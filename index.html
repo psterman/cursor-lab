@@ -200,7 +200,8 @@
         }
 
         .upload-icon {
-            font-size: 48px;
+            width: 64px;
+            height: 64px;
             margin-bottom: 20px;
             display: block;
         }
@@ -2580,7 +2581,7 @@
                     {/* 上传阶段 */}
                     {step === 'upload' && (
                         <div className="max-w-2xl w-full space-y-8 text-center">
-                            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-xs text-blue-400 mb-4 mx-auto">
+                            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-xs text-white mb-4 mx-auto">
                                 <Icon name="zap" size={12} />
                                 <span>Vibe Coding行为临床实验室 v1.0</span>
                             </div>
@@ -2608,7 +2609,7 @@
                             
                             <div className="group relative p-12 mt-12 border-2 border-dashed border-zinc-800 rounded-sm hover:border-green-500/50 transition-all cursor-pointer bg-zinc-900/50">
                                 <div className="relative z-10 space-y-4 text-center">
-                                    <span style={{ fontSize: '48px', marginBottom: '20px', display: 'block' }} className="upload-icon">🧪</span>
+                                    <img src="images/CUBE_2D_DARK.png" width="64" height="64" style={{ marginBottom: '20px', display: 'block', margin: '0 auto 20px auto' }} className="upload-icon" alt="Upload" />
                                     <h2 style={{ marginBottom: '10px', fontSize: '20px', fontWeight: 600, color: 'var(--text-main)' }}>载入你的 VSCDB 文件</h2>
                                     <p style={{ color: 'var(--text-dim)', marginBottom: '25px' }}>您的聊天记录，仅在本地解析，隐私隔离不泄</p>
                                     <div className="flex gap-4 justify-center mt-6">
@@ -2678,31 +2679,31 @@
                                             label="全网受虐人数" 
                                             value={formatNumber(totalUsers)} 
                                             sub="人" 
-                                            color="text-blue-400" 
+                                            color="text-white" 
                                         />
                                         <StatBox 
                                             label="赛博磕头" 
                                             value={analysisData.stats?.qingCount || 0} 
                                             sub="次" 
-                                            color="text-green-400" 
+                                            color="text-white" 
                                         />
                                         <StatBox 
                                             label="全网排名" 
                                             value={calculateRank(analysisData.stats?.qingCount || 0)} 
                                             sub="%" 
-                                            color="text-blue-400" 
+                                            color="text-white" 
                                         />
                                         <StatBox 
                                             label="甲方上身" 
                                             value={analysisData.stats?.buCount || 0} 
                                             sub="次" 
-                                            color="text-red-400" 
+                                            color="text-white" 
                                         />
                                         <StatBox 
                                             label="对话天数" 
                                             value={calculateUsageDays(analysisData.stats)} 
                                             sub="天" 
-                                            color="text-emerald-400" 
+                                            color="text-white" 
                                         />
                                     </div>
                                 </div>
