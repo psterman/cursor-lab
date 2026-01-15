@@ -1156,8 +1156,8 @@
                             
                             console.log('[React] API 返回数据:', data, '解析后的值:', value);
                             
-                            if (value > 0) {
-                                // 受虐人数：使用 API 返回的实时访问总数
+                            if (value >= 0) {
+                                // 受虐人数：使用 API 返回的实时访问总数（允许显示 0）
                                 setTotalUsers(value);
                                 setTotalTestUsers(value);
                                 
@@ -1177,32 +1177,25 @@
                                     unlockedCount: calculatedUnlocked
                                 });
                             } else {
-                                throw new Error('API 返回的值为 0 或无效');
+                                throw new Error('API 返回的值无效');
                             }
                         } else {
                             throw new Error(`API 请求失败，状态码: ${response.status}`);
                         }
                     } catch (error) {
                         console.warn('[React] API 请求失败，使用 localStorage fallback:', error.message);
-                        // 使用 localStorage 作为 fallback
+                        // 使用 localStorage 作为 fallback（允许显示 0）
                         const cached = parseInt(localStorage.getItem('totalTestUsers') || '0');
-                        if (cached > 0) {
-                            setTotalUsers(cached);
-                            setTotalTestUsers(cached);
-                            // 根据缓存值动态计算
-                            setTechRank(Math.floor(cached * 0.6));
-                            setUnlockedCount(Math.min(100, parseFloat((cached / 1000).toFixed(1))));
-                            console.log('[React] 使用缓存数据:', {
-                                totalUsers: cached,
-                                techRank: Math.floor(cached * 0.6),
-                                unlockedCount: Math.min(100, parseFloat((cached / 1000).toFixed(1)))
-                            });
-                        } else {
-                            // 如果缓存也没有，使用默认值 0
-                            setTotalUsers(0);
-                            setTechRank(0);
-                            setUnlockedCount(0);
-                        }
+                        setTotalUsers(cached);
+                        setTotalTestUsers(cached);
+                        // 根据缓存值动态计算
+                        setTechRank(Math.floor(cached * 0.6));
+                        setUnlockedCount(Math.min(100, parseFloat((cached / 1000).toFixed(1))));
+                        console.log('[React] 使用缓存数据:', {
+                            totalUsers: cached,
+                            techRank: Math.floor(cached * 0.6),
+                            unlockedCount: Math.min(100, parseFloat((cached / 1000).toFixed(1)))
+                        });
                     }
                 };
                 

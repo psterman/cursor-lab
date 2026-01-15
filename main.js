@@ -1829,7 +1829,7 @@ function animateNumber(element, from, to, formatter, onComplete) {
 
 // API 端点常量
 const API_ENDPOINT = 'https://cursor-clinical-analysis.psterman.workers.dev/';
-const DEFAULT_VALUE = 18429; // 默认值
+// 移除硬编码默认值，允许从 0 开始计数
 
 // 获取 API 端点
 function getApiEndpoint() {
@@ -1889,7 +1889,7 @@ export async function updateGlobalStats(shouldIncrement = false) {
       // API 返回的字段是 value
       const newValue = data.value || data.totalUsers || data.total || data.count || null;
       
-      if (newValue !== null && newValue > 0) {
+      if (newValue !== null && newValue >= 0) {
         console.log(`[Main] ${shouldIncrement ? 'POST' : 'GET'} 请求成功，数字:`, newValue);
         // 更新本地存储
         localStorage.setItem('totalTestUsers', newValue.toString());
@@ -1915,9 +1915,9 @@ export async function updateGlobalStats(shouldIncrement = false) {
     console.warn(`[Main] ${shouldIncrement ? 'POST' : 'GET'} 请求失败，使用降级方案:`, error.message);
   }
   
-  // 优雅降级：优先使用本地存储，否则使用默认值
+  // 优雅降级：使用本地存储，如果没有则为 0
   const cachedValue = parseInt(localStorage.getItem('totalTestUsers') || '0');
-  const fallbackValue = cachedValue > 0 ? cachedValue : DEFAULT_VALUE;
+  const fallbackValue = cachedValue; // 允许为 0，不再使用硬编码默认值
   
   // 更新页面显示（如果存在）
   const totalTestUsersEl = document.getElementById('totalTestUsers');
