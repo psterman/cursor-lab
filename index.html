@@ -2835,5 +2835,73 @@
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
+    
+    <!-- 友情链接 -->
+    <style>
+        .friend-links {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 24px;
+            align-items: center;
+            z-index: 100;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        
+        .friend-link {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: rgba(24, 24, 27, 0.8);
+            border: 1px solid var(--card-border);
+            border-radius: 2px;
+            color: var(--text-main);
+            text-decoration: none;
+            transition: all 0.2s ease;
+            font-size: 12px;
+        }
+        
+        .friend-link:hover {
+            border-color: var(--accent-terminal);
+            color: var(--accent-terminal);
+        }
+        
+        .friend-link img {
+            display: block;
+        }
+    </style>
+    <div class="friend-links">
+        <a 
+            href="https://github.com/psterman/nmer" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            class="friend-link"
+        >
+            <img 
+                src="https://github.com/psterman/nmer/blob/main/favicon.ico?raw=true" 
+                alt="牛马" 
+                width="32" 
+                height="32"
+            />
+            <span>牛马（cursor windows工具箱）</span>
+        </a>
+        <a 
+            href="https://github.com/psterman/curser" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            class="friend-link"
+        >
+            <img 
+                src="https://github.com/psterman/nmer/blob/main/curser.ico?raw=true" 
+                alt="抠搜" 
+                width="32" 
+                height="32"
+            />
+            <span>抠搜（cursor聊天记录查看器）</span>
+        </a>
+    </div>
 </body>
 </html>
