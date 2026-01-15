@@ -126,9 +126,13 @@
             border-radius: 20px;
             padding: 24px;
             transition: transform 0.3s ease;
+            position: relative; /* 支持绝对定位的排名显示 */
         }
 
         .stat-label {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
             font-size: 16px;
             color: var(--text-dim);
             margin-bottom: 8px;
@@ -146,6 +150,27 @@
             margin-top: 10px;
             color: var(--accent-purple);
             font-weight: 500;
+        }
+
+        /* 排名显示样式（右下角） */
+        .stat-ranking {
+            position: absolute;
+            bottom: 12px;
+            right: 12px;
+            font-size: 12px;
+            color: var(--text-dim);
+            font-weight: 600;
+            background: rgba(139, 92, 246, 0.15);
+            padding: 4px 8px;
+            border-radius: 8px;
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .stat-ranking.has-rank {
+            color: var(--accent-purple);
+            background: rgba(139, 92, 246, 0.2);
+            border-color: var(--accent-purple);
         }
 
         .wordcloud-section {
@@ -1402,14 +1427,32 @@
 
             // 进入完整报告
             const showFullReport = async () => {
-                console.log('showFullReport 被调用，发起 POST 请求增加计数值...');
+                console.log('showFullReport 被调用，发起 POST 请求增加计数值并上传统计数据...');
                 
                 // 保存当前值，用于动画效果
                 const oldTotalUsers = totalUsers;
                 const oldTechRank = techRank;
                 const oldUnlockedCount = unlockedCount;
                 
-                // 在用户点击生成报告时，发起 POST 请求增加计数值
+                // 获取当前用户的统计数据
+                const stats = window.analysisModule?.getGlobalStats();
+                const usageDays = calculateUsageDays(stats);
+                
+                // 准备上传统计数据
+                const userStats = {
+                    qingCount: stats?.qingCount || 0,           // 赛博磕头次数
+                    buCount: stats?.buCount || 0,                // 甲方爸爸上身
+                    userMessages: stats?.userMessages || 0,      // 调戏AI次数
+                    totalUserChars: stats?.userBehaviorStats?.totalUserChars || 0,  // 废话文学输出
+                    avgUserMessageLength: stats?.userBehaviorStats?.avgUserMessageLength || 0,  // 平均吹水长度
+                    totalConversations: stats?.totalConversations || 0,  // Cursor上岗天数（对话数）
+                    usageDays: usageDays,                        // 使用天数
+                    timestamp: Date.now()
+                };
+                
+                console.log('[React] 准备上传统计数据:', userStats);
+                
+                // 在用户点击生成报告时，发起 POST 请求增加计数值并上传统计数据
                 try {
                     const apiUrl = 'https://cursor-clinical-analysis.psterman.workers.dev/';
                     const response = await fetch(apiUrl, {
@@ -1419,7 +1462,8 @@
                         },
                         mode: 'cors',
                         body: JSON.stringify({
-                            action: 'increment',
+                            action: 'submit_stats',
+                            stats: userStats,
                             timestamp: Date.now(),
                         }),
                     });
@@ -1428,57 +1472,64 @@
                         const data = await response.json();
                         const newCount = data.value || data.totalUsers || data.total || data.count || 0;
                         
-                        if (newCount > 0) {
-                            // 更新所有相关状态
-                            setTotalUsers(newCount);
-                            setTotalTestUsers(newCount);
-                            
-                            // 根据新的总人数动态计算技术排名和人格库解锁
-                            const calculatedRank = Math.floor(newCount * 0.6);
-                            setTechRank(calculatedRank);
-                            
-                            const calculatedUnlocked = Math.min(100, parseFloat((newCount / 1000).toFixed(1)));
-                            setUnlockedCount(calculatedUnlocked);
-                            
-                            // 保存到本地存储作为 fallback
-                            localStorage.setItem('totalTestUsers', newCount.toString());
-                            
-                            console.log('[React] POST 请求成功，计数值已更新:', {
-                                totalUsers: newCount,
-                                techRank: calculatedRank,
-                                unlockedCount: calculatedUnlocked
-                            });
-                            
-                            // 保存动画数据到 ref，等待 Dashboard 渲染完成后触发
-                            animationDataRef.current = {
-                                totalUsers: { old: oldTotalUsers, new: newCount },
-                                techRank: { old: oldTechRank, new: calculatedRank },
-                                unlockedCount: { old: oldUnlockedCount, new: calculatedUnlocked }
-                            };
+                        // 更新所有相关状态
+                        setTotalUsers(newCount >= 0 ? newCount : 0);
+                        setTotalTestUsers(newCount >= 0 ? newCount : 0);
+                        
+                        // 根据新的总人数动态计算技术排名和人格库解锁
+                        const calculatedRank = Math.floor(newCount * 0.6);
+                        setTechRank(calculatedRank);
+                        
+                        const calculatedUnlocked = Math.min(100, parseFloat((newCount / 1000).toFixed(1)));
+                        setUnlockedCount(calculatedUnlocked);
+                        
+                        // 保存到本地存储作为 fallback
+                        localStorage.setItem('totalTestUsers', newCount.toString());
+                        
+                        // 保存排名数据到状态（如果 API 返回了排名）
+                        if (data.rankings) {
+                            window.userRankings = data.rankings;
+                            console.log('[React] ✅ 排名数据已保存:', data.rankings);
                         } else {
-                            console.warn('[React] POST 请求返回的值为 0 或无效');
+                            console.warn('[React] ⚠️ API 未返回排名数据！');
+                            console.warn('[React] 可能原因：');
+                            console.warn('1. Cloudflare Worker 代码未更新（请参考 CLOUDFLARE_WORKER_RANKING.md）');
+                            console.warn('2. Worker 代码不支持 submit_stats 动作');
+                            console.warn('3. Worker 代码有错误，请检查 Cloudflare Dashboard 日志');
+                            console.warn('当前 API 响应:', data);
                         }
+                        
+                        console.log('[React] POST 请求成功，计数值和排名已更新:', {
+                            totalUsers: newCount,
+                            techRank: calculatedRank,
+                            unlockedCount: calculatedUnlocked,
+                            rankings: data.rankings,
+                            hasRankings: !!data.rankings
+                        });
+                        
+                        // 保存动画数据到 ref，等待 Dashboard 渲染完成后触发
+                        animationDataRef.current = {
+                            totalUsers: { old: oldTotalUsers, new: newCount },
+                            techRank: { old: oldTechRank, new: calculatedRank },
+                            unlockedCount: { old: oldUnlockedCount, new: calculatedUnlocked }
+                        };
                     } else {
                         console.warn('[React] POST 请求失败，状态码:', response.status);
                         // POST 失败时，尝试从 localStorage 获取最新值
                         const cached = parseInt(localStorage.getItem('totalTestUsers') || '0');
-                        if (cached > 0) {
-                            setTotalUsers(cached);
-                            setTotalTestUsers(cached);
-                            setTechRank(Math.floor(cached * 0.6));
-                            setUnlockedCount(Math.min(100, parseFloat((cached / 1000).toFixed(1))));
-                        }
+                        setTotalUsers(cached >= 0 ? cached : 0);
+                        setTotalTestUsers(cached >= 0 ? cached : 0);
+                        setTechRank(Math.floor(cached * 0.6));
+                        setUnlockedCount(Math.min(100, parseFloat((cached / 1000).toFixed(1))));
                     }
                 } catch (error) {
                     console.warn('[React] POST 请求异常，使用 localStorage fallback:', error.message);
                     // 请求异常时，使用 localStorage 作为 fallback
                     const cached = parseInt(localStorage.getItem('totalTestUsers') || '0');
-                    if (cached > 0) {
-                        setTotalUsers(cached);
-                        setTotalTestUsers(cached);
-                        setTechRank(Math.floor(cached * 0.6));
-                        setUnlockedCount(Math.min(100, parseFloat((cached / 1000).toFixed(1))));
-                    }
+                    setTotalUsers(cached >= 0 ? cached : 0);
+                    setTotalTestUsers(cached >= 0 ? cached : 0);
+                    setTechRank(Math.floor(cached * 0.6));
+                    setUnlockedCount(Math.min(100, parseFloat((cached / 1000).toFixed(1))));
                 }
                 
                 setStep('fullReport');
@@ -1519,6 +1570,43 @@
                                         </div>
                                     </div>
 
+                                    <!-- 横向排名区域 -->
+                                    <div class="ranking-section" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 24px; padding: 24px; margin-bottom: 40px; backdrop-filter: var(--glass-blur);">
+                                        <h3 class="chart-title" style="margin-bottom: 20px; text-align: center;">🏆 全网横向排名</h3>
+                                        <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;" id="rankingCards">
+                                            <div class="stat-card" style="text-align: center;">
+                                                <p class="stat-label">赛博磕头排名</p>
+                                                <p class="stat-value" id="rankingQingCount" style="color: var(--accent-purple);">--</p>
+                                                <p class="stat-comparison" id="rankingQingCountPercent">--</p>
+                                            </div>
+                                            <div class="stat-card" style="text-align: center;">
+                                                <p class="stat-label">甲方上身排名</p>
+                                                <p class="stat-value" id="rankingBuCount" style="color: #ef4444;">--</p>
+                                                <p class="stat-comparison" id="rankingBuCountPercent">--</p>
+                                            </div>
+                                            <div class="stat-card" style="text-align: center;">
+                                                <p class="stat-label">调戏AI排名</p>
+                                                <p class="stat-value" id="rankingUserMessages" style="color: var(--accent-blue);">--</p>
+                                                <p class="stat-comparison" id="rankingUserMessagesPercent">--</p>
+                                            </div>
+                                            <div class="stat-card" style="text-align: center;">
+                                                <p class="stat-label">废话输出排名</p>
+                                                <p class="stat-value" id="rankingTotalChars" style="color: #10b981;">--</p>
+                                                <p class="stat-comparison" id="rankingTotalCharsPercent">--</p>
+                                            </div>
+                                            <div class="stat-card" style="text-align: center;">
+                                                <p class="stat-label">平均长度排名</p>
+                                                <p class="stat-value" id="rankingAvgLength" style="color: #f59e0b;">--</p>
+                                                <p class="stat-comparison" id="rankingAvgLengthPercent">--</p>
+                                            </div>
+                                            <div class="stat-card" style="text-align: center;">
+                                                <p class="stat-label">上岗天数排名</p>
+                                                <p class="stat-value" id="rankingUsageDays" style="color: #8b5cf6;">--</p>
+                                                <p class="stat-comparison" id="rankingUsageDaysPercent">--</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
                                     <!-- 维度得分排行榜 -->
                                     <div class="dimension-ranking-section" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 24px; padding: 24px; margin-bottom: 40px; backdrop-filter: var(--glass-blur);">
                                         <h3 class="chart-title" style="margin-bottom: 20px; text-align: center;">🏆 六大硬核维度得分排行榜</h3>
@@ -1530,10 +1618,12 @@
                                             <p class="stat-label">Cursor上岗天数</p>
                                             <p class="stat-value" id="totalConversations">0</p>
                                             <p class="stat-comparison">天</p>
+                                            <span class="stat-ranking" id="rankingUsageDaysBadge">--</span>
                                         </div>
                                         <div class="stat-card">
                                             <p class="stat-label">调戏 AI 次数</p>
                                             <p class="stat-value" id="userMessages">0</p>
+                                            <span class="stat-ranking" id="rankingUserMessagesBadge">--</span>
                                         </div>
                                     </div>
                                     
@@ -1542,11 +1632,13 @@
                                             <p class="stat-label">赛博磕头次数</p>
                                             <p class="stat-value" id="qingCount">0</p>
                                             <p class="stat-comparison">次</p>
+                                            <span class="stat-ranking" id="rankingQingCountBadge">--</span>
                                         </div>
                                         <div class="stat-card">
                                             <p class="stat-label">甲方爸爸上身</p>
                                             <p class="stat-value" id="buCount">0</p>
                                             <p class="stat-comparison">次</p>
+                                            <span class="stat-ranking" id="rankingBuCountBadge">--</span>
                                         </div>
                                     </div>
                                     
@@ -1555,11 +1647,13 @@
                                             <p class="stat-label">废话文学输出</p>
                                             <p class="stat-value" id="totalUserChars">0</p>
                                             <p class="stat-comparison">字符</p>
+                                            <span class="stat-ranking" id="rankingTotalCharsBadge">--</span>
                                         </div>
                                         <div class="stat-card">
                                             <p class="stat-label">平均吹水长度</p>
                                             <p class="stat-value" id="avgUserMessageLength">0</p>
                                             <p class="stat-comparison">字符</p>
+                                            <span class="stat-ranking" id="rankingAvgLengthBadge">--</span>
                                         </div>
                                         <div class="stat-card hidden" id="questionCard">
                                             <p class="stat-label">黑人问号次数</p>
@@ -1649,6 +1743,20 @@
                                 window.analysisModule.renderFullDashboard();
                                 console.log('Dashboard 渲染完成');
                                 
+                                // 延迟更新排名显示（确保 DOM 元素已创建）
+                                setTimeout(async () => {
+                                    if (window.userRankings) {
+                                        await updateRankingBadges(window.userRankings);
+                                        console.log('[React] ✅ 排名徽章已更新:', window.userRankings);
+                                    } else {
+                                        console.warn('[React] ⚠️ 未找到排名数据！');
+                                        console.warn('[React] 请检查：');
+                                        console.warn('1. 是否已更新 Cloudflare Worker 代码（参考 CLOUDFLARE_WORKER_RANKING.md）');
+                                        console.warn('2. 浏览器控制台是否有 API 错误');
+                                        console.warn('3. 运行 RANKING_DEBUG.md 中的调试代码');
+                                    }
+                                }, 100);
+                                
                                 // 立即使用当前状态值更新显示（使用 formatNumber）
                                 const formatNumberLocal = (num) => {
                                     if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
@@ -1661,13 +1769,13 @@
                                 const techRankEl = document.getElementById('techRank');
                                 const personalityUnlockEl = document.getElementById('personalityUnlock');
                                 
-                                if (totalUsersEl && totalUsers > 0) {
+                                if (totalUsersEl && totalUsers >= 0) {
                                     totalUsersEl.textContent = formatNumberLocal(totalUsers);
                                 }
-                                if (techRankEl && techRank > 0) {
+                                if (techRankEl && techRank >= 0) {
                                     techRankEl.textContent = formatNumberLocal(techRank);
                                 }
-                                if (personalityUnlockEl && unlockedCount > 0) {
+                                if (personalityUnlockEl && unlockedCount >= 0) {
                                     personalityUnlockEl.textContent = unlockedCount.toFixed(1) + '%';
                                 }
                                 
@@ -1728,6 +1836,251 @@
                                 console.error('渲染 Dashboard 失败:', error);
                             }
                             
+                            // 加载排名JSON数据
+                            const rankingDataCache = {};
+                            const loadRankingData = async (jsonFile) => {
+                                if (rankingDataCache[jsonFile]) {
+                                    return rankingDataCache[jsonFile];
+                                }
+                                try {
+                                    const response = await fetch(`src/${jsonFile}`);
+                                    const data = await response.json();
+                                    rankingDataCache[jsonFile] = data;
+                                    return data;
+                                } catch (error) {
+                                    console.error(`加载 ${jsonFile} 失败:`, error);
+                                    return null;
+                                }
+                            };
+                            
+                            // 根据排名匹配对应的level和comment
+                            const getRankingComment = (data, rank, total) => {
+                                if (!data || !data.levels || rank === null || rank === undefined || total <= 0) {
+                                    return null;
+                                }
+                                
+                                const percent = ((total - rank + 1) / total * 100);
+                                const rankPercent = (rank / total) * 100;
+                                
+                                // 遍历levels，找到匹配的level
+                                for (const level of data.levels) {
+                                    const range = level.range;
+                                    
+                                    // 处理不同的range格式
+                                    let matched = false;
+                                    
+                                    // 处理 "TOP 81-100" 格式（please.json）
+                                    if (range.startsWith('TOP ')) {
+                                        const rangeStr = range.replace('TOP ', '');
+                                        const [minPercent, maxPercent] = rangeStr.split('-').map(s => parseFloat(s.trim()));
+                                        if (percent >= minPercent && percent <= maxPercent) {
+                                            matched = true;
+                                        }
+                                    }
+                                    // 处理 "1-10", "11-30" 等格式（no.json, ai.json）
+                                    else if (/^\d+-\d+$/.test(range)) {
+                                        const [minRank, maxRank] = range.split('-').map(s => parseInt(s.trim()));
+                                        if (rank >= minRank && rank <= maxRank) {
+                                            matched = true;
+                                        }
+                                    }
+                                    // 处理 "91-100+" 格式（no.json）
+                                    else if (/^\d+-\d+\+$/.test(range)) {
+                                        const [minRank] = range.replace('+', '').split('-').map(s => parseInt(s.trim()));
+                                        if (rank >= minRank) {
+                                            matched = true;
+                                        }
+                                    }
+                                    // 处理 "201+" 格式（ai.json）
+                                    else if (/^\d+\+$/.test(range)) {
+                                        const minRank = parseInt(range.replace('+', ''));
+                                        if (rank >= minRank) {
+                                            matched = true;
+                                        }
+                                    }
+                                    // 处理 "1-7天", "8-30天" 等格式（day.json）
+                                    else if (range.includes('天')) {
+                                        // 根据排名百分比匹配：排名越靠前（rank越小），天数越多
+                                        // levels数组从低到高排列，所以需要反向匹配
+                                        const levelIndex = data.levels.indexOf(level);
+                                        const totalLevels = data.levels.length;
+                                        const segmentSize = 100 / totalLevels;
+                                        
+                                        if (range === '181+') {
+                                            // 最高level，排名前20%
+                                            if (rankPercent <= 20) matched = true;
+                                        } else if (range === '91-180天') {
+                                            if (rankPercent > 20 && rankPercent <= 40) matched = true;
+                                        } else if (range === '31-90天') {
+                                            if (rankPercent > 40 && rankPercent <= 60) matched = true;
+                                        } else if (range === '8-30天') {
+                                            if (rankPercent > 60 && rankPercent <= 80) matched = true;
+                                        } else if (range === '1-7天') {
+                                            if (rankPercent > 80) matched = true;
+                                        }
+                                    }
+                                    // 处理 "1-500字", "501-2000字" 等格式（say.json）
+                                    else if (range.includes('字') && (range.includes('10001') || range.includes('5001') || range.includes('2001') || range.includes('501') || range.includes('1-500'))) {
+                                        // say.json的格式
+                                        const rankPercent = (rank / total) * 100;
+                                        if (range === '10001+字') {
+                                            if (rankPercent <= 20) matched = true;
+                                        } else if (range === '5001-10000字') {
+                                            if (rankPercent > 20 && rankPercent <= 40) matched = true;
+                                        } else if (range === '2001-5000字') {
+                                            if (rankPercent > 40 && rankPercent <= 60) matched = true;
+                                        } else if (range === '501-2000字') {
+                                            if (rankPercent > 60 && rankPercent <= 80) matched = true;
+                                        } else if (range === '1-500字') {
+                                            if (rankPercent > 80) matched = true;
+                                        }
+                                    }
+                                    // 处理 "1-50字", "51-200字" 等格式（word.json）
+                                    else if (range.includes('字') && (range.includes('1001') || range.includes('501') || range.includes('201') || range.includes('51') || range.includes('1-50'))) {
+                                        // word.json的格式
+                                        const rankPercent = (rank / total) * 100;
+                                        if (range === '1001+') {
+                                            if (rankPercent <= 20) matched = true;
+                                        } else if (range === '501-1000字') {
+                                            if (rankPercent > 20 && rankPercent <= 40) matched = true;
+                                        } else if (range === '201-500字') {
+                                            if (rankPercent > 40 && rankPercent <= 60) matched = true;
+                                        } else if (range === '51-200字') {
+                                            if (rankPercent > 60 && rankPercent <= 80) matched = true;
+                                        } else if (range === '1-50字') {
+                                            if (rankPercent > 80) matched = true;
+                                        }
+                                    }
+                                    
+                                    if (matched && level.comments && level.comments.length > 0) {
+                                        // 随机选择一个comment
+                                        const randomComment = level.comments[Math.floor(Math.random() * level.comments.length)];
+                                        return {
+                                            title: randomComment.title,
+                                            content: randomComment.content,
+                                            label: level.label
+                                        };
+                                    }
+                                }
+                                
+                                return null;
+                            };
+                            
+                            // 统一更新排名徽章的函数
+                            const updateRankingBadges = async (rankings) => {
+                                if (!rankings) return;
+                                
+                                // 更新排名徽章（统计卡片右下角）
+                                const updateBadge = (badgeId, rank, total) => {
+                                    const badge = document.getElementById(badgeId);
+                                    if (!badge) return;
+                                    
+                                    if (rank !== null && rank !== undefined && total > 0) {
+                                        const percent = ((total - rank + 1) / total * 100).toFixed(1);
+                                        badge.textContent = `#${rank} (前${percent}%)`;
+                                        badge.classList.add('has-rank');
+                                    } else {
+                                        badge.textContent = '--';
+                                        badge.classList.remove('has-rank');
+                                    }
+                                };
+                                
+                                // 排名卡片说明文字映射
+                                const rankingLabels = {
+                                    'rankingQingCount': '赛博磕头排名',
+                                    'rankingBuCount': '甲方上身排名',
+                                    'rankingUserMessages': '调戏AI排名',
+                                    'rankingTotalChars': '废话输出排名',
+                                    'rankingAvgLength': '平均长度排名',
+                                    'rankingUsageDays': '上岗天数排名'
+                                };
+                                
+                                // 更新"全网横向排名"区域的卡片（大卡片）
+                                const updateRankingCard = async (valueId, percentId, rank, total, jsonFile) => {
+                                    const valueEl = document.getElementById(valueId);
+                                    const percentEl = document.getElementById(percentId);
+                                    
+                                    // 确保标题不换行
+                                    if (valueEl) {
+                                        valueEl.style.whiteSpace = 'nowrap';
+                                        valueEl.style.overflow = 'hidden';
+                                        valueEl.style.textOverflow = 'ellipsis';
+                                    }
+                                    if (percentEl) {
+                                        percentEl.style.whiteSpace = 'nowrap';
+                                        percentEl.style.overflow = 'hidden';
+                                        percentEl.style.textOverflow = 'ellipsis';
+                                    }
+                                    
+                                    if (rank !== null && rank !== undefined && total > 0) {
+                                        // 判断是否在100名内
+                                        if (rank <= 100) {
+                                            // 100名内：显示排名数字和JSON中的标题和评语
+                                            const data = await loadRankingData(jsonFile);
+                                            const comment = getRankingComment(data, rank, total);
+                                            
+                                            if (comment && valueEl && percentEl) {
+                                                // valueEl显示排名数字（大字体，参考技术排名样式）
+                                                valueEl.textContent = rank;
+                                                valueEl.style.fontSize = '36px';
+                                                valueEl.style.fontWeight = '700';
+                                                valueEl.style.fontFamily = "'JetBrains Mono', monospace";
+                                                
+                                                // percentEl显示JSON中的title和content
+                                                percentEl.innerHTML = `<strong>${comment.title}</strong><br/>${comment.content}`;
+                                                percentEl.style.whiteSpace = 'normal'; // 允许换行显示content
+                                            } else {
+                                                // 如果无法从JSON获取，使用默认显示
+                                                const percent = ((total - rank + 1) / total * 100).toFixed(1);
+                                                if (valueEl) {
+                                                    valueEl.textContent = rank;
+                                                    valueEl.style.fontSize = '36px';
+                                                    valueEl.style.fontWeight = '700';
+                                                    valueEl.style.fontFamily = "'JetBrains Mono', monospace";
+                                                }
+                                                if (percentEl) {
+                                                    percentEl.textContent = `前 ${percent}%`;
+                                                    percentEl.style.whiteSpace = 'nowrap';
+                                                }
+                                            }
+                                        } else {
+                                            // 101名以后：只显示数字排名
+                                            if (valueEl) {
+                                                valueEl.textContent = rank;
+                                                valueEl.style.fontSize = '36px';
+                                                valueEl.style.fontWeight = '700';
+                                                valueEl.style.fontFamily = "'JetBrains Mono', monospace";
+                                            }
+                                            if (percentEl) {
+                                                percentEl.textContent = '名';
+                                                percentEl.style.whiteSpace = 'nowrap';
+                                            }
+                                        }
+                                    } else {
+                                        if (valueEl) valueEl.textContent = '--';
+                                        if (percentEl) percentEl.textContent = '--';
+                                    }
+                                };
+                                
+                                // 更新各个统计卡片的排名徽章（右下角小徽章）
+                                updateBadge('rankingQingCountBadge', rankings.qingCount?.rank, rankings.qingCount?.total);
+                                updateBadge('rankingBuCountBadge', rankings.buCount?.rank, rankings.buCount?.total);
+                                updateBadge('rankingUserMessagesBadge', rankings.userMessages?.rank, rankings.userMessages?.total);
+                                updateBadge('rankingTotalCharsBadge', rankings.totalUserChars?.rank, rankings.totalUserChars?.total);
+                                updateBadge('rankingAvgLengthBadge', rankings.avgUserMessageLength?.rank, rankings.avgUserMessageLength?.total);
+                                updateBadge('rankingUsageDaysBadge', rankings.usageDays?.rank, rankings.usageDays?.total);
+                                
+                                // 更新"全网横向排名"区域的卡片（大卡片显示）
+                                // 对应关系：no.json -> 甲方爸爸上身, ai.json -> 调戏AI, please.json -> 赛博磕头
+                                // say.json -> 平均长度, word.json -> 废话输出, day.json -> 上岗天数
+                                await updateRankingCard('rankingQingCount', 'rankingQingCountPercent', rankings.qingCount?.rank, rankings.qingCount?.total, 'please.json');
+                                await updateRankingCard('rankingBuCount', 'rankingBuCountPercent', rankings.buCount?.rank, rankings.buCount?.total, 'no.json');
+                                await updateRankingCard('rankingUserMessages', 'rankingUserMessagesPercent', rankings.userMessages?.rank, rankings.userMessages?.total, 'ai.json');
+                                await updateRankingCard('rankingTotalChars', 'rankingTotalCharsPercent', rankings.totalUserChars?.rank, rankings.totalUserChars?.total, 'word.json');
+                                await updateRankingCard('rankingAvgLength', 'rankingAvgLengthPercent', rankings.avgUserMessageLength?.rank, rankings.avgUserMessageLength?.total, 'say.json');
+                                await updateRankingCard('rankingUsageDays', 'rankingUsageDaysPercent', rankings.usageDays?.rank, rankings.usageDays?.total, 'day.json');
+                            };
+                            
                             // 实时更新统计数据（从 Cloudflare API 获取）
                             const updateRealtimeStats = async () => {
                                 // 格式化数字函数（确保在作用域内可用）
@@ -1757,7 +2110,7 @@
                                         
                                         console.log('[实时更新] API 返回数据:', data, '解析后的值:', value);
                                         
-                                        if (value > 0) {
+                                        if (value >= 0) {
                                             // 更新 React 状态
                                             setTotalUsers(value);
                                             setTotalTestUsers(value);
@@ -1765,6 +2118,16 @@
                                             setTechRank(calculatedRank);
                                             const calculatedUnlocked = Math.min(100, parseFloat((value / 1000).toFixed(1)));
                                             setUnlockedCount(calculatedUnlocked);
+                                            
+                                            // 如果 API 返回了排名数据，也更新排名徽章
+                                            if (data.rankings) {
+                                                window.userRankings = data.rankings;
+                                                // 延迟更新，确保 DOM 元素存在
+                                                setTimeout(async () => {
+                                                    await updateRankingBadges(data.rankings);
+                                                    console.log('[实时更新] 排名徽章已更新:', data.rankings);
+                                                }, 100);
+                                            }
                                             
                                             // 更新 DOM 元素
                                             const totalUsersEl = document.getElementById('totalTestUsers');
@@ -1815,7 +2178,7 @@
                                                 unlockedCount: calculatedUnlocked
                                             });
                                         } else {
-                                            console.warn('[实时更新] API 返回的值为 0 或无效');
+                                            console.warn('[实时更新] API 返回的值无效');
                                         }
                                     } else {
                                         console.warn('[实时更新] API 请求失败，状态码:', response.status);
