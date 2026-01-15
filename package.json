@@ -1,0 +1,28 @@
+{
+  "name": "cursor-audit-wasm",
+  "version": "1.0.0",
+  "description": "Cursor 对话历史分析工具 - WebAssembly 版本",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [
+    "cursor",
+    "wasm",
+    "sql.js",
+    "analytics"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "terser": "^5.44.1",
+    "vite": "^5.0.0"
+  },
+  "dependencies": {
+    "chart.js": "^4.5.1",
+    "html2canvas": "^1.4.1",
+    "sql.js": "^1.13.0"
+  }
+}
