@@ -1048,14 +1048,32 @@
         .chart-wrapper {
             position: relative;
             height: 400px;
-            background: rgba(255, 255, 255, 0.03);
+            background: 
+                repeating-linear-gradient(
+                    0deg,
+                    transparent,
+                    transparent 19px,
+                    rgba(0, 255, 65, 0.05) 19px,
+                    rgba(0, 255, 65, 0.05) 20px
+                ),
+                repeating-linear-gradient(
+                    90deg,
+                    transparent,
+                    transparent 19px,
+                    rgba(0, 255, 65, 0.05) 19px,
+                    rgba(0, 255, 65, 0.05) 20px
+                );
             border-radius: 2px;
             padding: 20px;
             border: 1px solid var(--card-border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         #vibeRadarChart {
             max-height: 100%;
+            max-width: 100%;
         }
 
         .btn {
@@ -1853,7 +1871,7 @@
                             <div class="full-report-container" style="max-width: 1100px; margin: 0 auto; padding: 20px; padding-bottom: 80px;">
                                 <header style="text-align: center; padding: 60px 20px;">
                                     <div class="logo-box" style="display: inline-block; padding: 8px 16px; background: transparent; border: 1px solid var(--card-border); border-radius: 2px; margin-bottom: 20px; font-size: 14px; color: var(--accent-terminal); text-transform: uppercase; letter-spacing: 0.15em;">> Clinical Analysis v2.0</div>
-                                    <h1 style="font-size: clamp(2rem, 5vw, 3.5rem); font-weight: 700; letter-spacing: 0.1em; color: var(--text-main); margin-bottom: 15px; text-transform: uppercase; font-family: 'JetBrains Mono', monospace;">> CURSOR 迷惑行为报告</h1>
+                                    <h1 style="font-size: clamp(2rem, 5vw, 3.5rem); font-weight: 700; letter-spacing: 0.1em; color: var(--text-main); margin-bottom: 15px; text-transform: uppercase; font-family: 'JetBrains Mono', monospace;"><a href="https://github.com/psterman/cursor-lab" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: none; display: inline-block; transition: all 0.3s ease; position: relative; filter: blur(2px);" onmouseenter="this.style.filter='blur(0px)'; this.style.textShadow='0 0 20px var(--accent-terminal), 0 0 40px var(--accent-terminal)';" onmouseleave="this.style.filter='blur(2px)'; this.style.textShadow='none';">> CURSOR 迷惑行为报告</a></h1>
                                     <p class="subtitle" style="color: var(--text-dim); font-size: 1.1rem;">基于Cursor聊天记录的深度受虐分析</p>
                                 </header>
                                 
@@ -2583,7 +2601,9 @@
                         <div className="max-w-2xl w-full space-y-8 text-center">
                             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-xs text-white mb-4 mx-auto">
                                 <Icon name="zap" size={12} />
-                                <span>Vibe Coding行为临床实验室 v1.0</span>
+                                <a href="https://github.com/psterman/cursor-lab" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }} onMouseEnter={(e) => e.target.style.color = 'var(--accent-terminal)'} onMouseLeave={(e) => e.target.style.color = 'inherit'}>
+                                    <span>Vibe Coding行为临床实验室 v1.0</span>
+                                </a>
                             </div>
                             <h1 style={{
                                 fontSize: 'clamp(2rem, 5vw, 3.5rem)',
@@ -2593,9 +2613,32 @@
                                 WebkitBackgroundClip: 'text',
                                 backgroundClip: 'text',
                                 WebkitTextFillColor: 'transparent',
-                                marginBottom: '15px'
+                                marginBottom: '15px',
+                                transition: 'all 0.3s ease'
                             }}>
-                                Cursor迷惑行为报告
+                                <a 
+                                    href="https://github.com/psterman/cursor-lab" 
+                                    target="_blank" 
+                                    rel="noopener noreferrer" 
+                                    style={{ 
+                                        color: 'inherit', 
+                                        textDecoration: 'none',
+                                        display: 'inline-block',
+                                        transition: 'all 0.3s ease',
+                                        position: 'relative',
+                                        filter: 'blur(2px)'
+                                    }} 
+                                    onMouseEnter={(e) => { 
+                                        e.target.style.filter = 'blur(0px)';
+                                        e.target.style.textShadow = '0 0 20px var(--accent-terminal), 0 0 40px var(--accent-terminal)';
+                                    }} 
+                                    onMouseLeave={(e) => { 
+                                        e.target.style.filter = 'blur(2px)';
+                                        e.target.style.textShadow = 'none';
+                                    }}
+                                >
+                                    Cursor迷惑行为报告
+                                </a>
                             </h1>
                             <p className="text-zinc-500 text-lg max-w-md mx-auto">
                                 基于 Cursor 聊天记录的深度受虐分析
@@ -2609,8 +2652,15 @@
                             
                             <div className="group relative p-12 mt-12 border-2 border-dashed border-zinc-800 rounded-sm hover:border-green-500/50 transition-all cursor-pointer bg-zinc-900/50">
                                 <div className="relative z-10 space-y-4 text-center">
-                                    <img src="images/CUBE_2D_DARK.png" width="64" height="64" style={{ marginBottom: '20px', display: 'block', margin: '0 auto 20px auto' }} className="upload-icon" alt="Upload" />
-                                    <h2 style={{ marginBottom: '10px', fontSize: '20px', fontWeight: 600, color: 'var(--text-main)' }}>数据本地解析 隐私绝对隔离</h2>                                    <p style={{ color: 'var(--text-dim)', marginBottom: '25px' }}>The salvation lies within</p>
+                                    <a href="https://github.com/psterman/cursor-lab" target="_blank" rel="noopener noreferrer" style={{ display: 'block', textDecoration: 'none' }} onMouseEnter={(e) => { e.target.style.opacity = '0.8'; }} onMouseLeave={(e) => { e.target.style.opacity = '1'; }}>
+                                        <img src="images/CUBE_2D_DARK.png" width="64" height="64" style={{ marginBottom: '20px', display: 'block', margin: '0 auto 20px auto' }} className="upload-icon" alt="Upload" />
+                                    </a>
+                                    <a href="https://github.com/psterman/cursor-lab" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', color: 'inherit' }} onMouseEnter={(e) => { e.target.style.color = 'var(--accent-terminal)'; }} onMouseLeave={(e) => { e.target.style.color = 'var(--text-main)'; }}>
+                                        <h2 style={{ marginBottom: '10px', fontSize: '20px', fontWeight: 600, color: 'var(--text-main)' }}>数据本地解析 隐私绝对隔离</h2>
+                                    </a>
+                                    <a href="https://github.com/psterman/cursor-lab" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', color: 'inherit' }} onMouseEnter={(e) => { e.target.style.color = 'var(--accent-terminal)'; }} onMouseLeave={(e) => { e.target.style.color = 'var(--text-dim)'; }}>
+                                        <p style={{ color: 'var(--text-dim)', marginBottom: '25px' }}>The salvation lies within</p>
+                                    </a>
                                     <div className="flex gap-4 justify-center mt-6">
                                         <button 
                                             onClick={() => handleFileSelect('folder')}

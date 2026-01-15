@@ -1739,17 +1739,30 @@ function renderVibeRadarChart() {
     options: {
       responsive: true,
       maintainAspectRatio: true,
+      layout: {
+        padding: {
+          top: 20,
+          bottom: 20,
+          left: 20,
+          right: 20
+        }
+      },
       scales: {
         r: {
           beginAtZero: true,
           max: 100,
           ticks: {
             stepSize: 20,
+            display: false, // 隐藏数字
+          },
+          grid: {
+            color: 'rgba(0, 255, 65, 0.1)',
           },
           pointLabels: {
             font: {
               size: 12,
             },
+            color: '#ffffff',
           },
         },
       },
