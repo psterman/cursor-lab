@@ -3,6 +3,35 @@
  * 集成文件上传、数据库解析、图表渲染和图片导出功能
  */
 
+// 检测基础路径（用于 GitHub Pages 等生产环境）
+if (!window.BASE_PATH) {
+  const pathname = window.location.pathname;
+  const hostname = window.location.hostname;
+  const isGitHubPages = hostname.includes('github.io');
+
+  let basePath = '';
+  if (isGitHubPages) {
+    // GitHub Pages: 从 pathname 提取仓库名
+    const pathParts = pathname.split('/').filter(p => p);
+    const cleanParts = pathParts.filter(p => p !== 'index.html');
+    if (cleanParts.length > 0) {
+      basePath = '/' + cleanParts[0];
+    }
+  } else {
+    // 其他生产环境
+    const pathParts = pathname.split('/').filter(p => p && p !== 'index.html');
+    basePath = pathParts.length > 0 ? '/' + pathParts[0] : '';
+  }
+
+  // 确保 basePath 格式正确
+  if (basePath && basePath !== '/' && basePath.endsWith('/')) {
+    basePath = basePath.slice(0, -1);
+  }
+
+  window.BASE_PATH = basePath;
+  console.log('[Main] 检测到基础路径:', window.BASE_PATH);
+}
+
 import { CursorParser } from './src/CursorParser.js';
 import { VibeCodingerAnalyzer, DIMENSIONS } from './src/VibeCodingerAnalyzer.js';
 // Chart.js 和 html2canvas 通过 CDN 加载，使用全局变量

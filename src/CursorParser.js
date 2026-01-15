@@ -66,14 +66,17 @@ export class CursorParser {
    *  sql.js
    */
   async init() {
-    // 使用相对路径，Vite 会自动处理路径解析
+    // 使用全局基础路径构建 wasm 文件路径
     // 在开发环境：./sql-wasm.wasm
-    // 在生产环境：Vite 会根据 base 配置自动处理
-    const wasmPath = './sql-wasm.wasm';
-    
+    // 在生产环境：/Cursor-Clinical-Analysis/sql-wasm.wasm
+    const basePath = window.BASE_PATH || '';
+    const wasmPath = basePath ? `${basePath}/sql-wasm.wasm` : './sql-wasm.wasm';
+
+    console.log('[CursorParser] 初始化 sql.js，WASM 路径:', wasmPath);
+
     const SQL = await initSqlJs({
       locateFile: (file) => {
-        // 如果是 wasm 文件，使用相对路径
+        // 如果是 wasm 文件，使用构建好的路径
         if (file.endsWith('.wasm')) {
           return wasmPath;
         }

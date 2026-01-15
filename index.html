@@ -893,7 +893,10 @@
                     if (basePath && basePath !== '/' && basePath.endsWith('/')) {
                         basePath = basePath.slice(0, -1);
                     }
-                    
+
+                    // 保存基础路径供其他模块使用
+                    window.BASE_PATH = basePath;
+
                     // 获取当前目录（用于相对路径）
                     const currentDir = pathname.substring(0, pathname.lastIndexOf('/')) || '';
                     
