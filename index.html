@@ -1854,7 +1854,7 @@
                                 <header style="text-align: center; padding: 60px 20px;">
                                     <div class="logo-box" style="display: inline-block; padding: 8px 16px; background: transparent; border: 1px solid var(--card-border); border-radius: 2px; margin-bottom: 20px; font-size: 14px; color: var(--accent-terminal); text-transform: uppercase; letter-spacing: 0.15em;">> Clinical Analysis v2.0</div>
                                     <h1 style="font-size: clamp(2rem, 5vw, 3.5rem); font-weight: 700; letter-spacing: 0.1em; color: var(--text-main); margin-bottom: 15px; text-transform: uppercase; font-family: 'JetBrains Mono', monospace;">> CURSOR 迷惑行为报告</h1>
-                                    <p class="subtitle" style="color: var(--text-dim); font-size: 1.1rem;">基于本地 SQLite 数据库的深度受虐分析</p>
+                                    <p class="subtitle" style="color: var(--text-dim); font-size: 1.1rem;">基于Cursor聊天记录的深度受虐分析</p>
                                 </header>
                                 
                                 <div id="dashboardSection">
@@ -1988,7 +1988,7 @@
                                     </div>
                                     
                                     <div class="chart-card" style="margin-top: 40px;">
-                                        <h3 class="chart-title">🗣️ vibe coding黑话榜</h3>
+                                        <h3 class="chart-title"><span style="color: var(--accent-terminal);">🗣️</span> vibe coding黑话榜</h3>
                                         <div class="prompts-list" id="topChineseWordsList"></div>
                                     </div>
                                     
@@ -2610,21 +2610,106 @@
                             <div className="group relative p-12 mt-12 border-2 border-dashed border-zinc-800 rounded-sm hover:border-green-500/50 transition-all cursor-pointer bg-zinc-900/50">
                                 <div className="relative z-10 space-y-4 text-center">
                                     <img src="images/CUBE_2D_DARK.png" width="64" height="64" style={{ marginBottom: '20px', display: 'block', margin: '0 auto 20px auto' }} className="upload-icon" alt="Upload" />
-                                    <h2 style={{ marginBottom: '10px', fontSize: '20px', fontWeight: 600, color: 'var(--text-main)' }}>载入你的 VSCDB 文件</h2>
-                                    <p style={{ color: 'var(--text-dim)', marginBottom: '25px' }}>您的聊天记录，仅在本地解析，隐私隔离不泄</p>
+                                    <h2 style={{ marginBottom: '10px', fontSize: '20px', fontWeight: 600, color: 'var(--text-main)' }}>数据本地解析 隐私绝对隔离</h2>                                    <p style={{ color: 'var(--text-dim)', marginBottom: '25px' }}>The salvation lies within</p>
                                     <div className="flex gap-4 justify-center mt-6">
                                         <button 
                                             onClick={() => handleFileSelect('folder')}
                                             className="px-6 py-3 bg-green-500 hover:bg-transparent hover:text-green-500 text-black rounded-sm font-semibold transition-colors border border-green-500 uppercase tracking-wider font-mono"
                                         >
-                                            选择文件夹
+                                        聊天文件夹
                                         </button>
-                                        <button 
+                                        {/* <button 
                                             onClick={() => handleFileSelect('file')}
                                             className="px-6 py-3 bg-transparent hover:bg-zinc-700 text-white rounded-sm font-semibold transition-colors border border-zinc-700 uppercase tracking-wider font-mono"
                                         >
-                                            选择文件
-                                        </button>
+                                            选择state.vscdb
+                                        </button> */}
+                                    </div>
+                                    {/* 救赎路径复制器 */}
+                                    <div style={{ 
+                                        marginTop: '24px', 
+                                        padding: '12px 16px', 
+                                        background: 'rgba(24, 24, 27, 0.8)', 
+                                        border: '1px solid var(--card-border)', 
+                                        borderRadius: '2px',
+                                        fontFamily: "'JetBrains Mono', monospace"
+                                    }}>
+                                        <div style={{ 
+                                            display: 'flex', 
+                                            alignItems: 'center', 
+                                            justifyContent: 'space-between', 
+                                            gap: '12px',
+                                            marginBottom: '8px'
+                                        }}>
+                                            <code style={{ 
+                                                color: 'var(--accent-terminal)', 
+                                                fontSize: '12px', 
+                                                flex: 1, 
+                                                textAlign: 'left',
+                                                wordBreak: 'break-all',
+                                                fontFamily: "'JetBrains Mono', monospace"
+                                            }} id="workspacePath">
+                                                {(navigator.platform.toLowerCase().includes('win') || navigator.userAgent.toLowerCase().includes('windows')) 
+                                                    ? '%APPDATA%\\Cursor\\User\\workspaceStorage\\' 
+                                                    : '~/Library/Application Support/Cursor/User/workspaceStorage/'}
+                                            </code>
+                                            <button 
+                                                onClick={(e) => {
+                                                    const pathEl = document.getElementById('workspacePath');
+                                                    const path = pathEl ? pathEl.textContent : '';
+                                                    navigator.clipboard.writeText(path).then(() => {
+                                                        const btn = e.target;
+                                                        const originalText = btn.textContent;
+                                                        btn.textContent = '已复制';
+                                                        btn.style.color = 'var(--accent-terminal)';
+                                                        btn.style.background = 'var(--accent-terminal)';
+                                                        btn.style.color = '#050505';
+                                                        setTimeout(() => {
+                                                            btn.textContent = originalText;
+                                                            btn.style.background = 'transparent';
+                                                            btn.style.color = 'var(--accent-terminal)';
+                                                        }, 2000);
+                                                    }).catch(err => {
+                                                        console.error('复制失败:', err);
+                                                        alert('复制失败，请手动复制');
+                                                    });
+                                                }}
+                                                style={{
+                                                    padding: '6px 12px',
+                                                    background: 'transparent',
+                                                    border: '1px solid var(--accent-terminal)',
+                                                    borderRadius: '2px',
+                                                    color: 'var(--accent-terminal)',
+                                                    fontSize: '11px',
+                                                    cursor: 'pointer',
+                                                    fontFamily: "'JetBrains Mono', monospace",
+                                                    textTransform: 'uppercase',
+                                                    letterSpacing: '0.05em',
+                                                    transition: 'all 0.2s ease',
+                                                    whiteSpace: 'nowrap'
+                                                }}
+                                                onMouseEnter={(e) => {
+                                                    e.target.style.background = 'var(--accent-terminal)';
+                                                    e.target.style.color = '#050505';
+                                                }}
+                                                onMouseLeave={(e) => {
+                                                    e.target.style.background = 'transparent';
+                                                    e.target.style.color = 'var(--accent-terminal)';
+                                                }}
+                                            >
+                                                复制
+                                            </button>
+                                        </div>
+                                        <p style={{ 
+                                            color: '#ffffff', 
+                                            fontSize: '10px', 
+                                            margin: 0,
+                                            textAlign: 'left',
+                                            fontFamily: "'JetBrains Mono', monospace",
+                                            opacity: 0.8
+                                        }}>
+                                            {'> '}在弹出窗口的地址栏粘贴此路径可瞬间抵达
+                                        </p>
                                     </div>
                                 </div>
                             </div>

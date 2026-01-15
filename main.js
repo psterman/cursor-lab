@@ -1263,7 +1263,7 @@ function renderChatList(chatData) {
         <div class="chat-item">
           <div class="chat-item-header">
             <span class="chat-role ${role === 'USER' ? 'role-user' : 'role-ai'}">
-              ${role === 'USER' ? '👤' : '🤖'} ${role}
+              <span style="color: var(--accent-terminal);">${role === 'USER' ? '>' : '$'}</span> ${role}
             </span>
             <span class="chat-time">${formatTime(timestamp)}</span>
           </div>
