@@ -251,8 +251,13 @@
         .stat-comparison {
             font-size: 14px;
             margin-top: 10px;
-            color: var(--accent-terminal);
+            color: #ffffff;
             font-weight: 500;
+        }
+        
+        .stat-comparison strong {
+            color: var(--accent-terminal);
+            font-weight: 700;
         }
 
         /* 排名显示样式（右下角） */
@@ -508,8 +513,8 @@
 
         .role-user {
             background: transparent;
-            color: var(--accent-cyan);
-            border-color: var(--accent-cyan);
+            color: var(--accent-terminal);
+            border-color: var(--accent-terminal);
         }
 
         .role-ai {
@@ -1858,17 +1863,17 @@
                                         <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
                                             <div class="stat-card" style="text-align: center;">
                                                 <p class="stat-label">全网受虐人数</p>
-                                                <p class="stat-value" id="totalTestUsers" style="color: var(--accent-blue);">加载中...</p>
+                                                <p class="stat-value" id="totalTestUsers" style="color: #ffffff;">加载中...</p>
                                                 <p class="stat-comparison">人</p>
                                             </div>
                                             <div class="stat-card" style="text-align: center;">
                                                 <p class="stat-label">技术排名</p>
-                                                <p class="stat-value" id="techRank" style="color: var(--accent-terminal);">加载中...</p>
+                                                <p class="stat-value" id="techRank" style="color: #ffffff;">加载中...</p>
                                                 <p class="stat-comparison">名</p>
                                             </div>
                                             <div class="stat-card" style="text-align: center;">
                                                 <p class="stat-label">人格库解锁</p>
-                                                <p class="stat-value" id="personalityUnlock" style="color: #10b981;">加载中...</p>
+                                                <p class="stat-value" id="personalityUnlock" style="color: #ffffff;">加载中...</p>
                                                 <p class="stat-comparison">243 种人格</p>
                                             </div>
                                         </div>
@@ -1879,33 +1884,33 @@
                                         <h3 class="chart-title" style="margin-bottom: 20px; text-align: center;">🏆 全网横向排名</h3>
                                         <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;" id="rankingCards">
                                             <div class="stat-card" style="text-align: center;">
-                                                <p class="stat-label">赛博磕头排名</p>
-                                                <p class="stat-value" id="rankingQingCount" style="color: var(--accent-terminal);">--</p>
+                                                <p class="stat-label" style="color: var(--text-dim);">赛博磕头排名</p>
+                                                <p class="stat-value" id="rankingQingCount" style="color: #ffffff;">--</p>
                                                 <p class="stat-comparison" id="rankingQingCountPercent">--</p>
                                             </div>
                                             <div class="stat-card" style="text-align: center;">
-                                                <p class="stat-label">甲方上身排名</p>
-                                                <p class="stat-value" id="rankingBuCount" style="color: #ef4444;">--</p>
+                                                <p class="stat-label" style="color: var(--text-dim);">甲方上身排名</p>
+                                                <p class="stat-value" id="rankingBuCount" style="color: #ffffff;">--</p>
                                                 <p class="stat-comparison" id="rankingBuCountPercent">--</p>
                                             </div>
                                             <div class="stat-card" style="text-align: center;">
-                                                <p class="stat-label">调戏AI排名</p>
-                                                <p class="stat-value" id="rankingUserMessages" style="color: var(--accent-blue);">--</p>
+                                                <p class="stat-label" style="color: var(--text-dim);">调戏AI排名</p>
+                                                <p class="stat-value" id="rankingUserMessages" style="color: #ffffff;">--</p>
                                                 <p class="stat-comparison" id="rankingUserMessagesPercent">--</p>
                                             </div>
                                             <div class="stat-card" style="text-align: center;">
-                                                <p class="stat-label">废话输出排名</p>
-                                                <p class="stat-value" id="rankingTotalChars" style="color: #10b981;">--</p>
+                                                <p class="stat-label" style="color: var(--text-dim);">废话输出排名</p>
+                                                <p class="stat-value" id="rankingTotalChars" style="color: #ffffff;">--</p>
                                                 <p class="stat-comparison" id="rankingTotalCharsPercent">--</p>
                                             </div>
                                             <div class="stat-card" style="text-align: center;">
-                                                <p class="stat-label">平均长度排名</p>
-                                                <p class="stat-value" id="rankingAvgLength" style="color: #f59e0b;">--</p>
+                                                <p class="stat-label" style="color: var(--text-dim);">平均长度排名</p>
+                                                <p class="stat-value" id="rankingAvgLength" style="color: #ffffff;">--</p>
                                                 <p class="stat-comparison" id="rankingAvgLengthPercent">--</p>
                                             </div>
                                             <div class="stat-card" style="text-align: center;">
-                                                <p class="stat-label">上岗天数排名</p>
-                                                <p class="stat-value" id="rankingUsageDays" style="color: var(--accent-terminal);">--</p>
+                                                <p class="stat-label" style="color: var(--text-dim);">上岗天数排名</p>
+                                                <p class="stat-value" id="rankingUsageDays" style="color: #ffffff;">--</p>
                                                 <p class="stat-comparison" id="rankingUsageDaysPercent">--</p>
                                             </div>
                                         </div>
@@ -2331,8 +2336,10 @@
                                                 valueEl.style.fontFamily = "'JetBrains Mono', monospace";
                                                 
                                                 // percentEl显示JSON中的title和content
+                                                // strong标签会自动应用绿色加粗样式（通过CSS）
                                                 percentEl.innerHTML = `<strong>${comment.title}</strong><br/>${comment.content}`;
                                                 percentEl.style.whiteSpace = 'normal'; // 允许换行显示content
+                                                percentEl.style.color = '#ffffff'; // 确保内容文字是白色
                                             } else {
                                                 // 如果无法从JSON获取，使用默认显示
                                                 const percent = ((total - rank + 1) / total * 100).toFixed(1);
@@ -2575,7 +2582,7 @@
                         <div className="max-w-2xl w-full space-y-8 text-center">
                             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-xs text-blue-400 mb-4 mx-auto">
                                 <Icon name="zap" size={12} />
-                                <span>AI 行为学临床实验室 v2.0</span>
+                                <span>Vibe Coding行为临床实验室 v1.0</span>
                             </div>
                             <h1 style={{
                                 fontSize: 'clamp(2rem, 5vw, 3.5rem)',
@@ -2587,10 +2594,10 @@
                                 WebkitTextFillColor: 'transparent',
                                 marginBottom: '15px'
                             }}>
-                                Cursor 迷惑行为报告
+                                Cursor迷惑行为报告
                             </h1>
                             <p className="text-zinc-500 text-lg max-w-md mx-auto">
-                                基于本地 SQLite 数据库的深度受虐分析
+                                基于 Cursor 聊天记录的深度受虐分析
                             </p>
                             
                             {error && (
@@ -2603,7 +2610,7 @@
                                 <div className="relative z-10 space-y-4 text-center">
                                     <span style={{ fontSize: '48px', marginBottom: '20px', display: 'block' }} className="upload-icon">🧪</span>
                                     <h2 style={{ marginBottom: '10px', fontSize: '20px', fontWeight: 600, color: 'var(--text-main)' }}>载入你的 VSCDB 文件</h2>
-                                    <p style={{ color: 'var(--text-dim)', marginBottom: '25px' }}>交出你的聊天存货，数据仅在本地解析，绝不上传云端</p>
+                                    <p style={{ color: 'var(--text-dim)', marginBottom: '25px' }}>您的聊天记录，仅在本地解析，隐私隔离不泄</p>
                                     <div className="flex gap-4 justify-center mt-6">
                                         <button 
                                             onClick={() => handleFileSelect('folder')}

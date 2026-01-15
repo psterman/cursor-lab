@@ -1526,7 +1526,7 @@ function displayVibeCodingerAnalysis() {
   container.innerHTML = `
     <div class="vibe-header">
       <h2 class="vibe-title">🔮 你的cursor人格已被锁定</h2>
-      <div class="vibe-badge" style="background: linear-gradient(135deg, ${analysis.color}22 0%, ${analysis.color}44 100%); border: 2px solid ${analysis.color};">
+      <div class="vibe-badge" style="background: transparent; border: 2px solid var(--accent-terminal);">
         <span class="vibe-type">${personalityType}</span>
         <span class="vibe-name">${personalityName || analysis.name}</span>
       </div>
@@ -1564,7 +1564,7 @@ function displayVibeCodingerAnalysis() {
               <span class="dimension-level">${dimInfo.level}</span>
             </div>
             <div class="dimension-bar-container">
-              <div class="dimension-bar" style="width: ${percentage}%; background: ${getDimensionColor(key)}"></div>
+              <div class="dimension-bar" style="width: ${percentage}%; background: var(--accent-terminal)"></div>
             </div>
             <p class="dimension-interpretation">${dimInfo.interpretation}</p>
             <p class="dimension-desc">${DIMENSIONS[key].description}</p>
@@ -1704,13 +1704,13 @@ function renderVibeRadarChart() {
             eValue,
             dimensions.F,
           ],
-          backgroundColor: 'rgba(59, 130, 246, 0.2)',
-          borderColor: 'rgba(59, 130, 246, 1)',
+          backgroundColor: 'rgba(0, 255, 65, 0.2)',
+          borderColor: 'rgba(0, 255, 65, 1)',
           borderWidth: 2,
-          pointBackgroundColor: 'rgba(59, 130, 246, 1)',
+          pointBackgroundColor: 'rgba(0, 255, 65, 1)',
           pointBorderColor: '#fff',
           pointHoverBackgroundColor: '#fff',
-          pointHoverBorderColor: 'rgba(59, 130, 246, 1)',
+          pointHoverBorderColor: 'rgba(0, 255, 65, 1)',
           pointRadius: 5,
           pointHoverRadius: 7,
         },
@@ -1723,14 +1723,14 @@ function renderVibeRadarChart() {
             eAverage,
             globalAverage.F,
           ],
-          backgroundColor: 'rgba(139, 92, 246, 0.1)',
-          borderColor: 'rgba(139, 92, 246, 0.5)',
+          backgroundColor: 'rgba(113, 113, 122, 0.1)',
+          borderColor: 'rgba(113, 113, 122, 0.5)',
           borderWidth: 1.5,
           borderDash: [5, 5],
-          pointBackgroundColor: 'rgba(139, 92, 246, 0.5)',
-          pointBorderColor: 'rgba(139, 92, 246, 0.8)',
-          pointHoverBackgroundColor: 'rgba(139, 92, 246, 0.8)',
-          pointHoverBorderColor: 'rgba(139, 92, 246, 1)',
+          pointBackgroundColor: 'rgba(113, 113, 122, 0.5)',
+          pointBorderColor: 'rgba(113, 113, 122, 0.8)',
+          pointHoverBackgroundColor: 'rgba(113, 113, 122, 0.8)',
+          pointHoverBorderColor: 'rgba(113, 113, 122, 1)',
           pointRadius: 3,
           pointHoverRadius: 5,
         },
@@ -1757,6 +1757,13 @@ function renderVibeRadarChart() {
         legend: {
           display: true,
           position: 'top',
+          labels: {
+            color: '#ffffff',
+            font: {
+              family: "'JetBrains Mono', monospace",
+            },
+            // 图例颜色块会自动使用数据集的 borderColor（已在上面设置为绿色和深灰色）
+          },
         },
         tooltip: {
           callbacks: {
@@ -2037,14 +2044,14 @@ function displayDimensionRanking() {
     const unit = dim.key === 'E' ? '种技术' : '分';
     
     return `
-      <div class="prompt-item" style="background: ${rank <= 3 ? 'rgba(139, 92, 246, 0.1)' : 'rgba(255, 255, 255, 0.03)'}; border-color: ${rank <= 3 ? 'rgba(139, 92, 246, 0.3)' : 'var(--card-border)'};">
+      <div class="prompt-item" style="background: ${rank <= 3 ? 'rgba(0, 255, 65, 0.1)' : 'rgba(255, 255, 255, 0.03)'}; border-color: ${rank <= 3 ? 'rgba(0, 255, 65, 0.3)' : 'var(--card-border)'};">
         <span class="prompt-rank" style="font-size: 20px; min-width: 50px;">${rankIcon}</span>
         <span class="prompt-text" style="flex: 1; font-weight: 600;">${dim.label}</span>
         <div style="display: flex; align-items: center; gap: 12px;">
           <div style="width: 120px; height: 8px; background: rgba(255, 255, 255, 0.1); border-radius: 4px; overflow: hidden;">
-            <div style="width: ${percentage}%; height: 100%; background: ${getDimensionColor(dim.key)}; transition: width 0.5s ease;"></div>
+            <div style="width: ${percentage}%; height: 100%; background: var(--accent-terminal); transition: width 0.5s ease;"></div>
           </div>
-          <span class="prompt-count" style="min-width: 80px; text-align: right; font-weight: 700; color: ${getDimensionColor(dim.key)};">${dim.displayValue} ${unit}</span>
+          <span class="prompt-count" style="min-width: 80px; text-align: right; font-weight: 700; color: var(--accent-terminal);">${dim.displayValue} ${unit}</span>
         </div>
       </div>
     `;
