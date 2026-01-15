@@ -1,0 +1,4 @@
+# .nojekyll - 防止 GitHub Pages 过滤 Wasm 文件
+# GitHub Pages 默认使用 Jekyll 处理文件，会忽略以 _ 开头的文件和目录
+# 但也会错误处理一些特殊文件，如 .wasm 文件
+# 创建这个空文件可以禁用 Jekyll，确保所有文件（包括 Wasm）都能正常访问
