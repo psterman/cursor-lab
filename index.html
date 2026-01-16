@@ -1238,10 +1238,21 @@
                         // pathname 可能是: /Cursor-Clinical-Analysis/ 或 /Cursor-Clinical-Analysis/index.html
                         const pathParts = pathname.split('/').filter(p => p);
                         // 移除 'index.html' 如果存在
-                        const cleanParts = pathParts.filter(p => p !== 'index.html');
+                        const cleanParts = pathParts.filter(p => p !== 'index.html' && p !== '');
                         if (cleanParts.length > 0) {
                             // 第一个非空部分通常是仓库名
                             basePath = '/' + cleanParts[0];
+                        } else {
+                            // 如果 pathname 是 '/' 或 '/index.html'，可能是用户页面，basePath 为空
+                            // 但如果是项目页面，pathname 应该包含仓库名
+                            // 尝试从 URL 的完整路径推断
+                            const fullPath = window.location.pathname;
+                            if (fullPath && fullPath !== '/' && fullPath !== '/index.html') {
+                                const parts = fullPath.split('/').filter(p => p && p !== 'index.html');
+                                if (parts.length > 0) {
+                                    basePath = '/' + parts[0];
+                                }
+                            }
                         }
                     } else {
                         // 其他生产环境
@@ -1249,10 +1260,15 @@
                         basePath = pathParts.length > 0 ? '/' + pathParts[0] : '';
                     }
                     
-                    // 确保 basePath 格式正确
+                    // 确保 basePath 格式正确（移除末尾斜杠，但保留开头的斜杠）
                     if (basePath && basePath !== '/' && basePath.endsWith('/')) {
                         basePath = basePath.slice(0, -1);
                     }
+                    
+                    // 调试信息
+                    console.log('[Path] 原始 pathname:', pathname);
+                    console.log('[Path] 检测到的 basePath:', basePath);
+                    console.log('[Path] isGitHubPages:', isGitHubPages);
 
                     // 保存基础路径供其他模块使用
                     window.BASE_PATH = basePath;
@@ -1376,37 +1392,80 @@
                     if (isDev) {
                         i18nModule = await import('./src/i18n.js');
                     } else {
-                        // 生产环境：尝试多个路径
+                        // 生产环境：尝试多个路径（按优先级排序）
                         const i18nPaths = [];
+                        
+                        // 1. GitHub Pages 绝对路径（最高优先级）
                         if (isGitHubPages && basePath) {
-                            i18nPaths.push(`${basePath}/src/i18n.js`);
-                        }
-                        i18nPaths.push('./src/i18n.js');
-                        if (currentDir) {
-                            i18nPaths.push(`${currentDir}/src/i18n.js`);
+                            // 确保 basePath 以 / 开头，但不以 / 结尾
+                            const normalizedBasePath = basePath.startsWith('/') ? basePath : '/' + basePath;
+                            const cleanBasePath = normalizedBasePath.endsWith('/') ? normalizedBasePath.slice(0, -1) : normalizedBasePath;
+                            i18nPaths.push(`${cleanBasePath}/src/i18n.js`);
                         }
                         
+                        // 2. 基于当前目录的路径
+                        if (currentDir) {
+                            i18nPaths.push(`${currentDir}/src/i18n.js`);
+                            // 如果 currentDir 不以 / 结尾，添加 /
+                            if (!currentDir.endsWith('/')) {
+                                i18nPaths.push(`${currentDir}/src/i18n.js`);
+                            }
+                        }
+                        
+                        // 3. 相对路径（备用）
+                        i18nPaths.push('./src/i18n.js');
+                        i18nPaths.push('src/i18n.js');
+                        
+                        // 4. 绝对路径（最后尝试）
+                        if (basePath) {
+                            i18nPaths.push(`/src/i18n.js`);
+                        }
+                        
+                        console.log('[i18n] 当前 URL:', window.location.href);
+                        console.log('[i18n] 基础路径:', basePath);
+                        console.log('[i18n] 当前目录:', currentDir);
+                        console.log('[i18n] 尝试加载路径列表:', i18nPaths);
+                        
                         let i18nLoaded = false;
+                        let lastI18nError = null;
+                        const i18nErrors = [];
+                        
                         for (const path of i18nPaths) {
                             try {
+                                console.log(`[i18n] 尝试加载: ${path}`);
                                 i18nModule = await import(/* @vite-ignore */ path);
+                                console.log(`[i18n] ✅ 成功加载: ${path}`);
                                 i18nLoaded = true;
                                 break;
                             } catch (err) {
-                                console.warn(`[i18n] 路径 ${path} 加载失败:`, err.message);
+                                const errorInfo = {
+                                    path,
+                                    error: err.message,
+                                    name: err.name
+                                };
+                                i18nErrors.push(errorInfo);
+                                console.warn(`[i18n] ❌ 路径 ${path} 加载失败:`, err.message);
+                                lastI18nError = err;
                             }
                         }
+                        
                         if (!i18nLoaded) {
-                            throw new Error('i18n 模块加载失败');
+                            console.error('[i18n] ❌ 所有 i18n 路径都加载失败');
+                            console.error('[i18n] 所有尝试的错误:', i18nErrors);
+                            console.error('[i18n] 最后尝试的错误:', lastI18nError);
+                            throw new Error(`i18n 模块加载失败：所有路径都尝试失败。\n尝试的路径：\n${i18nErrors.map(e => `  - ${e.path}: ${e.error}`).join('\n')}\n\n请确认：\n1. 已运行 npm run build\n2. dist/src/i18n.js 文件存在\n3. 文件已正确部署到 GitHub Pages`);
                         }
                     }
                     window.i18n = i18nModule;
-                    console.log('[i18n] i18n 模块已加载');
+                    console.log('[i18n] ✅ i18n 模块已成功加载，导出内容:', Object.keys(i18nModule));
                 } catch (err) {
                     console.error('[i18n] ❌ i18n 模块加载失败:', err);
                     // 提供一个简单的 fallback
                     window.i18n = {
-                        getText: (key, lang) => key,
+                        getText: (key, lang) => {
+                            console.warn(`[i18n] 使用 fallback，返回 key: ${key}`);
+                            return key;
+                        },
                         getI18nText: (lang) => ({})
                     };
                 }

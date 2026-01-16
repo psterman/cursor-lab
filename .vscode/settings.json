@@ -1,0 +1,26 @@
+{
+  // Git 提交消息配置
+  "git.commitMessagePrompt": "请用中文描述本次提交的更改",
+  
+  // Cursor AI 配置 - 提交消息生成语言
+  "cursor.chat.language": "zh-CN",
+  "cursor.ai.language": "zh-CN",
+  
+  // Git 相关设置
+  "git.enableSmartCommit": true,
+  "git.confirmSync": false,
+  
+  // 提交消息模板（使用项目根目录的 .gitmessage 文件）
+  "git.template.commitMessage": "请用中文描述本次提交的更改",
+  
+  // 文件编码
+  "files.encoding": "utf8",
+  "files.autoGuessEncoding": true,
+  
+  // Source Control 相关设置
+  "scm.inputFontFamily": "Consolas, 'Courier New', monospace",
+  "scm.inputFontSize": 13,
+  
+  // 提示 Cursor AI 使用中文生成 commit message
+  "cursor.ai.commitMessageLanguage": "zh-CN"
+}

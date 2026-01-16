@@ -36,3 +36,35 @@ _Exported on 01/16/2026 at 22:05:38 GMT+8 from Cursor via WayLog_
 修复：Vite 构建未将 `src/i18n.js` 复制到 `dist`，导致 GitHub Pages 无法加载。更新 Vite 配置，在构建时复制该文件：
 
 ---
+
+
+**User**
+
+我希望source  control 的generate commit message生成的都是中文
+
+---
+
+
+**Cursor**
+
+检查项目中的 Git 配置，确保生成的 commit message 为中文。
+
+
+
+检查并配置 Cursor/VS Code 设置，使生成的 commit message 为中文。
+
+---
+
+
+**User**
+
+我的github加载的inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-xs text-white mb-4 mx-auto是dashboard.clinicalAnalysis，但是我的index.html加载的是Vibe Coding Behavioral Clinical Laboratory v1.0，git push后刷新还是没有解决，如何彻底修复
+
+---
+
+
+**Cursor**
+
+检查构建输出和路径配置，定位 GitHub Pages 上 i18n 未加载的原因。
+
+---
