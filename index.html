@@ -1220,6 +1220,10 @@
             window.analysisModuleLoading = true;
             window.analysisModuleError = null;
             
+            // 在外部作用域定义变量，确保 i18n 加载代码可以访问
+            let basePath = '';
+            let currentDir = '';
+            
             try {
                 let module;
                 
@@ -1232,7 +1236,7 @@
                     console.log('[Main] 生产环境：动态导入 main.js');
                     
                     // 检测基础路径（更准确的检测逻辑）
-                    let basePath = '';
+                    basePath = '';
                     if (isGitHubPages) {
                         // GitHub Pages: 从 pathname 提取仓库名
                         // pathname 可能是: /Cursor-Clinical-Analysis/ 或 /Cursor-Clinical-Analysis/index.html
@@ -1274,7 +1278,7 @@
                     window.BASE_PATH = basePath;
 
                     // 获取当前目录（用于相对路径）
-                    const currentDir = pathname.substring(0, pathname.lastIndexOf('/')) || '';
+                    currentDir = pathname.substring(0, pathname.lastIndexOf('/')) || '';
                     
                     // 构建路径列表（GitHub Pages 使用绝对路径，本地使用相对路径）
                     const paths = [];
@@ -1393,37 +1397,43 @@
                         i18nModule = await import('./src/i18n.js');
                     } else {
                         // 生产环境：尝试多个路径（按优先级排序）
+                        // 使用 window.BASE_PATH 作为备用，确保变量可用
+                        const effectiveBasePath = basePath || window.BASE_PATH || '';
+                        const effectiveCurrentDir = currentDir || (pathname.substring(0, pathname.lastIndexOf('/')) || '');
+                        
                         const i18nPaths = [];
                         
                         // 1. GitHub Pages 绝对路径（最高优先级）
-                        if (isGitHubPages && basePath) {
+                        if (isGitHubPages && effectiveBasePath) {
                             // 确保 basePath 以 / 开头，但不以 / 结尾
-                            const normalizedBasePath = basePath.startsWith('/') ? basePath : '/' + basePath;
+                            const normalizedBasePath = effectiveBasePath.startsWith('/') ? effectiveBasePath : '/' + effectiveBasePath;
                             const cleanBasePath = normalizedBasePath.endsWith('/') ? normalizedBasePath.slice(0, -1) : normalizedBasePath;
                             i18nPaths.push(`${cleanBasePath}/src/i18n.js`);
                         }
                         
                         // 2. 基于当前目录的路径
-                        if (currentDir) {
-                            i18nPaths.push(`${currentDir}/src/i18n.js`);
-                            // 如果 currentDir 不以 / 结尾，添加 /
-                            if (!currentDir.endsWith('/')) {
-                                i18nPaths.push(`${currentDir}/src/i18n.js`);
-                            }
+                        if (effectiveCurrentDir) {
+                            i18nPaths.push(`${effectiveCurrentDir}/src/i18n.js`);
                         }
                         
-                        // 3. 相对路径（备用）
+                        // 3. 基于 window.BASE_PATH 的路径（如果存在）
+                        if (window.BASE_PATH) {
+                            const cleanBase = window.BASE_PATH.endsWith('/') ? window.BASE_PATH.slice(0, -1) : window.BASE_PATH;
+                            i18nPaths.push(`${cleanBase}/src/i18n.js`);
+                        }
+                        
+                        // 4. 相对路径（备用）
                         i18nPaths.push('./src/i18n.js');
                         i18nPaths.push('src/i18n.js');
                         
-                        // 4. 绝对路径（最后尝试）
-                        if (basePath) {
-                            i18nPaths.push(`/src/i18n.js`);
-                        }
+                        // 5. 绝对路径（最后尝试）
+                        i18nPaths.push('/src/i18n.js');
                         
                         console.log('[i18n] 当前 URL:', window.location.href);
-                        console.log('[i18n] 基础路径:', basePath);
-                        console.log('[i18n] 当前目录:', currentDir);
+                        console.log('[i18n] 基础路径 (basePath):', basePath);
+                        console.log('[i18n] 基础路径 (window.BASE_PATH):', window.BASE_PATH);
+                        console.log('[i18n] 有效基础路径:', effectiveBasePath);
+                        console.log('[i18n] 当前目录:', effectiveCurrentDir);
                         console.log('[i18n] 尝试加载路径列表:', i18nPaths);
                         
                         let i18nLoaded = false;
