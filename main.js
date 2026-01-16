@@ -70,6 +70,28 @@ export const getAllChatData = () => allChatData;
 export const getVibeResult = () => vibeResult;
 export const getParser = () => parser;
 export const getVibeAnalyzer = () => vibeAnalyzer;
+
+// 设置函数（用于分享模式）
+export const setGlobalStats = (stats) => {
+  if (stats) {
+    globalStats = stats;
+    console.log('[Main] 已设置分享模式的统计数据:', globalStats);
+  }
+};
+
+export const setVibeResult = (result) => {
+  if (result) {
+    vibeResult = result;
+    console.log('[Main] 已设置分享模式的 Vibe 结果:', vibeResult);
+  }
+};
+
+export const setAllChatData = (data) => {
+  if (data && Array.isArray(data)) {
+    allChatData = data;
+    console.log('[Main] 已设置分享模式的聊天数据:', allChatData.length, '条');
+  }
+};
 // 注意：updateNumberWithAnimation, formatNumber, fetchTotalTestUsers, reportNewUser, updateGlobalStats 
 // 在文件后面定义，将在定义时直接导出
 
@@ -2138,10 +2160,28 @@ export async function reportNewUser() {
 
 // 显示实时统计
 async function displayRealtimeStats() {
-  if (!vibeResult || !globalStats) return;
+  if (!vibeResult || !globalStats) {
+    console.warn('[Main] displayRealtimeStats: 缺少必要数据', {
+      hasVibeResult: !!vibeResult,
+      hasGlobalStats: !!globalStats
+    });
+    return;
+  }
 
-  // 从 API 获取测试总人数（页面加载时已获取，这里直接使用）
-  let totalTestUsers = await fetchTotalTestUsers();
+  // 检查是否为分享模式（通过检查是否有分享数据标记）
+  const isShareMode = window.shareModeStats || window.shareModeVibeResult;
+  
+  // 从 API 获取测试总人数（分享模式下使用默认值或缓存值）
+  let totalTestUsers;
+  if (isShareMode) {
+    // 分享模式：使用缓存值或默认值，不调用 API
+    const cached = parseInt(localStorage.getItem('totalTestUsers') || '0');
+    totalTestUsers = cached > 0 ? cached : 1000; // 默认值用于计算排名
+    console.log('[Main] 分享模式：使用缓存的 totalTestUsers:', totalTestUsers);
+  } else {
+    // 正常模式：从 API 获取
+    totalTestUsers = await fetchTotalTestUsers();
+  }
   const previousTotal = totalTestUsers;
 
   // 计算技术排名（基于综合维度得分）

@@ -11,6 +11,8 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- LZ-string 压缩库，用于压缩分享数据 -->
+    <script src="https://cdn.jsdelivr.net/npm/lz-string@1.4.4/libs/lz-string.min.js"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -1367,6 +1369,9 @@
                     renderFullDashboard,
                     getGlobalStats,
                     getVibeResult,
+                    setGlobalStats,
+                    setVibeResult,
+                    setAllChatData,
                     reanalyzeWithLanguage,
                     updateNumberWithAnimation,
                     formatNumber,
@@ -1382,6 +1387,9 @@
                     renderFullDashboard,
                     getGlobalStats,
                     getVibeResult,
+                    setGlobalStats: setGlobalStats || (() => {}),
+                    setVibeResult: setVibeResult || (() => {}),
+                    setAllChatData: setAllChatData || (() => {}),
                     reanalyzeWithLanguage: reanalyzeWithLanguage || (async () => null),
                     updateNumberWithAnimation: updateNumberWithAnimation || (() => {}),
                     formatNumber: formatNumber || ((n) => n.toString()),
@@ -1822,84 +1830,209 @@
                 }
             }, [lang]);
 
-            // 路由解析逻辑：检查 URL Hash 中的分享数据
+            // 路由解析逻辑：检查 URL Hash 中的分享数据（优化版：支持压缩数据）
             useEffect(() => {
                 const hash = window.location.hash;
                 if (hash && hash.startsWith('#share=')) {
                     try {
-                        const base64String = hash.substring(7); // 去掉 '#share='
-                        const decodedString = decodeURIComponent(atob(base64String));
-                        const shareData = JSON.parse(decodedString);
+                        const encodedString = hash.substring(7); // 去掉 '#share='
+                        let shareData;
+                        
+                        // 尝试解压（优先使用 LZ-string）
+                        if (typeof LZString !== 'undefined') {
+                            try {
+                                const decompressed = LZString.decompressFromEncodedURIComponent(encodedString);
+                                if (decompressed) {
+                                    shareData = JSON.parse(decompressed);
+                                    console.log('[分享] 使用 LZ-string 解压成功');
+                                } else {
+                                    throw new Error('LZ-string 解压失败，尝试 Base64');
+                                }
+                            } catch (lzError) {
+                                console.warn('[分享] LZ-string 解压失败，尝试 Base64:', lzError);
+                                // 降级到 Base64
+                                const decodedString = decodeURIComponent(atob(encodedString));
+                                shareData = JSON.parse(decodedString);
+                                console.log('[分享] 使用 Base64 解码成功');
+                            }
+                        } else {
+                            // 直接使用 Base64
+                            const decodedString = decodeURIComponent(atob(encodedString));
+                            shareData = JSON.parse(decodedString);
+                            console.log('[分享] 使用 Base64 解码（LZ-string 不可用）');
+                        }
+                        
+                        // 数据验证
+                        if (!shareData || typeof shareData !== 'object') {
+                            throw new Error('分享数据格式无效：不是有效的对象');
+                        }
+                        
+                        // 版本检查
+                        if (shareData.ver && shareData.ver !== '1.0') {
+                            console.warn('[分享] 数据版本不匹配:', shareData.ver, '当前版本: 1.0');
+                        }
                         
                         console.log('[分享] 检测到分享链接，数据:', shareData);
                         
                         // 设置分享模式
                         setIsShareMode(true);
-                        setShareRankings(shareData);
+                        
+                        // 数据格式转换（兼容新旧格式）
+                        let rankings = null;
+                        let stats = null;
+                        let vibeResult = null;
+                        
+                        // 新格式：r, s, v
+                        if (shareData.r) {
+                            // 从精简数据构建完整的 rankings 对象
+                            rankings = {
+                                avgUserMessageLength: {
+                                    rank: shareData.r.wordRank,
+                                    total: shareData.r.totals?.word || 0
+                                },
+                                qingCount: {
+                                    rank: shareData.r.pleaseRank,
+                                    total: shareData.r.totals?.please || 0
+                                },
+                                buCount: {
+                                    rank: shareData.r.noRank,
+                                    total: shareData.r.totals?.no || 0
+                                },
+                                usageDays: {
+                                    rank: shareData.r.dayRank,
+                                    total: shareData.r.totals?.day || 0
+                                },
+                                // 补充其他可能的排名字段（如果有的话）
+                                userMessages: shareData.r.userMessagesRank ? {
+                                    rank: shareData.r.userMessagesRank,
+                                    total: shareData.r.totals?.userMessages || 0
+                                } : null,
+                                totalUserChars: shareData.r.totalCharsRank ? {
+                                    rank: shareData.r.totalCharsRank,
+                                    total: shareData.r.totals?.totalChars || 0
+                                } : null
+                            };
+                            console.log('[分享] 从精简数据构建的 rankings:', rankings);
+                        }
+                        
+                        // 旧格式兼容：rankings（完整数据）
+                        if (shareData.rankings && typeof shareData.rankings === 'object') {
+                            // 如果旧格式存在，优先使用（因为它包含更完整的数据）
+                            rankings = shareData.rankings;
+                            console.log('[分享] 使用旧格式的完整 rankings:', rankings);
+                        }
+                        
+                        // 新格式：s 字段（精简数据）
+                        if (shareData.s) {
+                            // 将精简数据转换为完整结构
+                            stats = {
+                                totalConversations: shareData.s.totalConversations || 0,
+                                userMessages: shareData.s.userMessages || 0,
+                                aiMessages: shareData.s.aiMessages || 0,
+                                qingCount: shareData.s.qingCount || 0,
+                                buCount: shareData.s.buCount || 0,
+                                totalCodeChars: shareData.s.totalCodeChars || 0,
+                                earliestFileTime: shareData.s.earliestFileTime || null,
+                                // 补充必要的字段
+                                modelUsage: {},
+                                hourlyActivity: new Array(24).fill(0),
+                                dailyActivity: {},
+                                topPrompts: {},
+                                topChineseWords: {},
+                                chineseWords: {},
+                                englishWords: {},
+                                userBehaviorStats: {
+                                    totalUserChars: shareData.s.totalUserChars || 0,
+                                    avgUserMessageLength: shareData.s.avgUserMessageLength || 0,
+                                    questionMessageCount: shareData.s.questionMessageCount || 0,
+                                    techStack: {}
+                                }
+                            };
+                        } 
+                        // 旧格式兼容：analysisData.stats（完整数据）
+                        else if (shareData.analysisData?.stats) {
+                            stats = shareData.analysisData.stats;
+                        }
+                        
+                        // 新格式：v 字段
+                        if (shareData.v && typeof shareData.v === 'object') {
+                            vibeResult = shareData.v;
+                        } 
+                        // 旧格式兼容：analysisData.vibeResult
+                        else if (shareData.analysisData?.vibeResult) {
+                            vibeResult = shareData.analysisData.vibeResult;
+                        }
+                        
+                        setShareRankings({ rankings, stats, vibeResult });
                         
                         // 注入排名数据到全局变量
-                        if (shareData.rankings) {
-                            window.userRankings = shareData.rankings;
+                        if (rankings) {
+                            window.userRankings = rankings;
                         }
                         
                         // 如果有分析数据，存储到全局变量供 analysisModule 使用
-                        if (shareData.analysisData) {
-                            if (shareData.analysisData.stats) {
-                                window.shareModeStats = shareData.analysisData.stats;
-                            }
-                            if (shareData.analysisData.vibeResult) {
-                                window.shareModeVibeResult = shareData.analysisData.vibeResult;
-                            }
+                        if (stats) {
+                            window.shareModeStats = stats;
+                        }
+                        if (vibeResult) {
+                            window.shareModeVibeResult = vibeResult;
                         }
                         
-                        // 等待 analysisModule 加载完成后再渲染
-                        const checkAndRender = () => {
-                            if (window.analysisModule && window.analysisModule.renderFullDashboard) {
-                                // 直接进入 Dashboard
-                                setStep('fullReport');
-                                
-                                // 延迟渲染 Dashboard
-                                setTimeout(() => {
-                                    const container = document.getElementById('fullReportContainer');
-                                    if (container) {
-                                        recreateDashboardDOM(lang);
-                                        container.style.display = 'block';
-                                        
-                                        setTimeout(() => {
-                                            const dashboardSection = container.querySelector('#dashboardSection');
-                                            if (dashboardSection) {
-                                                dashboardSection.classList.remove('hidden');
-                                                dashboardSection.style.display = 'block';
-                                            }
-                                            
-                                            // 如果 analysisModule 有数据，使用分享数据覆盖
-                                            if (window.shareModeStats && window.analysisModule.updateGlobalStats) {
-                                                window.analysisModule.updateGlobalStats(window.shareModeStats);
-                                            }
-                                            
-                                            window.analysisModule.renderFullDashboard();
-                                            
-                                            // 更新排名显示
-                                            setTimeout(async () => {
-                                                if (shareData.rankings && window.updateRankingBadges) {
-                                                    const currentLang = localStorage.getItem('appLanguage') || 'zh-CN';
-                                                    await window.updateRankingBadges(shareData.rankings, currentLang);
-                                                }
-                                            }, 100);
-                                        }, 500);
-                                    }
-                                }, 100);
-                            } else {
-                                // 如果 analysisModule 还没加载，等待一下再试
-                                setTimeout(checkAndRender, 100);
-                            }
+                        // 分享模式：只显示预览页面，不进入完整报告
+                        // 将分享数据设置到 analysisData 状态，供预览页面使用
+                        console.log('[分享] 准备设置预览页面数据:', {
+                            hasStats: !!stats,
+                            hasVibeResult: !!vibeResult,
+                            hasRankings: !!rankings
+                        });
+                        
+                        // 构建预览页面需要的数据结构
+                        const previewData = {
+                            stats: stats || null,
+                            vibeResult: vibeResult || null,
+                            chatData: [], // 预览页面不需要聊天数据
+                            rankings: rankings || null
                         };
                         
-                        // 开始检查
-                        checkAndRender();
+                        // 设置到 analysisData 状态
+                        setAnalysisData(previewData);
+                        
+                        // 设置到全局变量（供其他功能使用）
+                        if (stats) {
+                            window.shareModeStats = stats;
+                        }
+                        if (vibeResult) {
+                            window.shareModeVibeResult = vibeResult;
+                        }
+                        if (rankings) {
+                            window.userRankings = rankings;
+                        }
+                        
+                        // 直接进入预览页面
+                        setStep('preview');
+                        
+                        console.log('[分享] ✅ 已设置预览页面数据，进入预览模式');
                     } catch (error) {
                         console.error('[分享] 解析分享数据失败:', error);
-                        alert('分享链接格式错误，无法加载数据');
+                        console.error('[分享] 错误详情:', {
+                            message: error.message,
+                            stack: error.stack,
+                            hash: hash.substring(0, 100) + '...'
+                        });
+                        
+                        // 友好的错误提示
+                        const errorMsg = error.message.includes('JSON') 
+                            ? '分享链接格式错误：数据解析失败。请确认链接完整且未被修改。'
+                            : error.message.includes('atob') || error.message.includes('decode')
+                            ? '分享链接格式错误：数据解码失败。请确认链接完整。'
+                            : '分享链接格式错误，无法加载数据。错误：' + error.message;
+                        
+                        alert(errorMsg);
+                        
+                        // 提供测试链接选项
+                        if (confirm('是否要生成一个测试链接来验证分享功能？')) {
+                            testShareLink();
+                        }
                     }
                 }
             }, []); // 只在组件挂载时执行一次
@@ -3140,59 +3273,259 @@
                 }, 100);
             };
 
-            // 生成分享链接
-            const generateShareUrl = () => {
+            // 生成分享链接（优化版：使用压缩，只保存关键数据）
+            const generateShareUrl = (testMode = false) => {
                 try {
                     // 获取排名数据（从 window.userRankings）
                     const rankings = window.userRankings || {};
+                    const stats = window.analysisModule?.getGlobalStats() || null;
+                    const vibeResult = window.analysisModule?.getVibeResult() || null;
                     
-                    // 提取4项排名数据
+                    // 验证必要数据是否存在
+                    if (!stats && !vibeResult && !rankings) {
+                        console.warn('[分享] 没有可分享的数据');
+                        return null;
+                    }
+                    
+                    // 提取关键数据（精简版，只保存必要信息）
                     const shareData = {
-                        wordRank: rankings.avgUserMessageLength?.rank || null,      // 平均长度排名
-                        pleaseRank: rankings.qingCount?.rank || null,                // 赛博磕头排名
-                        noRank: rankings.buCount?.rank || null,                     // 甲方爸爸上身排名
-                        dayRank: rankings.usageDays?.rank || null,                  // 上岗天数排名
-                        // 额外保存总数，用于计算百分比
-                        totals: {
-                            word: rankings.avgUserMessageLength?.total || 0,
-                            please: rankings.qingCount?.total || 0,
-                            no: rankings.buCount?.total || 0,
-                            day: rankings.usageDays?.total || 0
+                        ver: '1.0', // 版本号，用于兼容性检查
+                        t: Date.now(), // 时间戳
+                        // 排名数据（精简）
+                        r: {
+                            wordRank: rankings.avgUserMessageLength?.rank || null,
+                            pleaseRank: rankings.qingCount?.rank || null,
+                            noRank: rankings.buCount?.rank || null,
+                            dayRank: rankings.usageDays?.rank || null,
+                            totals: {
+                                word: rankings.avgUserMessageLength?.total || 0,
+                                please: rankings.qingCount?.total || 0,
+                                no: rankings.buCount?.total || 0,
+                                day: rankings.usageDays?.total || 0
+                            }
                         },
-                        // 保存分析数据（用于完整展示）
-                        analysisData: {
-                            stats: window.analysisModule?.getGlobalStats() || null,
-                            vibeResult: window.analysisModule?.getVibeResult() || null
-                        },
-                        rankings: rankings // 保存完整排名数据
+                        // 统计数据（只保存关键字段）
+                        s: stats ? {
+                            totalConversations: stats.totalConversations || 0,
+                            userMessages: stats.userMessages || 0,
+                            aiMessages: stats.aiMessages || 0,
+                            qingCount: stats.qingCount || 0,
+                            buCount: stats.buCount || 0,
+                            totalCodeChars: stats.totalCodeChars || 0,
+                            totalUserChars: stats.userBehaviorStats?.totalUserChars || 0,
+                            avgUserMessageLength: stats.userBehaviorStats?.avgUserMessageLength || 0,
+                            questionMessageCount: stats.userBehaviorStats?.questionMessageCount || 0,
+                            earliestFileTime: stats.earliestFileTime || null
+                        } : null,
+                        // Vibe 结果（只保存关键字段）
+                        v: vibeResult ? {
+                            personalityType: vibeResult.personalityType || null,
+                            personalityName: vibeResult.personalityName || null,
+                            vibeIndex: vibeResult.vibeIndex || null,
+                            lpdef: vibeResult.lpdef || null,
+                            dimensions: vibeResult.dimensions || null,
+                            roastText: vibeResult.roastText || null,
+                            analysis: vibeResult.analysis ? {
+                                name: vibeResult.analysis.name,
+                                description: vibeResult.analysis.description,
+                                traits: vibeResult.analysis.traits || []
+                            } : null
+                        } : null
                     };
                     
-                    // 转换为 Base64
+                    // 转换为 JSON 字符串
                     const jsonString = JSON.stringify(shareData);
-                    const base64String = btoa(encodeURIComponent(jsonString));
+                    console.log('[分享] 原始数据大小:', jsonString.length, '字符');
+                    
+                    // 使用 LZ-string 压缩（如果可用）
+                    let compressedString;
+                    if (typeof LZString !== 'undefined') {
+                        compressedString = LZString.compressToEncodedURIComponent(jsonString);
+                        console.log('[分享] 压缩后大小:', compressedString.length, '字符', 
+                            '压缩率:', ((1 - compressedString.length / jsonString.length) * 100).toFixed(1) + '%');
+                    } else {
+                        // 降级方案：使用 Base64
+                        compressedString = btoa(encodeURIComponent(jsonString));
+                        console.log('[分享] 使用 Base64 编码（未压缩）');
+                    }
                     
                     // 生成完整链接
-                    const shareUrl = window.location.origin + window.location.pathname + '#share=' + base64String;
+                    const basePath = window.location.pathname.replace(/\/[^/]*$/, '') || '';
+                    const shareUrl = window.location.origin + basePath + '#share=' + compressedString;
+                    
+                    console.log('[分享] 生成的链接长度:', shareUrl.length, '字符');
+                    if (shareUrl.length > 2000) {
+                        console.warn('[分享] 链接过长，可能在某些浏览器中无法正常工作');
+                    }
                     
                     return shareUrl;
                 } catch (error) {
                     console.error('[分享] 生成分享链接失败:', error);
+                    console.error('[分享] 错误堆栈:', error.stack);
                     return null;
                 }
             };
 
+            // 测试分享链接功能（使用真实数据）
+            const testShareLink = () => {
+                try {
+                    // 检查是否有真实数据
+                    const currentStats = analysisData?.stats || window.analysisModule?.getGlobalStats() || null;
+                    const currentVibeResult = analysisData?.vibeResult || window.analysisModule?.getVibeResult() || null;
+                    const currentRankings = window.userRankings || null;
+                    
+                    if (!currentStats && !currentVibeResult) {
+                        alert('没有可用的数据！\n\n请先上传文件并完成分析，然后再测试分享功能。');
+                        return;
+                    }
+                    
+                    console.log('[测试] 使用真实数据生成测试链接:', {
+                        hasStats: !!currentStats,
+                        hasVibeResult: !!currentVibeResult,
+                        hasRankings: !!currentRankings
+                    });
+                    
+                    // 使用真实数据构建分享数据
+                    const shareData = {
+                        ver: '1.0',
+                        t: Date.now(),
+                        // 排名数据（精简）
+                        r: currentRankings ? {
+                            wordRank: currentRankings.avgUserMessageLength?.rank || null,
+                            pleaseRank: currentRankings.qingCount?.rank || null,
+                            noRank: currentRankings.buCount?.rank || null,
+                            dayRank: currentRankings.usageDays?.rank || null,
+                            totals: {
+                                word: currentRankings.avgUserMessageLength?.total || 0,
+                                please: currentRankings.qingCount?.total || 0,
+                                no: currentRankings.buCount?.total || 0,
+                                day: currentRankings.usageDays?.total || 0
+                            }
+                        } : null,
+                        // 同时保存完整格式的 rankings（用于兼容性和完整性）
+                        rankings: currentRankings || null,
+                        // 统计数据（只保存关键字段）
+                        s: currentStats ? {
+                            totalConversations: currentStats.totalConversations || 0,
+                            userMessages: currentStats.userMessages || 0,
+                            aiMessages: currentStats.aiMessages || 0,
+                            qingCount: currentStats.qingCount || 0,
+                            buCount: currentStats.buCount || 0,
+                            totalCodeChars: currentStats.totalCodeChars || 0,
+                            totalUserChars: currentStats.userBehaviorStats?.totalUserChars || 0,
+                            avgUserMessageLength: currentStats.userBehaviorStats?.avgUserMessageLength || 0,
+                            questionMessageCount: currentStats.userBehaviorStats?.questionMessageCount || 0,
+                            earliestFileTime: currentStats.earliestFileTime || null
+                        } : null,
+                        // Vibe 结果（包含所有必要字段：吐槽、人格特色、称号等）
+                        v: currentVibeResult ? {
+                            personalityType: currentVibeResult.personalityType || null,
+                            personalityName: currentVibeResult.personalityName || null,
+                            vibeIndex: currentVibeResult.vibeIndex || null,
+                            lpdef: currentVibeResult.lpdef || null,
+                            dimensions: currentVibeResult.dimensions || null,
+                            roastText: currentVibeResult.roastText || null, // 吐槽文本
+                            analysis: currentVibeResult.analysis ? {
+                                name: currentVibeResult.analysis.name,
+                                description: currentVibeResult.analysis.description,
+                                traits: currentVibeResult.analysis.traits || [] // 人格特色
+                            } : null
+                        } : null
+                    };
+                    
+                    // 验证必要数据是否存在
+                    if (!shareData.s && !shareData.v) {
+                        alert('数据不完整！\n\n缺少必要的统计数据或人格分析结果。\n\n请确保已完成文件分析和人格鉴定。');
+                        return;
+                    }
+                    
+                    console.log('[测试] 构建的分享数据:', shareData);
+                    
+                    // 转换为 JSON 并压缩
+                    const jsonString = JSON.stringify(shareData);
+                    console.log('[测试] 原始数据大小:', jsonString.length, '字符');
+                    
+                    let compressedString;
+                    if (typeof LZString !== 'undefined') {
+                        compressedString = LZString.compressToEncodedURIComponent(jsonString);
+                        console.log('[测试] 压缩后大小:', compressedString.length, '字符', 
+                            '压缩率:', ((1 - compressedString.length / jsonString.length) * 100).toFixed(1) + '%');
+                    } else {
+                        compressedString = btoa(encodeURIComponent(jsonString));
+                        console.log('[测试] 使用 Base64 编码（未压缩）');
+                    }
+                    
+                    // 生成测试链接
+                    const basePath = window.location.pathname.replace(/\/[^/]*$/, '') || '';
+                    const testUrl = window.location.origin + basePath + '#share=' + compressedString;
+                    
+                    console.log('[测试] 生成的测试链接:', testUrl);
+                    console.log('[测试] 链接长度:', testUrl.length, '字符');
+                    console.log('[测试] 包含的数据:', {
+                        有统计数据: !!shareData.s,
+                        有人格结果: !!shareData.v,
+                        有排名数据: !!shareData.rankings,
+                        有吐槽文本: !!shareData.v?.roastText,
+                        有人格特色: !!shareData.v?.analysis?.traits,
+                        有人格称号: !!shareData.v?.personalityName
+                    });
+                    
+                    if (testUrl.length > 2000) {
+                        console.warn('[测试] 链接较长，可能在某些浏览器中无法正常工作');
+                    }
+                    
+                    // 在新窗口打开测试链接
+                    if (confirm('✅ 测试链接已生成（使用真实数据）！\n\n包含内容：\n' +
+                        (shareData.v?.personalityName ? '• 人格称号：' + shareData.v.personalityName + '\n' : '') +
+                        (shareData.v?.roastText ? '• 吐槽文本：' + (shareData.v.roastText.length > 30 ? shareData.v.roastText.substring(0, 30) + '...' : shareData.v.roastText) + '\n' : '') +
+                        (shareData.s?.qingCount ? '• 磕头次数：' + shareData.s.qingCount + '\n' : '') +
+                        (shareData.s?.earliestFileTime ? '• 使用天数：' + calculateUsageDays(shareData.s) + '\n' : '') +
+                        (shareData.rankings ? '• 排名数据：已包含\n' : '') +
+                        '\n链接长度: ' + testUrl.length + ' 字符\n\n是否在新窗口打开测试？')) {
+                        window.open(testUrl, '_blank');
+                    } else {
+                        // 复制到剪贴板
+                        navigator.clipboard.writeText(testUrl).then(() => {
+                            alert('✅ 测试链接已复制到剪贴板！\n\n链接长度: ' + testUrl.length + ' 字符\n\n您可以粘贴到新标签页测试。');
+                        }).catch(() => {
+                            prompt('请手动复制以下测试链接:', testUrl);
+                        });
+                    }
+                } catch (error) {
+                    console.error('[测试] 生成测试链接失败:', error);
+                    alert('生成测试链接失败: ' + error.message);
+                }
+            };
+            
             // 分享报告
             const shareReport = async () => {
                 const shareUrl = generateShareUrl();
                 if (!shareUrl) {
-                    alert('生成分享链接失败，请稍后重试');
+                    alert('生成分享链接失败，请稍后重试\n\n可能的原因：\n1. 没有可分享的数据\n2. 数据格式错误\n\n是否生成测试链接？');
+                    if (confirm('是否生成测试链接？')) {
+                        testShareLink();
+                    }
                     return;
+                }
+                
+                // 检查链接长度
+                if (shareUrl.length > 2000) {
+                    const proceed = confirm(
+                        '警告：分享链接较长 (' + shareUrl.length + ' 字符)，可能在某些浏览器中无法正常工作。\n\n' +
+                        '建议：\n' +
+                        '1. 使用测试链接验证功能\n' +
+                        '2. 或考虑使用短链接服务\n\n' +
+                        '是否继续生成分享链接？'
+                    );
+                    if (!proceed) {
+                        return;
+                    }
                 }
                 
                 try {
                     // 复制到剪贴板
                     await navigator.clipboard.writeText(shareUrl);
-                    alert('分享链接已生成，PC端点开可交互，手机点开直接看结果');
+                    alert('✅ 分享链接已生成并复制到剪贴板！\n\n链接长度: ' + shareUrl.length + ' 字符\n\nPC端点开可交互，手机点开直接看结果');
                 } catch (err) {
                     // 降级方案：使用传统方法
                     const textArea = document.createElement('textarea');
@@ -3203,10 +3536,13 @@
                     textArea.select();
                     try {
                         document.execCommand('copy');
-                        alert('分享链接已生成，PC端点开可交互，手机点开直接看结果');
+                        alert('✅ 分享链接已生成并复制到剪贴板！\n\n链接长度: ' + shareUrl.length + ' 字符\n\nPC端点开可交互，手机点开直接看结果');
                     } catch (e) {
                         // 如果复制失败，显示链接让用户手动复制
-                        prompt('请手动复制以下链接:', shareUrl);
+                        const copied = prompt('请手动复制以下链接（Ctrl+C）:', shareUrl);
+                        if (copied) {
+                            alert('链接已复制！');
+                        }
                     }
                     document.body.removeChild(textArea);
                 }
@@ -3625,6 +3961,25 @@
                     {/* 预览结果阶段 */}
                     {step === 'preview' && analysisData && (
                         <div className="max-w-4xl w-full space-y-6">
+                            {/* 分享模式提示 */}
+                            {isShareMode && (
+                                <div className="w-full bg-blue-500/20 border border-blue-500/50 rounded-sm p-4 mb-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+                                    <div className="flex items-center gap-3">
+                                        <Icon name="info" size={20} className="text-blue-400" />
+                                        <span className="text-white font-mono text-sm sm:text-base">
+                                            正在查看分享的报告
+                                        </span>
+                                    </div>
+                                    <button 
+                                        onClick={resetToUpload}
+                                        className="flex items-center justify-center gap-2 bg-green-500 text-black px-6 py-2 rounded-sm font-bold hover:bg-transparent hover:text-green-500 transition-colors border border-green-500 uppercase tracking-wider font-mono text-sm"
+                                    >
+                                        <Icon name="refresh-cw" size={16} />
+                                        我也要测
+                                    </button>
+                                </div>
+                            )}
+                            
                             <div className="bg-zinc-900 border border-zinc-800 rounded-sm p-6 md:p-8 relative overflow-hidden shadow-2xl">
                                 
                                 <div className="flex flex-col md:flex-row justify-between items-start gap-6">
@@ -3673,29 +4028,40 @@
                                 </div>
                             </div>
 
-                            <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
-                                <button 
-                                    onClick={showFullReport}
-                                    className="flex items-center justify-center gap-2 bg-green-500 text-black px-8 py-4 rounded-sm font-bold hover:bg-transparent hover:text-green-500 transition-colors border border-green-500 uppercase tracking-wider font-mono"
-                                >
-                                    <Icon name="share-2" size={20} />
-                                    {t('preview.shareBtn')}
-                                </button>
-                                <button 
-                                    onClick={shareReport}
-                                    className="flex items-center justify-center gap-2 bg-blue-500 text-white px-8 py-4 rounded-sm font-bold hover:bg-transparent hover:text-blue-500 transition-colors border border-blue-500 uppercase tracking-wider font-mono"
-                                >
-                                    <Icon name="link" size={20} />
-                                    分享报告
-                                </button>
-                                <button 
-                                    onClick={exportReport}
-                                    className="flex items-center justify-center gap-2 bg-transparent text-white px-8 py-4 rounded-sm font-bold border border-zinc-800 hover:bg-zinc-800 transition-colors uppercase tracking-wider font-mono"
-                                >
-                                    <Icon name="download" size={20} />
-                                    {t('export.title')}
-                                </button>
-                            </div>
+                            {/* 分享模式下隐藏操作按钮 */}
+                            {!isShareMode && (
+                                <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
+                                    <button 
+                                        onClick={showFullReport}
+                                        className="flex items-center justify-center gap-2 bg-green-500 text-black px-8 py-4 rounded-sm font-bold hover:bg-transparent hover:text-green-500 transition-colors border border-green-500 uppercase tracking-wider font-mono"
+                                    >
+                                        <Icon name="share-2" size={20} />
+                                        {t('preview.shareBtn')}
+                                    </button>
+                                    <button 
+                                        onClick={shareReport}
+                                        className="flex items-center justify-center gap-2 bg-blue-500 text-white px-8 py-4 rounded-sm font-bold hover:bg-transparent hover:text-blue-500 transition-colors border border-blue-500 uppercase tracking-wider font-mono"
+                                    >
+                                        <Icon name="link" size={20} />
+                                        分享报告
+                                    </button>
+                                    <button 
+                                        onClick={testShareLink}
+                                        className="flex items-center justify-center gap-2 bg-purple-500 text-white px-8 py-4 rounded-sm font-bold hover:bg-transparent hover:text-purple-500 transition-colors border border-purple-500 uppercase tracking-wider font-mono"
+                                        title="生成测试链接验证分享功能"
+                                    >
+                                        <Icon name="test-tube" size={20} />
+                                        测试分享
+                                    </button>
+                                    <button 
+                                        onClick={exportReport}
+                                        className="flex items-center justify-center gap-2 bg-transparent text-white px-8 py-4 rounded-sm font-bold border border-zinc-800 hover:bg-zinc-800 transition-colors uppercase tracking-wider font-mono"
+                                    >
+                                        <Icon name="download" size={20} />
+                                        {t('export.title')}
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     )}
 
