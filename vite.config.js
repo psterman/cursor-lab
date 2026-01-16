@@ -1,4 +1,29 @@
 import { defineConfig } from 'vite';
+import { copyFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
+
+// 自定义插件：复制 i18n.js 到 dist 目录
+const copyI18nPlugin = () => {
+  return {
+    name: 'copy-i18n',
+    closeBundle() {
+      // 构建完成后复制 i18n.js
+      const srcPath = join(process.cwd(), 'src', 'i18n.js');
+      const distSrcDir = join(process.cwd(), 'dist', 'src');
+      const distPath = join(distSrcDir, 'i18n.js');
+      
+      try {
+        // 确保 dist/src 目录存在
+        mkdirSync(distSrcDir, { recursive: true });
+        // 复制文件
+        copyFileSync(srcPath, distPath);
+        console.log('[Vite] ✅ 已复制 src/i18n.js 到 dist/src/i18n.js');
+      } catch (error) {
+        console.error('[Vite] ❌ 复制 i18n.js 失败:', error);
+      }
+    }
+  };
+};
 
 export default defineConfig({
   // 部署配置（GitHub Pages）
@@ -10,6 +35,9 @@ export default defineConfig({
     port: 3000,
     open: true,
   },
+
+  // 插件配置
+  plugins: [copyI18nPlugin()],
 
   // 构建配置
   build: {
