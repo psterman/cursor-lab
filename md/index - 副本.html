@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title id="pageTitle">Cursor 行为体检 - Vibe Coding</title>
+    <title>Cursor 行为体检 - Vibe Coding</title>
     <!-- API 端点配置（Cloudflare Workers） -->
     <meta name="api-endpoint" content="https://cursor-clinical-analysis.psterman.workers.dev/">
     <!-- 引入必要的库 -->
@@ -1132,13 +1132,6 @@
                 flex-direction: column;
                 align-items: stretch;
             }
-            /* 分享模式下，移动端使用单列布局 */
-            .full-report-container .stats-grid {
-                grid-template-columns: 1fr !important;
-            }
-            .full-report-container .ranking-section .stats-grid {
-                grid-template-columns: 1fr !important;
-            }
         }
 
         @media (max-width: 480px) {
@@ -1347,7 +1340,6 @@
                     renderFullDashboard,
                     getGlobalStats,
                     getVibeResult,
-                    reanalyzeWithLanguage,
                     updateNumberWithAnimation,
                     formatNumber,
                     fetchTotalTestUsers,
@@ -1362,54 +1354,12 @@
                     renderFullDashboard,
                     getGlobalStats,
                     getVibeResult,
-                    reanalyzeWithLanguage: reanalyzeWithLanguage || (async () => null),
                     updateNumberWithAnimation: updateNumberWithAnimation || (() => {}),
                     formatNumber: formatNumber || ((n) => n.toString()),
                     fetchTotalTestUsers: fetchTotalTestUsers || (async () => 0),
                     reportNewUser: reportNewUser || (async () => {}),
                     updateGlobalStats: updateGlobalStats || (() => {})
                 };
-                
-                // 导入 i18n 模块并暴露给全局
-                try {
-                    let i18nModule;
-                    if (isDev) {
-                        i18nModule = await import('./src/i18n.js');
-                    } else {
-                        // 生产环境：尝试多个路径
-                        const i18nPaths = [];
-                        if (isGitHubPages && basePath) {
-                            i18nPaths.push(`${basePath}/src/i18n.js`);
-                        }
-                        i18nPaths.push('./src/i18n.js');
-                        if (currentDir) {
-                            i18nPaths.push(`${currentDir}/src/i18n.js`);
-                        }
-                        
-                        let i18nLoaded = false;
-                        for (const path of i18nPaths) {
-                            try {
-                                i18nModule = await import(/* @vite-ignore */ path);
-                                i18nLoaded = true;
-                                break;
-                            } catch (err) {
-                                console.warn(`[i18n] 路径 ${path} 加载失败:`, err.message);
-                            }
-                        }
-                        if (!i18nLoaded) {
-                            throw new Error('i18n 模块加载失败');
-                        }
-                    }
-                    window.i18n = i18nModule;
-                    console.log('[i18n] i18n 模块已加载');
-                } catch (err) {
-                    console.error('[i18n] ❌ i18n 模块加载失败:', err);
-                    // 提供一个简单的 fallback
-                    window.i18n = {
-                        getText: (key, lang) => key,
-                        getI18nText: (lang) => ({})
-                    };
-                }
                 
                 // 验证全局对象
                 console.log('[Main] 全局模块对象已创建:', {
@@ -1447,284 +1397,19 @@
         };
 
         // 统计卡片子组件
-        function StatBox({ label, value, sub, color, lang = 'zh-CN' }) {
-            const isEn = lang === 'en';
-            // 如果 sub 是 '#'，需要放在数字前面
-            const displayValue = (sub === '#' && isEn) ? `${sub}${value}` : value;
-            const displaySub = (sub === '#' && isEn) ? '' : sub;
+        function StatBox({ label, value, sub, color }) {
             return (
-                <div className="bg-zinc-950/50 border border-zinc-800 rounded-sm w-full flex flex-col" style={{padding: '20px'}}>
-                    <div className={`text-zinc-600 uppercase tracking-widest font-bold ${isEn ? 'text-[10px] leading-tight' : 'text-[11px]'}`} style={{minHeight: isEn ? '28px' : '24px', marginBottom: '12px', display: 'flex', alignItems: 'flex-start'}}>{label}</div>
-                    <div className={`text-3xl font-black ${color} font-mono flex items-baseline`}>
-                        {displayValue}
-                        {displaySub && <span className="text-sm ml-1 opacity-50 font-normal text-zinc-400">{displaySub}</span>}
+                <div className="bg-zinc-950/50 border border-zinc-800 p-4 rounded-sm min-w-[120px] md:min-w-[140px]">
+                    <div className="text-zinc-600 text-[10px] uppercase tracking-widest mb-1 font-bold">{label}</div>
+                    <div className={`text-2xl font-black ${color} font-mono`}>
+                        {value}
+                        <span className="text-xs ml-1 opacity-50 font-normal text-zinc-400">{sub}</span>
                     </div>
                 </div>
             );
         }
 
         function App() {
-            // 语言状态管理
-            const [lang, setLang] = useState(() => {
-                // 从 localStorage 读取保存的语言设置，默认为中文
-                const savedLang = localStorage.getItem('appLanguage');
-                return savedLang === 'en' ? 'en' : 'zh-CN';
-            });
-            
-            // i18n 辅助函数
-            const t = (key) => {
-                if (window.i18n && window.i18n.getText) {
-                    return window.i18n.getText(key, lang);
-                }
-                return key;
-            };
-            
-            // 重新创建 Dashboard DOM（使用当前语言）
-            const recreateDashboardDOM = (currentLang) => {
-                const container = document.getElementById('fullReportContainer');
-                if (!container || !window.analysisModule) return;
-                
-                // 获取当前语言下的翻译函数
-                const getText = (key) => {
-                    if (window.i18n && window.i18n.getText) {
-                        return window.i18n.getText(key, currentLang);
-                    }
-                    return key;
-                };
-                
-                const loadingText = getText('dashboard.loading');
-                
-                // 重新创建 Dashboard DOM 结构
-                container.innerHTML = `
-                    <div class="full-report-container" style="max-width: 1100px; margin: 0 auto; padding: 20px; padding-bottom: 80px;">
-                        <header style="text-align: center; padding: 60px 20px;">
-                            <div class="logo-box" style="display: inline-block; padding: 8px 16px; background: transparent; border: 1px solid var(--card-border); border-radius: 2px; margin-bottom: 20px; font-size: 14px; color: var(--accent-terminal); text-transform: uppercase; letter-spacing: 0.15em;">> ${getText('dashboard.clinicalAnalysis')}</div>
-                            <h1 style="font-size: clamp(2rem, 5vw, 3.5rem); font-weight: 700; letter-spacing: 0.1em; color: var(--text-main); margin-bottom: 15px; text-transform: uppercase; font-family: 'JetBrains Mono', monospace;"><a href="https://github.com/psterman/cursor-lab" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: none; display: inline-block; transition: all 0.3s ease; position: relative; filter: blur(2px);" onmouseenter="this.style.filter='blur(0px)'; this.style.textShadow='0 0 20px var(--accent-terminal), 0 0 40px var(--accent-terminal)';" onmouseleave="this.style.filter='blur(2px)'; this.style.textShadow='none';">> ${getText('dashboard.reportTitle')}</a></h1>
-                            <p class="subtitle" style="color: var(--text-dim); font-size: 1.1rem;">${getText('dashboard.reportSubtitle')}</p>
-                        </header>
-                        
-                        <div id="dashboardSection">
-                            <!-- 实时统计区域 -->
-                            <div class="realtime-stats-section" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 2px; padding: 24px; margin-bottom: 40px;">
-                                <h3 class="chart-title" style="margin-bottom: 20px; text-align: center;">${getText('dashboard.realtimeStats')}</h3>
-                                <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
-                                    <div class="stat-card" style="text-align: center;">
-                                        <p class="stat-label">${getText('dashboard.totalUsers')}</p>
-                                        <p class="stat-value" id="totalTestUsers" style="color: #ffffff;">${loadingText}</p>
-                                        <p class="stat-comparison">${getText('dashboard.personUnit')}</p>
-                                    </div>
-                                    <div class="stat-card" style="text-align: center;">
-                                        <p class="stat-label">${getText('dashboard.techRank')}</p>
-                                        <p class="stat-value" id="techRank" style="color: #ffffff;">${loadingText}</p>
-                                        <p class="stat-comparison">${getText('dashboard.rankUnit')}</p>
-                                    </div>
-                                    <div class="stat-card" style="text-align: center;">
-                                        <p class="stat-label">${getText('dashboard.personalityUnlock')}</p>
-                                        <p class="stat-value" id="personalityUnlock" style="color: #ffffff;">${loadingText}</p>
-                                        <p class="stat-comparison">243 ${getText('dashboard.personalityUnit')}</p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- 横向排名区域 -->
-                            <div class="ranking-section" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 2px; padding: 24px; margin-bottom: 40px;">
-                                <h3 class="chart-title" style="margin-bottom: 20px; text-align: center;">${getText('dashboard.globalRankings')}</h3>
-                                <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;" id="rankingCards">
-                                    <div class="stat-card" style="text-align: center;">
-                                        <p class="stat-label" style="color: var(--text-dim);">${getText('dashboard.cyberBowRanking')}</p>
-                                        <p class="stat-value" id="rankingQingCount" style="color: #ffffff;">--</p>
-                                        <p class="stat-comparison" id="rankingQingCountPercent">--</p>
-                                    </div>
-                                    <div class="stat-card" style="text-align: center;">
-                                        <p class="stat-label" style="color: var(--text-dim);">${getText('dashboard.bossModeRanking')}</p>
-                                        <p class="stat-value" id="rankingBuCount" style="color: #ffffff;">--</p>
-                                        <p class="stat-comparison" id="rankingBuCountPercent">--</p>
-                                    </div>
-                                    <div class="stat-card" style="text-align: center;">
-                                        <p class="stat-label" style="color: var(--text-dim);">${getText('dashboard.aiTeasingRanking')}</p>
-                                        <p class="stat-value" id="rankingUserMessages" style="color: #ffffff;">--</p>
-                                        <p class="stat-comparison" id="rankingUserMessagesPercent">--</p>
-                                    </div>
-                                    <div class="stat-card" style="text-align: center;">
-                                        <p class="stat-label" style="color: var(--text-dim);">${getText('dashboard.banterOutputRanking')}</p>
-                                        <p class="stat-value" id="rankingTotalChars" style="color: #ffffff;">--</p>
-                                        <p class="stat-comparison" id="rankingTotalCharsPercent">--</p>
-                                    </div>
-                                    <div class="stat-card" style="text-align: center;">
-                                        <p class="stat-label" style="color: var(--text-dim);">${getText('dashboard.avgLengthRanking')}</p>
-                                        <p class="stat-value" id="rankingAvgLength" style="color: #ffffff;">--</p>
-                                        <p class="stat-comparison" id="rankingAvgLengthPercent">--</p>
-                                    </div>
-                                    <div class="stat-card" style="text-align: center;">
-                                        <p class="stat-label" style="color: var(--text-dim);">${getText('dashboard.daysOnDutyRanking')}</p>
-                                        <p class="stat-value" id="rankingUsageDays" style="color: #ffffff;">--</p>
-                                        <p class="stat-comparison" id="rankingUsageDaysPercent">--</p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- 维度得分排行榜 -->
-                            <div class="dimension-ranking-section" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 2px; padding: 24px; margin-bottom: 40px;">
-                                <h3 class="chart-title" style="margin-bottom: 20px; text-align: center;">${getText('dashboard.dimensionRankingTitle')}</h3>
-                                <div id="dimensionRankingList" class="prompts-list"></div>
-                            </div>
-
-                            <div class="stats-grid" id="exportArea">
-                                <div class="stat-card">
-                                    <p class="stat-label">${getText('dashboard.daysOnDutyCount')}</p>
-                                    <p class="stat-value" id="totalConversations">0</p>
-                                    <p class="stat-comparison">${getText('statsLabels.unit.days')}</p>
-                                    <span class="stat-ranking" id="rankingUsageDaysBadge">--</span>
-                                </div>
-                                <div class="stat-card">
-                                    <p class="stat-label">${getText('dashboard.aiTeasingCount')}</p>
-                                    <p class="stat-value" id="userMessages">0</p>
-                                    <span class="stat-ranking" id="rankingUserMessagesBadge">--</span>
-                                </div>
-                            </div>
-                            
-                            <div class="stats-grid">
-                                <div class="stat-card">
-                                    <p class="stat-label">${getText('dashboard.cyberBowCount')}</p>
-                                    <p class="stat-value" id="qingCount">0</p>
-                                    <p class="stat-comparison">${getText('dashboard.timesUnit')}</p>
-                                    <span class="stat-ranking" id="rankingQingCountBadge">--</span>
-                                </div>
-                                <div class="stat-card">
-                                    <p class="stat-label">${getText('dashboard.bossModeCount')}</p>
-                                    <p class="stat-value" id="buCount">0</p>
-                                    <p class="stat-comparison">${getText('dashboard.timesUnit')}</p>
-                                    <span class="stat-ranking" id="rankingBuCountBadge">--</span>
-                                </div>
-                            </div>
-                            
-                            <div class="stats-grid">
-                                <div class="stat-card">
-                                    <p class="stat-label">${getText('dashboard.banterOutputCount')}</p>
-                                    <p class="stat-value" id="totalUserChars">0</p>
-                                    <p class="stat-comparison">${getText('dashboard.charUnit')}</p>
-                                    <span class="stat-ranking" id="rankingTotalCharsBadge">--</span>
-                                </div>
-                                <div class="stat-card">
-                                    <p class="stat-label">${getText('dashboard.avgLengthCount')}</p>
-                                    <p class="stat-value" id="avgUserMessageLength">0</p>
-                                    <p class="stat-comparison">${getText('dashboard.charUnit')}</p>
-                                    <span class="stat-ranking" id="rankingAvgLengthBadge">--</span>
-                                </div>
-                                <div class="stat-card hidden" id="questionCard">
-                                    <p class="stat-label">${getText('dashboard.questionCount')}</p>
-                                    <p class="stat-value" id="questionMessageCount">0</p>
-                                    <p class="stat-comparison">${getText('statsLabels.unit.count')}</p>
-                                </div>
-                            </div>
-                            
-                            <div class="wordcloud-section">
-                                <div class="chart-card">
-                                    <h3 class="chart-title">${getText('dashboard.aiMerits')}</h3>
-                                    <div class="wordcloud-container">
-                                        <canvas id="chineseWordCloud"></canvas>
-                                    </div>
-                                </div>
-                                <div class="chart-card">
-                                    <h3 class="chart-title">${getText('dashboard.siliconValleySlang')}</h3>
-                                    <div class="wordcloud-container">
-                                        <canvas id="englishWordCloud"></canvas>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div class="chart-card" style="margin-top: 40px;">
-                                <h3 class="chart-title"><span style="color: var(--accent-terminal);">🗣️</span> ${getText('dashboard.vibeCodingSlang')}</h3>
-                                <div class="prompts-list" id="topChineseWordsList"></div>
-                            </div>
-                            
-                            <div class="chart-card" id="techStackSection" style="display: none; margin-top: 40px;">
-                                <h3 class="chart-title">${getText('dashboard.userTechStack')}</h3>
-                                <div class="prompts-list" id="techStackList"></div>
-                            </div>
-                            
-                            <div class="vibe-codinger-section chart-card" id="vibeCodingerSection" style="margin-top: 40px;"></div>
-                            
-                            <div class="chat-list-section" style="margin-top: 40px;">
-                                <div class="chat-list-header">
-                                    <h3 class="chat-list-title">${getText('chatList.title')}</h3>
-                                    <div class="chat-list-controls">
-                                        <input type="text" id="searchInput" class="search-input" placeholder="${getText('chatList.searchPlaceholder')}">
-                                    </div>
-                                </div>
-                                <div class="chat-list" id="chatList"></div>
-                                <div class="pagination-container" id="paginationContainer" style="display: none;">
-                                    <div class="pagination-info">
-                                        <span id="paginationInfo">${getText('chatList.pagePrefix')} 1 ${getText('chatList.pageSuffix')}，${getText('chatList.totalPrefix')} 1 ${getText('chatList.totalSuffix')}</span>
-                                    </div>
-                                    <div class="pagination-controls">
-                                        <button id="paginationPrev" class="pagination-btn" disabled>${getText('chatList.prev')}</button>
-                                        <div class="pagination-pages" id="paginationPages"></div>
-                                        <button id="paginationNext" class="pagination-btn">${getText('chatList.next')}</button>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div style="text-align: center; margin-top: 50px;">
-                                <button class="btn" id="exportBtn" style="background: rgba(255,255,255,0.1); border: 1px solid var(--card-border);">
-                                    <span>${getText('dashboard.exportBtn')}</span>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            };
-            
-            // 语言切换函数
-            const switchLanguage = async (newLang) => {
-                setLang(newLang);
-                localStorage.setItem('appLanguage', newLang);
-                // 更新 HTML lang 属性
-                document.documentElement.lang = newLang;
-                
-                // 如果已经分析完成，重新分析以更新语言
-                if (analysisData && window.analysisModule && window.analysisModule.reanalyzeWithLanguage) {
-                    try {
-                        const newVibeResult = await window.analysisModule.reanalyzeWithLanguage(newLang);
-                        if (newVibeResult) {
-                            // 更新分析数据
-                            setAnalysisData(prev => ({
-                                ...prev,
-                                vibeResult: newVibeResult
-                            }));
-                        }
-                    } catch (error) {
-                        console.error('重新分析失败:', error);
-                    }
-                }
-                
-                // 如果是在完整报告页面，重新创建 DOM 并渲染
-                if (step === 'fullReport' && window.analysisModule && window.analysisModule.renderFullDashboard) {
-                    setTimeout(() => {
-                        // 重新创建 Dashboard DOM（使用新语言）
-                        recreateDashboardDOM(newLang);
-                        
-                        // 重新渲染 Dashboard
-                        setTimeout(() => {
-                            window.analysisModule.renderFullDashboard();
-                            // 重新更新排名卡片（使用新语言）
-                            if (window.userRankings && window.updateRankingBadges) {
-                                setTimeout(async () => {
-                                    // 清除缓存，强制重新加载
-                                    if (window.rankingDataCache) {
-                                        Object.keys(window.rankingDataCache).forEach(key => {
-                                            delete window.rankingDataCache[key];
-                                        });
-                                    }
-                                    // 使用全局的updateRankingBadges函数更新排名卡片
-                                    await window.updateRankingBadges(window.userRankings, newLang);
-                                }, 200);
-                            }
-                        }, 100);
-                    }, 100);
-                }
-            };
-            
             const [step, setStep] = useState('upload');
             const [logs, setLogs] = useState([]);
             const [analysisData, setAnalysisData] = useState(null);
@@ -1735,156 +1420,16 @@
             const [totalUsers, setTotalUsers] = useState(0); // 受虐人数
             const [techRank, setTechRank] = useState(0); // 技术排名
             const [unlockedCount, setUnlockedCount] = useState(0); // 人格解锁数
-            const [isShareMode, setIsShareMode] = useState(false); // 是否为分享查看模式
-            const [shareRankings, setShareRankings] = useState(null); // 分享的排名数据
             const folderInputRef = useRef(null);
             const fileInputRef = useRef(null);
             // 用于保存动画所需的旧值和新值
             const animationDataRef = useRef(null);
-            
-            // 初始化时设置 HTML lang 属性
-            useEffect(() => {
-                document.documentElement.lang = lang;
-                // 更新页面标题
-                const titleElement = document.getElementById('pageTitle');
-                if (titleElement) {
-                    titleElement.textContent = lang === 'en' ? 'Cursor Diagnostics' : 'Cursor 行为体检 - Vibe Coding';
-                }
-            }, [lang]);
-
-            // 路由解析逻辑：检查 URL Hash 中的分享数据
-            useEffect(() => {
-                const hash = window.location.hash;
-                if (hash && hash.startsWith('#share=')) {
-                    try {
-                        const base64String = hash.substring(7); // 去掉 '#share='
-                        const decodedString = decodeURIComponent(atob(base64String));
-                        const shareData = JSON.parse(decodedString);
-                        
-                        console.log('[分享] 检测到分享链接，数据:', shareData);
-                        
-                        // 设置分享模式
-                        setIsShareMode(true);
-                        setShareRankings(shareData);
-                        
-                        // 注入排名数据到全局变量
-                        if (shareData.rankings) {
-                            window.userRankings = shareData.rankings;
-                        }
-                        
-                        // 如果有分析数据，存储到全局变量供 analysisModule 使用
-                        if (shareData.analysisData) {
-                            if (shareData.analysisData.stats) {
-                                window.shareModeStats = shareData.analysisData.stats;
-                            }
-                            if (shareData.analysisData.vibeResult) {
-                                window.shareModeVibeResult = shareData.analysisData.vibeResult;
-                            }
-                        }
-                        
-                        // 等待 analysisModule 加载完成后再渲染
-                        const checkAndRender = () => {
-                            if (window.analysisModule && window.analysisModule.renderFullDashboard) {
-                                // 直接进入 Dashboard
-                                setStep('fullReport');
-                                
-                                // 延迟渲染 Dashboard
-                                setTimeout(() => {
-                                    const container = document.getElementById('fullReportContainer');
-                                    if (container) {
-                                        recreateDashboardDOM(lang);
-                                        container.style.display = 'block';
-                                        
-                                        setTimeout(() => {
-                                            const dashboardSection = container.querySelector('#dashboardSection');
-                                            if (dashboardSection) {
-                                                dashboardSection.classList.remove('hidden');
-                                                dashboardSection.style.display = 'block';
-                                            }
-                                            
-                                            // 如果 analysisModule 有数据，使用分享数据覆盖
-                                            if (window.shareModeStats && window.analysisModule.updateGlobalStats) {
-                                                window.analysisModule.updateGlobalStats(window.shareModeStats);
-                                            }
-                                            
-                                            window.analysisModule.renderFullDashboard();
-                                            
-                                            // 更新排名显示
-                                            setTimeout(async () => {
-                                                if (shareData.rankings && window.updateRankingBadges) {
-                                                    const currentLang = localStorage.getItem('appLanguage') || 'zh-CN';
-                                                    await window.updateRankingBadges(shareData.rankings, currentLang);
-                                                }
-                                            }, 100);
-                                        }, 500);
-                                    }
-                                }, 100);
-                            } else {
-                                // 如果 analysisModule 还没加载，等待一下再试
-                                setTimeout(checkAndRender, 100);
-                            }
-                        };
-                        
-                        // 开始检查
-                        checkAndRender();
-                    } catch (error) {
-                        console.error('[分享] 解析分享数据失败:', error);
-                        alert('分享链接格式错误，无法加载数据');
-                    }
-                }
-            }, []); // 只在组件挂载时执行一次
 
             // 格式化数字显示
             const formatNumber = (num) => {
-                if (typeof num !== 'number' || isNaN(num)) return '0';
-                const currentLang = localStorage.getItem('appLanguage') || 'zh-CN';
-                const isEn = currentLang === 'en';
-                
-                // 英文使用标准格式：K, M, B, T
-                if (isEn) {
-                    if (num >= 1000000000000) {
-                        return (num / 1000000000000).toFixed(1) + 'T';
-                    }
-                    if (num >= 1000000000) {
-                        return (num / 1000000000).toFixed(1) + 'B';
-                    }
-                    if (num >= 1000000) {
-                        return (num / 1000000).toFixed(1) + 'M';
-                    }
-                    if (num >= 1000) {
-                        return (num / 1000).toFixed(1) + 'K';
-                    }
-                    return num.toString();
-                }
-                
-                // 中文使用万、亿等单位
-                if (num >= 1000000000000) {
-                    return (num / 1000000000000).toFixed(1) + '万亿';
-                }
-                if (num >= 100000000000) {
-                    return (num / 100000000000).toFixed(1) + '千亿';
-                }
-                if (num >= 10000000000) {
-                    return (num / 10000000000).toFixed(1) + '百亿';
-                }
-                if (num >= 100000000) {
-                    return (num / 100000000).toFixed(1) + '亿';
-                }
-                if (num >= 10000000) {
-                    return (num / 10000000).toFixed(1) + '千万';
-                }
-                if (num >= 1000000) {
-                    return (num / 1000000).toFixed(1) + '百万';
-                }
-                if (num >= 100000) {
-                    return (num / 100000).toFixed(1) + '十万';
-                }
-                if (num >= 10000) {
-                    return (num / 10000).toFixed(1) + '万';
-                }
-                if (num >= 1000) {
-                    return (num / 1000).toFixed(1) + 'K';
-                }
+                if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+                if (num >= 10000) return (num / 10000).toFixed(1) + '万';
+                if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
                 return num.toString();
             };
 
@@ -2026,8 +1571,7 @@
                             // 如果模块加载失败，立即退出
                             if (window.analysisModuleError) {
                                 console.error('模块加载失败:', window.analysisModuleError);
-                                const errorMsg = window.analysisModuleError.message || t('dashboard.unknownError');
-                                setError(`${t('upload.logs.initializingParser')}: ${errorMsg}，${lang === 'en' ? 'please refresh and try again' : '请刷新页面重试'}`);
+                                setError('模块加载失败: ' + (window.analysisModuleError.message || '未知错误') + '，请刷新页面重试');
                                 return;
                             }
                             
@@ -2062,8 +1606,7 @@
                 // 监听模块加载失败事件
                 const handleLoadFailed = (event) => {
                     console.error('收到模块加载失败事件:', event.detail);
-                    const errorMsg = event.detail.error?.message || t('dashboard.unknownError');
-                    setError(`${t('upload.logs.initializingParser')}: ${errorMsg}，${lang === 'en' ? 'please refresh and try again' : '请刷新页面重试'}`);
+                    setError('模块加载失败: ' + (event.detail.error?.message || '未知错误') + '，请刷新页面重试');
                 };
                 window.addEventListener('analysisModuleLoadFailed', handleLoadFailed);
                 
@@ -2112,13 +1655,13 @@
 
                 setError(null);
                 setStep('analyzing');
-                setLogs([`> ${t('upload.logs.startParsing')}`]);
+                setLogs(['> 开始解析数据库文件...']);
 
                 try {
                     // 检查模块是否加载，如果未加载则等待一段时间
                     if (!window.analysisModule) {
                         console.warn('模块未加载，等待加载...');
-                        setLogs(prev => [...prev, `> ${t('upload.logs.waitingModule')}`]);
+                        setLogs(prev => [...prev, '> 等待分析模块加载...']);
                         
                         // 等待模块加载（最多等待 3 秒）
                         let retries = 0;
@@ -2127,8 +1670,7 @@
                         while (!window.analysisModule && retries < maxRetries) {
                             // 如果模块加载失败，立即退出
                             if (window.analysisModuleError) {
-                                const errorMsg = window.analysisModuleError.message || t('dashboard.unknownError');
-                                throw new Error(`${t('upload.logs.initializingParser')}: ${errorMsg}，${lang === 'en' ? 'please refresh and try again' : '请刷新页面重试'}`);
+                                throw new Error('分析模块加载失败: ' + (window.analysisModuleError.message || '未知错误') + '，请刷新页面重试');
                             }
                             
                             // 如果模块还在加载中，继续等待
@@ -2149,11 +1691,11 @@
                         }
                         
                         console.log('✅ 模块已加载，继续处理文件');
-                        setLogs(prev => [...prev, `> ${t('upload.logs.parserReady')}`]);
+                        setLogs(prev => [...prev, '> 分析模块已就绪']);
                     }
 
                     if (!isInitialized) {
-                        setLogs(prev => [...prev, `> ${t('upload.logs.initializingParser')}`]);
+                        setLogs(prev => [...prev, '> 初始化解析器...']);
                         await window.analysisModule.initializeParser();
                         setIsInitialized(true);
                     }
@@ -2167,12 +1709,12 @@
                         },
                         onProgress: (current, total, fileName) => {
                             console.log('onProgress:', { current, total, fileName });
-                            setLogs(prev => [...prev, `> ${t('upload.logs.processingProgress').replace('{current}', current).replace('{total}', total).replace('{fileName}', fileName)}`]);
+                            setLogs(prev => [...prev, `> 处理进度: ${current}/${total} - ${fileName}`]);
                         },
                         onComplete: (data) => {
                             console.log('onComplete:', data);
                             setAnalysisData(data);
-                            setLogs(prev => [...prev, `> ${t('upload.logs.analysisComplete')}`]);
+                            setLogs(prev => [...prev, '> 分析完成！']);
                             setTimeout(() => {
                                 setStep('preview');
                             }, 500);
@@ -2324,8 +1866,185 @@
                     const container = document.getElementById('fullReportContainer');
                     if (container && window.analysisModule) {
                         console.log('创建 Dashboard DOM...');
-                        // 使用 recreateDashboardDOM 函数创建 Dashboard DOM（使用当前语言）
-                        recreateDashboardDOM(lang);
+                        // 创建 Dashboard DOM 结构（从 index.html 复制）
+                        container.innerHTML = `
+                            <div class="full-report-container" style="max-width: 1100px; margin: 0 auto; padding: 20px; padding-bottom: 80px;">
+                                <header style="text-align: center; padding: 60px 20px;">
+                                    <div class="logo-box" style="display: inline-block; padding: 8px 16px; background: transparent; border: 1px solid var(--card-border); border-radius: 2px; margin-bottom: 20px; font-size: 14px; color: var(--accent-terminal); text-transform: uppercase; letter-spacing: 0.15em;">> Clinical Analysis v2.0</div>
+                                    <h1 style="font-size: clamp(2rem, 5vw, 3.5rem); font-weight: 700; letter-spacing: 0.1em; color: var(--text-main); margin-bottom: 15px; text-transform: uppercase; font-family: 'JetBrains Mono', monospace;"><a href="https://github.com/psterman/cursor-lab" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: none; display: inline-block; transition: all 0.3s ease; position: relative; filter: blur(2px);" onmouseenter="this.style.filter='blur(0px)'; this.style.textShadow='0 0 20px var(--accent-terminal), 0 0 40px var(--accent-terminal)';" onmouseleave="this.style.filter='blur(2px)'; this.style.textShadow='none';">> CURSOR 迷惑行为报告</a></h1>
+                                    <p class="subtitle" style="color: var(--text-dim); font-size: 1.1rem;">基于Cursor聊天记录的深度受虐分析</p>
+                                </header>
+                                
+                                <div id="dashboardSection">
+                                    <!-- 实时统计区域 -->
+                                    <div class="realtime-stats-section" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 2px; padding: 24px; margin-bottom: 40px;">
+                                        <h3 class="chart-title" style="margin-bottom: 20px; text-align: center;">📊 实时统计</h3>
+                                        <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
+                                            <div class="stat-card" style="text-align: center;">
+                                                <p class="stat-label">全网受虐人数</p>
+                                                <p class="stat-value" id="totalTestUsers" style="color: #ffffff;">加载中...</p>
+                                                <p class="stat-comparison">人</p>
+                                            </div>
+                                            <div class="stat-card" style="text-align: center;">
+                                                <p class="stat-label">技术排名</p>
+                                                <p class="stat-value" id="techRank" style="color: #ffffff;">加载中...</p>
+                                                <p class="stat-comparison">名</p>
+                                            </div>
+                                            <div class="stat-card" style="text-align: center;">
+                                                <p class="stat-label">人格库解锁</p>
+                                                <p class="stat-value" id="personalityUnlock" style="color: #ffffff;">加载中...</p>
+                                                <p class="stat-comparison">243 种人格</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- 横向排名区域 -->
+                                    <div class="ranking-section" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 2px; padding: 24px; margin-bottom: 40px;">
+                                        <h3 class="chart-title" style="margin-bottom: 20px; text-align: center;">🏆 全网横向排名</h3>
+                                        <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;" id="rankingCards">
+                                            <div class="stat-card" style="text-align: center;">
+                                                <p class="stat-label" style="color: var(--text-dim);">赛博磕头排名</p>
+                                                <p class="stat-value" id="rankingQingCount" style="color: #ffffff;">--</p>
+                                                <p class="stat-comparison" id="rankingQingCountPercent">--</p>
+                                            </div>
+                                            <div class="stat-card" style="text-align: center;">
+                                                <p class="stat-label" style="color: var(--text-dim);">甲方上身排名</p>
+                                                <p class="stat-value" id="rankingBuCount" style="color: #ffffff;">--</p>
+                                                <p class="stat-comparison" id="rankingBuCountPercent">--</p>
+                                            </div>
+                                            <div class="stat-card" style="text-align: center;">
+                                                <p class="stat-label" style="color: var(--text-dim);">调戏AI排名</p>
+                                                <p class="stat-value" id="rankingUserMessages" style="color: #ffffff;">--</p>
+                                                <p class="stat-comparison" id="rankingUserMessagesPercent">--</p>
+                                            </div>
+                                            <div class="stat-card" style="text-align: center;">
+                                                <p class="stat-label" style="color: var(--text-dim);">废话输出排名</p>
+                                                <p class="stat-value" id="rankingTotalChars" style="color: #ffffff;">--</p>
+                                                <p class="stat-comparison" id="rankingTotalCharsPercent">--</p>
+                                            </div>
+                                            <div class="stat-card" style="text-align: center;">
+                                                <p class="stat-label" style="color: var(--text-dim);">平均长度排名</p>
+                                                <p class="stat-value" id="rankingAvgLength" style="color: #ffffff;">--</p>
+                                                <p class="stat-comparison" id="rankingAvgLengthPercent">--</p>
+                                            </div>
+                                            <div class="stat-card" style="text-align: center;">
+                                                <p class="stat-label" style="color: var(--text-dim);">上岗天数排名</p>
+                                                <p class="stat-value" id="rankingUsageDays" style="color: #ffffff;">--</p>
+                                                <p class="stat-comparison" id="rankingUsageDaysPercent">--</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- 维度得分排行榜 -->
+                                    <div class="dimension-ranking-section" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 2px; padding: 24px; margin-bottom: 40px;">
+                                        <h3 class="chart-title" style="margin-bottom: 20px; text-align: center;">🏆 六大硬核维度得分排行榜</h3>
+                                        <div id="dimensionRankingList" class="prompts-list"></div>
+                                    </div>
+
+                                    <div class="stats-grid" id="exportArea">
+                                        <div class="stat-card">
+                                            <p class="stat-label">Cursor上岗天数</p>
+                                            <p class="stat-value" id="totalConversations">0</p>
+                                            <p class="stat-comparison">天</p>
+                                            <span class="stat-ranking" id="rankingUsageDaysBadge">--</span>
+                                        </div>
+                                        <div class="stat-card">
+                                            <p class="stat-label">调戏 AI 次数</p>
+                                            <p class="stat-value" id="userMessages">0</p>
+                                            <span class="stat-ranking" id="rankingUserMessagesBadge">--</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="stats-grid">
+                                        <div class="stat-card">
+                                            <p class="stat-label">赛博磕头次数</p>
+                                            <p class="stat-value" id="qingCount">0</p>
+                                            <p class="stat-comparison">次</p>
+                                            <span class="stat-ranking" id="rankingQingCountBadge">--</span>
+                                        </div>
+                                        <div class="stat-card">
+                                            <p class="stat-label">甲方爸爸上身</p>
+                                            <p class="stat-value" id="buCount">0</p>
+                                            <p class="stat-comparison">次</p>
+                                            <span class="stat-ranking" id="rankingBuCountBadge">--</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="stats-grid">
+                                        <div class="stat-card">
+                                            <p class="stat-label">废话文学输出</p>
+                                            <p class="stat-value" id="totalUserChars">0</p>
+                                            <p class="stat-comparison">字符</p>
+                                            <span class="stat-ranking" id="rankingTotalCharsBadge">--</span>
+                                        </div>
+                                        <div class="stat-card">
+                                            <p class="stat-label">平均吹水长度</p>
+                                            <p class="stat-value" id="avgUserMessageLength">0</p>
+                                            <p class="stat-comparison">字符</p>
+                                            <span class="stat-ranking" id="rankingAvgLengthBadge">--</span>
+                                        </div>
+                                        <div class="stat-card hidden" id="questionCard">
+                                            <p class="stat-label">黑人问号次数</p>
+                                            <p class="stat-value" id="questionMessageCount">0</p>
+                                            <p class="stat-comparison">条</p>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="wordcloud-section">
+                                        <div class="chart-card">
+                                            <h3 class="chart-title">☁️ AI功德簿</h3>
+                                            <div class="wordcloud-container">
+                                                <canvas id="chineseWordCloud"></canvas>
+                                            </div>
+                                        </div>
+                                        <div class="chart-card">
+                                            <h3 class="chart-title">🔤 你的硅谷黑话口头禅</h3>
+                                            <div class="wordcloud-container">
+                                                <canvas id="englishWordCloud"></canvas>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="chart-card" style="margin-top: 40px;">
+                                        <h3 class="chart-title"><span style="color: var(--accent-terminal);">🗣️</span> vibe coding黑话榜</h3>
+                                        <div class="prompts-list" id="topChineseWordsList"></div>
+                                    </div>
+                                    
+                                    <div class="chart-card" id="techStackSection" style="display: none; margin-top: 40px;">
+                                        <h3 class="chart-title">🛠️ 用户技术栈 Top 10</h3>
+                                        <div class="prompts-list" id="techStackList"></div>
+                                    </div>
+                                    
+                                    <div class="vibe-codinger-section chart-card" id="vibeCodingerSection" style="margin-top: 40px;"></div>
+                                    
+                                    <div class="chat-list-section" style="margin-top: 40px;">
+                                        <div class="chat-list-header">
+                                            <h3 class="chat-list-title">对话记录</h3>
+                                            <div class="chat-list-controls">
+                                                <input type="text" id="searchInput" class="search-input" placeholder="搜索对话...">
+                                            </div>
+                                        </div>
+                                        <div class="chat-list" id="chatList"></div>
+                                        <div class="pagination-container" id="paginationContainer" style="display: none;">
+                                            <div class="pagination-info">
+                                                <span id="paginationInfo">第 1 页，共 1 页</span>
+                                            </div>
+                                            <div class="pagination-controls">
+                                                <button id="paginationPrev" class="pagination-btn" disabled>上一页</button>
+                                                <div class="pagination-pages" id="paginationPages"></div>
+                                                <button id="paginationNext" class="pagination-btn">下一页</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div style="text-align: center; margin-top: 50px;">
+                                        <button class="btn" id="exportBtn" style="background: rgba(255,255,255,0.1); border: 1px solid var(--card-border);">
+                                            <span>生成受虐证据海报</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
                         // 显示容器
                         container.style.display = 'block';
                         
@@ -2355,8 +2074,7 @@
                                 // 延迟更新排名显示（确保 DOM 元素已创建）
                                 setTimeout(async () => {
                                     if (window.userRankings) {
-                                        const currentLang = localStorage.getItem('appLanguage') || 'zh-CN';
-                                        await updateRankingBadges(window.userRankings, currentLang);
+                                        await updateRankingBadges(window.userRankings);
                                         console.log('[React] ✅ 排名徽章已更新:', window.userRankings);
                                     } else {
                                         console.warn('[React] ⚠️ 未找到排名数据！');
@@ -2367,59 +2085,13 @@
                                     }
                                 }, 100);
                                 
-                            // 立即使用当前状态值更新显示（使用 formatNumber）
-                            const formatNumberLocal = (num) => {
-                                if (typeof num !== 'number' || isNaN(num)) return '0';
-                                const currentLang = localStorage.getItem('appLanguage') || 'zh-CN';
-                                const isEn = currentLang === 'en';
-                                
-                                // 英文使用标准格式：K, M, B, T
-                                if (isEn) {
-                                    if (num >= 1000000000000) {
-                                        return (num / 1000000000000).toFixed(1) + 'T';
-                                    }
-                                    if (num >= 1000000000) {
-                                        return (num / 1000000000).toFixed(1) + 'B';
-                                    }
-                                    if (num >= 1000000) {
-                                        return (num / 1000000).toFixed(1) + 'M';
-                                    }
-                                    if (num >= 1000) {
-                                        return (num / 1000).toFixed(1) + 'K';
-                                    }
+                                // 立即使用当前状态值更新显示（使用 formatNumber）
+                                const formatNumberLocal = (num) => {
+                                    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+                                    if (num >= 10000) return (num / 10000).toFixed(1) + '万';
+                                    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
                                     return num.toString();
-                                }
-                                
-                                // 中文使用万、亿等单位
-                                if (num >= 1000000000000) {
-                                    return (num / 1000000000000).toFixed(1) + '万亿';
-                                }
-                                if (num >= 100000000000) {
-                                    return (num / 100000000000).toFixed(1) + '千亿';
-                                }
-                                if (num >= 10000000000) {
-                                    return (num / 10000000000).toFixed(1) + '百亿';
-                                }
-                                if (num >= 100000000) {
-                                    return (num / 100000000).toFixed(1) + '亿';
-                                }
-                                if (num >= 10000000) {
-                                    return (num / 10000000).toFixed(1) + '千万';
-                                }
-                                if (num >= 1000000) {
-                                    return (num / 1000000).toFixed(1) + '百万';
-                                }
-                                if (num >= 100000) {
-                                    return (num / 100000).toFixed(1) + '十万';
-                                }
-                                if (num >= 10000) {
-                                    return (num / 10000).toFixed(1) + '万';
-                                }
-                                if (num >= 1000) {
-                                    return (num / 1000).toFixed(1) + 'K';
-                                }
-                                return num.toString();
-                            };
+                                };
                                 
                                 const totalUsersEl = document.getElementById('totalTestUsers');
                                 const techRankEl = document.getElementById('techRank');
@@ -2493,105 +2165,15 @@
                             }
                             
                             // 加载排名JSON数据
-                            // 将缓存暴露到全局，以便在语言切换时清除
-                            if (!window.rankingDataCache) {
-                                window.rankingDataCache = {};
-                            }
-                            const rankingDataCache = window.rankingDataCache;
-                            const loadRankingData = async (jsonFile, lang = 'zh-CN') => {
-                                // 根据语言生成缓存键
-                                const cacheKey = `${jsonFile}_${lang}`;
-                                if (rankingDataCache[cacheKey]) {
-                                    return rankingDataCache[cacheKey];
+                            const rankingDataCache = {};
+                            const loadRankingData = async (jsonFile) => {
+                                if (rankingDataCache[jsonFile]) {
+                                    return rankingDataCache[jsonFile];
                                 }
                                 try {
-                                    // 尝试加载对应语言的JSON文件
-                                    let targetFile = jsonFile;
-                                    if (lang === 'en') {
-                                        // 英文版使用*2.json格式（如please2.json, word2.json等）
-                                        const enFile = jsonFile.replace('.json', '2.json');
-                                        try {
-                                            const enResponse = await fetch(`src/${enFile}`);
-                                            if (enResponse.ok) {
-                                                targetFile = enFile;
-                                            } else {
-                                                // 英文文件不存在，使用中文版本
-                                                console.warn(`英文版文件 ${enFile} 不存在（HTTP ${enResponse.status}），使用中文版本`);
-                                            }
-                                        } catch (e) {
-                                            // 英文文件不存在，使用中文版本
-                                            console.warn(`英文版文件 ${enFile} 加载失败，使用中文版本:`, e.message);
-                                        }
-                                    }
-                                    const response = await fetch(`src/${targetFile}`);
-                                    if (!response.ok) {
-                                        throw new Error(`HTTP error! status: ${response.status}`);
-                                    }
-                                    // 英文版JSON文件可能包含多个JSON对象，需要特殊处理
-                                    const text = await response.text();
-                                    let data;
-                                    if (lang === 'en' && targetFile.endsWith('2.json')) {
-                                        // 英文版文件（*2.json）可能包含多个独立的JSON对象
-                                        // 先尝试作为单个JSON解析
-                                        try {
-                                            data = JSON.parse(text);
-                                            // 如果解析成功但没有segments字段，说明是单个对象，需要转换为segments数组
-                                            if (!data.segments && !data.levels) {
-                                                data = { segments: [data], isEnglishFormat: true };
-                                            } else if (data.segments) {
-                                                data.isEnglishFormat = true;
-                                            }
-                                        } catch (e) {
-                                            // 如果失败，尝试分割多个JSON对象
-                                            // 查找所有独立的JSON对象（以{开头，以}结尾）
-                                            const segments = [];
-                                            let braceCount = 0;
-                                            let startPos = -1;
-                                            
-                                            for (let i = 0; i < text.length; i++) {
-                                                if (text[i] === '{') {
-                                                    if (braceCount === 0) startPos = i;
-                                                    braceCount++;
-                                                } else if (text[i] === '}') {
-                                                    braceCount--;
-                                                    if (braceCount === 0 && startPos !== -1) {
-                                                        // 找到一个完整的JSON对象
-                                                        try {
-                                                            const jsonStr = text.substring(startPos, i + 1);
-                                                            const obj = JSON.parse(jsonStr);
-                                                            segments.push(obj);
-                                                        } catch (parseError) {
-                                                            console.warn('解析JSON对象失败:', parseError);
-                                                        }
-                                                        startPos = -1;
-                                                    }
-                                                }
-                                            }
-                                            
-                                            if (segments.length > 0) {
-                                                data = { segments: segments, isEnglishFormat: true };
-                                            } else {
-                                                // 如果英文版解析失败，尝试加载中文版本作为回退
-                                                console.warn(`英文版 ${targetFile} 解析失败，尝试加载中文版本`);
-                                                const zhFile = jsonFile; // 使用原始的中文文件名
-                                                try {
-                                                    const zhResponse = await fetch(`src/${zhFile}`);
-                                                    if (zhResponse.ok) {
-                                                        const zhText = await zhResponse.text();
-                                                        data = JSON.parse(zhText);
-                                                        console.log(`已回退到中文版本: ${zhFile}`);
-                                                    } else {
-                                                        throw new Error(`无法加载中文版本 ${zhFile}`);
-                                                    }
-                                                } catch (zhError) {
-                                                    throw new Error(`无法解析JSON文件（英文版和中文版都失败）`);
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        data = JSON.parse(text);
-                                    }
-                                    rankingDataCache[cacheKey] = data;
+                                    const response = await fetch(`src/${jsonFile}`);
+                                    const data = await response.json();
+                                    rankingDataCache[jsonFile] = data;
                                     return data;
                                 } catch (error) {
                                     console.error(`加载 ${jsonFile} 失败:`, error);
@@ -2600,43 +2182,13 @@
                             };
                             
                             // 根据排名匹配对应的level和comment
-                            const getRankingComment = (data, rank, total, lang = 'zh-CN') => {
-                                if (!data || rank === null || rank === undefined || total <= 0) {
+                            const getRankingComment = (data, rank, total) => {
+                                if (!data || !data.levels || rank === null || rank === undefined || total <= 0) {
                                     return null;
                                 }
                                 
                                 const percent = ((total - rank + 1) / total * 100);
                                 const rankPercent = (rank / total) * 100;
-                                
-                                // 处理英文版JSON格式（有segments数组或isEnglishFormat标志）
-                                if (data.isEnglishFormat && data.segments) {
-                                    // 英文版：根据rank匹配segment
-                                    for (const segment of data.segments) {
-                                        if (!segment.segment || !segment.comments) continue;
-                                        
-                                        // 解析segment格式，如"Rank 1-33"或"Rank 68-100"
-                                        const segmentMatch = segment.segment.match(/Rank\s+(\d+)-(\d+)/);
-                                        if (segmentMatch) {
-                                            const minRank = parseInt(segmentMatch[1]);
-                                            const maxRank = parseInt(segmentMatch[2]);
-                                            if (rank >= minRank && rank <= maxRank) {
-                                                // 找到匹配的segment，随机选择一个comment
-                                                const randomComment = segment.comments[Math.floor(Math.random() * segment.comments.length)];
-                                                return {
-                                                    title: randomComment.title,
-                                                    content: randomComment.content,
-                                                    label: segment.segment
-                                                };
-                                            }
-                                        }
-                                    }
-                                    return null;
-                                }
-                                
-                                // 处理中文版JSON格式（有levels数组）
-                                if (!data.levels) {
-                                    return null;
-                                }
                                 
                                 // 遍历levels，找到匹配的level
                                 for (const level of data.levels) {
@@ -2712,8 +2264,7 @@
                                         }
                                     }
                                     // 处理 "1-50字", "51-200字" 等格式（word.json）
-                                    // 注意：word.json的最后一个range是"1001+"，不包含"字"
-                                    else if (range === '1001+' || (range.includes('字') && (range.includes('1001') || range.includes('501') || range.includes('201') || range.includes('51') || range.includes('1-50')))) {
+                                    else if (range.includes('字') && (range.includes('1001') || range.includes('501') || range.includes('201') || range.includes('51') || range.includes('1-50'))) {
                                         // word.json的格式
                                         const rankPercent = (rank / total) * 100;
                                         if (range === '1001+') {
@@ -2732,30 +2283,10 @@
                                     if (matched && level.comments && level.comments.length > 0) {
                                         // 随机选择一个comment
                                         const randomComment = level.comments[Math.floor(Math.random() * level.comments.length)];
-                                        
-                                        // 根据语言选择对应的文本
-                                        let title = randomComment.title;
-                                        let content = randomComment.content;
-                                        let label = level.label;
-                                        
-                                        // 如果当前语言是英文，但数据是中文，尝试使用多语言字段或提供默认翻译
-                                        if (lang === 'en') {
-                                            // 优先使用英文字段（如果存在）
-                                            if (randomComment.title_en) {
-                                                title = randomComment.title_en;
-                                            }
-                                            if (randomComment.content_en) {
-                                                content = randomComment.content_en;
-                                            }
-                                            if (level.label_en) {
-                                                label = level.label_en;
-                                            }
-                                        }
-                                        
                                         return {
-                                            title: title,
-                                            content: content,
-                                            label: label
+                                            title: randomComment.title,
+                                            content: randomComment.content,
+                                            label: level.label
                                         };
                                     }
                                 }
@@ -2763,17 +2294,9 @@
                                 return null;
                             };
                             
-                            // 统一更新排名徽章的函数（暴露到全局，以便在语言切换时调用）
-                            const updateRankingBadges = async (rankings, lang = 'zh-CN') => {
+                            // 统一更新排名徽章的函数
+                            const updateRankingBadges = async (rankings) => {
                                 if (!rankings) return;
-                                
-                                // 获取i18n翻译函数
-                                const t = (key) => {
-                                    if (window.i18n && window.i18n.getText) {
-                                        return window.i18n.getText(key, lang);
-                                    }
-                                    return key;
-                                };
                                 
                                 // 更新排名徽章（统计卡片右下角）
                                 const updateBadge = (badgeId, rank, total) => {
@@ -2782,16 +2305,22 @@
                                     
                                     if (rank !== null && rank !== undefined && total > 0) {
                                         const percent = ((total - rank + 1) / total * 100).toFixed(1);
-                                        if (lang === 'en') {
-                                            badge.textContent = `#${rank} (Top ${percent}%)`;
-                                        } else {
-                                            badge.textContent = `#${rank} (前${percent}%)`;
-                                        }
+                                        badge.textContent = `#${rank} (前${percent}%)`;
                                         badge.classList.add('has-rank');
                                     } else {
                                         badge.textContent = '--';
                                         badge.classList.remove('has-rank');
                                     }
+                                };
+                                
+                                // 排名卡片说明文字映射
+                                const rankingLabels = {
+                                    'rankingQingCount': '赛博磕头排名',
+                                    'rankingBuCount': '甲方上身排名',
+                                    'rankingUserMessages': '调戏AI排名',
+                                    'rankingTotalChars': '废话输出排名',
+                                    'rankingAvgLength': '平均长度排名',
+                                    'rankingUsageDays': '上岗天数排名'
                                 };
                                 
                                 // 更新"全网横向排名"区域的卡片（大卡片）
@@ -2815,8 +2344,8 @@
                                         // 判断是否在100名内
                                         if (rank <= 100) {
                                             // 100名内：显示排名数字和JSON中的标题和评语
-                                            const data = await loadRankingData(jsonFile, lang);
-                                            const comment = getRankingComment(data, rank, total, lang);
+                                            const data = await loadRankingData(jsonFile);
+                                            const comment = getRankingComment(data, rank, total);
                                             
                                             if (comment && valueEl && percentEl) {
                                                 // valueEl显示排名数字（大字体，参考技术排名样式）
@@ -2840,11 +2369,7 @@
                                                     valueEl.style.fontFamily = "'JetBrains Mono', monospace";
                                                 }
                                                 if (percentEl) {
-                                                    if (lang === 'en') {
-                                                        percentEl.textContent = `Top ${percent}%`;
-                                                    } else {
-                                                        percentEl.textContent = `前 ${percent}%`;
-                                                    }
+                                                    percentEl.textContent = `前 ${percent}%`;
                                                     percentEl.style.whiteSpace = 'nowrap';
                                                 }
                                             }
@@ -2857,11 +2382,7 @@
                                                 valueEl.style.fontFamily = "'JetBrains Mono', monospace";
                                             }
                                             if (percentEl) {
-                                                if (lang === 'en') {
-                                                    percentEl.textContent = 'Rank';
-                                                } else {
-                                                    percentEl.textContent = '名';
-                                                }
+                                                percentEl.textContent = '名';
                                                 percentEl.style.whiteSpace = 'nowrap';
                                             }
                                         }
@@ -2881,71 +2402,22 @@
                                 
                                 // 更新"全网横向排名"区域的卡片（大卡片显示）
                                 // 对应关系：no.json -> 甲方爸爸上身, ai.json -> 调戏AI, please.json -> 赛博磕头
-                                // say.json -> 废话输出（总字数）, word.json -> 平均长度（单次指令厚度）, day.json -> 上岗天数
+                                // say.json -> 平均长度, word.json -> 废话输出, day.json -> 上岗天数
                                 await updateRankingCard('rankingQingCount', 'rankingQingCountPercent', rankings.qingCount?.rank, rankings.qingCount?.total, 'please.json');
                                 await updateRankingCard('rankingBuCount', 'rankingBuCountPercent', rankings.buCount?.rank, rankings.buCount?.total, 'no.json');
                                 await updateRankingCard('rankingUserMessages', 'rankingUserMessagesPercent', rankings.userMessages?.rank, rankings.userMessages?.total, 'ai.json');
-                                await updateRankingCard('rankingTotalChars', 'rankingTotalCharsPercent', rankings.totalUserChars?.rank, rankings.totalUserChars?.total, 'say.json');
-                                await updateRankingCard('rankingAvgLength', 'rankingAvgLengthPercent', rankings.avgUserMessageLength?.rank, rankings.avgUserMessageLength?.total, 'word.json');
+                                await updateRankingCard('rankingTotalChars', 'rankingTotalCharsPercent', rankings.totalUserChars?.rank, rankings.totalUserChars?.total, 'word.json');
+                                await updateRankingCard('rankingAvgLength', 'rankingAvgLengthPercent', rankings.avgUserMessageLength?.rank, rankings.avgUserMessageLength?.total, 'say.json');
                                 await updateRankingCard('rankingUsageDays', 'rankingUsageDaysPercent', rankings.usageDays?.rank, rankings.usageDays?.total, 'day.json');
                             };
                             
-                            // 将updateRankingBadges暴露到全局作用域
-                            window.updateRankingBadges = updateRankingBadges;
-                            
                             // 实时更新统计数据（从 Cloudflare API 获取）
                             const updateRealtimeStats = async () => {
-                                // 格式化数字函数（确保在作用域内可用，支持多语言和大数值）
+                                // 格式化数字函数（确保在作用域内可用）
                                 const formatNumberLocal = (num) => {
-                                    if (typeof num !== 'number' || isNaN(num)) return '0';
-                                    const currentLang = localStorage.getItem('appLanguage') || 'zh-CN';
-                                    const isEn = currentLang === 'en';
-                                    
-                                    // 英文使用标准格式：K, M, B, T
-                                    if (isEn) {
-                                        if (num >= 1000000000000) {
-                                            return (num / 1000000000000).toFixed(1) + 'T';
-                                        }
-                                        if (num >= 1000000000) {
-                                            return (num / 1000000000).toFixed(1) + 'B';
-                                        }
-                                        if (num >= 1000000) {
-                                            return (num / 1000000).toFixed(1) + 'M';
-                                        }
-                                        if (num >= 1000) {
-                                            return (num / 1000).toFixed(1) + 'K';
-                                        }
-                                        return num.toString();
-                                    }
-                                    
-                                    // 中文使用万、亿等单位
-                                    if (num >= 1000000000000) {
-                                        return (num / 1000000000000).toFixed(1) + '万亿';
-                                    }
-                                    if (num >= 100000000000) {
-                                        return (num / 100000000000).toFixed(1) + '千亿';
-                                    }
-                                    if (num >= 10000000000) {
-                                        return (num / 10000000000).toFixed(1) + '百亿';
-                                    }
-                                    if (num >= 100000000) {
-                                        return (num / 100000000).toFixed(1) + '亿';
-                                    }
-                                    if (num >= 10000000) {
-                                        return (num / 10000000).toFixed(1) + '千万';
-                                    }
-                                    if (num >= 1000000) {
-                                        return (num / 1000000).toFixed(1) + '百万';
-                                    }
-                                    if (num >= 100000) {
-                                        return (num / 100000).toFixed(1) + '十万';
-                                    }
-                                    if (num >= 10000) {
-                                        return (num / 10000).toFixed(1) + '万';
-                                    }
-                                    if (num >= 1000) {
-                                        return (num / 1000).toFixed(1) + 'K';
-                                    }
+                                    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+                                    if (num >= 10000) return (num / 10000).toFixed(1) + '万';
+                                    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
                                     return num.toString();
                                 };
                                 
@@ -2982,8 +2454,7 @@
                                                 window.userRankings = data.rankings;
                                                 // 延迟更新，确保 DOM 元素存在
                                                 setTimeout(async () => {
-                                                    const currentLang = localStorage.getItem('appLanguage') || 'zh-CN';
-                                                    await updateRankingBadges(data.rankings, currentLang);
+                                                    await updateRankingBadges(data.rankings);
                                                     console.log('[实时更新] 排名徽章已更新:', data.rankings);
                                                 }, 100);
                                             }
@@ -3070,78 +2541,6 @@
                 }, 100);
             };
 
-            // 生成分享链接
-            const generateShareUrl = () => {
-                try {
-                    // 获取排名数据（从 window.userRankings）
-                    const rankings = window.userRankings || {};
-                    
-                    // 提取4项排名数据
-                    const shareData = {
-                        wordRank: rankings.avgUserMessageLength?.rank || null,      // 平均长度排名
-                        pleaseRank: rankings.qingCount?.rank || null,                // 赛博磕头排名
-                        noRank: rankings.buCount?.rank || null,                     // 甲方爸爸上身排名
-                        dayRank: rankings.usageDays?.rank || null,                  // 上岗天数排名
-                        // 额外保存总数，用于计算百分比
-                        totals: {
-                            word: rankings.avgUserMessageLength?.total || 0,
-                            please: rankings.qingCount?.total || 0,
-                            no: rankings.buCount?.total || 0,
-                            day: rankings.usageDays?.total || 0
-                        },
-                        // 保存分析数据（用于完整展示）
-                        analysisData: {
-                            stats: window.analysisModule?.getGlobalStats() || null,
-                            vibeResult: window.analysisModule?.getVibeResult() || null
-                        },
-                        rankings: rankings // 保存完整排名数据
-                    };
-                    
-                    // 转换为 Base64
-                    const jsonString = JSON.stringify(shareData);
-                    const base64String = btoa(encodeURIComponent(jsonString));
-                    
-                    // 生成完整链接
-                    const shareUrl = window.location.origin + window.location.pathname + '#share=' + base64String;
-                    
-                    return shareUrl;
-                } catch (error) {
-                    console.error('[分享] 生成分享链接失败:', error);
-                    return null;
-                }
-            };
-
-            // 分享报告
-            const shareReport = async () => {
-                const shareUrl = generateShareUrl();
-                if (!shareUrl) {
-                    alert('生成分享链接失败，请稍后重试');
-                    return;
-                }
-                
-                try {
-                    // 复制到剪贴板
-                    await navigator.clipboard.writeText(shareUrl);
-                    alert('分享链接已生成，PC端点开可交互，手机点开直接看结果');
-                } catch (err) {
-                    // 降级方案：使用传统方法
-                    const textArea = document.createElement('textarea');
-                    textArea.value = shareUrl;
-                    textArea.style.position = 'fixed';
-                    textArea.style.opacity = '0';
-                    document.body.appendChild(textArea);
-                    textArea.select();
-                    try {
-                        document.execCommand('copy');
-                        alert('分享链接已生成，PC端点开可交互，手机点开直接看结果');
-                    } catch (e) {
-                        // 如果复制失败，显示链接让用户手动复制
-                        prompt('请手动复制以下链接:', shareUrl);
-                    }
-                    document.body.removeChild(textArea);
-                }
-            };
-
             // 导出报告
             const exportReport = async () => {
                 try {
@@ -3166,18 +2565,6 @@
                     console.error('导出失败:', err);
                     alert('导出失败: ' + err.message);
                 }
-            };
-
-            // 返回初始分析界面
-            const resetToUpload = () => {
-                // 清空 Hash
-                window.location.hash = '';
-                // 重置状态
-                setIsShareMode(false);
-                setShareRankings(null);
-                setStep('upload');
-                // 刷新页面
-                window.location.reload();
             };
 
             return (
@@ -3209,168 +2596,13 @@
                         }}
                     />
 
-                    {/* 语言切换按钮 */}
-                    <div style={{
-                        position: 'fixed',
-                        top: '20px',
-                        right: '20px',
-                        zIndex: 1000,
-                        display: 'flex',
-                        gap: '8px'
-                    }}>
-                        <button
-                            onClick={() => switchLanguage('zh-CN')}
-                            style={{
-                                padding: '0',
-                                background: 'transparent',
-                                border: lang === 'zh-CN' 
-                                    ? '3px solid var(--accent-terminal)' 
-                                    : 'none',
-                                borderRadius: '50%',
-                                cursor: 'pointer',
-                                fontFamily: "'JetBrains Mono', monospace",
-                                transition: 'opacity 0.3s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                width: '44px',
-                                height: '44px',
-                                opacity: lang === 'zh-CN' ? 1 : 0.6,
-                                boxShadow: lang === 'zh-CN' 
-                                    ? '0 0 16px rgba(0, 255, 65, 0.6), 0 0 32px rgba(0, 255, 65, 0.3), inset 0 0 20px rgba(0, 255, 65, 0.1)' 
-                                    : 'none',
-                                transform: lang === 'zh-CN' ? 'scale(1.1)' : 'scale(1)',
-                                overflow: 'hidden'
-                            }}
-                            onMouseEnter={(e) => {
-                                if (lang !== 'zh-CN') {
-                                    e.currentTarget.style.opacity = '0.9';
-                                    e.currentTarget.style.transform = 'scale(1.15)';
-                                    e.currentTarget.style.transition = 'opacity 0.25s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)';
-                                } else {
-                                    // 选中状态：保持 3px 粗边框，只改变缩放和阴影
-                                    e.currentTarget.style.border = '3px solid var(--accent-terminal)';
-                                    e.currentTarget.style.transform = 'scale(1.15)';
-                                    e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 255, 65, 0.8), 0 0 40px rgba(0, 255, 65, 0.4), inset 0 0 25px rgba(0, 255, 65, 0.15)';
-                                    e.currentTarget.style.transition = 'opacity 0.25s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s ease';
-                                }
-                            }}
-                            onMouseLeave={(e) => {
-                                if (lang === 'zh-CN') {
-                                    // 选中状态：保持 3px 粗边框，只改变缩放和阴影
-                                    e.currentTarget.style.border = '3px solid var(--accent-terminal)';
-                                    e.currentTarget.style.opacity = '1';
-                                    e.currentTarget.style.transform = 'scale(1.1)';
-                                    e.currentTarget.style.boxShadow = '0 0 16px rgba(0, 255, 65, 0.6), 0 0 32px rgba(0, 255, 65, 0.3), inset 0 0 20px rgba(0, 255, 65, 0.1)';
-                                    e.currentTarget.style.transition = 'opacity 0.3s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease';
-                                } else {
-                                    e.currentTarget.style.opacity = '0.6';
-                                    e.currentTarget.style.transform = 'scale(1)';
-                                    e.currentTarget.style.boxShadow = 'none';
-                                    e.currentTarget.style.transition = 'opacity 0.3s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease';
-                                }
-                            }}
-                            title="中文"
-                        >
-                            <img 
-                                src="images/zh.png" 
-                                alt="中文" 
-                                style={{
-                                    width: '100%',
-                                    height: '100%',
-                                    objectFit: 'contain',
-                                    borderRadius: '50%',
-                                    transition: 'all 0.4s ease',
-                                    padding: '2px',
-                                    outline: 'none',
-                                    border: 'none',
-                                    boxShadow: 'none',
-                                    WebkitAppearance: 'none',
-                                    appearance: 'none'
-                                }}
-                            />
-                        </button>
-                        <button
-                            onClick={() => switchLanguage('en')}
-                            style={{
-                                padding: '0',
-                                background: 'transparent',
-                                border: lang === 'en' 
-                                    ? '3px solid var(--accent-terminal)' 
-                                    : 'none',
-                                borderRadius: '50%',
-                                cursor: 'pointer',
-                                fontFamily: "'JetBrains Mono', monospace",
-                                transition: 'opacity 0.3s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                width: '44px',
-                                height: '44px',
-                                opacity: lang === 'en' ? 1 : 0.6,
-                                boxShadow: lang === 'en' 
-                                    ? '0 0 16px rgba(0, 255, 65, 0.6), 0 0 32px rgba(0, 255, 65, 0.3), inset 0 0 20px rgba(0, 255, 65, 0.1)' 
-                                    : 'none',
-                                transform: lang === 'en' ? 'scale(1.1)' : 'scale(1)',
-                                overflow: 'hidden'
-                            }}
-                            onMouseEnter={(e) => {
-                                if (lang !== 'en') {
-                                    e.currentTarget.style.opacity = '0.9';
-                                    e.currentTarget.style.transform = 'scale(1.15)';
-                                    e.currentTarget.style.transition = 'opacity 0.25s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)';
-                                } else {
-                                    // 选中状态：保持 3px 粗边框，只改变缩放和阴影
-                                    e.currentTarget.style.border = '3px solid var(--accent-terminal)';
-                                    e.currentTarget.style.transform = 'scale(1.15)';
-                                    e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 255, 65, 0.8), 0 0 40px rgba(0, 255, 65, 0.4), inset 0 0 25px rgba(0, 255, 65, 0.15)';
-                                    e.currentTarget.style.transition = 'opacity 0.25s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s ease';
-                                }
-                            }}
-                            onMouseLeave={(e) => {
-                                if (lang === 'en') {
-                                    // 选中状态：保持 3px 粗边框，只改变缩放和阴影
-                                    e.currentTarget.style.border = '3px solid var(--accent-terminal)';
-                                    e.currentTarget.style.opacity = '1';
-                                    e.currentTarget.style.transform = 'scale(1.1)';
-                                    e.currentTarget.style.boxShadow = '0 0 16px rgba(0, 255, 65, 0.6), 0 0 32px rgba(0, 255, 65, 0.3), inset 0 0 20px rgba(0, 255, 65, 0.1)';
-                                    e.currentTarget.style.transition = 'opacity 0.3s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease';
-                                } else {
-                                    e.currentTarget.style.opacity = '0.6';
-                                    e.currentTarget.style.transform = 'scale(1)';
-                                    e.currentTarget.style.boxShadow = 'none';
-                                    e.currentTarget.style.transition = 'opacity 0.3s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease';
-                                }
-                            }}
-                            title="English"
-                        >
-                            <img 
-                                src="images/us.png" 
-                                alt="English" 
-                                style={{
-                                    width: '100%',
-                                    height: '100%',
-                                    objectFit: 'contain',
-                                    borderRadius: '50%',
-                                    transition: 'all 0.4s ease',
-                                    padding: '2px',
-                                    outline: 'none',
-                                    border: 'none',
-                                    boxShadow: 'none',
-                                    WebkitAppearance: 'none',
-                                    appearance: 'none'
-                                }}
-                            />
-                        </button>
-                    </div>
-
                     {/* 上传阶段 */}
                     {step === 'upload' && (
                         <div className="max-w-2xl w-full space-y-8 text-center">
                             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-xs text-white mb-4 mx-auto">
                                 <Icon name="zap" size={12} />
                                 <a href="https://github.com/psterman/cursor-lab" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }} onMouseEnter={(e) => e.target.style.color = 'var(--accent-terminal)'} onMouseLeave={(e) => e.target.style.color = 'inherit'}>
-                                    <span>{t('dashboard.clinicalAnalysis')}</span>
+                                    <span>Vibe Coding行为临床实验室 v1.0</span>
                                 </a>
                             </div>
                             <h1 style={{
@@ -3405,11 +2637,11 @@
                                         e.target.style.textShadow = 'none';
                                     }}
                                 >
-                                    {t('title')}
+                                    Cursor迷惑行为报告
                                 </a>
                             </h1>
                             <p className="text-zinc-500 text-lg max-w-md mx-auto">
-                                {t('subtitle')}
+                                基于 Cursor 聊天记录的深度受虐分析
                             </p>
                             
                             {error && (
@@ -3424,17 +2656,17 @@
                                         <img src="images/CUBE_2D_DARK.png" width="64" height="64" style={{ marginBottom: '20px', display: 'block', margin: '0 auto 20px auto' }} className="upload-icon" alt="Upload" />
                                     </a>
                                     <a href="https://github.com/psterman/cursor-lab" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', color: 'inherit' }} onMouseEnter={(e) => { e.target.style.color = 'var(--accent-terminal)'; }} onMouseLeave={(e) => { e.target.style.color = 'var(--text-main)'; }}>
-                                        <h2 style={{ marginBottom: '10px', fontSize: '20px', fontWeight: 600, color: 'var(--text-main)' }}>{t('upload.title')}</h2>
+                                        <h2 style={{ marginBottom: '10px', fontSize: '20px', fontWeight: 600, color: 'var(--text-main)' }}>数据本地解析 隐私绝对隔离</h2>
                                     </a>
                                     <a href="https://github.com/psterman/cursor-lab" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', color: 'inherit' }} onMouseEnter={(e) => { e.target.style.color = 'var(--accent-terminal)'; }} onMouseLeave={(e) => { e.target.style.color = 'var(--text-dim)'; }}>
-                                        <p style={{ color: 'var(--text-dim)', marginBottom: '25px' }}>{t('upload.subtitle')}</p>
+                                        <p style={{ color: 'var(--text-dim)', marginBottom: '25px' }}>The salvation lies within</p>
                                     </a>
                                     <div className="flex gap-4 justify-center mt-6">
                                         <button 
                                             onClick={() => handleFileSelect('folder')}
                                             className="px-6 py-3 bg-green-500 hover:bg-transparent hover:text-green-500 text-black rounded-sm font-semibold transition-colors border border-green-500 uppercase tracking-wider font-mono"
                                         >
-                                        {t('upload.selectFolder')}
+                                        聊天文件夹
                                         </button>
                                         {/* <button 
                                             onClick={() => handleFileSelect('file')}
@@ -3478,7 +2710,7 @@
                                                     navigator.clipboard.writeText(path).then(() => {
                                                         const btn = e.target;
                                                         const originalText = btn.textContent;
-                                                        btn.textContent = t('dashboard.copied');
+                                                        btn.textContent = '已复制';
                                                         btn.style.color = 'var(--accent-terminal)';
                                                         btn.style.background = 'var(--accent-terminal)';
                                                         btn.style.color = '#050505';
@@ -3489,7 +2721,7 @@
                                                         }, 2000);
                                                     }).catch(err => {
                                                         console.error('复制失败:', err);
-                                                        alert(t('dashboard.copyFailed'));
+                                                        alert('复制失败，请手动复制');
                                                     });
                                                 }}
                                                 style={{
@@ -3515,7 +2747,7 @@
                                                     e.target.style.color = 'var(--accent-terminal)';
                                                 }}
                                             >
-                                                {t('dashboard.copy')}
+                                                复制
                                             </button>
                                         </div>
                                         <p style={{ 
@@ -3526,7 +2758,7 @@
                                             fontFamily: "'JetBrains Mono', monospace",
                                             opacity: 0.8
                                         }}>
-                                            {'> '}{t('upload.pathHelp')}
+                                            {'> '}在弹出窗口的地址栏粘贴此路径可瞬间抵达
                                         </p>
                                     </div>
                                 </div>
@@ -3539,7 +2771,7 @@
                         <div className="w-full max-w-lg bg-zinc-950 border border-zinc-800 rounded-sm p-6 shadow-2xl overflow-hidden">
                             <div className="flex items-center gap-2 mb-4 border-b border-zinc-900 pb-3">
                                 <Icon name="terminal" size={16} className="text-green-500" />
-                                <span className="text-xs text-zinc-500 uppercase tracking-widest">{t('dashboard.systemAnalysis')}</span>
+                                <span className="text-xs text-zinc-500 uppercase tracking-widest">System Analysis</span>
                             </div>
                             <div className="space-y-2 h-64 overflow-y-auto custom-scrollbar">
                                 {logs.map((log, i) => (
@@ -3555,51 +2787,69 @@
                     {/* 预览结果阶段 */}
                     {step === 'preview' && analysisData && (
                         <div className="max-w-4xl w-full space-y-6">
-                            <div className="bg-zinc-900 border border-zinc-800 rounded-sm p-6 md:p-8 relative overflow-hidden shadow-2xl">
+                            <div className="bg-zinc-900 border border-zinc-800 rounded-sm p-8 md:p-12 relative overflow-hidden shadow-2xl">
                                 
-                                <div className="flex flex-col md:flex-row justify-between items-start gap-6">
-                                    <div className={`space-y-4 flex-1 ${lang === 'en' ? 'md:max-w-lg' : 'md:max-w-md'}`}>
+                                <div className="flex flex-col md:flex-row justify-between items-start gap-8">
+                                    <div className="space-y-6">
                                         <div>
-                                            <h2 className="text-zinc-500 text-sm uppercase tracking-widest mb-1 font-mono">{t('preview.personalityLabel')}</h2>
+                                            <h2 className="text-zinc-500 text-sm uppercase tracking-widest mb-1 font-mono">人格鉴定结果</h2>
                                             <div className="text-5xl font-black text-white font-mono">
-                                                {analysisData.vibeResult?.personalityName || t('dashboard.unknownPersonality')}
+                                                {analysisData.vibeResult?.personalityName || '未知人格'}
                                             </div>
                                         </div>
-                                        <p className={`text-zinc-400 ${lang === 'en' ? 'text-base' : 'text-lg'}`}>
-                                            {analysisData.vibeResult?.roastText || t('preview.analyzing')}
+                                        <p className="text-zinc-400 text-lg max-w-sm">
+                                            {analysisData.vibeResult?.roastText || '分析中...'}
                                         </p>
+                                        {analysisData.vibeResult?.vibeIndex && (
+                                            <div className="flex gap-2">
+                                                <span className="px-3 py-1 bg-zinc-800 text-green-400 text-xs rounded-sm border border-green-500 font-mono uppercase tracking-wider">
+                                                    Vibe Index: {analysisData.vibeResult.vibeIndex}
+                                                </span>
+                                            </div>
+                                        )}
                                     </div>
 
-                                    <div className={`grid grid-cols-2 gap-4 ${lang === 'en' ? 'md:w-[460px]' : 'md:w-[420px]'} w-full md:w-auto`}>
+                                    <div className="grid grid-cols-2 gap-4 w-full md:w-auto">
                                         <StatBox 
-                                            label={t('dashboard.totalUsers')} 
+                                            label="全网受虐人数" 
                                             value={formatNumber(totalUsers)} 
-                                            sub={t('dashboard.personUnit')} 
-                                            color="text-white"
-                                            lang={lang}
+                                            sub="人" 
+                                            color="text-white" 
                                         />
                                         <StatBox 
-                                            label={t('dashboard.cyberBowCount')} 
+                                            label="赛博磕头" 
                                             value={analysisData.stats?.qingCount || 0} 
-                                            sub={t('dashboard.timesUnit')} 
-                                            color="text-white"
-                                            lang={lang}
+                                            sub="次" 
+                                            color="text-white" 
                                         />
                                         <StatBox 
-                                            label={t('preview.globalRank')} 
+                                            label="全网排名" 
                                             value={calculateRank(analysisData.stats?.qingCount || 0)} 
-                                            sub={lang === 'en' ? t('dashboard.rankUnit') : '%'} 
-                                            color="text-white"
-                                            lang={lang}
+                                            sub="%" 
+                                            color="text-white" 
                                         />
                                         <StatBox 
-                                            label={t('statsLabels.totalConversations')} 
+                                            label="甲方上身" 
+                                            value={analysisData.stats?.buCount || 0} 
+                                            sub="次" 
+                                            color="text-white" 
+                                        />
+                                        <StatBox 
+                                            label="对话天数" 
                                             value={calculateUsageDays(analysisData.stats)} 
-                                            sub={t('statsLabels.unit.days')} 
-                                            color="text-white"
-                                            lang={lang}
+                                            sub="天" 
+                                            color="text-white" 
                                         />
                                     </div>
+                                </div>
+
+                                <div className="mt-12 p-6 bg-zinc-950/50 rounded-sm border border-zinc-800 flex items-start gap-4">
+                                    <Icon name="alert-triangle" className="text-green-500 shrink-0 mt-1" size={20} />
+                                    <p className="text-sm text-zinc-400 font-mono">
+                                        专家诊断：你对 Cursor 说了 {analysisData.stats?.qingCount || 0} 次"请"，
+                                        {analysisData.stats?.qingCount > 100 ? '你对你老板可能都没这么客气过。' : '还算正常。'}
+                                        建议适当增加"直接命令"语气，找回丢失的码农尊严。
+                                    </p>
                                 </div>
                             </div>
 
@@ -3609,21 +2859,14 @@
                                     className="flex items-center justify-center gap-2 bg-green-500 text-black px-8 py-4 rounded-sm font-bold hover:bg-transparent hover:text-green-500 transition-colors border border-green-500 uppercase tracking-wider font-mono"
                                 >
                                     <Icon name="share-2" size={20} />
-                                    {t('preview.shareBtn')}
-                                </button>
-                                <button 
-                                    onClick={shareReport}
-                                    className="flex items-center justify-center gap-2 bg-blue-500 text-white px-8 py-4 rounded-sm font-bold hover:bg-transparent hover:text-blue-500 transition-colors border border-blue-500 uppercase tracking-wider font-mono"
-                                >
-                                    <Icon name="link" size={20} />
-                                    分享报告
+                                    晒出我的受虐证据
                                 </button>
                                 <button 
                                     onClick={exportReport}
                                     className="flex items-center justify-center gap-2 bg-transparent text-white px-8 py-4 rounded-sm font-bold border border-zinc-800 hover:bg-zinc-800 transition-colors uppercase tracking-wider font-mono"
                                 >
                                     <Icon name="download" size={20} />
-                                    {t('export.title')}
+                                    保存体检报告
                                 </button>
                             </div>
                         </div>
@@ -3632,124 +2875,9 @@
                     {/* 完整报告阶段 */}
                     {step === 'fullReport' && (
                         <div className="w-full" style={{minHeight: '100vh'}}>
-                            {/* 分享模式提示 */}
-                            {isShareMode && (
-                                <div className="w-full bg-blue-500/20 border border-blue-500/50 rounded-sm p-4 mb-4 flex flex-col sm:flex-row items-center justify-between gap-4" style={{marginBottom: '20px', maxWidth: '1100px', margin: '0 auto 20px', padding: '16px'}}>
-                                    <div className="flex items-center gap-3">
-                                        <Icon name="info" size={20} className="text-blue-400" />
-                                        <span className="text-white font-mono text-sm sm:text-base">
-                                            正在查看分享的报告
-                                        </span>
-                                    </div>
-                                    <button 
-                                        onClick={resetToUpload}
-                                        className="flex items-center justify-center gap-2 bg-green-500 text-black px-6 py-2 rounded-sm font-bold hover:bg-transparent hover:text-green-500 transition-colors border border-green-500 uppercase tracking-wider font-mono text-sm"
-                                    >
-                                        <Icon name="refresh-cw" size={16} />
-                                        我也要测
-                                    </button>
-                                </div>
-                            )}
-                            
-                            {/* 浮动分享按钮（非分享模式时显示） */}
-                            {!isShareMode && (
-                                <div className="fixed bottom-24 right-4 z-50" style={{zIndex: 1000}}>
-                                    <button 
-                                        onClick={shareReport}
-                                        className="flex items-center justify-center gap-2 bg-blue-500 text-white px-4 py-3 rounded-sm font-bold hover:bg-transparent hover:text-blue-500 transition-colors border border-blue-500 uppercase tracking-wider font-mono text-sm shadow-lg"
-                                        title="分享报告"
-                                    >
-                                        <Icon name="link" size={18} />
-                                        <span className="hidden sm:inline">分享</span>
-                                    </button>
-                                </div>
-                            )}
-                            
                             <div id="fullReportContainer" style={{display: 'block'}}></div>
                         </div>
                     )}
-
-                    {/* 友情链接 */}
-                    <div style={{
-                        position: 'fixed',
-                        bottom: '20px',
-                        left: '50%',
-                        transform: 'translateX(-50%)',
-                        display: 'flex',
-                        gap: '24px',
-                        alignItems: 'center',
-                        zIndex: 100,
-                        fontFamily: "'JetBrains Mono', monospace"
-                    }}>
-                        <a 
-                            href="https://github.com/psterman/nmer" 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '8px',
-                                padding: '8px 12px',
-                                background: 'rgba(24, 24, 27, 0.8)',
-                                border: '1px solid var(--card-border)',
-                                borderRadius: '2px',
-                                color: 'var(--text-main)',
-                                textDecoration: 'none',
-                                transition: 'all 0.2s ease',
-                                fontSize: '12px'
-                            }}
-                            onMouseEnter={(e) => {
-                                e.target.style.borderColor = 'var(--accent-terminal)';
-                                e.target.style.color = 'var(--accent-terminal)';
-                            }}
-                            onMouseLeave={(e) => {
-                                e.target.style.borderColor = 'var(--card-border)';
-                                e.target.style.color = 'var(--text-main)';
-                            }}
-                        >
-                            <img 
-                                src="https://github.com/psterman/nmer/blob/main/favicon.ico?raw=true" 
-                                alt={lang === 'zh-CN' ? '牛马' : 'NMER'} 
-                                width="32" 
-                                height="32"
-                            />
-                            <span>{t('dashboard.friendLinks.nmer')}</span>
-                        </a>
-                        <a 
-                            href="https://github.com/psterman/curser" 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '8px',
-                                padding: '8px 12px',
-                                background: 'rgba(24, 24, 27, 0.8)',
-                                border: '1px solid var(--card-border)',
-                                borderRadius: '2px',
-                                color: 'var(--text-main)',
-                                textDecoration: 'none',
-                                transition: 'all 0.2s ease',
-                                fontSize: '12px'
-                            }}
-                            onMouseEnter={(e) => {
-                                e.target.style.borderColor = 'var(--accent-terminal)';
-                                e.target.style.color = 'var(--accent-terminal)';
-                            }}
-                            onMouseLeave={(e) => {
-                                e.target.style.borderColor = 'var(--card-border)';
-                                e.target.style.color = 'var(--text-main)';
-                            }}
-                        >
-                            <img 
-                                src="https://github.com/psterman/nmer/blob/main/curser.ico?raw=true" 
-                                alt={lang === 'zh-CN' ? '抠搜' : 'CURSER'} 
-                                width="32" 
-                                height="32"
-                            />
-                            <span>{t('dashboard.friendLinks.curser')}</span>
-                        </a>
-                    </div>
                 </div>
             );
         }
@@ -3758,5 +2886,72 @@
         root.render(<App />);
     </script>
     
+    <!-- 友情链接 -->
+    <style>
+        .friend-links {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 24px;
+            align-items: center;
+            z-index: 100;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        
+        .friend-link {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: rgba(24, 24, 27, 0.8);
+            border: 1px solid var(--card-border);
+            border-radius: 2px;
+            color: var(--text-main);
+            text-decoration: none;
+            transition: all 0.2s ease;
+            font-size: 12px;
+        }
+        
+        .friend-link:hover {
+            border-color: var(--accent-terminal);
+            color: var(--accent-terminal);
+        }
+        
+        .friend-link img {
+            display: block;
+        }
+    </style>
+    <div class="friend-links">
+        <a 
+            href="https://github.com/psterman/nmer" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            class="friend-link"
+        >
+            <img 
+                src="https://github.com/psterman/nmer/blob/main/favicon.ico?raw=true" 
+                alt="牛马" 
+                width="32" 
+                height="32"
+            />
+            <span>牛马（cursor windows工具箱）</span>
+        </a>
+        <a 
+            href="https://github.com/psterman/curser" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            class="friend-link"
+        >
+            <img 
+                src="https://github.com/psterman/nmer/blob/main/curser.ico?raw=true" 
+                alt="抠搜" 
+                width="32" 
+                height="32"
+            />
+            <span>抠搜（cursor聊天记录查看器）</span>
+        </a>
+    </div>
 </body>
 </html>

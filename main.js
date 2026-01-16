@@ -50,6 +50,20 @@ let globalStats = null;
 let vibeAnalyzer = null;
 let vibeResult = null;
 
+// 获取当前语言的辅助函数
+function getCurrentLang() {
+  const savedLang = localStorage.getItem('appLanguage');
+  return savedLang === 'en' ? 'en' : 'zh-CN';
+}
+
+// i18n 辅助函数
+function t(key) {
+  if (window.i18n && window.i18n.getText) {
+    return window.i18n.getText(key, getCurrentLang());
+  }
+  return key;
+}
+
 // 导出供 React 使用的函数和变量
 export const getGlobalStats = () => globalStats;
 export const getAllChatData = () => allChatData;
@@ -85,6 +99,39 @@ export const processFiles = async (files, type, callbacks) => {
       callbacks.onError(error);
     }
     throw error;
+  }
+};
+
+// 导出重新分析函数（用于语言切换）
+export const reanalyzeWithLanguage = async (lang) => {
+  if (!vibeAnalyzer || !allChatData || allChatData.length === 0) {
+    console.warn('[Main] 无法重新分析：缺少数据或分析器');
+    return null;
+  }
+  
+  console.log('[Main] 使用新语言重新分析:', lang);
+  
+  // 设置分析器语言
+  vibeAnalyzer.setLanguage(lang);
+  
+  try {
+    // 重新分析
+    vibeResult = await vibeAnalyzer.analyze(allChatData, lang);
+    console.log('[Main] 重新分析完成');
+    
+    // 重新渲染
+    if (document.getElementById('vibeCodingerSection')) {
+      displayVibeCodingerAnalysis();
+    }
+    
+    return vibeResult;
+  } catch (error) {
+    console.warn('[Main] 异步分析失败，使用同步方法:', error);
+    vibeResult = vibeAnalyzer.analyzeSync(allChatData, lang);
+    if (document.getElementById('vibeCodingerSection')) {
+      displayVibeCodingerAnalysis();
+    }
+    return vibeResult;
   }
 };
 
@@ -408,7 +455,9 @@ async function handleFileUpload(event, type, callbacks = {}) {
   if (!callbacks || !callbacks.onLog) {
     showLoading();
   } else if (callbacks.onLog) {
-    callbacks.onLog('> 开始处理文件...');
+    const currentLang = getCurrentLang();
+    const logText = window.i18n?.getText('upload.logs.startProcessing', currentLang) || '开始处理文件...';
+    callbacks.onLog(`> ${logText}`);
   }
 
   try {
@@ -542,7 +591,10 @@ async function handleFileUpload(event, type, callbacks = {}) {
           onProgress(processedCount, dbFiles.length, file.name);
         }
         if (onLog) {
-          onLog(`> 已处理 ${processedCount}/${dbFiles.length}: ${file.name}`);
+          const currentLang = getCurrentLang();
+          const logText = window.i18n?.getText('upload.logs.processed', currentLang) || '已处理 {current}/{total}: {fileName}';
+          const processedText = logText.replace('{current}', processedCount).replace('{total}', dbFiles.length).replace('{fileName}', file.name);
+          onLog(`> ${processedText}`);
         }
 
         console.log(`[Main] 当前统计:`, {
@@ -565,7 +617,11 @@ async function handleFileUpload(event, type, callbacks = {}) {
 
     // 从所有对话数据重新计算统计（包括词云数据）
     console.log('[Main] 开始重新计算统计（包括词云数据）...');
-    if (onLog) onLog('> 计算统计数据...');
+    if (onLog) {
+      const currentLang = getCurrentLang();
+      const logText = window.i18n?.getText('upload.logs.calculatingStats', currentLang) || '计算统计数据...';
+      onLog(`> ${logText}`);
+    }
     calculateStatsFromData(allChatData);
     console.log('[Main] 统计计算完成，词云数据:', {
       chineseWords: Object.keys(globalStats.chineseWords || {}).length,
@@ -575,16 +631,32 @@ async function handleFileUpload(event, type, callbacks = {}) {
     // 进行 Vibe Codinger 人格分析（异步）
     if (allChatData.length > 0) {
       console.log('[Main] 开始 Vibe Codinger 人格分析（Web Worker）...');
-      if (onLog) onLog('> 生成人格画像（高性能匹配中）...');
+      if (onLog) {
+        const currentLang = getCurrentLang();
+        const logText = window.i18n?.getText('upload.logs.generatingPersonality', currentLang) || '生成人格画像（高性能匹配中）...';
+        onLog(`> ${logText}`);
+      }
       try {
-        vibeResult = await vibeAnalyzer.analyze(allChatData);
+        const currentLang = getCurrentLang();
+        vibeAnalyzer.setLanguage(currentLang);
+        vibeResult = await vibeAnalyzer.analyze(allChatData, currentLang);
         console.log('[Main] Vibe Codinger 分析完成:', vibeResult);
-        if (onLog) onLog('> 分析完成！');
+        if (onLog) {
+          const currentLang = getCurrentLang();
+          const logText = window.i18n?.getText('upload.logs.analysisComplete', currentLang) || '分析完成！';
+          onLog(`> ${logText}`);
+        }
       } catch (error) {
         console.error('[Main] Vibe Codinger 分析失败:', error);
-        if (onLog) onLog('> 分析失败，使用降级方案...');
+        if (onLog) {
+          const currentLang = getCurrentLang();
+          const logText = window.i18n?.getText('upload.logs.analysisFailed', currentLang) || '分析失败，使用降级方案...';
+          onLog(`> ${logText}`);
+        }
         // 降级到同步方法
-        vibeResult = vibeAnalyzer.analyzeSync(allChatData);
+        const currentLang = getCurrentLang();
+        vibeAnalyzer.setLanguage(currentLang);
+        vibeResult = vibeAnalyzer.analyzeSync(allChatData, currentLang);
       }
     }
     
@@ -1128,11 +1200,74 @@ function displayStats() {
   }
 }
 
-// 格式化数字（与 React 组件保持一致）
-export function formatNumber(num) {
-  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-  if (num >= 10000) return (num / 10000).toFixed(1) + '万';
-  if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+// 格式化数字（支持多语言和大数值）
+export function formatNumber(num, lang = null) {
+  if (typeof num !== 'number' || isNaN(num)) return '0';
+  
+  // 获取当前语言
+  if (!lang) {
+    lang = getCurrentLang();
+  }
+  const isEn = lang === 'en';
+  
+  // 英文使用标准格式：K, M, B, T
+  if (isEn) {
+    if (num >= 1000000000000) {
+      // Trillion (万亿)
+      return (num / 1000000000000).toFixed(1) + 'T';
+    }
+    if (num >= 1000000000) {
+      // Billion (十亿)
+      return (num / 1000000000).toFixed(1) + 'B';
+    }
+    if (num >= 1000000) {
+      // Million (百万)
+      return (num / 1000000).toFixed(1) + 'M';
+    }
+    if (num >= 1000) {
+      // Thousand (千)
+      return (num / 1000).toFixed(1) + 'K';
+    }
+    return num.toString();
+  }
+  
+  // 中文使用万、亿等单位
+  if (num >= 1000000000000) {
+    // 万亿
+    return (num / 1000000000000).toFixed(1) + '万亿';
+  }
+  if (num >= 100000000000) {
+    // 千亿
+    return (num / 100000000000).toFixed(1) + '千亿';
+  }
+  if (num >= 10000000000) {
+    // 百亿
+    return (num / 10000000000).toFixed(1) + '百亿';
+  }
+  if (num >= 100000000) {
+    // 亿
+    return (num / 100000000).toFixed(1) + '亿';
+  }
+  if (num >= 10000000) {
+    // 千万
+    return (num / 10000000).toFixed(1) + '千万';
+  }
+  if (num >= 1000000) {
+    // 百万
+    return (num / 1000000).toFixed(1) + '百万';
+  }
+  if (num >= 100000) {
+    // 十万
+    return (num / 100000).toFixed(1) + '十万';
+  }
+  if (num >= 10000) {
+    // 万
+    return (num / 10000).toFixed(1) + '万';
+  }
+  if (num >= 1000) {
+    // 千（使用K）
+    return (num / 1000).toFixed(1) + 'K';
+  }
   return num.toString();
 }
 
@@ -1310,7 +1445,14 @@ function renderPagination(totalItems, totalPages) {
   // 更新分页信息
   const startItem = (currentPage - 1) * itemsPerPage + 1;
   const endItem = Math.min(currentPage * itemsPerPage, totalItems);
-  elements.paginationInfo.textContent = `第 ${currentPage} 页，共 ${totalPages} 页（共 ${totalItems} 条记录，显示 ${startItem}-${endItem} 条）`;
+  const currentLang = getCurrentLang();
+  const paginationText = window.i18n?.getText('chatList.paginationInfo', currentLang) || '第 {currentPage} 页，共 {totalPages} 页（共 {totalItems} 条记录，显示 {startItem}-{endItem} 条）';
+  elements.paginationInfo.textContent = paginationText
+    .replace('{currentPage}', currentPage)
+    .replace('{totalPages}', totalPages)
+    .replace('{totalItems}', totalItems)
+    .replace('{startItem}', startItem)
+    .replace('{endItem}', endItem);
 
   // 更新上一页/下一页按钮状态
   if (elements.paginationPrev) {
@@ -1497,26 +1639,44 @@ function displayVibeCodingerAnalysis() {
 
   // 生成人格头衔（根据索引特征）
   const getPersonalityTitle = (index) => {
-    const l = index[0] === '2' ? '硬核' : index[0] === '1' ? '标准' : '随性';
-    const p = index[1] === '2' ? '耐心' : index[1] === '1' ? '平衡' : '急躁';
-    const d = index[2] === '2' ? '细节控' : index[2] === '1' ? '适中' : '极简';
-    const e = index[3] === '2' ? '探索者' : index[3] === '1' ? '观望' : '守旧';
-    const f = index[4] === '2' ? '暖男' : index[4] === '1' ? '职业' : '冷酷';
+    const lang = getCurrentLang();
+    const personalityTitles = lang === 'en' 
+      ? window.i18n?.getI18nText('en')?.vibeCodinger?.personalityTitles
+      : window.i18n?.getI18nText('zh-CN')?.vibeCodinger?.personalityTitles;
+    
+    if (!personalityTitles) {
+      // Fallback to hardcoded Chinese
+      const l = index[0] === '2' ? '硬核' : index[0] === '1' ? '标准' : '随性';
+      const p = index[1] === '2' ? '耐心' : index[1] === '1' ? '平衡' : '急躁';
+      const d = index[2] === '2' ? '细节控' : index[2] === '1' ? '适中' : '极简';
+      const e = index[3] === '2' ? '探索者' : index[3] === '1' ? '观望' : '守旧';
+      const f = index[4] === '2' ? '暖男' : index[4] === '1' ? '职业' : '冷酷';
+      return `${l}·${p}·${d}·${e}·${f}`;
+    }
+    
+    const l = index[0] === '2' ? personalityTitles.l[2] : index[0] === '1' ? personalityTitles.l[1] : personalityTitles.l[0];
+    const p = index[1] === '2' ? personalityTitles.p[2] : index[1] === '1' ? personalityTitles.p[1] : personalityTitles.p[0];
+    const d = index[2] === '2' ? personalityTitles.d[2] : index[2] === '1' ? personalityTitles.d[1] : personalityTitles.d[0];
+    const e = index[3] === '2' ? personalityTitles.e[2] : index[3] === '1' ? personalityTitles.e[1] : personalityTitles.e[0];
+    const f = index[4] === '2' ? personalityTitles.f[2] : index[4] === '1' ? personalityTitles.f[1] : personalityTitles.f[0];
     return `${l}·${p}·${d}·${e}·${f}`;
   };
 
   // 生成维度标签
   const getDimensionTags = (dimensions) => {
     const tags = [];
+    const lang = getCurrentLang();
     Object.entries(dimensions).forEach(([key, value]) => {
       // E 维度特殊处理
       let level;
+      const dimInfo = window.i18n?.getI18nText(lang)?.dimensions?.[key];
       if (key === 'E') {
-        level = value < 5 ? '低' : value < 10 ? '中' : '高';
+        level = value < 5 ? (dimInfo?.levels?.low || '低') : value < 10 ? (dimInfo?.levels?.medium || '中') : (dimInfo?.levels?.high || '高');
       } else {
-        level = value < 40 ? '低' : value < 70 ? '中' : '高';
+        level = value < 40 ? (dimInfo?.levels?.low || '低') : value < 70 ? (dimInfo?.levels?.medium || '中') : (dimInfo?.levels?.high || '高');
       }
-      const label = DIMENSIONS[key].label;
+      // 使用 i18n 获取翻译后的标签
+      const label = dimInfo?.label || window.i18n?.getText(`dimensions.${key}.label`, lang) || DIMENSIONS[key].label;
       tags.push(`${label}:${level}`);
     });
     return tags;
@@ -1525,7 +1685,7 @@ function displayVibeCodingerAnalysis() {
   // 渲染人格画像
   container.innerHTML = `
     <div class="vibe-header">
-      <h2 class="vibe-title">🔮 你的cursor人格已被锁定</h2>
+      <h2 class="vibe-title">${t('vibeCodinger.title')}</h2>
       <div class="vibe-badge" style="background: transparent; border: 2px solid var(--accent-terminal);">
         <span class="vibe-type">${personalityType}</span>
         <span class="vibe-name">${personalityName || analysis.name}</span>
@@ -1536,9 +1696,9 @@ function displayVibeCodingerAnalysis() {
     <!-- 新增：人格头衔和吐槽区域 -->
     <div class="vibe-roast-section">
       <div class="roast-header">
-        <h3 class="roast-title">🔥 精准吐槽</h3>
+        <h3 class="roast-title">${t('vibeCodinger.roastTitle')}</h3>
         <div class="personality-title">${getPersonalityTitle(vibeIndex)}</div>
-        <div class="vibe-index">索引: ${vibeIndex} | LPDEF: ${lpdef || 'N/A'}</div>
+        <div class="vibe-index">${getCurrentLang() === 'en' ? `${t('vibeCodinger.lpdef')}: ${lpdef || 'N/A'}` : `${t('vibeCodinger.index')}: ${vibeIndex} | ${t('vibeCodinger.lpdef')}: ${lpdef || 'N/A'}`}</div>
       </div>
       <div class="roast-content">
         <p class="roast-text">${roastText}</p>
@@ -1551,15 +1711,17 @@ function displayVibeCodingerAnalysis() {
     </div>
 
     <div class="vibe-dimensions">
-      <h3 class="dimensions-title">📊 看看你的cursor五观正不正</h3>
+      <h3 class="dimensions-title">${t('vibeCodinger.dimensionsTitle')}</h3>
       ${Object.entries(dimensions).map(([key, value]) => {
         const dimInfo = analysis.dimensions[key];
         const percentage = value;
+        const dimLabel = window.i18n?.getI18nText(getCurrentLang())?.dimensions?.[key]?.label || DIMENSIONS[key].label;
+        const dimDesc = window.i18n?.getI18nText(getCurrentLang())?.dimensions?.[key]?.description || DIMENSIONS[key].description;
         return `
           <div class="dimension-card">
             <div class="dimension-header">
               <span class="dimension-key">${key}</span>
-              <span class="dimension-label">${DIMENSIONS[key].label}</span>
+              <span class="dimension-label">${dimLabel}</span>
               <span class="dimension-value">${value}</span>
               <span class="dimension-level">${dimInfo.level}</span>
             </div>
@@ -1567,14 +1729,14 @@ function displayVibeCodingerAnalysis() {
               <div class="dimension-bar" style="width: ${percentage}%; background: var(--accent-terminal)"></div>
             </div>
             <p class="dimension-interpretation">${dimInfo.interpretation}</p>
-            <p class="dimension-desc">${DIMENSIONS[key].description}</p>
+            <p class="dimension-desc">${dimDesc}</p>
           </div>
         `;
       }).join('')}
     </div>
 
     <div class="vibe-traits">
-      <h3 class="traits-title">🎯 人格特征</h3>
+      <h3 class="traits-title">${t('vibeCodinger.traitsTitle')}</h3>
       <div class="traits-list">
         ${analysis.traits.map(trait => `
           <div class="trait-tag">${trait}</div>
@@ -1583,49 +1745,49 @@ function displayVibeCodingerAnalysis() {
     </div>
 
     <div class="vibe-fingerprint">
-      <h3 class="fingerprint-title">🔍 语义指纹</h3>
+      <h3 class="fingerprint-title">${t('vibeCodinger.fingerprintTitle')}</h3>
       <div class="fingerprint-grid">
         <div class="fingerprint-item">
-          <span class="fingerprint-label">代码比例</span>
+          <span class="fingerprint-label">${t('fingerprint.codeRatio')}</span>
           <span class="fingerprint-value">${semanticFingerprint.codeRatio || 'N/A'}</span>
         </div>
         <div class="fingerprint-item">
-          <span class="fingerprint-label">耐心水平</span>
+          <span class="fingerprint-label">${t('fingerprint.patienceLevel')}</span>
           <span class="fingerprint-value">${semanticFingerprint.patienceLevel || 'N/A'}</span>
         </div>
         <div class="fingerprint-item">
-          <span class="fingerprint-label">细腻程度</span>
+          <span class="fingerprint-label">${t('fingerprint.detailLevel')}</span>
           <span class="fingerprint-value">${semanticFingerprint.detailLevel || 'N/A'}</span>
         </div>
         <div class="fingerprint-item">
-          <span class="fingerprint-label">技术探索</span>
+          <span class="fingerprint-label">${t('fingerprint.techExploration')}</span>
           <span class="fingerprint-value">${semanticFingerprint.techExploration || 'N/A'}</span>
         </div>
         <div class="fingerprint-item">
-          <span class="fingerprint-label">反馈密度</span>
+          <span class="fingerprint-label">${t('fingerprint.feedbackDensity')}</span>
           <span class="fingerprint-value">${semanticFingerprint.feedbackDensity || 'N/A'}</span>
         </div>
         ${semanticFingerprint.compositeScore ? `
         <div class="fingerprint-item">
-          <span class="fingerprint-label">综合得分</span>
+          <span class="fingerprint-label">${t('fingerprint.score')}</span>
           <span class="fingerprint-value">${semanticFingerprint.compositeScore}</span>
         </div>
         ` : ''}
         ${semanticFingerprint.techDiversity ? `
         <div class="fingerprint-item">
-          <span class="fingerprint-label">技术多样性</span>
+          <span class="fingerprint-label">${t('fingerprint.diversity')}</span>
           <span class="fingerprint-value">${semanticFingerprint.techDiversity}</span>
         </div>
         ` : ''}
         ${semanticFingerprint.interactionStyle ? `
         <div class="fingerprint-item">
-          <span class="fingerprint-label">交互风格</span>
+          <span class="fingerprint-label">${t('fingerprint.style')}</span>
           <span class="fingerprint-value">${semanticFingerprint.interactionStyle}</span>
         </div>
         ` : ''}
         ${semanticFingerprint.balanceIndex ? `
         <div class="fingerprint-item">
-          <span class="fingerprint-label">维度平衡度</span>
+          <span class="fingerprint-label">${t('fingerprint.balance')}</span>
           <span class="fingerprint-value">${semanticFingerprint.balanceIndex}</span>
         </div>
         ` : ''}
@@ -1633,7 +1795,7 @@ function displayVibeCodingerAnalysis() {
     </div>
 
     <div class="vibe-chart-container">
-      <h3 class="chart-title">📈 维度雷达图</h3>
+      <h3 class="chart-title">${t('vibeCodinger.chartTitle')}</h3>
       <div class="chart-wrapper">
         <canvas id="vibeRadarChart"></canvas>
       </div>
@@ -1689,14 +1851,29 @@ function renderVibeRadarChart() {
   const eValue = dimensions.E >= 10 ? 100 : dimensions.E >= 5 ? 70 : 40;
   const eAverage = globalAverage.E >= 10 ? 100 : globalAverage.E >= 5 ? 70 : 40;
   
+  // 获取当前语言
+  const currentLang = getCurrentLang();
+  const isEn = currentLang === 'en';
+  
+  // 使用 i18n 获取维度标签
+  const dimLabels = ['L', 'P', 'D', 'E', 'F'].map(key => {
+    const dimInfo = window.i18n?.getI18nText(currentLang)?.dimensions?.[key];
+    const label = dimInfo?.label || DIMENSIONS[key]?.label || key;
+    return `${label} (${key})`;
+  });
+  
+  // 使用 i18n 获取数据集标签
+  const yourScoreLabel = window.i18n?.getText('dashboard.radarChart.yourScore', currentLang) || '你的得分';
+  const globalAverageLabel = window.i18n?.getText('dashboard.radarChart.globalAverage', currentLang) || '全网平均';
+  
   // Chart 已在函数开头声明，直接使用
   window.vibeRadarChartInstance = new Chart(ctx, {
     type: 'radar',
     data: {
-      labels: ['逻辑力 (L)', '耐心值 (P)', '细腻度 (D)', '探索欲 (E)', '反馈感 (F)'],
+      labels: dimLabels,
       datasets: [
         {
-          label: '你的得分',
+          label: yourScoreLabel,
           data: [
             dimensions.L,
             dimensions.P,
@@ -1715,7 +1892,7 @@ function renderVibeRadarChart() {
           pointHoverRadius: 7,
         },
         {
-          label: '全网平均',
+          label: globalAverageLabel,
           data: [
             globalAverage.L,
             globalAverage.P,
@@ -2032,14 +2209,21 @@ function displayDimensionRanking() {
 
   const { dimensions } = vibeResult;
 
+  const currentLang = getCurrentLang();
+  
   // 将维度转换为数组并按得分排序
   const dimensionArray = Object.entries(dimensions)
-    .map(([key, value]) => ({
-      key,
-      label: DIMENSIONS[key]?.label || key,
-      value: key === 'E' ? value : value, // E维度不需要转换，其他维度已经是0-100
-      displayValue: key === 'E' ? value : Math.round(value), // E维度显示原始值
-    }))
+    .map(([key, value]) => {
+      // 使用 i18n 获取维度标签
+      const dimInfo = window.i18n?.getI18nText(currentLang)?.dimensions?.[key];
+      const label = dimInfo?.label || DIMENSIONS[key]?.label || key;
+      return {
+        key,
+        label,
+        value: key === 'E' ? value : value, // E维度不需要转换，其他维度已经是0-100
+        displayValue: key === 'E' ? value : Math.round(value), // E维度显示原始值
+      };
+    })
     .sort((a, b) => {
       // E维度需要特殊处理（值域不同）
       const aScore = a.key === 'E' ? a.value * 10 : a.value;
@@ -2054,7 +2238,10 @@ function displayDimensionRanking() {
     // E维度最大值为10左右，其他维度最大值为100
     const maxValue = dim.key === 'E' ? 10 : 100;
     const percentage = Math.min(100, Math.round((dim.value / maxValue) * 100));
-    const unit = dim.key === 'E' ? '种技术' : '分';
+    // 使用 i18n 获取单位
+    const unit = dim.key === 'E' 
+      ? (window.i18n?.getText('dashboard.techUnit', currentLang) || '种技术')
+      : (window.i18n?.getText('dashboard.pointsUnit', currentLang) || '分');
     
     return `
       <div class="prompt-item" style="background: ${rank <= 3 ? 'rgba(0, 255, 65, 0.1)' : 'rgba(255, 255, 255, 0.03)'}; border-color: ${rank <= 3 ? 'rgba(0, 255, 65, 0.3)' : 'var(--card-border)'};">

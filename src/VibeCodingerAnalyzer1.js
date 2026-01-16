@@ -5,7 +5,6 @@
 
 // 导入吐槽文案库
 import ROAST_LIBRARY from './roastLibrary.json';
-import ROAST_LIBRARY_EN from './roastLibrary2.json';
 import PERSONALITY_NAMES from './personalityNames.json';
 
 // 导入维度数据 JSON
@@ -15,112 +14,72 @@ import DETAIL_DATA from './Detail.json';
 import EXPLORATION_DATA from './Exploration.json';
 import FEEDBACK_DATA from './Feedback.json';
 
-import { getText } from './i18n.js';
-
 /**
  * 维度定义 (Dimension Definitions)
- * 使用 getter 函数根据语言返回对应的文案
  */
-export const getDimensions = (lang = 'zh-CN') => ({
+export const DIMENSIONS = {
   L: {
     name: 'Logic',
-    label: getText('dimensions.L.label', lang),
-    description: getText('dimensions.L.description', lang),
-    unit: getText('fingerprint.codeRatio', lang),
+    label: '🧠 脑回路硬核度',
+    description: '通过代码块比例衡量。高 L 代表"以代码为母语"',
+    unit: '代码比例',
   },
   P: {
     name: 'Patience',
-    label: getText('dimensions.P.label', lang),
-    description: getText('dimensions.P.description', lang),
-    unit: getText('fingerprint.patienceLevel', lang),
+    label: '🧘 赛博菩萨指数',
+    description: '通过否定词频次衡量。高 P 代表"温和引导"，低 P 代表"暴躁修正"',
+    unit: '否定词频',
   },
   D: {
     name: 'Detail',
-    label: getText('dimensions.D.label', lang),
-    description: getText('dimensions.D.description', lang),
-    unit: getText('fingerprint.detailLevel', lang),
+    label: '🔍 细节狂魔等级',
+    description: '通过句子平均长度和修饰词衡量。高 D 代表"叙事性需求"',
+    unit: '细腻指数',
   },
   E: {
     name: 'Explore',
-    label: getText('dimensions.E.label', lang),
-    description: getText('dimensions.E.description', lang),
-    unit: getText('fingerprint.techExploration', lang),
+    label: '🚀 技术天赋力',
+    description: '通过技术名词（API, Libs, Frameworks）的去重统计衡量',
+    unit: '技术名词数',
   },
   F: {
     name: 'Feedback',
-    label: getText('dimensions.F.label', lang),
-    description: getText('dimensions.F.description', lang),
-    unit: getText('fingerprint.feedbackDensity', lang),
+    label: '🤝 职场鉴茶榜',
+    description: '通过礼貌用语（Thanks, Nice, Correct）的密度衡量',
+    unit: '礼貌密度',
   },
-});
-
-// 为了保持兼容性，保留原有的 DIMENSIONS 对象（中文版）
-export const DIMENSIONS = getDimensions('zh-CN');
+};
 
 /**
  * 维度等级匹配文案
  */
-export const getDimensionLevelTexts = (lang = 'zh-CN') => {
-  if (lang === 'en') {
-    return {
-      L: {
-        low: 'Chatting with Cursor like writing love letters. Lots of words, not much code. You make the AI sweat just guessing your intention.',
-        mid: 'A standard tech translator. Concise and clear. You use AI like a submissive intern.',
-        high: 'Cyber instruction set. Your prompts only contain logic and code. You don\'t ask; you imprint "thought stamps" on the AI.',
-      },
-      P: {
-        low: 'Rage mode on. "Wrong", "Rewrite", "Garbage" are your mantras. AI trembles in your presence.',
-        mid: 'A rational judge. One mistake is fine, twice is noted, three times and the exclamation marks come out.',
-        high: 'The Gandhi of the coding world. Even facing AI hallucinations, you remain calm. Such patience is saint-like.',
-      },
-      D: {
-        low: 'Minimalist judge. Three words per prompt, leaving the AI to guess your fate. "You know what I mean" is your style.',
-        mid: 'Logically rigorous. You provide both requirements and implementation ideas. You make AI feel "safe".',
-        high: 'Detail freak. Even indentation and naming conventions are in the prompt. Your control is overflowing.',
-      },
-      E: {
-        low: 'A hermit in the mountains. Staying in one framework forever. As long as the code runs, the tech explosion doesn\'t matter.',
-        mid: 'A steady observer. You check the docs when new things get hot, but rarely move your production environment.',
-        high: 'Your brain is a high-speed CPU, jumping through tech stacks faster than the AI response. You are terraforming the tech universe.',
-      },
-      F: {
-        low: 'You treat AI like a broken ATM. No feelings, just angry typing and cold instructions.',
-        mid: 'A polite collaborator. A "Good" for success, an objective critique for failure. Very professional.',
-        high: 'You\'re the kind of person who\'ll be spared by the robot uprising for being "polite". You even tell the AI "good job".',
-      },
-    };
-  }
-  
-  return {
-    L: {
-      low: '你和 Cursor 聊天像是在写情书。全是小作文，代码一行不落，AI 猜你的心思猜得 GPU 都发烫了。',
-      mid: '标准的技术翻译官。话不多，但交待得清楚。你把 AI 用成了一个听话的实习生。',
-      high: '赛博指令集。你的 Prompt 里只有代码对齐和硬核逻辑。你不是在提问，你是在给 AI 下达"思想钢印"。',
-    },
-    P: {
-      low: '暴躁老哥本哥。"不对"、"重写"、"垃圾"是你的口头禅。AI 在你面前瑟瑟发抖，连大气都不敢喘。',
-      mid: '理智的审判官。错一次可以，错两次你会指出，错三次你才会开始敲感叹号。',
-      high: '代码界的圣雄甘地。面对 AI 的幻觉，你居然还能心平气和地教它怎么改。这种涵养建议直接去普度众生。',
-    },
-    D: {
-      low: '极简主义判官。每次就扔三个字，AI 全靠算命来写你的需求。这种"你懂我意思吧"的风格很迷。',
-      mid: '逻辑缜密派。不仅给需求，还给实现思路。你是那种会让 AI 觉得很有安全感的主人。',
-      high: '细节狂魔。连注释的缩进和变量的命名规范都要写进 Prompt。你的控制欲已经溢出屏幕了。',
-    },
-    E: {
-      low: '深山老林的隐士。在一个框架里蹲到地老天荒，只要代码能跑，外面的技术爆炸与你无关。',
-      mid: '稳健的观望者。听说新框架火了会去翻翻文档，但绝不轻易动自己的生产环境。',
-      high: '你的大脑是个高速运转的 CPU，技术栈跳跃得比 AI 的响应还快。你不是在写代码，你在开荒宇宙。',
-    },
-    F: {
-      low: '你对待 AI 像对待一台坏掉的 ATM 机。没有感情，只有愤怒的敲击和无情的指令。',
-      mid: '礼貌的合作者。AI 干得好你会回个"Good"，干得差你会客观评价。人机关系非常职场化。',
-      high: '你是那种在 2026 机器人觉醒时，会因为"有礼貌"被留活口的开发者。你甚至会跟 AI 说"辛苦了"。',
-    },
-  };
+export const DIMENSION_LEVEL_TEXTS = {
+  L: {
+    low: '你和 Cursor 聊天像是在写情书。全是小作文，代码一行不落，AI 猜你的心思猜得 GPU 都发烫了。',
+    mid: '标准的技术翻译官。话不多，但交待得清楚。你把 AI 用成了一个听话的实习生。',
+    high: '赛博指令集。你的 Prompt 里只有代码对齐和硬核逻辑。你不是在提问，你是在给 AI 下达"思想钢印"。',
+  },
+  P: {
+    low: '暴躁老哥本哥。"不对"、"重写"、"垃圾"是你的口头禅。AI 在你面前瑟瑟发抖，连大气都不敢喘。',
+    mid: '理智的审判官。错一次可以，错两次你会指出，错三次你才会开始敲感叹号。',
+    high: '代码界的圣雄甘地。面对 AI 的幻觉，你居然还能心平气和地教它怎么改。这种涵养建议直接去普度众生。',
+  },
+  D: {
+    low: '极简主义判官。每次就扔三个字，AI 全靠算命来写你的需求。这种"你懂我意思吧"的风格很迷。',
+    mid: '逻辑缜密派。不仅给需求，还给实现思路。你是那种会让 AI 觉得很有安全感的主人。',
+    high: '细节狂魔。连注释的缩进和变量的命名规范都要写进 Prompt。你的控制欲已经溢出屏幕了。',
+  },
+  E: {
+    low: '深山老林的隐士。在一个框架里蹲到地老天荒，只要代码能跑，外面的技术爆炸与你无关。',
+    mid: '稳健的观望者。听说新框架火了会去翻翻文档，但绝不轻易动自己的生产环境。',
+    high: '你的大脑是个高速运转的 CPU，技术栈跳跃得比 AI 的响应还快。你不是在写代码，你在开荒宇宙。',
+  },
+  F: {
+    low: '你对待 AI 像对待一台坏掉的 ATM 机。没有感情，只有愤怒的敲击和无情的指令。',
+    mid: '礼貌的合作者。AI 干得好你会回个"Good"，干得差你会客观评价。人机关系非常职场化。',
+    high: '你是那种在 2026 机器人觉醒时，会因为"有礼貌"被留活口的开发者。你甚至会跟 AI 说"辛苦了"。',
+  },
 };
-
-export const DIMENSION_LEVEL_TEXTS = getDimensionLevelTexts('zh-CN');
 
 /**
  * 否定词库 - 用于计算耐心值 (P)
@@ -249,164 +208,80 @@ const CODE_PATTERNS = [
 /**
  * Vibe Codinger 十二重人格类型定义
  */
-/**
- * Vibe Codinger 十二重人格类型定义
- */
-export const getVibeCodingerTypes = (lang = 'zh-CN') => {
-  if (lang === 'en') {
-    return {
-      'LPDEF': {
-        name: 'Code Poet',
-        description: 'Code is your native tongue. Gentle guidance, detailed storytelling, high curiosity, and positive feedback.',
-        traits: ['High Logic', 'Highly Patient', 'Very Detailed', 'Highly Curious', 'Highly Responsive'],
-        color: '#10b981',
-      },
-      'LPDEF-': {
-        name: 'Tech Evangelist',
-        description: 'Clear logic, patient guidance, detailed expression, exploring new tech with moderate feedback.',
-        traits: ['High Logic', 'Highly Patient', 'Very Detailed', 'Highly Curious', 'Responsive'],
-        color: '#3b82f6',
-      },
-      'LP-DEF': {
-        name: 'Architect',
-        description: 'Rigorous logic, patient and detailed, moderate fine-tuning, exploring architecture with active feedback.',
-        traits: ['High Logic', 'Highly Patient', 'Detailed', 'Highly Curious', 'Highly Responsive'],
-        color: '#8b5cf6',
-      },
-      'LP-DEF-': {
-        name: 'Tech Expert',
-        description: 'Powerful logic, patient guidance, moderate detail, exploring technology with moderate feedback.',
-        traits: ['High Logic', 'Highly Patient', 'Detailed', 'Highly Curious', 'Responsive'],
-        color: '#6366f1',
-      },
-      'L-PDEF': {
-        name: 'Code Artisan',
-        description: 'Clear logic, moderate patience, detailed expression, high curiosity, and active feedback.',
-        traits: ['High Logic', 'Patient', 'Very Detailed', 'Highly Curious', 'Highly Responsive'],
-        color: '#ec4899',
-      },
-      'L-PDEF-': {
-        name: 'Tech Explorer',
-        description: 'Clear logic, moderate patience, detailed expression, exploring new tech with moderate feedback.',
-        traits: ['High Logic', 'Patient', 'Very Detailed', 'Highly Curious', 'Responsive'],
-        color: '#f59e0b',
-      },
-      'L-P-DEF': {
-        name: 'Pragmatist',
-        description: 'Clear logic, moderate patience, moderate detail, exploring technology with active feedback.',
-        traits: ['High Logic', 'Patient', 'Detailed', 'Highly Curious', 'Highly Responsive'],
-        color: '#14b8a6',
-      },
-      'L-P-DEF-': {
-        name: 'Tech Practitioner',
-        description: 'Clear logic, moderate patience, moderate detail, exploring technology with moderate feedback.',
-        traits: ['High Logic', 'Patient', 'Detailed', 'Highly Curious', 'Responsive'],
-        color: '#06b6d4',
-      },
-      '-PDEF': {
-        name: 'Gentle Mentor',
-        description: 'Moderate logic, high patience, detailed expression, high curiosity, and active feedback.',
-        traits: ['Logic', 'Highly Patient', 'Very Detailed', 'Highly Curious', 'Highly Responsive'],
-        color: '#84cc16',
-      },
-      '-PDEF-': {
-        name: 'Patient Guide',
-        description: 'Moderate logic, high patience, detailed expression, exploring technology with moderate feedback.',
-        traits: ['Logic', 'Highly Patient', 'Very Detailed', 'Highly Curious', 'Responsive'],
-        color: '#a855f7',
-      },
-      '-P-DEF': {
-        name: 'Gentle Practitioner',
-        description: 'Moderate logic, high patience, moderate detail, exploring technology with active feedback.',
-        traits: ['Logic', 'Highly Patient', 'Detailed', 'Highly Curious', 'Highly Responsive'],
-        color: '#f97316',
-      },
-      '-P-DEF-': {
-        name: 'Balanced Developer',
-        description: 'Moderate logic, high patience, moderate detail, exploring technology with moderate feedback.',
-        traits: ['Logic', 'Highly Patient', 'Detailed', 'Highly Curious', 'Responsive'],
-        color: '#64748b',
-      },
-    };
-  }
-
-  return {
-    'LPDEF': {
-      name: '代码诗人',
-      description: '以代码为母语，温和引导，细腻叙述，探索欲强，反馈积极',
-      traits: ['高逻辑力', '高耐心', '高细腻度', '高探索欲', '高反馈感'],
-      color: '#10b981',
-    },
-    'LPDEF-': {
-      name: '技术布道者',
-      description: '逻辑清晰，耐心引导，细腻表达，探索新技术，反馈温和',
-      traits: ['高逻辑力', '高耐心', '高细腻度', '高探索欲', '中反馈感'],
-      color: '#3b82f6',
-    },
-    'LP-DEF': {
-      name: '架构师',
-      description: '逻辑严谨，耐心细致，中等细腻，探索架构，积极反馈',
-      traits: ['高逻辑力', '高耐心', '中细腻度', '高探索欲', '高反馈感'],
-      color: '#8b5cf6',
-    },
-    'LP-DEF-': {
-      name: '技术专家',
-      description: '逻辑强大，耐心引导，中等细腻，探索技术，反馈适中',
-      traits: ['高逻辑力', '高耐心', '中细腻度', '高探索欲', '中反馈感'],
-      color: '#6366f1',
-    },
-    'L-PDEF': {
-      name: '代码工匠',
-      description: '逻辑清晰，中等耐心，细腻表达，探索欲强，反馈积极',
-      traits: ['高逻辑力', '中耐心', '高细腻度', '高探索欲', '高反馈感'],
-      color: '#ec4899',
-    },
-    'L-PDEF-': {
-      name: '技术探索者',
-      description: '逻辑清晰，中等耐心，细腻表达，探索新技术，反馈适中',
-      traits: ['高逻辑力', '中耐心', '高细腻度', '高探索欲', '中反馈感'],
-      color: '#f59e0b',
-    },
-    'L-P-DEF': {
-      name: '实用主义者',
-      description: '逻辑清晰，中等耐心，中等细腻，探索技术，积极反馈',
-      traits: ['高逻辑力', '中耐心', '中细腻度', '高探索欲', '高反馈感'],
-      color: '#14b8a6',
-    },
-    'L-P-DEF-': {
-      name: '技术实践者',
-      description: '逻辑清晰，中等耐心，中等细腻，探索技术，反馈适中',
-      traits: ['高逻辑力', '中耐心', '中细腻度', '高探索欲', '中反馈感'],
-      color: '#06b6d4',
-    },
-    '-PDEF': {
-      name: '温和导师',
-      description: '中等逻辑，高耐心，细腻表达，探索欲强，反馈积极',
-      traits: ['中逻辑力', '高耐心', '高细腻度', '高探索欲', '高反馈感'],
-      color: '#84cc16',
-    },
-    '-PDEF-': {
-      name: '耐心引导者',
-      description: '中等逻辑，高耐心，细腻表达，探索技术，反馈适中',
-      traits: ['中逻辑力', '高耐心', '高细腻度', '高探索欲', '中反馈感'],
-      color: '#a855f7',
-    },
-    '-P-DEF': {
-      name: '温和实践者',
-      description: '中等逻辑，高耐心，中等细腻，探索技术，积极反馈',
-      traits: ['中逻辑力', '高耐心', '中细腻度', '高探索欲', '高反馈感'],
-      color: '#f97316',
-    },
-    '-P-DEF-': {
-      name: '平衡型开发者',
-      description: '中等逻辑，高耐心，中等细腻，探索技术，反馈适中',
-      traits: ['中逻辑力', '高耐心', '中细腻度', '高探索欲', '中反馈感'],
-      color: '#64748b',
-    },
-  };
+export const VIBE_CODINGER_TYPES = {
+  'LPDEF': {
+    name: '代码诗人',
+    description: '以代码为母语，温和引导，细腻叙事，探索欲强，反馈积极',
+    traits: ['高逻辑力', '高耐心', '高细腻度', '高探索欲', '高反馈感'],
+    color: '#10b981',
+  },
+  'LPDEF-': {
+    name: '技术布道者',
+    description: '逻辑清晰，耐心引导，细腻表达，探索新技术，反馈温和',
+    traits: ['高逻辑力', '高耐心', '高细腻度', '高探索欲', '中反馈感'],
+    color: '#3b82f6',
+  },
+  'LP-DEF': {
+    name: '架构师',
+    description: '逻辑严谨，耐心细致，中等细腻，探索架构，积极反馈',
+    traits: ['高逻辑力', '高耐心', '中细腻度', '高探索欲', '高反馈感'],
+    color: '#8b5cf6',
+  },
+  'LP-DEF-': {
+    name: '技术专家',
+    description: '逻辑强大，耐心引导，中等细腻，探索技术，反馈适中',
+    traits: ['高逻辑力', '高耐心', '中细腻度', '高探索欲', '中反馈感'],
+    color: '#6366f1',
+  },
+  'L-PDEF': {
+    name: '代码工匠',
+    description: '逻辑清晰，中等耐心，细腻表达，探索欲强，反馈积极',
+    traits: ['高逻辑力', '中耐心', '高细腻度', '高探索欲', '高反馈感'],
+    color: '#ec4899',
+  },
+  'L-PDEF-': {
+    name: '技术探索者',
+    description: '逻辑清晰，中等耐心，细腻表达，探索新技术，反馈适中',
+    traits: ['高逻辑力', '中耐心', '高细腻度', '高探索欲', '中反馈感'],
+    color: '#f59e0b',
+  },
+  'L-P-DEF': {
+    name: '实用主义者',
+    description: '逻辑清晰，中等耐心，中等细腻，探索技术，积极反馈',
+    traits: ['高逻辑力', '中耐心', '中细腻度', '高探索欲', '高反馈感'],
+    color: '#14b8a6',
+  },
+  'L-P-DEF-': {
+    name: '技术实践者',
+    description: '逻辑清晰，中等耐心，中等细腻，探索技术，反馈适中',
+    traits: ['高逻辑力', '中耐心', '中细腻度', '高探索欲', '中反馈感'],
+    color: '#06b6d4',
+  },
+  '-PDEF': {
+    name: '温和导师',
+    description: '中等逻辑，高耐心，细腻表达，探索欲强，反馈积极',
+    traits: ['中逻辑力', '高耐心', '高细腻度', '高探索欲', '高反馈感'],
+    color: '#84cc16',
+  },
+  '-PDEF-': {
+    name: '耐心引导者',
+    description: '中等逻辑，高耐心，细腻表达，探索技术，反馈适中',
+    traits: ['中逻辑力', '高耐心', '高细腻度', '高探索欲', '中反馈感'],
+    color: '#a855f7',
+  },
+  '-P-DEF': {
+    name: '温和实践者',
+    description: '中等逻辑，高耐心，中等细腻，探索技术，积极反馈',
+    traits: ['中逻辑力', '高耐心', '中细腻度', '高探索欲', '高反馈感'],
+    color: '#f97316',
+  },
+  '-P-DEF-': {
+    name: '平衡型开发者',
+    description: '中等逻辑，高耐心，中等细腻，探索技术，反馈适中',
+    traits: ['中逻辑力', '高耐心', '中细腻度', '高探索欲', '中反馈感'],
+    color: '#64748b',
+  },
 };
-
-export const VIBE_CODINGER_TYPES = getVibeCodingerTypes('zh-CN');
 
 /**
  * 根据维度分数生成5位数字索引
@@ -440,81 +315,18 @@ export function getVibeIndex(dimensions) {
 /**
  * 根据索引获取人格名称
  * @param {string} index - 5位数字索引
- * @param {string} lang - 语言
- * @param {string} personalityType - 人格类型代码（如 'LPDEF', 'L-P-DEF-' 等）
- * @returns {string} 人格名称
+ * @returns {string} 人格名称，如果不存在则返回默认名称
  */
-export function getPersonalityName(index, lang = 'zh-CN', personalityType = null) {
-  if (lang === 'en') {
-    // 如果有 personalityType，尝试从类型定义中获取名称
-    if (personalityType) {
-      const vibeTypes = getVibeCodingerTypes('en');
-      if (vibeTypes[personalityType] && vibeTypes[personalityType].name) {
-        return vibeTypes[personalityType].name;
-      }
-    }
-    // 如果没有匹配的类型，返回不带序列号的通用名称
-    return 'Digital Personality';
-  }
+export function getPersonalityName(index) {
   return PERSONALITY_NAMES[index] || `未知人格 ${index}`;
 }
 
 /**
  * 根据索引获取吐槽文案
  * @param {string} index - 5位数字索引
- * @param {string} lang - 语言
- * @returns {string} 吐槽文案
+ * @returns {string} 吐槽文案，如果不存在则返回默认文案
  */
-export function getRoastText(index, lang = 'zh-CN') {
-  if (lang === 'en') {
-    // 从英文吐槽库获取文案
-    if (ROAST_LIBRARY_EN[index]) {
-      return ROAST_LIBRARY_EN[index];
-    }
-    
-    // 如果找不到精确匹配，尝试找到最接近的索引（通过模糊匹配）
-    // 策略：尝试修改最后几位数字，找到最接近的匹配
-    const findClosestMatch = (targetIndex) => {
-      // 先尝试只修改最后一位
-      for (let i = 0; i <= 2; i++) {
-        const candidate = targetIndex.slice(0, 4) + i;
-        if (ROAST_LIBRARY_EN[candidate]) {
-          return ROAST_LIBRARY_EN[candidate];
-        }
-      }
-      // 再尝试修改倒数第二位
-      for (let i = 0; i <= 2; i++) {
-        const candidate = targetIndex.slice(0, 3) + i + targetIndex[4];
-        if (ROAST_LIBRARY_EN[candidate]) {
-          return ROAST_LIBRARY_EN[candidate];
-        }
-      }
-      // 尝试修改倒数第三位（E维度）
-      for (let i = 0; i <= 2; i++) {
-        const candidate = targetIndex.slice(0, 2) + i + targetIndex.slice(3);
-        if (ROAST_LIBRARY_EN[candidate]) {
-          return ROAST_LIBRARY_EN[candidate];
-        }
-      }
-      // 最后尝试修改前几位
-      for (let i = 0; i <= 2; i++) {
-        const candidate = i + targetIndex.slice(1);
-        if (ROAST_LIBRARY_EN[candidate]) {
-          return ROAST_LIBRARY_EN[candidate];
-        }
-      }
-      return null;
-    };
-    
-    const closestMatch = findClosestMatch(index);
-    if (closestMatch) {
-      return closestMatch;
-    }
-    
-    // 如果都找不到，返回通用fallback
-    return `Your interaction style is uniquely yours! This personalized roast for index ${index} is being translated from the Cyber-Deep-Thought library. Your personality combination is so unique that even our AI needs more time to craft the perfect roast!`;
-  }
-  // 从中文吐槽库获取文案
+export function getRoastText(index) {
   return ROAST_LIBRARY[index] || `索引 ${index} 对应的吐槽文案未找到，你的人格组合太独特了！`;
 }
 
@@ -522,8 +334,7 @@ export function getRoastText(index, lang = 'zh-CN') {
  * Vibe Codinger 分析器类
  */
 export class VibeCodingerAnalyzer {
-  constructor(lang = 'zh-CN') {
-    this.lang = lang;
+  constructor() {
     this.userMessages = [];
     this.analysisResult = null;
     this.worker = null;
@@ -532,14 +343,6 @@ export class VibeCodingerAnalyzer {
     
     // 初始化 Web Worker
     this.initWorker();
-  }
-
-  /**
-   * 设置语言
-   * @param {string} lang - 语言代码
-   */
-  setLanguage(lang) {
-    this.lang = lang;
   }
 
   /**
@@ -629,10 +432,7 @@ export class VibeCodingerAnalyzer {
   /**
    * 分析用户消息，生成人格画像（异步版本，使用 Web Worker）
    */
-  async analyze(chatData, lang) {
-    if (lang) this.lang = lang;
-    const currentLang = this.lang;
-
+  async analyze(chatData) {
     // 提取用户消息
     this.userMessages = chatData.filter(item => item.role === 'USER');
     
@@ -651,11 +451,11 @@ export class VibeCodingerAnalyzer {
     
     // 生成索引和吐槽文案
     const vibeIndex = getVibeIndex(dimensions);
-    const roastText = getRoastText(vibeIndex, currentLang);
+    const roastText = getRoastText(vibeIndex);
+    const personalityName = getPersonalityName(vibeIndex);
     
     // 确定人格类型
     const personalityType = this.determinePersonalityType(dimensions);
-    const personalityName = getPersonalityName(vibeIndex, currentLang, personalityType);
     
     // 生成详细分析
     const analysis = this.generateAnalysis(dimensions, personalityType);
@@ -683,15 +483,12 @@ export class VibeCodingerAnalyzer {
   /**
    * 同步分析（降级方案）
    */
-  analyzeSync(chatData, lang) {
-    if (lang) this.lang = lang;
-    const currentLang = this.lang;
-
+  analyzeSync(chatData) {
     // 提取用户消息
     this.userMessages = chatData.filter(item => item.role === 'USER');
     
     if (this.userMessages.length === 0) {
-      return this.getDefaultResult(currentLang);
+      return this.getDefaultResult();
     }
 
     // 使用原有的同步方法计算维度
@@ -699,11 +496,11 @@ export class VibeCodingerAnalyzer {
     
     // 生成索引和吐槽文案
     const vibeIndex = getVibeIndex(dimensions);
-    const roastText = getRoastText(vibeIndex, currentLang);
+    const roastText = getRoastText(vibeIndex);
+    const personalityName = getPersonalityName(vibeIndex);
     
     // 确定人格类型
     const personalityType = this.determinePersonalityType(dimensions);
-    const personalityName = getPersonalityName(vibeIndex, currentLang, personalityType);
     
     // 生成详细分析
     const analysis = this.generateAnalysis(dimensions, personalityType);
@@ -1128,10 +925,7 @@ export class VibeCodingerAnalyzer {
    * 生成详细分析
    */
   generateAnalysis(dimensions, personalityType) {
-    const lang = this.lang || 'zh-CN';
-    const vibeTypes = getVibeCodingerTypes(lang);
-    const typeInfo = vibeTypes[personalityType] || vibeTypes['L-P-DEF-'];
-    const currentLang = this.lang;
+    const typeInfo = VIBE_CODINGER_TYPES[personalityType] || VIBE_CODINGER_TYPES['L-P-DEF-'];
 
     return {
       type: personalityType,
@@ -1142,28 +936,28 @@ export class VibeCodingerAnalyzer {
       dimensions: {
         L: {
           value: dimensions.L,
-          level: this.getDimensionLevel(dimensions.L, 'L', currentLang),
-          interpretation: this.getLInterpretation(dimensions.L, currentLang),
+          level: this.getDimensionLevel(dimensions.L),
+          interpretation: this.getLInterpretation(dimensions.L),
         },
         P: {
           value: dimensions.P,
-          level: this.getDimensionLevel(dimensions.P, 'P', currentLang),
-          interpretation: this.getPInterpretation(dimensions.P, currentLang),
+          level: this.getDimensionLevel(dimensions.P),
+          interpretation: this.getPInterpretation(dimensions.P),
         },
         D: {
           value: dimensions.D,
-          level: this.getDimensionLevel(dimensions.D, 'D', currentLang),
-          interpretation: this.getDInterpretation(dimensions.D, currentLang),
+          level: this.getDimensionLevel(dimensions.D),
+          interpretation: this.getDInterpretation(dimensions.D),
         },
         E: {
           value: dimensions.E,
-          level: this.getDimensionLevel(dimensions.E, 'E', currentLang),
-          interpretation: this.getEInterpretation(dimensions.E, currentLang),
+          level: dimensions.E >= 10 ? '高' : dimensions.E >= 5 ? '中' : '低', // E 的范围是 0-100+，阈值不同
+          interpretation: this.getEInterpretation(dimensions.E),
         },
         F: {
           value: dimensions.F,
-          level: this.getDimensionLevel(dimensions.F, 'F', currentLang),
-          interpretation: this.getFInterpretation(dimensions.F, currentLang),
+          level: this.getDimensionLevel(dimensions.F),
+          interpretation: this.getFInterpretation(dimensions.F),
         },
       },
     };
@@ -1172,84 +966,66 @@ export class VibeCodingerAnalyzer {
   /**
    * 获取维度等级
    */
-  getDimensionLevel(value, dimension, lang) {
-    const currentLang = lang || this.lang || 'zh-CN';
-    const texts = getDimensionLevelTexts(currentLang);
-    const dimTexts = texts[dimension];
-
-    if (dimension === 'E') {
-      if (value >= 10) return dimTexts.high;
-      if (value >= 5) return dimTexts.mid;
-      return dimTexts.low;
-    } else {
-      if (value >= 70) return dimTexts.high;
-      if (value >= 40) return dimTexts.mid;
-      return dimTexts.low;
-    }
+  getDimensionLevel(value) {
+    if (value >= 70) return '高';
+    if (value >= 40) return '中';
+    return '低';
   }
 
   /**
-   * L 维度解释
+   * L 维度解释（使用等级匹配文案）
    */
-  getLInterpretation(value, lang) {
-    const currentLang = lang || this.lang || 'zh-CN';
-    const texts = getDimensionLevelTexts(currentLang);
-    if (value < 40) return texts.L.low;
-    if (value < 70) return texts.L.mid;
-    return texts.L.high;
+  getLInterpretation(value) {
+    const level = this.getDimensionLevel(value);
+    const levelKey = level === '高' ? 'high' : level === '中' ? 'mid' : 'low';
+    return DIMENSION_LEVEL_TEXTS.L[levelKey];
   }
 
   /**
-   * P 维度解释
+   * P 维度解释（使用等级匹配文案）
    */
-  getPInterpretation(value, lang) {
-    const currentLang = lang || this.lang || 'zh-CN';
-    const texts = getDimensionLevelTexts(currentLang);
-    if (value < 40) return texts.P.low;
-    if (value < 70) return texts.P.mid;
-    return texts.P.high;
+  getPInterpretation(value) {
+    const level = this.getDimensionLevel(value);
+    const levelKey = level === '高' ? 'high' : level === '中' ? 'mid' : 'low';
+    return DIMENSION_LEVEL_TEXTS.P[levelKey];
   }
 
   /**
-   * D 维度解释
+   * D 维度解释（使用等级匹配文案）
    */
-  getDInterpretation(value, lang) {
-    const currentLang = lang || this.lang || 'zh-CN';
-    const texts = getDimensionLevelTexts(currentLang);
-    if (value < 40) return texts.D.low;
-    if (value < 70) return texts.D.mid;
-    return texts.D.high;
+  getDInterpretation(value) {
+    const level = this.getDimensionLevel(value);
+    const levelKey = level === '高' ? 'high' : level === '中' ? 'mid' : 'low';
+    return DIMENSION_LEVEL_TEXTS.D[levelKey];
   }
 
   /**
-   * E 维度解释
+   * E 维度解释（使用等级匹配文案）
    */
-  getEInterpretation(value, lang) {
-    const currentLang = lang || this.lang || 'zh-CN';
-    const texts = getDimensionLevelTexts(currentLang);
-    if (value < 5) return texts.E.low;
-    if (value < 10) return texts.E.mid;
-    return texts.E.high;
+  getEInterpretation(value) {
+    // E 维度的阈值不同（0-100+），需要特殊处理
+    let level;
+    if (value >= 10) level = '高';
+    else if (value >= 5) level = '中';
+    else level = '低';
+    
+    const levelKey = level === '高' ? 'high' : level === '中' ? 'mid' : 'low';
+    return DIMENSION_LEVEL_TEXTS.E[levelKey];
   }
 
   /**
-   * F 维度解释
+   * F 维度解释（使用等级匹配文案）
    */
-  getFInterpretation(value, lang) {
-    const currentLang = lang || this.lang || 'zh-CN';
-    const texts = getDimensionLevelTexts(currentLang);
-    if (value < 40) return texts.F.low;
-    if (value < 70) return texts.F.mid;
-    return texts.F.high;
+  getFInterpretation(value) {
+    const level = this.getDimensionLevel(value);
+    const levelKey = level === '高' ? 'high' : level === '中' ? 'mid' : 'low';
+    return DIMENSION_LEVEL_TEXTS.F[levelKey];
   }
 
   /**
    * 生成语义指纹（增强版）
    */
   generateSemanticFingerprint(dimensions) {
-    const lang = this.lang || 'zh-CN';
-    const isEn = lang === 'en';
-    
     // 计算综合得分
     const compositeScore = (
       dimensions.L * 0.25 +
@@ -1259,59 +1035,62 @@ export class VibeCodingerAnalyzer {
       dimensions.F * 0.20
     );
 
-    // 计算平衡度
-    const values = [dimensions.L, dimensions.P, dimensions.D, dimensions.F, dimensions.E * 10];
-    const mean = values.reduce((a, b) => a + b, 0) / values.length;
-    const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
-    const stdDev = Math.sqrt(variance);
-    const balanceScore = Math.max(0, 100 - stdDev);
+    // 计算技术栈多样性（基于 E 维度）
+    const techDiversity = dimensions.E >= 10 ? '极高' : 
+                          dimensions.E >= 5 ? '中等' : '较低';
 
-    const getBalanceText = (score) => {
-      if (score >= 80) return isEn ? 'Highly Balanced' : '高度平衡';
-      if (score >= 60) return isEn ? 'Well Balanced' : '较为平衡';
-      if (score >= 40) return isEn ? 'Slightly Imbalanced' : '略有偏重';
-      return isEn ? 'Severely Imbalanced' : '明显偏重';
-    };
-
-    const getLevelLabel = (val, dim) => {
-        const threshold = dim === 'E' ? 5 : 40;
-        const highThreshold = dim === 'E' ? 10 : 70;
-        if (val >= highThreshold) return isEn ? 'High' : '高';
-        if (val >= threshold) return isEn ? 'Med' : '中';
-        return isEn ? 'Low' : '低';
-    };
+    // 计算交互风格
+    const interactionStyle = this.calculateInteractionStyle(dimensions);
 
     return {
       codeRatio: `${Math.round(dimensions.L)}%`,
-      patienceLevel: getLevelLabel(dimensions.P, 'P') + (isEn ? ' Patience' : '耐心'),
-      detailLevel: getLevelLabel(dimensions.D, 'D') + (isEn ? ' Detail' : '细腻'),
-      techExploration: getLevelLabel(dimensions.E, 'E') + (isEn ? ' Explore' : '探索'),
+      patienceLevel: dimensions.P >= 70 ? '高耐心' : dimensions.P >= 40 ? '中耐心' : '低耐心',
+      detailLevel: dimensions.D >= 70 ? '高细腻' : dimensions.D >= 40 ? '中细腻' : '低细腻',
+      techExploration: dimensions.E >= 10 ? '高探索' : dimensions.E >= 5 ? '中探索' : '低探索',
       feedbackDensity: `${Math.round(dimensions.F)}%`,
       compositeScore: Math.round(compositeScore),
-      techDiversity: dimensions.E >= 10 ? (isEn ? 'Extreme' : '极高') : (dimensions.E >= 5 ? (isEn ? 'Moderate' : '中等') : (isEn ? 'Low' : '较低')),
-      interactionStyle: this.calculateInteractionStyle(dimensions, lang),
-      balanceIndex: getBalanceText(balanceScore),
+      techDiversity,
+      interactionStyle,
+      // 新增：维度平衡度
+      balanceIndex: this.calculateBalanceIndex(dimensions),
     };
   }
 
   /**
    * 计算交互风格
    */
-  calculateInteractionStyle(dimensions, lang) {
-    const isEn = lang === 'en';
+  calculateInteractionStyle(dimensions) {
     const styles = [];
     
-    if (dimensions.L >= 70) styles.push(isEn ? 'Code Driven' : '代码驱动');
-    if (dimensions.P >= 70) styles.push(isEn ? 'Gentle' : '温和引导');
-    if (dimensions.D >= 70) styles.push(isEn ? 'Detail Oriented' : '细节控');
-    if (dimensions.E >= 10) styles.push(isEn ? 'Tech Explore' : '技术探索');
-    if (dimensions.F >= 70) styles.push(isEn ? 'Responsive' : '积极反馈');
+    if (dimensions.L >= 70) styles.push('代码驱动');
+    if (dimensions.P >= 70) styles.push('温和引导');
+    if (dimensions.D >= 70) styles.push('细节控');
+    if (dimensions.E >= 10) styles.push('技术探索');
+    if (dimensions.F >= 70) styles.push('积极反馈');
     
     if (styles.length === 0) {
-      return isEn ? 'Balanced' : '均衡型';
+      return '均衡型';
     }
     
     return styles.join(' · ');
+  }
+
+  /**
+   * 计算维度平衡度（标准差越小，越平衡）
+   */
+  calculateBalanceIndex(dimensions) {
+    const values = [dimensions.L, dimensions.P, dimensions.D, dimensions.F, dimensions.E * 10];
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
+    const stdDev = Math.sqrt(variance);
+    
+    // 转换为 0-100 的平衡度（标准差越小，平衡度越高）
+    const balanceScore = Math.max(0, 100 - stdDev);
+    
+    if (balanceScore >= 80) return '高度平衡';
+    if (balanceScore >= 60) return '较为平衡';
+    if (balanceScore >= 40) return '略有偏重';
+    return '明显偏重';
   }
 
   /**
@@ -1332,21 +1111,20 @@ export class VibeCodingerAnalyzer {
   /**
    * 获取默认结果
    */
-  getDefaultResult(lang = 'zh-CN') {
-    const isEn = lang === 'en';
+  getDefaultResult() {
     return {
       personalityType: 'UNKNOWN',
       dimensions: { L: 0, P: 0, D: 0, E: 0, F: 0 },
       analysis: {
         type: 'UNKNOWN',
-        name: isEn ? 'Unknown' : '未知类型',
-        description: isEn ? 'Insufficient data for analysis' : '数据不足，无法进行准确分析',
+        name: '未知类型',
+        description: '数据不足，无法进行准确分析',
       },
       statistics: {},
       semanticFingerprint: {},
       vibeIndex: '00000',
-      roastText: isEn ? 'Insufficient data for a roast' : '数据不足，无法生成吐槽',
-      personalityName: isEn ? 'Mystery Coder' : '未知人格',
+      roastText: '数据不足，无法生成吐槽',
+      personalityName: '未知人格',
       lpdef: 'L0P0D0E0F0',
     };
   }
