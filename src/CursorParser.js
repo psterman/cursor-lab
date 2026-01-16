@@ -68,7 +68,7 @@ export class CursorParser {
   async init() {
     // 使用全局基础路径构建 wasm 文件路径
     // 在开发环境：./sql-wasm.wasm
-    // 在生产环境：/Cursor-Clinical-Analysis/sql-wasm.wasm
+    // 在生产环境：/cursor-lab/sql-wasm.wasm
     const basePath = window.BASE_PATH || '';
     const wasmPath = basePath ? `${basePath}/sql-wasm.wasm` : './sql-wasm.wasm';
 

@@ -1239,7 +1239,7 @@
                     basePath = '';
                     if (isGitHubPages) {
                         // GitHub Pages: 从 pathname 提取仓库名
-                        // pathname 可能是: /Cursor-Clinical-Analysis/ 或 /Cursor-Clinical-Analysis/index.html
+                        // pathname 可能是: /cursor-lab/ 或 /cursor-lab/index.html
                         const pathParts = pathname.split('/').filter(p => p);
                         // 移除 'index.html' 如果存在
                         const cleanParts = pathParts.filter(p => p !== 'index.html' && p !== '');
@@ -1398,8 +1398,9 @@
                     } else {
                         // 生产环境：尝试多个路径（按优先级排序）
                         // 使用 window.BASE_PATH 作为备用，确保变量可用
-                        const effectiveBasePath = basePath || window.BASE_PATH || '';
-                        const effectiveCurrentDir = currentDir || (pathname.substring(0, pathname.lastIndexOf('/')) || '');
+                        // 安全获取 basePath：优先使用 window.BASE_PATH（已在 main.js 加载时设置）
+                        const effectiveBasePath = (typeof basePath !== 'undefined' ? basePath : '') || window.BASE_PATH || '';
+                        const effectiveCurrentDir = (typeof currentDir !== 'undefined' ? currentDir : '') || (pathname.substring(0, pathname.lastIndexOf('/')) || '');
                         
                         const i18nPaths = [];
                         
@@ -1430,7 +1431,7 @@
                         i18nPaths.push('/src/i18n.js');
                         
                         console.log('[i18n] 当前 URL:', window.location.href);
-                        console.log('[i18n] 基础路径 (basePath):', basePath);
+                        console.log('[i18n] 基础路径 (basePath):', typeof basePath !== 'undefined' ? basePath : 'undefined');
                         console.log('[i18n] 基础路径 (window.BASE_PATH):', window.BASE_PATH);
                         console.log('[i18n] 有效基础路径:', effectiveBasePath);
                         console.log('[i18n] 当前目录:', effectiveCurrentDir);

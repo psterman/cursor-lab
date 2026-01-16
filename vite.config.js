@@ -29,7 +29,8 @@ export default defineConfig({
   // 部署配置（GitHub Pages）
   // 根据实际部署的仓库名设置 base 路径
   // 开发模式使用 '/'，生产模式使用仓库名
-  base: process.env.NODE_ENV === 'production' ? '/Cursor-Clinical-Analysis/' : '/',
+  // 实际仓库：https://psterman.github.io/cursor-lab/
+  base: process.env.NODE_ENV === 'production' ? '/cursor-lab/' : '/',
   // 开发服务器配置
   server: {
     port: 3000,
