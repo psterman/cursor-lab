@@ -1,0 +1,86 @@
+{
+  "en_US": {
+    "fragile_ecosystem": {
+      "title": "[SUCCESS] Link abducted",
+      "body": "Link generated & abducted to clipboard.\nLength: 35 chars of pure spaghetti code.\nCapability: Desktop works (miraculously). Mobile is view-only because my CSS is a fragile ecosystem."
+    },
+    "honest_dev": {
+      "title": "[OK] Link ready",
+      "body": "Metadata: 35 chars.\nReality Check: Desktop has interactivity; Mobile is a glorified screenshot. I ran out of caffeine before I could fix the touch events."
+    },
+    "classic_scapegoat": {
+      "title": "[DONE] Link copied",
+      "body": "Size: 35 bytes.\nStatus: Interactive on Desktop. Mobile is 'View-only' as per the PM’s questionable requirements. Don't @ me."
+    },
+    "works_on_my_machine": {
+      "title": "[SUCCESS] Deployed",
+      "body": "Length: 35.\nEnvironment: It’s interactive on my 27-inch monitor, so it’s your problem now. Mobile users get the 'Minimalist' (read: broken) experience."
+    },
+    "stack_overflow": {
+      "title": "[INFO] Copied!",
+      "body": "Payload: 35 chars of code I found on Stack Overflow.\nDevice Logic: Desktop: Full Access. Mobile: Look but don't touch. My responsive design skills end at display: block."
+    },
+    "resource_squeezer": {
+      "title": "[200 OK] Generated",
+      "body": "Weight: 35 chars.\nWarning: Full interactive mode requires a real GPU. Your phone's CPU can't handle my unoptimized JS, so it's read-only."
+    },
+    "passive_aggressive": {
+      "title": "[SUCCESS] Oh look...",
+      "body": "Stats: 35 characters.\nSupport: Interactive on Desktop. Mobile is static, because apparently, making things work on touchscreens is 'too much to ask.'"
+    },
+    "legacy_code": {
+      "title": "[READY] Link copied",
+      "body": "Count: 35 chars. (Please don't refresh).\nLegacy Support: Desktop allows interaction. Mobile is view-only to prevent the entire backend from collapsing."
+    },
+    "cyberpunk": {
+      "title": "[SYSTEM] Uplink established",
+      "body": "Bitrate: 35 chars.\nUptime: PC: High Agency. Mobile: Low Fidelity. Life is hard, and so is mobile optimization."
+    },
+    "minimalist_lazy": {
+      "title": "[OK] Link's there",
+      "body": "35 chars.\nNotice: PC version allows clicking things. Mobile version is a digital museum—you can only look. I don't do media queries on weekends."
+    }
+  },
+  "zh_CN": {
+    "humble_adapter": {
+      "title": "[SUCCESS] 强行塞入",
+      "body": "链接搞定了，已经强行塞进剪贴板。\n反馈：长度 35，多一个字节服务器都要抗议。\n真相：PC端能点是因为我还没把 Bug 写进去，手机端只能看是因为我不想为难你的流量。"
+    },
+    "works_on_pc": {
+      "title": "[OK] 传送门开启",
+      "body": "传送门已开启（已自动复制）。数据：35 字符。\n兼容性：PC 端交互正常，手机端只能看。别问，问就是“在我电脑上是好的”。"
+    },
+    "pm_scapegoat": {
+      "title": "[DONE] 链接占领",
+      "body": "链接已生成，剪贴板已占领。长度：35 字节。\n由于 PM 没给预算，只有这么长。体验：PC 端全功能版，手机端“劝退版”（仅限观看）。"
+    },
+    "hardcore_disdain": {
+      "title": "[INFO] 链接就绪",
+      "body": "统计：35 字符（刚好够填满你的好奇心）。\n环境：电脑端允许你乱点，手机端建议保持安静，看一眼得了。"
+    },
+    "spaghetti_code": {
+      "title": "[WARN] 居然没崩",
+      "body": "链接生成成功，逻辑居然没崩。体积：35 个祖传字符。\n逻辑：PC 端支持交互（实验性功能），手机端仅支持静止画面（为了世界的和平）。"
+    },
+    "metaphysical": {
+      "title": "[SUCCESS] 大师开光",
+      "body": "链接已生成并复制。备注：35 字符。此链接经过大师开光。\n注意：电脑端能交互全靠运气，手机端不能点全靠底气。"
+    },
+    "ultra_minimalist": {
+      "title": "[OK] 拿走不谢",
+      "body": "大小：35。已复制。\n说明：屏幕大 (PC) 的随便玩，屏幕小 (手机) 的别瞎点。"
+    },
+    "client_is_god": {
+      "title": "[DONE] 尊贵适配",
+      "body": "您要的链接（35 字）已复制。差异：PC 端是尊贵的交互版，手机端是“阉割版”。\n内心 OS：“手机端不能交互”这种需求，我也很难办啊。"
+    },
+    "self_deprecating": {
+      "title": "[SUCCESS] 无效挣扎",
+      "body": "经过 0.001 秒的无效挣扎，链接已复制。计数：35 字符。\n状态：PC 端尚有余力交互，手机端已进入植物人模式（仅限围观）。"
+    },
+    "total_destruction": {
+      "title": "[SYSTEM] 认命吧",
+      "body": "链接已生成，长度 35。\n运行状态：电脑端可交互（大概吧）；手机端只能看（认命吧）。\n提示：如果手机端点不动，那是特色，不是 Bug。"
+    }
+  }
+}

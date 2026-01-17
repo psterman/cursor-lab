@@ -1,0 +1,12 @@
+# 忽略 Windows 保留设备名称文件
+src/nul
+
+# 临时修复脚本
+*.cjs
+fix_*.js
+
+# 备份文件
+*.backup
+
+# 日志和历史记录
+.waylog/
