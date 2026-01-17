@@ -1833,7 +1833,134 @@
             // 路由解析逻辑：检查 URL Hash 中的分享数据（优化版：支持压缩数据）
             useEffect(() => {
                 const hash = window.location.hash;
-                if (hash && hash.startsWith('#share=')) {
+
+                // 先检查是否是短链接格式（#s=）
+                if (hash && hash.startsWith('#s=')) {
+                    try {
+                        const encodedString = hash.substring(3); // 去掉 '#s='
+                        console.log('[分享] 检测到短链接格式，编码长度:', encodedString.length);
+
+                        // 解码短链接数据
+                        const previewData = decodePreviewData(encodedString);
+
+                        if (!previewData) {
+                            throw new Error('短链接解码失败');
+                        }
+
+                        console.log('[分享] 解码后的预览数据:', previewData);
+
+                        // 将数字索引转换回vibeIndex
+                        const vibeIndexStr = numberToVibeIndex(previewData.v);
+
+                        // 从JSON获取人格名称和吐槽文本
+                        const loadPersonalityData = async (vibeIndex) => {
+                            try {
+                                const response = await fetch(`src/personalityNames.json`);
+                                if (!response.ok) throw new Error('加载人格数据失败');
+                                const namesData = await response.json();
+
+                                const response2 = await fetch(`src/roastLibrary.json`);
+                                if (!response2.ok) throw new Error('加载吐槽数据失败');
+                                const roastData = await response2.json();
+
+                                return {
+                                    personalityName: namesData[vibeIndex] || `未知人格 ${vibeIndex}`,
+                                    vibeIndex: vibeIndex,
+                                    roastText: roastData[vibeIndex] || '暂无吐槽',
+                                    dimensions: null,
+                                    personalityType: null,
+                                    lpdef: null,
+                                    analysis: {
+                                        name: namesData[vibeIndex] || `未知人格 ${vibeIndex}`,
+                                        description: '',
+                                        traits: []
+                                    }
+                                };
+                            } catch (error) {
+                                console.error('[分享] 加载人格数据失败:', error);
+                                // 降级：返回默认数据
+                                return {
+                                    personalityName: `未知人格`,
+                                    vibeIndex: vibeIndexStr,
+                                    roastText: '数据加载失败，无法显示人格详情',
+                                    dimensions: null,
+                                    personalityType: null,
+                                    lpdef: null,
+                                    analysis: {
+                                        name: `未知人格`,
+                                        description: '',
+                                        traits: []
+                                    }
+                                };
+                            }
+                        };
+
+                        // 异步加载人格数据
+                        loadPersonalityData(vibeIndexStr).then(vibeResult => {
+                            console.log('[分享] 加载的人格数据:', vibeResult);
+
+                            // 构建简化的stats数据
+                            const now = Date.now();
+                            const usageDays = previewData.d;
+                            const earliestFileTime = now - (usageDays * 24 * 60 * 60 * 1000);
+
+                            const stats = {
+                                qingCount: previewData.q,
+                                earliestFileTime: earliestFileTime,
+                                totalConversations: 0,
+                                userMessages: 0,
+                                aiMessages: 0,
+                                totalCodeChars: 0,
+                                buCount: 0,
+                                totalUserChars: 0,
+                                userBehaviorStats: {
+                                    totalUserChars: 0,
+                                    avgUserMessageLength: 0,
+                                    questionMessageCount: 0,
+                                    techStack: {}
+                                }
+                            };
+
+                            // 设置分享模式
+                            setIsShareMode(true);
+
+                            // 存储到全局变量
+                            window.shareModeVibeResult = vibeResult;
+                            window.shareModeStats = stats;
+
+                            // 构建预览数据
+                            const previewDataState = {
+                                stats: stats,
+                                vibeResult: vibeResult,
+                                chatData: [],
+                                rankings: null
+                            };
+
+                            setAnalysisData(previewDataState);
+
+                            // 进入预览页面
+                            setStep('preview');
+
+                            console.log('[分享] ✅ 短链接解析成功，进入预览模式');
+                        }).catch(error => {
+                            console.error('[分享] 加载人格数据失败:', error);
+                            alert('加载人格数据失败，请刷新页面重试');
+                        });
+
+                        return; // 短链接处理完成，不继续处理完整链接
+                    } catch (error) {
+                        console.error('[分享] 短链接解析失败:', error);
+                        // 友好的错误提示
+                        alert('分享链接格式错误，无法加载数据。\n错误：' + error.message);
+
+                        // 提供测试链接选项
+                        if (confirm('是否要生成一个测试链接来验证分享功能？')) {
+                            testShareLink();
+                        }
+                    }
+                }
+                // 然后检查是否是完整链接格式（#share=）
+                else if (hash && hash.startsWith('#share=')) {
                     try {
                         const encodedString = hash.substring(7); // 去掉 '#share='
                         let shareData;
@@ -3273,9 +3400,205 @@
                 }, 100);
             };
 
-            // 生成分享链接（优化版：使用压缩，只保存关键数据）
+            // ===== 超短分享编码系统 =====
+
+            /**
+             * 将人格索引（00000-22222）转换为数字索引（0-242）
+             * vibeIndex是5位三进制编码，每位表示一个维度的等级
+             */
+            const vibeIndexToNumber = (vibeIndex) => {
+                // 将字符串转换为数字，然后解析为三进制
+                const digits = vibeIndex.split('').map(d => parseInt(d));
+                let num = 0;
+                for (let i = 0; i < 5; i++) {
+                    num = num * 3 + digits[i];
+                }
+                return num; // 0-242
+            };
+
+            /**
+             * 将数字索引（0-242）转换回vibeIndex（00000-22222）
+             */
+            const numberToVibeIndex = (num) => {
+                let digits = [];
+                for (let i = 0; i < 5; i++) {
+                    digits.unshift(num % 3);
+                    num = Math.floor(num / 3);
+                }
+                return digits.join('');
+            };
+
+            /**
+             * URL-safe Base64编码
+             * 避免使用+/=等特殊字符，用-_*代替
+             */
+            const urlSafeBase64Encode = (str) => {
+                const base64 = btoa(str);
+                return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+            };
+
+            /**
+             * URL-safe Base64解码
+             */
+            const urlSafeBase64Decode = (str) => {
+                let base64 = str.replace(/-/g, '+').replace(/_/g, '/');
+                // 补全padding
+                while (base64.length % 4 !== 0) {
+                    base64 += '=';
+                }
+                return atob(base64);
+            };
+
+            /**
+             * 超短编码：将预览数据压缩为最短字符串
+             * 数据结构：{ v: 0-242, q: qingCount, d: usageDays }
+             */
+            const encodePreviewData = (data) => {
+                const v = data.v || 0;  // 人格索引（0-242，1字节）
+                const q = data.q || 0;  // 赛博磕头次数（变长）
+                const d = data.d || 0;  // 使用天数（变长，假设最多3650天）
+
+                // 将数据打包成字节数组
+                // 格式：[v:1字节][q_len:1字节][q:变长][d_len:1字节][d:变长]
+                const qBytes = varintEncode(q);
+                const dBytes = varintEncode(d);
+
+                const buffer = new Uint8Array(1 + 1 + qBytes.length + 1 + dBytes.length);
+                let offset = 0;
+
+                buffer[offset++] = v;  // 人格索引
+                buffer[offset++] = qBytes.length;  // q长度
+                buffer.set(qBytes, offset);  // q值
+                offset += qBytes.length;
+                buffer[offset++] = dBytes.length;  // d长度
+                buffer.set(dBytes, offset);  // d值
+
+                // 转换为Base64字符串
+                const base64Str = btoa(String.fromCharCode.apply(null, buffer));
+                return urlSafeBase64Encode(base64Str);
+            };
+
+            /**
+             * 超短解码：从短字符串还原预览数据
+             */
+            const decodePreviewData = (str) => {
+                try {
+                    const base64Str = urlSafeBase64Decode(str);
+                    const buffer = new Uint8Array(base64Str.split('').map(c => c.charCodeAt(0)));
+
+                    let offset = 0;
+                    const v = buffer[offset++];  // 人格索引
+                    const qLen = buffer[offset++];  // q长度
+                    const qBytes = buffer.subarray(offset, offset + qLen);
+                    offset += qLen;
+                    const dLen = buffer[offset++];  // d长度
+                    const dBytes = buffer.subarray(offset, offset + dLen);
+
+                    return {
+                        v: v,
+                        q: varintDecode(qBytes),
+                        d: varintDecode(dBytes)
+                    };
+                } catch (error) {
+                    console.error('[解码] 解码失败:', error);
+                    return null;
+                }
+            };
+
+            /**
+             * Varint编码（变长整数编码）
+             */
+            const varintEncode = (num) => {
+                const bytes = [];
+                while (num > 127) {
+                    bytes.push((num & 0x7F) | 0x80);
+                    num = Math.floor(num / 128);
+                }
+                bytes.push(num & 0x7F);
+                return new Uint8Array(bytes);
+            };
+
+            /**
+             * Varint解码
+             */
+            const varintDecode = (bytes) => {
+                let num = 0;
+                let shift = 0;
+                for (let i = 0; i < bytes.length; i++) {
+                    const byte = bytes[i];
+                    num |= (byte & 0x7F) << shift;
+                    if (!(byte & 0x80)) break;
+                    shift += 7;
+                }
+                return num;
+            };
+
+            /**
+             * 生成短链接的分享函数
+             */
+            const generateShortShareUrl = () => {
+                try {
+                    const vibeResult = window.analysisModule?.getVibeResult();
+                    const stats = window.analysisModule?.getGlobalStats();
+
+                    if (!vibeResult || !vibeResult.vibeIndex || !stats) {
+                        console.warn('[分享] 没有可分享的数据');
+                        return null;
+                    }
+
+                    // 提取关键数据
+                    const vibeIndexNum = vibeIndexToNumber(vibeResult.vibeIndex);
+                    const qingCount = stats.qingCount || 0;
+                    const usageDays = calculateUsageDays(stats);
+
+                    console.log('[分享] 原始数据:', {
+                        vibeIndex: vibeResult.vibeIndex,
+                        vibeIndexNum: vibeIndexNum,
+                        qingCount: qingCount,
+                        usageDays: usageDays
+                    });
+
+                    // 编码数据
+                    const encoded = encodePreviewData({
+                        v: vibeIndexNum,
+                        q: qingCount,
+                        d: usageDays
+                    });
+
+                    console.log('[分享] 编码后长度:', encoded.length, '字符');
+
+                    // 生成链接
+                    const basePath = window.location.pathname.replace(/\/[^/]*$/, '') || '';
+                    const shareUrl = window.location.origin + basePath + '#s=' + encoded;
+
+                    console.log('[分享] 链接总长度:', shareUrl.length, '字符');
+
+                    if (shareUrl.length > 2000) {
+                        console.warn('[分享] 链接过长:', shareUrl.length);
+                    }
+
+                    return shareUrl;
+                } catch (error) {
+                    console.error('[分享] 生成短链接失败:', error);
+                    return null;
+                }
+            };
+
+            // ===== 超短分享编码系统结束 =====
+
+            // 生成分享链接（优化版：优先使用短链接）
             const generateShareUrl = (testMode = false) => {
                 try {
+                    // 优先尝试生成短链接（用于预览页面分享）
+                    const shortUrl = generateShortShareUrl();
+                    if (shortUrl) {
+                        console.log('[分享] 使用短链接:', shortUrl.length, '字符');
+                        return shortUrl;
+                    }
+                    
+                    console.log('[分享] 短链接生成失败，使用完整链接');
+                    
+                    // 降级到完整链接
                     // 获取排名数据（从 window.userRankings）
                     const rankings = window.userRankings || {};
                     const stats = window.analysisModule?.getGlobalStats() || null;
