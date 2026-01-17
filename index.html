@@ -1541,6 +1541,547 @@
             );
         }
 
+        // 答案之书卡片组件（用于替换人格解锁库卡片）
+        function AnswerBookCard({ lang = 'zh-CN' }) {
+            const [prompt, setPrompt] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [liked, setLiked] = useState(false);
+            const isEn = lang === 'en';
+
+            // 获取 API 端点
+            const getApiEndpoint = () => {
+                if (typeof window !== 'undefined') {
+                    const envApiUrl = window.__API_ENDPOINT__ || window.API_ENDPOINT;
+                    if (envApiUrl) {
+                        return envApiUrl;
+                    }
+                    const metaApi = document.querySelector('meta[name="api-endpoint"]');
+                    if (metaApi && metaApi.content) {
+                        return metaApi.content;
+                    }
+                }
+                return 'https://cursor-clinical-analysis.psterman.workers.dev/';
+            };
+
+            // 调试：输出组件初始化信息
+            useEffect(() => {
+                const apiEndpoint = getApiEndpoint();
+                console.log('[AnswerBookCard] 组件初始化:', {
+                    lang: lang,
+                    apiEndpoint: apiEndpoint,
+                    apiEndpoint类型: typeof apiEndpoint,
+                    apiEndpoint是否为空: !apiEndpoint || apiEndpoint === '',
+                    timestamp: new Date().toISOString(),
+                });
+            }, []);
+
+            // 获取随机提示
+            const fetchRandomPrompt = async () => {
+                setLoading(true);
+                setError(null);
+                setLiked(false);
+                
+                const apiEndpoint = getApiEndpoint();
+                // 确保 apiEndpoint 以斜杠结尾，然后拼接 API 路径
+                const baseUrl = apiEndpoint?.endsWith('/') ? apiEndpoint : `${apiEndpoint}/`;
+                const requestUrl = `${baseUrl}api/random_prompt`;
+                
+                // 调试：输出请求信息
+                console.log('[AnswerBookCard] 准备发起请求:', {
+                    apiEndpoint: apiEndpoint,
+                    requestUrl: requestUrl,
+                    apiEndpoint是否以斜杠结尾: apiEndpoint?.endsWith('/'),
+                });
+                
+                try {
+                    const response = await fetch(requestUrl, {
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        mode: 'cors',
+                        cache: 'no-cache',
+                    });
+
+                    // 调试：输出响应状态
+                    console.log('[AnswerBookCard] 响应状态:', {
+                        ok: response.ok,
+                        status: response.status,
+                        statusText: response.statusText,
+                        headers: Object.fromEntries(response.headers.entries()),
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        console.log('[AnswerBookCard] 获取到的数据:', {
+                            data: data,
+                            data类型: typeof data,
+                            dataKeys: data ? Object.keys(data) : 'null',
+                            content: data?.content,
+                            id: data?.id,
+                        });
+                        setPrompt(data);
+                    } else {
+                        const errorText = await response.text().catch(() => '无法读取错误信息');
+                        console.error('[AnswerBookCard] 响应失败:', {
+                            status: response.status,
+                            statusText: response.statusText,
+                            errorText: errorText,
+                        });
+                        throw new Error(isEn ? `Failed to fetch prompt: ${response.status}` : `获取提示失败: ${response.status}`);
+                    }
+                } catch (err) {
+                    console.error('[AnswerBookCard] 获取提示失败:', {
+                        error: err,
+                        message: err.message,
+                        stack: err.stack,
+                        name: err.name,
+                    });
+                    setError(err.message || (isEn ? 'Failed to load prompt' : '加载提示失败'));
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            // 点赞提示
+            const handleLike = async () => {
+                if (!prompt || liked) return;
+                
+                try {
+                    const apiEndpoint = getApiEndpoint();
+                    // 确保 apiEndpoint 以斜杠结尾，然后拼接 API 路径
+                    const baseUrl = apiEndpoint?.endsWith('/') ? apiEndpoint : `${apiEndpoint}/`;
+                    const response = await fetch(`${baseUrl}api/like_prompt`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        mode: 'cors',
+                        body: JSON.stringify({ id: prompt.id }),
+                    });
+
+                    if (response.ok) {
+                        setLiked(true);
+                    } else {
+                        console.warn('[AnswerBookCard] 点赞失败:', response.status);
+                    }
+                } catch (err) {
+                    console.error('[AnswerBookCard] 点赞请求失败:', err);
+                }
+            };
+
+            // 组件加载时获取数据
+            useEffect(() => {
+                console.log('[AnswerBookCard] useEffect 触发，准备获取数据');
+                fetchRandomPrompt();
+            }, []);
+
+            return (
+                <div 
+                    className="stat-card"
+                    style={{
+                        textAlign: 'center',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        minHeight: '140px',
+                        padding: '16px',
+                    }}
+                >
+                    {loading && (
+                        <div style={{ 
+                            color: 'var(--accent-terminal)', 
+                            fontFamily: "'JetBrains Mono', monospace",
+                            fontSize: '12px',
+                            margin: 'auto 0'
+                        }}>
+                            <div className="w-2 h-4 bg-green-500 animate-pulse inline-block" style={{ marginRight: '6px' }} />
+                            {isEn ? '> LOADING...' : '> 加载中...'}
+                        </div>
+                    )}
+
+                    {error && (
+                        <div style={{ 
+                            color: '#ef4444', 
+                            fontFamily: "'JetBrains Mono', monospace",
+                            fontSize: '11px',
+                            margin: 'auto 0'
+                        }}>
+                            {isEn ? '> ERROR' : '> 错误'}
+                        </div>
+                    )}
+
+                    {!loading && !error && prompt && (
+                        <>
+                            <p className="stat-label" style={{ marginBottom: '8px' }}>
+                                {isEn ? 'ANSWER BOOK' : '答案之书'}
+                            </p>
+                            <div 
+                                style={{
+                                    color: 'var(--text-main)',
+                                    fontSize: '13px',
+                                    lineHeight: '1.6',
+                                    fontFamily: "'JetBrains Mono', monospace",
+                                    marginBottom: '12px',
+                                    minHeight: '60px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    wordBreak: 'break-word',
+                                    flex: 1,
+                                }}
+                            >
+                                {prompt.content || (isEn ? 'No content' : '暂无内容')}
+                            </div>
+                            <div style={{ 
+                                display: 'flex', 
+                                gap: '8px', 
+                                justifyContent: 'center',
+                                marginTop: 'auto'
+                            }}>
+                                <button
+                                    onClick={handleLike}
+                                    disabled={liked}
+                                    style={{
+                                        padding: '6px 12px',
+                                        background: liked ? 'var(--accent-terminal)' : 'transparent',
+                                        border: '1px solid var(--accent-terminal)',
+                                        borderRadius: '2px',
+                                        color: liked ? '#050505' : 'var(--accent-terminal)',
+                                        fontFamily: "'JetBrains Mono', monospace",
+                                        fontSize: '10px',
+                                        fontWeight: '600',
+                                        textTransform: 'uppercase',
+                                        letterSpacing: '0.05em',
+                                        cursor: liked ? 'default' : 'pointer',
+                                        transition: 'all 0.2s ease',
+                                        opacity: liked ? 0.7 : 1,
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        if (!liked) {
+                                            e.target.style.background = 'var(--accent-terminal)';
+                                            e.target.style.color = '#050505';
+                                        }
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        if (!liked) {
+                                            e.target.style.background = 'transparent';
+                                            e.target.style.color = 'var(--accent-terminal)';
+                                        }
+                                    }}
+                                >
+                                    {liked ? '✓' : '♥'}
+                                </button>
+                                <button
+                                    onClick={fetchRandomPrompt}
+                                    style={{
+                                        padding: '6px 12px',
+                                        background: 'transparent',
+                                        border: '1px solid var(--accent-terminal)',
+                                        borderRadius: '2px',
+                                        color: 'var(--accent-terminal)',
+                                        fontFamily: "'JetBrains Mono', monospace",
+                                        fontSize: '10px',
+                                        fontWeight: '600',
+                                        textTransform: 'uppercase',
+                                        letterSpacing: '0.05em',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s ease',
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.target.style.background = 'var(--accent-terminal)';
+                                        e.target.style.color = '#050505';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.target.style.background = 'transparent';
+                                        e.target.style.color = 'var(--accent-terminal)';
+                                    }}
+                                >
+                                    {isEn ? 'NEXT' : '下一条'}
+                                </button>
+                            </div>
+                        </>
+                    )}
+                </div>
+            );
+        }
+
+        // 答案之书模式组件（完整版，保留用于其他用途）
+        function PersonaSection({ stats, t, apiEndpoint, lang = 'zh-CN' }) {
+            const [prompt, setPrompt] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [liked, setLiked] = useState(false);
+            const isEn = lang === 'en';
+
+            // 调试：输出组件接收的参数
+            console.log('[PersonaSection] 组件参数:', {
+                stats: stats,
+                t: typeof t === 'function' ? '✓ 函数可用' : '✗ 函数不可用',
+                apiEndpoint: apiEndpoint,
+                lang: lang,
+                apiEndpoint类型: typeof apiEndpoint,
+                apiEndpoint长度: apiEndpoint?.length,
+                apiEndpoint是否为空: !apiEndpoint || apiEndpoint === '',
+            });
+
+            // 获取随机提示
+            const fetchRandomPrompt = async () => {
+                if (!apiEndpoint) {
+                    console.error('[PersonaSection] apiEndpoint 未定义');
+                    setError('API 端点未配置');
+                    setLoading(false);
+                    return;
+                }
+                
+                setLoading(true);
+                setError(null);
+                setLiked(false);
+                
+                // 使用 apiEndpoint 拼接 API 路径
+                const requestUrl = `${apiEndpoint}api/random_prompt`;
+                console.log('[PersonaSection] 准备发起请求:', {
+                    apiEndpoint: apiEndpoint,
+                    requestUrl: requestUrl,
+                });
+                
+                try {
+                    const response = await fetch(requestUrl, {
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        mode: 'cors',
+                        cache: 'no-cache',
+                    });
+
+                    // 调试：输出响应状态
+                    console.log('[PersonaSection] 响应状态:', {
+                        ok: response.ok,
+                        status: response.status,
+                        statusText: response.statusText,
+                        headers: Object.fromEntries(response.headers.entries()),
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        console.log('[PersonaSection] 获取到的数据:', {
+                            data: data,
+                            data类型: typeof data,
+                            dataKeys: data ? Object.keys(data) : 'null',
+                            content: data?.content,
+                            id: data?.id,
+                        });
+                        setPrompt(data);
+                    } else {
+                        const errorText = await response.text().catch(() => '无法读取错误信息');
+                        console.error('[PersonaSection] 响应失败:', {
+                            status: response.status,
+                            statusText: response.statusText,
+                            errorText: errorText,
+                        });
+                        throw new Error(isEn ? `Failed to fetch prompt: ${response.status}` : `获取提示失败: ${response.status}`);
+                    }
+                } catch (err) {
+                    console.error('[PersonaSection] 获取提示失败:', {
+                        error: err,
+                        message: err.message,
+                        stack: err.stack,
+                        name: err.name,
+                    });
+                    setError(err.message || (isEn ? 'Failed to load prompt' : '加载提示失败'));
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            // 点赞提示
+            const handleLike = async () => {
+                if (!prompt || liked) {
+                    console.log('[PersonaSection] 点赞被跳过:', {
+                        hasPrompt: !!prompt,
+                        alreadyLiked: liked,
+                        promptId: prompt?.id,
+                    });
+                    return;
+                }
+                
+                // 确保 apiEndpoint 以斜杠结尾，然后拼接 API 路径
+                const baseUrl = apiEndpoint?.endsWith('/') ? apiEndpoint : `${apiEndpoint}/`;
+                const likeUrl = `${baseUrl}api/like_prompt`;
+                console.log('[PersonaSection] 准备点赞:', {
+                    apiEndpoint: apiEndpoint,
+                    likeUrl: likeUrl,
+                    promptId: prompt.id,
+                });
+                
+                try {
+                    const response = await fetch(likeUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        mode: 'cors',
+                        body: JSON.stringify({ id: prompt.id }),
+                    });
+
+                    console.log('[PersonaSection] 点赞响应:', {
+                        ok: response.ok,
+                        status: response.status,
+                        statusText: response.statusText,
+                    });
+
+                    if (response.ok) {
+                        setLiked(true);
+                        console.log('[PersonaSection] 点赞成功');
+                    } else {
+                        const errorText = await response.text().catch(() => '无法读取错误信息');
+                        console.warn('[PersonaSection] 点赞失败:', {
+                            status: response.status,
+                            statusText: response.statusText,
+                            errorText: errorText,
+                        });
+                    }
+                } catch (err) {
+                    console.error('[PersonaSection] 点赞请求失败:', {
+                        error: err,
+                        message: err.message,
+                        stack: err.stack,
+                    });
+                }
+            };
+
+            // 组件加载时获取数据
+            useEffect(() => {
+                console.log('[PersonaSection] useEffect 触发:', {
+                    apiEndpoint: apiEndpoint,
+                    timestamp: new Date().toISOString(),
+                });
+                fetchRandomPrompt();
+            }, [apiEndpoint]);
+
+            return (
+                <div className="max-w-2xl w-full mx-auto">
+                    <div 
+                        className="card-terminal"
+                        style={{
+                            background: 'var(--card-bg)',
+                            border: '1px solid var(--card-border)',
+                            borderRadius: '2px',
+                            padding: '48px 32px',
+                            position: 'relative',
+                            minHeight: '400px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            textAlign: 'center',
+                        }}
+                    >
+                        {loading && (
+                            <div style={{ color: 'var(--accent-terminal)', fontFamily: "'JetBrains Mono', monospace" }}>
+                                <div className="w-2 h-5 bg-green-500 animate-pulse inline-block" style={{ marginRight: '8px' }} />
+                                {isEn ? '> LOADING...' : '> 加载中...'}
+                            </div>
+                        )}
+
+                        {error && (
+                            <div style={{ color: '#ef4444', fontFamily: "'JetBrains Mono', monospace", marginBottom: '24px' }}>
+                                {isEn ? '> ERROR: ' : '> 错误: '}{error}
+                            </div>
+                        )}
+
+                        {!loading && !error && prompt && (
+                            <>
+                                <div 
+                                    style={{
+                                        color: 'var(--text-main)',
+                                        fontSize: 'clamp(1.25rem, 3vw, 1.75rem)',
+                                        lineHeight: '1.8',
+                                        fontFamily: "'JetBrains Mono', monospace",
+                                        marginBottom: '48px',
+                                        padding: '0 16px',
+                                        wordBreak: 'break-word',
+                                    }}
+                                >
+                                    {prompt.content || (isEn ? 'No content available' : '暂无内容')}
+                                </div>
+
+                                <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', alignItems: 'center' }}>
+                                    <button
+                                        onClick={handleLike}
+                                        disabled={liked}
+                                        style={{
+                                            padding: '12px 24px',
+                                            background: liked ? 'var(--accent-terminal)' : 'transparent',
+                                            border: '1px solid var(--accent-terminal)',
+                                            borderRadius: '2px',
+                                            color: liked ? '#050505' : 'var(--accent-terminal)',
+                                            fontFamily: "'JetBrains Mono', monospace",
+                                            fontSize: '14px',
+                                            fontWeight: '600',
+                                            textTransform: 'uppercase',
+                                            letterSpacing: '0.1em',
+                                            cursor: liked ? 'default' : 'pointer',
+                                            transition: 'all 0.2s ease',
+                                            opacity: liked ? 0.7 : 1,
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            if (!liked) {
+                                                e.target.style.background = 'var(--accent-terminal)';
+                                                e.target.style.color = '#050505';
+                                                e.target.style.boxShadow = '0 0 8px var(--accent-terminal)';
+                                            }
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            if (!liked) {
+                                                e.target.style.background = 'transparent';
+                                                e.target.style.color = 'var(--accent-terminal)';
+                                                e.target.style.boxShadow = 'none';
+                                            }
+                                        }}
+                                    >
+                                        {liked ? (isEn ? '✓ LIKED' : '✓ 已点赞') : (isEn ? 'LIKE' : '点赞')}
+                                    </button>
+
+                                    <button
+                                        onClick={fetchRandomPrompt}
+                                        style={{
+                                            padding: '12px 24px',
+                                            background: 'transparent',
+                                            border: '1px solid var(--accent-terminal)',
+                                            borderRadius: '2px',
+                                            color: 'var(--accent-terminal)',
+                                            fontFamily: "'JetBrains Mono', monospace",
+                                            fontSize: '14px',
+                                            fontWeight: '600',
+                                            textTransform: 'uppercase',
+                                            letterSpacing: '0.1em',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.2s ease',
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.target.style.background = 'var(--accent-terminal)';
+                                            e.target.style.color = '#050505';
+                                            e.target.style.boxShadow = '0 0 8px var(--accent-terminal)';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.target.style.background = 'transparent';
+                                            e.target.style.color = 'var(--accent-terminal)';
+                                            e.target.style.boxShadow = 'none';
+                                        }}
+                                    >
+                                        {isEn ? 'NEXT' : '下一条'}
+                                    </button>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
         function App() {
             // 语言状态管理
             const [lang, setLang] = useState(() => {
@@ -1556,6 +2097,20 @@
                 }
                 return key;
             };
+            
+            // 获取 API 端点（从 meta 标签获取）
+            const apiEndpoint = (() => {
+                if (typeof window !== 'undefined') {
+                    const metaElement = document.querySelector('meta[name="api-endpoint"]');
+                    if (metaElement) {
+                        const content = metaElement.getAttribute('content');
+                        if (content) {
+                            return content;
+                        }
+                    }
+                }
+                return 'https://cursor-clinical-analysis.psterman.workers.dev/';
+            })();
             
             // 重新创建 Dashboard DOM（使用当前语言）
             const recreateDashboardDOM = (currentLang) => {
@@ -1596,11 +2151,7 @@
                                         <p class="stat-value" id="techRank" style="color: #ffffff;">${loadingText}</p>
                                         <p class="stat-comparison">${getText('dashboard.rankUnit')}</p>
                                     </div>
-                                    <div class="stat-card" style="text-align: center;">
-                                        <p class="stat-label">${getText('dashboard.personalityUnlock')}</p>
-                                        <p class="stat-value" id="personalityUnlock" style="color: #ffffff;">${loadingText}</p>
-                                        <p class="stat-comparison">243 ${getText('dashboard.personalityUnit')}</p>
-                                    </div>
+                                    <div id="answerBookCardContainer" style="text-align: center;"></div>
                                 </div>
                             </div>
 
@@ -1746,6 +2297,41 @@
                         </div>
                     </div>
                 `;
+                
+                // 渲染答案之书卡片组件
+                setTimeout(() => {
+                    const answerBookContainer = document.getElementById('answerBookCardContainer');
+                    console.log('[recreateDashboardDOM] 尝试渲染 AnswerBookCard:', {
+                        container存在: !!answerBookContainer,
+                        containerId: answerBookContainer?.id,
+                        windowReact存在: !!window.React,
+                        windowReactDOM存在: !!window.ReactDOM,
+                        React存在: typeof React !== 'undefined',
+                        ReactDOM存在: typeof ReactDOM !== 'undefined',
+                        currentLang: currentLang,
+                    });
+                    
+                    if (answerBookContainer && window.React && window.ReactDOM) {
+                        console.log('[recreateDashboardDOM] 使用 window.React 渲染');
+                        const root = window.ReactDOM.createRoot(answerBookContainer);
+                        root.render(window.React.createElement(AnswerBookCard, { lang: currentLang }));
+                        console.log('[recreateDashboardDOM] AnswerBookCard 已渲染');
+                    } else if (answerBookContainer && React && ReactDOM) {
+                        // 备用方案：如果 React 在局部作用域中
+                        console.log('[recreateDashboardDOM] 使用局部 React 渲染');
+                        const root = ReactDOM.createRoot(answerBookContainer);
+                        root.render(React.createElement(AnswerBookCard, { lang: currentLang }));
+                        console.log('[recreateDashboardDOM] AnswerBookCard 已渲染（备用方案）');
+                    } else {
+                        console.warn('[recreateDashboardDOM] 无法渲染 AnswerBookCard:', {
+                            container存在: !!answerBookContainer,
+                            windowReact: !!window.React,
+                            windowReactDOM: !!window.ReactDOM,
+                            React: typeof React,
+                            ReactDOM: typeof ReactDOM,
+                        });
+                    }
+                }, 100);
             };
             
             // 语言切换函数
@@ -2716,6 +3302,24 @@
                                 window.analysisModule.renderFullDashboard();
                                 console.log('Dashboard 渲染完成');
                                 
+                                // 确保 AnswerBookCard 在 Dashboard 渲染后也能正确渲染
+                                setTimeout(() => {
+                                    const answerBookContainer = document.getElementById('answerBookCardContainer');
+                                    console.log('[renderFullDashboard后] 检查 AnswerBookCard 容器:', {
+                                        container存在: !!answerBookContainer,
+                                        containerId: answerBookContainer?.id,
+                                        containerParent: answerBookContainer?.parentElement?.id,
+                                        windowReact存在: !!window.React,
+                                        windowReactDOM存在: !!window.ReactDOM,
+                                    });
+                                    
+                                    if (answerBookContainer && !answerBookContainer.hasChildNodes() && window.React && window.ReactDOM) {
+                                        console.log('[renderFullDashboard后] 重新渲染 AnswerBookCard');
+                                        const root = window.ReactDOM.createRoot(answerBookContainer);
+                                        root.render(window.React.createElement(AnswerBookCard, { lang: lang }));
+                                    }
+                                }, 200);
+                                
                                 // 延迟更新排名显示（确保 DOM 元素已创建）
                                 setTimeout(async () => {
                                     if (window.userRankings) {
@@ -2784,16 +3388,12 @@
                                 
                                 const totalUsersEl = document.getElementById('totalTestUsers');
                                 const techRankEl = document.getElementById('techRank');
-                                const personalityUnlockEl = document.getElementById('personalityUnlock');
                                 
                                 if (totalUsersEl && totalUsers >= 0) {
                                     totalUsersEl.textContent = formatNumberLocal(totalUsers);
                                 }
                                 if (techRankEl && techRank >= 0) {
                                     techRankEl.textContent = formatNumberLocal(techRank);
-                                }
-                                if (personalityUnlockEl && unlockedCount >= 0) {
-                                    personalityUnlockEl.textContent = unlockedCount.toFixed(1) + '%';
                                 }
                                 
                                 // 检查是否有待执行的动画数据（来自 POST 请求）
@@ -2811,40 +3411,7 @@
                                         animateNumberUpdate('techRank', animData.techRank.old, animData.techRank.new, formatNumberLocal);
                                     }
                                     
-                                    // 更新人格库解锁，带跳动效果
-                                    if (animData.unlockedCount.old !== animData.unlockedCount.new) {
-                                        const animatePercentage = (elementId, oldVal, newVal) => {
-                                            const element = document.getElementById(elementId);
-                                            if (!element) return;
-                                            
-                                            element.classList.add('animate-pulse');
-                                            const diff = newVal - oldVal;
-                                            const duration = 800;
-                                            const steps = 30;
-                                            const stepValue = diff / steps;
-                                            let currentStep = 0;
-                                            
-                                            const animate = () => {
-                                                if (currentStep < steps) {
-                                                    const currentValue = oldVal + stepValue * currentStep;
-                                                    element.textContent = currentValue.toFixed(1) + '%';
-                                                    currentStep++;
-                                                    requestAnimationFrame(() => {
-                                                        setTimeout(animate, duration / steps);
-                                                    });
-                                                } else {
-                                                    element.textContent = newVal.toFixed(1) + '%';
-                                                    setTimeout(() => {
-                                                        element.classList.remove('animate-pulse');
-                                                    }, 100);
-                                                }
-                                            };
-                                            
-                                            animate();
-                                        };
-                                        
-                                        animatePercentage('personalityUnlock', animData.unlockedCount.old, animData.unlockedCount.new);
-                                    }
+                                    // 人格库解锁已替换为答案之书组件，移除百分比进度条逻辑
                                     
                                     // 清空动画数据
                                     animationDataRef.current = null;
@@ -3360,7 +3927,6 @@
                                             // 更新 DOM 元素
                                             const totalUsersEl = document.getElementById('totalTestUsers');
                                             const techRankEl = document.getElementById('techRank');
-                                            const personalityUnlockEl = document.getElementById('personalityUnlock');
                                             
                                             if (totalUsersEl) {
                                                 // 使用 formatNumber 处理显示格式
@@ -3389,21 +3955,11 @@
                                                 console.warn('[实时更新] 未找到 techRank 元素');
                                             }
                                             
-                                            if (personalityUnlockEl) {
-                                                personalityUnlockEl.textContent = calculatedUnlocked.toFixed(1) + '%';
-                                                personalityUnlockEl.classList.add('animate-pulse');
-                                                setTimeout(() => {
-                                                    personalityUnlockEl.classList.remove('animate-pulse');
-                                                }, 600);
-                                                console.log('[实时更新] 人格库解锁已更新:', calculatedUnlocked.toFixed(1) + '%');
-                                            } else {
-                                                console.warn('[实时更新] 未找到 personalityUnlock 元素');
-                                            }
+                                            // 人格库解锁已替换为答案之书组件，移除百分比更新逻辑
                                             
                                             console.log('[实时更新] 统计数据已全部更新:', {
                                                 totalUsers: value,
-                                                techRank: calculatedRank,
-                                                unlockedCount: calculatedUnlocked
+                                                techRank: calculatedRank
                                             });
                                         } else {
                                             console.warn('[实时更新] API 返回的值无效');
@@ -4669,6 +5225,30 @@
                             )}
                             
                             <div id="fullReportContainer" style={{display: 'block'}}></div>
+                        </div>
+                    )}
+
+                    {/* 答案之书模式阶段 */}
+                    {step === 'persona' && (
+                        <div className="w-full" style={{minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 20px'}}>
+                            {(() => {
+                                console.log('[App] 渲染 PersonaSection，传递的参数:', {
+                                    stats: analysisData?.stats || null,
+                                    hasT: typeof t === 'function',
+                                    apiEndpoint: apiEndpoint,
+                                    lang: lang,
+                                    analysisData: analysisData,
+                                    step: step,
+                                });
+                                return (
+                                    <PersonaSection 
+                                        stats={analysisData?.stats || null} 
+                                        t={t} 
+                                        apiEndpoint={apiEndpoint} 
+                                        lang={lang} 
+                                    />
+                                );
+                            })()}
                         </div>
                     )}
 
