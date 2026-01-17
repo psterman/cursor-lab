@@ -3549,12 +3549,7 @@
                     const base64Str = urlSafeBase64Decode(str);
                     console.log('[解码] Base64解码后:', base64Str, '长度:', base64Str.length);
 
-                    // ✅ 修复：使用正确的Base64到Uint8Array转换
-                    const binaryString = atob(base64Str);
-                    const buffer = new Uint8Array(binaryString.length);
-                    for (let i = 0; i < binaryString.length; i++) {
-                        buffer[i] = binaryString.charCodeAt(i);
-                    }
+                    const buffer = new Uint8Array(base64Str.split('').map(c => c.charCodeAt(0)));
                     console.log('[解码] 转换为字节数组，长度:', buffer.length, '内容:', Array.from(buffer));
 
                     let pos = 0;
