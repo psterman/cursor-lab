@@ -7,6 +7,7 @@
 import ROAST_LIBRARY from './roastLibrary.json';
 import ROAST_LIBRARY_EN from './roastLibrary2.json';
 import PERSONALITY_NAMES from './personalityNames.json';
+import PERSONALITY_NAMES_EN from './personalityNamesEn.json';
 
 // 导入维度数据 JSON
 import LOGIC_DATA from './logic.json';
@@ -446,6 +447,10 @@ export function getVibeIndex(dimensions) {
  */
 export function getPersonalityName(index, lang = 'zh-CN', personalityType = null) {
   if (lang === 'en') {
+    // 优先使用英文人格称号库
+    if (PERSONALITY_NAMES_EN[index]) {
+      return PERSONALITY_NAMES_EN[index];
+    }
     // 如果有 personalityType，尝试从类型定义中获取名称
     if (personalityType) {
       const vibeTypes = getVibeCodingerTypes('en');

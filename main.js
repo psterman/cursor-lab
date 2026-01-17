@@ -1278,12 +1278,8 @@ export function formatNumber(num, lang = null) {
     // 百万
     return (num / 1000000).toFixed(1) + '百万';
   }
-  if (num >= 100000) {
-    // 十万
-    return (num / 100000).toFixed(1) + '十万';
-  }
   if (num >= 10000) {
-    // 万
+    // 万（包含10万-99.9万，显示为XX.X万，符合中文习惯）
     return (num / 10000).toFixed(1) + '万';
   }
   if (num >= 1000) {

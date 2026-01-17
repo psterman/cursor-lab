@@ -1743,11 +1743,6 @@
                                 </div>
                             </div>
                             
-                            <div style="text-align: center; margin-top: 50px;">
-                                <button class="btn" id="exportBtn" style="background: rgba(255,255,255,0.1); border: 1px solid var(--card-border);">
-                                    <span>${getText('dashboard.exportBtn')}</span>
-                                </button>
-                            </div>
                         </div>
                     </div>
                 `;
@@ -1855,39 +1850,51 @@
                         // 从JSON获取人格名称和吐槽文本
                         const loadPersonalityData = async (vibeIndex) => {
                             try {
+                                const currentLang = localStorage.getItem('appLanguage') || 'zh-CN';
+                                const isEn = currentLang === 'en';
+                                
                                 const response = await fetch(`src/personalityNames.json`);
                                 if (!response.ok) throw new Error('加载人格数据失败');
                                 const namesData = await response.json();
 
-                                const response2 = await fetch(`src/roastLibrary.json`);
+                                // 根据语言加载对应的吐槽库
+                                const roastLibraryFile = isEn ? 'src/roastLibrary2.json' : 'src/roastLibrary.json';
+                                const response2 = await fetch(roastLibraryFile);
                                 if (!response2.ok) throw new Error('加载吐槽数据失败');
                                 const roastData = await response2.json();
 
+                                const defaultRoastText = isEn ? 'No roast available' : '暂无吐槽';
+                                const defaultPersonalityName = isEn ? `Unknown Personality ${vibeIndex}` : `未知人格 ${vibeIndex}`;
+                                const fallbackPersonalityName = isEn ? 'Unknown Personality' : '未知人格';
+                                const fallbackRoastText = isEn ? 'Failed to load personality data' : '数据加载失败，无法显示人格详情';
+
                                 return {
-                                    personalityName: namesData[vibeIndex] || `未知人格 ${vibeIndex}`,
+                                    personalityName: namesData[vibeIndex] || defaultPersonalityName,
                                     vibeIndex: vibeIndex,
-                                    roastText: roastData[vibeIndex] || '暂无吐槽',
+                                    roastText: roastData[vibeIndex] || defaultRoastText,
                                     dimensions: null,
                                     personalityType: null,
                                     lpdef: null,
                                     analysis: {
-                                        name: namesData[vibeIndex] || `未知人格 ${vibeIndex}`,
+                                        name: namesData[vibeIndex] || defaultPersonalityName,
                                         description: '',
                                         traits: []
                                     }
                                 };
                             } catch (error) {
                                 console.error('[分享] 加载人格数据失败:', error);
+                                const currentLang = localStorage.getItem('appLanguage') || 'zh-CN';
+                                const isEn = currentLang === 'en';
                                 // 降级：返回默认数据
                                 return {
-                                    personalityName: `未知人格`,
+                                    personalityName: isEn ? 'Unknown Personality' : '未知人格',
                                     vibeIndex: vibeIndexStr,
-                                    roastText: '数据加载失败，无法显示人格详情',
+                                    roastText: isEn ? 'Failed to load personality data' : '数据加载失败，无法显示人格详情',
                                     dimensions: null,
                                     personalityType: null,
                                     lpdef: null,
                                     analysis: {
-                                        name: `未知人格`,
+                                        name: isEn ? 'Unknown Personality' : '未知人格',
                                         description: '',
                                         traits: []
                                     }
@@ -2206,30 +2213,38 @@
                     return num.toString();
                 }
                 
-                // 中文使用万、亿等单位
-                if (num >= 1000000000000) {
-                    return (num / 1000000000000).toFixed(1) + '万亿';
-                }
-                if (num >= 100000000000) {
-                    return (num / 100000000000).toFixed(1) + '千亿';
-                }
-                if (num >= 10000000000) {
-                    return (num / 10000000000).toFixed(1) + '百亿';
-                }
+                // 中文使用万、亿等单位（符合中文数字习惯）
                 if (num >= 100000000) {
-                    return (num / 100000000).toFixed(1) + '亿';
-                }
-                if (num >= 10000000) {
-                    return (num / 10000000).toFixed(1) + '千万';
-                }
-                if (num >= 1000000) {
-                    return (num / 1000000).toFixed(1) + '百万';
-                }
-                if (num >= 100000) {
-                    return (num / 100000).toFixed(1) + '十万';
+                    // 1亿及以上：使用亿
+                    const yi = num / 100000000;
+                    if (yi >= 10000) {
+                        // 1万亿及以上：使用万亿
+                        return (yi / 10000).toFixed(1) + '万亿';
+                    }
+                    if (yi >= 1000) {
+                        // 1千亿及以上：使用千亿
+                        return (yi / 1000).toFixed(1) + '千亿';
+                    }
+                    if (yi >= 100) {
+                        // 1百亿及以上：使用百亿
+                        return (yi / 100).toFixed(1) + '百亿';
+                    }
+                    // 1亿-99.9亿：使用亿
+                    return yi.toFixed(1) + '亿';
                 }
                 if (num >= 10000) {
-                    return (num / 10000).toFixed(1) + '万';
+                    // 1万-9999.9万：直接使用万，不显示小数（符合中文习惯）
+                    const wan = num / 10000;
+                    // 如果整数部分大于等于1000，保留1位小数；否则显示整数
+                    if (wan >= 1000) {
+                        return wan.toFixed(1) + '万';
+                    } else if (wan >= 100) {
+                        return Math.round(wan) + '万';
+                    } else if (wan >= 10) {
+                        return wan.toFixed(1) + '万';
+                    } else {
+                        return wan.toFixed(1) + '万';
+                    }
                 }
                 if (num >= 1000) {
                     return (num / 1000).toFixed(1) + 'K';
@@ -2758,9 +2773,6 @@
                                 if (num >= 1000000) {
                                     return (num / 1000000).toFixed(1) + '百万';
                                 }
-                                if (num >= 100000) {
-                                    return (num / 100000).toFixed(1) + '十万';
-                                }
                                 if (num >= 10000) {
                                     return (num / 10000).toFixed(1) + '万';
                                 }
@@ -3267,30 +3279,38 @@
                                         return num.toString();
                                     }
                                     
-                                    // 中文使用万、亿等单位
-                                    if (num >= 1000000000000) {
-                                        return (num / 1000000000000).toFixed(1) + '万亿';
-                                    }
-                                    if (num >= 100000000000) {
-                                        return (num / 100000000000).toFixed(1) + '千亿';
-                                    }
-                                    if (num >= 10000000000) {
-                                        return (num / 10000000000).toFixed(1) + '百亿';
-                                    }
+                                    // 中文使用万、亿等单位（符合中文数字习惯）
                                     if (num >= 100000000) {
-                                        return (num / 100000000).toFixed(1) + '亿';
-                                    }
-                                    if (num >= 10000000) {
-                                        return (num / 10000000).toFixed(1) + '千万';
-                                    }
-                                    if (num >= 1000000) {
-                                        return (num / 1000000).toFixed(1) + '百万';
-                                    }
-                                    if (num >= 100000) {
-                                        return (num / 100000).toFixed(1) + '十万';
+                                        // 1亿及以上：使用亿
+                                        const yi = num / 100000000;
+                                        if (yi >= 10000) {
+                                            // 1万亿及以上：使用万亿
+                                            return (yi / 10000).toFixed(1) + '万亿';
+                                        }
+                                        if (yi >= 1000) {
+                                            // 1千亿及以上：使用千亿
+                                            return (yi / 1000).toFixed(1) + '千亿';
+                                        }
+                                        if (yi >= 100) {
+                                            // 1百亿及以上：使用百亿
+                                            return (yi / 100).toFixed(1) + '百亿';
+                                        }
+                                        // 1亿-99.9亿：使用亿
+                                        return yi.toFixed(1) + '亿';
                                     }
                                     if (num >= 10000) {
-                                        return (num / 10000).toFixed(1) + '万';
+                                        // 1万-9999.9万：直接使用万，不显示小数（符合中文习惯）
+                                        const wan = num / 10000;
+                                        // 如果整数部分大于等于1000，保留1位小数；否则显示整数
+                                        if (wan >= 1000) {
+                                            return wan.toFixed(1) + '万';
+                                        } else if (wan >= 100) {
+                                            return Math.round(wan) + '万';
+                                        } else if (wan >= 10) {
+                                            return wan.toFixed(1) + '万';
+                                        } else {
+                                            return wan.toFixed(1) + '万';
+                                        }
                                     }
                                     if (num >= 1000) {
                                         return (num / 1000).toFixed(1) + 'K';
@@ -3997,8 +4017,10 @@
             const shareReport = async () => {
                 const shareUrl = generateShareUrl();
                 if (!shareUrl) {
-                    alert('生成分享链接失败，请稍后重试\n\n可能的原因：\n1. 没有可分享的数据\n2. 数据格式错误\n\n是否生成测试链接？');
-                    if (confirm('是否生成测试链接？')) {
+                    const errorMsg = lang === 'en' 
+                        ? '[ERROR] Share link generation failed\n\nPossible causes:\n1. No shareable data\n2. Data format error\n\nGenerate test link?'
+                        : '[ERROR] 生成分享链接失败\n\n可能的原因：\n1. 没有可分享的数据\n2. 数据格式错误\n\n是否生成测试链接？';
+                    if (confirm(errorMsg)) {
                         testShareLink();
                     }
                     return;
@@ -4006,22 +4028,50 @@
                 
                 // 检查链接长度
                 if (shareUrl.length > 2000) {
-                    const proceed = confirm(
-                        '警告：分享链接较长 (' + shareUrl.length + ' 字符)，可能在某些浏览器中无法正常工作。\n\n' +
-                        '建议：\n' +
-                        '1. 使用测试链接验证功能\n' +
-                        '2. 或考虑使用短链接服务\n\n' +
-                        '是否继续生成分享链接？'
-                    );
+                    const warningMsg = lang === 'en'
+                        ? '[WARNING] Share link is too long (' + shareUrl.length + ' chars)\nMay not work in some browsers.\n\nSuggestions:\n1. Use test link verification\n2. Consider using URL shortener\n\nContinue generating share link?'
+                        : '[WARNING] 分享链接较长 (' + shareUrl.length + ' 字符)\n可能在某些浏览器中无法正常工作。\n\n建议：\n1. 使用测试链接验证功能\n2. 或考虑使用短链接服务\n\n是否继续生成分享链接？';
+                    const proceed = confirm(warningMsg);
                     if (!proceed) {
                         return;
                     }
                 }
                 
                 try {
+                    // 从 tips.json 随机获取提示词
+                    const tipsLang = lang === 'en' ? 'en_US' : 'zh_CN';
+                    let tipData = null;
+                    try {
+                        const tipsResponse = await fetch('src/tips.json');
+                        if (tipsResponse.ok) {
+                            const tipsJson = await tipsResponse.json();
+                            const tips = tipsJson[tipsLang];
+                            if (tips && Object.keys(tips).length > 0) {
+                                const tipKeys = Object.keys(tips);
+                                const randomKey = tipKeys[Math.floor(Math.random() * tipKeys.length)];
+                                tipData = tips[randomKey];
+                            }
+                        }
+                    } catch (tipsError) {
+                        console.warn('[分享] 加载 tips.json 失败，使用默认提示:', tipsError);
+                    }
+                    
                     // 复制到剪贴板
                     await navigator.clipboard.writeText(shareUrl);
-                    alert('✅ 分享链接已生成并复制到剪贴板！\n\n链接长度: ' + shareUrl.length + ' 字符\n\nPC端点开可交互，手机点开直接看结果');
+                    
+                    // 使用随机提示词或默认提示
+                    let successMsg;
+                    if (tipData) {
+                        // 替换 body 中的 "35" 为实际链接长度
+                        const body = tipData.body.replace(/35/g, shareUrl.length.toString());
+                        successMsg = tipData.title + '\n\n' + body;
+                    } else {
+                        // 降级到默认提示
+                        successMsg = lang === 'en'
+                            ? '[SUCCESS] Share link generated & copied to clipboard\n\nLink length: ' + shareUrl.length + ' chars\n\nDesktop: Interactive | Mobile: View only'
+                            : '[SUCCESS] 分享链接已生成并复制到剪贴板\n\n链接长度: ' + shareUrl.length + ' 字符\n\nPC端点开可交互，手机点开直接看结果';
+                    }
+                    alert(successMsg);
                 } catch (err) {
                     // 降级方案：使用传统方法
                     const textArea = document.createElement('textarea');
@@ -4032,12 +4082,46 @@
                     textArea.select();
                     try {
                         document.execCommand('copy');
-                        alert('✅ 分享链接已生成并复制到剪贴板！\n\n链接长度: ' + shareUrl.length + ' 字符\n\nPC端点开可交互，手机点开直接看结果');
+                        
+                        // 从 tips.json 随机获取提示词
+                        const tipsLang = lang === 'en' ? 'en_US' : 'zh_CN';
+                        let tipData = null;
+                        try {
+                            const tipsResponse = await fetch('src/tips.json');
+                            if (tipsResponse.ok) {
+                                const tipsJson = await tipsResponse.json();
+                                const tips = tipsJson[tipsLang];
+                                if (tips && Object.keys(tips).length > 0) {
+                                    const tipKeys = Object.keys(tips);
+                                    const randomKey = tipKeys[Math.floor(Math.random() * tipKeys.length)];
+                                    tipData = tips[randomKey];
+                                }
+                            }
+                        } catch (tipsError) {
+                            console.warn('[分享] 加载 tips.json 失败，使用默认提示:', tipsError);
+                        }
+                        
+                        // 使用随机提示词或默认提示
+                        let successMsg;
+                        if (tipData) {
+                            // 替换 body 中的 "35" 为实际链接长度
+                            const body = tipData.body.replace(/35/g, shareUrl.length.toString());
+                            successMsg = tipData.title + '\n\n' + body;
+                        } else {
+                            // 降级到默认提示
+                            successMsg = lang === 'en'
+                                ? '[SUCCESS] Share link generated & copied to clipboard\n\nLink length: ' + shareUrl.length + ' chars\n\nDesktop: Interactive | Mobile: View only'
+                                : '[SUCCESS] 分享链接已生成并复制到剪贴板\n\n链接长度: ' + shareUrl.length + ' 字符\n\nPC端点开可交互，手机点开直接看结果';
+                        }
+                        alert(successMsg);
                     } catch (e) {
                         // 如果复制失败，显示链接让用户手动复制
-                        const copied = prompt('请手动复制以下链接（Ctrl+C）:', shareUrl);
+                        const promptMsg = lang === 'en' 
+                            ? 'Manual copy required (Ctrl+C):'
+                            : '请手动复制以下链接（Ctrl+C）:';
+                        const copied = prompt(promptMsg, shareUrl);
                         if (copied) {
-                            alert('链接已复制！');
+                            alert(lang === 'en' ? '[OK] Link copied' : '[OK] 链接已复制');
                         }
                     }
                     document.body.removeChild(textArea);
@@ -4459,11 +4543,11 @@
                         <div className="max-w-4xl w-full space-y-6">
                             {/* 分享模式提示 */}
                             {isShareMode && (
-                                <div className="w-full bg-blue-500/20 border border-blue-500/50 rounded-sm p-4 mb-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+                                <div className="w-full bg-zinc-900/50 border border-zinc-700 rounded-sm p-4 mb-4 flex flex-col sm:flex-row items-center justify-between gap-4">
                                     <div className="flex items-center gap-3">
-                                        <Icon name="info" size={20} className="text-blue-400" />
+                                        <Icon name="info" size={20} className="text-green-500" />
                                         <span className="text-white font-mono text-sm sm:text-base">
-                                            正在查看分享的报告
+                                            {lang === 'en' ? '> VIEWING SHARED REPORT' : '> 正在查看分享的报告'}
                                         </span>
                                     </div>
                                     <button 
@@ -4471,7 +4555,7 @@
                                         className="flex items-center justify-center gap-2 bg-green-500 text-black px-6 py-2 rounded-sm font-bold hover:bg-transparent hover:text-green-500 transition-colors border border-green-500 uppercase tracking-wider font-mono text-sm"
                                     >
                                         <Icon name="refresh-cw" size={16} />
-                                        我也要测
+                                        {lang === 'en' ? 'RUN TEST' : '我也要测'}
                                     </button>
                                 </div>
                             )}
@@ -4529,32 +4613,19 @@
                                 <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
                                     <button 
                                         onClick={showFullReport}
-                                        className="flex items-center justify-center gap-2 bg-green-500 text-black px-8 py-4 rounded-sm font-bold hover:bg-transparent hover:text-green-500 transition-colors border border-green-500 uppercase tracking-wider font-mono"
+                                        className="flex items-center justify-center gap-2 bg-green-500 text-black px-8 py-4 rounded-sm font-bold hover:bg-transparent hover:text-green-500 transition-colors border border-green-500 uppercase tracking-wider font-mono relative"
                                     >
-                                        <Icon name="share-2" size={20} />
-                                        {t('preview.shareBtn')}
+                                        <Icon name="search" size={18} className="opacity-70" />
+                                        <span>{lang === 'en' ? 'INVASIVE PROFILING' : '偷看档案'}</span>
+                                        <Icon name="search" size={18} className="opacity-70" />
                                     </button>
                                     <button 
                                         onClick={shareReport}
-                                        className="flex items-center justify-center gap-2 bg-blue-500 text-white px-8 py-4 rounded-sm font-bold hover:bg-transparent hover:text-blue-500 transition-colors border border-blue-500 uppercase tracking-wider font-mono"
+                                        className="flex items-center justify-center gap-2 bg-transparent text-white px-8 py-4 rounded-sm font-bold hover:bg-zinc-800 transition-colors border border-green-500 uppercase tracking-wider font-mono relative"
                                     >
-                                        <Icon name="link" size={20} />
-                                        分享报告
-                                    </button>
-                                    <button 
-                                        onClick={testShareLink}
-                                        className="flex items-center justify-center gap-2 bg-purple-500 text-white px-8 py-4 rounded-sm font-bold hover:bg-transparent hover:text-purple-500 transition-colors border border-purple-500 uppercase tracking-wider font-mono"
-                                        title="生成测试链接验证分享功能"
-                                    >
-                                        <Icon name="test-tube" size={20} />
-                                        测试分享
-                                    </button>
-                                    <button 
-                                        onClick={exportReport}
-                                        className="flex items-center justify-center gap-2 bg-transparent text-white px-8 py-4 rounded-sm font-bold border border-zinc-800 hover:bg-zinc-800 transition-colors uppercase tracking-wider font-mono"
-                                    >
-                                        <Icon name="download" size={20} />
-                                        {t('export.title')}
+                                        <Icon name="send" size={18} className="opacity-70" />
+                                        <span>{lang === 'en' ? "DON'T @ ME" : '请君入瓮'}</span>
+                                        <Icon name="send" size={18} className="opacity-70" />
                                     </button>
                                 </div>
                             )}
@@ -4566,11 +4637,11 @@
                         <div className="w-full" style={{minHeight: '100vh'}}>
                             {/* 分享模式提示 */}
                             {isShareMode && (
-                                <div className="w-full bg-blue-500/20 border border-blue-500/50 rounded-sm p-4 mb-4 flex flex-col sm:flex-row items-center justify-between gap-4" style={{marginBottom: '20px', maxWidth: '1100px', margin: '0 auto 20px', padding: '16px'}}>
+                                <div className="w-full bg-zinc-900/50 border border-zinc-700 rounded-sm p-4 mb-4 flex flex-col sm:flex-row items-center justify-between gap-4" style={{marginBottom: '20px', maxWidth: '1100px', margin: '0 auto 20px', padding: '16px'}}>
                                     <div className="flex items-center gap-3">
-                                        <Icon name="info" size={20} className="text-blue-400" />
+                                        <Icon name="info" size={20} className="text-green-500" />
                                         <span className="text-white font-mono text-sm sm:text-base">
-                                            正在查看分享的报告
+                                            {lang === 'en' ? '> VIEWING SHARED REPORT' : '> 正在查看分享的报告'}
                                         </span>
                                     </div>
                                     <button 
@@ -4578,7 +4649,7 @@
                                         className="flex items-center justify-center gap-2 bg-green-500 text-black px-6 py-2 rounded-sm font-bold hover:bg-transparent hover:text-green-500 transition-colors border border-green-500 uppercase tracking-wider font-mono text-sm"
                                     >
                                         <Icon name="refresh-cw" size={16} />
-                                        我也要测
+                                        {lang === 'en' ? 'RUN TEST' : '我也要测'}
                                     </button>
                                 </div>
                             )}
@@ -4588,11 +4659,11 @@
                                 <div className="fixed bottom-24 right-4 z-50" style={{zIndex: 1000}}>
                                     <button 
                                         onClick={shareReport}
-                                        className="flex items-center justify-center gap-2 bg-blue-500 text-white px-4 py-3 rounded-sm font-bold hover:bg-transparent hover:text-blue-500 transition-colors border border-blue-500 uppercase tracking-wider font-mono text-sm shadow-lg"
-                                        title="分享报告"
+                                        className="flex items-center justify-center gap-2 bg-transparent text-white px-4 py-3 rounded-sm font-bold hover:bg-zinc-800 transition-colors border border-green-500 uppercase tracking-wider font-mono text-sm shadow-lg"
+                                        title={lang === 'en' ? 'SHARE REPORT' : '分享报告'}
                                     >
                                         <Icon name="link" size={18} />
-                                        <span className="hidden sm:inline">分享</span>
+                                        <span className="hidden sm:inline">{lang === 'en' ? 'SHARE' : '分享'}</span>
                                     </button>
                                 </div>
                             )}
