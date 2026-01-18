@@ -17,6 +17,9 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Waline 留言板 V2 -->
+    <link rel="stylesheet" href="https://unpkg.com/@waline/client@v2/dist/waline.css" />
+    <script src="https://unpkg.com/@waline/client@v2/dist/waline.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
         body { font-family: 'JetBrains Mono', monospace; }
@@ -1201,6 +1204,255 @@
         @keyframes shimmer {
             0% { transform: translateX(-100%); }
             100% { transform: translateX(100%); }
+        }
+
+        /* Waline 留言板样式覆盖 - 适配 Terminal 终端风格 */
+        #waline {
+            --waline-theme-color: var(--accent-terminal);
+            --waline-active-color: var(--accent-terminal);
+            --waline-bg-color: var(--card-bg);
+            --waline-border-color: var(--card-border);
+            --waline-text-color: var(--text-main);
+            --waline-bg-color-light: rgba(24, 24, 27, 0.4);
+            --waline-color: var(--text-main);
+            --waline-meta-color: var(--text-dim);
+            --waline-border: 1px solid var(--card-border);
+            --waline-box-shadow: none;
+            --waline-white: #0a0a0a !important;
+            --waline-light-grey: #1a1a1a !important;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        
+        .wl-content, .wl-editor {
+            color: var(--text-main) !important;
+        }
+
+        .wl-header {
+            border-bottom: 1px solid var(--card-border) !important;
+            padding-bottom: 16px;
+            margin-bottom: 20px;
+        }
+
+        .wl-header label {
+            color: var(--text-main) !important;
+        }
+
+        .wl-header input,
+        .wl-header textarea {
+            background: rgba(24, 24, 27, 0.6) !important;
+            border: 1px solid var(--card-border) !important;
+            color: var(--text-main) !important;
+            font-family: 'JetBrains Mono', monospace !important;
+        }
+
+        .wl-header input:focus,
+        .wl-header textarea:focus {
+            border-color: var(--accent-terminal) !important;
+            outline: none;
+            box-shadow: 0 0 4px rgba(0, 255, 65, 0.3) !important;
+        }
+
+        /* 完全隐藏邮箱和网址字段 */
+        .wl-header .wl-mail,
+        .wl-header .wl-mail-wrapper,
+        .wl-header .wl-link,
+        .wl-header .wl-link-wrapper,
+        .wl-header .wl-email,
+        .wl-header .wl-url {
+            display: none !important;
+            visibility: hidden !important;
+            height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            opacity: 0 !important;
+        }
+
+        .wl-btn {
+            background: transparent !important;
+            border: 1px solid var(--accent-terminal) !important;
+            color: var(--accent-terminal) !important;
+            font-family: 'JetBrains Mono', monospace !important;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            transition: all 0.2s ease !important;
+        }
+
+        .wl-btn:hover {
+            background: var(--accent-terminal) !important;
+            color: #000 !important;
+        }
+
+        .wl-card {
+            background: var(--card-bg) !important;
+            border: 1px solid var(--card-border) !important;
+            border-radius: 2px !important;
+            padding: 16px !important;
+            margin-bottom: 16px !important;
+        }
+
+        .wl-card:hover {
+            border-color: var(--accent-terminal) !important;
+        }
+
+        .wl-nick {
+            color: var(--accent-terminal) !important;
+            font-weight: 700;
+        }
+
+        .wl-time {
+            color: var(--text-dim) !important;
+        }
+
+        .wl-content {
+            color: var(--text-main) !important;
+            line-height: 1.6;
+        }
+
+        .wl-actions button {
+            color: var(--text-dim) !important;
+            font-family: 'JetBrains Mono', monospace !important;
+        }
+
+        .wl-actions button:hover {
+            color: var(--accent-terminal) !important;
+        }
+
+        .wl-pagination {
+            border-top: 1px solid var(--card-border) !important;
+            padding-top: 16px;
+            margin-top: 20px;
+        }
+
+        .wl-pagination button {
+            background: transparent !important;
+            border: 1px solid var(--card-border) !important;
+            color: var(--text-main) !important;
+            font-family: 'JetBrains Mono', monospace !important;
+        }
+
+        .wl-pagination button:hover {
+            border-color: var(--accent-terminal) !important;
+            color: var(--accent-terminal) !important;
+        }
+
+        .wl-pagination button.wl-page-btn-active {
+            background: var(--accent-terminal) !important;
+            border-color: var(--accent-terminal) !important;
+            color: #000 !important;
+        }
+
+        /* 更多样式覆盖以确保完美适配黑色背景和绿色主题 */
+        .wl-count {
+            color: var(--text-dim) !important;
+        }
+
+        .wl-count .wl-num {
+            color: var(--accent-terminal) !important;
+        }
+
+        .wl-info {
+            color: var(--text-dim) !important;
+        }
+
+        .wl-info .wl-nick {
+            color: var(--accent-terminal) !important;
+        }
+
+        .wl-comment {
+            background: transparent !important;
+        }
+
+        .wl-comment .wl-content {
+            color: var(--text-main) !important;
+        }
+
+        .wl-comment .wl-meta {
+            color: var(--text-dim) !important;
+        }
+
+        .wl-comment .wl-meta .wl-nick {
+            color: var(--accent-terminal) !important;
+        }
+
+        .wl-comment .wl-time {
+            color: var(--text-dim) !important;
+        }
+
+        .wl-reaction {
+            background: rgba(24, 24, 27, 0.6) !important;
+            border: 1px solid var(--card-border) !important;
+            color: var(--text-main) !important;
+        }
+
+        .wl-reaction:hover {
+            border-color: var(--accent-terminal) !important;
+            color: var(--accent-terminal) !important;
+        }
+
+        .wl-reaction.active {
+            background: var(--accent-terminal) !important;
+            border-color: var(--accent-terminal) !important;
+            color: #000 !important;
+        }
+
+        .wl-emoji {
+            filter: brightness(0.9);
+        }
+
+        .wl-emoji:hover {
+            filter: brightness(1.2);
+        }
+
+        /* 输入框占位符样式 */
+        .wl-header input::placeholder,
+        .wl-header textarea::placeholder {
+            color: var(--text-dim) !important;
+            opacity: 0.6;
+        }
+
+        /* 评论列表容器 */
+        .wl-comments {
+            background: transparent !important;
+        }
+
+        /* 空状态提示 */
+        .wl-empty {
+            color: var(--text-dim) !important;
+        }
+
+        /* 加载状态 */
+        .wl-loading {
+            color: var(--accent-terminal) !important;
+        }
+
+        /* 错误提示 */
+        .wl-error {
+            color: #ef4444 !important;
+            background: rgba(239, 68, 68, 0.1) !important;
+            border: 1px solid rgba(239, 68, 68, 0.3) !important;
+        }
+
+        /* 回复按钮 */
+        .wl-reply {
+            color: var(--text-dim) !important;
+        }
+
+        .wl-reply:hover {
+            color: var(--accent-terminal) !important;
+        }
+
+        /* 管理员标识 */
+        .wl-badge {
+            background: var(--accent-terminal) !important;
+            color: #000 !important;
+        }
+
+        /* 确保所有文本都使用正确的字体 */
+        .wl-header *,
+        .wl-comment *,
+        .wl-actions *,
+        .wl-pagination * {
+            font-family: 'JetBrains Mono', monospace !important;
         }
     </style>
 </head>
@@ -2959,6 +3211,175 @@
                 
                 fetchTotalUsers();
             }, []);
+
+            // 初始化 Waline 留言板
+            useEffect(() => {
+                const walineServerURL = 'https://curser-project.vercel.app/';
+                let retryCount = 0;
+                const maxRetries = 50; // 最多重试 50 次（10秒）
+                
+                // 等待脚本加载完成
+                const waitForScript = () => {
+                    return new Promise((resolve) => {
+                        // 如果已经加载，直接返回
+                        if (window.Waline && typeof window.Waline.init === 'function') {
+                            resolve(true);
+                            return;
+                        }
+                        
+                        // 检查脚本标签
+                        const script = document.querySelector('script[src*="waline.js"]');
+                        if (script) {
+                            // 如果脚本已加载完成
+                            if (script.readyState === 'complete' || script.readyState === 'loaded') {
+                                // 再等待一小段时间确保执行完成
+                                setTimeout(() => {
+                                    resolve(window.Waline && typeof window.Waline.init === 'function');
+                                }, 100);
+                                return;
+                            }
+                            
+                            // 监听脚本加载完成
+                            script.onload = () => {
+                                setTimeout(() => {
+                                    resolve(window.Waline && typeof window.Waline.init === 'function');
+                                }, 100);
+                            };
+                            
+                            // 如果脚本加载失败，也继续尝试
+                            script.onerror = () => {
+                                resolve(false);
+                            };
+                        } else {
+                            // 没有脚本标签，等待一段时间后检查
+                            setTimeout(() => {
+                                resolve(window.Waline && typeof window.Waline.init === 'function');
+                            }, 500);
+                        }
+                    });
+                };
+                
+                const initWaline = async () => {
+                    const walineContainer = document.getElementById('waline-comments');
+                    if (!walineContainer) {
+                        console.log('⚠️ Waline 容器元素不存在');
+                        return false;
+                    }
+                    
+                    // 检查容器是否可见
+                    const style = window.getComputedStyle(walineContainer);
+                    if (style.display === 'none' || style.visibility === 'hidden') {
+                        console.log('⚠️ Waline 容器不可见，等待...');
+                        return false;
+                    }
+                    
+                    // 等待脚本加载完成
+                    console.log('⏳ 等待 Waline 脚本加载...');
+                    const scriptReady = await waitForScript();
+                    if (!scriptReady) {
+                        console.log('⚠️ Waline 脚本未就绪');
+                        return false;
+                    }
+                    console.log('✅ Waline 脚本已就绪');
+                    
+                    // 检查是否已初始化
+                    if (walineContainer.hasAttribute('data-waline-initialized')) {
+                        console.log('ℹ️ Waline 已初始化，清除旧实例并重新初始化以刷新评论...');
+                        // 如果已初始化，清除旧实例并重新初始化，确保使用最新的 path 配置加载评论
+                        const existingInstance = walineContainer._walineInstance;
+                        if (existingInstance && typeof existingInstance.destroy === 'function') {
+                            try {
+                                existingInstance.destroy();
+                                console.log('🧹 已销毁旧的 Waline 实例');
+                            } catch (error) {
+                                console.warn('⚠️ 销毁旧实例时出错:', error);
+                            }
+                        }
+                        // 清除标记和实例引用
+                        walineContainer.removeAttribute('data-waline-initialized');
+                        delete walineContainer._walineInstance;
+                        // 清空容器内容
+                        if (walineContainer.innerHTML.trim()) {
+                            console.log('🧹 清空 Waline 容器内容...');
+                            walineContainer.innerHTML = '';
+                        }
+                    }
+                    
+                    // 安全检查并初始化
+                    if (window.Waline && typeof window.Waline.init === 'function') {
+                        try {
+                            // 强制路径固定为根路径，确保本地和线上环境统一
+                            const currentPath = '/';
+                            
+                            // 语言映射
+                            const walineLang = lang === 'en' ? 'en' : 'zh-CN';
+                            
+                            // 如果容器内已有内容，先清空（避免重复渲染）
+                            if (walineContainer.innerHTML.trim()) {
+                                console.log('🧹 清空 Waline 容器，准备重新初始化...');
+                                walineContainer.innerHTML = '';
+                            }
+                            
+                            const walineInstance = window.Waline.init({
+                                el: '#waline-comments',
+                                serverURL: walineServerURL,
+                                path: currentPath,  // 固定为根路径，统一存储和读取评论
+                                lang: walineLang,
+                                meta: ['nick'],
+                                requiredMeta: ['nick'],
+                                dark: true,
+                                login: 'disable',
+                                locale: {
+                                    placeholder: lang === 'en' ? 'Leave a comment...' : '留下你的评论...',
+                                    nick: lang === 'en' ? 'Nickname' : '昵称',
+                                    submit: lang === 'en' ? 'SUBMIT' : '提交'
+                                }
+                            });
+                            
+                            // 保存实例到容器
+                            if (walineInstance) {
+                                walineContainer._walineInstance = walineInstance;
+                            }
+                            
+                            walineContainer.setAttribute('data-waline-initialized', 'true');
+                            console.log('✅ Waline 初始化成功 - 当前使用根路径: "/"');
+                            console.log('📌 Waline 配置 - path: "/", lang: ' + walineLang + ', dark: true, login: disable');
+                            
+                            return true;
+                        } catch (error) {
+                            console.error('❌ Waline 初始化失败:', error);
+                            return false;
+                        }
+                    } else {
+                        console.error('❌ window.Waline 或 init 方法不存在');
+                        return false;
+                    }
+                };
+                
+                // 重试初始化
+                const tryInit = async () => {
+                    if (retryCount >= maxRetries) {
+                        console.error(`❌ Waline 初始化超时，已达到最大重试次数 (${maxRetries})`);
+                        return;
+                    }
+                    
+                    retryCount++;
+                    if (retryCount > 1) {
+                        console.log(`🔄 重试初始化 Waline (第 ${retryCount}/${maxRetries} 次)...`);
+                    }
+                    
+                    const success = await initWaline();
+                    
+                    if (!success) {
+                        // 如果未成功，延迟重试
+                        setTimeout(tryInit, 200);
+                    }
+                };
+                
+                // 延迟启动，确保 DOM 已渲染
+                console.log('⏳ 等待 DOM 渲染完成，准备初始化 Waline...');
+                setTimeout(tryInit, 500);
+            }, [lang]);
 
             // 初始化解析器
             useEffect(() => {
@@ -5251,6 +5672,39 @@
                             })()}
                         </div>
                     )}
+
+                    {/* Analysis Comments - Waline 留言板 */}
+                    <div style={{
+                        width: '100%',
+                        maxWidth: '1100px',
+                        margin: '0 auto',
+                        padding: '40px 20px',
+                        marginBottom: '120px'
+                    }}>
+                        <div style={{
+                            background: 'var(--card-bg)',
+                            border: '1px solid var(--card-border)',
+                            borderRadius: '2px',
+                            padding: '32px',
+                            fontFamily: "'JetBrains Mono', monospace"
+                        }}>
+                            <h2 style={{
+                                color: 'var(--accent-terminal)',
+                                fontSize: '18px',
+                                fontWeight: '700',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.1em',
+                                marginBottom: '24px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px'
+                            }}>
+                                <span style={{color: 'var(--accent-terminal)'}}>&gt;</span>
+                                <span>{lang === 'en' ? 'Analysis Comments' : '分析评论'}</span>
+                            </h2>
+                            <div id="waline-comments"></div>
+                        </div>
+                    </div>
 
                     {/* 友情链接 */}
                     <div style={{
