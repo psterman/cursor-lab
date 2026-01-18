@@ -2546,6 +2546,17 @@
                                 </div>
                             </div>
                             
+                            <!-- Analysis Comments - Waline 留言板 -->
+                            <div style="margin-top: 60px; padding: 40px 0;">
+                                <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 2px; padding: 32px; fontFamily: 'JetBrains Mono', monospace">
+                                    <h2 style="color: var(--accent-terminal); fontSize: 18px; fontWeight: 700; textTransform: uppercase; letterSpacing: 0.1em; marginBottom: 24px; display: flex; alignItems: center; gap: 8px">
+                                        <span style="color: var(--accent-terminal)">&gt;</span>
+                                        <span>${currentLang === 'en' ? 'Analysis Comments' : '分析评论'}</span>
+                                    </h2>
+                                    <div id="waline-comments"></div>
+                                </div>
+                            </div>
+                            
                         </div>
                     </div>
                 `;
@@ -3212,8 +3223,14 @@
                 fetchTotalUsers();
             }, []);
 
-            // 初始化 Waline 留言板
+            // 初始化 Waline 留言板（仅在结果页面初始化）
             useEffect(() => {
+                // 只在结果页面（fullReport）初始化 Waline
+                if (step !== 'fullReport') {
+                    console.log('ℹ️ 当前不在结果页面，跳过 Waline 初始化');
+                    return;
+                }
+                
                 const walineServerURL = 'https://curser-project.vercel.app/';
                 let retryCount = 0;
                 const maxRetries = 50; // 最多重试 50 次（10秒）
@@ -3376,10 +3393,10 @@
                     }
                 };
                 
-                // 延迟启动，确保 DOM 已渲染
-                console.log('⏳ 等待 DOM 渲染完成，准备初始化 Waline...');
-                setTimeout(tryInit, 500);
-            }, [lang]);
+                // 延迟启动，确保 DOM 已渲染（结果页面的 DOM 需要时间创建）
+                console.log('⏳ 等待结果页面 DOM 渲染完成，准备初始化 Waline...');
+                setTimeout(tryInit, 1000);
+            }, [step, lang]);
 
             // 初始化解析器
             useEffect(() => {
@@ -5673,38 +5690,6 @@
                         </div>
                     )}
 
-                    {/* Analysis Comments - Waline 留言板 */}
-                    <div style={{
-                        width: '100%',
-                        maxWidth: '1100px',
-                        margin: '0 auto',
-                        padding: '40px 20px',
-                        marginBottom: '120px'
-                    }}>
-                        <div style={{
-                            background: 'var(--card-bg)',
-                            border: '1px solid var(--card-border)',
-                            borderRadius: '2px',
-                            padding: '32px',
-                            fontFamily: "'JetBrains Mono', monospace"
-                        }}>
-                            <h2 style={{
-                                color: 'var(--accent-terminal)',
-                                fontSize: '18px',
-                                fontWeight: '700',
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.1em',
-                                marginBottom: '24px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '8px'
-                            }}>
-                                <span style={{color: 'var(--accent-terminal)'}}>&gt;</span>
-                                <span>{lang === 'en' ? 'Analysis Comments' : '分析评论'}</span>
-                            </h2>
-                            <div id="waline-comments"></div>
-                        </div>
-                    </div>
 
                     {/* 友情链接 */}
                     <div style={{
