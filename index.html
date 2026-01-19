@@ -2414,7 +2414,7 @@
                                         <p class="stat-value" id="techRank" style="color: #ffffff;">${loadingText}</p>
                                         <p class="stat-comparison">${getText('dashboard.rankUnit')}</p>
                                     </div>
-                                    <div id="answerBookCardContainer" style="text-align: center;"></div>
+                                    <div id="answerBookCardContainer" style="text-align: center;" key={lang}></div>
                                 </div>
                             </div>
 
@@ -2670,11 +2670,37 @@
             const [unlockedCount, setUnlockedCount] = useState(0); // 人格解锁数
             const [isShareMode, setIsShareMode] = useState(false); // 是否为分享查看模式
             const [shareRankings, setShareRankings] = useState(null); // 分享的排名数据
+            const [hasHistory, setHasHistory] = useState(false); // 是否有历史记录
             const folderInputRef = useRef(null);
             const fileInputRef = useRef(null);
             // 用于保存动画所需的旧值和新值
             const animationDataRef = useRef(null);
             
+            const [modulesReady, setModulesReady] = useState(!!(window.i18n && window.i18n.getText));
+
+            // 监听模块加载状态
+            useEffect(() => {
+                if (modulesReady) return;
+                
+                const checkModules = () => {
+                    if (window.i18n && window.i18n.getText && window.analysisModule) {
+                        setModulesReady(true);
+                        return true;
+                    }
+                    return false;
+                };
+
+                if (checkModules()) return;
+
+                const interval = setInterval(() => {
+                    if (checkModules()) {
+                        clearInterval(interval);
+                    }
+                }, 50);
+
+                return () => clearInterval(interval);
+            }, [modulesReady]);
+
             // 初始化时设置 HTML lang 属性
             useEffect(() => {
                 document.documentElement.lang = lang;
@@ -2684,6 +2710,84 @@
                     titleElement.textContent = lang === 'en' ? 'Cursor Diagnostics' : 'Cursor 行为体检 - Vibe Coding';
                 }
             }, [lang]);
+
+            // 检查历史记录
+            useEffect(() => {
+                const historyStr = localStorage.getItem('cursor_clinical_history');
+                if (historyStr) {
+                    try {
+                        const history = JSON.parse(historyStr);
+                        if (history && history.analysisData) {
+                            setHasHistory(true);
+                            console.log('[History] 发现历史记录');
+                        }
+                    } catch (e) {
+                        console.error('[History] 解析历史记录失败:', e);
+                    }
+                }
+            }, []);
+
+            // 加载历史记录函数
+            const loadHistory = async () => {
+                try {
+                    const historyStr = localStorage.getItem('cursor_clinical_history');
+                    if (!historyStr) return;
+                    const history = JSON.parse(historyStr);
+                    
+                    console.log('[History] 正在加载历史记录，进入预览页面...');
+                    
+                    let finalAnalysisData = history.analysisData;
+
+                    // 1. 注入数据到 analysisModule (vanilla JS 模块)
+                    // 必须先注入数据，才能进行语言切换的重新分析
+                    if (window.analysisModule) {
+                        if (history.analysisData.stats) {
+                            if (window.analysisModule.setGlobalStats) {
+                                window.analysisModule.setGlobalStats(history.analysisData.stats);
+                            }
+                            window.globalStats = history.analysisData.stats;
+                        }
+                        if (history.analysisData.vibeResult) {
+                            if (window.analysisModule.setVibeResult) {
+                                window.analysisModule.setVibeResult(history.analysisData.vibeResult);
+                            }
+                            window.vibeResult = history.analysisData.vibeResult;
+                        }
+                        if (history.analysisData.chatData) {
+                            if (window.analysisModule.setAllChatData) {
+                                window.analysisModule.setAllChatData(history.analysisData.chatData);
+                            }
+                            window.allChatData = history.analysisData.chatData;
+                        }
+
+                        // 2. 检查语言是否需要转换
+                        // 如果历史记录的语言与当前 UI 语言不一致，触发重新分析以获取正确的文本
+                        if (window.analysisModule.reanalyzeWithLanguage) {
+                            console.log('[History] 检查语言对齐，当前 UI 语言:', lang);
+                            const newVibeResult = await window.analysisModule.reanalyzeWithLanguage(lang);
+                            if (newVibeResult) {
+                                console.log('[History] 语言对齐分析完成');
+                                finalAnalysisData = {
+                                    ...finalAnalysisData,
+                                    vibeResult: newVibeResult
+                                };
+                            }
+                        }
+                    }
+                    
+                    // 3. 恢复 React 状态
+                    setAnalysisData(finalAnalysisData);
+                    if (history.rankings) {
+                        window.userRankings = history.rankings;
+                    }
+                    
+                    // 进入预览页面 (人格鉴定结果)
+                    setStep('preview');
+                } catch (e) {
+                    console.error('[History] 加载历史记录失败:', e);
+                    setHasHistory(false);
+                }
+            };
 
             // 路由解析逻辑：检查 URL Hash 中的分享数据（优化版：支持压缩数据）
             useEffect(() => {
@@ -3682,6 +3786,20 @@
                             console.warn('2. Worker 代码不支持 submit_stats 动作');
                             console.warn('3. Worker 代码有错误，请检查 Cloudflare Dashboard 日志');
                             console.warn('当前 API 响应:', data);
+                        }
+
+                        // 保存到历史记录
+                        try {
+                            const historyData = {
+                                analysisData: analysisData,
+                                rankings: data.rankings || null,
+                                timestamp: Date.now()
+                            };
+                            localStorage.setItem('cursor_clinical_history', JSON.stringify(historyData));
+                            setHasHistory(true);
+                            console.log('[History] 已保存到历史记录');
+                        } catch (e) {
+                            console.error('[History] 保存历史记录失败:', e);
                         }
                         
                         console.log('[React] POST 请求成功，计数值和排名已更新:', {
@@ -5209,6 +5327,38 @@
                 window.location.reload();
             };
 
+            if (!modulesReady) {
+                const isEn = lang === 'en';
+                return (
+                    <div className="min-h-screen bg-black flex flex-col items-center justify-center font-mono p-4">
+                        <div className="mb-8 relative">
+                            <img src="images/CUBE_2D_DARK.png" width="48" height="48" className="animate-pulse opacity-50" alt="Loading" />
+                        </div>
+                        <div className="w-48 h-[2px] bg-zinc-900 relative overflow-hidden mb-6">
+                            <div className="absolute top-0 left-0 h-full bg-green-500 animate-loading-bar"></div>
+                        </div>
+                        <div className="space-y-2 text-center">
+                            <div className="text-green-500 text-[10px] tracking-[0.3em] uppercase opacity-80">
+                                {isEn ? 'System Initialization' : '系统初始化'}
+                            </div>
+                            <div className="text-zinc-600 text-[9px] font-mono">
+                                {isEn ? 'loading neural translation matrices...' : '正在加载神经翻译矩阵...'}
+                            </div>
+                        </div>
+                        <style>{`
+                            @keyframes loading-bar {
+                                0% { transform: translateX(-100%); }
+                                100% { transform: translateX(100%); }
+                            }
+                            .animate-loading-bar {
+                                animation: loading-bar 2s infinite cubic-bezier(0.4, 0, 0.2, 1);
+                                width: 100%;
+                            }
+                        `}</style>
+                    </div>
+                );
+            }
+
             return (
                 <div className="min-h-screen text-zinc-100 p-4 md:p-8 flex flex-col items-center justify-center relative">
                     <div className="fixed top-0 left-0 w-full h-1 bg-green-500 shadow-[0_0_8px_rgba(0,255,65,0.8)] z-50" />
@@ -5465,6 +5615,15 @@
                                         >
                                         {t('upload.selectFolder')}
                                         </button>
+                                        {hasHistory && (
+                                            <button 
+                                                onClick={loadHistory}
+                                                className="px-6 py-3 bg-transparent hover:bg-zinc-800 text-green-500 rounded-sm font-semibold transition-colors border border-zinc-700 uppercase tracking-wider font-mono"
+                                                title={t('upload.viewHistory')}
+                                            >
+                                                {t('upload.viewHistory')}
+                                            </button>
+                                        )}
                                         {/* <button 
                                             onClick={() => handleFileSelect('file')}
                                             className="px-6 py-3 bg-transparent hover:bg-zinc-700 text-white rounded-sm font-semibold transition-colors border border-zinc-700 uppercase tracking-wider font-mono"

@@ -154,7 +154,8 @@ export const I18N = {
       processing: '处理中...',
       error: '上传失败，请重试',
       pathHelp: '在弹出窗口的地址栏粘贴此路径可瞬间抵达',
-      selectFolder: '聊天文件夹',
+      selectFolder: '上传',
+      viewHistory: '复盘',
       privacyNote: '救赎之道 就在其中',
       logs: {
         startParsing: '开始解析数据库文件...',
@@ -396,11 +397,13 @@ export const I18N = {
     upload: {
       title: 'Upload Cursor Database',
       subtitle: 'The salvation lies within',
-      button: 'Select Files',
+      button: 'Upload',
       dragText: 'Drag files here',
+      viewHistory: 'Review',
       processing: 'Processing...',
       error: 'Upload failed, please try again',
       pathHelp: 'Suggested path: %APPDATA%\\Cursor\\User\\workspaceStorage',
+      selectFolder: 'Upload',
       logs: {
         startParsing: 'Starting to parse database files...',
         waitingModule: 'Waiting for analysis module to load...',
