@@ -227,10 +227,8 @@
             border: 1px solid var(--card-border);
             border-radius: 2px;
             padding: 24px;
-            padding-top: 40px;
             transition: border-color 0.2s ease;
             position: relative;
-            overflow: visible;
         }
         
         .stat-card:hover {
@@ -239,7 +237,7 @@
         }
 
         .stat-label {
-            white-space: normal;
+            white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
             font-size: 16px;
@@ -270,23 +268,11 @@
 
         /* 击败人数提示样式 */
         .stat-beaten {
-            position: absolute;
-            top: 8px;
-            left: 50%;
-            transform: translateX(-50%);
-            font-size: 11px;
-            padding: 3px 6px;
+            font-size: 14px;
+            margin-top: 8px;
             color: var(--accent-terminal);
             font-weight: 500;
             font-family: 'JetBrains Mono', monospace;
-            white-space: nowrap;
-            line-height: 1.4;
-            display: block;
-            z-index: 1;
-            background: transparent;
-            border-radius: 2px;
-            box-sizing: border-box;
-            text-align: center;
         }
 
         /* 排名显示样式（右下角） */
@@ -426,7 +412,7 @@
             color: var(--text-main);
             overflow: hidden;
             text-overflow: ellipsis;
-            white-space: normal;
+            white-space: nowrap;
             font-family: 'JetBrains Mono', monospace;
         }
         
@@ -439,7 +425,7 @@
         .prompt-count {
             font-size: 15px;
             color: var(--text-dim);
-            white-space: normal;
+            white-space: nowrap;
         }
 
         .chat-list-section {
@@ -1505,7 +1491,7 @@
             transition: all 0.2s ease;
             background: transparent;
             text-transform: uppercase;
-            white-space: normal;
+            white-space: nowrap;
             border-left: none;
         }
 
@@ -1629,7 +1615,7 @@
                 transition: all 0.2s ease;
                 text-transform: uppercase;
                 letter-spacing: 0.1em;
-                white-space: normal;
+                white-space: nowrap;
                 border-left: 2px solid transparent;
             }
 
@@ -2626,40 +2612,40 @@
                                 <h3 class="chart-title" style="margin-bottom: 20px; text-align: center;">${getText('dashboard.globalRankings')}</h3>
                                 <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;" id="rankingCards">
                                     <div class="stat-card" style="text-align: center;">
-                                        <p class="stat-beaten" id="rankingQingCountBeaten">--</p>
                                         <p class="stat-label" style="color: var(--text-dim);">${getText('dashboard.cyberBowRanking')}</p>
                                         <p class="stat-value" id="rankingQingCount" style="color: #ffffff;">--</p>
                                         <p class="stat-comparison" id="rankingQingCountPercent">--</p>
+                                        <p class="stat-beaten" id="rankingQingCountBeaten" style="color: var(--accent-terminal); font-size: 14px; margin-top: 8px;">--</p>
                                     </div>
                                     <div class="stat-card" style="text-align: center;">
-                                        <p class="stat-beaten" id="rankingBuCountBeaten">--</p>
                                         <p class="stat-label" style="color: var(--text-dim);">${getText('dashboard.bossModeRanking')}</p>
                                         <p class="stat-value" id="rankingBuCount" style="color: #ffffff;">--</p>
                                         <p class="stat-comparison" id="rankingBuCountPercent">--</p>
                                     </div>
+                                        <p class="stat-beaten" id="rankingBuCountBeaten" style="color: var(--accent-terminal); font-size: 14px; margin-top: 8px;">--</p>
                                     <div class="stat-card" style="text-align: center;">
-                                        <p class="stat-beaten" id="rankingUserMessagesBeaten">--</p>
                                         <p class="stat-label" style="color: var(--text-dim);">${getText('dashboard.aiTeasingRanking')}</p>
                                         <p class="stat-value" id="rankingUserMessages" style="color: #ffffff;">--</p>
                                         <p class="stat-comparison" id="rankingUserMessagesPercent">--</p>
                                     </div>
                                     <div class="stat-card" style="text-align: center;">
-                                        <p class="stat-beaten" id="rankingTotalCharsBeaten">--</p>
+                                        <p class="stat-beaten" id="rankingUserMessagesBeaten" style="color: var(--accent-terminal); font-size: 14px; margin-top: 8px;">--</p>
                                         <p class="stat-label" style="color: var(--text-dim);">${getText('dashboard.banterOutputRanking')}</p>
                                         <p class="stat-value" id="rankingTotalChars" style="color: #ffffff;">--</p>
                                         <p class="stat-comparison" id="rankingTotalCharsPercent">--</p>
                                     </div>
                                     <div class="stat-card" style="text-align: center;">
-                                        <p class="stat-beaten" id="rankingAvgLengthBeaten">--</p>
                                         <p class="stat-label" style="color: var(--text-dim);">${getText('dashboard.avgLengthRanking')}</p>
+                                        <p class="stat-beaten" id="rankingTotalCharsBeaten" style="color: var(--accent-terminal); font-size: 14px; margin-top: 8px;">--</p>
                                         <p class="stat-value" id="rankingAvgLength" style="color: #ffffff;">--</p>
                                         <p class="stat-comparison" id="rankingAvgLengthPercent">--</p>
                                     </div>
                                     <div class="stat-card" style="text-align: center;">
-                                        <p class="stat-beaten" id="rankingUsageDaysBeaten">--</p>
                                         <p class="stat-label" style="color: var(--text-dim);">${getText('dashboard.daysOnDutyRanking')}</p>
                                         <p class="stat-value" id="rankingUsageDays" style="color: #ffffff;">--</p>
+                                        <p class="stat-beaten" id="rankingAvgLengthBeaten" style="color: var(--accent-terminal); font-size: 14px; margin-top: 8px;">--</p>
                                         <p class="stat-comparison" id="rankingUsageDaysPercent">--</p>
+                                        <p class="stat-beaten" id="rankingUsageDaysBeaten" style="color: var(--accent-terminal); font-size: 14px; margin-top: 8px;">--</p>
                                     </div>
                                 </div>
                             </div>
@@ -4639,8 +4625,8 @@
                                     }
                                     if (beatenEl) {
                                         beatenEl.style.whiteSpace = 'nowrap';
-                                        beatenEl.style.overflow = 'visible';
-                                        beatenEl.style.textOverflow = 'clip';
+                                        beatenEl.style.overflow = 'hidden';
+                                        beatenEl.style.textOverflow = 'ellipsis';
                                     }
                                     
                                     if (rank !== null && rank !== undefined && total > 0) {
