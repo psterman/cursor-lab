@@ -1506,10 +1506,60 @@
             50% { opacity: 0; }
         }
 
-        /* 响应式：在小屏幕上隐藏目录 */
+        /* 移动端目录导航 */
+        .toc-nav-mobile {
+            display: none;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(5, 5, 5, 0.95);
+            border-top: 1px solid var(--card-border);
+            z-index: 1000;
+            padding: 8px 12px;
+            overflow-x: auto;
+            backdrop-filter: blur(10px);
+        }
+
+        .toc-nav-mobile .toc-item {
+            font-size: 9px;
+            padding: 6px 10px;
+            color: var(--text-dim);
+            flex-shrink: 0;
+        }
+
+        .toc-nav-mobile .toc-item.active {
+            color: var(--accent-terminal);
+            background: rgba(0, 255, 65, 0.1);
+        }
+
+        /* 响应式：小屏幕适配 */
         @media (max-width: 1200px) {
             .toc-nav {
                 display: none;
+            }
+            .toc-nav-mobile {
+                display: flex;
+                flex-direction: row;
+                align-items: center;
+                gap: 4px;
+            }
+            .toc-nav-mobile::before {
+                content: '导航';
+                font-family: 'JetBrains Mono', monospace;
+                font-size: 10px;
+                color: var(--text-dim);
+                padding: 0 8px;
+                text-transform: uppercase;
+                letter-spacing: 0.1em;
+            }
+        }
+
+        /* 分享按钮移动端适配 */
+        @media (max-width: 1200px) {
+            .fixed.bottom-24.right-4 {
+                bottom: 80px !important;
+                right: 12px !important;
             }
         }
     </style>
@@ -5990,9 +6040,85 @@
                                 </div>
                             )}
                             
-                            {/* 竖向目录导航 - 只在完整报告页面显示 */}
+                            {/* 竖向目录导航 - PC端 */}
                             {step === 'fullReport' && (
                                 <div className="toc-nav">
+                                    <span 
+                                        className="toc-item active" 
+                                        data-target="realtime-stats"
+                                        onClick={(e) => scrollToSection(e, 'realtime-stats')}
+                                    >
+                                        实时统计
+                                    </span>
+                                    <span 
+                                        className="toc-item" 
+                                        data-target="global-rankings"
+                                        onClick={(e) => scrollToSection(e, 'global-rankings')}
+                                    >
+                                        横向排名
+                                    </span>
+                                    <span 
+                                        className="toc-item" 
+                                        data-target="dimension-rankings"
+                                        onClick={(e) => scrollToSection(e, 'dimension-rankings')}
+                                    >
+                                        排行榜
+                                    </span>
+                                    <span 
+                                        className="toc-item" 
+                                        data-target="vibe-slang"
+                                        onClick={(e) => scrollToSection(e, 'vibe-slang')}
+                                    >
+                                        黑话榜
+                                    </span>
+                                    <span 
+                                        className="toc-item" 
+                                        data-target="personality-lock"
+                                        onClick={(e) => scrollToSection(e, 'personality-lock')}
+                                    >
+                                        人格锁定
+                                    </span>
+                                    <span 
+                                        className="toc-item" 
+                                        data-target="personality-traits"
+                                        onClick={(e) => scrollToSection(e, 'personality-traits')}
+                                    >
+                                        人格特征
+                                    </span>
+                                    <span 
+                                        className="toc-item" 
+                                        data-target="semantic-fingerprint"
+                                        onClick={(e) => scrollToSection(e, 'semantic-fingerprint')}
+                                    >
+                                        语义指纹
+                                    </span>
+                                    <span 
+                                        className="toc-item" 
+                                        data-target="radar-chart"
+                                        onClick={(e) => scrollToSection(e, 'radar-chart')}
+                                    >
+                                        雷达图
+                                    </span>
+                                    <span 
+                                        className="toc-item" 
+                                        data-target="chat-history"
+                                        onClick={(e) => scrollToSection(e, 'chat-history')}
+                                    >
+                                        聊天记录
+                                    </span>
+                                    <span 
+                                        className="toc-item" 
+                                        data-target="analysis-comments"
+                                        onClick={(e) => scrollToSection(e, 'analysis-comments')}
+                                    >
+                                        分析评论
+                                    </span>
+                                </div>
+                            )}
+                            
+                            {/* 移动端底部目录导航 */}
+                            {step === 'fullReport' && (
+                                <div className="toc-nav-mobile">
                                     <span 
                                         className="toc-item active" 
                                         data-target="realtime-stats"
