@@ -1454,6 +1454,64 @@
         .wl-pagination * {
             font-family: 'JetBrains Mono', monospace !important;
         }
+
+        /* 竖向目录导航样式 */
+        .toc-nav {
+            position: fixed;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 0;
+            padding: 16px 0;
+        }
+
+        .toc-item {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            font-weight: 500;
+            letter-spacing: 0.15em;
+            color: var(--text-dim);
+            padding: 4px 10px 4px 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: transparent;
+            text-transform: uppercase;
+            white-space: nowrap;
+            border-left: none;
+        }
+
+        .toc-item:hover {
+            color: var(--accent-terminal);
+            background: rgba(0, 255, 65, 0.08);
+        }
+
+        .toc-item.active {
+            color: var(--accent-terminal);
+            background: rgba(0, 255, 65, 0.1);
+            text-shadow: 0 0 8px var(--accent-terminal);
+        }
+
+        .toc-item.active::before {
+            content: '>';
+            margin-right: 6px;
+            animation: blink 0.8s steps(2) infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        /* 响应式：在小屏幕上隐藏目录 */
+        @media (max-width: 1200px) {
+            .toc-nav {
+                display: none;
+            }
+        }
     </style>
 </head>
 <body class="bg-[#050505]">
@@ -2400,8 +2458,9 @@
                         </header>
                         
                         <div id="dashboardSection">
+                            
                             <!-- 实时统计区域 -->
-                            <div class="realtime-stats-section" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 2px; padding: 24px; margin-bottom: 40px;">
+                            <div id="realtime-stats" className="realtime-stats-section" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 2px; padding: 24px; margin-bottom: 40px; scroll-margin-top: 80px;">
                                 <h3 class="chart-title" style="margin-bottom: 20px; text-align: center;">${getText('dashboard.realtimeStats')}</h3>
                                 <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
                                     <div class="stat-card" style="text-align: center;">
@@ -2419,7 +2478,7 @@
                             </div>
 
                             <!-- 横向排名区域 -->
-                            <div class="ranking-section" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 2px; padding: 24px; margin-bottom: 40px;">
+                            <div id="global-rankings" className="ranking-section" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 2px; padding: 24px; margin-bottom: 40px; scroll-margin-top: 80px;">
                                 <h3 class="chart-title" style="margin-bottom: 20px; text-align: center;">${getText('dashboard.globalRankings')}</h3>
                                 <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;" id="rankingCards">
                                     <div class="stat-card" style="text-align: center;">
@@ -2456,7 +2515,7 @@
                             </div>
 
                             <!-- 维度得分排行榜 -->
-                            <div class="dimension-ranking-section" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 2px; padding: 24px; margin-bottom: 40px;">
+                            <div id="dimension-rankings" className="dimension-ranking-section" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 2px; padding: 24px; margin-bottom: 40px; scroll-margin-top: 80px;">
                                 <h3 class="chart-title" style="margin-bottom: 20px; text-align: center;">${getText('dashboard.dimensionRankingTitle')}</h3>
                                 <div id="dimensionRankingList" class="prompts-list"></div>
                             </div>
@@ -2525,7 +2584,8 @@
                                 </div>
                             </div>
                             
-                            <div class="chart-card" style="margin-top: 40px;">
+                            <!-- 黑话榜 -->
+                            <div id="vibe-slang" className="chart-card" style="margin-top: 40px; scroll-margin-top: 80px;">
                                 <h3 class="chart-title"><span style="color: var(--accent-terminal);">🗣️</span> ${getText('dashboard.vibeCodingSlang')}</h3>
                                 <div class="prompts-list" id="topChineseWordsList"></div>
                             </div>
@@ -2535,9 +2595,11 @@
                                 <div class="prompts-list" id="techStackList"></div>
                             </div>
                             
-                            <div class="vibe-codinger-section chart-card" id="vibeCodingerSection" style="margin-top: 40px;"></div>
+                            <!-- 人格锁定、人格特征、语义指纹、维度雷达图 -->
+                            <div id="personality-lock" className="vibe-codinger-section chart-card" style="margin-top: 40px; scroll-margin-top: 80px;"></div>
                             
-                            <div class="chat-list-section" style="margin-top: 40px;">
+                            <!-- 聊天记录 -->
+                            <div id="chat-history" className="chat-list-section" style="margin-top: 40px; scroll-margin-top: 80px;">
                                 <div class="chat-list-header">
                                     <h3 class="chat-list-title">${getText('chatList.title')}</h3>
                                     <div class="chat-list-controls">
@@ -2558,7 +2620,7 @@
                             </div>
                             
                             <!-- Analysis Comments - Waline 留言板 -->
-                            <div style="margin-top: 60px; padding: 40px 0;">
+                            <div id="analysis-comments" style="margin-top: 60px; padding: 40px 0; scroll-margin-top: 80px;">
                                 <div style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 2px; padding: 32px; fontFamily: 'JetBrains Mono', monospace">
                                     <h2 style="color: var(--accent-terminal); fontSize: 18px; fontWeight: 700; textTransform: uppercase; letterSpacing: 0.1em; marginBottom: 24px; display: flex; alignItems: center; gap: 8px">
                                         <span style="color: var(--accent-terminal)">&gt;</span>
@@ -2677,6 +2739,78 @@
             const animationDataRef = useRef(null);
             
             const [modulesReady, setModulesReady] = useState(!!(window.i18n && window.i18n.getText));
+
+            // 滚动到指定section的函数
+            const scrollToSection = (e, targetId) => {
+                e.preventDefault();
+                const element = document.getElementById(targetId);
+                if (element) {
+                    const offsetTop = element.offsetTop - 80; // 减去header高度
+                    window.scrollTo({
+                        top: offsetTop,
+                        behavior: 'smooth'
+                    });
+                }
+            };
+
+            // 滚动监听高亮当前section
+            useEffect(() => {
+                if (step !== 'fullReport') return;
+
+                const sections = [
+                    'realtime-stats',
+                    'global-rankings',
+                    'dimension-rankings',
+                    'vibe-slang',
+                    'personality-lock',
+                    'personality-traits',
+                    'semantic-fingerprint',
+                    'radar-chart',
+                    'chat-history',
+                    'analysis-comments'
+                ];
+
+                const observerOptions = {
+                    root: null,
+                    rootMargin: '-20% 0px -60% 0px',
+                    threshold: 0
+                };
+
+                const observer = new IntersectionObserver((entries) => {
+                    entries.forEach(entry => {
+                        if (entry.isIntersecting) {
+                            // 移除所有active状态
+                            document.querySelectorAll('.toc-item').forEach(item => {
+                                item.classList.remove('active');
+                            });
+                            // 添加active状态到当前section
+                            const activeItem = document.querySelector(`.toc-item[data-target="${entry.target.id}"]`);
+                            if (activeItem) {
+                                activeItem.classList.add('active');
+                            }
+                        }
+                    });
+                }, observerOptions);
+
+                // 观察所有section
+                setTimeout(() => {
+                    sections.forEach(id => {
+                        const element = document.getElementById(id);
+                        if (element) {
+                            observer.observe(element);
+                        }
+                    });
+                }, 500);
+
+                return () => {
+                    sections.forEach(id => {
+                        const element = document.getElementById(id);
+                        if (element) {
+                            observer.unobserve(element);
+                        }
+                    });
+                };
+            }, [step]);
 
             // 监听模块加载状态
             useEffect(() => {
@@ -5856,6 +5990,82 @@
                                 </div>
                             )}
                             
+                            {/* 竖向目录导航 - 只在完整报告页面显示 */}
+                            {step === 'fullReport' && (
+                                <div className="toc-nav">
+                                    <span 
+                                        className="toc-item active" 
+                                        data-target="realtime-stats"
+                                        onClick={(e) => scrollToSection(e, 'realtime-stats')}
+                                    >
+                                        实时统计
+                                    </span>
+                                    <span 
+                                        className="toc-item" 
+                                        data-target="global-rankings"
+                                        onClick={(e) => scrollToSection(e, 'global-rankings')}
+                                    >
+                                        横向排名
+                                    </span>
+                                    <span 
+                                        className="toc-item" 
+                                        data-target="dimension-rankings"
+                                        onClick={(e) => scrollToSection(e, 'dimension-rankings')}
+                                    >
+                                        排行榜
+                                    </span>
+                                    <span 
+                                        className="toc-item" 
+                                        data-target="vibe-slang"
+                                        onClick={(e) => scrollToSection(e, 'vibe-slang')}
+                                    >
+                                        黑话榜
+                                    </span>
+                                    <span 
+                                        className="toc-item" 
+                                        data-target="personality-lock"
+                                        onClick={(e) => scrollToSection(e, 'personality-lock')}
+                                    >
+                                        人格锁定
+                                    </span>
+                                    <span 
+                                        className="toc-item" 
+                                        data-target="personality-traits"
+                                        onClick={(e) => scrollToSection(e, 'personality-traits')}
+                                    >
+                                        人格特征
+                                    </span>
+                                    <span 
+                                        className="toc-item" 
+                                        data-target="semantic-fingerprint"
+                                        onClick={(e) => scrollToSection(e, 'semantic-fingerprint')}
+                                    >
+                                        语义指纹
+                                    </span>
+                                    <span 
+                                        className="toc-item" 
+                                        data-target="radar-chart"
+                                        onClick={(e) => scrollToSection(e, 'radar-chart')}
+                                    >
+                                        雷达图
+                                    </span>
+                                    <span 
+                                        className="toc-item" 
+                                        data-target="chat-history"
+                                        onClick={(e) => scrollToSection(e, 'chat-history')}
+                                    >
+                                        聊天记录
+                                    </span>
+                                    <span 
+                                        className="toc-item" 
+                                        data-target="analysis-comments"
+                                        onClick={(e) => scrollToSection(e, 'analysis-comments')}
+                                    >
+                                        分析评论
+                                    </span>
+                                </div>
+                            )}
+                            
                             {/* 浮动分享按钮（非分享模式时显示） */}
                             {!isShareMode && (
                                 <div className="fixed bottom-24 right-4 z-50" style={{zIndex: 1000}}>
@@ -5864,7 +6074,7 @@
                                         className="flex items-center justify-center gap-2 bg-transparent text-white px-4 py-3 rounded-sm font-bold hover:bg-zinc-800 transition-colors border border-green-500 uppercase tracking-wider font-mono text-sm shadow-lg"
                                         title={lang === 'en' ? 'SHARE REPORT' : '分享报告'}
                                     >
-                                        <Icon name="link" size={18} />
+                                        <Icon name="share" size={18} />
                                         <span className="hidden sm:inline">{lang === 'en' ? 'SHARE' : '分享'}</span>
                                     </button>
                                 </div>

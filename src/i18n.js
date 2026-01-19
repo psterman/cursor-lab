@@ -279,12 +279,12 @@ export const I18N = {
 
     // Vibe Codinger
     vibeCodinger: {
-      title: '🔮 Your Cursor Personality Locked',
+      title: '🔮 Personality Lock',
       roastTitle: '🔥 Precision Roast',
-      dimensionsTitle: '📊 Five-Dimensional Semantic Fingerprint',
+      dimensionsTitle: '📊 5D Semantic Fingerprint',
       traitsTitle: '🎯 Personality Traits',
       fingerprintTitle: '🔍 Semantic Fingerprint',
-      chartTitle: '📈 Dimension Radar Chart',
+      chartTitle: '📈 Dimension Radar',
       index: 'Index',
       lpdef: 'LPDEF',
       personalityTitles: {

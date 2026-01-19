@@ -438,7 +438,17 @@ function triggerFileInput(inputElement) {
     // 重置 input 的值，允许重新选择相同文件
     inputElement.value = '';
     // 点击触发文件选择
-    inputElement.click();
+    if (inputElement.click) {
+        inputElement.click();
+    } else {
+        // 尝试模拟点击
+        const event = new MouseEvent('click', {
+            view: window,
+            bubbles: true,
+            cancelable: true
+        });
+        inputElement.dispatchEvent(event);
+    }
     console.log('[Main] ✅ 文件选择已触发');
   } catch (error) {
     console.error('[Main] ❌ 触发文件选择失败:', error);
@@ -1650,7 +1660,8 @@ function debounce(func, wait) {
 function displayVibeCodingerAnalysis() {
   if (!vibeResult) return;
 
-  const container = document.getElementById('vibeCodingerSection');
+  // 查找容器（支持多个ID）
+  const container = document.getElementById('vibeCodingerSection') || document.getElementById('personality-lock');
   if (!container) return;
 
   const { personalityType, dimensions, analysis, semanticFingerprint, statistics, vibeIndex, roastText, personalityName, lpdef } = vibeResult;
@@ -1753,7 +1764,7 @@ function displayVibeCodingerAnalysis() {
       }).join('')}
     </div>
 
-    <div class="vibe-traits">
+    <div class="vibe-traits" id="personality-traits" style="scroll-margin-top: 80px;">
       <h3 class="traits-title">${t('vibeCodinger.traitsTitle')}</h3>
       <div class="traits-list">
         ${analysis.traits.map(trait => `
@@ -1762,7 +1773,7 @@ function displayVibeCodingerAnalysis() {
       </div>
     </div>
 
-    <div class="vibe-fingerprint">
+    <div class="vibe-fingerprint" id="semantic-fingerprint" style="scroll-margin-top: 80px;">
       <h3 class="fingerprint-title">${t('vibeCodinger.fingerprintTitle')}</h3>
       <div class="fingerprint-grid">
         <div class="fingerprint-item">
@@ -1812,7 +1823,7 @@ function displayVibeCodingerAnalysis() {
       </div>
     </div>
 
-    <div class="vibe-chart-container">
+    <div class="vibe-chart-container" id="radar-chart" style="scroll-margin-top: 80px;">
       <h3 class="chart-title">${t('vibeCodinger.chartTitle')}</h3>
       <div class="chart-wrapper">
         <canvas id="vibeRadarChart"></canvas>
