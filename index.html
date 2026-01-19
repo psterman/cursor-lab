@@ -1837,12 +1837,16 @@
                 const apiEndpoint = getApiEndpoint();
                 // 确保 apiEndpoint 以斜杠结尾，然后拼接 API 路径
                 const baseUrl = apiEndpoint?.endsWith('/') ? apiEndpoint : `${apiEndpoint}/`;
-                const requestUrl = `${baseUrl}api/random_prompt`;
+                // 将语言代码转换为 API 期望的格式：zh-CN -> cn, en -> en
+                const langParam = lang === 'zh-CN' ? 'cn' : (lang === 'en' ? 'en' : 'cn');
+                const requestUrl = `${baseUrl}api/random_prompt?lang=${langParam}`;
                 
                 // 调试：输出请求信息
                 console.log('[AnswerBookCard] 准备发起请求:', {
                     apiEndpoint: apiEndpoint,
                     requestUrl: requestUrl,
+                    lang: lang,
+                    langParam: langParam,
                     apiEndpoint是否以斜杠结尾: apiEndpoint?.endsWith('/'),
                 });
                 
@@ -1923,11 +1927,11 @@
                 }
             };
 
-            // 组件加载时获取数据
+            // 组件加载时或语言变化时获取数据
             useEffect(() => {
-                console.log('[AnswerBookCard] useEffect 触发，准备获取数据');
+                console.log('[AnswerBookCard] useEffect 触发，准备获取数据，当前语言:', lang);
                 fetchRandomPrompt();
-            }, []);
+            }, [lang]); // 监听 lang 变化，自动重新获取数据
 
             return (
                 <div 
@@ -1966,9 +1970,11 @@
 
                     {!loading && !error && prompt && (
                         <>
-                            <p className="stat-label" style={{ marginBottom: '8px' }}>
-                                {isEn ? 'ANSWER BOOK' : '答案之书'}
-                            </p>
+                            {prompt.author && (
+                                <p className="stat-label" style={{ marginBottom: '8px' }}>
+                                    {prompt.author}
+                                </p>
+                            )}
                             <div 
                                 style={{
                                     color: 'var(--text-main)',
@@ -2091,11 +2097,15 @@
                 setError(null);
                 setLiked(false);
                 
-                // 使用 apiEndpoint 拼接 API 路径
-                const requestUrl = `${apiEndpoint}api/random_prompt`;
+                // 将语言代码转换为 API 期望的格式：zh-CN -> cn, en -> en
+                const langParam = lang === 'zh-CN' ? 'cn' : (lang === 'en' ? 'en' : 'cn');
+                // 使用 apiEndpoint 拼接 API 路径，添加语言参数
+                const requestUrl = `${apiEndpoint}api/random_prompt?lang=${langParam}`;
                 console.log('[PersonaSection] 准备发起请求:', {
                     apiEndpoint: apiEndpoint,
                     requestUrl: requestUrl,
+                    lang: lang,
+                    langParam: langParam,
                 });
                 
                 try {
@@ -2204,14 +2214,15 @@
                 }
             };
 
-            // 组件加载时获取数据
+            // 组件加载时或语言/API端点变化时获取数据
             useEffect(() => {
                 console.log('[PersonaSection] useEffect 触发:', {
                     apiEndpoint: apiEndpoint,
+                    lang: lang,
                     timestamp: new Date().toISOString(),
                 });
                 fetchRandomPrompt();
-            }, [apiEndpoint]);
+            }, [apiEndpoint, lang]); // 监听 apiEndpoint 和 lang 变化，自动重新获取数据
 
             return (
                 <div className="max-w-2xl w-full mx-auto">
@@ -3968,11 +3979,25 @@
                             // 根据排名匹配对应的level和comment
                             const getRankingComment = (data, rank, total, lang = 'zh-CN') => {
                                 if (!data || rank === null || rank === undefined || total <= 0) {
+                                    console.warn('[getRankingComment] 参数无效:', { data: !!data, rank, total, lang });
                                     return null;
                                 }
                                 
+                                // percent: 超过多少百分比的人（排名越靠前，percent越大）
                                 const percent = ((total - rank + 1) / total * 100);
+                                // rankPercent: 排名百分比（排名越靠前，rankPercent越小）
                                 const rankPercent = (rank / total) * 100;
+                                
+                                console.log('[getRankingComment] 开始匹配:', {
+                                    rank, 
+                                    total, 
+                                    percent: percent.toFixed(1) + '% (超过百分比)',
+                                    rankPercent: rankPercent.toFixed(1) + '% (排名百分比)',
+                                    lang,
+                                    hasLevels: !!data.levels,
+                                    levelsCount: data.levels?.length,
+                                    levels: data.levels?.map(l => l.range)
+                                });
                                 
                                 // 处理英文版JSON格式（有segments数组或isEnglishFormat标志）
                                 if (data.isEnglishFormat && data.segments) {
@@ -4041,24 +4066,22 @@
                                         }
                                     }
                                     // 处理 "1-7天", "8-30天" 等格式（day.json）
-                                    else if (range.includes('天')) {
+                                    else if (range.includes('天') || range === '181+') {
                                         // 根据排名百分比匹配：排名越靠前（rank越小），天数越多
-                                        // levels数组从低到高排列，所以需要反向匹配
-                                        const levelIndex = data.levels.indexOf(level);
-                                        const totalLevels = data.levels.length;
-                                        const segmentSize = 100 / totalLevels;
+                                        // 使用 percent（超过百分比）来匹配，因为排名越靠前，percent越大
+                                        // 如果 total 很小，使用 rank 直接匹配
                                         
-                                        if (range === '181+') {
-                                            // 最高level，排名前20%
-                                            if (rankPercent <= 20) matched = true;
+                                        if (range === '181+' || range === '181+天') {
+                                            // 最高level：排名前20% 或 排名前3名（如果total很小）
+                                            if (rankPercent <= 20 || (total <= 10 && rank <= 3)) matched = true;
                                         } else if (range === '91-180天') {
-                                            if (rankPercent > 20 && rankPercent <= 40) matched = true;
+                                            if ((rankPercent > 20 && rankPercent <= 40) || (total <= 10 && rank > 3 && rank <= 5)) matched = true;
                                         } else if (range === '31-90天') {
-                                            if (rankPercent > 40 && rankPercent <= 60) matched = true;
+                                            if ((rankPercent > 40 && rankPercent <= 60) || (total <= 10 && rank > 5 && rank <= 7)) matched = true;
                                         } else if (range === '8-30天') {
-                                            if (rankPercent > 60 && rankPercent <= 80) matched = true;
+                                            if ((rankPercent > 60 && rankPercent <= 80) || (total <= 10 && rank > 7 && rank <= 9)) matched = true;
                                         } else if (range === '1-7天') {
-                                            if (rankPercent > 80) matched = true;
+                                            if (rankPercent > 80 || (total <= 10 && rank > 9)) matched = true;
                                         }
                                     }
                                     // 处理 "1-500字", "501-2000字" 等格式（say.json）
@@ -4079,25 +4102,38 @@
                                     }
                                     // 处理 "1-50字", "51-200字" 等格式（word.json）
                                     // 注意：word.json的最后一个range是"1001+"，不包含"字"
-                                    else if (range === '1001+' || (range.includes('字') && (range.includes('1001') || range.includes('501') || range.includes('201') || range.includes('51') || range.includes('1-50')))) {
+                                    else if (range === '1001+' || range === '1001+字' || (range.includes('字') && (range.includes('501-1000') || range.includes('201-500') || range.includes('51-200') || range.includes('1-50')))) {
                                         // word.json的格式
-                                        const rankPercent = (rank / total) * 100;
-                                        if (range === '1001+') {
-                                            if (rankPercent <= 20) matched = true;
+                                        // 使用 rankPercent 来匹配，如果 total 很小，使用 rank 直接匹配
+                                        if (range === '1001+' || range === '1001+字') {
+                                            // 最高level：排名前20% 或 排名前3名（如果total很小）
+                                            if (rankPercent <= 20 || (total <= 10 && rank <= 3)) matched = true;
                                         } else if (range === '501-1000字') {
-                                            if (rankPercent > 20 && rankPercent <= 40) matched = true;
+                                            if ((rankPercent > 20 && rankPercent <= 40) || (total <= 10 && rank > 3 && rank <= 5)) matched = true;
                                         } else if (range === '201-500字') {
-                                            if (rankPercent > 40 && rankPercent <= 60) matched = true;
+                                            if ((rankPercent > 40 && rankPercent <= 60) || (total <= 10 && rank > 5 && rank <= 7)) matched = true;
                                         } else if (range === '51-200字') {
-                                            if (rankPercent > 60 && rankPercent <= 80) matched = true;
+                                            if ((rankPercent > 60 && rankPercent <= 80) || (total <= 10 && rank > 7 && rank <= 9)) matched = true;
                                         } else if (range === '1-50字') {
-                                            if (rankPercent > 80) matched = true;
+                                            if (rankPercent > 80 || (total <= 10 && rank > 9)) matched = true;
                                         }
                                     }
                                     
                                     if (matched && level.comments && level.comments.length > 0) {
                                         // 随机选择一个comment
                                         const randomComment = level.comments[Math.floor(Math.random() * level.comments.length)];
+                                        
+                                        // 调试日志
+                                        console.log(`[getRankingComment] ✅ 匹配成功:`, {
+                                            range: range,
+                                            rank: rank,
+                                            total: total,
+                                            rankPercent: rankPercent.toFixed(1) + '%',
+                                            percent: percent.toFixed(1) + '%',
+                                            title: randomComment.title,
+                                            content: randomComment.content?.substring(0, 50) + '...',
+                                            commentsCount: level.comments.length
+                                        });
                                         
                                         // 根据语言选择对应的文本
                                         let title = randomComment.title;
@@ -4126,6 +4162,12 @@
                                     }
                                 }
                                 
+                                console.warn('[getRankingComment] 未找到匹配的level:', {
+                                    rank,
+                                    total,
+                                    rankPercent: rankPercent.toFixed(1) + '%',
+                                    levels: data.levels?.map(l => l.range)
+                                });
                                 return null;
                             };
                             
@@ -4181,8 +4223,24 @@
                                         // 判断是否在100名内
                                         if (rank <= 100) {
                                             // 100名内：显示排名数字和JSON中的标题和评语
+                                            console.log(`[updateRankingCard] 开始加载数据: ${jsonFile}, rank=${rank}, total=${total}`);
                                             const data = await loadRankingData(jsonFile, lang);
+                                            console.log(`[updateRankingCard] 数据加载结果:`, {
+                                                jsonFile,
+                                                hasData: !!data,
+                                                hasLevels: !!data?.levels,
+                                                levelsCount: data?.levels?.length
+                                            });
+                                            
                                             const comment = getRankingComment(data, rank, total, lang);
+                                            console.log(`[updateRankingCard] 匹配结果:`, {
+                                                jsonFile,
+                                                rank,
+                                                total,
+                                                hasComment: !!comment,
+                                                commentTitle: comment?.title,
+                                                commentContent: comment?.content?.substring(0, 50)
+                                            });
                                             
                                             if (comment && valueEl && percentEl) {
                                                 // valueEl显示排名数字（大字体，参考技术排名样式）
@@ -4196,8 +4254,18 @@
                                                 percentEl.innerHTML = `<strong>${comment.title}</strong><br/>${comment.content}`;
                                                 percentEl.style.whiteSpace = 'normal'; // 允许换行显示content
                                                 percentEl.style.color = '#ffffff'; // 确保内容文字是白色
+                                                console.log(`[updateRankingCard] ✅ 成功显示文字说明: ${jsonFile}`);
                                             } else {
                                                 // 如果无法从JSON获取，使用默认显示
+                                                console.warn(`[updateRankingCard] ⚠️ 无法获取文字说明，使用默认显示:`, {
+                                                    jsonFile,
+                                                    rank,
+                                                    total,
+                                                    hasComment: !!comment,
+                                                    hasValueEl: !!valueEl,
+                                                    hasPercentEl: !!percentEl,
+                                                    data: !!data
+                                                });
                                                 const percent = ((total - rank + 1) / total * 100).toFixed(1);
                                                 if (valueEl) {
                                                     valueEl.textContent = rank;
