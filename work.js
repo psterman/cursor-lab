@@ -22,12 +22,22 @@ export default {
       
       // 路径：GET /api/random_prompt
       if (url.pathname === "/api/random_prompt") {
-        // 【修正】变量名改为 prompts_library，表名改为 answer_book，note 映射为 author
-        const result = await env.prompts_library.prepare(
-          "SELECT id, content, note as author FROM answer_book ORDER BY RANDOM() LIMIT 1"
-        ).first();
+        // 获取语言参数，默认为中文 (cn)
+        const langParam = url.searchParams.get("lang") || "cn";
+        // 确保语言参数有效，只接受 'cn' 或 'en'
+        const lang = (langParam === "en") ? "en" : "cn";
         
-        return new Response(JSON.stringify(result || { content: "数据库是空的", author: "System" }), {
+        // 【修正】根据语言参数过滤数据：变量名改为 prompts_library，表名改为 answer_book，note 映射为 author
+        const result = await env.prompts_library.prepare(
+          "SELECT id, content, note as author FROM answer_book WHERE lang = ? ORDER BY RANDOM() LIMIT 1"
+        ).bind(lang).first();
+        
+        // 根据语言返回对应的空数据提示
+        const emptyMessage = lang === "en" 
+          ? "Database is empty" 
+          : "数据库是空的";
+        
+        return new Response(JSON.stringify(result || { content: emptyMessage, author: "System" }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
       }
