@@ -175,37 +175,99 @@ const MODIFIER_WORDS = {
  * 技术名词模式 - 用于计算探索欲 (E)
  */
 const TECH_PATTERNS = {
-  // API 相关
-  api: [
-    /api[\/\s]?[a-z0-9]+/gi,
-    /rest[\/\s]?api/gi,
-    /graphql/gi,
-    /endpoint/gi,
-    /request/gi,
-    /response/gi,
+  // 1. 编程语言 (Core Languages)
+  languages: [
+    // C/C++ Ecosystem
+    /\b(c\+\+|cpp|cplusplus|objective-c|objc)\b/gi,
+    /\b(c lang|gcc|clang|msvc|cmake|makefile|stl|boost|qt|mfc|win32 api)\b/gi, // 增加生态库
+    // Java/JVM Ecosystem
+    /\b(java|jdk|jre|jvm|kotlin|scala|groovy|clojure)\b/gi,
+    /\b(spring boot|spring cloud|hibernate|mybatis|jpa|jakarta|maven|gradle|ant|junit|testng)\b/gi,
+    // .NET Ecosystem
+    /\b(c#|csharp|f#|dotnet|\.net|asp\.net|entity framework|blazor|razor|nuget|xamarin|maui)\b/gi,
+    // Scripting & Dynamic
+    /\b(python|javascript|typescript|php|ruby|lua|perl|bash|shell|powershell|zsh|tcl)\b/gi,
+    /\b(node\.js|deno|bun|composer|pip|conda|gem)\b/gi,
+    // Modern & Systems
+    /\b(go|golang|rust|swift|dart|elixir|haskell|erlang|julia|r lang|matlab|fortran|cobol|assembly|wasm|zig|nim|crystal)\b/gi,
   ],
-  // 框架和库
-  frameworks: [
-    /\b(react|vue|angular|svelte|next|nuxt|gatsby|remix)\b/gi,
-    /\b(express|koa|fastify|nest|django|flask|fastapi|spring|laravel)\b/gi,
-    /\b(tensorflow|pytorch|keras|scikit-learn|pandas|numpy)\b/gi,
-    /\b(bootstrap|tailwind|material-ui|antd|element|vuetify)\b/gi,
+
+  // 2. 移动与嵌入式 (Mobile & Embedded)
+  mobile_embedded: [
+    // Android
+    /\b(android|apk|aar|adb|logcat|jetpack compose|material design|ndk|jni)\b/gi,
+    /\b(activity|fragment|intent|service|broadcast receiver|content provider|gradle|retrofit|okhttp|room)\b/gi,
+    // iOS/Mac
+    /\b(ios|macos|watchos|tvos|swiftui|uikit|cocoa|xcode|cocoapods|carthage|spm|core data|arkit)\b/gi,
+    // Embedded & IoT & Smart TV
+    /\b(webos|tizen|harmonyos|openharmony|embedded|iot|arduino|raspberry pi|esp32|stm32|rtos|firmware|driver)\b/gi,
+    /\b(enes|webos|enact|luna-service|palm)\b/gi, // WebOS specific
+    // Cross Platform
+    /\b(flutter|react native|uniapp|taro|ionic|cordova|capacitor|expo|weex|qt quick|qml)\b/gi,
   ],
-  // 工具和技术
-  tools: [
-    /\b(webpack|vite|rollup|parcel|esbuild|swc)\b/gi,
-    /\b(docker|kubernetes|k8s|jenkins|gitlab|github|git)\b/gi,
-    /\b(typescript|javascript|python|java|go|rust|swift|kotlin)\b/gi,
-    /\b(mysql|postgresql|mongodb|redis|elasticsearch|kafka)\b/gi,
-    /\b(aws|azure|gcp|cloudflare|vercel|netlify)\b/gi,
+
+  // 3. 计算机科学基础与底层 (CS Fundamentals - 权重高，防刷关键)
+  cs_concepts: [
+    // 算法与数据结构
+    /\b(algorithm|data structure|big o|recursion|sorting|searching|graph|tree|linked list|hash map|binary search|queue|stack|heap|trie)\b/gi,
+    /\b(dfs|bfs|dp|dynamic programming|greedy|backtracking|divide and conquer|sliding window|two pointers)\b/gi,
+    // 操作系统与并发
+    /\b(process|thread|concurrency|parallelism|mutex|semaphore|deadlock|race condition|context switch|coroutine|async\/await)\b/gi,
+    /\b(memory management|garbage collection|heap|stack|buffer overflow|memory leak|pointer|reference|virtual memory|kernel|syscall)\b/gi,
+    // 网络与协议
+    /\b(tcp|udp|dns|http|https|ssl|tls|ssh|ftp|smtp|websocket|socket|ip address|subnet|vlan|vpn|cors|rest|graphql|grpc|protobuf)\b/gi,
+    // 设计模式与架构
+    /\b(oop|functional programming|solid|dry|kiss|design pattern|singleton|factory|observer|dependency injection|mvc|mvvm|mvp|microservice|serverless)\b/gi,
+    /\b(monolith|distributed system|cap theorem|event sourcing|cqrs|domain driven design|ddd)\b/gi,
   ],
-  // 设计模式和架构
-  patterns: [
-    /\b(mvc|mvp|mvvm|flux|redux|mobx|zustand)\b/gi,
-    /\b(microservice|monolith|serverless|jamstack)\b/gi,
-    /\b(oauth|jwt|jwt|session|cookie)\b/gi,
-    /\b(cdn|ssr|csr|isr|ssg)\b/gi,
+
+  // 4. AI, LLM & Data Science (Frontiers)
+  ai_data: [
+    // LLM & Agents
+    /\b(openai|anthropic|claude|gpt|llama|mistral|ollama|gemini|huggingface|midjourney|stable diffusion)\b/gi,
+    /\b(langchain|llamaindex|rag|agent|prompt engineering|embedding|fine-tuning|inference|token|context window|rlhf)\b/gi,
+    // ML/DL Frameworks
+    /\b(pytorch|tensorflow|keras|jax|scikit-learn|pandas|numpy|matplotlib|jupyter|anaconda|opencv|scipy)\b/gi,
+    // Vector DB & Search
+    /\b(pinecone|milvus|weaviate|chroma|faiss|elasticsearch|solr|lucene|meilisearch)\b/gi,
+    // Big Data
+    /\b(hadoop|spark|kafka|flink|airflow|etl|data warehouse|data lake|snowflake|databricks|hive|hbase)\b/gi,
   ],
+
+  // 5. 现代 Web 全栈 (Web Fullstack)
+  web_fullstack: [
+    // 框架
+    /\b(react|vue|angular|svelte|next\.js|nuxt|remix|astro|solidjs|jquery|backbone|ember)\b/gi,
+    /\b(express|koa|nest|django|flask|fastapi|laravel|symfony|rails|gin|fiber|hono|phoenix)\b/gi,
+    // 样式与组件
+    /\b(tailwind|bootstrap|sass|less|css-in-js|styled-components|material-ui|antd|shadcn|radix|chakra)\b/gi,
+    // 状态管理与API
+    /\b(redux|mobx|zustand|pinia|vuex|recoil|jotai|tanstack query|swr|axios|fetch)\b/gi,
+    // 构建工具
+    /\b(webpack|vite|rollup|esbuild|turbopack|babel|eslint|prettier|npm|yarn|pnpm|bun)\b/gi,
+    // 运行时与环境
+    /\b(browser|dom|virtual dom|shadow dom|web components|service worker|pwa|wasm|webassembly)\b/gi,
+  ],
+
+  // 6. DevOps, Cloud & Database (Infrastructure)
+  infra_ops: [
+    // 容器与编排
+    /\b(docker|kubernetes|k8s|helm|container|image|volume|pod|docker-compose|podman)\b/gi,
+    // 云厂商
+    /\b(aws|azure|gcp|aliyun|tencent cloud|cloudflare|vercel|netlify|heroku|digitalocean|fly\.io)\b/gi,
+    // IaC & CI/CD
+    /\b(terraform|ansible|jenkins|github actions|gitlab ci|circleci|prometheus|grafana|elk|sentry|datadog)\b/gi,
+    // 数据库
+    /\b(mysql|postgresql|postgres|mongodb|redis|sqlite|mariadb|oracle|sql server|dynamodb|firestore|cassandra|neo4j)\b/gi,
+    /\b(prisma|typeorm|sequelize|drizzle|mongoose|sql|nosql|acid|transaction|index|sharding|replication)\b/gi,
+  ],
+  
+  // 7. 游戏与图形学 (Game & Graphics)
+  game_graphics: [
+    /\b(unity|unreal engine|godot|cocos|gamemaker|cryengine|rpg maker)\b/gi,
+    /\b(opengl|vulkan|directx|metal|webgl|three\.js|babylon\.js|canvas|svg)\b/gi,
+    /\b(shader|glsl|hlsl|vertex|fragment|physics engine|collider|rigidbody|mesh|texture|material|lighting)\b/gi,
+  ]
 };
 
 /**
@@ -1054,8 +1116,9 @@ export class VibeCodingerAnalyzer {
     const P_mid = dimensions.P >= midThreshold && dimensions.P < threshold;
     const D_high = dimensions.D >= threshold;
     const D_mid = dimensions.D >= midThreshold && dimensions.D < threshold;
-    const E_high = dimensions.E >= 10;
-    const E_mid = dimensions.E >= 5 && dimensions.E < 10;
+    // 调整 E 维度阈值：由于词库扩大到 800+，高分门槛提高到 30+
+    const E_high = dimensions.E >= 30;
+    const E_mid = dimensions.E >= 12 && dimensions.E < 30;
     const F_high = dimensions.F >= threshold;
 
     // 构建类型代码（格式：L-P-DEF 或 L-P-DEF-）
@@ -1279,8 +1342,12 @@ export class VibeCodingerAnalyzer {
     };
 
     const getLevelLabel = (val, dim) => {
-        const threshold = dim === 'E' ? 5 : 40;
-        const highThreshold = dim === 'E' ? 10 : 70;
+        // E 维度阈值调整 (适应 800+ 词库规模)
+        // High: 30+ (资深/架构级)
+        // Med: 12-29 (中高级/全栈)
+        // Low: 0-11 (初级/专注单一领域)
+        const threshold = dim === 'E' ? 12 : 40;
+        const highThreshold = dim === 'E' ? 30 : 70;
         if (val >= highThreshold) return isEn ? 'High' : '高';
         if (val >= threshold) return isEn ? 'Med' : '中';
         return isEn ? 'Low' : '低';
@@ -1293,10 +1360,31 @@ export class VibeCodingerAnalyzer {
       techExploration: getLevelLabel(dimensions.E, 'E') + (isEn ? ' Explore' : '探索'),
       feedbackDensity: `${Math.round(dimensions.F)}%`,
       compositeScore: Math.round(compositeScore),
-      techDiversity: dimensions.E >= 10 ? (isEn ? 'Extreme' : '极高') : (dimensions.E >= 5 ? (isEn ? 'Moderate' : '中等') : (isEn ? 'Low' : '较低')),
+      techDiversity: dimensions.E >= 30 ? (isEn ? 'Extreme' : '极高') : (dimensions.E >= 12 ? (isEn ? 'Moderate' : '中等') : (isEn ? 'Low' : '较低')),
       interactionStyle: this.calculateInteractionStyle(dimensions, lang),
       balanceIndex: getBalanceText(balanceScore),
     };
+  }
+
+  /**
+   * 计算交互风格
+   */
+  calculateInteractionStyle(dimensions, lang) {
+    const isEn = lang === 'en';
+    const styles = [];
+    
+    if (dimensions.L >= 70) styles.push(isEn ? 'Code Driven' : '代码驱动');
+    if (dimensions.P >= 70) styles.push(isEn ? 'Gentle' : '温和引导');
+    if (dimensions.D >= 70) styles.push(isEn ? 'Detail Oriented' : '细节控');
+    // E 维度阈值同步调整
+    if (dimensions.E >= 30) styles.push(isEn ? 'Tech Explore' : '技术探索');
+    if (dimensions.F >= 70) styles.push(isEn ? 'Responsive' : '积极反馈');
+    
+    if (styles.length === 0) {
+      return isEn ? 'Balanced' : '均衡型';
+    }
+    
+    return styles.join(' · ');
   }
 
   /**
