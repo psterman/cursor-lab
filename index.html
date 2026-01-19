@@ -266,6 +266,15 @@
             font-weight: 700;
         }
 
+        /* 击败人数提示样式 */
+        .stat-beaten {
+            font-size: 14px;
+            margin-top: 8px;
+            color: var(--accent-terminal);
+            font-weight: 500;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
         /* 排名显示样式（右下角） */
         .stat-ranking {
             position: absolute;
@@ -287,6 +296,7 @@
             border-color: var(--accent-terminal);
         }
 
+        
         .wordcloud-section {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
@@ -1123,7 +1133,8 @@
             .stats-grid {
                 grid-template-columns: 1fr 1fr;
             }
-            .wordcloud-section {
+        
+        .wordcloud-section {
                 grid-template-columns: 1fr;
             }
             .chat-list-header {
@@ -2629,6 +2640,7 @@
                                         <p class="stat-label" style="color: var(--text-dim);">${getText('dashboard.daysOnDutyRanking')}</p>
                                         <p class="stat-value" id="rankingUsageDays" style="color: #ffffff;">--</p>
                                         <p class="stat-comparison" id="rankingUsageDaysPercent">--</p>
+                                        <p class="stat-beaten" id="rankingUsageDaysBeaten" style="color: var(--accent-terminal); font-size: 14px; margin-top: 8px;">--</p>
                                     </div>
                                 </div>
                             </div>
@@ -4165,7 +4177,7 @@
                                 }, 100);
                                 
                             // 立即使用当前状态值更新显示（使用 formatNumber）
-                            const formatNumberLocal = (num) => {
+                            const formatNumber = (num) => {
                                 if (typeof num !== 'number' || isNaN(num)) return '0';
                                 const currentLang = localStorage.getItem('appLanguage') || 'zh-CN';
                                 const isEn = currentLang === 'en';
@@ -4219,10 +4231,10 @@
                                 const techRankEl = document.getElementById('techRank');
                                 
                                 if (totalUsersEl && totalUsers >= 0) {
-                                    totalUsersEl.textContent = formatNumberLocal(totalUsers);
+                                    totalUsersEl.textContent = formatNumber(totalUsers);
                                 }
                                 if (techRankEl && techRank >= 0) {
-                                    techRankEl.textContent = formatNumberLocal(techRank);
+                                    techRankEl.textContent = formatNumber(techRank);
                                 }
                                 
                                 // 检查是否有待执行的动画数据（来自 POST 请求）
@@ -4232,12 +4244,12 @@
                                     
                                     // 更新全网受虐人数，带跳动效果
                                     if (animData.totalUsers.old !== animData.totalUsers.new) {
-                                        animateNumberUpdate('totalTestUsers', animData.totalUsers.old, animData.totalUsers.new, formatNumberLocal);
+                                        animateNumberUpdate('totalTestUsers', animData.totalUsers.old, animData.totalUsers.new, formatNumber);
                                     }
                                     
                                     // 更新技术排名，带跳动效果
                                     if (animData.techRank.old !== animData.techRank.new) {
-                                        animateNumberUpdate('techRank', animData.techRank.old, animData.techRank.new, formatNumberLocal);
+                                        animateNumberUpdate('techRank', animData.techRank.old, animData.techRank.new, formatNumber);
                                     }
                                     
                                     // 人格库解锁已替换为答案之书组件，移除百分比进度条逻辑
@@ -4589,10 +4601,11 @@
                                     }
                                 };
                                 
-                                // 更新"全网横向排名"区域的卡片（大卡片）
-                                const updateRankingCard = async (valueId, percentId, rank, total, jsonFile) => {
+                                 // 更新"全网横向排名"区域的卡片（大卡片）
+                                const updateRankingCard = async (valueId, percentId, rank, total, jsonFile, isUsageDays = false) => {
                                     const valueEl = document.getElementById(valueId);
                                     const percentEl = document.getElementById(percentId);
+                                    const beatenEl = isUsageDays ? document.getElementById('rankingUsageDaysBeaten') : null;
                                     
                                     // 确保标题不换行
                                     if (valueEl) {
@@ -4605,8 +4618,16 @@
                                         percentEl.style.overflow = 'hidden';
                                         percentEl.style.textOverflow = 'ellipsis';
                                     }
+                                    if (beatenEl) {
+                                        beatenEl.style.whiteSpace = 'nowrap';
+                                        beatenEl.style.overflow = 'hidden';
+                                        beatenEl.style.textOverflow = 'ellipsis';
+                                    }
                                     
                                     if (rank !== null && rank !== undefined && total > 0) {
+                                        // 计算击败人数
+                                        const beatenCount = total - rank;
+                                        
                                         // 判断是否在100名内
                                         if (rank <= 100) {
                                             // 100名内：显示排名数字和JSON中的标题和评语
@@ -4624,8 +4645,18 @@
                                                 // strong标签会自动应用绿色加粗样式（通过CSS）
                                                 percentEl.innerHTML = `<strong>${comment.title}</strong><br/>${comment.content}`;
                                                 percentEl.style.whiteSpace = 'normal'; // 允许换行显示content
-                                                percentEl.style.color = '#ffffff'; // 确保内容文字是白色
-                                            } else {
+                                                 percentEl.style.color = '#ffffff'; // 确保内容文字是白色
+                                                 
+                                                 // 上岗天数卡片：显示击败人数和百分比
+                                                 if (beatenEl) {
+                                                     const beatPercent = ((total - rank) / total * 100).toFixed(1);
+                                                     if (lang === 'en') {
+                                                         beatenEl.textContent = `Defeated ${formatNumber(beatenCount)} users (Top ${beatPercent}%)`;
+                                                     } else {
+                                                         beatenEl.textContent = `击败了 ${formatNumber(beatenCount)} 人 (超过 ${beatPercent}%)`;
+                                                     }
+                                                 }
+                                             } else {
                                                 // 如果无法从JSON获取，使用默认显示
                                                 const percent = ((total - rank + 1) / total * 100).toFixed(1);
                                                 if (valueEl) {
@@ -4641,6 +4672,15 @@
                                                         percentEl.textContent = `前 ${percent}%`;
                                                     }
                                                     percentEl.style.whiteSpace = 'nowrap';
+                                                }
+                                                 // 上岗天数卡片：显示击败人数和百分比
+                                                if (beatenEl) {
+                                                    const beatPercent = ((total - rank) / total * 100).toFixed(1);
+                                                    if (lang === 'en') {
+                                                        beatenEl.textContent = `Defeated ${formatNumber(beatenCount)} users (Top ${beatPercent}%)`;
+                                                    } else {
+                                                        beatenEl.textContent = `击败了 ${formatNumber(beatenCount)} 人 (超过 ${beatPercent}%)`;
+                                                    }
                                                 }
                                             }
                                         } else {
@@ -4659,10 +4699,20 @@
                                                 }
                                                 percentEl.style.whiteSpace = 'nowrap';
                                             }
+                                                 // 上岗天数卡片：显示击败人数和百分比
+                                                if (beatenEl) {
+                                                    const beatPercent = ((total - rank) / total * 100).toFixed(1);
+                                                    if (lang === 'en') {
+                                                        beatenEl.textContent = `Defeated ${formatNumber(beatenCount)} users (Top ${beatPercent}%)`;
+                                                    } else {
+                                                        beatenEl.textContent = `击败了 ${formatNumber(beatenCount)} 人 (超过 ${beatPercent}%)`;
+                                                    }
+                                                }
                                         }
                                     } else {
                                         if (valueEl) valueEl.textContent = '--';
                                         if (percentEl) percentEl.textContent = '--';
+                                        if (beatenEl) beatenEl.textContent = '--';
                                     }
                                 };
                                 
@@ -4682,7 +4732,7 @@
                                 await updateRankingCard('rankingUserMessages', 'rankingUserMessagesPercent', rankings.userMessages?.rank, rankings.userMessages?.total, 'ai.json');
                                 await updateRankingCard('rankingTotalChars', 'rankingTotalCharsPercent', rankings.totalUserChars?.rank, rankings.totalUserChars?.total, 'say.json');
                                 await updateRankingCard('rankingAvgLength', 'rankingAvgLengthPercent', rankings.avgUserMessageLength?.rank, rankings.avgUserMessageLength?.total, 'word.json');
-                                await updateRankingCard('rankingUsageDays', 'rankingUsageDaysPercent', rankings.usageDays?.rank, rankings.usageDays?.total, 'day.json');
+                                await updateRankingCard('rankingUsageDays', 'rankingUsageDaysPercent', rankings.usageDays?.rank, rankings.usageDays?.total, 'day.json', true);
                             };
                             
                             // 将updateRankingBadges暴露到全局作用域
@@ -4691,7 +4741,7 @@
                             // 实时更新统计数据（从 Cloudflare API 获取）
                             const updateRealtimeStats = async () => {
                                 // 格式化数字函数（确保在作用域内可用，支持多语言和大数值）
-                                const formatNumberLocal = (num) => {
+                                const formatNumber = (num) => {
                                     if (typeof num !== 'number' || isNaN(num)) return '0';
                                     const currentLang = localStorage.getItem('appLanguage') || 'zh-CN';
                                     const isEn = currentLang === 'en';
@@ -4797,7 +4847,7 @@
                                             
                                             if (totalUsersEl) {
                                                 // 使用 formatNumber 处理显示格式
-                                                const formatted = formatNumberLocal(value);
+                                                const formatted = formatNumber(value);
                                                 totalUsersEl.textContent = formatted;
                                                 // 添加更新动画
                                                 totalUsersEl.classList.add('animate-pulse');
@@ -4811,7 +4861,7 @@
                                             
                                             if (techRankEl) {
                                                 // 使用 formatNumber 处理显示格式
-                                                const formatted = formatNumberLocal(calculatedRank);
+                                                const formatted = formatNumber(calculatedRank);
                                                 techRankEl.textContent = formatted;
                                                 techRankEl.classList.add('animate-pulse');
                                                 setTimeout(() => {
@@ -6535,3 +6585,4 @@
     
 </body>
 </html>
+
