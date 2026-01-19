@@ -1865,9 +1865,9 @@ function renderVibeRadarChart() {
     F: 75,
   };
 
-  // E 维度映射到 0-100
-  const eValue = dimensions.E >= 10 ? 100 : dimensions.E >= 5 ? 70 : 40;
-  const eAverage = globalAverage.E >= 10 ? 100 : globalAverage.E >= 5 ? 70 : 40;
+  // E 维度现在已经是归一化的 0-100 分数，不需要手动映射
+  const eValue = dimensions.E;
+  const eAverage = globalAverage.E;
   
   // 获取当前语言
   const currentLang = getCurrentLang();
@@ -1896,7 +1896,7 @@ function renderVibeRadarChart() {
             dimensions.L,
             dimensions.P,
             dimensions.D,
-            eValue,
+            dimensions.E,
             dimensions.F,
           ],
           backgroundColor: 'rgba(0, 255, 65, 0.2)',
@@ -1915,7 +1915,7 @@ function renderVibeRadarChart() {
             globalAverage.L,
             globalAverage.P,
             globalAverage.D,
-            eAverage,
+            globalAverage.E,
             globalAverage.F,
           ],
           backgroundColor: 'rgba(113, 113, 122, 0.1)',
