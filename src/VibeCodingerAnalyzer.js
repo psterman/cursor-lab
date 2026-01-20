@@ -19,6 +19,128 @@ import FEEDBACK_DATA from './Feedback.json';
 import { getText } from './i18n.js';
 
 /**
+ * ==========================================
+ * AC 自动机优化：词库预处理模块
+ * ==========================================
+ */
+
+/**
+ * 稀有度分值（IDF 模拟值）
+ * 专业词汇权重大于通用词汇
+ * L1 (专家词): 稀有度高，IDF = 5.0
+ * L2 (中等词): 稀有度中等，IDF = 2.0
+ * L3 (常用词): 稀有度低，IDF = 1.0
+ */
+const RARITY_SCORES = {
+  L1: 5.0, // 专家词/神谕词（如"幂等性"、"依赖反转"）
+  L2: 2.0, // 中等词（如"初始化"、"队列"）
+  L3: 1.0, // 常用词/噪音词（如"先"、"然后"）
+};
+
+/**
+ * 语义权重矩阵（保持原有配置）
+ */
+const SEMANTIC_WEIGHTS = { L1: 10, L2: 5, L3: 1 };
+
+/**
+ * 预处理维度数据，为 AC 自动机准备优化的词库结构
+ * @param {Object} rawData - 原始维度数据（如 LOGIC_DATA）
+ * @param {string} dimension - 维度标识（L/P/D/E/F）
+ * @returns {Object} 预处理后的维度数据
+ */
+function preprocessDimensionData(rawData, dimension) {
+  // 【防御性检查】验证 rawData 是否存在且包含 data 字段
+  if (!rawData || typeof rawData !== 'object') {
+    console.warn(`[VibeAnalyzer] 维度 ${dimension} 数据无效，使用空数据`);
+    return { dimension, data: {}, stats: { totalTerms: 0, levels: { L1: 0, L2: 0, L3: 0 } } };
+  }
+
+  if (!rawData.data || typeof rawData.data !== 'object') {
+    console.warn(`[VibeAnalyzer] 维度 ${dimension} 缺少 data 字段，使用空数据`);
+    return { dimension, data: {}, stats: { totalTerms: 0, levels: { L1: 0, L2: 0, L3: 0 } } };
+  }
+
+  const processedData = {};
+  let totalTerms = 0;
+  const levelStats = { L1: 0, L2: 0, L3: 0 };
+
+  // 遍历所有分类
+  Object.keys(rawData.data).forEach(categoryName => {
+    const category = rawData.data[categoryName];
+
+    // 【防御性检查】验证 category 是否存在
+    if (!category || typeof category !== 'object') {
+      return;
+    }
+
+    processedData[categoryName] = {
+      name: category.name || categoryName, // 分类名称
+      L1: [], // 专家词列表（带稀有度）
+      L2: [], // 中等词列表（带稀有度）
+      L3: [], // 常用词列表（带稀有度）
+    };
+
+    // 遍历 L1, L2, L3 层级
+    ['L1', 'L2', 'L3'].forEach(level => {
+      const terms = category[level];
+
+      // 【防御性检查】验证 terms 是否为数组
+      if (!Array.isArray(terms)) {
+        console.warn(`[VibeAnalyzer] 维度 ${dimension} 分类 ${categoryName} 的 ${level} 不是数组`);
+        return;
+      }
+
+      // 过滤无效词汇并预处理
+      const processedTerms = terms
+        .filter(term => term && typeof term === 'string' && term.trim().length > 0)
+        .map(term => ({
+          term: term.trim(), // 词汇
+          rarity: RARITY_SCORES[level], // 稀有度分值（IDF 模拟）
+          weight: SEMANTIC_WEIGHTS[level], // 语义权重
+          combinedWeight: RARITY_SCORES[level] * SEMANTIC_WEIGHTS[level], // 组合权重
+        }));
+
+      processedData[categoryName][level] = processedTerms;
+      totalTerms += processedTerms.length;
+      levelStats[level] += processedTerms.length;
+    });
+  });
+
+  return {
+    dimension,
+    data: processedData,
+    stats: {
+      totalTerms,
+      levels: levelStats,
+    },
+  };
+}
+
+/**
+ * 预处理所有维度数据（L/P/D/E/F）
+ * @returns {Object} 预处理后的完整维度数据
+ */
+function preprocessAllDimensions() {
+  const dimensions = ['L', 'P', 'D', 'E', 'F'];
+  const rawDataMap = {
+    L: LOGIC_DATA,
+    P: PATIENCE_DATA,
+    D: DETAIL_DATA,
+    E: EXPLORATION_DATA,
+    F: FEEDBACK_DATA,
+  };
+
+  const result = {};
+
+  dimensions.forEach(dimension => {
+    result[dimension] = preprocessDimensionData(rawDataMap[dimension], dimension);
+    console.log(`[VibeAnalyzer] 维度 ${dimension} 预处理完成:`, result[dimension].stats);
+  });
+
+  return result;
+}
+
+/**
  * 维度定义 (Dimension Definitions)
  * 使用 getter 函数根据语言返回对应的文案
  */
@@ -660,14 +782,19 @@ export class VibeCodingerAnalyzer {
         }
       };
 
-      // 准备维度数据
+      // 【2026-01-20 新增】预处理维度数据，为 AC 自动机准备优化的词库结构
+      const preprocessedDimensions = preprocessAllDimensions();
+
+      // 准备维度数据（使用预处理后的数据）
       const dimensionData = {
-        L: LOGIC_DATA,
-        P: PATIENCE_DATA,
-        D: DETAIL_DATA,
-        E: EXPLORATION_DATA,
-        F: FEEDBACK_DATA,
+        L: preprocessedDimensions.L,
+        P: preprocessedDimensions.P,
+        D: preprocessedDimensions.D,
+        E: preprocessedDimensions.E,
+        F: preprocessedDimensions.F,
       };
+
+      console.log('[VibeAnalyzer] 维度数据预处理完成，发送到 Worker');
 
       // 发送初始化消息
       this.worker.postMessage({
