@@ -7,3 +7,26 @@ compatibility_date = "2024-04-03"
 binding = "prompts_library"
 database_name = "prompts_library"
 database_id = "921a6870-94b9-43df-8d2d-5dad83f93fd2"
+
+# 2. KV 存储绑定（用于去重检查）
+# 注意：需要在 Cloudflare Dashboard 中创建 KV namespace
+# 访问路径：Workers & Pages → KV → Create a namespace
+# 创建后，在 Worker 的 Settings → Variables → KV Namespace Bindings 中绑定
+# 或者使用以下配置（需要替换为实际的 namespace_id）：
+# [[kv_namespaces]]
+# binding = "STATS_STORE"
+# id = "your_kv_namespace_id_here"
+
+# 3. Supabase 环境变量配置
+# 注意：实际值需要在 Cloudflare Dashboard 中设置
+# 访问路径：Workers & Pages → cursor-clinical-analysis → Settings → Variables
+# 需要配置以下环境变量：
+# - SUPABASE_URL: Supabase 项目 URL (例如: https://xxxxx.supabase.co)
+# - SUPABASE_KEY: Supabase anon 或 service_role key
+#
+# 如果使用 RLS (Row Level Security)，建议使用 service_role key
+# 如果未使用 RLS，可以使用 anon key
+#
+# 本地开发时，可以在 .dev.vars 文件中配置（不提交到 git）：
+# SUPABASE_URL=https://xxxxx.supabase.co
+# SUPABASE_KEY=your_supabase_key_here

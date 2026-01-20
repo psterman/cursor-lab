@@ -8,6 +8,25 @@ export default {
 
     if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+    // 验证 Supabase 环境变量
+    if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+      console.error('[Worker] ❌ Supabase 环境变量未配置:', {
+        SUPABASE_URL: env.SUPABASE_URL ? '已配置' : '未配置',
+        SUPABASE_KEY: env.SUPABASE_KEY ? '已配置' : '未配置'
+      });
+      return new Response(JSON.stringify({ 
+        status: "error",
+        error: "Supabase 环境变量未配置。请在 Cloudflare Dashboard 中设置 SUPABASE_URL 和 SUPABASE_KEY",
+        details: {
+          SUPABASE_URL: env.SUPABASE_URL ? '已配置' : '未配置',
+          SUPABASE_KEY: env.SUPABASE_KEY ? '已配置' : '未配置'
+        }
+      }), { 
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" } 
+      });
+    }
+
     const url = new URL(request.url);
     const clientIP = request.headers.get("CF-Connecting-IP") || "anonymous";
 
@@ -166,60 +185,89 @@ export default {
 
         // A. 推送数据到 Supabase (UPSERT) - 使用 user_identity 作为唯一标识
         if (!alreadySubmitted) {
+          // 准备 payload（在 try 块外定义，确保 catch 块可以访问）
+          const payload = {
+            user_identity: userIdentity, // 使用 user_identity 作为唯一标识
+            user_messages: parseInt(stats.totalMessages) || 0, // 实际表字段：user_messages (int4)
+            total_user_chars: parseInt(stats.totalChars) || 0, // 实际表字段：total_user_chars (int8)，注意不是 total_chars
+            vibe_index: String(stats.vibeIndex || "00000"), // 实际表字段：vibe_index (text)
+            personality: stats.personality || stats.personalityType || "Unknown", // 实际表字段：personality (text)，注意不是 personality_type
+            dimensions: stats.dimensions || {}, // 实际表字段：dimensions (jsonb)
+            updated_at: new Date().toISOString() // 更新时间
+            // 注意：id 字段是自动生成的，不需要手动指定
+          };
+
+          console.log('[Worker] 准备上传数据:', {
+            user_identity: userIdentity,
+            ip: clientIP,
+            payload: payload,
+            stats_received: {
+              totalMessages: stats.totalMessages,
+              totalChars: stats.totalChars,
+              vibeIndex: stats.vibeIndex,
+              personality: stats.personality || stats.personalityType,
+              hasDimensions: !!stats.dimensions
+            }
+          });
+
           try {
             // 先检查该 user_identity 是否已存在
-            const checkRes = await fetch(
-              `${env.SUPABASE_URL}/rest/v1/cursor_stats?user_identity=eq.${encodeURIComponent(userIdentity)}&select=user_identity`,
-              {
-                headers: {
-                  'apikey': env.SUPABASE_KEY,
-                  'Authorization': `Bearer ${env.SUPABASE_KEY}`
-                }
+            const checkUrl = `${env.SUPABASE_URL}/rest/v1/cursor_stats?user_identity=eq.${encodeURIComponent(userIdentity)}&select=user_identity`;
+            console.log('[Worker] 检查用户是否存在:', checkUrl);
+            
+            const checkRes = await fetch(checkUrl, {
+              headers: {
+                'apikey': env.SUPABASE_KEY,
+                'Authorization': `Bearer ${env.SUPABASE_KEY}`
               }
-            );
+            });
+
+            if (!checkRes.ok) {
+              const checkErrorText = await checkRes.text().catch(() => '无法读取错误信息');
+              console.error('[Worker] ❌ 检查用户存在性失败:', {
+                status: checkRes.status,
+                statusText: checkRes.statusText,
+                error: checkErrorText,
+                url: checkUrl
+              });
+              throw new Error(`检查用户失败: ${checkRes.status} - ${checkErrorText}`);
+            }
 
             const existing = await checkRes.json();
-            const exists = existing && existing.length > 0;
-
-            const payload = {
-              user_identity: userIdentity, // 使用 user_identity 作为唯一标识
-              user_messages: parseInt(stats.totalMessages) || 0, // 实际表字段：user_messages (int4)
-              total_user_chars: parseInt(stats.totalChars) || 0, // 实际表字段：total_user_chars (int8)，注意不是 total_chars
-              vibe_index: String(stats.vibeIndex || "00000"), // 实际表字段：vibe_index (text)
-              personality: stats.personality || stats.personalityType || "Unknown", // 实际表字段：personality (text)，注意不是 personality_type
-              dimensions: stats.dimensions || {}, // 实际表字段：dimensions (jsonb)
-              updated_at: new Date().toISOString() // 更新时间
-              // 注意：id 字段是自动生成的，不需要手动指定
-            };
+            const exists = Array.isArray(existing) && existing.length > 0;
+            console.log('[Worker] 用户存在性检查结果:', { exists, existing });
 
             let dbRes;
             if (exists) {
               // 如果存在，使用 PATCH 更新
-              dbRes = await fetch(
-                `${env.SUPABASE_URL}/rest/v1/cursor_stats?user_identity=eq.${encodeURIComponent(userIdentity)}`,
-                {
-                  method: 'PATCH',
-                  headers: {
-                    'apikey': env.SUPABASE_KEY,
-                    'Authorization': `Bearer ${env.SUPABASE_KEY}`,
-                    'Content-Type': 'application/json'
-                  },
-                  body: JSON.stringify(payload)
-                }
-              );
-              console.log(`[Worker] 更新现有记录 (user_identity: ${userIdentity})`);
+              const updateUrl = `${env.SUPABASE_URL}/rest/v1/cursor_stats?user_identity=eq.${encodeURIComponent(userIdentity)}`;
+              console.log('[Worker] 更新现有记录:', updateUrl);
+              
+              dbRes = await fetch(updateUrl, {
+                method: 'PATCH',
+                headers: {
+                  'apikey': env.SUPABASE_KEY,
+                  'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+                  'Content-Type': 'application/json',
+                  'Prefer': 'return=representation' // 返回更新后的数据
+                },
+                body: JSON.stringify(payload)
+              });
             } else {
               // 如果不存在，使用 POST 插入
-              dbRes = await fetch(`${env.SUPABASE_URL}/rest/v1/cursor_stats`, {
+              const insertUrl = `${env.SUPABASE_URL}/rest/v1/cursor_stats`;
+              console.log('[Worker] 插入新记录:', insertUrl);
+              
+              dbRes = await fetch(insertUrl, {
                 method: 'POST',
                 headers: {
                   'apikey': env.SUPABASE_KEY,
                   'Authorization': `Bearer ${env.SUPABASE_KEY}`,
-                  'Content-Type': 'application/json'
+                  'Content-Type': 'application/json',
+                  'Prefer': 'return=representation' // 返回插入后的数据
                 },
                 body: JSON.stringify(payload)
               });
-              console.log(`[Worker] 插入新记录 (user_identity: ${userIdentity})`);
             }
 
             // 检查写入结果
@@ -233,7 +281,8 @@ export default {
                 user_identity: userIdentity,
                 ip: clientIP,
                 status: dbRes.status,
-                response: responseData
+                response: responseData,
+                payload: payload
               });
             } else {
               const errorText = await dbRes.text().catch(() => '无法读取错误信息');
@@ -243,20 +292,27 @@ export default {
                 error: errorText,
                 payload: payload,
                 user_identity: userIdentity,
+                ip: clientIP,
                 exists: exists,
                 method: exists ? 'PATCH' : 'POST',
                 url: exists 
                   ? `${env.SUPABASE_URL}/rest/v1/cursor_stats?user_identity=eq.${encodeURIComponent(userIdentity)}`
-                  : `${env.SUPABASE_URL}/rest/v1/cursor_stats`
+                  : `${env.SUPABASE_URL}/rest/v1/cursor_stats`,
+                supabaseUrl: env.SUPABASE_URL ? '已配置' : '未配置',
+                supabaseKey: env.SUPABASE_KEY ? '已配置' : '未配置'
               });
               // 不抛出错误，继续执行排名查询（使用现有数据）
               // 这样即使插入失败，用户仍能看到排名
             }
           } catch (dbError) {
-            console.error('[Worker] Supabase 操作失败:', {
+            console.error('[Worker] ❌ Supabase 操作异常:', {
               error: dbError.message,
               stack: dbError.stack,
-              payload: payload
+              payload: payload,
+              user_identity: userIdentity,
+              ip: clientIP,
+              supabaseUrl: env.SUPABASE_URL ? '已配置' : '未配置',
+              supabaseKey: env.SUPABASE_KEY ? '已配置' : '未配置'
             });
             // 即使数据库操作失败，也继续返回排名（使用现有数据）
           }
