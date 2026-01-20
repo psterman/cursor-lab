@@ -1064,35 +1064,21 @@ export class VibeCodingerAnalyzer {
     const terms = new Set();
     const lowerText = text.toLowerCase();
 
-    // 提取 API
-    TECH_PATTERNS.api.forEach(pattern => {
-      const matches = text.match(pattern);
-      if (matches) {
-        matches.forEach(match => terms.add(match.trim()));
-      }
-    });
-
-    // 提取框架
-    TECH_PATTERNS.frameworks.forEach(pattern => {
-      const matches = lowerText.match(pattern);
-      if (matches) {
-        matches.forEach(match => terms.add(match.trim()));
-      }
-    });
-
-    // 提取工具
-    TECH_PATTERNS.tools.forEach(pattern => {
-      const matches = lowerText.match(pattern);
-      if (matches) {
-        matches.forEach(match => terms.add(match.trim()));
-      }
-    });
-
-    // 提取设计模式
-    TECH_PATTERNS.patterns.forEach(pattern => {
-      const matches = lowerText.match(pattern);
-      if (matches) {
-        matches.forEach(match => terms.add(match.trim()));
+    // 遍历所有 TECH_PATTERNS 的属性
+    Object.keys(TECH_PATTERNS).forEach(category => {
+      const patterns = TECH_PATTERNS[category];
+      if (Array.isArray(patterns)) {
+        patterns.forEach(pattern => {
+          const matches = lowerText.match(pattern);
+          if (matches) {
+            matches.forEach(match => {
+              const trimmed = match.trim();
+              if (trimmed) {
+                terms.add(trimmed);
+              }
+            });
+          }
+        });
       }
     });
 

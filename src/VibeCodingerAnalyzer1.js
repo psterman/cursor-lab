@@ -768,36 +768,64 @@ export class VibeCodingerAnalyzer {
     const lowerText = text.toLowerCase();
 
     // 提取 API
-    TECH_PATTERNS.api.forEach(pattern => {
-      const matches = text.match(pattern);
-      if (matches) {
-        matches.forEach(match => terms.add(match.trim()));
-      }
-    });
+    if (TECH_PATTERNS.api && Array.isArray(TECH_PATTERNS.api)) {
+      TECH_PATTERNS.api.forEach(pattern => {
+        const matches = text.match(pattern);
+        if (matches) {
+          matches.forEach(match => {
+            const trimmed = match.trim();
+            if (trimmed) {
+              terms.add(trimmed);
+            }
+          });
+        }
+      });
+    }
 
     // 提取框架
-    TECH_PATTERNS.frameworks.forEach(pattern => {
-      const matches = lowerText.match(pattern);
-      if (matches) {
-        matches.forEach(match => terms.add(match.trim()));
-      }
-    });
+    if (TECH_PATTERNS.frameworks && Array.isArray(TECH_PATTERNS.frameworks)) {
+      TECH_PATTERNS.frameworks.forEach(pattern => {
+        const matches = lowerText.match(pattern);
+        if (matches) {
+          matches.forEach(match => {
+            const trimmed = match.trim();
+            if (trimmed) {
+              terms.add(trimmed);
+            }
+          });
+        }
+      });
+    }
 
     // 提取工具
-    TECH_PATTERNS.tools.forEach(pattern => {
-      const matches = lowerText.match(pattern);
-      if (matches) {
-        matches.forEach(match => terms.add(match.trim()));
-      }
-    });
+    if (TECH_PATTERNS.tools && Array.isArray(TECH_PATTERNS.tools)) {
+      TECH_PATTERNS.tools.forEach(pattern => {
+        const matches = lowerText.match(pattern);
+        if (matches) {
+          matches.forEach(match => {
+            const trimmed = match.trim();
+            if (trimmed) {
+              terms.add(trimmed);
+            }
+          });
+        }
+      });
+    }
 
     // 提取设计模式
-    TECH_PATTERNS.patterns.forEach(pattern => {
-      const matches = lowerText.match(pattern);
-      if (matches) {
-        matches.forEach(match => terms.add(match.trim()));
-      }
-    });
+    if (TECH_PATTERNS.patterns && Array.isArray(TECH_PATTERNS.patterns)) {
+      TECH_PATTERNS.patterns.forEach(pattern => {
+        const matches = lowerText.match(pattern);
+        if (matches) {
+          matches.forEach(match => {
+            const trimmed = match.trim();
+            if (trimmed) {
+              terms.add(trimmed);
+            }
+          });
+        }
+      });
+    }
 
     return Array.from(terms);
   }
