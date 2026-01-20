@@ -164,12 +164,12 @@ export default {
           }
         }
 
-        // A. 推送数据到 Supabase (UPSERT) - 根据实际表结构使用正确字段名
+        // A. 推送数据到 Supabase (UPSERT) - 使用 user_identity 作为唯一标识
         if (!alreadySubmitted) {
           try {
-            // 先检查该 IP 是否已存在
+            // 先检查该 user_identity 是否已存在
             const checkRes = await fetch(
-              `${env.SUPABASE_URL}/rest/v1/cursor_stats?ip=eq.${encodeURIComponent(clientIP)}&select=ip`,
+              `${env.SUPABASE_URL}/rest/v1/cursor_stats?user_identity=eq.${encodeURIComponent(userIdentity)}&select=user_identity`,
               {
                 headers: {
                   'apikey': env.SUPABASE_KEY,
@@ -182,20 +182,21 @@ export default {
             const exists = existing && existing.length > 0;
 
             const payload = {
-              ip: clientIP, // 实际表字段：ip (text)
+              user_identity: userIdentity, // 使用 user_identity 作为唯一标识
               user_messages: parseInt(stats.totalMessages) || 0, // 实际表字段：user_messages (int4)
-              total_chars: parseInt(stats.totalChars) || 0, // 实际表字段：total_chars (int8)，不是 total_user_chars
+              total_user_chars: parseInt(stats.totalChars) || 0, // 实际表字段：total_user_chars (int8)，注意不是 total_chars
               vibe_index: String(stats.vibeIndex || "00000"), // 实际表字段：vibe_index (text)
-              personality_type: stats.personality || stats.personalityType || "Unknown", // 实际表字段：personality_type (text)
-              dimensions: stats.dimensions || {} // 实际表字段：dimensions (jsonb)
-              // 注意：id 字段是 uuid 类型，Supabase 会自动生成，不需要手动指定
+              personality: stats.personality || stats.personalityType || "Unknown", // 实际表字段：personality (text)，注意不是 personality_type
+              dimensions: stats.dimensions || {}, // 实际表字段：dimensions (jsonb)
+              updated_at: new Date().toISOString() // 更新时间
+              // 注意：id 字段是自动生成的，不需要手动指定
             };
 
             let dbRes;
             if (exists) {
               // 如果存在，使用 PATCH 更新
               dbRes = await fetch(
-                `${env.SUPABASE_URL}/rest/v1/cursor_stats?ip=eq.${encodeURIComponent(clientIP)}`,
+                `${env.SUPABASE_URL}/rest/v1/cursor_stats?user_identity=eq.${encodeURIComponent(userIdentity)}`,
                 {
                   method: 'PATCH',
                   headers: {
@@ -206,7 +207,7 @@ export default {
                   body: JSON.stringify(payload)
                 }
               );
-              console.log(`[Worker] 更新现有记录 (IP: ${clientIP})`);
+              console.log(`[Worker] 更新现有记录 (user_identity: ${userIdentity})`);
             } else {
               // 如果不存在，使用 POST 插入
               dbRes = await fetch(`${env.SUPABASE_URL}/rest/v1/cursor_stats`, {
@@ -218,7 +219,7 @@ export default {
                 },
                 body: JSON.stringify(payload)
               });
-              console.log(`[Worker] 插入新记录 (IP: ${clientIP})`);
+              console.log(`[Worker] 插入新记录 (user_identity: ${userIdentity})`);
             }
 
             // 检查写入结果
@@ -229,6 +230,7 @@ export default {
               }
               const responseData = await dbRes.json().catch(() => null);
               console.log(`[Worker] ✅ 数据已写入 Supabase (${exists ? '更新' : '插入'})`, {
+                user_identity: userIdentity,
                 ip: clientIP,
                 status: dbRes.status,
                 response: responseData
@@ -240,10 +242,11 @@ export default {
                 statusText: dbRes.statusText,
                 error: errorText,
                 payload: payload,
+                user_identity: userIdentity,
                 exists: exists,
                 method: exists ? 'PATCH' : 'POST',
                 url: exists 
-                  ? `${env.SUPABASE_URL}/rest/v1/cursor_stats?ip=eq.${encodeURIComponent(clientIP)}`
+                  ? `${env.SUPABASE_URL}/rest/v1/cursor_stats?user_identity=eq.${encodeURIComponent(userIdentity)}`
                   : `${env.SUPABASE_URL}/rest/v1/cursor_stats`
               });
               // 不抛出错误，继续执行排名查询（使用现有数据）
@@ -258,7 +261,7 @@ export default {
             // 即使数据库操作失败，也继续返回排名（使用现有数据）
           }
         } else {
-          console.log(`[Worker] 跳过重复提交 (IP: ${clientIP})`);
+          console.log(`[Worker] 跳过重复提交 (user_identity: ${userIdentity}, IP: ${clientIP})`);
         }
 
         // B. 查询排名情况 (以总消息数 user_messages 为主排名指标)

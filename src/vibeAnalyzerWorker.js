@@ -88,6 +88,41 @@ const RARITY_SCORES = {
   L3: 1.0, // 常用词/噪音词（如"先"、"然后"）
 };
 
+/**
+ * 【2026-01-20 新增】N-Gram 上下文匹配配置
+ */
+const NGRAM_CONFIG = {
+  N: 2,  // N-Gram 长度（2=双词，3=三词）
+  windowSize: 3,  // 滑窗大小（用于检测否定前缀）
+};
+
+/**
+ * 【2026-01-20 新增】否定前缀列表
+ * 用于反转语义的词汇，例如"不+稳定" → 负面
+ */
+const NEGATION_PREFIXES = {
+  chinese: [
+    '不', '没', '没有', '无', '未', '别', '不要', '不行',
+    '非', '不会', '不能', '不是', '从未',
+  ],
+  english: [
+    "don't", "doesn't", "didn't", "won't", "can't", "couldn't",
+    'never', 'no', 'not', 'none', 'nothing', 'nowhere',
+    'hardly', 'scarcely', 'barely', 'seldom', 'rarely',
+  ],
+};
+
+/**
+ * 【2026-01-20 新增】强化前缀列表
+ * 用于增强语义的词汇，例如"非常+好" → 正面加强
+ */
+const INTENSIFIER_PREFIXES = {
+  chinese: ['非常', '特别', '极其', '相当', '十分', '很', '太'],
+  english: ['very', 'extremely', 'really', 'quite', 'rather', 'too', 'so'],
+};
+
+// ==========================================
+// 2. AC 自动机 (Aho-Corasick Automaton)
 // ==========================================
 // 2. AC 自动机 (Aho-Corasick Automaton)
 // ==========================================
@@ -187,7 +222,82 @@ class ACAutomaton {
   }
 
   /**
+   * 【2026-01-20 新增】提取 N-Gram（上下文滑窗）
+   * @param {string} text - 输入文本
+   * @param {number} n - N-Gram 长度（默认 2）
+   * @returns {Array} N-Gram 列表
+   */
+  extractNGrams(text, n = 2) {
+    const ngrams = [];
+
+    for (let i = 0; i <= text.length - n; i++) {
+      ngrams.push(text.slice(i, i + n));
+    }
+
+    return ngrams;
+  }
+
+  /**
+   * 【2026-01-20 新增】检测否定前缀
+   * @param {string} text - 输入文本
+   * @param {number} index - 当前匹配位置的索引
+   * @returns {boolean} 是否检测到否定前缀
+   */
+  detectNegationPrefix(text, index) {
+    const windowSize = NGRAM_CONFIG.windowSize;
+    const windowStart = Math.max(0, index - windowSize);
+    const window = text.slice(windowStart, index);
+
+    // 检测中文否定词
+    for (const neg of NEGATION_PREFIXES.chinese) {
+      if (window.includes(neg)) {
+        return true;
+      }
+    }
+
+    // 检测英文否定词（包含边界检测）
+    for (const neg of NEGATION_PREFIXES.english) {
+      const regex = new RegExp(`\\b${neg}\\b$`, 'i');
+      if (regex.test(window)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * 【2026-01-20 新增】检测强化前缀
+   * @param {string} text - 输入文本
+   * @param {number} index - 当前匹配位置的索引
+   * @returns {number} 强化系数（默认 1.0）
+   */
+  detectIntensifierPrefix(text, index) {
+    const windowSize = NGRAM_CONFIG.windowSize;
+    const windowStart = Math.max(0, index - windowSize);
+    const window = text.slice(windowStart, index);
+
+    // 检测中文强化词
+    for (const int of INTENSIFIER_PREFIXES.chinese) {
+      if (window.includes(int)) {
+        return 1.5; // 强化系数 1.5
+      }
+    }
+
+    // 检测英文强化词
+    for (const int of INTENSIFIER_PREFIXES.english) {
+      const regex = new RegExp(`\\b${int}\\b$`, 'i');
+      if (regex.test(window)) {
+        return 1.5; // 强化系数 1.5
+      }
+    }
+
+    return 1.0; // 默认系数
+  }
+
+  /**
    * 搜索关键词（单次扫描，O(n) 复杂度）
+   * 【2026-01-20 更新】支持上下文检测（否定前缀、强化前缀）
    */
   search(text) {
     const results = {
@@ -222,10 +332,26 @@ class ACAutomaton {
         if (matchNode.isEnd) {
           const key = `${matchNode.dimension}_${matchNode.level}`;
 
+          // 【2026-01-20 新增】检测否定前缀
+          const hasNegation = this.detectNegationPrefix(text, i);
+
+          // 【2026-01-20 新增】检测强化前缀
+          const intensifierFactor = this.detectIntensifierPrefix(text, i);
+
+          // 如果检测到否定前缀，则反转权重（例如"不+稳定" → 负面）
+          // 对于 E 和 F 维度，否定前缀会降低得分
+          // 对于 L 和 D 维度，否定前缀会降低得分（例如"不要+优化" → 负面）
+          if (hasNegation && (matchNode.dimension === 'E' || matchNode.dimension === 'F' || matchNode.dimension === 'L' || matchNode.dimension === 'D')) {
+            // 否定：跳过该匹配（不加分）
+            continue;
+          }
+
           // 避免同一位置重复计数（防止短词覆盖长词）
           const posKey = `${key}_${i}`;
           if (!matchedPositions.has(posKey)) {
-            results[matchNode.dimension][matchNode.level]++;
+            // 应用强化系数
+            const effectiveCount = Math.round(matchNode.weight * intensifierFactor);
+            results[matchNode.dimension][matchNode.level] += effectiveCount;
             matchedPositions.add(posKey);
           }
         }
@@ -236,7 +362,80 @@ class ACAutomaton {
   }
 
   /**
+   * 【2026-01-20 新增】N-Gram 上下文匹配
+   * 在 AC 自动机基础上，引入滑窗机制
+   * @param {string} text - 输入文本
+   * @returns {Object} 匹配结果
+   */
+  searchWithNGram(text) {
+    const results = {
+      L: { L1: 0, L2: 0, L3: 0 },
+      P: { L1: 0, L2: 0, L3: 0 },
+      D: { L1: 0, L2: 0, L3: 0 },
+      E: { L1: 0, L2: 0, L3: 0 },
+      F: { L1: 0, L2: 0, L3: 0 },
+    };
+
+    if (!this.isBuilt) {
+      return results;
+    }
+
+    // 提取 N-Gram（N=2，双词组合）
+    const n = NGRAM_CONFIG.N;
+    const ngrams = this.extractNGrams(text, n);
+
+    // 使用 AC 自动机匹配 N-Gram
+    ngrams.forEach(ngram => {
+      let node = this.root;
+      const matchedPositions = new Set();
+
+      for (let i = 0; i < ngram.length; i++) {
+        const char = ngram[i];
+
+        // 沿着失败指针查找匹配
+        while (node !== this.root && !node.children[char]) {
+          node = node.fail;
+        }
+
+        node = node.children[char] || this.root;
+
+        // 检查当前节点和输出链接
+        const nodesToCheck = [node, ...node.output];
+
+        for (const matchNode of nodesToCheck) {
+          if (matchNode.isEnd) {
+            const key = `${matchNode.dimension}_${matchNode.level}`;
+
+            // 【2026-01-20 新增】N-Gram 上下文检测
+            // 检测否定前缀
+            const hasNegation = this.detectNegationPrefix(text, ngram.length);
+
+            // 检测强化前缀
+            const intensifierFactor = this.detectIntensifierPrefix(text, ngram.length);
+
+            // 如果检测到否定前缀，则反转权重
+            if (hasNegation) {
+              continue;
+            }
+
+            // 避免重复计数
+            const posKey = `${key}_${ngram}`;
+            if (!matchedPositions.has(posKey)) {
+              const effectiveCount = Math.round(matchNode.weight * intensifierFactor);
+              results[matchNode.dimension][matchNode.level] += effectiveCount;
+              matchedPositions.add(posKey);
+            }
+          }
+        }
+      }
+    });
+
+    return results;
+  }
+
+  /**
    * 统计每个关键词的命中次数（用于 BM25 计算）
+   * 【2026-01-20 更新】支持上下文检测
    */
   searchWithTermFrequency(text) {
     const results = {
@@ -270,14 +469,29 @@ class ACAutomaton {
       for (const matchNode of nodesToCheck) {
         if (matchNode.isEnd) {
           const key = `${matchNode.dimension}_${matchNode.level}`;
+
+          // 【2026-01-20 新增】检测否定前缀
+          const hasNegation = this.detectNegationPrefix(text, i);
+
+          // 【2026-01-20 新增】检测强化前缀
+          const intensifierFactor = this.detectIntensifierPrefix(text, i);
+
+          // 如果检测到否定前缀，则跳过该匹配
+          if (hasNegation) {
+            continue;
+          }
+
           const posKey = `${key}_${i}`;
 
           if (!matchedPositions.has(posKey)) {
-            results[matchNode.dimension][matchNode.level]++;
+            // 应用强化系数
+            const effectiveCount = Math.round(matchNode.weight * intensifierFactor);
 
-            // 统计词频
+            results[matchNode.dimension][matchNode.level] += effectiveCount;
+
+            // 统计词频（使用有效计数）
             const termKey = `${key}_${matchNode.term}`;
-            termFrequencyMap[termKey] = (termFrequencyMap[termKey] || 0) + 1;
+            termFrequencyMap[termKey] = (termFrequencyMap[termKey] || 0) + effectiveCount;
 
             matchedPositions.add(posKey);
           }
@@ -528,7 +742,11 @@ function scanAndMatch(chatData, patterns) {
       negativeWordCount += negativeMatches.length;
     }
 
-    // 【2026-01-20 重写】使用 AC 自动机进行关键词匹配
+    // 【2026-01-20 更新】使用 AC 自动机 + N-Gram 上下文匹配
+    // N-Gram 匹配：用于检测上下文反转（如"不+稳定"、"don't like"）
+    const ngramResults = acAutomaton.searchWithNGram(text);
+
+    // 单词匹配：用于统计词频
     const { results, termFrequencyMap: localTermFreqMap } = acAutomaton.searchWithTermFrequency(text);
 
     // 累加匹配结果
