@@ -1823,6 +1823,7 @@
                     renderFullDashboard,
                     getGlobalStats,
                     getVibeResult,
+                    getVibeAnalyzer,
                     setGlobalStats,
                     setVibeResult,
                     setAllChatData,
@@ -1841,6 +1842,7 @@
                     renderFullDashboard,
                     getGlobalStats,
                     getVibeResult,
+                    getVibeAnalyzer: getVibeAnalyzer || (() => null),
                     setGlobalStats: setGlobalStats || (() => {}),
                     setVibeResult: setVibeResult || (() => {}),
                     setAllChatData: setAllChatData || (() => {}),
@@ -2071,15 +2073,33 @@
                     });
 
                     if (response.ok) {
-                        const data = await response.json();
+                        const responseData = await response.json();
                         console.log('[AnswerBookCard] 获取到的数据:', {
-                            data: data,
-                            data类型: typeof data,
-                            dataKeys: data ? Object.keys(data) : 'null',
-                            content: data?.content,
-                            id: data?.id,
+                            responseData: responseData,
+                            data类型: typeof responseData,
+                            dataKeys: responseData ? Object.keys(responseData) : 'null',
                         });
-                        setPrompt(data);
+                        
+                        // 处理不同的响应格式
+                        let promptData = null;
+                        if (responseData.data) {
+                            // 格式1: { data: { id, content, author }, status: "success" }
+                            promptData = responseData.data;
+                        } else if (responseData.content) {
+                            // 格式2: { id, content, author } 直接返回
+                            promptData = responseData;
+                        } else if (responseData.id) {
+                            // 格式3: 只有 id，尝试使用整个对象
+                            promptData = responseData;
+                        }
+                        
+                        if (promptData && (promptData.content || promptData.id)) {
+                            console.log('[AnswerBookCard] 解析成功，设置提示:', promptData);
+                            setPrompt(promptData);
+                        } else {
+                            console.warn('[AnswerBookCard] 数据格式不正确或为空:', responseData);
+                            setError(isEn ? 'No prompt data available' : '暂无提示数据');
+                        }
                     } else {
                         const errorText = await response.text().catch(() => '无法读取错误信息');
                         console.error('[AnswerBookCard] 响应失败:', {
@@ -2849,9 +2869,10 @@
                         // 重新创建 Dashboard DOM（使用新语言）
                         recreateDashboardDOM(newLang);
                         
-                        // 重新渲染 Dashboard
+                        // 重新渲染 Dashboard，传递 vibeResult 参数
                         setTimeout(() => {
-                            window.analysisModule.renderFullDashboard();
+                            const currentVibeResult = window.analysisModule?.getVibeResult();
+                            window.analysisModule.renderFullDashboard(currentVibeResult);
                             // 重新更新排名卡片（使用新语言）
                             if (window.userRankings && window.updateRankingBadges) {
                                 setTimeout(async () => {
@@ -3576,16 +3597,22 @@
                                 'Content-Type': 'application/json',
                             },
                             mode: 'cors',
-                            cache: 'no-cache',
+                            cache: 'no-cache', // 禁用缓存，确保获取最新数据
                         });
                         
                         if (response.ok) {
                             const data = await response.json();
-                            const value = data.value || data.totalUsers || data.total || data.count || 0;
+                            const value = data.value ?? data.totalUsers ?? data.total ?? data.count ?? 0;
                             
-                            console.log('[React] API 返回数据:', data, '解析后的值:', value);
+                            console.log('[React] API 返回数据:', {
+                                raw: data,
+                                parsed: value,
+                                status: data.status,
+                                error: data.error
+                            });
                             
-                            if (value >= 0) {
+                            // 允许显示 0（表示还没有用户）
+                            if (typeof value === 'number' && value >= 0) {
                                 // 受虐人数：使用 API 返回的实时访问总数（允许显示 0）
                                 setTotalUsers(value);
                                 setTotalTestUsers(value);
@@ -3600,19 +3627,20 @@
                                 
                                 // 保存到本地存储作为 fallback
                                 localStorage.setItem('totalTestUsers', value.toString());
-                                console.log('[React] 数据获取成功:', {
+                                console.log('[React] ✅ 数据获取成功:', {
                                     totalUsers: value,
                                     techRank: calculatedRank,
                                     unlockedCount: calculatedUnlocked
                                 });
                             } else {
-                                throw new Error('API 返回的值无效');
+                                throw new Error(`API 返回的值无效: ${value} (类型: ${typeof value})`);
                             }
                         } else {
-                            throw new Error(`API 请求失败，状态码: ${response.status}`);
+                            const errorText = await response.text().catch(() => '无法读取错误信息');
+                            throw new Error(`API 请求失败，状态码: ${response.status}, 错误: ${errorText}`);
                         }
                     } catch (error) {
-                        console.warn('[React] API 请求失败，使用 localStorage fallback:', error.message);
+                        console.warn('[React] ⚠️ API 请求失败，使用 localStorage fallback:', error.message);
                         // 使用 localStorage 作为 fallback（允许显示 0）
                         const cached = parseInt(localStorage.getItem('totalTestUsers') || '0');
                         setTotalUsers(cached);
@@ -4018,109 +4046,202 @@
                 
                 // 获取当前用户的统计数据
                 const stats = window.analysisModule?.getGlobalStats();
+                const vibeResult = window.analysisModule?.getVibeResult();
+                const analyzer = window.analysisModule?.getVibeAnalyzer();
                 const usageDays = calculateUsageDays(stats);
                 
-                // 准备上传统计数据
-                const userStats = {
-                    qingCount: stats?.qingCount || 0,           // 赛博磕头次数
-                    buCount: stats?.buCount || 0,                // 甲方爸爸上身
-                    userMessages: stats?.userMessages || 0,      // 调戏AI次数
-                    totalUserChars: stats?.userBehaviorStats?.totalUserChars || 0,  // 废话文学输出
-                    avgUserMessageLength: stats?.userBehaviorStats?.avgUserMessageLength || 0,  // 平均吹水长度
-                    totalConversations: stats?.totalConversations || 0,  // Cursor上岗天数（对话数）
-                    usageDays: usageDays,                        // 使用天数
-                    timestamp: Date.now()
-                };
+                // 如果有 vibeResult 和 analyzer，调用 uploadToSupabase 上传数据并获取排名
+                // 注意：uploadToSupabase 内部已经发送了 submit_stats 请求，不需要重复发送
+                let rankingResult = null;
+                let newCount = 0;
+                let data = null; // 用于存储 API 返回的数据
                 
-                console.log('[React] 准备上传统计数据:', userStats);
+                if (vibeResult && analyzer) {
+                    try {
+                        // 确保 statistics 中包含必要的字段
+                        if (vibeResult.statistics) {
+                            vibeResult.statistics.qingCount = stats?.qingCount || 0;
+                            vibeResult.statistics.buCount = stats?.buCount || 0;
+                            vibeResult.statistics.usageDays = usageDays;
+                        }
+                        
+                        // 调用 uploadToSupabase 上传数据并获取排名（内部已发送 submit_stats）
+                        rankingResult = await analyzer.uploadToSupabase(vibeResult);
+                        
+                        console.log('[React] uploadToSupabase 返回结果:', rankingResult);
+                        
+                        // 兼容所有可能的排名字段名
+                        const finalRank = rankingResult?.rankPercent ?? rankingResult?.ranking ?? 0;
+                        
+                        // 从 uploadToSupabase 的返回结果中获取总人数
+                        newCount = rankingResult?.totalUsers ?? 0;
+                        
+                        // 检查数据是否有效：允许 rankPercent 为 0（表示排名很低），但 totalUsers 必须 >= 0
+                        // 如果 totalUsers 为 0，可能是数据库为空或查询失败
+                        if (typeof newCount === 'number' && newCount >= 0 && typeof finalRank === 'number' && finalRank >= 0) {
+                            console.log('[React] ✅ 排名数据已获取（来自 uploadToSupabase）:', {
+                                rankPercent: finalRank,
+                                totalUsers: newCount,
+                                hasError: !!rankingResult?.error
+                            });
+                            
+                            // 如果有错误信息，记录但不抛出异常（允许继续使用数据）
+                            if (rankingResult?.error) {
+                                console.warn('[React] ⚠️ uploadToSupabase 返回了错误信息，但数据可用:', rankingResult.error);
+                            }
+                        } else {
+                            console.warn('[React] ⚠️ uploadToSupabase 返回的数据格式不正确:', {
+                                rankPercent: finalRank,
+                                totalUsers: newCount,
+                                rankingResult
+                            });
+                            // 如果数据格式不正确，降级为直接发送 submit_stats 请求
+                            throw new Error('uploadToSupabase returned invalid data format');
+                        }
+                    } catch (uploadError) {
+                        console.warn('[React] uploadToSupabase 调用失败，降级为直接发送 submit_stats:', uploadError);
+                        // 如果 uploadToSupabase 失败，降级为直接发送 submit_stats 请求
+                        try {
+                            // 使用与 uploadToSupabase 相同的字段名，确保后端能正确解析
+                            const userStats = {
+                                totalMessages: stats?.userMessages || vibeResult?.statistics?.totalMessages || 0,
+                                totalChars: stats?.userBehaviorStats?.totalUserChars || vibeResult?.statistics?.totalChars || 0,
+                                vibeIndex: vibeResult?.vibeIndex || "00000",
+                                personality: vibeResult?.personalityType || "Unknown",
+                                personalityType: vibeResult?.personalityType || "Unknown",
+                                dimensions: vibeResult?.dimensions || {},
+                                // 保留旧字段以兼容（如果后端需要）
+                                qingCount: stats?.qingCount || vibeResult?.statistics?.qingCount || 0,
+                                buCount: stats?.buCount || vibeResult?.statistics?.buCount || 0,
+                                avgMessageLength: stats?.userBehaviorStats?.avgUserMessageLength || vibeResult?.statistics?.avgMessageLength || 0,
+                                usageDays: usageDays || vibeResult?.statistics?.usageDays || 1
+                            };
+                            
+                            console.log('[React] 降级请求：发送 submit_stats，数据:', userStats);
+                            
+                            const apiUrl = 'https://cursor-clinical-analysis.psterman.workers.dev/api/analyze';
+                            const response = await fetch(apiUrl, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                },
+                                mode: 'cors',
+                                body: JSON.stringify(userStats),
+                            });
+                            
+                            if (response.ok) {
+                                data = await response.json();
+                                console.log('[React] 降级请求成功，返回数据:', data);
+                                newCount = data.totalUsers ?? data.value ?? data.total ?? data.count ?? 0;
+                                
+                                // 如果降级请求成功，也保存排名数据
+                                if (data.rankPercent !== undefined || data.ranking !== undefined) {
+                                    rankingResult = {
+                                        rankPercent: data.rankPercent ?? data.ranking ?? 0,
+                                        totalUsers: newCount
+                                    };
+                                }
+                            } else {
+                                const errorText = await response.text().catch(() => '无法读取错误信息');
+                                console.warn('[React] 降级 POST 请求失败，状态码:', response.status, '错误:', errorText);
+                            }
+                        } catch (fallbackError) {
+                            console.error('[React] 降级 POST 请求异常:', fallbackError);
+                        }
+                    }
+                }
                 
-                // 在用户点击生成报告时，发起 POST 请求增加计数值并上传统计数据
-                try {
-                    const apiUrl = 'https://cursor-clinical-analysis.psterman.workers.dev/';
-                    const response = await fetch(apiUrl, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        mode: 'cors',
-                        body: JSON.stringify({
-                            action: 'submit_stats',
-                            stats: userStats,
-                            timestamp: Date.now(),
-                        }),
+                // 统一更新所有相关状态（无论数据来源是 uploadToSupabase 还是降级请求）
+                // 允许 newCount 为 0（表示数据库为空或查询失败，但仍尝试更新）
+                if (typeof newCount === 'number' && newCount >= 0) {
+                    // 更新所有相关状态
+                    setTotalUsers(newCount >= 0 ? newCount : 0);
+                    setTotalTestUsers(newCount >= 0 ? newCount : 0);
+                    
+                    // 根据新的总人数动态计算技术排名和人格库解锁
+                    const calculatedRank = Math.floor(newCount * 0.6);
+                    setTechRank(calculatedRank);
+                    
+                    const calculatedUnlocked = Math.min(100, parseFloat((newCount / 1000).toFixed(1)));
+                    setUnlockedCount(calculatedUnlocked);
+                    
+                    // 保存到本地存储作为 fallback
+                    localStorage.setItem('totalTestUsers', newCount.toString());
+                    
+                    // 保存排名数据到状态（优先使用 uploadToSupabase 返回的排名，否则使用 API 返回的排名）
+                    if (rankingResult && rankingResult.totalUsers > 0) {
+                        // 使用 uploadToSupabase 返回的排名数据
+                        const finalRank = rankingResult.rankPercent ?? rankingResult.ranking ?? 0;
+                        if (finalRank > 0) {
+                            // 构造排名数据结构
+                            window.userRankings = {
+                                qingCount: { rank: Math.round(rankingResult.totalUsers * (finalRank / 100)), total: rankingResult.totalUsers },
+                                buCount: { rank: Math.round(rankingResult.totalUsers * (finalRank / 100)), total: rankingResult.totalUsers },
+                                userMessages: { rank: Math.round(rankingResult.totalUsers * (finalRank / 100)), total: rankingResult.totalUsers },
+                                totalUserChars: { rank: Math.round(rankingResult.totalUsers * (finalRank / 100)), total: rankingResult.totalUsers },
+                                avgUserMessageLength: { rank: Math.round(rankingResult.totalUsers * (finalRank / 100)), total: rankingResult.totalUsers },
+                                usageDays: { rank: Math.round(rankingResult.totalUsers * (finalRank / 100)), total: rankingResult.totalUsers }
+                            };
+                            console.log('[React] ✅ 排名数据已保存（来自 uploadToSupabase）:', window.userRankings);
+                        }
+                    } else if (data && data.rankings) {
+                        // 兼容旧格式：data.rankings（完整排名对象）
+                        window.userRankings = data.rankings;
+                        console.log('[React] ✅ 排名数据已保存（来自 API rankings）:', data.rankings);
+                    } else if (data && (data.ranking !== undefined || data.rankPercent !== undefined)) {
+                        // 兼容新格式：data.ranking 或 data.rankPercent（单个排名值）
+                        const apiRank = data.rankPercent ?? data.ranking ?? 0;
+                        const apiTotalUsers = data.totalUsers || newCount || 0;
+                        if (apiRank > 0 && apiTotalUsers > 0) {
+                            window.userRankings = {
+                                qingCount: { rank: Math.round(apiTotalUsers * (apiRank / 100)), total: apiTotalUsers },
+                                buCount: { rank: Math.round(apiTotalUsers * (apiRank / 100)), total: apiTotalUsers },
+                                userMessages: { rank: Math.round(apiTotalUsers * (apiRank / 100)), total: apiTotalUsers },
+                                totalUserChars: { rank: Math.round(apiTotalUsers * (apiRank / 100)), total: apiTotalUsers },
+                                avgUserMessageLength: { rank: Math.round(apiTotalUsers * (apiRank / 100)), total: apiTotalUsers },
+                                usageDays: { rank: Math.round(apiTotalUsers * (apiRank / 100)), total: apiTotalUsers }
+                            };
+                            console.log('[React] ✅ 排名数据已保存（来自 API ranking/rankPercent）:', window.userRankings);
+                        }
+                    } else {
+                        console.warn('[React] ⚠️ 未找到排名数据！');
+                        console.warn('[React] 请检查：');
+                        console.warn('1. 是否已更新 Cloudflare Worker 代码（参考 CLOUDFLARE_WORKER_RANKING.md）');
+                        console.warn('2. 浏览器控制台是否有 API 错误');
+                        console.warn('3. 运行 RANKING_DEBUG.md 中的调试代码');
+                    }
+
+                    // 保存到历史记录
+                    try {
+                        const historyData = {
+                            analysisData: analysisData,
+                            rankings: (rankingResult && window.userRankings) || (data && data.rankings) || null,
+                            timestamp: Date.now()
+                        };
+                        localStorage.setItem('cursor_clinical_history', JSON.stringify(historyData));
+                        setHasHistory(true);
+                        console.log('[History] 已保存到历史记录');
+                    } catch (e) {
+                        console.error('[History] 保存历史记录失败:', e);
+                    }
+                    
+                    console.log('[React] ✅ 数据上传和排名更新完成:', {
+                        totalUsers: newCount,
+                        techRank: Math.floor(newCount * 0.6),
+                        unlockedCount: Math.min(100, parseFloat((newCount / 1000).toFixed(1))),
+                        hasRankings: !!window.userRankings,
+                        dataSource: rankingResult ? 'uploadToSupabase' : (data ? 'fallback API' : 'none')
                     });
                     
-                    if (response.ok) {
-                        const data = await response.json();
-                        const newCount = data.value || data.totalUsers || data.total || data.count || 0;
-                        
-                        // 更新所有相关状态
-                        setTotalUsers(newCount >= 0 ? newCount : 0);
-                        setTotalTestUsers(newCount >= 0 ? newCount : 0);
-                        
-                        // 根据新的总人数动态计算技术排名和人格库解锁
-                        const calculatedRank = Math.floor(newCount * 0.6);
-                        setTechRank(calculatedRank);
-                        
-                        const calculatedUnlocked = Math.min(100, parseFloat((newCount / 1000).toFixed(1)));
-                        setUnlockedCount(calculatedUnlocked);
-                        
-                        // 保存到本地存储作为 fallback
-                        localStorage.setItem('totalTestUsers', newCount.toString());
-                        
-                        // 保存排名数据到状态（如果 API 返回了排名）
-                        if (data.rankings) {
-                            window.userRankings = data.rankings;
-                            console.log('[React] ✅ 排名数据已保存:', data.rankings);
-                        } else {
-                            console.warn('[React] ⚠️ API 未返回排名数据！');
-                            console.warn('[React] 可能原因：');
-                            console.warn('1. Cloudflare Worker 代码未更新（请参考 CLOUDFLARE_WORKER_RANKING.md）');
-                            console.warn('2. Worker 代码不支持 submit_stats 动作');
-                            console.warn('3. Worker 代码有错误，请检查 Cloudflare Dashboard 日志');
-                            console.warn('当前 API 响应:', data);
-                        }
-
-                        // 保存到历史记录
-                        try {
-                            const historyData = {
-                                analysisData: analysisData,
-                                rankings: data.rankings || null,
-                                timestamp: Date.now()
-                            };
-                            localStorage.setItem('cursor_clinical_history', JSON.stringify(historyData));
-                            setHasHistory(true);
-                            console.log('[History] 已保存到历史记录');
-                        } catch (e) {
-                            console.error('[History] 保存历史记录失败:', e);
-                        }
-                        
-                        console.log('[React] POST 请求成功，计数值和排名已更新:', {
-                            totalUsers: newCount,
-                            techRank: calculatedRank,
-                            unlockedCount: calculatedUnlocked,
-                            rankings: data.rankings,
-                            hasRankings: !!data.rankings
-                        });
-                        
-                        // 保存动画数据到 ref，等待 Dashboard 渲染完成后触发
-                        animationDataRef.current = {
-                            totalUsers: { old: oldTotalUsers, new: newCount },
-                            techRank: { old: oldTechRank, new: calculatedRank },
-                            unlockedCount: { old: oldUnlockedCount, new: calculatedUnlocked }
-                        };
-                    } else {
-                        console.warn('[React] POST 请求失败，状态码:', response.status);
-                        // POST 失败时，尝试从 localStorage 获取最新值
-                        const cached = parseInt(localStorage.getItem('totalTestUsers') || '0');
-                        setTotalUsers(cached >= 0 ? cached : 0);
-                        setTotalTestUsers(cached >= 0 ? cached : 0);
-                        setTechRank(Math.floor(cached * 0.6));
-                        setUnlockedCount(Math.min(100, parseFloat((cached / 1000).toFixed(1))));
-                    }
-                } catch (error) {
-                    console.warn('[React] POST 请求异常，使用 localStorage fallback:', error.message);
-                    // 请求异常时，使用 localStorage 作为 fallback
+                    // 保存动画数据到 ref，等待 Dashboard 渲染完成后触发
+                    animationDataRef.current = {
+                        totalUsers: { old: oldTotalUsers, new: newCount },
+                        techRank: { old: oldTechRank, new: Math.floor(newCount * 0.6) },
+                        unlockedCount: { old: oldUnlockedCount, new: Math.min(100, parseFloat((newCount / 1000).toFixed(1))) }
+                    };
+                } else {
+                    // 如果所有请求都失败，使用 localStorage fallback
+                    console.warn('[React] ⚠️ 所有上传请求都失败，使用 localStorage fallback');
                     const cached = parseInt(localStorage.getItem('totalTestUsers') || '0');
                     setTotalUsers(cached >= 0 ? cached : 0);
                     setTotalTestUsers(cached >= 0 ? cached : 0);
@@ -4157,9 +4278,9 @@
                                 hasVibeResult: !!vibeResult
                             });
                             
-                            // 渲染完整 Dashboard
+                            // 渲染完整 Dashboard，传递 vibeResult 参数
                             try {
-                                window.analysisModule.renderFullDashboard();
+                                window.analysisModule.renderFullDashboard(vibeResult);
                                 console.log('Dashboard 渲染完成');
                                 
                                 // 确保 AnswerBookCard 在 Dashboard 渲染后也能正确渲染
@@ -4394,8 +4515,21 @@
                                     return null;
                                 }
                                 
-                                const percent = ((total - rank + 1) / total * 100);
-                                const rankPercent = (rank / total) * 100;
+                                // 强制类型转换：将输入值转换为数字，防止字符串对比导致的逻辑失效
+                                const rankNum = parseFloat(rank);
+                                const totalNum = parseFloat(total);
+                                
+                                if (isNaN(rankNum) || isNaN(totalNum) || totalNum <= 0) {
+                                    console.warn('[getRankingComment] 参数转换失败:', { rank, total, rankNum, totalNum });
+                                    return null;
+                                }
+                                
+                                // 限制 rank 范围，防止溢出：Math.min(99, Math.max(1, rank))
+                                const safeRank = Math.min(99, Math.max(1, rankNum));
+                                const safeTotal = Math.max(1, totalNum);
+                                
+                                const percent = ((safeTotal - safeRank + 1) / safeTotal * 100);
+                                const rankPercent = (safeRank / safeTotal) * 100;
                                 
                                 console.log('[getRankingComment] 开始匹配:', {
                                     rank, 
@@ -4448,21 +4582,26 @@
                                     if (range.startsWith('TOP ')) {
                                         const rangeStr = range.replace('TOP ', '');
                                         const [minPercent, maxPercent] = rangeStr.split('-').map(s => parseFloat(s.trim()));
-                                        if (percent >= minPercent && percent <= maxPercent) {
+                                        const minP = parseFloat(minPercent);
+                                        const maxP = parseFloat(maxPercent);
+                                        if (!isNaN(minP) && !isNaN(maxP) && percent >= minP && percent <= maxP) {
                                             matched = true;
                                         }
                                     }
                                     // 处理 "1-10", "11-30" 等格式（no.json, ai.json）
                                     else if (/^\d+-\d+$/.test(range)) {
                                         const [minRank, maxRank] = range.split('-').map(s => parseInt(s.trim()));
-                                        if (rank >= minRank && rank <= maxRank) {
+                                        const minR = parseInt(minRank);
+                                        const maxR = parseInt(maxRank);
+                                        if (!isNaN(minR) && !isNaN(maxR) && safeRank >= minR && safeRank <= maxR) {
                                             matched = true;
                                         }
                                     }
                                     // 处理 "91-100+" 格式（no.json）
                                     else if (/^\d+-\d+\+$/.test(range)) {
                                         const [minRank] = range.replace('+', '').split('-').map(s => parseInt(s.trim()));
-                                        if (rank >= minRank) {
+                                        const minR = parseInt(minRank);
+                                        if (!isNaN(minR) && safeRank >= minR) {
                                             matched = true;
                                         }
                                     }
@@ -4472,7 +4611,7 @@
                                         // 根据排名百分比匹配：排名越靠前（rank越小），天数越多
                                         // levels数组从低到高排列，所以需要反向匹配
                                         // 使用精确的rankPercent值进行比较，避免浮点数精度问题
-                                        const currentRankPercent = (rank / total) * 100;
+                                        const currentRankPercent = (safeRank / safeTotal) * 100;
                                         
                                         console.log(`[day.json匹配] range: ${range}, currentRankPercent: ${currentRankPercent}`);
                                         
@@ -4498,7 +4637,7 @@
                                     else if (range === '1001+' || range === '1001+字' || range === '1-50字' || range === '51-200字' || range === '201-500字' || range === '501-1000字') {
                                         // word.json的格式
                                         // 使用精确的rankPercent值进行比较，避免浮点数精度问题
-                                        const currentRankPercent = (rank / total) * 100;
+                                        const currentRankPercent = (safeRank / safeTotal) * 100;
                                         
                                         console.log(`[word.json匹配] range: ${range}, currentRankPercent: ${currentRankPercent}`);
                                         
@@ -4525,7 +4664,7 @@
                                     // 必须在word.json之后检查，避免误匹配word.json的range
                                     else if (range === '10001+字' || range === '5001-10000字' || range === '2001-5000字' || range === '501-2000字' || range === '1-500字') {
                                         // say.json的格式
-                                        const rankPercent = (rank / total) * 100;
+                                        const rankPercent = (safeRank / safeTotal) * 100;
                                         if (range === '10001+字') {
                                             if (rankPercent <= 20) matched = true;
                                         } else if (range === '5001-10000字') {
@@ -4581,17 +4720,61 @@
                                 }
                                 
                                 console.warn('[getRankingComment] 未找到匹配的level:', {
-                                    rank,
-                                    total,
+                                    rank: safeRank,
+                                    total: safeTotal,
                                     rankPercent: rankPercent.toFixed(1) + '%',
                                     levels: data.levels?.map(l => l.range)
                                 });
+                                // 处理 0% 的情况：返回默认值而不是 undefined
+                                if (rankPercent === 0 || safeRank === 0) {
+                                    return {
+                                        title: lang === 'en' ? 'Ranking Data' : '排名数据',
+                                        content: lang === 'en' ? 'Your ranking data is being calculated.' : '您的排名数据正在计算中。',
+                                        label: lang === 'en' ? 'Top 0%' : '前 0%'
+                                    };
+                                }
                                 return null;
                             };
                             
                             // 统一更新排名徽章的函数（暴露到全局，以便在语言切换时调用）
                             const updateRankingBadges = async (rankings, lang = 'zh-CN') => {
-                                if (!rankings) return;
+                                if (!rankings) {
+                                    console.warn('[updateRankingBadges] rankings 为空，无法更新排名徽章');
+                                    return;
+                                }
+                                
+                                // 辅助函数：从排名对象中提取 rank 值，兼容 ranking 或 rankPercent 字段
+                                const extractRank = (rankingObj, total) => {
+                                    if (!rankingObj) return null;
+                                    
+                                    // 优先使用 rank 字段
+                                    if (rankingObj.rank !== null && rankingObj.rank !== undefined) {
+                                        return Number(rankingObj.rank);
+                                    }
+                                    
+                                    // 兼容 ranking 字段
+                                    if (rankingObj.ranking !== null && rankingObj.ranking !== undefined) {
+                                        const rankingValue = Number(rankingObj.ranking);
+                                        // 如果 ranking 是 0-100 之间的值，认为是百分比，需要转换为排名
+                                        if (!isNaN(rankingValue) && rankingValue >= 0 && rankingValue <= 100 && total > 0) {
+                                            // 百分比转换为排名（rankPercent 越小，排名越靠前）
+                                            return Math.max(1, Math.round(total * (rankingValue / 100)));
+                                        }
+                                        // 如果 ranking 大于 100，认为是排名数字
+                                        return rankingValue;
+                                    }
+                                    
+                                    // 兼容 rankPercent 字段
+                                    if (rankingObj.rankPercent !== null && rankingObj.rankPercent !== undefined && total > 0) {
+                                        const rankPercent = Number(rankingObj.rankPercent);
+                                        if (!isNaN(rankPercent) && rankPercent >= 0 && rankPercent <= 100) {
+                                            // 百分比转换为排名（rankPercent 越小，排名越靠前）
+                                            return Math.max(1, Math.round(total * (rankPercent / 100)));
+                                        }
+                                    }
+                                    
+                                    return null;
+                                };
                                 
                                 // 获取i18n翻译函数
                                 const t = (key) => {
@@ -4602,16 +4785,22 @@
                                 };
                                 
                                 // 更新排名徽章（统计卡片右下角）
-                                const updateBadge = (badgeId, rank, total) => {
+                                const updateBadge = (badgeId, rankingObj, total) => {
                                     const badge = document.getElementById(badgeId);
                                     if (!badge) return;
                                     
-                                    if (rank !== null && rank !== undefined && total > 0) {
-                                        const percent = ((total - rank + 1) / total * 100).toFixed(1);
+                                    const rank = extractRank(rankingObj, total);
+                                    const actualTotal = rankingObj?.total || total || 0;
+                                    
+                                    if (rank !== null && rank !== undefined && actualTotal > 0) {
+                                        // 限制 rank 范围，防止溢出：Math.min(99, Math.max(1, rank))
+                                        const safeRank = Math.min(99, Math.max(1, rank));
+                                        const safeTotal = Math.max(1, actualTotal);
+                                        const percent = Math.min(99, Math.max(1, ((safeTotal - safeRank + 1) / safeTotal * 100))).toFixed(1);
                                         if (lang === 'en') {
-                                            badge.textContent = `#${rank} (Top ${percent}%)`;
+                                            badge.textContent = `#${safeRank} (Top ${percent}%)`;
                                         } else {
-                                            badge.textContent = `#${rank} (前${percent}%)`;
+                                            badge.textContent = `#${safeRank} (前${percent}%)`;
                                         }
                                         badge.classList.add('has-rank');
                                     } else {
@@ -4621,7 +4810,7 @@
                                 };
                                 
                                  // 更新"全网横向排名"区域的卡片（大卡片）
-                                const updateRankingCard = async (valueId, percentId, rank, total, jsonFile) => {
+                                const updateRankingCard = async (valueId, percentId, rankingObj, total, jsonFile) => {
                                     const valueEl = document.getElementById(valueId);
                                     const percentEl = document.getElementById(percentId);
                                     const beatenEl = document.getElementById(percentId.replace('Percent', 'Beaten'));
@@ -4643,19 +4832,29 @@
                                         beatenEl.style.textOverflow = 'clip';
                                     }
                                     
-                                    if (rank !== null && rank !== undefined && total > 0) {
-                                        // 计算击败人数
-                                        const beatenCount = total - rank;
+                                    // 从 rankingObj 中提取 rank 值，兼容 ranking 或 rankPercent 字段
+                                    const rank = extractRank(rankingObj, total);
+                                    const actualTotal = rankingObj?.total || total || 0;
+                                    
+                                    // 使用原始 rank 值计算击败人数，但显示时限制范围防止溢出
+                                    const actualRank = rank !== null && rank !== undefined ? rank : null;
+                                    const safeRank = actualRank !== null ? Math.min(99, Math.max(1, actualRank)) : null;
+                                    
+                                    if (actualRank !== null && actualRank !== undefined && actualTotal > 0) {
+                                        // 计算击败人数：使用原始 rank 值，而不是被限制的 safeRank
+                                        // 击败人数 = 总人数 - 排名（排名越小，击败人数越多）
+                                        // 例如：排名1，总人数13，击败人数 = 13 - 1 = 12
+                                        const beatenCount = Math.max(0, actualTotal - actualRank);
                                         
                                         // 判断是否在100名内
-                                        if (rank <= 100) {
+                                        if (safeRank <= 100) {
                                             // 100名内：显示排名数字和JSON中的标题和评语
                                             const data = await loadRankingData(jsonFile, lang);
-                                            const comment = getRankingComment(data, rank, total, lang);
+                                            const comment = getRankingComment(data, safeRank, actualTotal, lang);
                                             
                                             if (comment && valueEl && percentEl) {
                                                 // valueEl显示排名数字（大字体，参考技术排名样式）
-                                                valueEl.textContent = rank;
+                                                valueEl.textContent = safeRank;
                                                 valueEl.style.fontSize = '36px';
                                                 valueEl.style.fontWeight = '700';
                                                 valueEl.style.fontFamily = "'JetBrains Mono', monospace";
@@ -4666,9 +4865,12 @@
                                                 percentEl.style.whiteSpace = 'normal'; // 允许换行显示content
                                                  percentEl.style.color = '#ffffff'; // 确保内容文字是白色
                                                  
-                                                 // 击败人数：显示击败人数和百分比
+                                                 // 击败人数：显示击败人数和百分比（正确计算：击败人数/总人数*100）
                                                  if (beatenEl) {
-                                                     const beatPercent = ((total - rank) / total * 100).toFixed(1);
+                                                     // 击败百分比 = (击败人数 / 总人数) * 100
+                                                     const beatPercent = actualTotal > 0 
+                                                         ? Math.min(99.9, Math.max(0.1, (beatenCount / actualTotal * 100))).toFixed(1)
+                                                         : '0.0';
                                                      if (lang === 'en') {
                                                          beatenEl.textContent = `Defeated ${formatNumber(beatenCount)} users (Top ${beatPercent}%)`;
                                                      } else {
@@ -4676,10 +4878,10 @@
                                                      }
                                                  }
                                              } else {
-                                                // 如果无法从JSON获取，使用默认显示
-                                                const percent = ((total - rank + 1) / total * 100).toFixed(1);
+                                                // 如果无法从JSON获取，使用默认显示（限制范围防止溢出）
+                                                const percent = Math.min(99, Math.max(1, ((actualTotal - safeRank + 1) / actualTotal * 100))).toFixed(1);
                                                 if (valueEl) {
-                                                    valueEl.textContent = rank;
+                                                    valueEl.textContent = safeRank;
                                                     valueEl.style.fontSize = '36px';
                                                     valueEl.style.fontWeight = '700';
                                                     valueEl.style.fontFamily = "'JetBrains Mono', monospace";
@@ -4692,9 +4894,11 @@
                                                     }
                                                     percentEl.style.whiteSpace = 'nowrap';
                                                 }
-                                                 // 击败人数：显示击败人数和百分比
+                                                 // 击败人数：显示击败人数和百分比（使用原始 rank 值计算）
                                                 if (beatenEl) {
-                                                    const beatPercent = ((total - rank) / total * 100).toFixed(1);
+                                                    const beatPercent = actualTotal > 0 
+                                                        ? Math.min(99.9, Math.max(0.1, (beatenCount / actualTotal * 100))).toFixed(1)
+                                                        : '0.0';
                                                     if (lang === 'en') {
                                                         beatenEl.textContent = `Defeated ${formatNumber(beatenCount)} users (Top ${beatPercent}%)`;
                                                     } else {
@@ -4705,7 +4909,7 @@
                                         } else {
                                             // 101名以后：只显示数字排名
                                             if (valueEl) {
-                                                valueEl.textContent = rank;
+                                                valueEl.textContent = safeRank;
                                                 valueEl.style.fontSize = '36px';
                                                 valueEl.style.fontWeight = '700';
                                                 valueEl.style.fontFamily = "'JetBrains Mono', monospace";
@@ -4718,9 +4922,11 @@
                                                 }
                                                 percentEl.style.whiteSpace = 'nowrap';
                                             }
-                                                 // 击败人数：显示击败人数和百分比
+                                                 // 击败人数：显示击败人数和百分比（使用原始 rank 值计算）
                                                 if (beatenEl) {
-                                                    const beatPercent = ((total - rank) / total * 100).toFixed(1);
+                                                    const beatPercent = actualTotal > 0 
+                                                        ? Math.min(99.9, Math.max(0.1, (beatenCount / actualTotal * 100))).toFixed(1)
+                                                        : '0.0';
                                                     if (lang === 'en') {
                                                         beatenEl.textContent = `Defeated ${formatNumber(beatenCount)} users (Top ${beatPercent}%)`;
                                                     } else {
@@ -4729,6 +4935,7 @@
                                                 }
                                         }
                                     } else {
+                                        // 使用 (val ?? '--') 代替 (val && val)，确保当数值为 0 时依然渲染标题和边框
                                         if (valueEl) valueEl.textContent = '--';
                                         if (percentEl) percentEl.textContent = '--';
                                         if (beatenEl) beatenEl.textContent = '--';
@@ -4736,22 +4943,24 @@
                                 };
                                 
                                 // 更新各个统计卡片的排名徽章（右下角小徽章）
-                                updateBadge('rankingQingCountBadge', rankings.qingCount?.rank, rankings.qingCount?.total);
-                                updateBadge('rankingBuCountBadge', rankings.buCount?.rank, rankings.buCount?.total);
-                                updateBadge('rankingUserMessagesBadge', rankings.userMessages?.rank, rankings.userMessages?.total);
-                                updateBadge('rankingTotalCharsBadge', rankings.totalUserChars?.rank, rankings.totalUserChars?.total);
-                                updateBadge('rankingAvgLengthBadge', rankings.avgUserMessageLength?.rank, rankings.avgUserMessageLength?.total);
-                                updateBadge('rankingUsageDaysBadge', rankings.usageDays?.rank, rankings.usageDays?.total);
+                                // 使用完整的 rankingObj，函数内部会处理 ranking 或 rankPercent 字段
+                                updateBadge('rankingQingCountBadge', rankings.qingCount, rankings.qingCount?.total);
+                                updateBadge('rankingBuCountBadge', rankings.buCount, rankings.buCount?.total);
+                                updateBadge('rankingUserMessagesBadge', rankings.userMessages, rankings.userMessages?.total);
+                                updateBadge('rankingTotalCharsBadge', rankings.totalUserChars, rankings.totalUserChars?.total);
+                                updateBadge('rankingAvgLengthBadge', rankings.avgUserMessageLength, rankings.avgUserMessageLength?.total);
+                                updateBadge('rankingUsageDaysBadge', rankings.usageDays, rankings.usageDays?.total);
                                 
                                 // 更新"全网横向排名"区域的卡片（大卡片显示）
                                 // 对应关系：no.json -> 甲方爸爸上身, ai.json -> 调戏AI, please.json -> 赛博磕头
                                 // say.json -> 废话输出（总字数）, word.json -> 平均长度（单次指令厚度）, day.json -> 上岗天数
-                                await updateRankingCard('rankingQingCount', 'rankingQingCountPercent', rankings.qingCount?.rank, rankings.qingCount?.total, 'please.json');
-                                await updateRankingCard('rankingBuCount', 'rankingBuCountPercent', rankings.buCount?.rank, rankings.buCount?.total, 'no.json');
-                                await updateRankingCard('rankingUserMessages', 'rankingUserMessagesPercent', rankings.userMessages?.rank, rankings.userMessages?.total, 'ai.json');
-                                await updateRankingCard('rankingTotalChars', 'rankingTotalCharsPercent', rankings.totalUserChars?.rank, rankings.totalUserChars?.total, 'say.json');
-                                await updateRankingCard('rankingAvgLength', 'rankingAvgLengthPercent', rankings.avgUserMessageLength?.rank, rankings.avgUserMessageLength?.total, 'word.json');
-                                await updateRankingCard('rankingUsageDays', 'rankingUsageDaysPercent', rankings.usageDays?.rank, rankings.usageDays?.total, 'day.json');
+                                // 使用完整的 rankingObj，函数内部会处理 ranking 或 rankPercent 字段
+                                await updateRankingCard('rankingQingCount', 'rankingQingCountPercent', rankings.qingCount, rankings.qingCount?.total, 'please.json');
+                                await updateRankingCard('rankingBuCount', 'rankingBuCountPercent', rankings.buCount, rankings.buCount?.total, 'no.json');
+                                await updateRankingCard('rankingUserMessages', 'rankingUserMessagesPercent', rankings.userMessages, rankings.userMessages?.total, 'ai.json');
+                                await updateRankingCard('rankingTotalChars', 'rankingTotalCharsPercent', rankings.totalUserChars, rankings.totalUserChars?.total, 'say.json');
+                                await updateRankingCard('rankingAvgLength', 'rankingAvgLengthPercent', rankings.avgUserMessageLength, rankings.avgUserMessageLength?.total, 'word.json');
+                                await updateRankingCard('rankingUsageDays', 'rankingUsageDaysPercent', rankings.usageDays, rankings.usageDays?.total, 'day.json');
                             };
                             
                             // 将updateRankingBadges暴露到全局作用域

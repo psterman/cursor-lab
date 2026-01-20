@@ -3,6 +3,9 @@
  * 集成文件上传、数据库解析、图表渲染和图片导出功能
  */
 
+import { CursorParser } from './src/CursorParser.js';
+import { VibeCodingerAnalyzer, DIMENSIONS } from './src/VibeCodingerAnalyzer.js';
+
 // 检测基础路径（用于 GitHub Pages 等生产环境）
 if (!window.BASE_PATH) {
   const pathname = window.location.pathname;
@@ -36,12 +39,221 @@ if (!window.BASE_PATH) {
   window.BASE_PATH = basePath;
   console.log('[Main] 检测到基础路径:', window.BASE_PATH);
 }
-
-import { CursorParser } from './src/CursorParser.js';
-import { VibeCodingerAnalyzer, DIMENSIONS } from './src/VibeCodingerAnalyzer.js';
 // Chart.js 和 html2canvas 通过 CDN 加载，使用全局变量
 // import Chart from 'chart.js/auto';
 // import html2canvas from 'html2canvas';
+
+/**
+ * VibeCodingApp 类 - 封装文件上传和分析逻辑
+ */
+class VibeCodingApp {
+  constructor() {
+    this.parser = null;
+    this.analyzer = null;
+    this.allChatData = [];
+    this.globalStats = null;
+    this.vibeResult = null;
+  }
+
+  /**
+   * 初始化应用
+   */
+  async init() {
+    console.log('[VibeCodingApp] 初始化应用...');
+    
+    // 初始化解析器
+    if (!this.parser) {
+      this.parser = new CursorParser();
+      await this.parser.init();
+    }
+    
+    // 初始化分析器
+    if (!this.analyzer) {
+      this.analyzer = new VibeCodingerAnalyzer();
+    }
+    
+    console.log('[VibeCodingApp] 初始化完成');
+  }
+
+  /**
+   * 处理文件上传并进行分析
+   * @param {Array} chatData - 聊天数据
+   * @param {Object} extraStats - 额外的统计数据（用于上传排名）
+   * @param {Function} onProgress - 进度回调函数
+   * @returns {Promise<Object>} 分析结果
+   */
+  async analyzeFile(chatData, extraStats = null, onProgress = null) {
+    if (!this.analyzer) {
+      throw new Error('分析器未初始化，请先调用 init()');
+    }
+
+    const currentLang = getCurrentLang();
+    this.analyzer.setLanguage(currentLang);
+
+    // 步骤1: 调用 analyze 进行本地分析
+    const result = await this.analyzer.analyze(chatData, currentLang, null, onProgress);
+    console.log('[VibeCodingApp] analyze 完成:', result);
+
+    // 步骤2: 立即 await 调用 uploadToSupabase 获取真实排名
+    if (result && result.statistics) {
+      const stats = result.statistics;
+      
+      // 准备统计数据（包含本地计算的统计和额外字段）
+      const statsForUpload = {
+        ...stats,
+        qingCount: extraStats?.qingCount || 0,
+        buCount: extraStats?.buCount || 0,
+        usageDays: extraStats?.usageDays || 1
+      };
+
+      try {
+        // 步骤3: 立即 await 调用 uploadToSupabase 联网获取真实排名
+        // 传递完整的 result 对象，函数内部会从 result 中提取所有数据
+        const liveRank = await this.analyzer.uploadToSupabase(result, onProgress);
+        
+        // 步骤4: 必须拿到 rankPercent 后，再更新结果
+        if (liveRank && liveRank.rankPercent !== undefined) {
+          // 利用联网回传的 rankPercent 更新 result.statistics 对象
+          stats.rankPercent = liveRank.rankPercent;
+          stats.totalUsers = liveRank.totalUsers;
+          
+          // 将排名数据注入到 result 中
+          if (!result.rankData) {
+            result.rankData = {};
+          }
+          result.rankData.rankPercent = liveRank.rankPercent;
+          result.rankData.totalUsers = liveRank.totalUsers;
+          
+          console.log('[VibeCodingApp] 真实排名数据已获取并更新:', {
+            rankPercent: liveRank.rankPercent,
+            totalUsers: liveRank.totalUsers
+          });
+        } else {
+          console.warn('[VibeCodingApp] uploadToSupabase 未返回有效的 rankPercent');
+        }
+      } catch (uploadError) {
+        console.error('[VibeCodingApp] uploadToSupabase 调用失败:', uploadError);
+        // 严禁生成随机排名数据，如果上传失败则不显示排名
+        if (onProgress) {
+          const currentLang = getCurrentLang();
+          const errorText = window.i18n?.getText('upload.logs.rankUploadFailed', currentLang) || 
+                          (currentLang === 'en' 
+                            ? 'Failed to upload ranking data' 
+                            : '排名数据上传失败');
+          onProgress(`> ${errorText}`);
+        }
+      }
+    }
+
+    // 保存结果
+    this.vibeResult = result;
+    
+    // 步骤5: 最后执行 renderReport
+    this.renderReport(result);
+    
+    return result;
+  }
+
+  /**
+   * 处理文件上传并进行分析（同步方法，降级方案）
+   * @param {Array} chatData - 聊天数据
+   * @param {Object} extraStats - 额外的统计数据（用于上传排名）
+   * @param {Function} onProgress - 进度回调函数
+   * @returns {Promise<Object>} 分析结果
+   */
+  async analyzeFileSync(chatData, extraStats = null, onProgress = null) {
+    if (!this.analyzer) {
+      throw new Error('分析器未初始化，请先调用 init()');
+    }
+
+    const currentLang = getCurrentLang();
+    this.analyzer.setLanguage(currentLang);
+
+    // 步骤1: 调用 analyzeSync 进行本地分析（同步方法）
+    const result = await this.analyzer.analyzeSync(chatData, currentLang, null, onProgress);
+    console.log('[VibeCodingApp] analyzeSync 完成:', result);
+
+    // 步骤2: 立即 await 调用 uploadToSupabase 获取真实排名
+    if (result && result.statistics) {
+      const stats = result.statistics;
+      
+      // 准备统计数据（包含本地计算的统计和额外字段）
+      const statsForUpload = {
+        ...stats,
+        qingCount: extraStats?.qingCount || 0,
+        buCount: extraStats?.buCount || 0,
+        usageDays: extraStats?.usageDays || 1
+      };
+
+      try {
+        // 步骤3: 立即 await 调用 uploadToSupabase 联网获取真实排名
+        // 传递完整的 result 对象，函数内部会从 result 中提取所有数据
+        const liveRank = await this.analyzer.uploadToSupabase(result, onProgress);
+        
+        // 步骤4: 必须拿到 rankPercent 后，再更新结果
+        if (liveRank && liveRank.rankPercent !== undefined) {
+          // 利用联网回传的 rankPercent 更新 result.statistics 对象
+          stats.rankPercent = liveRank.rankPercent;
+          stats.totalUsers = liveRank.totalUsers;
+          
+          // 将排名数据注入到 result 中
+          if (!result.rankData) {
+            result.rankData = {};
+          }
+          result.rankData.rankPercent = liveRank.rankPercent;
+          result.rankData.totalUsers = liveRank.totalUsers;
+          
+          console.log('[VibeCodingApp] 真实排名数据已获取并更新（同步方法）:', {
+            rankPercent: liveRank.rankPercent,
+            totalUsers: liveRank.totalUsers
+          });
+        } else {
+          console.warn('[VibeCodingApp] uploadToSupabase 未返回有效的 rankPercent（同步方法）');
+        }
+      } catch (uploadError) {
+        console.error('[VibeCodingApp] uploadToSupabase 调用失败（同步方法）:', uploadError);
+        // 严禁生成随机排名数据，如果上传失败则不显示排名
+        if (onProgress) {
+          const currentLang = getCurrentLang();
+          const errorText = window.i18n?.getText('upload.logs.rankUploadFailed', currentLang) || 
+                          (currentLang === 'en' 
+                            ? 'Failed to upload ranking data' 
+                            : '排名数据上传失败');
+          onProgress(`> ${errorText}`);
+        }
+      }
+    }
+
+    // 保存结果
+    this.vibeResult = result;
+    
+    // 步骤5: 最后执行 renderReport
+    this.renderReport(result);
+    
+    return result;
+  }
+
+  /**
+   * 渲染报告
+   * @param {Object} result - 分析结果
+   */
+  renderReport(result) {
+    if (!result) {
+      console.warn('[VibeCodingApp] 没有结果可渲染');
+      return;
+    }
+
+    // 更新全局变量（保持向后兼容）
+    vibeResult = result;
+    
+    // 调用现有的渲染函数
+    if (document.getElementById('vibeCodingerSection')) {
+      displayVibeCodingerAnalysis();
+    }
+    
+    console.log('[VibeCodingApp] 报告渲染完成');
+  }
+}
 
 // 全局变量
 let parser = null;
@@ -49,6 +261,9 @@ let allChatData = [];
 let globalStats = null;
 let vibeAnalyzer = null;
 let vibeResult = null;
+
+// 创建全局 VibeCodingApp 实例
+let vibeCodingApp = null;
 
 // 获取当前语言的辅助函数
 function getCurrentLang() {
@@ -137,9 +352,51 @@ export const reanalyzeWithLanguage = async (lang) => {
   vibeAnalyzer.setLanguage(lang);
   
   try {
-    // 重新分析
-    vibeResult = await vibeAnalyzer.analyze(allChatData, lang);
+    // 计算使用天数
+    let usageDays = 1;
+    if (globalStats && globalStats.earliestFileTime) {
+      const now = Date.now();
+      const earliest = globalStats.earliestFileTime;
+      const diffMs = now - earliest;
+      usageDays = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+    }
+    
+    // 重新分析（本地计算，不联网）
+    vibeResult = await vibeAnalyzer.analyze(allChatData, lang, null);
     console.log('[Main] 重新分析完成');
+    
+    // 立即 await 调用 uploadToSupabase 获取真实排名
+    if (vibeResult && vibeResult.statistics) {
+      // 将额外统计数据合并到 vibeResult.statistics 中
+      vibeResult.statistics.qingCount = globalStats?.qingCount || 0;
+      vibeResult.statistics.buCount = globalStats?.buCount || 0;
+      vibeResult.statistics.usageDays = usageDays;
+      
+      try {
+        // 传递完整的 vibeResult 对象，函数内部会从 vibeResult 中提取所有数据
+        const liveRank = await vibeAnalyzer.uploadToSupabase(vibeResult);
+        
+        // 必须拿到 rankPercent 后，再更新结果
+        if (liveRank && liveRank.rankPercent !== undefined) {
+          vibeResult.statistics.rankPercent = liveRank.rankPercent;
+          vibeResult.statistics.totalUsers = liveRank.totalUsers;
+          
+          if (!vibeResult.rankData) {
+            vibeResult.rankData = {};
+          }
+          vibeResult.rankData.rankPercent = liveRank.rankPercent;
+          vibeResult.rankData.totalUsers = liveRank.totalUsers;
+          
+          console.log('[Main] 真实排名数据已获取并覆盖:', {
+            rankPercent: liveRank.rankPercent,
+            totalUsers: liveRank.totalUsers
+          });
+        }
+      } catch (uploadError) {
+        console.error('[Main] uploadToSupabase 调用失败:', uploadError);
+        // 严禁生成随机排名数据，如果上传失败则不显示排名
+      }
+    }
     
     // 重新渲染
     if (document.getElementById('vibeCodingerSection')) {
@@ -149,7 +406,52 @@ export const reanalyzeWithLanguage = async (lang) => {
     return vibeResult;
   } catch (error) {
     console.warn('[Main] 异步分析失败，使用同步方法:', error);
-    vibeResult = vibeAnalyzer.analyzeSync(allChatData, lang);
+    
+    // 计算使用天数
+    let usageDays = 1;
+    if (globalStats && globalStats.earliestFileTime) {
+      const now = Date.now();
+      const earliest = globalStats.earliestFileTime;
+      const diffMs = now - earliest;
+      usageDays = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+    }
+    
+    // 重新分析（本地计算，不联网）
+    vibeResult = await vibeAnalyzer.analyzeSync(allChatData, lang, null);
+    
+    // 立即 await 调用 uploadToSupabase 获取真实排名
+    if (vibeResult && vibeResult.statistics) {
+      // 将额外统计数据合并到 vibeResult.statistics 中
+      vibeResult.statistics.qingCount = globalStats?.qingCount || 0;
+      vibeResult.statistics.buCount = globalStats?.buCount || 0;
+      vibeResult.statistics.usageDays = usageDays;
+      
+      try {
+        // 传递完整的 vibeResult 对象，函数内部会从 vibeResult 中提取所有数据
+        const liveRank = await vibeAnalyzer.uploadToSupabase(vibeResult);
+        
+        // 必须拿到 rankPercent 后，再更新结果
+        if (liveRank && liveRank.rankPercent !== undefined) {
+          vibeResult.statistics.rankPercent = liveRank.rankPercent;
+          vibeResult.statistics.totalUsers = liveRank.totalUsers;
+          
+          if (!vibeResult.rankData) {
+            vibeResult.rankData = {};
+          }
+          vibeResult.rankData.rankPercent = liveRank.rankPercent;
+          vibeResult.rankData.totalUsers = liveRank.totalUsers;
+          
+          console.log('[Main] 真实排名数据已获取并覆盖（同步方法）:', {
+            rankPercent: liveRank.rankPercent,
+            totalUsers: liveRank.totalUsers
+          });
+        }
+      } catch (uploadError) {
+        console.error('[Main] uploadToSupabase 调用失败（同步方法）:', uploadError);
+        // 严禁生成随机排名数据，如果上传失败则不显示排名
+      }
+    }
+    
     if (document.getElementById('vibeCodingerSection')) {
       displayVibeCodingerAnalysis();
     }
@@ -158,11 +460,14 @@ export const reanalyzeWithLanguage = async (lang) => {
 };
 
 // 导出渲染函数
-export const renderFullDashboard = () => {
+export const renderFullDashboard = async (vibeResult) => {
+  // 如果没有传入参数，使用全局变量（向后兼容）
+  const currentVibeResult = vibeResult || window.vibeResult || globalThis.vibeResult;
+  
   console.log('[Main] renderFullDashboard 被调用');
   console.log('[Main] 数据状态:', {
     hasGlobalStats: !!globalStats,
-    hasVibeResult: !!vibeResult,
+    hasVibeResult: !!currentVibeResult,
     chatDataLength: allChatData.length
   });
   
@@ -173,12 +478,23 @@ export const renderFullDashboard = () => {
     console.log('[Main] 调用 displayStats...');
     displayStats();
   }
-  if (vibeResult) {
+  if (currentVibeResult) {
     console.log('[Main] 调用 displayVibeCodingerAnalysis...');
     displayVibeCodingerAnalysis();
     // 显示实时统计和维度排行榜
-    displayRealtimeStats();
-    displayDimensionRanking();
+    // 使用 try-catch 确保即使 displayRealtimeStats 失败，也不影响后续的 displayDimensionRanking
+    try {
+      // 把 vibeResult 传给它！
+      await displayRealtimeStats(currentVibeResult);
+    } catch (error) {
+      console.error('[Main] 统计上传失败:', error);
+    }
+    // 确保 displayDimensionRanking 能够继续执行
+    try {
+      displayDimensionRanking();
+    } catch (error) {
+      console.error('[Main] displayDimensionRanking 调用失败:', error);
+    }
   }
   if (allChatData.length > 0) {
     console.log('[Main] 渲染对话列表...');
@@ -222,7 +538,97 @@ function updateElementReferences() {
     chatList: !!elements.chatList
   });
 }
+/**
+ * 上传统计数据到 Worker 并获取排名
+ * @param {Object} stats - 统计数据对象
+ * @param {number} stats.qingCount - 情绪词数
+ * @param {number} stats.buCount - 逻辑词数
+ * @param {number} stats.totalMessages - 总消息数
+ * @param {number} stats.totalChars - 总字符数
+ * @param {number} stats.avgMessageLength - 平均消息长度
+ * @param {number} stats.usageDays - 使用天数
+ * @param {Function} onProgress - 进度回调函数，用于显示加载提示
+ * @returns {Promise<Object>} 返回包含 rankPercent 和 totalUsers 的对象
+ */
+async function uploadStatsToWorker(stats, onProgress = null) {
+  try {
+    // 显示加载提示
+    if (onProgress) {
+      const currentLang = getCurrentLang();
+      const loadingText = currentLang === 'en' 
+        ? 'Connecting to database, syncing global ranking...'
+        : '正在连接数据库，同步全球排名...';
+      onProgress(loadingText);
+    }
 
+    // 获取 API 端点（从 meta 标签动态获取）
+    const metaApi = document.querySelector('meta[name="api-endpoint"]');
+    if (!metaApi || !metaApi.content) {
+      throw new Error('API endpoint not found in meta tag');
+    }
+    const apiEndpoint = metaApi.content.trim();
+    
+    // 确保 endpoint 以 / 结尾
+    const normalizedEndpoint = apiEndpoint.endsWith('/') ? apiEndpoint : apiEndpoint + '/';
+    
+    console.log('[Main] 上传统计数据到 Worker:', {
+      endpoint: normalizedEndpoint,
+      stats: {
+        qingCount: stats.qingCount || 0,
+        buCount: stats.buCount || 0,
+        totalMessages: stats.totalMessages || 0,
+        totalChars: stats.totalChars || 0,
+        avgMessageLength: stats.avgMessageLength || 0,
+        usageDays: stats.usageDays || 1
+      }
+    });
+
+    // 准备上传数据（字段名与后端匹配）
+    const uploadData = {
+      qingCount: stats.qingCount || 0,
+      buCount: stats.buCount || 0, // 注意：后端可能使用 bu_count，但先尝试 buCount
+      totalMessages: stats.totalMessages || 0,
+      totalChars: stats.totalChars || 0,
+      avgMessageLength: stats.avgMessageLength || 0,
+      usageDays: stats.usageDays || 1
+    };
+
+    // 发送 POST 请求到 Worker
+    const response = await fetch(`${normalizedEndpoint}api/analyze`, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(uploadData)
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const result = await response.json();
+    
+    if (result.status === 'success' && result.rankPercent !== undefined) {
+      console.log(`[Main] 排名获取成功：击败了 ${result.rankPercent}% 的用户`);
+      return {
+        rankPercent: result.rankPercent,
+        totalUsers: result.totalUsers || null,
+        success: true
+      };
+    } else {
+      throw new Error('后端返回数据格式异常');
+    }
+  } catch (err) {
+    console.error('[Main] 上传排名失败:', err);
+    // 容错处理：返回保底排名
+    return {
+      rankPercent: 99.9, // 保底排名
+      totalUsers: null,
+      success: false,
+      error: err.message
+    };
+  }
+}
 // 导出初始化函数（供 React 调用，不绑定事件）
 export const initializeParser = async () => {
   if (!parser) {
@@ -322,6 +728,13 @@ async function init() {
   console.log('[Main] 初始化 VibeCodingerAnalyzer...');
   vibeAnalyzer = new VibeCodingerAnalyzer();
   console.log('[Main] VibeCodingerAnalyzer 初始化完成');
+
+  // 初始化 VibeCodingApp 类
+  console.log('[Main] 初始化 VibeCodingApp...');
+  vibeCodingApp = new VibeCodingApp();
+  vibeCodingApp.parser = parser;
+  vibeCodingApp.analyzer = vibeAnalyzer;
+  console.log('[Main] VibeCodingApp 初始化完成');
 
   // 绑定事件
   bindEvents();
@@ -660,35 +1073,135 @@ async function handleFileUpload(event, type, callbacks = {}) {
       englishWords: Object.keys(globalStats.englishWords || {}).length,
     });
 
-    // 进行 Vibe Codinger 人格分析（异步）
+    // 进行 Vibe Codinger 人格分析（使用 VibeCodingApp 类）
     if (allChatData.length > 0) {
-      console.log('[Main] 开始 Vibe Codinger 人格分析（Web Worker）...');
+      console.log('[Main] 开始 Vibe Codinger 人格分析（使用 VibeCodingApp）...');
       if (onLog) {
         const currentLang = getCurrentLang();
         const logText = window.i18n?.getText('upload.logs.generatingPersonality', currentLang) || '生成人格画像（高性能匹配中）...';
         onLog(`> ${logText}`);
       }
       try {
-        const currentLang = getCurrentLang();
-        vibeAnalyzer.setLanguage(currentLang);
-        vibeResult = await vibeAnalyzer.analyze(allChatData, currentLang);
-        console.log('[Main] Vibe Codinger 分析完成:', vibeResult);
+        // 确保 VibeCodingApp 已初始化
+        if (!vibeCodingApp) {
+          vibeCodingApp = new VibeCodingApp();
+          await vibeCodingApp.init();
+        }
+        
+        // 确保使用全局的 analyzer（保持向后兼容）
+        vibeCodingApp.analyzer = vibeAnalyzer;
+        
+        // 计算使用天数
+        let usageDays = 1;
+        if (globalStats && globalStats.earliestFileTime) {
+          const now = Date.now();
+          const earliest = globalStats.earliestFileTime;
+          const diffMs = now - earliest;
+          usageDays = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+        }
+        
+        // 准备额外的统计数据（用于上传排名）
+        const extraStats = globalStats ? {
+          qingCount: globalStats.qingCount || 0,
+          buCount: globalStats.buCount || 0,
+          usageDays: usageDays
+        } : null;
+        
+        // 创建进度回调函数
+        const onProgress = (message) => {
+          if (onLog) {
+            onLog(`> ${message}`);
+          }
+          // 显示 UI Loading 状态
+          if (!callbacks || !callbacks.onLog) {
+            showLoading(message);
+          }
+        };
+        
+        // 使用 VibeCodingApp 的 analyzeFile 方法
+        // 该方法内部会：1) 调用 analyze 2) 立即 await uploadToSupabase 3) 更新 statistics 4) 调用 renderReport
+        vibeResult = await vibeCodingApp.analyzeFile(allChatData, extraStats, onProgress);
+        console.log('[Main] Vibe Codinger 分析完成（使用 VibeCodingApp）:', vibeResult);
+        
+        // 隐藏加载状态
+        if (!callbacks || !callbacks.onLog) {
+          hideLoading();
+        }
+        
         if (onLog) {
           const currentLang = getCurrentLang();
           const logText = window.i18n?.getText('upload.logs.analysisComplete', currentLang) || '分析完成！';
           onLog(`> ${logText}`);
         }
       } catch (error) {
-        console.error('[Main] Vibe Codinger 分析失败:', error);
+        console.error('[Main] Vibe Codinger 分析失败，使用降级方案:', error);
         if (onLog) {
           const currentLang = getCurrentLang();
           const logText = window.i18n?.getText('upload.logs.analysisFailed', currentLang) || '分析失败，使用降级方案...';
           onLog(`> ${logText}`);
         }
-        // 降级到同步方法
-        const currentLang = getCurrentLang();
-        vibeAnalyzer.setLanguage(currentLang);
-        vibeResult = vibeAnalyzer.analyzeSync(allChatData, currentLang);
+        
+        // 降级到同步方法（使用 VibeCodingApp 类）
+        try {
+          // 确保 VibeCodingApp 已初始化
+          if (!vibeCodingApp) {
+            vibeCodingApp = new VibeCodingApp();
+            await vibeCodingApp.init();
+          }
+          
+          // 确保使用全局的 analyzer（保持向后兼容）
+          vibeCodingApp.analyzer = vibeAnalyzer;
+          
+          // 计算使用天数
+          let usageDays = 1;
+          if (globalStats && globalStats.earliestFileTime) {
+            const now = Date.now();
+            const earliest = globalStats.earliestFileTime;
+            const diffMs = now - earliest;
+            usageDays = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+          }
+          
+          // 准备额外的统计数据（用于上传排名）
+          const extraStats = globalStats ? {
+            qingCount: globalStats.qingCount || 0,
+            buCount: globalStats.buCount || 0,
+            usageDays: usageDays
+          } : null;
+          
+          // 创建进度回调函数
+          const onProgress = (message) => {
+            if (onLog) {
+              onLog(`> ${message}`);
+            }
+            // 显示 UI Loading 状态
+            if (!callbacks || !callbacks.onLog) {
+              showLoading(message);
+            }
+          };
+          
+          // 使用 VibeCodingApp 的 analyzeFileSync 方法（同步方法）
+          // 该方法内部会：1) 调用 analyzeSync 2) 立即 await uploadToSupabase 3) 更新 statistics 4) 调用 renderReport
+          vibeResult = await vibeCodingApp.analyzeFileSync(allChatData, extraStats, onProgress);
+          console.log('[Main] Vibe Codinger 分析完成（使用 VibeCodingApp 同步方法）:', vibeResult);
+          
+          // 隐藏加载状态
+          if (!callbacks || !callbacks.onLog) {
+            hideLoading();
+          }
+          
+          if (onLog) {
+            const currentLang = getCurrentLang();
+            const logText = window.i18n?.getText('upload.logs.analysisComplete', currentLang) || '分析完成！';
+            onLog(`> ${logText}`);
+          }
+        } catch (syncError) {
+          console.error('[Main] 同步方法也失败:', syncError);
+          if (onLog) {
+            const currentLang = getCurrentLang();
+            const errorText = window.i18n?.getText('upload.logs.analysisFailed', currentLang) || '分析失败';
+            onLog(`> ${errorText}`);
+          }
+        }
       }
     }
     
@@ -1048,11 +1561,17 @@ function extractWordsFromText(text) {
 }
 
 // 显示加载状态
-function showLoading() {
-  console.log('[Main] 显示加载状态...');
+function showLoading(message = null) {
+  console.log('[Main] 显示加载状态...', message || '');
   elements.uploadSection.classList.add('hidden');
   elements.loadingSection.classList.remove('hidden');
   elements.dashboardSection.classList.add('hidden');
+  
+  // 如果提供了消息，更新加载提示文本
+  if (message && elements.loadingProgress) {
+    elements.loadingProgress.textContent = message;
+  }
+  
   console.log('[Main] ✅ 加载状态已显示');
 }
 
@@ -1995,42 +2514,70 @@ function renderVibeRadarChart() {
     },
   });
 }
-
-// 更新数字并触发动画
+/**
+ * 数字滚动动画 - 语法修复版
+ */
 export function updateNumberWithAnimation(element, newValue, formatter = (v) => v.toString()) {
   if (!element) return;
-  
-  const oldValue = parseInt(element.textContent.replace(/[^0-9]/g, '')) || 0;
-  const newNum = parseInt(newValue.toString().replace(/[^0-9]/g, '')) || 0;
-  
-  if (oldValue !== newNum) {
-    // 添加更新动画类
-    element.classList.add('updating');
-    
-    // 数字跳动动画
-    element.classList.add('animate-pulse');
-    setTimeout(() => {
-      element.classList.remove('animate-pulse');
-    }, 600);
-    
-    // 更新数值（带过渡效果）
-    animateNumber(element, oldValue, newNum, formatter, () => {
-      element.classList.remove('updating');
-    });
-  } else {
-    // 即使数值相同，也显示闪烁效果（表示实时更新）
-    element.classList.add('animate-flash');
-    setTimeout(() => {
-      element.classList.remove('animate-flash');
-    }, 400);
+
+  // 1. 安全数值转换与防御性编程
+  let targetValue = Number(newValue);
+  if (isNaN(targetValue) || newValue === null || newValue === undefined) {
+    console.warn('[Main] 检测到无效数值，重置为 0');
+    targetValue = 0;
   }
+
+  // 2. 获取起始值
+  const startValue = parseInt(element.textContent.replace(/[^0-9]/g, '')) || 0;
+  const duration = 1500;
+  const startTime = performance.now();
+
+  // 3. 内部动画循环
+  const update = (currentTime) => {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    
+    // 缓动算法：先快后慢
+    const easeOutQuad = t => t * (2 - t);
+    const currentValue = Math.floor(startValue + (targetValue - startValue) * easeOutQuad(progress));
+
+    // 安全渲染
+    try {
+      element.textContent = formatter(currentValue);
+    } catch (e) {
+      element.textContent = currentValue.toString();
+    }
+
+    if (progress < 1) {
+      requestAnimationFrame(update);
+    }
+  };
+
+  // 4. 启动动画
+  requestAnimationFrame(update);
 }
 
 // 数字递增动画
 function animateNumber(element, from, to, formatter, onComplete) {
   const duration = 800; // 动画时长（毫秒）
   const startTime = Date.now();
-  const difference = to - from;
+  
+  // 防御性编程：确保 from 和 to 都是有效数字
+  const safeFrom = (typeof from === 'number' && !isNaN(from)) ? from : 0;
+  const safeTo = (typeof to === 'number' && !isNaN(to)) ? to : 0;
+  const difference = safeTo - safeFrom;
+  
+  // 安全的格式化函数包装器
+  const safeFormatter = (value) => {
+    // 确保 value 是有效数字
+    const safeValue = (typeof value === 'number' && !isNaN(value)) ? value : 0;
+    try {
+      return formatter(safeValue);
+    } catch (error) {
+      console.error('[Main] animateNumber: formatter 执行失败', { value: safeValue, error });
+      return '0';
+    }
+  };
   
   function update() {
     const elapsed = Date.now() - startTime;
@@ -2038,14 +2585,17 @@ function animateNumber(element, from, to, formatter, onComplete) {
     
     // 使用缓动函数（ease-out）
     const easeOut = 1 - Math.pow(1 - progress, 3);
-    const current = Math.round(from + difference * easeOut);
+    const current = Math.round(safeFrom + difference * easeOut);
     
-    element.textContent = formatter(current);
+    // 确保 current 是有效数字后再调用 formatter
+    const safeCurrent = (typeof current === 'number' && !isNaN(current)) ? current : 0;
+    element.textContent = safeFormatter(safeCurrent);
     
     if (progress < 1) {
       requestAnimationFrame(update);
     } else {
-      element.textContent = formatter(to);
+      // 确保 to 是有效数字后再调用 formatter
+      element.textContent = safeFormatter(safeTo);
       if (onComplete) onComplete();
     }
   }
@@ -2166,45 +2716,145 @@ export async function reportNewUser() {
 }
 
 // 显示实时统计
-async function displayRealtimeStats() {
-  if (!vibeResult || !globalStats) {
-    console.warn('[Main] displayRealtimeStats: 缺少必要数据', {
-      hasVibeResult: !!vibeResult,
-      hasGlobalStats: !!globalStats
-    });
-    return;
-  }
-
-  // 检查是否为分享模式（通过检查是否有分享数据标记）
-  const isShareMode = window.shareModeStats || window.shareModeVibeResult;
+async function displayRealtimeStats(vibeResult) {
+  // 如果没有传入参数，使用全局变量（向后兼容）
+  const currentVibeResult = vibeResult || window.vibeResult || globalThis.vibeResult;
   
-  // 从 API 获取测试总人数（分享模式下使用默认值或缓存值）
-  let totalTestUsers;
-  if (isShareMode) {
-    // 分享模式：使用缓存值或默认值，不调用 API
-    const cached = parseInt(localStorage.getItem('totalTestUsers') || '0');
-    totalTestUsers = cached > 0 ? cached : 1000; // 默认值用于计算排名
-    console.log('[Main] 分享模式：使用缓存的 totalTestUsers:', totalTestUsers);
-  } else {
-    // 正常模式：从 API 获取
-    totalTestUsers = await fetchTotalTestUsers();
-  }
-  const previousTotal = totalTestUsers;
+  // 全局异常捕获：确保即使 uploadToSupabase 失败或数据处理出错，也不影响后续的图表渲染和词云生成
+  try {
+    if (!currentVibeResult || !globalStats) {
+      console.warn('[Main] displayRealtimeStats: 缺少必要数据', {
+        hasVibeResult: !!currentVibeResult,
+        hasGlobalStats: !!globalStats
+      });
+      return;
+    }
 
-  // 计算技术排名（基于综合维度得分）
-  // 综合得分 = (L + P + D + F) / 4 + E * 2（E维度权重更高）
-  const dimensions = vibeResult.dimensions;
-  const compositeScore = (
-    (dimensions.L || 0) + 
-    (dimensions.P || 0) + 
-    (dimensions.D || 0) + 
-    (dimensions.F || 0)
-  ) / 4 + (dimensions.E || 0) * 2;
-  const maxScore = 100 + 20; // L/P/D/F最高100，E最高10（权重*2=20）
-  const scorePercentile = Math.max(1, Math.min(99, Math.round((compositeScore / maxScore) * 98)));
-  // 排名越靠前，percentile越小（前1%排名最好）
-  const rankPercentile = 100 - scorePercentile;
-  const estimatedRank = Math.max(1, Math.round((totalTestUsers * rankPercentile) / 100));
+    // 检查是否为分享模式（通过检查是否有分享数据标记）
+    const isShareMode = window.shareModeStats || window.shareModeVibeResult;
+    
+    // 从 API 获取测试总人数（分享模式下使用默认值或缓存值）
+    let totalTestUsers;
+    try {
+      if (isShareMode) {
+        // 分享模式：使用缓存值或默认值，不调用 API
+        const cached = parseInt(localStorage.getItem('totalTestUsers') || '0');
+        totalTestUsers = cached > 0 ? cached : 1000; // 默认值用于计算排名
+        console.log('[Main] 分享模式：使用缓存的 totalTestUsers:', totalTestUsers);
+      } else {
+        // 正常模式：从 API 获取
+        totalTestUsers = await fetchTotalTestUsers();
+      }
+    } catch (fetchError) {
+      // 异常捕获：获取测试总人数失败时的降级处理
+      console.error('[Main] 获取测试总人数失败，使用默认值:', fetchError);
+      totalTestUsers = 1000; // 降级值
+    }
+    const previousTotal = totalTestUsers;
+
+  // 使用后端返回的真实排名（必须从 uploadToSupabase 获取）
+  let rankPercent = null;
+  let estimatedRank = 0; // 默认值设为 0，避免 null 导致的崩溃
+  
+  // 防御性编程：检查排名数据是否存在，支持多种字段格式
+  try {
+    // 优先检查 currentVibeResult.rankData（主要数据源）
+    if (currentVibeResult && currentVibeResult.rankData) {
+      const rankData = currentVibeResult.rankData;
+      
+      // 字段兼容性：使用 ?? 运算符同时兼容 ranking 或 rankPercent 字段
+      const rankingValue = rankData.ranking ?? rankData.rankPercent ?? null;
+      
+      if (rankingValue !== null && rankingValue !== undefined) {
+        const numValue = Number(rankingValue);
+        
+        // 判断是排名数字还是百分比
+        if (!isNaN(numValue)) {
+          if (numValue >= 0 && numValue <= 100) {
+            // 如果是 0-100 之间的值，认为是百分比
+            rankPercent = numValue;
+          } else if (numValue > 0 && totalTestUsers > 0) {
+            // 如果大于 100，认为是排名数字，转换为百分比（假设排名越小越好）
+            rankPercent = ((totalTestUsers - numValue) / totalTestUsers) * 100;
+          }
+        }
+      }
+      
+      // 如果成功获取到 rankPercent，计算排名数字
+      if (rankPercent !== null && !isNaN(rankPercent) && rankPercent >= 0 && rankPercent <= 100) {
+        console.log('[Main] 使用后端返回的真实排名:', rankPercent);
+        const rankPercentile = rankPercent / 100;
+        estimatedRank = Math.max(1, Math.round(totalTestUsers * (1 - rankPercentile)));
+      } else {
+        // 容错处理：排名数据获取失败，只打印警告，不中断后续逻辑
+        console.warn('[Main] 警告：排名数据格式异常或无效，将显示为 0', {
+          rankPercent,
+          rankingValue,
+          rankData: currentVibeResult.rankData
+        });
+        rankPercent = null;
+        estimatedRank = 0; // 降级处理：设置为 0
+      }
+    } else {
+      // 如果没有 rankData，尝试调用 uploadToSupabase 获取排名
+      // 确保 vibeResult 包含所有必要的数据
+      if (currentVibeResult && !isShareMode && vibeAnalyzer) {
+        try {
+          // 确保 statistics 中包含必要的字段
+          if (currentVibeResult.statistics) {
+            currentVibeResult.statistics.qingCount = globalStats?.qingCount || 0;
+            currentVibeResult.statistics.buCount = globalStats?.buCount || 0;
+            currentVibeResult.statistics.usageDays = globalStats?.usageDays || 1;
+          }
+          
+          console.log('[Main] displayRealtimeStats: 调用 uploadToSupabase 上传数据并获取排名');
+          const liveRank = await vibeAnalyzer.uploadToSupabase(currentVibeResult);
+          
+          if (liveRank && (liveRank.rankPercent !== undefined || liveRank.ranking !== undefined)) {
+            // 兼容 ranking 和 rankPercent 字段
+            const finalRank = liveRank.rankPercent ?? liveRank.ranking ?? 0;
+            
+            // 更新 vibeResult 的 rankData
+            if (!currentVibeResult.rankData) {
+              currentVibeResult.rankData = {};
+            }
+            currentVibeResult.rankData.rankPercent = finalRank;
+            currentVibeResult.rankData.totalUsers = liveRank.totalUsers || totalTestUsers;
+            
+            rankPercent = finalRank;
+            if (rankPercent >= 0 && rankPercent <= 100) {
+              const rankPercentile = rankPercent / 100;
+              estimatedRank = Math.max(1, Math.round(totalTestUsers * (1 - rankPercentile)));
+              console.log('[Main] 成功获取排名数据:', { rankPercent, estimatedRank, totalUsers: liveRank.totalUsers });
+            }
+          } else {
+            console.warn('[Main] uploadToSupabase 未返回有效的排名数据');
+            rankPercent = null;
+            estimatedRank = 0;
+          }
+        } catch (uploadError) {
+          console.error('[Main] uploadToSupabase 调用失败:', uploadError);
+          rankPercent = null;
+          estimatedRank = 0;
+        }
+      } else {
+        // 容错处理：后端排名数据不可用，只打印警告，不中断后续逻辑
+        console.warn('[Main] 警告：后端排名数据不可用，排名将显示为 0', {
+          hasVibeResult: !!currentVibeResult,
+          hasRankData: !!(currentVibeResult && currentVibeResult.rankData),
+          isShareMode,
+          hasVibeAnalyzer: !!vibeAnalyzer
+        });
+        rankPercent = null;
+        estimatedRank = 0; // 降级处理：设置为 0
+      }
+    }
+  } catch (error) {
+    // 异常捕获：确保即使处理排名数据时出错，也不影响后续逻辑
+    console.warn('[Main] 处理排名数据时发生错误，将显示为 0:', error);
+    rankPercent = null;
+    estimatedRank = 0; // 降级处理：设置为 0
+  }
 
   // 计算人格库解锁进度（243种人格，基于vibeIndex）
   // vibeIndex是5位数字，每个位置有3种可能（0,1,2），总共3^5=243种组合
@@ -2228,7 +2878,14 @@ async function displayRealtimeStats() {
   }
   
   if (techRankEl) {
-    updateNumberWithAnimation(techRankEl, estimatedRank, formatNumber);
+    // 防御性编程：确保 estimatedRank 是有效数字后再更新
+    if (estimatedRank !== null && estimatedRank !== undefined && !isNaN(estimatedRank) && estimatedRank >= 0) {
+      updateNumberWithAnimation(techRankEl, estimatedRank, formatNumber);
+    } else {
+      // 降级处理：如果排名数据无效，安全地更新为 0 或隐藏
+      console.warn('[Main] 排名数据无效，将显示为 0');
+      updateNumberWithAnimation(techRankEl, 0, formatNumber);
+    }
   }
   
   if (personalityUnlockEl) {
@@ -2240,11 +2897,16 @@ async function displayRealtimeStats() {
     }
   }
 
-  console.log('[Main] 实时统计已更新:', {
-    totalTestUsers,
-    techRank: estimatedRank,
-    unlockProgress: `${unlockProgress}%`
-  });
+    console.log('[Main] 实时统计已更新:', {
+      totalTestUsers,
+      techRank: estimatedRank,
+      unlockProgress: `${unlockProgress}%`
+    });
+  } catch (error) {
+    // 全局异常捕获：确保即使 displayRealtimeStats 内部出错，也不影响后续的图表渲染和词云生成逻辑
+    console.error('[Main] displayRealtimeStats 执行失败，但不影响后续逻辑:', error);
+    // 不抛出错误，让调用者能够继续执行后续的 displayDimensionRanking 等函数
+  }
 }
 
 // 显示维度得分排行榜

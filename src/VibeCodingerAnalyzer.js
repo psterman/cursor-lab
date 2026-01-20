@@ -695,8 +695,15 @@ export class VibeCodingerAnalyzer {
 
   /**
    * 分析用户消息，生成人格画像（异步版本，使用 Web Worker）
+   * @param {Array} chatData - 聊天数据
+   * @param {string} lang - 语言代码
+   * @param {Object} extraStats - 额外的统计数据（用于上传排名）
+   * @param {number} extraStats.qingCount - 情绪词数
+   * @param {number} extraStats.buCount - 逻辑词数
+   * @param {number} extraStats.usageDays - 使用天数
+   * @param {Function} onProgress - 进度回调函数，用于显示加载提示
    */
-  async analyze(chatData, lang) {
+  async analyze(chatData, lang, extraStats = null, onProgress = null) {
     if (lang) this.lang = lang;
     const currentLang = this.lang;
 
@@ -730,11 +737,17 @@ export class VibeCodingerAnalyzer {
     // 生成 LPDEF 编码
     const lpdef = this.generateLPDEF(dimensions);
     
+    // 计算统计信息（仅本地计算，不上传排名）
+    const statistics = this.calculateStatistics();
+    
+    // 不再在 analyze 内部自动上传排名，由外部调用 uploadToSupabase 统一处理
+    // 排名数据将在外部通过 uploadToSupabase 获取后注入到 statistics 中
+    
     this.analysisResult = {
       personalityType,
       dimensions,
       analysis,
-      statistics: this.calculateStatistics(),
+      statistics,
       semanticFingerprint: this.generateSemanticFingerprint(dimensions),
       vibeIndex,      // 5位数字索引
       roastText,      // 吐槽文案
@@ -742,6 +755,7 @@ export class VibeCodingerAnalyzer {
       lpdef,          // LPDEF 编码
       globalAverage: this.globalAverage || null, // 全局平均基准（用于 Chart.js 对比）
       metadata: this.analysisMetadata || null,  // 分析元数据（负面词计数、长度修正等）
+      rankData: null, // 排名数据将在外部获取后注入
     };
 
     return this.analysisResult;
@@ -749,8 +763,12 @@ export class VibeCodingerAnalyzer {
 
   /**
    * 同步分析（降级方案）
+   * @param {Array} chatData - 聊天数据
+   * @param {string} lang - 语言代码
+   * @param {Object} extraStats - 额外的统计数据（用于上传排名）
+   * @param {Function} onProgress - 进度回调函数，用于显示加载提示
    */
-  analyzeSync(chatData, lang) {
+  async analyzeSync(chatData, lang, extraStats = null, onProgress = null) {
     if (lang) this.lang = lang;
     const currentLang = this.lang;
 
@@ -778,16 +796,25 @@ export class VibeCodingerAnalyzer {
     // 生成 LPDEF 编码
     const lpdef = this.generateLPDEF(dimensions);
     
+    // 计算统计信息（仅本地计算，不上传排名）
+    const statistics = this.calculateStatistics();
+    
+    // 不再在 analyzeSync 内部自动上传排名，由外部调用 uploadToSupabase 统一处理
+    // 排名数据将在外部通过 uploadToSupabase 获取后注入到 statistics 中
+    
     return {
       personalityType,
       dimensions,
       analysis,
-      statistics: this.calculateStatistics(),
+      statistics,
       semanticFingerprint: this.generateSemanticFingerprint(dimensions),
       vibeIndex,
       roastText,
       personalityName,
       lpdef,
+      globalAverage: this.globalAverage || null,
+      metadata: this.analysisMetadata || null,
+      rankData: null, // 排名数据将在外部获取后注入
     };
   }
 
@@ -1422,6 +1449,108 @@ export class VibeCodingerAnalyzer {
     };
   }
 
+  /**
+   * 上传统计数据到 Supabase 并获取排名
+   * @param {Object} vibeResult - 完整的分析结果对象，包含 statistics、dimensions、personality 和 vibeIndex
+   * @param {Function} onProgress - 进度回调函数，用于显示加载提示
+   * @returns {Promise<Object>} 返回包含 rankPercent 和 totalUsers 的对象
+   */
+  /**
+   * 上传统计数据到 Supabase 并获取排名
+   * 修复版：从 vibeResult 中提取所有数据，确保后台能收到汇总数据
+   */
+  async uploadToSupabase(vibeResult, onProgress = null) {
+    try {
+      // 1. 显示加载提示
+      if (onProgress) {
+        const currentLang = this.lang;
+        onProgress(currentLang === 'en' 
+          ? 'Connecting to database, syncing global ranking...' 
+          : '正在连接数据库，同步全球排名...');
+      }
+
+      // 2. 获取 API 端点
+      let apiEndpoint;
+      if (typeof window !== 'undefined') {
+        const metaApi = document.querySelector('meta[name="api-endpoint"]');
+        if (metaApi && metaApi.content) {
+          apiEndpoint = metaApi.content;
+        }
+      }
+      
+      if (!apiEndpoint) throw new Error('API endpoint not found');
+
+      // 3. 从 vibeResult 中提取所有数据，构造完整的数据包
+      // 注意：后端 /api/analyze 端点期望直接接收 stats 对象，不需要 action 包装
+      const uploadData = {
+        totalMessages: vibeResult.statistics?.totalMessages || 0,
+        totalChars: vibeResult.statistics?.totalChars || 0,
+        vibeIndex: String(vibeResult.vibeIndex || "00000"),
+        personality: vibeResult.personalityType || "Unknown",
+        personalityType: vibeResult.personalityType || "Unknown", // 兼容字段
+        dimensions: vibeResult.dimensions || {},
+        // 保留旧字段以兼容（如果后端需要）
+        qingCount: vibeResult.statistics?.qingCount || 0,
+        buCount: vibeResult.statistics?.buCount || 0,
+        avgMessageLength: vibeResult.statistics?.avgMessageLength || 0,
+        usageDays: vibeResult.statistics?.usageDays || 1
+      };
+
+      console.log('[VibeAnalyzer] 上传统计数据（包含完整分析结果）:', uploadData);
+
+      // 4. 发送请求到 /api/analyze 端点
+      const analyzeUrl = apiEndpoint.endsWith('/') 
+        ? `${apiEndpoint}api/analyze` 
+        : `${apiEndpoint}/api/analyze`;
+      
+      const response = await fetch(analyzeUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(uploadData)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '无法读取错误信息');
+        throw new Error(`HTTP error! status: ${response.status}, error: ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('[VibeAnalyzer] 后端返回数据:', result);
+      
+      // 兼容性提取：同时查找 ranking 和 rankPercent
+      const finalRank = result.ranking ?? result.rankPercent ?? 0;
+      const totalUsers = result.totalUsers ?? result.value ?? result.total ?? result.count ?? 0;
+
+      // 即使 status 不是 'success'，也尝试返回数据（可能后端返回了数据但状态字段不同）
+      if (result.status === 'success' || (typeof finalRank === 'number' && typeof totalUsers === 'number')) {
+        return {
+          rankPercent: Number(finalRank),
+          ranking: Number(finalRank), // 兼容字段
+          totalUsers: Number(totalUsers),
+          defeated: result.defeated ?? 0,
+          actualRank: result.actualRank ?? 0,
+          action: result.action
+        };
+      } else {
+        console.warn('[VibeAnalyzer] 后端返回数据格式异常:', result);
+        // 即使格式异常，也尝试返回能提取的数据
+        return { 
+          rankPercent: Number(finalRank) || 0, 
+          ranking: Number(finalRank) || 0,
+          totalUsers: Number(totalUsers) || 0,
+          error: 'Unexpected response format'
+        };
+      }
+
+    } catch (err) {
+      console.error('[VibeAnalyzer] 上传排名过程出错:', err);
+      return { 
+        rankPercent: 0, 
+        totalUsers: 0,
+        error: err.message 
+      };
+    }
+  }
   /**
    * 获取默认结果
    */

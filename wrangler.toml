@@ -2,13 +2,8 @@ name = "cursor-clinical-analysis"
 main = "src/index.js"
 compatibility_date = "2024-04-03"
 
-# 1. 答案之书数据库 (D1)
+# 1. 答案之书数据库 (保留原有 D1)
 [[d1_databases]]
 binding = "prompts_library"
 database_name = "prompts_library"
 database_id = "921a6870-94b9-43df-8d2d-5dad83f93fd2"
-
-# 2. 人数统计存储 (KV)
-[[kv_namespaces]]
-binding = "STATS_STORE"
-id = "991ddbdb18fa4b50998c722a7332f4c0"
