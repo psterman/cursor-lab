@@ -9,6 +9,24 @@
     <!-- 引入必要的库 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/wordcloud2.js/1.1.0/wordcloud2.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        // #region agent log
+        (function() {
+            const checkChart = setInterval(function() {
+                if (window.Chart || globalThis.Chart) {
+                    fetch('http://127.0.0.1:7242/ingest/77cf65a2-f6f6-400e-839c-82d53b031ba9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.html:11',message:'Chart.js loaded successfully',data:{hasWindowChart:!!window.Chart,hasGlobalChart:!!globalThis.Chart,chartType:typeof(window.Chart||globalThis.Chart)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+                    clearInterval(checkChart);
+                }
+            }, 100);
+            setTimeout(function() {
+                if (!window.Chart && !globalThis.Chart) {
+                    fetch('http://127.0.0.1:7242/ingest/77cf65a2-f6f6-400e-839c-82d53b031ba9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.html:11',message:'Chart.js failed to load after 5s',data:{hasWindowChart:!!window.Chart,hasGlobalChart:!!globalThis.Chart},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+                    clearInterval(checkChart);
+                }
+            }, 5000);
+        })();
+        // #endregion
+    </script>
     <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- LZ-string 压缩库，用于压缩分享数据 -->

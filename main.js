@@ -2177,11 +2177,27 @@ function debounce(func, wait) {
 
 // 显示 Vibe Codinger 人格分析结果
 function displayVibeCodingerAnalysis() {
-  if (!vibeResult) return;
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/77cf65a2-f6f6-400e-839c-82d53b031ba9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:2179',message:'displayVibeCodingerAnalysis called',data:{vibeResultExists:!!vibeResult,vibeResultKeys:vibeResult?Object.keys(vibeResult):null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
+  if (!vibeResult) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/77cf65a2-f6f6-400e-839c-82d53b031ba9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:2180',message:'vibeResult is null/undefined, returning early',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
+    return;
+  }
 
   // 查找容器（支持多个ID）
   const container = document.getElementById('vibeCodingerSection') || document.getElementById('personality-lock');
-  if (!container) return;
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/77cf65a2-f6f6-400e-839c-82d53b031ba9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:2183',message:'container lookup',data:{containerFound:!!container,containerId:container?.id,hasVibeCodingerSection:!!document.getElementById('vibeCodingerSection'),hasPersonalityLock:!!document.getElementById('personality-lock')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+  // #endregion
+  if (!container) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/77cf65a2-f6f6-400e-839c-82d53b031ba9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:2184',message:'container not found, returning early',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+    return;
+  }
 
   const { personalityType, dimensions, analysis, semanticFingerprint, statistics, vibeIndex, roastText, personalityName, lpdef } = vibeResult;
 
@@ -2351,6 +2367,9 @@ function displayVibeCodingerAnalysis() {
   `;
 
   // 渲染雷达图（增强版，显示所有维度）
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/77cf65a2-f6f6-400e-839c-82d53b031ba9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:2354',message:'calling renderVibeRadarChart',data:{hasChart:!!(window.Chart||globalThis.Chart),hasCanvas:!!document.getElementById('vibeRadarChart')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
   renderVibeRadarChart();
 }
 
@@ -2368,15 +2387,29 @@ function getDimensionColor(key) {
 
 // 渲染雷达图（增强版：包含全局平均基准对比层）
 function renderVibeRadarChart() {
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/77cf65a2-f6f6-400e-839c-82d53b031ba9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:2370',message:'renderVibeRadarChart called',data:{hasVibeResult:!!vibeResult,hasWindowChart:!!window.Chart,hasGlobalChart:!!globalThis.Chart,chartType:typeof(window.Chart||globalThis.Chart)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
   // 使用全局 Chart 对象（通过 CDN 加载）
   const Chart = window.Chart || globalThis.Chart;
   if (!vibeResult || !Chart) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/77cf65a2-f6f6-400e-839c-82d53b031ba9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:2373',message:'Chart.js not loaded or vibeResult missing',data:{hasVibeResult:!!vibeResult,hasChart:!!Chart},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     console.warn('[Main] Chart.js 未加载，无法渲染雷达图');
     return;
   }
 
   const canvas = document.getElementById('vibeRadarChart');
-  if (!canvas) return;
+  // #region agent log
+  fetch('http://127.0.0.1:7242/ingest/77cf65a2-f6f6-400e-839c-82d53b031ba9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:2378',message:'canvas lookup',data:{canvasFound:!!canvas,canvasId:canvas?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
+  if (!canvas) {
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/77cf65a2-f6f6-400e-839c-82d53b031ba9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:2379',message:'canvas not found, returning early',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    return;
+  }
 
   const { dimensions } = vibeResult;
   const ctx = canvas.getContext('2d');
