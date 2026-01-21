@@ -42,24 +42,45 @@ if (!window.BASE_PATH) {
     basePath = '';
   } else if (isGitHubPages) {
     // GitHub Pages: 从 pathname 提取仓库名
-    const pathParts = pathname.split('/').filter(p => p);
-    const cleanParts = pathParts.filter(p => p !== 'index.html');
-    if (cleanParts.length > 0) {
-      basePath = '/' + cleanParts[0];
+    // pathname 可能是: /cursor-lab/ 或 /cursor-lab/index.html 或 /cursor-lab/some-page.html
+    const pathParts = pathname.split('/').filter(p => p && p !== 'index.html');
+    
+    // 如果 pathname 是 '/' 或只有 'index.html'，可能是用户页面（username.github.io）
+    // 否则第一个非空部分通常是仓库名（如 cursor-lab）
+    if (pathParts.length > 0) {
+      basePath = '/' + pathParts[0];
+    } else {
+      // 如果 pathname 是 '/'，检查是否是项目页面
+      // 对于项目页面，URL 通常是 username.github.io/repo-name/
+      // 对于用户页面，URL 通常是 username.github.io/
+      // 这里假设如果是项目页面，pathname 应该包含仓库名
+      // 如果没有，可能是用户页面，basePath 为空
+      basePath = '';
     }
+    
+    console.log('[Main] GitHub Pages 路径检测:', {
+      pathname,
+      pathParts,
+      detectedBasePath: basePath
+    });
   } else {
     // 其他生产环境
     const pathParts = pathname.split('/').filter(p => p && p !== 'index.html');
     basePath = pathParts.length > 0 ? '/' + pathParts[0] : '';
   }
 
-  // 确保 basePath 格式正确
+  // 确保 basePath 格式正确（不以 / 结尾，除非是根路径）
   if (basePath && basePath !== '/' && basePath.endsWith('/')) {
     basePath = basePath.slice(0, -1);
   }
 
   window.BASE_PATH = basePath;
-  console.log('[Main] 检测到基础路径:', window.BASE_PATH);
+  console.log('[Main] 检测到基础路径:', window.BASE_PATH, {
+    hostname,
+    pathname,
+    isGitHubPages,
+    isLocalhost
+  });
 }
 
 /**
@@ -2888,19 +2909,18 @@ async function fetchWithCORS(url, options = {}) {
  * @returns {Promise<Object>} 返回全局平均值对象 {L, P, D, E, F}，如果失败则返回默认值
  */
 async function fetchGlobalAverage() {
-  const apiEndpoint = getApiEndpoint();
   const defaultAverage = { L: 50, P: 50, D: 50, E: 50, F: 50 };
   
   try {
-    // 尝试从 /api/global-average 端点获取（如果后端支持）
-    const globalAverageUrl = apiEndpoint.endsWith('/') 
-      ? `${apiEndpoint}api/global-average` 
-      : `${apiEndpoint}/api/global-average`;
+    // 【强制使用绝对 HTTPS 地址】禁止使用 BASE_PATH 或相对路径拼接 API
+    // 直接使用 Cloudflare Workers 的绝对地址
+    const globalAverageUrl = 'https://cursor-clinical-analysis.psterman.workers.dev/api/global-average';
     
-    console.log('[Main] 尝试获取全局平均值:', {
+    console.log('[Main] 尝试获取全局平均值（强制使用绝对 HTTPS 地址）:', {
       url: globalAverageUrl,
-      endpoint: apiEndpoint,
-      environment: window.location.hostname.includes('github.io') ? 'GitHub Pages' : 'Local'
+      environment: window.location.hostname.includes('github.io') ? 'GitHub Pages' : 'Local',
+      hostname: window.location.hostname,
+      pathname: window.location.pathname
     });
     
     // 使用带 CORS 配置的 fetch
