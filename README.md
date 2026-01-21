@@ -407,16 +407,16 @@ SOFTWARE.
 - **配置**: Wrangler
 
 #### 核心算法
-- **Vibe 算法**: 基于语义指纹的多维度分析
-- **Web Workers**: 异步计算，不阻塞主线程
-- **正则表达式**: 高效的语义模式匹配
+- **Vibe 算法**: 基于语义指纹的多维度分析（AI自诩）
+- **Web Workers**: 异步计算，不阻塞主线程（AI自夸）
+- **正则表达式**: 高效的语义模式匹配（AI自嗨）
 
 ### 灵感来源
 
 本项目受到以下项目的启发：
-- Cursor 编辑器的对话历史功能
+- Cursor 编辑器的对话简陋的历史功能
 - 各种编程风格分析工具
-- 人格测试和画像生成算法
+- 星座生肖MBTI人格测试和大数据画像生成算法
 
 ## 📧 联系方式
 
@@ -428,7 +428,7 @@ SOFTWARE.
 
 ## ⚠️ 免责声明
 
-本项目仅用于学习和研究目的，分析结果仅供参考和娱乐，不构成任何专业建议。使用本工具产生的任何后果由使用者自行承担。
+本项目分析结果仅供参考和娱乐，不构成任何医学建议。引发生气黑化吐槽，建议尽快撸猫治愈，使用本工具产生的任何后果由使用者自行承担。
 
 ---
 
@@ -439,6 +439,5 @@ SOFTWARE.
 Made with ❤️ by the community
 
 </div>
-## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=psterman/cursor-lab&type=timeline&legend=bottom-right)](https://www.star-history.com/#psterman/cursor-lab&type=timeline&legend=bottom-right)
