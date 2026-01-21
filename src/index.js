@@ -468,6 +468,17 @@ export default {
         try {
           console.log('[Worker] 开始计算全局平均值...');
           
+          // 检查 Supabase 环境变量
+          if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+            console.warn('[Worker] ⚠️ Supabase 环境变量未配置，返回默认值');
+            const defaultAverage = { L: 50, P: 50, D: 50, E: 50, F: 50 };
+            return new Response(JSON.stringify({
+              status: "success",
+              globalAverage: defaultAverage,
+              message: "Supabase 环境变量未配置"
+            }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          }
+          
           // 使用 Supabase 的聚合查询计算 JSONB 字段的平均值
           // 由于 Supabase REST API 不支持直接在 select 中使用聚合函数，
           // 我们需要先获取所有记录，然后在 Worker 中计算平均值
@@ -475,33 +486,44 @@ export default {
           
           // 方法1：尝试使用 RPC 函数（如果存在）
           const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_global_average`;
-          const rpcRes = await fetch(rpcUrl, {
-            method: 'POST',
-            headers: {
-              'apikey': env.SUPABASE_KEY,
-              'Authorization': `Bearer ${env.SUPABASE_KEY}`,
-              'Content-Type': 'application/json',
-              'Prefer': 'return=representation'
-            },
-            body: JSON.stringify({})
-          });
+          console.log('[Worker] 尝试调用 RPC 函数:', rpcUrl);
           
-          if (rpcRes.ok) {
-            const rpcData = await rpcRes.json();
-            if (rpcData && typeof rpcData === 'object') {
-              console.log('[Worker] ✅ 通过 RPC 获取全局平均值:', rpcData);
-              return new Response(JSON.stringify({
-                status: "success",
-                globalAverage: rpcData
-              }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          try {
+            const rpcRes = await fetch(rpcUrl, {
+              method: 'POST',
+              headers: {
+                'apikey': env.SUPABASE_KEY,
+                'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=representation'
+              },
+              body: JSON.stringify({})
+            });
+            
+            if (rpcRes.ok) {
+              const rpcData = await rpcRes.json();
+              if (rpcData && typeof rpcData === 'object') {
+                console.log('[Worker] ✅ 通过 RPC 获取全局平均值:', rpcData);
+                return new Response(JSON.stringify({
+                  status: "success",
+                  globalAverage: rpcData
+                }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+              }
+            } else {
+              console.log('[Worker] RPC 函数调用失败，状态码:', rpcRes.status);
             }
+          } catch (rpcError) {
+            console.log('[Worker] RPC 函数调用异常:', rpcError.message);
           }
           
           // 方法2：如果 RPC 不存在，使用聚合查询（获取所有记录并计算）
-          console.log('[Worker] RPC 函数不存在，使用聚合查询...');
+          console.log('[Worker] RPC 函数不存在或失败，使用聚合查询...');
           
           // 获取所有有 dimensions 数据的记录
-          const statsRes = await fetch(`${env.SUPABASE_URL}/rest/v1/cursor_stats?select=dimensions&dimensions=not.is.null`, {
+          const queryUrl = `${env.SUPABASE_URL}/rest/v1/cursor_stats?select=dimensions&dimensions=not.is.null`;
+          console.log('[Worker] 查询 URL:', queryUrl);
+          
+          const statsRes = await fetch(queryUrl, {
             headers: {
               'apikey': env.SUPABASE_KEY,
               'Authorization': `Bearer ${env.SUPABASE_KEY}`,
@@ -511,13 +533,23 @@ export default {
           });
           
           if (!statsRes.ok) {
-            throw new Error(`查询失败: ${statsRes.status}`);
+            const errorText = await statsRes.text().catch(() => '无法读取错误信息');
+            console.error('[Worker] ❌ Supabase 查询失败:', {
+              status: statsRes.status,
+              statusText: statsRes.statusText,
+              error: errorText
+            });
+            throw new Error(`查询失败: ${statsRes.status} - ${errorText}`);
           }
           
           const statsData = await statsRes.json();
+          console.log('[Worker] 查询结果数量:', Array.isArray(statsData) ? statsData.length : '非数组');
+          
           const validDimensions = Array.isArray(statsData) 
             ? statsData.filter(item => item.dimensions && typeof item.dimensions === 'object')
             : [];
+          
+          console.log('[Worker] 有效维度数据数量:', validDimensions.length);
           
           if (validDimensions.length === 0) {
             // 如果没有数据，返回默认值
@@ -525,7 +557,8 @@ export default {
             console.log('[Worker] ⚠️ 没有有效数据，返回默认值:', defaultAverage);
             return new Response(JSON.stringify({
               status: "success",
-              globalAverage: defaultAverage
+              globalAverage: defaultAverage,
+              message: "数据库中没有有效数据"
             }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
           }
           

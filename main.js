@@ -2915,20 +2915,54 @@ async function fetchGlobalAverage() {
   const defaultAverage = { L: 50, P: 50, D: 50, E: 50, F: 50 };
   
   try {
-    // 直接请求，不拼接任何变量
-    const res = await fetch(API_URL);
-    const data = await res.json();
+    console.log('[Main] 开始获取全局平均值，URL:', API_URL);
     
-    if (data.status === 'success') {
-      globalAverageData = data.globalAverage;
-      globalAverageDataLoaded = true;
-      return data.globalAverage;
+    // 直接请求，不拼接任何变量
+    const res = await fetch(API_URL, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    if (!res.ok) {
+      const errorText = await res.text().catch(() => '无法读取错误信息');
+      console.error('[Main] ❌ API 请求失败:', {
+        status: res.status,
+        statusText: res.statusText,
+        error: errorText
+      });
+      return defaultAverage;
+    }
+    
+    const data = await res.json();
+    console.log('[Main] API 返回数据:', data);
+    
+    if (data.status === 'success' && data.globalAverage) {
+      const avg = data.globalAverage;
+      // 验证数据格式
+      if (typeof avg.L === 'number' && typeof avg.P === 'number' && 
+          typeof avg.D === 'number' && typeof avg.E === 'number' && typeof avg.F === 'number') {
+        globalAverageData = avg;
+        globalAverageDataLoaded = true;
+        console.log('[Main] ✅ 成功获取全局平均值:', avg);
+        return avg;
+      } else {
+        console.warn('[Main] ⚠️ 全局平均值数据格式不正确:', avg);
+      }
+    } else {
+      console.warn('[Main] ⚠️ API 返回状态不是 success 或缺少 globalAverage:', data);
     }
   } catch (error) {
-    console.error('[Main] ❌ 获取全局平均值失败:', error);
+    console.error('[Main] ❌ 获取全局平均值异常:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
   }
   
   // 保底逻辑：返回默认值
+  console.warn('[Main] ⚠️ 使用默认全局平均值');
   return defaultAverage;
 }
 

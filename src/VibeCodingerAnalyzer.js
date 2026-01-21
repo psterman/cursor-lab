@@ -749,9 +749,25 @@ export class VibeCodingerAnalyzer {
    */
   initWorker() {
     try {
-      // 使用 import.meta.url 动态获取当前脚本目录，确保 Worker 路径正确
-      const workerUrl = new URL('./vibeAnalyzerWorker.js', import.meta.url).href;
-      console.log('[VibeAnalyzer] Worker URL (import.meta.url):', workerUrl);
+      // 动态获取 Worker 路径，适配不同环境
+      let workerUrl;
+      
+      // 优先使用 window.WORKER_CONFIG（如果存在，由 main.js 设置）
+      if (typeof window !== 'undefined' && window.WORKER_CONFIG && window.WORKER_CONFIG.workerPath) {
+        workerUrl = window.WORKER_CONFIG.workerPath;
+        console.log('[VibeAnalyzer] Worker URL (window.WORKER_CONFIG):', workerUrl);
+      } else {
+        // 降级方案：使用 import.meta.url 动态获取
+        try {
+          const workerUrlObj = new URL('./vibeAnalyzerWorker.js', import.meta.url);
+          workerUrl = workerUrlObj.href;
+          console.log('[VibeAnalyzer] Worker URL (import.meta.url):', workerUrl);
+        } catch (e) {
+          // 最后降级：使用相对路径
+          workerUrl = './src/vibeAnalyzerWorker.js';
+          console.log('[VibeAnalyzer] Worker URL (相对路径):', workerUrl);
+        }
+      }
       
       this.worker = new Worker(workerUrl, {
         type: 'module',
