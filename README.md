@@ -12,6 +12,7 @@
 
 </div>
 <img width="921" height="852" alt="image" src="https://github.com/user-attachments/assets/40d8b11c-8b36-47af-a8df-4dae54a4b6a3" />
+
 ## ✨ 
 功能特性
 
@@ -469,4 +470,6 @@ SOFTWARE.
 Made with ❤️ by the community
 
 </div>
-https://www.star-history.com/#psterman/cursor-lab&type=date&legend=bottom-right
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=psterman/cursor-lab&type=timeline&legend=bottom-right)](https://www.star-history.com/#psterman/cursor-lab&type=timeline&legend=bottom-right)
