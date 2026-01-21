@@ -11,33 +11,14 @@
 [English](./README_EN.md) | 简体中文
 
 </div>
-
-### 网页解析流程
-
-1. **准备数据**
-   - 知悉 Cursor 默认记录文件夹位置：%APPDATA%\Cursor\User\workspaceStorage\（Windows）
-   - 打开部署页面
-
-2. **上传并分析**
-   - 打开应用首页
-   - 点击"上传对话历史"按钮
-   - 选择 workspacestorage 文件夹
-   - 等待分析完成（分析过程在 Web Worker 中异步执行）
-
-3. **查看结果**
-   - **五维度雷达图**: 可视化展示 LPDEF 五个维度的得分
-   - **人格画像**: 根据分析结果生成个性化的人格描述
-   - **统计数据**: 查看消息数、字符数、使用天数等详细统计
-   - **排名信息**: 查看在全网用户中的排名情况（需要后端支持）
-
-
+<img width="921" height="852" alt="image" src="https://github.com/user-attachments/assets/40d8b11c-8b36-47af-a8df-4dae54a4b6a3" />
 ## ✨ 
 功能特性
 
 ### 核心功能
 
 1. **对话历史分析**
-   - 支持上传 Cursor 对话历史 JSON 文件
+   - 支持上传 Cursor 对话历史 JSON 文件夹
    - 使用 WebAssembly (sql.js) 进行本地数据库分析
    - 完全本地处理，保护用户隐私
 
@@ -67,9 +48,28 @@
 6. **数据可视化**
    - 使用 Chart.js 生成雷达图
    - 支持导出分析结果为图片
-   - 美观的 UI 界面
+   - ai生成的 UI 界面
 
-## 🎯 解决的痛点
+### 测试方法
+
+1. **准备数据**
+   - 知悉 Cursor 默认记录文件夹位置：%APPDATA%\Cursor\User\workspaceStorage\（Windows）
+   - 打开那个网页
+
+2. **上传并分析**
+   
+   - 点击"上传"按钮
+   - 选择 workspacestorage 文件夹
+   - 等待分析完成（分析过程在 Web Worker 中异步执行）
+   - 一旦上传过一次，就有"复盘"按钮,可以跳过繁琐步骤
+
+3. **查看结果**
+   - **五维度雷达图**: 可视化展示 LPDEF 五个维度的得分
+   - **人格画像**: 根据分析结果生成个性化的人格描述
+   - **统计数据**: 查看消息数、字符数、使用天数等详细统计
+   - **排名信息**: 查看在全网用户中的排名情况（不准，娱乐）
+
+## 🎯 解决痛点
 
 ### 1. 隐私保护
 - **问题**: 传统分析工具需要上传数据到服务器，存在隐私泄露风险
@@ -91,7 +91,7 @@
 - **问题**: 大量对话历史难以管理和查询
 - **解决**: 使用 SQLite 数据库（WebAssembly 版本）进行高效查询和统计
 
-#### 开发环境
+#### 开发环境（ai写的，我完全看不懂）
 - **Node.js**: >= 16.0.0
 - **npm**: >= 7.0.0 或 **yarn**: >= 1.22.0
 
@@ -146,7 +146,7 @@ yarn build
 
 构建产物将输出到 `dist/` 目录，可以直接部署到静态托管服务。
 
-### 功能说明
+### 开发说明（ai写的，我看不懂）
 
 #### 1. 本地分析（前端）
 
@@ -308,7 +308,7 @@ wrangler deploy
 ## 🔬 算法说明
 
 
-### 排名算法
+### 排名算法（还没找到完美自洽的算法，请不要当农药匹配）
 
 排名算法基于多个指标进行排序：
 
@@ -372,21 +372,6 @@ A: 分析结果基于 Vibe 算法的语义指纹识别，提供的是对编程�
 
 欢迎贡献代码、报告问题或提出建议！
 
-### 贡献方式
-
-1. **Fork 本仓库**
-2. **创建功能分支** (`git checkout -b feature/AmazingFeature`)
-3. **提交更改** (`git commit -m 'Add some AmazingFeature'`)
-4. **推送到分支** (`git push origin feature/AmazingFeature`)
-5. **开启 Pull Request**
-
-### 开发规范
-
-- 遵循现有代码风格
-- 添加必要的注释和文档
-- 确保代码通过测试
-- 提交信息使用中文或英文，清晰描述变更内容
-
 ### 报告问题
 
 在 [GitHub Issues](https://github.com/your-username/cursor-lab/issues) 中报告问题时，请包含：
@@ -395,6 +380,7 @@ A: 分析结果基于 Vibe 算法的语义指纹识别，提供的是对编程�
 - 预期行为
 - 实际行为
 - 浏览器和操作系统信息
+- 截图最好，谢谢
 
 ## 📄 MIT 许可证
 
@@ -483,3 +469,4 @@ SOFTWARE.
 Made with ❤️ by the community
 
 </div>
+https://www.star-history.com/#psterman/cursor-lab&type=date&legend=bottom-right
