@@ -154,6 +154,7 @@ export const I18N = {
       processing: '处理中...',
       error: '上传失败，请重试',
       pathHelp: '在弹出窗口的地址栏粘贴此路径可瞬间抵达',
+      pathHelpMac: '复制路径后，请先打开访达-前往-前往文件夹-粘贴路径-将workspaceStorage文件夹拖到左侧后，再点击上传',
       selectFolder: '上传',
       viewHistory: '复盘',
       privacyNote: '救赎之道 就在其中',
@@ -403,6 +404,7 @@ export const I18N = {
       processing: 'Processing...',
       error: 'Upload failed, please try again',
       pathHelp: 'Suggested path: %APPDATA%\\Cursor\\User\\workspaceStorage',
+      pathHelpMac: 'After copying the path, first open Finder → Go → Go to Folder → paste the path → drag the workspaceStorage folder to the sidebar, then click the upload button.',
       selectFolder: 'Upload',
       logs: {
         startParsing: 'Starting to parse database files...',

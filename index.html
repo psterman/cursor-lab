@@ -2910,6 +2910,7 @@
             const [isShareMode, setIsShareMode] = useState(false); // 是否为分享查看模式
             const [shareRankings, setShareRankings] = useState(null); // 分享的排名数据
             const [hasHistory, setHasHistory] = useState(false); // 是否有历史记录
+            const [shareModal, setShareModal] = useState(null); // 分享弹窗数据 { show: boolean, message: string, shareUrl: string }
             const folderInputRef = useRef(null);
             const fileInputRef = useRef(null);
             // 用于保存动画所需的旧值和新值
@@ -5834,7 +5835,13 @@
                             ? '[SUCCESS] Share link generated & copied to clipboard\n\nLink length: ' + shareUrl.length + ' chars\n\nDesktop: Interactive | Mobile: View only'
                             : '[SUCCESS] 分享链接已生成并复制到剪贴板\n\n链接长度: ' + shareUrl.length + ' 字符\n\nPC端点开可交互，手机点开直接看结果';
                     }
-                    alert(successMsg);
+                    
+                    // 显示自定义弹窗而不是 alert
+                    setShareModal({
+                        show: true,
+                        message: successMsg,
+                        shareUrl: shareUrl
+                    });
                 } catch (err) {
                     // 降级方案：使用传统方法
                     const textArea = document.createElement('textarea');
@@ -5876,7 +5883,13 @@
                                 ? '[SUCCESS] Share link generated & copied to clipboard\n\nLink length: ' + shareUrl.length + ' chars\n\nDesktop: Interactive | Mobile: View only'
                                 : '[SUCCESS] 分享链接已生成并复制到剪贴板\n\n链接长度: ' + shareUrl.length + ' 字符\n\nPC端点开可交互，手机点开直接看结果';
                         }
-                        alert(successMsg);
+                        
+                        // 显示自定义弹窗而不是 alert
+                        setShareModal({
+                            show: true,
+                            message: successMsg,
+                            shareUrl: shareUrl
+                        });
                     } catch (e) {
                         // 如果复制失败，显示链接让用户手动复制
                         const promptMsg = lang === 'en' 
@@ -5914,6 +5927,74 @@
                 } catch (err) {
                     console.error('导出失败:', err);
                     alert('导出失败: ' + err.message);
+                }
+            };
+
+            // 保存预览结果图片
+            const savePreviewImage = async () => {
+                try {
+                    // 获取预览结果容器
+                    const previewContainer = document.querySelector('[data-preview-container]');
+                    if (!previewContainer) {
+                        const errorMsg = lang === 'en' 
+                            ? 'Preview container not found' 
+                            : '预览容器未找到';
+                        alert(errorMsg);
+                        return;
+                    }
+
+                    // 使用 html2canvas 捕获预览区域
+                    const html2canvasLib = window.html2canvas || globalThis.html2canvas;
+                    if (!html2canvasLib) {
+                        const errorMsg = lang === 'en' 
+                            ? 'html2canvas library not loaded' 
+                            : 'html2canvas 库未加载';
+                        alert(errorMsg);
+                        return;
+                    }
+
+                    // 添加保存图片的类，强制横版布局
+                    previewContainer.classList.add('saving-image');
+                    
+                    // 等待布局更新
+                    await new Promise(resolve => setTimeout(resolve, 100));
+
+                    const canvas = await html2canvasLib(previewContainer, {
+                        backgroundColor: '#18181b',
+                        scale: 2,
+                        useCORS: true,
+                        logging: false,
+                        allowTaint: true,
+                        width: 1200,
+                        windowWidth: 1200,
+                    });
+
+                    // 移除保存图片的类，恢复原始布局
+                    previewContainer.classList.remove('saving-image');
+
+                    // 创建下载链接
+                    const link = document.createElement('a');
+                    const timestamp = new Date().getTime();
+                    // 从 state 或全局变量获取人格名称
+                    const currentAnalysisData = analysisData || window.shareModeVibeResult || null;
+                    const personalityName = currentAnalysisData?.personalityName || currentAnalysisData?.vibeResult?.personalityName || 'personality';
+                    const safeName = personalityName.replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+                    const filename = `cursor-personality-${safeName}-${timestamp}.png`;
+                    link.download = filename;
+                    link.href = canvas.toDataURL('image/png');
+                    link.click();
+
+                    // 显示成功提示
+                    const successMsg = lang === 'en' 
+                        ? 'Image saved successfully!' 
+                        : '图片保存成功！';
+                    console.log('[保存图片]', successMsg);
+                } catch (err) {
+                    console.error('[保存图片] 失败:', err);
+                    const errorMsg = lang === 'en' 
+                        ? 'Failed to save image: ' + err.message 
+                        : '保存图片失败: ' + err.message;
+                    alert(errorMsg);
                 }
             };
 
@@ -6316,7 +6397,11 @@
                                             fontFamily: "'JetBrains Mono', monospace",
                                             opacity: 0.8
                                         }}>
-                                            {'> '}{t('upload.pathHelp')}
+                                            {'> '}{(() => {
+                                                const isMac = navigator.platform.toLowerCase().includes('mac') || 
+                                                             navigator.userAgent.toLowerCase().includes('mac');
+                                                return isMac ? t('upload.pathHelpMac') : t('upload.pathHelp');
+                                            })()}
                                         </p>
                                     </div>
                                 </div>
@@ -6354,62 +6439,158 @@
                                             {lang === 'en' ? '> VIEWING SHARED REPORT' : '> 正在查看分享的报告'}
                                         </span>
                                     </div>
-                                    <button 
-                                        onClick={resetToUpload}
-                                        className="flex items-center justify-center gap-2 bg-green-500 text-black px-6 py-2 rounded-sm font-bold hover:bg-transparent hover:text-green-500 transition-colors border border-green-500 uppercase tracking-wider font-mono text-sm"
-                                    >
-                                        <Icon name="refresh-cw" size={16} />
-                                        {lang === 'en' ? 'RUN TEST' : '我也要测'}
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <button 
+                                            onClick={savePreviewImage}
+                                            className="flex items-center justify-center gap-2 bg-transparent text-green-500 px-6 py-2 rounded-sm font-bold hover:bg-green-500/10 transition-colors border border-green-500 uppercase tracking-wider font-mono text-sm"
+                                        >
+                                            <Icon name="download" size={16} />
+                                            {lang === 'en' ? 'SAVE IMAGE' : '保存图片'}
+                                        </button>
+                                        <button 
+                                            onClick={resetToUpload}
+                                            className="flex items-center justify-center gap-2 bg-green-500 text-black px-6 py-2 rounded-sm font-bold hover:bg-transparent hover:text-green-500 transition-colors border border-green-500 uppercase tracking-wider font-mono text-sm"
+                                        >
+                                            <Icon name="refresh-cw" size={16} />
+                                            {lang === 'en' ? 'RUN TEST' : '我也要测'}
+                                        </button>
+                                    </div>
                                 </div>
                             )}
                             
-                            <div className="bg-zinc-900 border border-zinc-800 rounded-sm p-6 md:p-8 relative overflow-hidden shadow-2xl">
-                                
-                                <div className="flex flex-col md:flex-row justify-between items-start gap-6">
-                                    <div className={`space-y-4 flex-1 ${lang === 'en' ? 'md:max-w-lg' : 'md:max-w-md'}`}>
-                                        <div>
-                                            <h2 className="text-zinc-500 text-sm uppercase tracking-widest mb-1 font-mono">{t('preview.personalityLabel')}</h2>
-                                            <div className="text-5xl font-black text-white font-mono">
-                                                {analysisData.vibeResult?.personalityName || t('dashboard.unknownPersonality')}
-                                            </div>
+                            {/* 横版卡片布局 - 用于保存图片 */}
+                            <div 
+                                className="bg-zinc-900 border border-zinc-800 rounded-sm p-6 md:p-8 relative overflow-hidden shadow-2xl preview-card-horizontal"
+                                data-preview-container
+                            >
+                                {/* 左侧：人格信息 */}
+                                <div className="preview-card-left">
+                                    <div>
+                                        <h2 className="text-zinc-500 text-sm uppercase tracking-widest mb-2 font-mono">{t('preview.personalityLabel')}</h2>
+                                        <div className="text-4xl md:text-5xl font-black text-white font-mono mb-4" style={{ wordBreak: 'break-word' }}>
+                                            {analysisData.vibeResult?.personalityName || t('dashboard.unknownPersonality')}
                                         </div>
-                                        <p className={`text-zinc-400 ${lang === 'en' ? 'text-base' : 'text-lg'}`}>
-                                            {analysisData.vibeResult?.roastText || t('preview.analyzing')}
-                                        </p>
                                     </div>
-
-                                    <div className={`grid grid-cols-2 gap-4 ${lang === 'en' ? 'md:w-[460px]' : 'md:w-[420px]'} w-full md:w-auto`}>
-                                        <StatBox 
-                                            label={t('dashboard.totalUsers')} 
-                                            value={formatNumber(totalUsers)} 
-                                            sub={t('dashboard.personUnit')} 
-                                            color="text-white"
-                                            lang={lang}
-                                        />
-                                        <StatBox 
-                                            label={t('dashboard.cyberBowCount')} 
-                                            value={analysisData.stats?.qingCount || 0} 
-                                            sub={t('dashboard.timesUnit')} 
-                                            color="text-white"
-                                            lang={lang}
-                                        />
-                                        <StatBox 
-                                            label={t('preview.globalRank')} 
-                                            value={calculateRank(analysisData.stats?.qingCount || 0)} 
-                                            sub={lang === 'en' ? t('dashboard.rankUnit') : '%'} 
-                                            color="text-white"
-                                            lang={lang}
-                                        />
-                                        <StatBox 
-                                            label={t('statsLabels.totalConversations')} 
-                                            value={calculateUsageDays(analysisData.stats)} 
-                                            sub={t('statsLabels.unit.days')} 
-                                            color="text-white"
-                                            lang={lang}
-                                        />
-                                    </div>
+                                    <p 
+                                        className="text-zinc-400 preview-text" 
+                                        style={{
+                                            fontSize: lang === 'en' ? '14px' : '16px',
+                                            lineHeight: '1.6',
+                                            wordBreak: 'break-word',
+                                            whiteSpace: 'normal',
+                                            overflow: 'visible'
+                                        }}
+                                    >
+                                        {analysisData.vibeResult?.roastText || t('preview.analyzing')}
+                                    </p>
                                 </div>
+
+                                {/* 右侧：统计数据 */}
+                                <div className="preview-card-right">
+                                    <StatBox 
+                                        label={t('dashboard.totalUsers')} 
+                                        value={formatNumber(totalUsers)} 
+                                        sub={t('dashboard.personUnit')} 
+                                        color="text-white"
+                                        lang={lang}
+                                    />
+                                    <StatBox 
+                                        label={t('dashboard.cyberBowCount')} 
+                                        value={analysisData.stats?.qingCount || 0} 
+                                        sub={t('dashboard.timesUnit')} 
+                                        color="text-white"
+                                        lang={lang}
+                                    />
+                                    <StatBox 
+                                        label={t('preview.globalRank')} 
+                                        value={calculateRank(analysisData.stats?.qingCount || 0)} 
+                                        sub={lang === 'en' ? t('dashboard.rankUnit') : '%'} 
+                                        color="text-white"
+                                        lang={lang}
+                                    />
+                                    <StatBox 
+                                        label={t('statsLabels.totalConversations')} 
+                                        value={calculateUsageDays(analysisData.stats)} 
+                                        sub={t('statsLabels.unit.days')} 
+                                        color="text-white"
+                                        lang={lang}
+                                    />
+                                </div>
+                                
+                                <style>{`
+                                    .preview-card-horizontal {
+                                        display: flex;
+                                        flex-direction: row;
+                                        align-items: stretch;
+                                        min-height: 300px;
+                                        width: 100%;
+                                        max-width: 1200px;
+                                    }
+                                    
+                                    .preview-card-left {
+                                        flex: 1 1 50%;
+                                        display: flex;
+                                        flex-direction: column;
+                                        justify-content: space-between;
+                                        padding-right: 24px;
+                                        min-width: 0;
+                                    }
+                                    
+                                    .preview-card-right {
+                                        flex: 0 0 auto;
+                                        display: grid;
+                                        grid-template-columns: repeat(2, 1fr);
+                                        gap: 16px;
+                                        width: ${lang === 'en' ? '460px' : '420px'};
+                                        min-width: ${lang === 'en' ? '460px' : '420px'};
+                                    }
+                                    
+                                    .preview-text {
+                                        word-break: break-word;
+                                        white-space: normal !important;
+                                        overflow: visible !important;
+                                    }
+                                    
+                                    @media (max-width: 768px) {
+                                        .preview-card-horizontal {
+                                            flex-direction: column;
+                                            max-width: 100%;
+                                        }
+                                        
+                                        .preview-card-left {
+                                            flex: 1 1 100%;
+                                            padding-right: 0;
+                                            padding-bottom: 24px;
+                                        }
+                                        
+                                        .preview-card-right {
+                                            flex: 1 1 100%;
+                                            width: 100%;
+                                            min-width: 100%;
+                                            padding-top: 24px;
+                                        }
+                                    }
+                                    
+                                    /* 保存图片时强制横版布局 */
+                                    [data-preview-container].saving-image {
+                                        flex-direction: row !important;
+                                        max-width: 1200px !important;
+                                        width: 1200px !important;
+                                    }
+                                    
+                                    [data-preview-container].saving-image .preview-card-left {
+                                        flex: 1 1 50% !important;
+                                        padding-right: 24px !important;
+                                        padding-bottom: 0 !important;
+                                    }
+                                    
+                                    [data-preview-container].saving-image .preview-card-right {
+                                        flex: 0 0 auto !important;
+                                        width: ${lang === 'en' ? '460px' : '420px'} !important;
+                                        min-width: ${lang === 'en' ? '460px' : '420px'} !important;
+                                        padding-top: 0 !important;
+                                    }
+                                `}</style>
                             </div>
 
                             {/* 分享模式下隐藏操作按钮 */}
@@ -6448,13 +6629,22 @@
                                             {lang === 'en' ? '> VIEWING SHARED REPORT' : '> 正在查看分享的报告'}
                                         </span>
                                     </div>
-                                    <button 
-                                        onClick={resetToUpload}
-                                        className="flex items-center justify-center gap-2 bg-green-500 text-black px-6 py-2 rounded-sm font-bold hover:bg-transparent hover:text-green-500 transition-colors border border-green-500 uppercase tracking-wider font-mono text-sm"
-                                    >
-                                        <Icon name="refresh-cw" size={16} />
-                                        {lang === 'en' ? 'RUN TEST' : '我也要测'}
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <button 
+                                            onClick={exportReport}
+                                            className="flex items-center justify-center gap-2 bg-transparent text-green-500 px-6 py-2 rounded-sm font-bold hover:bg-green-500/10 transition-colors border border-green-500 uppercase tracking-wider font-mono text-sm"
+                                        >
+                                            <Icon name="download" size={16} />
+                                            {lang === 'en' ? 'SAVE IMAGE' : '保存图片'}
+                                        </button>
+                                        <button 
+                                            onClick={resetToUpload}
+                                            className="flex items-center justify-center gap-2 bg-green-500 text-black px-6 py-2 rounded-sm font-bold hover:bg-transparent hover:text-green-500 transition-colors border border-green-500 uppercase tracking-wider font-mono text-sm"
+                                        >
+                                            <Icon name="refresh-cw" size={16} />
+                                            {lang === 'en' ? 'RUN TEST' : '我也要测'}
+                                        </button>
+                                    </div>
                                 </div>
                             )}
                             
@@ -6865,6 +7055,117 @@
                             }
                         }
                     `}</style>
+
+                    {/* 分享弹窗 */}
+                    {shareModal && shareModal.show && (
+                        <div 
+                            style={{
+                                position: 'fixed',
+                                top: 0,
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                zIndex: 10000,
+                                padding: '20px'
+                            }}
+                            onClick={() => setShareModal(null)}
+                        >
+                            <div 
+                                style={{
+                                    backgroundColor: '#0a0a0a',
+                                    border: '1px solid var(--accent-terminal)',
+                                    borderRadius: '4px',
+                                    padding: '24px',
+                                    maxWidth: '500px',
+                                    width: '100%',
+                                    boxShadow: '0 0 20px rgba(0, 255, 65, 0.3)'
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                <div style={{
+                                    color: 'var(--accent-terminal)',
+                                    fontFamily: "'JetBrains Mono', monospace",
+                                    fontSize: '14px',
+                                    lineHeight: '1.6',
+                                    whiteSpace: 'pre-line',
+                                    marginBottom: '20px'
+                                }}>
+                                    {shareModal.message}
+                                </div>
+                                <div style={{
+                                    display: 'flex',
+                                    gap: '12px',
+                                    justifyContent: 'flex-end',
+                                    flexWrap: 'wrap'
+                                }}>
+                                    <button
+                                        onClick={async () => {
+                                            try {
+                                                await savePreviewImage();
+                                            } catch (err) {
+                                                console.error('[分享弹窗] 保存图片失败:', err);
+                                            }
+                                        }}
+                                        style={{
+                                            padding: '10px 20px',
+                                            backgroundColor: 'transparent',
+                                            border: '1px solid var(--accent-terminal)',
+                                            color: 'var(--accent-terminal)',
+                                            borderRadius: '2px',
+                                            fontFamily: "'JetBrains Mono', monospace",
+                                            fontSize: '12px',
+                                            fontWeight: 'bold',
+                                            cursor: 'pointer',
+                                            textTransform: 'uppercase',
+                                            letterSpacing: '0.05em',
+                                            transition: 'all 0.2s ease'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.target.style.backgroundColor = 'var(--accent-terminal)';
+                                            e.target.style.color = '#000';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.target.style.backgroundColor = 'transparent';
+                                            e.target.style.color = 'var(--accent-terminal)';
+                                        }}
+                                    >
+                                        {lang === 'en' ? 'SAVE IMAGE' : '保存图片'}
+                                    </button>
+                                    <button
+                                        onClick={() => setShareModal(null)}
+                                        style={{
+                                            padding: '10px 20px',
+                                            backgroundColor: 'var(--accent-terminal)',
+                                            border: '1px solid var(--accent-terminal)',
+                                            color: '#000',
+                                            borderRadius: '2px',
+                                            fontFamily: "'JetBrains Mono', monospace",
+                                            fontSize: '12px',
+                                            fontWeight: 'bold',
+                                            cursor: 'pointer',
+                                            textTransform: 'uppercase',
+                                            letterSpacing: '0.05em',
+                                            transition: 'all 0.2s ease'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.target.style.backgroundColor = 'transparent';
+                                            e.target.style.color = 'var(--accent-terminal)';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.target.style.backgroundColor = 'var(--accent-terminal)';
+                                            e.target.style.color = '#000';
+                                        }}
+                                    >
+                                        {lang === 'en' ? 'OK' : '确定'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             );
         }
