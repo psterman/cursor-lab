@@ -54,9 +54,10 @@
 ### 测试方法
 
 1. **准备数据**
-   - 知悉 Cursor 默认记录文件夹位置：%APPDATA%\Cursor\User\workspaceStorage\ （windows）
-                                   ~/Library/Application Support/Cursor/User/workspaceStorage/（Mac）
-                                   mac复制以上路径后，打开访达-前往-前往文件夹-粘贴路径-将workspaceStorage文件夹拖到左侧后，再点击上传时选择文件夹（抱歉病友）
+   - 知悉 Cursor 默认记录文件夹位置：
+   - %APPDATA%\Cursor\User\workspaceStorage\ （windows）
+   - ~/Library/Application Support/Cursor/User/workspaceStorage/（Mac）
+     mac复制以上路径后，打开访达-前往-前往文件夹-粘贴路径-将workspaceStorage文件夹拖到左侧后，再点击上传时选择文件夹（抱歉病友）
      <img width="409" height="309" alt="截屏2026-01-21 23 31 20" src="https://github.com/user-attachments/assets/97fdf7df-f557-4686-9f42-088900afd6aa" />
 
    - 打开引你过来的那个网页或者这个 https://psterman.github.io/cursor-lab/
