@@ -1,4 +1,5 @@
 # Cursor Conversation History Analyzer
+<img width="1048" height="842" alt="image" src="https://github.com/user-attachments/assets/9ce31eb7-701b-49ec-a711-7764bd5dcf8c" />
 
 <div align="center">
 
