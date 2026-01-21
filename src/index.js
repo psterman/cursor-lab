@@ -463,7 +463,132 @@ export default {
         }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
-      return new Response("Not Found", { status: 404 });
+      // --- 功能 3：获取全局平均值 (新增接口) ---
+      if (url.pathname === "/api/global-average" && request.method === "GET") {
+        try {
+          console.log('[Worker] 开始计算全局平均值...');
+          
+          // 使用 Supabase 的聚合查询计算 JSONB 字段的平均值
+          // 由于 Supabase REST API 不支持直接在 select 中使用聚合函数，
+          // 我们需要先获取所有记录，然后在 Worker 中计算平均值
+          // 或者使用 RPC 函数（如果已创建）
+          
+          // 方法1：尝试使用 RPC 函数（如果存在）
+          const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_global_average`;
+          const rpcRes = await fetch(rpcUrl, {
+            method: 'POST',
+            headers: {
+              'apikey': env.SUPABASE_KEY,
+              'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=representation'
+            },
+            body: JSON.stringify({})
+          });
+          
+          if (rpcRes.ok) {
+            const rpcData = await rpcRes.json();
+            if (rpcData && typeof rpcData === 'object') {
+              console.log('[Worker] ✅ 通过 RPC 获取全局平均值:', rpcData);
+              return new Response(JSON.stringify({
+                status: "success",
+                globalAverage: rpcData
+              }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+            }
+          }
+          
+          // 方法2：如果 RPC 不存在，使用聚合查询（获取所有记录并计算）
+          console.log('[Worker] RPC 函数不存在，使用聚合查询...');
+          
+          // 获取所有有 dimensions 数据的记录
+          const statsRes = await fetch(`${env.SUPABASE_URL}/rest/v1/cursor_stats?select=dimensions&dimensions=not.is.null`, {
+            headers: {
+              'apikey': env.SUPABASE_KEY,
+              'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+              'Prefer': 'count=exact',
+              'Range': '0-9999' // 最多获取 10000 条记录
+            }
+          });
+          
+          if (!statsRes.ok) {
+            throw new Error(`查询失败: ${statsRes.status}`);
+          }
+          
+          const statsData = await statsRes.json();
+          const validDimensions = Array.isArray(statsData) 
+            ? statsData.filter(item => item.dimensions && typeof item.dimensions === 'object')
+            : [];
+          
+          if (validDimensions.length === 0) {
+            // 如果没有数据，返回默认值
+            const defaultAverage = { L: 50, P: 50, D: 50, E: 50, F: 50 };
+            console.log('[Worker] ⚠️ 没有有效数据，返回默认值:', defaultAverage);
+            return new Response(JSON.stringify({
+              status: "success",
+              globalAverage: defaultAverage
+            }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          }
+          
+          // 计算平均值
+          let sumL = 0, sumP = 0, sumD = 0, sumE = 0, sumF = 0;
+          let countL = 0, countP = 0, countD = 0, countE = 0, countF = 0;
+          
+          validDimensions.forEach(item => {
+            const dims = item.dimensions;
+            if (typeof dims.L === 'number' && !isNaN(dims.L)) {
+              sumL += dims.L;
+              countL++;
+            }
+            if (typeof dims.P === 'number' && !isNaN(dims.P)) {
+              sumP += dims.P;
+              countP++;
+            }
+            if (typeof dims.D === 'number' && !isNaN(dims.D)) {
+              sumD += dims.D;
+              countD++;
+            }
+            if (typeof dims.E === 'number' && !isNaN(dims.E)) {
+              sumE += dims.E;
+              countE++;
+            }
+            if (typeof dims.F === 'number' && !isNaN(dims.F)) {
+              sumF += dims.F;
+              countF++;
+            }
+          });
+          
+          const globalAverage = {
+            L: countL > 0 ? Math.round(sumL / countL) : 50,
+            P: countP > 0 ? Math.round(sumP / countP) : 50,
+            D: countD > 0 ? Math.round(sumD / countD) : 50,
+            E: countE > 0 ? Math.round(sumE / countE) : 50,
+            F: countF > 0 ? Math.round(sumF / countF) : 50
+          };
+          
+          console.log('[Worker] ✅ 全局平均值计算完成:', {
+            globalAverage,
+            sampleCount: validDimensions.length,
+            dimensionCounts: { L: countL, P: countP, D: countD, E: countE, F: countF }
+          });
+          
+          return new Response(JSON.stringify({
+            status: "success",
+            globalAverage: globalAverage
+          }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          
+        } catch (e) {
+          console.error('[Worker] ❌ 获取全局平均值失败:', e);
+          // 返回默认值而不是错误
+          const defaultAverage = { L: 50, P: 50, D: 50, E: 50, F: 50 };
+          return new Response(JSON.stringify({
+            status: "success",
+            globalAverage: defaultAverage,
+            error: e.message
+          }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+      }
+
+      return new Response("Not Found", { status: 404, headers: corsHeaders });
 
     } catch (e) {
       return new Response(JSON.stringify({ error: e.message }), { 

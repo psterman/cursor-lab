@@ -1102,8 +1102,8 @@ self.onmessage = function(e) {
               algorithmVersion: '2026-01-20-v3.0', // 【新增】算法版本标识
               bm25Config: BM25_CONFIG, // 【新增】BM25 参数
             },
-            // 调整后的全局基准，用于雷达图对比
-            globalAverage: { L: 50, P: 60, D: 50, E: 40, F: 55 }
+            // 注意：全局平均值不再在 Worker 中硬编码，由主线程从后端 API 获取
+            // globalAverage 将在主线程中通过 fetchGlobalAverage() 获取并注入到 vibeResult 中
           },
         });
         break;

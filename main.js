@@ -111,6 +111,12 @@ class VibeCodingApp {
         // 传递完整的 result 对象，函数内部会从 result 中提取所有数据
         const liveRank = await this.analyzer.uploadToSupabase(result, onProgress);
         
+        // 如果后端返回了 globalAverage，更新全局变量
+        if (liveRank && liveRank.globalAverage) {
+          globalAverageData = liveRank.globalAverage;
+          console.log('[VibeCodingApp] 从 uploadToSupabase 获取到全局平均值:', globalAverageData);
+        }
+        
         // 步骤4: 必须拿到 rankPercent 后，再更新结果
         if (liveRank && liveRank.rankPercent !== undefined) {
           // 利用联网回传的 rankPercent 更新 result.statistics 对象
@@ -190,6 +196,12 @@ class VibeCodingApp {
         // 传递完整的 result 对象，函数内部会从 result 中提取所有数据
         const liveRank = await this.analyzer.uploadToSupabase(result, onProgress);
         
+        // 如果后端返回了 globalAverage，更新全局变量
+        if (liveRank && liveRank.globalAverage) {
+          globalAverage = liveRank.globalAverage;
+          console.log('[VibeCodingApp] 从 uploadToSupabase 获取到全局平均值（同步方法）:', globalAverage);
+        }
+        
         // 步骤4: 必须拿到 rankPercent 后，再更新结果
         if (liveRank && liveRank.rankPercent !== undefined) {
           // 利用联网回传的 rankPercent 更新 result.statistics 对象
@@ -261,6 +273,7 @@ let allChatData = [];
 let globalStats = null;
 let vibeAnalyzer = null;
 let vibeResult = null;
+let globalAverageData = { L: 50, P: 50, D: 50, E: 50, F: 50 }; // 存储从后端获取的全局平均值，默认值作为保底
 
 // 创建全局 VibeCodingApp 实例
 let vibeCodingApp = null;
@@ -376,6 +389,12 @@ export const reanalyzeWithLanguage = async (lang) => {
         // 传递完整的 vibeResult 对象，函数内部会从 vibeResult 中提取所有数据
         const liveRank = await vibeAnalyzer.uploadToSupabase(vibeResult);
         
+        // 如果后端返回了 globalAverage，更新全局变量
+        if (liveRank && liveRank.globalAverage) {
+          globalAverage = liveRank.globalAverage;
+          console.log('[Main] 从 uploadToSupabase 获取到全局平均值:', globalAverage);
+        }
+        
         // 必须拿到 rankPercent 后，再更新结果
         if (liveRank && liveRank.rankPercent !== undefined) {
           vibeResult.statistics.rankPercent = liveRank.rankPercent;
@@ -429,6 +448,12 @@ export const reanalyzeWithLanguage = async (lang) => {
       try {
         // 传递完整的 vibeResult 对象，函数内部会从 vibeResult 中提取所有数据
         const liveRank = await vibeAnalyzer.uploadToSupabase(vibeResult);
+        
+        // 如果后端返回了 globalAverage，更新全局变量
+        if (liveRank && liveRank.globalAverage) {
+          globalAverage = liveRank.globalAverage;
+          console.log('[Main] 从 uploadToSupabase 获取到全局平均值（同步方法）:', globalAverage);
+        }
         
         // 必须拿到 rankPercent 后，再更新结果
         if (liveRank && liveRank.rankPercent !== undefined) {
@@ -735,6 +760,23 @@ async function init() {
   vibeCodingApp.parser = parser;
   vibeCodingApp.analyzer = vibeAnalyzer;
   console.log('[Main] VibeCodingApp 初始化完成');
+
+  // 获取全局平均值（异步，不阻塞初始化）
+  console.log('[Main] 开始获取全局平均值...');
+  fetchGlobalAverage().then(avg => {
+    globalAverageData = avg;
+    console.log('[Main] 全局平均值已加载:', globalAverageData);
+    
+    // 如果雷达图已经渲染，需要更新它
+    if (vibeResult && window.vibeRadarChartInstance) {
+      console.log('[Main] 更新已渲染的雷达图...');
+      renderVibeRadarChart();
+    }
+  }).catch(error => {
+    console.error('[Main] 获取全局平均值失败:', error);
+    // 使用默认值（已在变量初始化时设置）
+    console.log('[Main] 使用默认全局平均值:', globalAverageData);
+  });
 
   // 绑定事件
   bindEvents();
@@ -2419,18 +2461,18 @@ function renderVibeRadarChart() {
     window.vibeRadarChartInstance.destroy();
   }
 
-  // 获取全局平均基准（从 Worker 返回的数据中获取，如果没有则使用默认值）
-  const globalAverage = vibeResult.globalAverage || {
-    L: 65,
-    P: 70,
-    D: 60,
-    E: 55,
-    F: 75,
+  // 获取全局平均基准（优先级：1. 从 API 获取的全局变量 globalAverageData 2. vibeResult 中的值 3. 默认值）
+  const chartGlobalAverage = globalAverageData || vibeResult.globalAverage || {
+    L: 50,
+    P: 50,
+    D: 50,
+    E: 50,
+    F: 50,
   };
 
   // E 维度现在已经是归一化的 0-100 分数，不需要手动映射
   const eValue = dimensions.E;
-  const eAverage = globalAverage.E;
+  const eAverage = chartGlobalAverage.E;
   
   // 获取当前语言
   const currentLang = getCurrentLang();
@@ -2475,11 +2517,11 @@ function renderVibeRadarChart() {
         {
           label: globalAverageLabel,
           data: [
-            globalAverage.L,
-            globalAverage.P,
-            globalAverage.D,
-            globalAverage.E,
-            globalAverage.F,
+            chartGlobalAverage.L,
+            chartGlobalAverage.P,
+            chartGlobalAverage.D,
+            chartGlobalAverage.E,
+            chartGlobalAverage.F,
           ],
           backgroundColor: 'rgba(113, 113, 122, 0.1)',
           borderColor: 'rgba(113, 113, 122, 0.5)',
@@ -2659,6 +2701,69 @@ function getApiEndpoint() {
   
   // 默认 API 端点
   return API_ENDPOINT;
+}
+
+/**
+ * 从后端 API 获取全局平均值
+ * @returns {Promise<Object>} 返回全局平均值对象 {L, P, D, E, F}，如果失败则返回默认值
+ */
+async function fetchGlobalAverage() {
+  const apiEndpoint = getApiEndpoint();
+  const defaultAverage = { L: 50, P: 50, D: 50, E: 50, F: 50 };
+  
+  try {
+    // 尝试从 /api/global-average 端点获取（如果后端支持）
+    const globalAverageUrl = apiEndpoint.endsWith('/') 
+      ? `${apiEndpoint}api/global-average` 
+      : `${apiEndpoint}/api/global-average`;
+    
+    console.log('[Main] 尝试获取全局平均值:', globalAverageUrl);
+    
+    const response = await fetch(globalAverageUrl, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      mode: 'cors',
+      cache: 'no-cache',
+      signal: createTimeoutSignal(5000), // 5秒超时
+    });
+    
+    if (response.ok) {
+      const result = await response.json();
+      const avg = result.globalAverage || result.global_average || result.data;
+      
+      // 验证返回的数据格式
+      if (avg && typeof avg === 'object' && 
+          typeof avg.L === 'number' && 
+          typeof avg.P === 'number' && 
+          typeof avg.D === 'number' && 
+          typeof avg.E === 'number' && 
+          typeof avg.F === 'number') {
+        console.log('[Main] ✅ 成功获取全局平均值:', avg);
+        return avg;
+      } else {
+        console.warn('[Main] ⚠️ 后端返回的全局平均值格式不正确:', result);
+        // 如果格式不正确，尝试从 result 中直接提取
+        if (result && typeof result === 'object' && 
+            typeof result.L === 'number' && 
+            typeof result.P === 'number' && 
+            typeof result.D === 'number' && 
+            typeof result.E === 'number' && 
+            typeof result.F === 'number') {
+          console.log('[Main] ✅ 从 result 根对象提取全局平均值:', result);
+          return result;
+        }
+      }
+    } else {
+      const errorText = await response.text().catch(() => '无法读取错误信息');
+      console.warn('[Main] ⚠️ 获取全局平均值失败，状态码:', response.status, '错误:', errorText);
+    }
+  } catch (error) {
+    console.warn('[Main] ⚠️ 获取全局平均值失败，使用默认值:', error.message);
+  }
+  
+  // 保底逻辑：返回默认值
+  console.log('[Main] 使用默认全局平均值:', defaultAverage);
+  return defaultAverage;
 }
 
 // 创建带超时的 AbortSignal（兼容性处理）
@@ -2842,6 +2947,17 @@ async function displayRealtimeStats(vibeResult) {
           
           console.log('[Main] displayRealtimeStats: 调用 uploadToSupabase 上传数据并获取排名');
           const liveRank = await vibeAnalyzer.uploadToSupabase(currentVibeResult);
+          
+          // 如果后端返回了 globalAverage，更新全局变量
+          if (liveRank && liveRank.globalAverage) {
+            globalAverageData = liveRank.globalAverage;
+            console.log('[Main] 从 uploadToSupabase 获取到全局平均值:', globalAverageData);
+            
+            // 如果雷达图已经渲染，更新它
+            if (window.vibeRadarChartInstance) {
+              renderVibeRadarChart();
+            }
+          }
           
           if (liveRank && (liveRank.rankPercent !== undefined || liveRank.ranking !== undefined)) {
             // 兼容 ranking 和 rankPercent 字段

@@ -1633,10 +1633,13 @@ export class VibeCodingerAnalyzer {
       // 兼容性提取：同时查找 ranking 和 rankPercent
       const finalRank = result.ranking ?? result.rankPercent ?? 0;
       const totalUsers = result.totalUsers ?? result.value ?? result.total ?? result.count ?? 0;
+      
+      // 提取全局平均值（如果后端返回了）
+      const globalAverage = result.globalAverage || result.global_average || null;
 
       // 即使 status 不是 'success'，也尝试返回数据（可能后端返回了数据但状态字段不同）
       if (result.status === 'success' || (typeof finalRank === 'number' && typeof totalUsers === 'number')) {
-        return {
+        const returnData = {
           rankPercent: Number(finalRank),
           ranking: Number(finalRank), // 兼容字段
           totalUsers: Number(totalUsers),
@@ -1644,15 +1647,29 @@ export class VibeCodingerAnalyzer {
           actualRank: result.actualRank ?? 0,
           action: result.action
         };
+        
+        // 如果后端返回了 globalAverage，添加到返回对象中
+        if (globalAverage) {
+          returnData.globalAverage = globalAverage;
+        }
+        
+        return returnData;
       } else {
         console.warn('[VibeAnalyzer] 后端返回数据格式异常:', result);
         // 即使格式异常，也尝试返回能提取的数据
-        return { 
+        const returnData = { 
           rankPercent: Number(finalRank) || 0, 
           ranking: Number(finalRank) || 0,
           totalUsers: Number(totalUsers) || 0,
           error: 'Unexpected response format'
         };
+        
+        // 如果后端返回了 globalAverage，即使格式异常也尝试提取
+        if (globalAverage) {
+          returnData.globalAverage = globalAverage;
+        }
+        
+        return returnData;
       }
 
     } catch (err) {
