@@ -219,6 +219,7 @@ cursor-lab/
 
 1. Open the application in your browser
 2. Click "Upload Conversation History" button (MacOS user: After copying the path, first open Finder → Go → Go to Folder → paste the path → drag the workspaceStorage folder to the sidebar, then click the upload button.)
+<img width="409" height="309" alt="截屏2026-01-21 23 31 20" src="https://github.com/user-attachments/assets/e91993be-04e5-4443-abeb-2d71c3af9b0f" />
 3. Select your exported JSON file
 4. Wait for analysis to complete (runs asynchronously, won't freeze your browser)
 
