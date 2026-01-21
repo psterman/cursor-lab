@@ -48,19 +48,18 @@
 6. **数据可视化**
    - 生成病历雷达图
    - 支持分享链接
-   - 支持分享病历图片
+   - 支持分享病历图
    - 支持移动端查看病历（不支持体检）
 
 ### 测试方法
 
 1. **准备数据**
+   - 打开 https://psterman.github.io/cursor-lab/
    - 知悉 Cursor 默认记录文件夹位置：
    - %APPDATA%\Cursor\User\workspaceStorage\ （windows）
    - ~/Library/Application Support/Cursor/User/workspaceStorage/（Mac）
-     mac复制以上路径后，打开访达-前往-前往文件夹-粘贴路径-将workspaceStorage文件夹拖到左侧后，再点击上传时选择文件夹（抱歉病友）
+     mac复制以上路径后，打开访达-前往-前往文件夹-粘贴路径-将workspaceStorage文件夹拖到左侧的收藏位置后，再点击上传按钮，选择workspacestorage文件夹（抱歉病友）
      <img width="409" height="309" alt="截屏2026-01-21 23 31 20" src="https://github.com/user-attachments/assets/97fdf7df-f557-4686-9f42-088900afd6aa" />
-
-   - 打开引你过来的那个网页或者这个 https://psterman.github.io/cursor-lab/
 
 2. **上传并分析**   
    - 点击"上传"按钮
@@ -90,7 +89,7 @@
 
 ### 4. 自黑分析
 - **问题**: 简单的关键词统计无法反映个性的编程风格
-- **解决**: 基于语义指纹的多维度分析，生成个性化的人格画像
+- **解决**: 基于语义指纹的多维度分析，生成个性化的黑暗人格画像
 
 ### 5. 数据管理
 - **问题**: 大量对话历史难以管理和查询
