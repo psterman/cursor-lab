@@ -2,7 +2,7 @@
 
 <div align="center">
 
-基于 WebAssembly 的 Cursor 对话历史分析工具，通过 Vibe 算法对病人的编程对话进行病历分析，生成243重人格画像。
+专注于您的 Cursor 聊天记录分析，对编程对话进行病毒式分析，生成243重人格病历。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D16.0.0-brightgreen)](https://nodejs.org/)
