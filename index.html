@@ -3606,8 +3606,25 @@
             useEffect(() => {
                 const fetchTotalUsers = async () => {
                     try {
-                        const apiUrl = 'https://cursor-clinical-analysis.psterman.workers.dev/';
-                        console.log('[React] 发起 GET 请求获取全网受虐人数...');
+                        // 获取 API 端点（与 main.js 保持一致）
+                        const getApiEndpoint = () => {
+                            if (typeof window !== 'undefined') {
+                                const envApiUrl = window.__API_ENDPOINT__ || window.API_ENDPOINT;
+                                if (envApiUrl) {
+                                    return envApiUrl;
+                                }
+                                const metaApi = document.querySelector('meta[name="api-endpoint"]');
+                                if (metaApi && metaApi.content) {
+                                    const apiUrl = metaApi.content.trim();
+                                    // 确保 URL 格式正确（以 / 结尾）
+                                    return apiUrl.endsWith('/') ? apiUrl : apiUrl + '/';
+                                }
+                            }
+                            return 'https://cursor-clinical-analysis.psterman.workers.dev/';
+                        };
+                        
+                        const apiUrl = getApiEndpoint();
+                        console.log('[React] 发起 GET 请求获取全网受虐人数，API 端点:', apiUrl);
                         
                         const response = await fetch(apiUrl, {
                             method: 'GET',
@@ -3615,6 +3632,7 @@
                                 'Content-Type': 'application/json',
                             },
                             mode: 'cors',
+                            credentials: 'omit', // 避免 CORS 预检问题
                             cache: 'no-cache', // 禁用缓存，确保获取最新数据
                         });
                         
@@ -4137,13 +4155,34 @@
                             
                             console.log('[React] 降级请求：发送 submit_stats，数据:', userStats);
                             
-                            const apiUrl = 'https://cursor-clinical-analysis.psterman.workers.dev/api/analyze';
+                            // 获取 API 端点（与 main.js 保持一致）
+                            const getApiEndpoint = () => {
+                                if (typeof window !== 'undefined') {
+                                    const envApiUrl = window.__API_ENDPOINT__ || window.API_ENDPOINT;
+                                    if (envApiUrl) {
+                                        return envApiUrl;
+                                    }
+                                    const metaApi = document.querySelector('meta[name="api-endpoint"]');
+                                    if (metaApi && metaApi.content) {
+                                        const apiUrl = metaApi.content.trim();
+                                        return apiUrl.endsWith('/') ? apiUrl : apiUrl + '/';
+                                    }
+                                }
+                                return 'https://cursor-clinical-analysis.psterman.workers.dev/';
+                            };
+                            
+                            const apiEndpoint = getApiEndpoint();
+                            const apiUrl = apiEndpoint.endsWith('/') 
+                                ? `${apiEndpoint}api/analyze` 
+                                : `${apiEndpoint}/api/analyze`;
+                            
                             const response = await fetch(apiUrl, {
                                 method: 'POST',
                                 headers: {
                                     'Content-Type': 'application/json',
                                 },
                                 mode: 'cors',
+                                credentials: 'omit', // 避免 CORS 预检问题
                                 body: JSON.stringify(userStats),
                             });
                             
@@ -5049,8 +5088,24 @@
                                 };
                                 
                                 try {
-                                    const apiUrl = 'https://cursor-clinical-analysis.psterman.workers.dev/';
-                                    console.log('[实时更新] 开始获取 Cloudflare 实时数据...');
+                                    // 获取 API 端点（与 main.js 保持一致）
+                                    const getApiEndpoint = () => {
+                                        if (typeof window !== 'undefined') {
+                                            const envApiUrl = window.__API_ENDPOINT__ || window.API_ENDPOINT;
+                                            if (envApiUrl) {
+                                                return envApiUrl;
+                                            }
+                                            const metaApi = document.querySelector('meta[name="api-endpoint"]');
+                                            if (metaApi && metaApi.content) {
+                                                const apiUrl = metaApi.content.trim();
+                                                return apiUrl.endsWith('/') ? apiUrl : apiUrl + '/';
+                                            }
+                                        }
+                                        return 'https://cursor-clinical-analysis.psterman.workers.dev/';
+                                    };
+                                    
+                                    const apiUrl = getApiEndpoint();
+                                    console.log('[实时更新] 开始获取 Cloudflare 实时数据，API 端点:', apiUrl);
                                     
                                     const response = await fetch(apiUrl, {
                                         method: 'GET',
@@ -5058,6 +5113,7 @@
                                             'Content-Type': 'application/json',
                                         },
                                         mode: 'cors',
+                                        credentials: 'omit', // 避免 CORS 预检问题
                                         cache: 'no-cache',
                                     });
                                     

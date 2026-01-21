@@ -82,12 +82,25 @@ function preprocessDimensionData(rawData, dimension) {
 
     // 遍历 L1, L2, L3 层级
     ['L1', 'L2', 'L3'].forEach(level => {
-      const terms = category[level];
+      let terms = category[level];
 
-      // 【防御性检查】验证 terms 是否为数组
+      // 【防御性检查】验证 terms 是否为数组，如果不是则转换为空数组
       if (!Array.isArray(terms)) {
-        console.warn(`[VibeAnalyzer] 维度 ${dimension} 分类 ${categoryName} 的 ${level} 不是数组`);
-        return;
+        // 如果 terms 存在但不是数组，尝试转换
+        if (terms !== null && terms !== undefined) {
+          // 如果是字符串，尝试按逗号或换行符分割
+          if (typeof terms === 'string') {
+            terms = terms.split(/[,\n]/).map(t => t.trim()).filter(t => t.length > 0);
+            console.log(`[VibeAnalyzer] 维度 ${dimension} 分类 ${categoryName} 的 ${level} 是字符串，已转换为数组`);
+          } else {
+            // 其他类型，转换为空数组
+            console.warn(`[VibeAnalyzer] 维度 ${dimension} 分类 ${categoryName} 的 ${level} 不是数组（类型: ${typeof terms}），使用空数组`);
+            terms = [];
+          }
+        } else {
+          // null 或 undefined，使用空数组
+          terms = [];
+        }
       }
 
       // 过滤无效词汇并预处理
