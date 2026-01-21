@@ -217,7 +217,7 @@ cursor-lab/
 #### Step 2: Upload and Analyze
 
 1. Open the application in your browser
-2. Click "Upload Conversation History" button
+2. Click "Upload Conversation History" button (MacOS user: After copying the path, first open Finder → Go → Go to Folder → paste the path → drag the workspaceStorage folder to the sidebar, then click the upload button.)
 3. Select your exported JSON file
 4. Wait for analysis to complete (runs asynchronously, won't freeze your browser)
 
