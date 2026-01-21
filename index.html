@@ -1754,24 +1754,12 @@
                     // 获取当前目录（用于相对路径）
                     currentDir = pathname.substring(0, pathname.lastIndexOf('/')) || '';
                     
-                    // 构建路径列表（优先使用相对路径，避免 GitHub Pages 路径问题）
+                    // 构建路径列表（强制使用相对路径）
                     const paths = [];
                     
-                    // 【修复】优先使用相对路径（适用于所有环境）
+                    // 强制使用相对路径，避免 GitHub Pages 路径问题
                     paths.push('./main.js');
                     paths.push('./dist/main.js');
-                    
-                    // GitHub Pages 环境：如果相对路径失败，尝试绝对路径作为备用
-                    if (isGitHubPages && basePath) {
-                        paths.push(`${basePath}/main.js`);
-                        paths.push(`${basePath}/dist/main.js`);
-                    }
-                    
-                    // 基于当前目录（备用）
-                    if (currentDir) {
-                        paths.push(`${currentDir}/main.js`);
-                        paths.push(`${currentDir}/dist/main.js`);
-                    }
                     
                     console.log('[Main] 当前 URL:', window.location.href);
                     console.log('[Main] 当前路径:', pathname);

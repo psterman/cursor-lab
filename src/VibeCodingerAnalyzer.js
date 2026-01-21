@@ -749,30 +749,9 @@ export class VibeCodingerAnalyzer {
    */
   initWorker() {
     try {
-      // 创建 Worker（适配 GitHub Pages 环境）
-      let workerUrl;
-      const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
-      const isGitHubPages = hostname.includes('github.io');
-      
-      if (isGitHubPages) {
-        // GitHub Pages 环境：使用绝对路径，拼接仓库前缀
-        const basePath = (typeof window !== 'undefined' && window.BASE_PATH) 
-          ? window.BASE_PATH 
-          : '/cursor-lab'; // 默认仓库名
-        workerUrl = `${basePath}/src/vibeAnalyzerWorker.js`;
-        console.log('[VibeAnalyzer] GitHub Pages 环境，Worker URL:', workerUrl);
-      } else {
-        // 本地开发环境：尝试使用 import.meta.url，失败则使用相对路径
-        try {
-          const workerUrlObj = new URL('./vibeAnalyzerWorker.js', import.meta.url);
-          workerUrl = workerUrlObj.href;
-          console.log('[VibeAnalyzer] 本地环境，Worker URL (import.meta.url):', workerUrl);
-        } catch (e) {
-          // 降级到相对路径
-          workerUrl = './src/vibeAnalyzerWorker.js';
-          console.log('[VibeAnalyzer] 本地环境，Worker URL (相对路径):', workerUrl);
-        }
-      }
+      // 使用 import.meta.url 动态获取当前脚本目录，确保 Worker 路径正确
+      const workerUrl = new URL('./vibeAnalyzerWorker.js', import.meta.url).href;
+      console.log('[VibeAnalyzer] Worker URL (import.meta.url):', workerUrl);
       
       this.worker = new Worker(workerUrl, {
         type: 'module',
