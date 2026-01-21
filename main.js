@@ -6,6 +6,28 @@
 import { CursorParser } from './src/CursorParser.js';
 import { VibeCodingerAnalyzer, DIMENSIONS } from './src/VibeCodingerAnalyzer.js';
 
+/**
+ * 创建 VibeCodingerAnalyzer 实例（适配 GitHub Pages 环境）
+ * 注意：Worker 路径需要在 VibeCodingerAnalyzer.js 中修改以支持 GitHub Pages
+ * 当前实现会在 Worker 初始化失败时自动降级到同步处理
+ * 
+ * @param {string} lang - 语言代码
+ * @returns {VibeCodingerAnalyzer} 分析器实例
+ */
+function createVibeCodingerAnalyzer(lang = 'zh-CN') {
+  const analyzer = new VibeCodingerAnalyzer(lang);
+  
+  // 在 GitHub Pages 环境下，如果 Worker 初始化失败，会自动降级到同步处理
+  // 这不会影响功能，只是性能会稍慢
+  console.log('[Main] 创建 VibeCodingerAnalyzer 实例，环境:', {
+    basePath: window.BASE_PATH || '(空)',
+    isGitHubPages: window.location.hostname.includes('github.io'),
+    workerConfig: window.WORKER_CONFIG
+  });
+  
+  return analyzer;
+}
+
 // 检测基础路径（用于 GitHub Pages 等生产环境）
 if (!window.BASE_PATH) {
   const pathname = window.location.pathname;
@@ -39,6 +61,42 @@ if (!window.BASE_PATH) {
   window.BASE_PATH = basePath;
   console.log('[Main] 检测到基础路径:', window.BASE_PATH);
 }
+
+/**
+ * 构建 Worker 文件的 URL（适配 GitHub Pages 环境）
+ * @param {string} workerFileName - Worker 文件名（如 'vibeAnalyzerWorker.js'）
+ * @returns {string} Worker 的完整 URL
+ */
+function getWorkerUrl(workerFileName) {
+  const basePath = window.BASE_PATH || '';
+  
+  // 在 GitHub Pages 环境下，需要构建绝对路径
+  if (basePath) {
+    // 使用绝对路径：/repo-name/src/worker.js
+    const workerPath = `${basePath}/src/${workerFileName}`;
+    console.log('[Main] 构建 Worker URL (GitHub Pages):', workerPath);
+    return workerPath;
+  } else {
+    // 本地开发环境：使用相对路径
+    const workerPath = `./src/${workerFileName}`;
+    console.log('[Main] 构建 Worker URL (本地):', workerPath);
+    return workerPath;
+  }
+}
+
+/**
+ * 全局配置对象，用于传递配置给子模块
+ * 注意：VibeCodingerAnalyzer 需要读取此配置来正确初始化 Worker
+ * 如果 Worker 初始化失败，会自动降级到同步处理（不影响功能）
+ */
+window.WORKER_CONFIG = {
+  getWorkerUrl: getWorkerUrl,
+  basePath: window.BASE_PATH || '',
+  // Worker 文件路径（GitHub Pages 环境）
+  workerPath: window.BASE_PATH 
+    ? `${window.BASE_PATH}/src/vibeAnalyzerWorker.js`
+    : './src/vibeAnalyzerWorker.js'
+};
 // Chart.js 和 html2canvas 通过 CDN 加载，使用全局变量
 // import Chart from 'chart.js/auto';
 // import html2canvas from 'html2canvas';
@@ -69,7 +127,7 @@ class VibeCodingApp {
     
     // 初始化分析器
     if (!this.analyzer) {
-      this.analyzer = new VibeCodingerAnalyzer();
+      this.analyzer = createVibeCodingerAnalyzer();
     }
     
     console.log('[VibeCodingApp] 初始化完成');
@@ -332,7 +390,7 @@ export const processFiles = async (files, type, callbacks) => {
     console.log('[Main] 解析器未初始化，正在初始化...');
     parser = new CursorParser();
     await parser.init();
-    vibeAnalyzer = new VibeCodingerAnalyzer();
+    vibeAnalyzer = createVibeCodingerAnalyzer();
     console.log('[Main] 解析器初始化完成');
   }
   
@@ -618,12 +676,9 @@ async function uploadStatsToWorker(stats, onProgress = null) {
       usageDays: stats.usageDays || 1
     };
 
-    // 发送 POST 请求到 Worker
-    const response = await fetch(`${normalizedEndpoint}api/analyze`, {
+    // 发送 POST 请求到 Worker（使用 CORS 配置）
+    const response = await fetchWithCORS(`${normalizedEndpoint}api/analyze`, {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json'
-      },
       body: JSON.stringify(uploadData)
     });
 
@@ -660,7 +715,7 @@ export const initializeParser = async () => {
     console.log('[Main] 初始化解析器（模块模式）...');
     parser = new CursorParser();
     await parser.init();
-    vibeAnalyzer = new VibeCodingerAnalyzer();
+    vibeAnalyzer = createVibeCodingerAnalyzer();
     console.log('[Main] 解析器初始化完成');
   }
   return { parser, vibeAnalyzer };
@@ -2682,25 +2737,66 @@ function animateNumber(element, from, to, formatter, onComplete) {
 const API_ENDPOINT = 'https://cursor-clinical-analysis.psterman.workers.dev/';
 // 移除硬编码默认值，允许从 0 开始计数
 
-// 获取 API 端点
+// 获取 API 端点（适配 GitHub Pages 和远程 Cloudflare API）
 function getApiEndpoint() {
   // 检查环境变量（Cloudflare Pages 可以通过 wrangler.toml 或环境变量设置）
   if (typeof window !== 'undefined') {
     // 尝试从 window 对象获取（可通过 Cloudflare Workers 注入）
     const envApiUrl = window.__API_ENDPOINT__ || window.API_ENDPOINT;
     if (envApiUrl) {
+      console.log('[Main] 从 window 对象获取 API 端点:', envApiUrl);
       return envApiUrl;
     }
     
-    // 尝试从 meta 标签获取
+    // 尝试从 meta 标签获取（推荐方式，适用于 GitHub Pages）
     const metaApi = document.querySelector('meta[name="api-endpoint"]');
     if (metaApi && metaApi.content) {
-      return metaApi.content;
+      const apiUrl = metaApi.content.trim();
+      // 确保 URL 格式正确（以 / 结尾）
+      const normalizedUrl = apiUrl.endsWith('/') ? apiUrl : apiUrl + '/';
+      console.log('[Main] 从 meta 标签获取 API 端点:', normalizedUrl);
+      return normalizedUrl;
     }
   }
   
-  // 默认 API 端点
+  // 默认 API 端点（远程 Cloudflare Workers）
+  console.log('[Main] 使用默认 API 端点:', API_ENDPOINT);
   return API_ENDPOINT;
+}
+
+/**
+ * 创建带 CORS 配置的 fetch 请求
+ * @param {string} url - 请求 URL
+ * @param {RequestInit} options - fetch 选项
+ * @returns {Promise<Response>} fetch 响应
+ */
+async function fetchWithCORS(url, options = {}) {
+  // 确保 mode 设置为 'cors'（适用于跨域请求，如 GitHub Pages 到 Cloudflare Workers）
+  const corsOptions = {
+    ...options,
+    mode: 'cors',
+    credentials: 'omit', // 不发送 cookies，避免 CORS 预检问题
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  };
+  
+  console.log('[Main] 发起 CORS 请求:', { url, method: corsOptions.method || 'GET' });
+  
+  try {
+    const response = await fetch(url, corsOptions);
+    
+    // 检查 CORS 错误
+    if (!response.ok && response.status === 0) {
+      throw new Error('CORS 错误：无法访问远程 API。请检查 API 端点的 CORS 配置。');
+    }
+    
+    return response;
+  } catch (error) {
+    console.error('[Main] CORS 请求失败:', error);
+    throw error;
+  }
 }
 
 /**
@@ -2719,10 +2815,9 @@ async function fetchGlobalAverage() {
     
     console.log('[Main] 尝试获取全局平均值:', globalAverageUrl);
     
-    const response = await fetch(globalAverageUrl, {
+    // 使用带 CORS 配置的 fetch
+    const response = await fetchWithCORS(globalAverageUrl, {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-      mode: 'cors',
       cache: 'no-cache',
       signal: createTimeoutSignal(5000), // 5秒超时
     });
@@ -2785,12 +2880,9 @@ export async function updateGlobalStats(shouldIncrement = false) {
   const apiEndpoint = getApiEndpoint();
   
   try {
-    const response = await fetch(apiEndpoint, {
+    // 使用带 CORS 配置的 fetch
+    const response = await fetchWithCORS(apiEndpoint, {
       method: shouldIncrement ? 'POST' : 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      mode: 'cors',
       body: shouldIncrement ? JSON.stringify({
         action: 'increment',
         timestamp: Date.now(),
