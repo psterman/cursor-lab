@@ -2945,8 +2945,8 @@ async function fetchGlobalAverage() {
     
     console.log('[Main] 开始获取全局平均值，URL:', apiUrl);
     
-    // 使用动态端点请求
-    const res = await fetch(apiUrl, {
+    // 使用带 CORS 配置的 fetch（适用于跨域请求，如 GitHub Pages 到 Cloudflare Workers）
+    const res = await fetchWithCORS(apiUrl, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -2985,12 +2985,25 @@ async function fetchGlobalAverage() {
     console.error('[Main] ❌ 获取全局平均值异常:', {
       message: error.message,
       stack: error.stack,
-      name: error.name
+      name: error.name,
+      apiUrl: apiUrl || '未定义',
+      apiEndpoint: apiEndpoint || '未定义'
     });
+    
+    // 如果是 CORS 错误，提供更详细的提示
+    if (error.message && error.message.includes('CORS')) {
+      console.error('[Main] ⚠️ CORS 错误：请检查 API 端点的 CORS 配置');
+      console.error('[Main] 当前 API 端点:', apiUrl);
+      console.error('[Main] 建议：确保 Cloudflare Worker 返回正确的 CORS 头');
+    }
   }
   
   // 保底逻辑：返回默认值
   console.warn('[Main] ⚠️ 使用默认全局平均值');
+  console.warn('[Main] 如果这是生产环境，请检查：');
+  console.warn('1. API 端点是否正确配置（meta[name="api-endpoint"]）');
+  console.warn('2. Cloudflare Worker 是否正常运行');
+  console.warn('3. 浏览器控制台是否有 CORS 错误');
   return defaultAverage;
 }
 
