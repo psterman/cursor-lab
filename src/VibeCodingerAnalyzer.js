@@ -1645,8 +1645,12 @@ export class VibeCodingerAnalyzer {
         personalityType: vibeResult.personalityType || "Unknown", // 兼容字段
         dimensions: vibeResult.dimensions || {},
         // 统计字段：匹配 findVal 的查找逻辑
-        qingCount: stats.qingCount || 0, // 对应赛博磕头 (ketao)
-        buCount: stats.buCount || 0,     // 对应甲方上身 (jiafang)
+        // ✅ 修复：同时发送 ketao 和 qingCount，确保后端能正确匹配
+        ketao: stats.qingCount || stats.ketao || 0,     // 赛博磕头（优先使用 qingCount）
+        qingCount: stats.qingCount || stats.ketao || 0, // 兼容字段
+        // ✅ 修复：同时发送 jiafang 和 buCount，确保后端能正确匹配
+        jiafang: stats.buCount || stats.jiafang || 0,   // 甲方上身（优先使用 buCount）
+        buCount: stats.buCount || stats.jiafang || 0,   // 兼容字段
         usageDays: stats.usageDays || stats.days || 1, // 对应上岗天数
         days: stats.usageDays || stats.days || 1,      // 兼容字段
         avgMessageLength: stats.avgMessageLength || stats.avgUserMessageLength || 0
