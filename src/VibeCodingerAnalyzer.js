@@ -1626,18 +1626,30 @@ export class VibeCodingerAnalyzer {
 
       // 3. 从 vibeResult 中提取所有数据，构造完整的数据包
       // 注意：后端 /api/analyze 端点期望直接接收 stats 对象，不需要 action 包装
+      // 确保字段名与 Work.js 的 findVal 匹配：
+      // - ketao: ['ketao', 'buCount', 'qingCount', 'politeCount']
+      // - jiafang: ['jiafang', 'buCount', 'negationCount']
+      // - totalChars: ['totalUserChars', 'totalChars', 'total_user_chars']
+      // - userMessages: ['userMessages', 'totalMessages', 'user_messages', 'messageCount']
+      // - days: ['usageDays', 'days', 'workDays']
+      const stats = vibeResult.statistics || {};
       const uploadData = {
-        totalMessages: vibeResult.statistics?.totalMessages || 0,
-        totalChars: vibeResult.statistics?.totalChars || 0,
+        // 消息和字符数：提供多个字段名以匹配 findVal 的查找逻辑
+        totalMessages: stats.totalMessages || 0,
+        userMessages: stats.userMessages || stats.totalMessages || 0,
+        totalChars: stats.totalChars || 0,
+        totalUserChars: stats.totalUserChars || stats.totalChars || 0,
+        // 其他字段
         vibeIndex: String(vibeResult.vibeIndex || "00000"),
         personality: vibeResult.personalityType || "Unknown",
         personalityType: vibeResult.personalityType || "Unknown", // 兼容字段
         dimensions: vibeResult.dimensions || {},
-        // 保留旧字段以兼容（如果后端需要）
-        qingCount: vibeResult.statistics?.qingCount || 0,
-        buCount: vibeResult.statistics?.buCount || 0,
-        avgMessageLength: vibeResult.statistics?.avgMessageLength || 0,
-        usageDays: vibeResult.statistics?.usageDays || 1
+        // 统计字段：匹配 findVal 的查找逻辑
+        qingCount: stats.qingCount || 0, // 对应赛博磕头 (ketao)
+        buCount: stats.buCount || 0,     // 对应甲方上身 (jiafang)
+        usageDays: stats.usageDays || stats.days || 1, // 对应上岗天数
+        days: stats.usageDays || stats.days || 1,      // 兼容字段
+        avgMessageLength: stats.avgMessageLength || stats.avgUserMessageLength || 0
       };
 
       console.log('[VibeAnalyzer] 上传统计数据（包含完整分析结果）:', uploadData);

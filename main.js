@@ -177,13 +177,20 @@ class VibeCodingApp {
     if (result && result.statistics) {
       const stats = result.statistics;
       
-      // 准备统计数据（包含本地计算的统计和额外字段）
-      const statsForUpload = {
-        ...stats,
-        qingCount: extraStats?.qingCount || 0,
-        buCount: extraStats?.buCount || 0,
-        usageDays: extraStats?.usageDays || 1
-      };
+      // 将 extraStats 合并到 result.statistics 中，确保字段名与 Work.js 的 findVal 匹配
+      // Work.js findVal 期望的字段：
+      // - ketao: ['ketao', 'buCount', 'qingCount', 'politeCount']
+      // - jiafang: ['jiafang', 'buCount', 'negationCount']
+      // - totalChars: ['totalUserChars', 'totalChars', 'total_user_chars']
+      // - userMessages: ['userMessages', 'totalMessages', 'user_messages', 'messageCount']
+      // - days: ['usageDays', 'days', 'workDays']
+      stats.qingCount = extraStats?.qingCount || globalStats?.qingCount || 0; // 对应赛博磕头
+      stats.buCount = extraStats?.buCount || globalStats?.buCount || 0;       // 对应甲方上身
+      stats.usageDays = extraStats?.usageDays || globalStats?.usageDays || 1; // 对应上岗天数
+      
+      // 确保这俩也有，以匹配 Work.js 的 findVal 查找逻辑
+      stats.totalUserChars = stats.totalUserChars || stats.totalChars || 0;
+      stats.userMessages = stats.userMessages || stats.totalMessages || 0;
 
       try {
         // 步骤3: 立即 await 调用 uploadToSupabase 联网获取真实排名
@@ -270,13 +277,20 @@ class VibeCodingApp {
     if (result && result.statistics) {
       const stats = result.statistics;
       
-      // 准备统计数据（包含本地计算的统计和额外字段）
-      const statsForUpload = {
-        ...stats,
-        qingCount: extraStats?.qingCount || 0,
-        buCount: extraStats?.buCount || 0,
-        usageDays: extraStats?.usageDays || 1
-      };
+      // 将 extraStats 合并到 result.statistics 中，确保字段名与 Work.js 的 findVal 匹配
+      // Work.js findVal 期望的字段：
+      // - ketao: ['ketao', 'buCount', 'qingCount', 'politeCount']
+      // - jiafang: ['jiafang', 'buCount', 'negationCount']
+      // - totalChars: ['totalUserChars', 'totalChars', 'total_user_chars']
+      // - userMessages: ['userMessages', 'totalMessages', 'user_messages', 'messageCount']
+      // - days: ['usageDays', 'days', 'workDays']
+      stats.qingCount = extraStats?.qingCount || globalStats?.qingCount || 0; // 对应赛博磕头
+      stats.buCount = extraStats?.buCount || globalStats?.buCount || 0;       // 对应甲方上身
+      stats.usageDays = extraStats?.usageDays || globalStats?.usageDays || 1; // 对应上岗天数
+      
+      // 确保这俩也有，以匹配 Work.js 的 findVal 查找逻辑
+      stats.totalUserChars = stats.totalUserChars || stats.totalChars || 0;
+      stats.userMessages = stats.userMessages || stats.totalMessages || 0;
 
       try {
         // 步骤3: 立即 await 调用 uploadToSupabase 联网获取真实排名
@@ -718,14 +732,25 @@ async function uploadStatsToWorker(stats, onProgress = null) {
       }
     });
 
-    // 准备上传数据（字段名与后端匹配）
+    // 准备上传数据（字段名与 Work.js 的 findVal 匹配）
+    // Work.js findVal 期望的字段：
+    // - ketao: ['ketao', 'buCount', 'qingCount', 'politeCount']
+    // - jiafang: ['jiafang', 'buCount', 'negationCount']
+    // - totalChars: ['totalUserChars', 'totalChars', 'total_user_chars']
+    // - userMessages: ['userMessages', 'totalMessages', 'user_messages', 'messageCount']
+    // - days: ['usageDays', 'days', 'workDays']
     const uploadData = {
-      qingCount: stats.qingCount || 0,
-      buCount: stats.buCount || 0, // 注意：后端可能使用 bu_count，但先尝试 buCount
+      // 消息和字符数：提供多个字段名以匹配 findVal 的查找逻辑
       totalMessages: stats.totalMessages || 0,
+      userMessages: stats.userMessages || stats.totalMessages || 0,
       totalChars: stats.totalChars || 0,
-      avgMessageLength: stats.avgMessageLength || 0,
-      usageDays: stats.usageDays || 1
+      totalUserChars: stats.totalUserChars || stats.totalChars || 0,
+      // 统计字段：匹配 findVal 的查找逻辑
+      qingCount: stats.qingCount || 0, // 对应赛博磕头 (ketao)
+      buCount: stats.buCount || 0,     // 对应甲方上身 (jiafang)
+      usageDays: stats.usageDays || stats.days || 1, // 对应上岗天数
+      days: stats.usageDays || stats.days || 1,      // 兼容字段
+      avgMessageLength: stats.avgMessageLength || stats.avgUserMessageLength || 0
     };
 
     // 发送 POST 请求到 Worker（使用 CORS 配置）

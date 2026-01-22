@@ -3,125 +3,173 @@ export default {
     const corsHeaders = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Max-Age": "86400",
     };
 
-    // 1. 处理跨域预检
-    if (request.method === "OPTIONS") {
-      return new Response(null, { headers: corsHeaders });
-    }
+    if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
     const url = new URL(request.url);
     const clientIP = request.headers.get("CF-Connecting-IP") || "anonymous";
-    const key = "total_users";
-    const userLockKey = `lock_${clientIP}`;
-    const allStatsKey = "all_user_stats";
 
     try {
-      // --- 【功能一：Answer Book (D1 数据库)】 ---
-      
-      // 路径：GET /api/random_prompt
+      // --- 路由 0：存活检查 & 状态 ---
+      if (url.pathname === "/" || url.pathname === "") {
+        const res = await fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_view?select=total_count`, {
+          headers: { 'apikey': env.SUPABASE_KEY, 'Authorization': `Bearer ${env.SUPABASE_KEY}` }
+        });
+        const data = await res.json();
+        return new Response(JSON.stringify({ 
+          status: "success", 
+          totalUsers: data[0]?.total_count || 0,
+          message: "Cursor Vibe API is active" 
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+
+      // --- 路由 1：答案之书 (D1) ---
       if (url.pathname === "/api/random_prompt") {
-        // 获取语言参数，默认为中文 (cn)
         const langParam = url.searchParams.get("lang") || "cn";
-        // 确保语言参数有效，只接受 'cn' 或 'en'
-        const lang = (langParam === "en") ? "en" : "cn";
-        
-        // 【修正】根据语言参数过滤数据：变量名改为 prompts_library，表名改为 answer_book，note 映射为 author
+        const lang = ["en", "en-US", "en-GB"].includes(langParam) ? "en" : "cn";
         const result = await env.prompts_library.prepare(
           "SELECT id, content, note as author FROM answer_book WHERE lang = ? ORDER BY RANDOM() LIMIT 1"
         ).bind(lang).first();
-        
-        // 根据语言返回对应的空数据提示
-        const emptyMessage = lang === "en" 
-          ? "Database is empty" 
-          : "数据库是空的";
-        
-        return new Response(JSON.stringify(result || { content: emptyMessage, author: "System" }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        return new Response(JSON.stringify({ data: result, status: "success" }), { 
+          headers: { ...corsHeaders, "Content-Type": "application/json" } 
         });
       }
 
-      // --- 【功能二：统计人数与排名 (KV 存储)】 ---
-
-      if (request.method === "POST") {
-        const body = await request.json().catch(() => ({}));
-
-        // 处理体检数据提交
-        if (body.action === "submit_stats" && body.stats) {
-          const userStats = body.stats;
-          
-          let allStatsStr = await env.STATS_STORE.get(allStatsKey);
-          let allStats = allStatsStr ? JSON.parse(allStatsStr) : [];
-          
-          const statsEntry = {
-            ip: clientIP,
-            ...userStats,
-            submittedAt: Date.now()
-          };
-
-          const existingIndex = allStats.findIndex(s => s.ip === clientIP);
-          if (existingIndex >= 0) allStats[existingIndex] = statsEntry;
-          else allStats.push(statsEntry);
-
-          await env.STATS_STORE.put(allStatsKey, JSON.stringify(allStats));
-
-          // 增加总人数计数 (UV 统计) - 需要在计算排名前获取，以便传入正确的 totalUsers
-          const alreadyCounted = await env.STATS_STORE.get(userLockKey);
-          let countStr = await env.STATS_STORE.get(key);
-          let count = parseInt(countStr || "0");
-
-          if (!alreadyCounted) {
-            count += 1;
-            await env.STATS_STORE.put(key, count.toString());
-            await env.STATS_STORE.put(userLockKey, "true", { expirationTtl: 86400 });
+      // --- 路由 2：分析与多维排名 (Supabase) ---
+      if (url.pathname === "/api/analyze" && request.method === "POST") {
+        const body = await request.json();
+        
+        // 1. 数据深度挖掘 (兼容扁平化及嵌套结构)
+        const sources = [body, body.statistics || {}, body.metadata || {}, body.stats || {}];
+        const findVal = (keys) => {
+          for (const source of sources) {
+            for (const key of keys) {
+              if (source[key] !== undefined && source[key] !== null) return Number(source[key]);
+            }
           }
+          return 0;
+        };
 
-          // 计算排名 (使用 total_users 的 value 作为总人数，而不是 allStats.length)
-          const rankings = calculateRankings(statsEntry, allStats, count);
+        // 指标映射
+        const ketao = findVal(['ketao', 'buCount', 'qingCount', 'politeCount']); 
+        const jiafang = findVal(['jiafang', 'buCount', 'negationCount']);
+        const totalChars = findVal(['totalUserChars', 'totalChars', 'total_user_chars']);
+        const userMessages = findVal(['userMessages', 'totalMessages', 'user_messages', 'messageCount']);
+        const avgLength = findVal(['avgMessageLength', 'avgUserMessageLength', 'avg_length']);
+        const days = findVal(['usageDays', 'days', 'workDays']);
 
-          return new Response(JSON.stringify({ 
-            value: count, 
-            status: "success",
-            rankings: rankings
-          }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        }
+        const dimensions = body.dimensions || body.stats?.dimensions || {};
+        const vibeIndex = String(body.vibeIndex || body.stats?.vibeIndex || "00000");
+        const personality = body.personalityType || body.personality || "Unknown";
+
+        // 生成 Hash ID
+        const msgUint8 = new TextEncoder().encode(clientIP);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+        const userIdentity = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+
+        // 2. 写入 Supabase
+        const payload = {
+          user_identity: userIdentity,
+          user_messages: userMessages,
+          total_user_chars: totalChars,
+          days: days,
+          jiafang: jiafang,
+          ketao: ketao,
+          feihua: totalChars, 
+          avg_length: avgLength,
+          vibe_index: vibeIndex,
+          personality: personality,
+          dimensions: dimensions,
+          metadata: { ...body.metadata, ...body.statistics },
+          updated_at: new Date().toISOString()
+        };
+
+        await fetch(`${env.SUPABASE_URL}/rest/v1/cursor_stats`, {
+          method: 'POST',
+          headers: {
+            'apikey': env.SUPABASE_KEY,
+            'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'resolution=merge-duplicates'
+          },
+          body: JSON.stringify(payload)
+        });
+
+        // 3. 并行计算排名
+        const totalUsersRes = await fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_view?select=total_count`, {
+            headers: { 'apikey': env.SUPABASE_KEY, 'Authorization': `Bearer ${env.SUPABASE_KEY}` }
+        });
+        const totalData = await totalUsersRes.json();
+        const totalUsers = totalData[0]?.total_count || 1;
+
+        const getRankCount = async (column, value) => {
+           if (value <= 0) return 0;
+           const res = await fetch(`${env.SUPABASE_URL}/rest/v1/cursor_stats?${column}=lt.${value}&select=id`, {
+             headers: { 
+               'apikey': env.SUPABASE_KEY, 
+               'Authorization': `Bearer ${env.SUPABASE_KEY}`, 
+               'Prefer': 'count=exact', 
+               'Range': '0-0'
+             }
+           });
+           return parseInt(res.headers.get('content-range')?.split('/')[1] || "0");
+        };
+
+        const [beatMsg, beatChar, beatDay, beatJia, beatKe, beatAvg] = await Promise.all([
+            getRankCount('user_messages', userMessages),
+            getRankCount('total_user_chars', totalChars),
+            getRankCount('days', days),
+            getRankCount('jiafang', jiafang),
+            getRankCount('ketao', ketao),
+            getRankCount('avg_length', avgLength)
+        ]);
+
+        const calcPct = (count) => Math.min(99, Math.floor((count / totalUsers) * 100));
+
+        const ranks = {
+            messageRank: calcPct(beatMsg),
+            charRank: calcPct(beatChar),
+            daysRank: calcPct(beatDay),
+            jiafangRank: calcPct(beatJia),
+            ketaoRank: calcPct(beatKe),
+            avgRank: calcPct(beatAvg)
+        };
+
+        return new Response(JSON.stringify({ 
+          status: "success", 
+          totalUsers,
+          rankPercent: ranks.messageRank, 
+          defeated: beatMsg,
+          ranks: ranks,
+          stats: { userMessages, totalChars, days, jiafang, ketao, avgLength }
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
-      // 默认 GET 请求：返回总人数统计
-      let countStr = await env.STATS_STORE.get(key);
-      return new Response(JSON.stringify({ value: parseInt(countStr || "0"), status: "success" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" }
-      });
+      // --- 路由 3：全局平均值 (雷达图必备) ---
+      if (url.pathname === "/api/global-average") {
+        const res = await fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_view?select=*`, {
+          headers: { 'apikey': env.SUPABASE_KEY, 'Authorization': `Bearer ${env.SUPABASE_KEY}` }
+        });
+        const data = await res.json();
+        const row = data[0] || { total_count: 0, avg_l: 50, avg_p: 50, avg_d: 50, avg_e: 50, avg_f: 50 };
+
+        return new Response(JSON.stringify({
+          status: "success",
+          totalUsers: parseInt(row.total_count),
+          globalAverage: { L: row.avg_l, P: row.avg_p, D: row.avg_d, E: row.avg_e, F: row.avg_f }
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
 
     } catch (e) {
-      return new Response(JSON.stringify({ error: e.message }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      return new Response(JSON.stringify({ error: e.message, status: "error" }), { 
+        status: 500, 
+        headers: { ...corsHeaders, "Content-Type": "application/json" } 
       });
     }
+
+    return new Response("Not Found", { status: 404, headers: corsHeaders });
   }
 };
-
-// 排名计算辅助函数
-// totalUsers: 使用 total_users 的 value，而不是 allStats.length
-function calculateRankings(userStats, allStats, totalUsers = 0) {
-  if (!allStats || allStats.length === 0) return {};
-  // 使用 total_users 的 value 作为总人数，确保排名对比数据正确
-  const total = totalUsers > 0 ? totalUsers : allStats.length;
-  const metrics = ['qingCount', 'buCount', 'userMessages', 'totalUserChars', 'avgUserMessageLength', 'usageDays'];
-  const results = {};
-  
-  metrics.forEach(metric => {
-    const sorted = [...allStats].sort((a, b) => (b[metric] || 0) - (a[metric] || 0));
-    const index = sorted.findIndex(s => s.ip === userStats.ip);
-    const userValue = userStats[metric] || 0;
-    let rank = index + 1;
-    for (let i = index - 1; i >= 0; i--) {
-      if ((sorted[i][metric] || 0) === userValue) rank = i + 1;
-      else break;
-    }
-    results[metric] = { rank, total };
-  });
-  return results;
-}
