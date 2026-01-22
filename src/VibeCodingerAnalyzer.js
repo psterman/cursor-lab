@@ -1679,9 +1679,6 @@ export class VibeCodingerAnalyzer {
       
       // 提取全局平均值（如果后端返回了）
       const globalAverage = result.globalAverage || result.global_average || null;
-      
-      // 提取 ranks 数据（Worker 返回的新格式）
-      const ranks = result.ranks || null;
 
       // 即使 status 不是 'success'，也尝试返回数据（可能后端返回了数据但状态字段不同）
       if (result.status === 'success' || (typeof finalRank === 'number' && typeof totalUsers === 'number')) {
@@ -1693,11 +1690,6 @@ export class VibeCodingerAnalyzer {
           actualRank: result.actualRank ?? 0,
           action: result.action
         };
-        
-        // 如果后端返回了 ranks，添加到返回对象中
-        if (ranks) {
-          returnData.ranks = ranks;
-        }
         
         // 如果后端返回了 globalAverage，添加到返回对象中
         if (globalAverage) {
@@ -1714,11 +1706,6 @@ export class VibeCodingerAnalyzer {
           totalUsers: Number(totalUsers) || 0,
           error: 'Unexpected response format'
         };
-        
-        // 如果后端返回了 ranks，即使格式异常也尝试提取
-        if (ranks) {
-          returnData.ranks = ranks;
-        }
         
         // 如果后端返回了 globalAverage，即使格式异常也尝试提取
         if (globalAverage) {

@@ -2933,20 +2933,17 @@ async function fetchWithCORS(url, options = {}) {
  * 从后端 API 获取全局平均值
  * @returns {Promise<Object>} 返回全局平均值对象 {L, P, D, E, F}，如果失败则返回默认值
  */
+// 强制锁定 Cloudflare 绝对地址，跳过路径解析
+const API_URL = 'https://cursor-clinical-analysis.psterman.workers.dev/api/global-average';
+
 async function fetchGlobalAverage() {
   const defaultAverage = { L: 50, P: 50, D: 50, E: 50, F: 50 };
   
   try {
-    // 使用动态 API 端点，而不是硬编码
-    const apiEndpoint = getApiEndpoint();
-    const apiUrl = apiEndpoint.endsWith('/') 
-      ? `${apiEndpoint}api/global-average` 
-      : `${apiEndpoint}/api/global-average`;
+    console.log('[Main] 开始获取全局平均值，URL:', API_URL);
     
-    console.log('[Main] 开始获取全局平均值，URL:', apiUrl);
-    
-    // 使用带 CORS 配置的 fetch（适用于跨域请求，如 GitHub Pages 到 Cloudflare Workers）
-    const res = await fetchWithCORS(apiUrl, {
+    // 直接请求，不拼接任何变量
+    const res = await fetch(API_URL, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -2985,25 +2982,12 @@ async function fetchGlobalAverage() {
     console.error('[Main] ❌ 获取全局平均值异常:', {
       message: error.message,
       stack: error.stack,
-      name: error.name,
-      apiUrl: apiUrl || '未定义',
-      apiEndpoint: apiEndpoint || '未定义'
+      name: error.name
     });
-    
-    // 如果是 CORS 错误，提供更详细的提示
-    if (error.message && error.message.includes('CORS')) {
-      console.error('[Main] ⚠️ CORS 错误：请检查 API 端点的 CORS 配置');
-      console.error('[Main] 当前 API 端点:', apiUrl);
-      console.error('[Main] 建议：确保 Cloudflare Worker 返回正确的 CORS 头');
-    }
   }
   
   // 保底逻辑：返回默认值
   console.warn('[Main] ⚠️ 使用默认全局平均值');
-  console.warn('[Main] 如果这是生产环境，请检查：');
-  console.warn('1. API 端点是否正确配置（meta[name="api-endpoint"]）');
-  console.warn('2. Cloudflare Worker 是否正常运行');
-  console.warn('3. 浏览器控制台是否有 CORS 错误');
   return defaultAverage;
 }
 
