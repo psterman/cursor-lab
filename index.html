@@ -4094,6 +4094,16 @@
                         rankingResult = await analyzer.uploadToSupabase(vibeResult);
                         
                         console.log('[React] uploadToSupabase 返回结果:', rankingResult);
+                        // ✅ 关键调试：检查 ranks 对象是否存在
+                        if (rankingResult && rankingResult.ranks) {
+                          console.log('[React] ✅ rankingResult.ranks 存在:', rankingResult.ranks);
+                        } else {
+                          console.warn('[React] ⚠️ rankingResult.ranks 不存在！', {
+                            hasRankingResult: !!rankingResult,
+                            hasRanks: !!(rankingResult && rankingResult.ranks),
+                            rankingResult: rankingResult
+                          });
+                        }
                         
                         // 兼容所有可能的排名字段名
                         const finalRank = rankingResult?.rankPercent ?? rankingResult?.ranking ?? 0;

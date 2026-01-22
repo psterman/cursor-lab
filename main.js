@@ -217,16 +217,23 @@ class VibeCodingApp {
           stats.rankPercent = liveRank.rankPercent;
           stats.totalUsers = liveRank.totalUsers;
           
-          // 将排名数据注入到 result 中
+          // ✅ 修复：将排名数据注入到 result 中（包括 ranks 对象）
           if (!result.rankData) {
             result.rankData = {};
           }
           result.rankData.rankPercent = liveRank.rankPercent;
           result.rankData.totalUsers = liveRank.totalUsers;
           
+          // ✅ 关键修复：注入 ranks 对象（六个排名数据）
+          if (liveRank.ranks) {
+            result.rankData.ranks = liveRank.ranks;
+            console.log('[VibeCodingApp] ✅ ranks 对象已注入:', liveRank.ranks);
+          }
+          
           console.log('[VibeCodingApp] 真实排名数据已获取并更新:', {
             rankPercent: liveRank.rankPercent,
-            totalUsers: liveRank.totalUsers
+            totalUsers: liveRank.totalUsers,
+            hasRanks: !!liveRank.ranks
           });
         } else {
           console.warn('[VibeCodingApp] uploadToSupabase 未返回有效的 rankPercent');
@@ -316,16 +323,23 @@ class VibeCodingApp {
           stats.rankPercent = liveRank.rankPercent;
           stats.totalUsers = liveRank.totalUsers;
           
-          // 将排名数据注入到 result 中
+          // ✅ 修复：将排名数据注入到 result 中（包括 ranks 对象）
           if (!result.rankData) {
             result.rankData = {};
           }
           result.rankData.rankPercent = liveRank.rankPercent;
           result.rankData.totalUsers = liveRank.totalUsers;
           
+          // ✅ 关键修复：注入 ranks 对象（六个排名数据）
+          if (liveRank.ranks) {
+            result.rankData.ranks = liveRank.ranks;
+            console.log('[VibeCodingApp] ✅ ranks 对象已注入（同步方法）:', liveRank.ranks);
+          }
+          
           console.log('[VibeCodingApp] 真实排名数据已获取并更新（同步方法）:', {
             rankPercent: liveRank.rankPercent,
-            totalUsers: liveRank.totalUsers
+            totalUsers: liveRank.totalUsers,
+            hasRanks: !!liveRank.ranks
           });
         } else {
           console.warn('[VibeCodingApp] uploadToSupabase 未返回有效的 rankPercent（同步方法）');
@@ -523,9 +537,16 @@ export const reanalyzeWithLanguage = async (lang) => {
           vibeResult.rankData.rankPercent = liveRank.rankPercent;
           vibeResult.rankData.totalUsers = liveRank.totalUsers;
           
+          // ✅ 关键修复：注入 ranks 对象（六个排名数据）
+          if (liveRank.ranks) {
+            vibeResult.rankData.ranks = liveRank.ranks;
+            console.log('[Main] ✅ ranks 对象已注入:', liveRank.ranks);
+          }
+          
           console.log('[Main] 真实排名数据已获取并覆盖:', {
             rankPercent: liveRank.rankPercent,
-            totalUsers: liveRank.totalUsers
+            totalUsers: liveRank.totalUsers,
+            hasRanks: !!liveRank.ranks
           });
         }
       } catch (uploadError) {
@@ -590,9 +611,16 @@ export const reanalyzeWithLanguage = async (lang) => {
           vibeResult.rankData.rankPercent = liveRank.rankPercent;
           vibeResult.rankData.totalUsers = liveRank.totalUsers;
           
+          // ✅ 关键修复：注入 ranks 对象（六个排名数据）
+          if (liveRank.ranks) {
+            vibeResult.rankData.ranks = liveRank.ranks;
+            console.log('[Main] ✅ ranks 对象已注入（同步方法）:', liveRank.ranks);
+          }
+          
           console.log('[Main] 真实排名数据已获取并覆盖（同步方法）:', {
             rankPercent: liveRank.rankPercent,
-            totalUsers: liveRank.totalUsers
+            totalUsers: liveRank.totalUsers,
+            hasRanks: !!liveRank.ranks
           });
         }
       } catch (uploadError) {
@@ -3200,11 +3228,17 @@ async function displayRealtimeStats(vibeResult) {
             currentVibeResult.rankData.rankPercent = finalRank;
             currentVibeResult.rankData.totalUsers = liveRank.totalUsers || totalTestUsers;
             
+            // ✅ 关键修复：注入 ranks 对象（六个排名数据）
+            if (liveRank.ranks) {
+              currentVibeResult.rankData.ranks = liveRank.ranks;
+              console.log('[Main] ✅ ranks 对象已注入（displayRealtimeStats）:', liveRank.ranks);
+            }
+            
             rankPercent = finalRank;
             if (rankPercent >= 0 && rankPercent <= 100) {
               const rankPercentile = rankPercent / 100;
               estimatedRank = Math.max(1, Math.round(totalTestUsers * (1 - rankPercentile)));
-              console.log('[Main] 成功获取排名数据:', { rankPercent, estimatedRank, totalUsers: liveRank.totalUsers });
+              console.log('[Main] 成功获取排名数据:', { rankPercent, estimatedRank, totalUsers: liveRank.totalUsers, hasRanks: !!liveRank.ranks });
             }
           } else {
             console.warn('[Main] uploadToSupabase 未返回有效的排名数据');

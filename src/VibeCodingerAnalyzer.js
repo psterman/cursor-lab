@@ -1684,8 +1684,12 @@ export class VibeCodingerAnalyzer {
       // 提取全局平均值（如果后端返回了）
       const globalAverage = result.globalAverage || result.global_average || null;
       
-      // 提取 ranks 对象（多维排名数据）
+      // ✅ 关键调试：提取 ranks 对象（多维排名数据）
       const ranks = result.ranks || null;
+      console.log('[VibeAnalyzer] ✅ 提取的 ranks 对象:', ranks);
+      if (!ranks) {
+        console.warn('[VibeAnalyzer] ⚠️ 后端未返回 ranks 对象！检查 worker.js 是否正确返回 ranks');
+      }
 
       // 即使 status 不是 'success'，也尝试返回数据（可能后端返回了数据但状态字段不同）
       if (result.status === 'success' || (typeof finalRank === 'number' && typeof totalUsers === 'number')) {
