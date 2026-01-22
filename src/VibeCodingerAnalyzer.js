@@ -52,12 +52,26 @@ function preprocessDimensionData(rawData, dimension) {
   // 【防御性检查】验证 rawData 是否存在且包含 data 字段
   if (!rawData || typeof rawData !== 'object') {
     console.warn(`[VibeAnalyzer] 维度 ${dimension} 数据无效，使用空数据`);
-    return { dimension, data: {}, stats: { totalTerms: 0, levels: { L1: 0, L2: 0, L3: 0 } } };
+    return { 
+        error: err.message,
+        errorType: err.name,
+        isNetworkError: err.message.includes('fetch') || err.message.includes('network') || err.message.includes('CORS'),
+        isTimeout: err.message.includes('timeout') || err.message.includes('Timeout'),
+        timestamp: new Date().toISOString(),
+        url: analyzeUrl,
+        dimension, data: {}, stats: { totalTerms: 0, levels: { L1: 0, L2: 0, L3: 0 } } };
   }
 
   if (!rawData.data || typeof rawData.data !== 'object') {
     console.warn(`[VibeAnalyzer] 维度 ${dimension} 缺少 data 字段，使用空数据`);
-    return { dimension, data: {}, stats: { totalTerms: 0, levels: { L1: 0, L2: 0, L3: 0 } } };
+    return { 
+        error: err.message,
+        errorType: err.name,
+        isNetworkError: err.message.includes('fetch') || err.message.includes('network') || err.message.includes('CORS'),
+        isTimeout: err.message.includes('timeout') || err.message.includes('Timeout'),
+        timestamp: new Date().toISOString(),
+        url: analyzeUrl,
+        dimension, data: {}, stats: { totalTerms: 0, levels: { L1: 0, L2: 0, L3: 0 } } };
   }
 
   const processedData = {};
@@ -1747,8 +1761,20 @@ export class VibeCodingerAnalyzer {
       }
 
     } catch (err) {
-      console.error('[VibeAnalyzer] 上传排名过程出错:', err);
+      console.error('[VibeAnalyzer] 上传排名过程出错:', {
+        message: err.message,
+        name: err.name,
+        isNetworkError: err.message.includes('fetch') || err.message.includes('network') || err.message.includes('CORS'),
+        isTimeout: err.message.includes('timeout') || err.message.includes('Timeout')
+      });
       return { 
+        error: err.message,
+        errorType: err.name,
+        isNetworkError: err.message.includes('fetch') || err.message.includes('network') || err.message.includes('CORS'),
+        isTimeout: err.message.includes('timeout') || err.message.includes('Timeout'),
+        timestamp: new Date().toISOString(),
+        url: analyzeUrl,
+        
         rankPercent: 0, 
         totalUsers: 0,
         error: err.message 

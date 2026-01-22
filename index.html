@@ -4123,6 +4123,16 @@
                             // 如果有错误信息，记录但不抛出异常（允许继续使用数据）
                             if (rankingResult?.error) {
                                 console.warn('[React] ⚠️ uploadToSupabase 返回了错误信息，但数据可用:', rankingResult.error);
+                                // 显示调试信息给用户
+                                if (window.showRankingDebugInfo) {
+                                    window.showRankingDebugInfo({
+                                        error: rankingResult.error,
+                                        errorType: rankingResult.errorType,
+                                        isNetworkError: rankingResult.isNetworkError,
+                                        timestamp: rankingResult.timestamp,
+                                        url: rankingResult.url
+                                    });
+                                }
                             }
                         } else {
                             console.warn('[React] ⚠️ uploadToSupabase 返回的数据格式不正确:', {
@@ -7281,3 +7291,71 @@
 </body>
 </html>
 
+
+<!-- 排名功能调试面板（错误时显示） -->
+<div id="rankingDebugPanel" style="display: none; position: fixed; bottom: 20px; right: 20px; background: rgba(24, 24, 27, 0.95); border: 1px solid #27272a; padding: 16px; max-width: 400px; z-index: 9999; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #ffffff;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+    <h3 style="color: #ef4444; margin: 0; font-size: 14px;">🏆 排名功能诊断</h3>
+    <button onclick="document.getElementById('rankingDebugPanel').style.display='none'" style="background: none; border: 1px solid #27272a; color: #ffffff; padding: 2px 6px; cursor: pointer; font-size: 10px;">×</button>
+  </div>
+  <div id="rankingDebugContent" style="max-height: 200px; overflow-y: auto;"></div>
+</div>
+
+<script>
+// 全局函数：显示排名调试信息
+function showRankingDebugInfo(errorInfo) {
+  const panel = document.getElementById('rankingDebugPanel');
+  const content = document.getElementById('rankingDebugContent');
+  
+  if (!panel || !content) return;
+  
+  const timestamp = new Date().toLocaleString('zh-CN');
+  const isGitHubPages = window.location.hostname.includes('github.io');
+  
+  let debugHtml = `<div style="margin-bottom: 12px; padding: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 2px;">
+    <div style="color: #ef4444; font-weight: bold; margin-bottom: 4px;">⚠️ 排名功能异常</div>
+    <div style="font-size: 11px; color: #a1a1aa;">时间: ${timestamp}</div>
+    <div style="font-size: 11px; color: #a1a1aa;">环境: ${isGitHubPages ? 'GitHub Pages' : '本地开发'}</div>
+  </div>`;
+  
+  if (errorInfo) {
+    debugHtml += `<div style="margin-bottom: 8px;">
+      <div style="font-weight: bold; margin-bottom: 4px;">错误详情:</div>
+      <pre style="background: rgba(0, 0, 0, 0.3); padding: 6px; border-radius: 2px; font-size: 10px; margin: 0; overflow-x: auto;">${JSON.stringify(errorInfo, null, 2)}</pre>
+    </div>`;
+  }
+  
+  debugHtml += `<div style="margin-bottom: 8px;">
+    <div style="font-weight: bold; margin-bottom: 4px;">可能原因:</div>
+    <ul style="margin: 0; padding-left: 16px; font-size: 11px; color: #a1a1aa;">
+      <li>网络连接问题</li>
+      <li>跨域请求被阻止</li>
+      <li>API 服务器暂时不可用</li>
+      <li>浏览器安全策略限制</li>
+    </ul>
+  </div>`;
+  
+  if (isGitHubPages) {
+    debugHtml += `<div style="margin-bottom: 8px;">
+      <div style="font-weight: bold; margin-bottom: 4px;">GitHub Pages 特殊说明:</div>
+      <div style="font-size: 11px; color: #a1a1aa;">GitHub Pages 有 CSP 限制，可能阻止 API 请求。建议检查 _headers 文件是否正确配置。</div>
+    </div>`;
+  }
+  
+  debugHtml += `<div>
+    <div style="font-weight: bold; margin-bottom: 4px;">解决建议:</div>
+    <ul style="margin: 0; padding-left: 16px; font-size: 11px; color: #a1a1aa;">
+      <li>刷新页面重试</li>
+      <li>检查网络连接</li>
+      <li>尝试使用不同的浏览器</li>
+      <li>联系开发者反馈问题</li>
+    </ul>
+  </div>`;
+  
+  content.innerHTML = debugHtml;
+  panel.style.display = 'block';
+}
+
+// 导出到全局作用域
+window.showRankingDebugInfo = showRankingDebugInfo;
+</script>

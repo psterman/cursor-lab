@@ -1476,7 +1476,7 @@
             }
         }
     </style>
-  <script type="module" crossorigin src="/cursor-lab/assets/main-Qq0Y0-m0.js"></script>
+  <script type="module" crossorigin src="/cursor-lab/assets/main-CLTQWZi1.js"></script>
 </head>
 <body class="bg-[#050505]">
     <div id="root"></div>
@@ -2422,6 +2422,7 @@
             const [isShareMode, setIsShareMode] = useState(false); // 是否为分享查看模式
             const [shareRankings, setShareRankings] = useState(null); // 分享的排名数据
             const [hasHistory, setHasHistory] = useState(false); // 是否有历史记录
+            const [shareModal, setShareModal] = useState(null); // 分享弹窗数据 { show: boolean, message: string, shareUrl: string }
             const folderInputRef = useRef(null);
             const fileInputRef = useRef(null);
             // 用于保存动画所需的旧值和新值
@@ -3106,8 +3107,25 @@
             useEffect(() => {
                 const fetchTotalUsers = async () => {
                     try {
-                        const apiUrl = 'https://cursor-clinical-analysis.psterman.workers.dev/';
-                        console.log('[React] 发起 GET 请求获取全网受虐人数...');
+                        // 获取 API 端点（与 main.js 保持一致）
+                        const getApiEndpoint = () => {
+                            if (typeof window !== 'undefined') {
+                                const envApiUrl = window.__API_ENDPOINT__ || window.API_ENDPOINT;
+                                if (envApiUrl) {
+                                    return envApiUrl;
+                                }
+                                const metaApi = document.querySelector('meta[name="api-endpoint"]');
+                                if (metaApi && metaApi.content) {
+                                    const apiUrl = metaApi.content.trim();
+                                    // 确保 URL 格式正确（以 / 结尾）
+                                    return apiUrl.endsWith('/') ? apiUrl : apiUrl + '/';
+                                }
+                            }
+                            return 'https://cursor-clinical-analysis.psterman.workers.dev/';
+                        };
+                        
+                        const apiUrl = getApiEndpoint();
+                        console.log('[React] 发起 GET 请求获取全网受虐人数，API 端点:', apiUrl);
                         
                         const response = await fetch(apiUrl, {
                             method: 'GET',
@@ -3115,6 +3133,7 @@
                                 'Content-Type': 'application/json',
                             },
                             mode: 'cors',
+                            credentials: 'omit', // 避免 CORS 预检问题
                             cache: 'no-cache', // 禁用缓存，确保获取最新数据
                         });
                         
@@ -3587,6 +3606,16 @@
                         rankingResult = await analyzer.uploadToSupabase(vibeResult);
                         
                         console.log('[React] uploadToSupabase 返回结果:', rankingResult);
+                        // ✅ 关键调试：检查 ranks 对象是否存在
+                        if (rankingResult && rankingResult.ranks) {
+                          console.log('[React] ✅ rankingResult.ranks 存在:', rankingResult.ranks);
+                        } else {
+                          console.warn('[React] ⚠️ rankingResult.ranks 不存在！', {
+                            hasRankingResult: !!rankingResult,
+                            hasRanks: !!(rankingResult && rankingResult.ranks),
+                            rankingResult: rankingResult
+                          });
+                        }
                         
                         // 兼容所有可能的排名字段名
                         const finalRank = rankingResult?.rankPercent ?? rankingResult?.ranking ?? 0;
@@ -3606,6 +3635,16 @@
                             // 如果有错误信息，记录但不抛出异常（允许继续使用数据）
                             if (rankingResult?.error) {
                                 console.warn('[React] ⚠️ uploadToSupabase 返回了错误信息，但数据可用:', rankingResult.error);
+                                // 显示调试信息给用户
+                                if (window.showRankingDebugInfo) {
+                                    window.showRankingDebugInfo({
+                                        error: rankingResult.error,
+                                        errorType: rankingResult.errorType,
+                                        isNetworkError: rankingResult.isNetworkError,
+                                        timestamp: rankingResult.timestamp,
+                                        url: rankingResult.url
+                                    });
+                                }
                             }
                         } else {
                             console.warn('[React] ⚠️ uploadToSupabase 返回的数据格式不正确:', {
@@ -3637,13 +3676,34 @@
                             
                             console.log('[React] 降级请求：发送 submit_stats，数据:', userStats);
                             
-                            const apiUrl = 'https://cursor-clinical-analysis.psterman.workers.dev/api/analyze';
+                            // 获取 API 端点（与 main.js 保持一致）
+                            const getApiEndpoint = () => {
+                                if (typeof window !== 'undefined') {
+                                    const envApiUrl = window.__API_ENDPOINT__ || window.API_ENDPOINT;
+                                    if (envApiUrl) {
+                                        return envApiUrl;
+                                    }
+                                    const metaApi = document.querySelector('meta[name="api-endpoint"]');
+                                    if (metaApi && metaApi.content) {
+                                        const apiUrl = metaApi.content.trim();
+                                        return apiUrl.endsWith('/') ? apiUrl : apiUrl + '/';
+                                    }
+                                }
+                                return 'https://cursor-clinical-analysis.psterman.workers.dev/';
+                            };
+                            
+                            const apiEndpoint = getApiEndpoint();
+                            const apiUrl = apiEndpoint.endsWith('/') 
+                                ? `${apiEndpoint}api/analyze` 
+                                : `${apiEndpoint}/api/analyze`;
+                            
                             const response = await fetch(apiUrl, {
                                 method: 'POST',
                                 headers: {
                                     'Content-Type': 'application/json',
                                 },
                                 mode: 'cors',
+                                credentials: 'omit', // 避免 CORS 预检问题
                                 body: JSON.stringify(userStats),
                             });
                             
@@ -3687,8 +3747,50 @@
                     localStorage.setItem('totalTestUsers', newCount.toString());
                     
                     // 保存排名数据到状态（优先使用 uploadToSupabase 返回的排名，否则使用 API 返回的排名）
-                    if (rankingResult && rankingResult.totalUsers > 0) {
-                        // 使用 uploadToSupabase 返回的排名数据
+                    if (rankingResult && rankingResult.ranks) {
+                        // 优先使用 uploadToSupabase 返回的 ranks 对象（多维排名数据）
+                        const apiTotalUsers = rankingResult.totalUsers || newCount || 0;
+                        const ranks = rankingResult.ranks || {};
+                        
+                        // 将百分比排名转换为实际排名数字
+                        const convertPercentToRank = (percent) => {
+                            if (percent === null || percent === undefined || apiTotalUsers <= 0) return null;
+                            if (percent <= 0) return apiTotalUsers;
+                            const beaten = Math.floor(apiTotalUsers * (percent / 100));
+                            const rank = Math.max(1, apiTotalUsers - beaten);
+                            return rank;
+                        };
+                        
+                        window.userRankings = {
+                            qingCount: { 
+                                rank: convertPercentToRank(ranks.ketaoRank), 
+                                total: apiTotalUsers 
+                            },
+                            buCount: { 
+                                rank: convertPercentToRank(ranks.jiafangRank), 
+                                total: apiTotalUsers 
+                            },
+                            userMessages: { 
+                                rank: convertPercentToRank(ranks.messageRank), 
+                                total: apiTotalUsers 
+                            },
+                            totalUserChars: { 
+                                rank: convertPercentToRank(ranks.charRank), 
+                                total: apiTotalUsers 
+                            },
+                            avgUserMessageLength: { 
+                                rank: convertPercentToRank(ranks.avgRank), 
+                                total: apiTotalUsers 
+                            },
+                            usageDays: { 
+                                rank: convertPercentToRank(ranks.daysRank), 
+                                total: apiTotalUsers 
+                            }
+                        };
+                        console.log('[React] ✅ 排名数据已保存（来自 uploadToSupabase ranks）:', window.userRankings);
+                        console.log('[React] 原始 ranks 数据:', ranks);
+                    } else if (rankingResult && rankingResult.totalUsers > 0) {
+                        // 使用 uploadToSupabase 返回的排名数据（单个 rankPercent）
                         const finalRank = rankingResult.rankPercent ?? rankingResult.ranking ?? 0;
                         if (finalRank > 0) {
                             // 构造排名数据结构
@@ -3700,8 +3802,60 @@
                                 avgUserMessageLength: { rank: Math.round(rankingResult.totalUsers * (finalRank / 100)), total: rankingResult.totalUsers },
                                 usageDays: { rank: Math.round(rankingResult.totalUsers * (finalRank / 100)), total: rankingResult.totalUsers }
                             };
-                            console.log('[React] ✅ 排名数据已保存（来自 uploadToSupabase）:', window.userRankings);
+                            console.log('[React] ✅ 排名数据已保存（来自 uploadToSupabase rankPercent）:', window.userRankings);
                         }
+                    } else if (data && data.ranks && data.totalUsers) {
+                        // 处理 Worker 返回的 data.ranks 格式（百分比排名）
+                        // ranks 对象包含：messageRank, charRank, daysRank, jiafangRank, ketaoRank, avgRank
+                        // 这些百分比表示击败了多少用户（beatMsg / totalUsers * 100）
+                        const apiTotalUsers = data.totalUsers || newCount || 0;
+                        const ranks = data.ranks || {};
+                        
+                        // 将百分比排名转换为实际排名数字
+                        // Worker 中：percent = Math.floor((beatMsg / totalUsers) * 100)
+                        // 所以：beatMsg ≈ Math.floor(percent * totalUsers / 100)
+                        // 实际排名 = totalUsers - beatMsg（因为 beatMsg 是击败的用户数，即排名更低的用户数）
+                        const convertPercentToRank = (percent) => {
+                            if (percent === null || percent === undefined || apiTotalUsers <= 0) return null;
+                            // 如果百分比为 0，说明没有击败任何用户，排名可能是最后一名
+                            if (percent <= 0) return apiTotalUsers;
+                            // 计算击败的用户数（向下取整，与 Worker 中的计算保持一致）
+                            const beaten = Math.floor(apiTotalUsers * (percent / 100));
+                            // 实际排名 = 总用户数 - 击败的用户数
+                            // 排名从 1 开始，所以如果击败了 0 个用户，排名是 totalUsers（最后一名）
+                            // 如果击败了 totalUsers-1 个用户，排名是 1（第一名）
+                            const rank = Math.max(1, apiTotalUsers - beaten);
+                            return rank;
+                        };
+                        
+                        window.userRankings = {
+                            qingCount: { 
+                                rank: convertPercentToRank(ranks.ketaoRank), 
+                                total: apiTotalUsers 
+                            },
+                            buCount: { 
+                                rank: convertPercentToRank(ranks.jiafangRank), 
+                                total: apiTotalUsers 
+                            },
+                            userMessages: { 
+                                rank: convertPercentToRank(ranks.messageRank), 
+                                total: apiTotalUsers 
+                            },
+                            totalUserChars: { 
+                                rank: convertPercentToRank(ranks.charRank), 
+                                total: apiTotalUsers 
+                            },
+                            avgUserMessageLength: { 
+                                rank: convertPercentToRank(ranks.avgRank), 
+                                total: apiTotalUsers 
+                            },
+                            usageDays: { 
+                                rank: convertPercentToRank(ranks.daysRank), 
+                                total: apiTotalUsers 
+                            }
+                        };
+                        console.log('[React] ✅ 排名数据已保存（来自 API ranks）:', window.userRankings);
+                        console.log('[React] 原始 ranks 数据:', ranks);
                     } else if (data && data.rankings) {
                         // 兼容旧格式：data.rankings（完整排名对象）
                         window.userRankings = data.rankings;
@@ -3733,7 +3887,7 @@
                     try {
                         const historyData = {
                             analysisData: analysisData,
-                            rankings: (rankingResult && window.userRankings) || (data && data.rankings) || null,
+                            rankings: (rankingResult && window.userRankings) || window.userRankings || (data && data.rankings) || null,
                             timestamp: Date.now()
                         };
                         localStorage.setItem('cursor_clinical_history', JSON.stringify(historyData));
@@ -4549,8 +4703,24 @@
                                 };
                                 
                                 try {
-                                    const apiUrl = 'https://cursor-clinical-analysis.psterman.workers.dev/';
-                                    console.log('[实时更新] 开始获取 Cloudflare 实时数据...');
+                                    // 获取 API 端点（与 main.js 保持一致）
+                                    const getApiEndpoint = () => {
+                                        if (typeof window !== 'undefined') {
+                                            const envApiUrl = window.__API_ENDPOINT__ || window.API_ENDPOINT;
+                                            if (envApiUrl) {
+                                                return envApiUrl;
+                                            }
+                                            const metaApi = document.querySelector('meta[name="api-endpoint"]');
+                                            if (metaApi && metaApi.content) {
+                                                const apiUrl = metaApi.content.trim();
+                                                return apiUrl.endsWith('/') ? apiUrl : apiUrl + '/';
+                                            }
+                                        }
+                                        return 'https://cursor-clinical-analysis.psterman.workers.dev/';
+                                    };
+                                    
+                                    const apiUrl = getApiEndpoint();
+                                    console.log('[实时更新] 开始获取 Cloudflare 实时数据，API 端点:', apiUrl);
                                     
                                     const response = await fetch(apiUrl, {
                                         method: 'GET',
@@ -4558,6 +4728,7 @@
                                             'Content-Type': 'application/json',
                                         },
                                         mode: 'cors',
+                                        credentials: 'omit', // 避免 CORS 预检问题
                                         cache: 'no-cache',
                                     });
                                     
@@ -5290,7 +5461,13 @@
                             ? '[SUCCESS] Share link generated & copied to clipboard\n\nLink length: ' + shareUrl.length + ' chars\n\nDesktop: Interactive | Mobile: View only'
                             : '[SUCCESS] 分享链接已生成并复制到剪贴板\n\n链接长度: ' + shareUrl.length + ' 字符\n\nPC端点开可交互，手机点开直接看结果';
                     }
-                    alert(successMsg);
+                    
+                    // 显示自定义弹窗而不是 alert
+                    setShareModal({
+                        show: true,
+                        message: successMsg,
+                        shareUrl: shareUrl
+                    });
                 } catch (err) {
                     // 降级方案：使用传统方法
                     const textArea = document.createElement('textarea');
@@ -5332,7 +5509,13 @@
                                 ? '[SUCCESS] Share link generated & copied to clipboard\n\nLink length: ' + shareUrl.length + ' chars\n\nDesktop: Interactive | Mobile: View only'
                                 : '[SUCCESS] 分享链接已生成并复制到剪贴板\n\n链接长度: ' + shareUrl.length + ' 字符\n\nPC端点开可交互，手机点开直接看结果';
                         }
-                        alert(successMsg);
+                        
+                        // 显示自定义弹窗而不是 alert
+                        setShareModal({
+                            show: true,
+                            message: successMsg,
+                            shareUrl: shareUrl
+                        });
                     } catch (e) {
                         // 如果复制失败，显示链接让用户手动复制
                         const promptMsg = lang === 'en' 
@@ -5370,6 +5553,74 @@
                 } catch (err) {
                     console.error('导出失败:', err);
                     alert('导出失败: ' + err.message);
+                }
+            };
+
+            // 保存预览结果图片
+            const savePreviewImage = async () => {
+                try {
+                    // 获取预览结果容器
+                    const previewContainer = document.querySelector('[data-preview-container]');
+                    if (!previewContainer) {
+                        const errorMsg = lang === 'en' 
+                            ? 'Preview container not found' 
+                            : '预览容器未找到';
+                        alert(errorMsg);
+                        return;
+                    }
+
+                    // 使用 html2canvas 捕获预览区域
+                    const html2canvasLib = window.html2canvas || globalThis.html2canvas;
+                    if (!html2canvasLib) {
+                        const errorMsg = lang === 'en' 
+                            ? 'html2canvas library not loaded' 
+                            : 'html2canvas 库未加载';
+                        alert(errorMsg);
+                        return;
+                    }
+
+                    // 添加保存图片的类，强制横版布局
+                    previewContainer.classList.add('saving-image');
+                    
+                    // 等待布局更新
+                    await new Promise(resolve => setTimeout(resolve, 100));
+
+                    const canvas = await html2canvasLib(previewContainer, {
+                        backgroundColor: '#18181b',
+                        scale: 2,
+                        useCORS: true,
+                        logging: false,
+                        allowTaint: true,
+                        width: 1200,
+                        windowWidth: 1200,
+                    });
+
+                    // 移除保存图片的类，恢复原始布局
+                    previewContainer.classList.remove('saving-image');
+
+                    // 创建下载链接
+                    const link = document.createElement('a');
+                    const timestamp = new Date().getTime();
+                    // 从 state 或全局变量获取人格名称
+                    const currentAnalysisData = analysisData || window.shareModeVibeResult || null;
+                    const personalityName = currentAnalysisData?.personalityName || currentAnalysisData?.vibeResult?.personalityName || 'personality';
+                    const safeName = personalityName.replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+                    const filename = `cursor-personality-${safeName}-${timestamp}.png`;
+                    link.download = filename;
+                    link.href = canvas.toDataURL('image/png');
+                    link.click();
+
+                    // 显示成功提示
+                    const successMsg = lang === 'en' 
+                        ? 'Image saved successfully!' 
+                        : '图片保存成功！';
+                    console.log('[保存图片]', successMsg);
+                } catch (err) {
+                    console.error('[保存图片] 失败:', err);
+                    const errorMsg = lang === 'en' 
+                        ? 'Failed to save image: ' + err.message 
+                        : '保存图片失败: ' + err.message;
+                    alert(errorMsg);
                 }
             };
 
@@ -5772,7 +6023,11 @@
                                             fontFamily: "'JetBrains Mono', monospace",
                                             opacity: 0.8
                                         }}>
-                                            {'> '}{t('upload.pathHelp')}
+                                            {'> '}{(() => {
+                                                const isMac = navigator.platform.toLowerCase().includes('mac') || 
+                                                             navigator.userAgent.toLowerCase().includes('mac');
+                                                return isMac ? t('upload.pathHelpMac') : t('upload.pathHelp');
+                                            })()}
                                         </p>
                                     </div>
                                 </div>
@@ -5810,62 +6065,158 @@
                                             {lang === 'en' ? '> VIEWING SHARED REPORT' : '> 正在查看分享的报告'}
                                         </span>
                                     </div>
-                                    <button 
-                                        onClick={resetToUpload}
-                                        className="flex items-center justify-center gap-2 bg-green-500 text-black px-6 py-2 rounded-sm font-bold hover:bg-transparent hover:text-green-500 transition-colors border border-green-500 uppercase tracking-wider font-mono text-sm"
-                                    >
-                                        <Icon name="refresh-cw" size={16} />
-                                        {lang === 'en' ? 'RUN TEST' : '我也要测'}
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <button 
+                                            onClick={savePreviewImage}
+                                            className="flex items-center justify-center gap-2 bg-transparent text-green-500 px-6 py-2 rounded-sm font-bold hover:bg-green-500/10 transition-colors border border-green-500 uppercase tracking-wider font-mono text-sm"
+                                        >
+                                            <Icon name="download" size={16} />
+                                            {lang === 'en' ? 'SAVE IMAGE' : '保存图片'}
+                                        </button>
+                                        <button 
+                                            onClick={resetToUpload}
+                                            className="flex items-center justify-center gap-2 bg-green-500 text-black px-6 py-2 rounded-sm font-bold hover:bg-transparent hover:text-green-500 transition-colors border border-green-500 uppercase tracking-wider font-mono text-sm"
+                                        >
+                                            <Icon name="refresh-cw" size={16} />
+                                            {lang === 'en' ? 'RUN TEST' : '我也要测'}
+                                        </button>
+                                    </div>
                                 </div>
                             )}
                             
-                            <div className="bg-zinc-900 border border-zinc-800 rounded-sm p-6 md:p-8 relative overflow-hidden shadow-2xl">
-                                
-                                <div className="flex flex-col md:flex-row justify-between items-start gap-6">
-                                    <div className={`space-y-4 flex-1 ${lang === 'en' ? 'md:max-w-lg' : 'md:max-w-md'}`}>
-                                        <div>
-                                            <h2 className="text-zinc-500 text-sm uppercase tracking-widest mb-1 font-mono">{t('preview.personalityLabel')}</h2>
-                                            <div className="text-5xl font-black text-white font-mono">
-                                                {analysisData.vibeResult?.personalityName || t('dashboard.unknownPersonality')}
-                                            </div>
+                            {/* 横版卡片布局 - 用于保存图片 */}
+                            <div 
+                                className="bg-zinc-900 border border-zinc-800 rounded-sm p-6 md:p-8 relative overflow-hidden shadow-2xl preview-card-horizontal"
+                                data-preview-container
+                            >
+                                {/* 左侧：人格信息 */}
+                                <div className="preview-card-left">
+                                    <div>
+                                        <h2 className="text-zinc-500 text-sm uppercase tracking-widest mb-2 font-mono">{t('preview.personalityLabel')}</h2>
+                                        <div className="text-4xl md:text-5xl font-black text-white font-mono mb-4" style={{ wordBreak: 'break-word' }}>
+                                            {analysisData.vibeResult?.personalityName || t('dashboard.unknownPersonality')}
                                         </div>
-                                        <p className={`text-zinc-400 ${lang === 'en' ? 'text-base' : 'text-lg'}`}>
-                                            {analysisData.vibeResult?.roastText || t('preview.analyzing')}
-                                        </p>
                                     </div>
-
-                                    <div className={`grid grid-cols-2 gap-4 ${lang === 'en' ? 'md:w-[460px]' : 'md:w-[420px]'} w-full md:w-auto`}>
-                                        <StatBox 
-                                            label={t('dashboard.totalUsers')} 
-                                            value={formatNumber(totalUsers)} 
-                                            sub={t('dashboard.personUnit')} 
-                                            color="text-white"
-                                            lang={lang}
-                                        />
-                                        <StatBox 
-                                            label={t('dashboard.cyberBowCount')} 
-                                            value={analysisData.stats?.qingCount || 0} 
-                                            sub={t('dashboard.timesUnit')} 
-                                            color="text-white"
-                                            lang={lang}
-                                        />
-                                        <StatBox 
-                                            label={t('preview.globalRank')} 
-                                            value={calculateRank(analysisData.stats?.qingCount || 0)} 
-                                            sub={lang === 'en' ? t('dashboard.rankUnit') : '%'} 
-                                            color="text-white"
-                                            lang={lang}
-                                        />
-                                        <StatBox 
-                                            label={t('statsLabels.totalConversations')} 
-                                            value={calculateUsageDays(analysisData.stats)} 
-                                            sub={t('statsLabels.unit.days')} 
-                                            color="text-white"
-                                            lang={lang}
-                                        />
-                                    </div>
+                                    <p 
+                                        className="text-zinc-400 preview-text" 
+                                        style={{
+                                            fontSize: lang === 'en' ? '14px' : '16px',
+                                            lineHeight: '1.6',
+                                            wordBreak: 'break-word',
+                                            whiteSpace: 'normal',
+                                            overflow: 'visible'
+                                        }}
+                                    >
+                                        {analysisData.vibeResult?.roastText || t('preview.analyzing')}
+                                    </p>
                                 </div>
+
+                                {/* 右侧：统计数据 */}
+                                <div className="preview-card-right">
+                                    <StatBox 
+                                        label={t('dashboard.totalUsers')} 
+                                        value={formatNumber(totalUsers)} 
+                                        sub={t('dashboard.personUnit')} 
+                                        color="text-white"
+                                        lang={lang}
+                                    />
+                                    <StatBox 
+                                        label={t('dashboard.cyberBowCount')} 
+                                        value={analysisData.stats?.qingCount || 0} 
+                                        sub={t('dashboard.timesUnit')} 
+                                        color="text-white"
+                                        lang={lang}
+                                    />
+                                    <StatBox 
+                                        label={t('preview.globalRank')} 
+                                        value={calculateRank(analysisData.stats?.qingCount || 0)} 
+                                        sub={lang === 'en' ? t('dashboard.rankUnit') : '%'} 
+                                        color="text-white"
+                                        lang={lang}
+                                    />
+                                    <StatBox 
+                                        label={t('statsLabels.totalConversations')} 
+                                        value={calculateUsageDays(analysisData.stats)} 
+                                        sub={t('statsLabels.unit.days')} 
+                                        color="text-white"
+                                        lang={lang}
+                                    />
+                                </div>
+                                
+                                <style>{`
+                                    .preview-card-horizontal {
+                                        display: flex;
+                                        flex-direction: row;
+                                        align-items: stretch;
+                                        min-height: 300px;
+                                        width: 100%;
+                                        max-width: 1200px;
+                                    }
+                                    
+                                    .preview-card-left {
+                                        flex: 1 1 50%;
+                                        display: flex;
+                                        flex-direction: column;
+                                        justify-content: space-between;
+                                        padding-right: 24px;
+                                        min-width: 0;
+                                    }
+                                    
+                                    .preview-card-right {
+                                        flex: 0 0 auto;
+                                        display: grid;
+                                        grid-template-columns: repeat(2, 1fr);
+                                        gap: 16px;
+                                        width: ${lang === 'en' ? '460px' : '420px'};
+                                        min-width: ${lang === 'en' ? '460px' : '420px'};
+                                    }
+                                    
+                                    .preview-text {
+                                        word-break: break-word;
+                                        white-space: normal !important;
+                                        overflow: visible !important;
+                                    }
+                                    
+                                    @media (max-width: 768px) {
+                                        .preview-card-horizontal {
+                                            flex-direction: column;
+                                            max-width: 100%;
+                                        }
+                                        
+                                        .preview-card-left {
+                                            flex: 1 1 100%;
+                                            padding-right: 0;
+                                            padding-bottom: 24px;
+                                        }
+                                        
+                                        .preview-card-right {
+                                            flex: 1 1 100%;
+                                            width: 100%;
+                                            min-width: 100%;
+                                            padding-top: 24px;
+                                        }
+                                    }
+                                    
+                                    /* 保存图片时强制横版布局 */
+                                    [data-preview-container].saving-image {
+                                        flex-direction: row !important;
+                                        max-width: 1200px !important;
+                                        width: 1200px !important;
+                                    }
+                                    
+                                    [data-preview-container].saving-image .preview-card-left {
+                                        flex: 1 1 50% !important;
+                                        padding-right: 24px !important;
+                                        padding-bottom: 0 !important;
+                                    }
+                                    
+                                    [data-preview-container].saving-image .preview-card-right {
+                                        flex: 0 0 auto !important;
+                                        width: ${lang === 'en' ? '460px' : '420px'} !important;
+                                        min-width: ${lang === 'en' ? '460px' : '420px'} !important;
+                                        padding-top: 0 !important;
+                                    }
+                                `}</style>
                             </div>
 
                             {/* 分享模式下隐藏操作按钮 */}
@@ -5904,13 +6255,22 @@
                                             {lang === 'en' ? '> VIEWING SHARED REPORT' : '> 正在查看分享的报告'}
                                         </span>
                                     </div>
-                                    <button 
-                                        onClick={resetToUpload}
-                                        className="flex items-center justify-center gap-2 bg-green-500 text-black px-6 py-2 rounded-sm font-bold hover:bg-transparent hover:text-green-500 transition-colors border border-green-500 uppercase tracking-wider font-mono text-sm"
-                                    >
-                                        <Icon name="refresh-cw" size={16} />
-                                        {lang === 'en' ? 'RUN TEST' : '我也要测'}
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                        <button 
+                                            onClick={exportReport}
+                                            className="flex items-center justify-center gap-2 bg-transparent text-green-500 px-6 py-2 rounded-sm font-bold hover:bg-green-500/10 transition-colors border border-green-500 uppercase tracking-wider font-mono text-sm"
+                                        >
+                                            <Icon name="download" size={16} />
+                                            {lang === 'en' ? 'SAVE IMAGE' : '保存图片'}
+                                        </button>
+                                        <button 
+                                            onClick={resetToUpload}
+                                            className="flex items-center justify-center gap-2 bg-green-500 text-black px-6 py-2 rounded-sm font-bold hover:bg-transparent hover:text-green-500 transition-colors border border-green-500 uppercase tracking-wider font-mono text-sm"
+                                        >
+                                            <Icon name="refresh-cw" size={16} />
+                                            {lang === 'en' ? 'RUN TEST' : '我也要测'}
+                                        </button>
+                                    </div>
                                 </div>
                             )}
                             
@@ -6321,6 +6681,117 @@
                             }
                         }
                     `}</style>
+
+                    {/* 分享弹窗 */}
+                    {shareModal && shareModal.show && (
+                        <div 
+                            style={{
+                                position: 'fixed',
+                                top: 0,
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                zIndex: 10000,
+                                padding: '20px'
+                            }}
+                            onClick={() => setShareModal(null)}
+                        >
+                            <div 
+                                style={{
+                                    backgroundColor: '#0a0a0a',
+                                    border: '1px solid var(--accent-terminal)',
+                                    borderRadius: '4px',
+                                    padding: '24px',
+                                    maxWidth: '500px',
+                                    width: '100%',
+                                    boxShadow: '0 0 20px rgba(0, 255, 65, 0.3)'
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                <div style={{
+                                    color: 'var(--accent-terminal)',
+                                    fontFamily: "'JetBrains Mono', monospace",
+                                    fontSize: '14px',
+                                    lineHeight: '1.6',
+                                    whiteSpace: 'pre-line',
+                                    marginBottom: '20px'
+                                }}>
+                                    {shareModal.message}
+                                </div>
+                                <div style={{
+                                    display: 'flex',
+                                    gap: '12px',
+                                    justifyContent: 'flex-end',
+                                    flexWrap: 'wrap'
+                                }}>
+                                    <button
+                                        onClick={async () => {
+                                            try {
+                                                await savePreviewImage();
+                                            } catch (err) {
+                                                console.error('[分享弹窗] 保存图片失败:', err);
+                                            }
+                                        }}
+                                        style={{
+                                            padding: '10px 20px',
+                                            backgroundColor: 'transparent',
+                                            border: '1px solid var(--accent-terminal)',
+                                            color: 'var(--accent-terminal)',
+                                            borderRadius: '2px',
+                                            fontFamily: "'JetBrains Mono', monospace",
+                                            fontSize: '12px',
+                                            fontWeight: 'bold',
+                                            cursor: 'pointer',
+                                            textTransform: 'uppercase',
+                                            letterSpacing: '0.05em',
+                                            transition: 'all 0.2s ease'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.target.style.backgroundColor = 'var(--accent-terminal)';
+                                            e.target.style.color = '#000';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.target.style.backgroundColor = 'transparent';
+                                            e.target.style.color = 'var(--accent-terminal)';
+                                        }}
+                                    >
+                                        {lang === 'en' ? 'SAVE IMAGE' : '保存图片'}
+                                    </button>
+                                    <button
+                                        onClick={() => setShareModal(null)}
+                                        style={{
+                                            padding: '10px 20px',
+                                            backgroundColor: 'var(--accent-terminal)',
+                                            border: '1px solid var(--accent-terminal)',
+                                            color: '#000',
+                                            borderRadius: '2px',
+                                            fontFamily: "'JetBrains Mono', monospace",
+                                            fontSize: '12px',
+                                            fontWeight: 'bold',
+                                            cursor: 'pointer',
+                                            textTransform: 'uppercase',
+                                            letterSpacing: '0.05em',
+                                            transition: 'all 0.2s ease'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.target.style.backgroundColor = 'transparent';
+                                            e.target.style.color = 'var(--accent-terminal)';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.target.style.backgroundColor = 'var(--accent-terminal)';
+                                            e.target.style.color = '#000';
+                                        }}
+                                    >
+                                        {lang === 'en' ? 'OK' : '确定'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             );
         }
@@ -6332,3 +6803,71 @@
 </body>
 </html>
 
+
+<!-- 排名功能调试面板（错误时显示） -->
+<div id="rankingDebugPanel" style="display: none; position: fixed; bottom: 20px; right: 20px; background: rgba(24, 24, 27, 0.95); border: 1px solid #27272a; padding: 16px; max-width: 400px; z-index: 9999; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #ffffff;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+    <h3 style="color: #ef4444; margin: 0; font-size: 14px;">🏆 排名功能诊断</h3>
+    <button onclick="document.getElementById('rankingDebugPanel').style.display='none'" style="background: none; border: 1px solid #27272a; color: #ffffff; padding: 2px 6px; cursor: pointer; font-size: 10px;">×</button>
+  </div>
+  <div id="rankingDebugContent" style="max-height: 200px; overflow-y: auto;"></div>
+</div>
+
+<script>
+// 全局函数：显示排名调试信息
+function showRankingDebugInfo(errorInfo) {
+  const panel = document.getElementById('rankingDebugPanel');
+  const content = document.getElementById('rankingDebugContent');
+  
+  if (!panel || !content) return;
+  
+  const timestamp = new Date().toLocaleString('zh-CN');
+  const isGitHubPages = window.location.hostname.includes('github.io');
+  
+  let debugHtml = `<div style="margin-bottom: 12px; padding: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 2px;">
+    <div style="color: #ef4444; font-weight: bold; margin-bottom: 4px;">⚠️ 排名功能异常</div>
+    <div style="font-size: 11px; color: #a1a1aa;">时间: ${timestamp}</div>
+    <div style="font-size: 11px; color: #a1a1aa;">环境: ${isGitHubPages ? 'GitHub Pages' : '本地开发'}</div>
+  </div>`;
+  
+  if (errorInfo) {
+    debugHtml += `<div style="margin-bottom: 8px;">
+      <div style="font-weight: bold; margin-bottom: 4px;">错误详情:</div>
+      <pre style="background: rgba(0, 0, 0, 0.3); padding: 6px; border-radius: 2px; font-size: 10px; margin: 0; overflow-x: auto;">${JSON.stringify(errorInfo, null, 2)}</pre>
+    </div>`;
+  }
+  
+  debugHtml += `<div style="margin-bottom: 8px;">
+    <div style="font-weight: bold; margin-bottom: 4px;">可能原因:</div>
+    <ul style="margin: 0; padding-left: 16px; font-size: 11px; color: #a1a1aa;">
+      <li>网络连接问题</li>
+      <li>跨域请求被阻止</li>
+      <li>API 服务器暂时不可用</li>
+      <li>浏览器安全策略限制</li>
+    </ul>
+  </div>`;
+  
+  if (isGitHubPages) {
+    debugHtml += `<div style="margin-bottom: 8px;">
+      <div style="font-weight: bold; margin-bottom: 4px;">GitHub Pages 特殊说明:</div>
+      <div style="font-size: 11px; color: #a1a1aa;">GitHub Pages 有 CSP 限制，可能阻止 API 请求。建议检查 _headers 文件是否正确配置。</div>
+    </div>`;
+  }
+  
+  debugHtml += `<div>
+    <div style="font-weight: bold; margin-bottom: 4px;">解决建议:</div>
+    <ul style="margin: 0; padding-left: 16px; font-size: 11px; color: #a1a1aa;">
+      <li>刷新页面重试</li>
+      <li>检查网络连接</li>
+      <li>尝试使用不同的浏览器</li>
+      <li>联系开发者反馈问题</li>
+    </ul>
+  </div>`;
+  
+  content.innerHTML = debugHtml;
+  panel.style.display = 'block';
+}
+
+// 导出到全局作用域
+window.showRankingDebugInfo = showRankingDebugInfo;
+</script>
