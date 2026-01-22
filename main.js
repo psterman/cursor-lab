@@ -2933,17 +2933,20 @@ async function fetchWithCORS(url, options = {}) {
  * 从后端 API 获取全局平均值
  * @returns {Promise<Object>} 返回全局平均值对象 {L, P, D, E, F}，如果失败则返回默认值
  */
-// 强制锁定 Cloudflare 绝对地址，跳过路径解析
-const API_URL = 'https://cursor-clinical-analysis.psterman.workers.dev/api/global-average';
-
 async function fetchGlobalAverage() {
   const defaultAverage = { L: 50, P: 50, D: 50, E: 50, F: 50 };
   
   try {
-    console.log('[Main] 开始获取全局平均值，URL:', API_URL);
+    // 使用动态 API 端点，而不是硬编码
+    const apiEndpoint = getApiEndpoint();
+    const apiUrl = apiEndpoint.endsWith('/') 
+      ? `${apiEndpoint}api/global-average` 
+      : `${apiEndpoint}/api/global-average`;
     
-    // 直接请求，不拼接任何变量
-    const res = await fetch(API_URL, {
+    console.log('[Main] 开始获取全局平均值，URL:', apiUrl);
+    
+    // 使用动态端点请求
+    const res = await fetch(apiUrl, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
