@@ -1613,16 +1613,26 @@ export class VibeCodingerAnalyzer {
           : '正在连接数据库，同步全球排名...');
       }
 
-      // 2. 获取 API 端点
-      let apiEndpoint;
-      if (typeof window !== 'undefined') {
-        const metaApi = document.querySelector('meta[name="api-endpoint"]');
-        if (metaApi && metaApi.content) {
-          apiEndpoint = metaApi.content;
+      // 2. 获取 API 端点（与 index.html 降级逻辑保持一致）
+      const getApiEndpoint = () => {
+        if (typeof window !== 'undefined') {
+          // 优先使用 window 对象中的配置
+          const envApiUrl = window.__API_ENDPOINT__ || window.API_ENDPOINT;
+          if (envApiUrl) {
+            return envApiUrl;
+          }
+          // 其次使用 meta 标签
+          const metaApi = document.querySelector('meta[name="api-endpoint"]');
+          if (metaApi && metaApi.content) {
+            const apiUrl = metaApi.content.trim();
+            return apiUrl.endsWith('/') ? apiUrl : apiUrl + '/';
+          }
         }
-      }
+        // 默认 API 端点
+        return 'https://cursor-clinical-analysis.psterman.workers.dev/';
+      };
       
-      if (!apiEndpoint) throw new Error('API endpoint not found');
+      const apiEndpoint = getApiEndpoint();
 
       // 3. 从 vibeResult 中提取所有数据，构造完整的数据包
       // 注意：后端 /api/analyze 端点期望直接接收 stats 对象，不需要 action 包装
