@@ -4215,8 +4215,50 @@
                     localStorage.setItem('totalTestUsers', newCount.toString());
                     
                     // 保存排名数据到状态（优先使用 uploadToSupabase 返回的排名，否则使用 API 返回的排名）
-                    if (rankingResult && rankingResult.totalUsers > 0) {
-                        // 使用 uploadToSupabase 返回的排名数据
+                    if (rankingResult && rankingResult.ranks) {
+                        // 优先使用 uploadToSupabase 返回的 ranks 对象（多维排名数据）
+                        const apiTotalUsers = rankingResult.totalUsers || newCount || 0;
+                        const ranks = rankingResult.ranks || {};
+                        
+                        // 将百分比排名转换为实际排名数字
+                        const convertPercentToRank = (percent) => {
+                            if (percent === null || percent === undefined || apiTotalUsers <= 0) return null;
+                            if (percent <= 0) return apiTotalUsers;
+                            const beaten = Math.floor(apiTotalUsers * (percent / 100));
+                            const rank = Math.max(1, apiTotalUsers - beaten);
+                            return rank;
+                        };
+                        
+                        window.userRankings = {
+                            qingCount: { 
+                                rank: convertPercentToRank(ranks.ketaoRank), 
+                                total: apiTotalUsers 
+                            },
+                            buCount: { 
+                                rank: convertPercentToRank(ranks.jiafangRank), 
+                                total: apiTotalUsers 
+                            },
+                            userMessages: { 
+                                rank: convertPercentToRank(ranks.messageRank), 
+                                total: apiTotalUsers 
+                            },
+                            totalUserChars: { 
+                                rank: convertPercentToRank(ranks.charRank), 
+                                total: apiTotalUsers 
+                            },
+                            avgUserMessageLength: { 
+                                rank: convertPercentToRank(ranks.avgRank), 
+                                total: apiTotalUsers 
+                            },
+                            usageDays: { 
+                                rank: convertPercentToRank(ranks.daysRank), 
+                                total: apiTotalUsers 
+                            }
+                        };
+                        console.log('[React] ✅ 排名数据已保存（来自 uploadToSupabase ranks）:', window.userRankings);
+                        console.log('[React] 原始 ranks 数据:', ranks);
+                    } else if (rankingResult && rankingResult.totalUsers > 0) {
+                        // 使用 uploadToSupabase 返回的排名数据（单个 rankPercent）
                         const finalRank = rankingResult.rankPercent ?? rankingResult.ranking ?? 0;
                         if (finalRank > 0) {
                             // 构造排名数据结构
@@ -4228,7 +4270,7 @@
                                 avgUserMessageLength: { rank: Math.round(rankingResult.totalUsers * (finalRank / 100)), total: rankingResult.totalUsers },
                                 usageDays: { rank: Math.round(rankingResult.totalUsers * (finalRank / 100)), total: rankingResult.totalUsers }
                             };
-                            console.log('[React] ✅ 排名数据已保存（来自 uploadToSupabase）:', window.userRankings);
+                            console.log('[React] ✅ 排名数据已保存（来自 uploadToSupabase rankPercent）:', window.userRankings);
                         }
                     } else if (data && data.ranks && data.totalUsers) {
                         // 处理 Worker 返回的 data.ranks 格式（百分比排名）
