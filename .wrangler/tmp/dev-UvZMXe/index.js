@@ -4051,13 +4051,13 @@ app.post("/api/v2/analyze", async (c) => {
     if (env.SUPABASE_URL && env.SUPABASE_KEY) {
       try {
         const [totalUsersRes, globalRes] = await Promise.all([
-          fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_view?select=total_count`, {
+          fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_v3_view?select=total_count`, {
             headers: {
               "apikey": env.SUPABASE_KEY,
               "Authorization": `Bearer ${env.SUPABASE_KEY}`
             }
           }),
-          fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_view?select=*`, {
+          fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_v3_view?select=*`, {
             headers: {
               "apikey": env.SUPABASE_KEY,
               "Authorization": `Bearer ${env.SUPABASE_KEY}`
@@ -4352,13 +4352,13 @@ app.post("/api/analyze", async (c) => {
       });
     }
     const [totalUsersRes, globalRes] = await Promise.all([
-      fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_view?select=total_count`, {
+      fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_v3_view?select=total_count`, {
         headers: {
           "apikey": env.SUPABASE_KEY,
           "Authorization": `Bearer ${env.SUPABASE_KEY}`
         }
       }),
-      fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_view?select=*`, {
+      fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_v3_view?select=*`, {
         headers: {
           "apikey": env.SUPABASE_KEY,
           "Authorization": `Bearer ${env.SUPABASE_KEY}`
@@ -4484,8 +4484,8 @@ app.post("/api/analyze", async (c) => {
 });
 app.get("/api/global-average", async (c) => {
   try {
+    const forceRefresh = c.req.query("force_refresh") === "true";
     const env = c.env;
-    const defaultAverage = { L: 50, P: 50, D: 50, E: 50, F: 50 };
     const defaultDimensions = {
       L: { label: "\u903B\u8F91\u529B" },
       P: { label: "\u8010\u5FC3\u503C" },
@@ -4493,28 +4493,64 @@ app.get("/api/global-average", async (c) => {
       E: { label: "\u60C5\u7EEA\u5316" },
       F: { label: "\u9891\u7387\u611F" }
     };
+    const defaultAverage = { L: 50, P: 50, D: 50, E: 50, F: 50 };
+    if (forceRefresh) {
+      console.log("[Worker] \u{1F504} \u5F3A\u5236\u5237\u65B0\uFF0C\u8DF3\u8FC7 KV \u7F13\u5B58");
+      console.log("--- \u6B63\u5728\u7A7F\u900F\u7F13\u5B58\u83B7\u53D6\u6700\u65B0\u6570\u636E ---");
+      return await fetchFromSupabase(env, defaultAverage, defaultDimensions, c, true);
+    }
     if (!env.STATS_STORE) {
       console.warn("[Worker] KV \u672A\u914D\u7F6E\uFF0C\u76F4\u63A5\u67E5\u8BE2 Supabase");
-      return await fetchFromSupabase(env, defaultAverage, defaultDimensions, c);
+      console.log("--- \u6B63\u5728\u7A7F\u900F\u7F13\u5B58\u83B7\u53D6\u6700\u65B0\u6570\u636E ---");
+      return await fetchFromSupabase(env, defaultAverage, defaultDimensions, c, false);
     }
     try {
       const cachedData = await env.STATS_STORE.get(KV_KEY_GLOBAL_AVERAGE, "json");
       const lastUpdate = await env.STATS_STORE.get(KV_KEY_LAST_UPDATE);
       if (cachedData && lastUpdate) {
+        if (!cachedData.dimensions) {
+          console.warn("[Worker] \u26A0\uFE0F \u68C0\u6D4B\u5230\u65E7\u7248\u7F13\u5B58\u6570\u636E\uFF08\u7F3A\u5C11 dimensions\uFF09\uFF0C\u5FFD\u7565\u7F13\u5B58\uFF0C\u91CD\u65B0\u67E5\u8BE2");
+          console.log("--- \u6B63\u5728\u7A7F\u900F\u7F13\u5B58\u83B7\u53D6\u6700\u65B0\u6570\u636E ---");
+          return await fetchFromSupabase(env, defaultAverage, defaultDimensions, c, true);
+        }
         const lastUpdateTime = parseInt(lastUpdate, 10);
         const now = Math.floor(Date.now() / 1e3);
         const age = now - lastUpdateTime;
         if (age < KV_CACHE_TTL) {
           console.log(`[Worker] \u2705 \u4ECE KV \u8FD4\u56DE\u7F13\u5B58\u6570\u636E\uFF08${age}\u79D2\u524D\u66F4\u65B0\uFF09`);
-          let totalUsers = 1;
           if (env.SUPABASE_URL && env.SUPABASE_KEY) {
             try {
-              const totalUsersRes = await fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_view?select=total_count`, {
-                headers: {
-                  "apikey": env.SUPABASE_KEY,
-                  "Authorization": `Bearer ${env.SUPABASE_KEY}`
-                }
-              });
+              const [totalUsersRes, recentVictimsRes, allLocationsRes, dashboardSummaryRes] = await Promise.all([
+                // 总用户数
+                fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_v3_view?select=total_count`, {
+                  headers: {
+                    "apikey": env.SUPABASE_KEY,
+                    "Authorization": `Bearer ${env.SUPABASE_KEY}`
+                  }
+                }),
+                // 最近受害者（最新的 5 条记录）
+                fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=personality_type,ip_location,created_at&order=created_at.desc&limit=5`, {
+                  headers: {
+                    "apikey": env.SUPABASE_KEY,
+                    "Authorization": `Bearer ${env.SUPABASE_KEY}`
+                  }
+                }),
+                // 所有地理位置（用于统计城市数和热力排行）
+                fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=ip_location&ip_location=not.is.null`, {
+                  headers: {
+                    "apikey": env.SUPABASE_KEY,
+                    "Authorization": `Bearer ${env.SUPABASE_KEY}`
+                  }
+                }),
+                // 汇总统计数据（从 dashboard_summary_view 获取 total_words）
+                fetch(`${env.SUPABASE_URL}/rest/v1/dashboard_summary_view?select=total_words`, {
+                  headers: {
+                    "apikey": env.SUPABASE_KEY,
+                    "Authorization": `Bearer ${env.SUPABASE_KEY}`
+                  }
+                })
+              ]);
+              let totalUsers = 1;
               if (totalUsersRes.ok) {
                 const totalData = await totalUsersRes.json();
                 totalUsers = totalData[0]?.total_count || 1;
@@ -4522,33 +4558,291 @@ app.get("/api/global-average", async (c) => {
                   totalUsers = 1;
                 }
               }
+              let recentVictims = [];
+              if (recentVictimsRes.ok) {
+                try {
+                  const victimsData = await recentVictimsRes.json();
+                  recentVictims = victimsData.map((item) => ({
+                    type: item.personality_type || "UNKNOWN",
+                    location: item.ip_location || "\u672A\u77E5",
+                    time: item.created_at || (/* @__PURE__ */ new Date()).toISOString()
+                  }));
+                } catch (error) {
+                  console.warn("[Worker] \u26A0\uFE0F \u89E3\u6790\u6700\u8FD1\u53D7\u5BB3\u8005\u6570\u636E\u5931\u8D25:", error);
+                }
+              }
+              let cityCount = 0;
+              let locationRank = [];
+              if (allLocationsRes.ok) {
+                try {
+                  const locationsData = await allLocationsRes.json();
+                  const locationMap = /* @__PURE__ */ new Map();
+                  locationsData.forEach((item) => {
+                    if (item.ip_location && item.ip_location !== "\u672A\u77E5") {
+                      const count = locationMap.get(item.ip_location) || 0;
+                      locationMap.set(item.ip_location, count + 1);
+                    }
+                  });
+                  cityCount = locationMap.size;
+                  locationRank = Array.from(locationMap.entries()).map(([location, count]) => ({ location, count })).sort((a, b) => b.count - a.count).slice(0, 5);
+                } catch (error) {
+                  console.warn("[Worker] \u26A0\uFE0F \u89E3\u6790\u5730\u7406\u4F4D\u7F6E\u6570\u636E\u5931\u8D25:", error);
+                }
+              }
+              let totalRoastWords = 0;
+              if (dashboardSummaryRes.ok) {
+                try {
+                  const summaryData = await dashboardSummaryRes.json();
+                  const summaryRow = summaryData[0] || {};
+                  totalRoastWords = parseInt(summaryRow.total_words || 0);
+                  console.log("[Worker] \u2705 \u4ECE dashboard_summary_view \u83B7\u53D6 total_words:", totalRoastWords);
+                } catch (error) {
+                  console.warn("[Worker] \u26A0\uFE0F \u89E3\u6790 dashboard_summary_view \u6570\u636E\u5931\u8D25:", error);
+                  try {
+                    const roastWordsRes = await fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=roast_text`, {
+                      headers: {
+                        "apikey": env.SUPABASE_KEY,
+                        "Authorization": `Bearer ${env.SUPABASE_KEY}`
+                      }
+                    });
+                    if (roastWordsRes.ok) {
+                      const roastData = await roastWordsRes.json();
+                      totalRoastWords = roastData.reduce((sum, item) => {
+                        const text = item.roast_text || "";
+                        return sum + text.length;
+                      }, 0);
+                      console.log("[Worker] \u2705 \u964D\u7EA7\u65B9\u6848\uFF1A\u4ECE user_analysis \u8BA1\u7B97 totalRoastWords:", totalRoastWords);
+                    }
+                  } catch (fallbackError) {
+                    console.warn("[Worker] \u26A0\uFE0F \u964D\u7EA7\u65B9\u6848\u4E5F\u5931\u8D25:", fallbackError);
+                  }
+                }
+              } else {
+                console.warn("[Worker] \u26A0\uFE0F dashboard_summary_view \u67E5\u8BE2\u5931\u8D25\uFF0CHTTP \u72B6\u6001:", dashboardSummaryRes.status);
+                try {
+                  const roastWordsRes = await fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=roast_text`, {
+                    headers: {
+                      "apikey": env.SUPABASE_KEY,
+                      "Authorization": `Bearer ${env.SUPABASE_KEY}`
+                    }
+                  });
+                  if (roastWordsRes.ok) {
+                    const roastData = await roastWordsRes.json();
+                    totalRoastWords = roastData.reduce((sum, item) => {
+                      const text = item.roast_text || "";
+                      return sum + text.length;
+                    }, 0);
+                    console.log("[Worker] \u2705 \u964D\u7EA7\u65B9\u6848\uFF1A\u4ECE user_analysis \u8BA1\u7B97 totalRoastWords:", totalRoastWords);
+                  }
+                } catch (fallbackError) {
+                  console.warn("[Worker] \u26A0\uFE0F \u964D\u7EA7\u65B9\u6848\u4E5F\u5931\u8D25:", fallbackError);
+                }
+              }
+              let cachedGlobalAverage;
+              if (cachedData.dimensions) {
+                cachedGlobalAverage = {
+                  L: cachedData.L || 50,
+                  P: cachedData.P || 50,
+                  D: cachedData.D || 50,
+                  E: cachedData.E || 50,
+                  F: cachedData.F || 50
+                };
+              } else {
+                cachedGlobalAverage = cachedData;
+              }
+              const finalTotalUsers = totalUsers || 1;
+              const responseData = {
+                status: "success",
+                success: true,
+                // 1. 维度分（统一使用 globalAverage）
+                globalAverage: cachedGlobalAverage,
+                // 2. 参与人数 (必须有，不然卡片显示 0)
+                totalUsers: finalTotalUsers,
+                // 3. 标签定义 (必须有，不然雷达图不显示文字) - 硬编码注入
+                dimensions: {
+                  L: { label: "\u903B\u8F91\u529B" },
+                  P: { label: "\u8010\u5FC3\u503C" },
+                  D: { label: "\u7EC6\u817B\u5EA6" },
+                  E: { label: "\u60C5\u7EEA\u5316" },
+                  F: { label: "\u9891\u7387\u611F" }
+                },
+                // 4. 兼容性包装 (防止前端去 .data 路径下找) - 双重包装
+                data: {
+                  globalAverage: cachedGlobalAverage,
+                  totalUsers: finalTotalUsers,
+                  dimensions: {
+                    L: { label: "\u903B\u8F91\u529B" },
+                    P: { label: "\u8010\u5FC3\u503C" },
+                    D: { label: "\u7EC6\u817B\u5EA6" },
+                    E: { label: "\u60C5\u7EEA\u5316" },
+                    F: { label: "\u9891\u7387\u611F" }
+                  }
+                },
+                // 5. 其他统计数据
+                totalRoastWords,
+                cityCount,
+                locationRank,
+                recentVictims,
+                source: "kv_cache",
+                cachedAt: lastUpdateTime,
+                age
+              };
+              console.log("[Worker] \u53D1\u9001\u7ED9\u524D\u7AEF\u7684\u6570\u636E:", JSON.stringify(responseData, null, 2));
+              console.log("[Worker] \u2705 \u4ECE KV \u7F13\u5B58\u8FD4\u56DE\u5B8C\u6574\u6570\u636E:", {
+                hasGlobalAverage: !!responseData.globalAverage,
+                hasDimensions: !!responseData.dimensions,
+                hasTotalUsers: !!responseData.totalUsers,
+                hasData: !!responseData.data,
+                totalUsers: responseData.totalUsers,
+                globalAverage: responseData.globalAverage
+              });
+              return c.json(responseData);
             } catch (error) {
-              console.warn("[Worker] \u26A0\uFE0F \u83B7\u53D6\u603B\u7528\u6237\u6570\u5931\u8D25\uFF0C\u4F7F\u7528\u9ED8\u8BA4\u503C 1:", error);
+              console.warn("[Worker] \u26A0\uFE0F \u83B7\u53D6\u7EDF\u8BA1\u6570\u636E\u5931\u8D25\uFF0C\u4F7F\u7528\u9ED8\u8BA4\u503C:", error);
+              let cachedGlobalAverage;
+              if (cachedData.dimensions) {
+                cachedGlobalAverage = {
+                  L: cachedData.L || 50,
+                  P: cachedData.P || 50,
+                  D: cachedData.D || 50,
+                  E: cachedData.E || 50,
+                  F: cachedData.F || 50
+                };
+              } else {
+                cachedGlobalAverage = cachedData;
+              }
+              const responseData = {
+                status: "success",
+                success: true,
+                // 1. 维度分（统一使用 globalAverage）
+                globalAverage: cachedGlobalAverage,
+                // 2. 参与人数 (必须有，不然卡片显示 0)
+                totalUsers: 1,
+                // 3. 标签定义 (必须有，不然雷达图不显示文字) - 硬编码注入
+                dimensions: {
+                  L: { label: "\u903B\u8F91\u529B" },
+                  P: { label: "\u8010\u5FC3\u503C" },
+                  D: { label: "\u7EC6\u817B\u5EA6" },
+                  E: { label: "\u60C5\u7EEA\u5316" },
+                  F: { label: "\u9891\u7387\u611F" }
+                },
+                // 4. 兼容性包装 (防止前端去 .data 路径下找) - 双重包装
+                data: {
+                  globalAverage: cachedGlobalAverage,
+                  totalUsers: 1,
+                  dimensions: {
+                    L: { label: "\u903B\u8F91\u529B" },
+                    P: { label: "\u8010\u5FC3\u503C" },
+                    D: { label: "\u7EC6\u817B\u5EA6" },
+                    E: { label: "\u60C5\u7EEA\u5316" },
+                    F: { label: "\u9891\u7387\u611F" }
+                  }
+                },
+                // 5. 其他统计数据（默认值）
+                totalRoastWords: 0,
+                cityCount: 0,
+                locationRank: [],
+                recentVictims: [],
+                source: "kv_cache",
+                cachedAt: lastUpdateTime,
+                age
+              };
+              console.log("[Worker] \u53D1\u9001\u7ED9\u524D\u7AEF\u7684\u6570\u636E:", JSON.stringify(responseData, null, 2));
+              console.log("[Worker] \u26A0\uFE0F \u964D\u7EA7\u8FD4\u56DE\uFF08\u7EDF\u8BA1\u6570\u636E\u83B7\u53D6\u5931\u8D25\uFF09:", {
+                hasGlobalAverage: !!responseData.globalAverage,
+                hasDimensions: !!responseData.dimensions,
+                hasTotalUsers: !!responseData.totalUsers,
+                hasData: !!responseData.data,
+                globalAverage: responseData.globalAverage
+              });
+              return c.json(responseData);
             }
+          } else {
+            let cachedGlobalAverage;
+            if (cachedData.dimensions) {
+              cachedGlobalAverage = {
+                L: cachedData.L || 50,
+                P: cachedData.P || 50,
+                D: cachedData.D || 50,
+                E: cachedData.E || 50,
+                F: cachedData.F || 50
+              };
+            } else {
+              cachedGlobalAverage = cachedData;
+            }
+            const responseData = {
+              status: "success",
+              success: true,
+              // 1. 维度分（统一使用 globalAverage）
+              globalAverage: cachedGlobalAverage,
+              // 2. 参与人数 (必须有，不然卡片显示 0)
+              totalUsers: 1,
+              // 3. 标签定义 (必须有，不然雷达图不显示文字) - 硬编码注入
+              dimensions: {
+                L: { label: "\u903B\u8F91\u529B" },
+                P: { label: "\u8010\u5FC3\u503C" },
+                D: { label: "\u7EC6\u817B\u5EA6" },
+                E: { label: "\u60C5\u7EEA\u5316" },
+                F: { label: "\u9891\u7387\u611F" }
+              },
+              // 4. 兼容性包装 (防止前端去 .data 路径下找) - 双重包装
+              data: {
+                globalAverage: cachedGlobalAverage,
+                totalUsers: 1,
+                dimensions: {
+                  L: { label: "\u903B\u8F91\u529B" },
+                  P: { label: "\u8010\u5FC3\u503C" },
+                  D: { label: "\u7EC6\u817B\u5EA6" },
+                  E: { label: "\u60C5\u7EEA\u5316" },
+                  F: { label: "\u9891\u7387\u611F" }
+                }
+              },
+              // 5. 其他统计数据（默认值）
+              totalRoastWords: 0,
+              cityCount: 0,
+              locationRank: [],
+              recentVictims: [],
+              source: "kv_cache",
+              cachedAt: lastUpdateTime,
+              age
+            };
+            console.log("[Worker] \u53D1\u9001\u7ED9\u524D\u7AEF\u7684\u6570\u636E:", JSON.stringify(responseData, null, 2));
+            console.log("[Worker] \u26A0\uFE0F \u65E0 Supabase \u914D\u7F6E\uFF0C\u8FD4\u56DE\u9ED8\u8BA4\u503C:", {
+              hasGlobalAverage: !!responseData.globalAverage,
+              hasDimensions: !!responseData.dimensions,
+              hasTotalUsers: !!responseData.totalUsers,
+              hasData: !!responseData.data,
+              globalAverage: responseData.globalAverage
+            });
+            return c.json(responseData);
           }
-          return c.json({
-            status: "success",
-            globalAverage: cachedData,
-            dimensions: defaultDimensions,
-            totalUsers,
-            source: "kv_cache",
-            cachedAt: lastUpdateTime,
-            age
-          });
         } else {
           console.log(`[Worker] \u26A0\uFE0F KV \u7F13\u5B58\u5DF2\u8FC7\u671F\uFF08${age}\u79D2\uFF09\uFF0C\u91CD\u65B0\u67E5\u8BE2 Supabase`);
+          console.log("--- \u6B63\u5728\u7A7F\u900F\u7F13\u5B58\u83B7\u53D6\u6700\u65B0\u6570\u636E ---");
+          return await fetchFromSupabase(env, defaultAverage, defaultDimensions, c, true);
         }
+      } else {
+        console.log("[Worker] \u26A0\uFE0F KV \u7F13\u5B58\u4E0D\u5B58\u5728\uFF0C\u76F4\u63A5\u67E5\u8BE2 Supabase");
+        console.log("--- \u6B63\u5728\u7A7F\u900F\u7F13\u5B58\u83B7\u53D6\u6700\u65B0\u6570\u636E ---");
+        return await fetchFromSupabase(env, defaultAverage, defaultDimensions, c, true);
       }
     } catch (error) {
       console.warn("[Worker] KV \u8BFB\u53D6\u5931\u8D25\uFF0C\u964D\u7EA7\u5230 Supabase:", error);
+      console.log("--- \u6B63\u5728\u7A7F\u900F\u7F13\u5B58\u83B7\u53D6\u6700\u65B0\u6570\u636E ---");
+      return await fetchFromSupabase(env, defaultAverage, defaultDimensions, c, true);
     }
+    console.log("[Worker] \u26A0\uFE0F \u6240\u6709\u7F13\u5B58\u8DEF\u5F84\u90FD\u672A\u547D\u4E2D\uFF0C\u6700\u7EC8\u964D\u7EA7\u5230 Supabase");
+    console.log("--- \u6B63\u5728\u7A7F\u900F\u7F13\u5B58\u83B7\u53D6\u6700\u65B0\u6570\u636E ---");
     return await fetchFromSupabase(env, defaultAverage, defaultDimensions, c, true);
   } catch (error) {
     console.error("[Worker] /api/global-average \u9519\u8BEF:", error);
-    return c.json({
+    const defaultAverage = { L: 50, P: 50, D: 50, E: 50, F: 50 };
+    const responseData = {
       status: "error",
+      success: false,
       error: error.message || "\u672A\u77E5\u9519\u8BEF",
-      globalAverage: { L: 50, P: 50, D: 50, E: 50, F: 50 },
+      // 即使出错也返回默认值，确保前端不会崩溃（统一使用 globalAverage）
+      globalAverage: defaultAverage,
       dimensions: {
         L: { label: "\u903B\u8F91\u529B" },
         P: { label: "\u8010\u5FC3\u503C" },
@@ -4556,8 +4850,34 @@ app.get("/api/global-average", async (c) => {
         E: { label: "\u60C5\u7EEA\u5316" },
         F: { label: "\u9891\u7387\u611F" }
       },
-      totalUsers: 1
-    }, 500);
+      totalUsers: 1,
+      // 兼容性包装 - 双重包装
+      data: {
+        globalAverage: defaultAverage,
+        totalUsers: 1,
+        dimensions: {
+          L: { label: "\u903B\u8F91\u529B" },
+          P: { label: "\u8010\u5FC3\u503C" },
+          D: { label: "\u7EC6\u817B\u5EA6" },
+          E: { label: "\u60C5\u7EEA\u5316" },
+          F: { label: "\u9891\u7387\u611F" }
+        }
+      },
+      // 其他统计数据（默认值）
+      totalRoastWords: 0,
+      cityCount: 0,
+      locationRank: [],
+      recentVictims: []
+    };
+    console.log("[Worker] \u53D1\u9001\u7ED9\u524D\u7AEF\u7684\u6570\u636E:", JSON.stringify(responseData, null, 2));
+    console.log("[Worker] \u26A0\uFE0F \u8DEF\u7531\u9519\u8BEF\u8FD4\u56DE\uFF08\u4F46\u5305\u542B\u5B8C\u6574\u5B57\u6BB5\uFF09:", {
+      hasGlobalAverage: !!responseData.globalAverage,
+      hasDimensions: !!responseData.dimensions,
+      hasTotalUsers: !!responseData.totalUsers,
+      hasData: !!responseData.data,
+      globalAverage: responseData.globalAverage
+    });
+    return c.json(responseData, 500);
   }
 });
 app.get("/api/stats/dashboard", async (c) => {
@@ -4567,7 +4887,7 @@ app.get("/api/stats/dashboard", async (c) => {
     let totalUsers = 0;
     if (env.SUPABASE_URL && env.SUPABASE_KEY) {
       try {
-        const res = await fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_view?select=total_count`, {
+        const res = await fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_v3_view?select=total_count`, {
           headers: {
             "apikey": env.SUPABASE_KEY,
             "Authorization": `Bearer ${env.SUPABASE_KEY}`
@@ -4692,67 +5012,327 @@ app.get("/api/stats/dashboard", async (c) => {
   }
 });
 async function fetchFromSupabase(env, defaultAverage, defaultDimensions, c, updateKV = false) {
+  console.log("--- \u6B63\u5728\u7A7F\u900F\u7F13\u5B58\u83B7\u53D6\u6700\u65B0\u6570\u636E ---");
   if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
     console.warn("[Worker] \u26A0\uFE0F Supabase \u73AF\u5883\u53D8\u91CF\u672A\u914D\u7F6E\uFF0C\u8FD4\u56DE\u9ED8\u8BA4\u503C");
-    return c.json({
+    const responseData = {
       status: "success",
+      success: true,
+      // 1. 维度分（统一使用 globalAverage）
       globalAverage: defaultAverage,
-      dimensions: defaultDimensions,
+      // 2. 参与人数 (必须有，不然卡片显示 0)
       totalUsers: 1,
+      // 3. 标签定义 (必须有，不然雷达图不显示文字) - 硬编码注入
+      dimensions: {
+        L: { label: "\u903B\u8F91\u529B" },
+        P: { label: "\u8010\u5FC3\u503C" },
+        D: { label: "\u7EC6\u817B\u5EA6" },
+        E: { label: "\u60C5\u7EEA\u5316" },
+        F: { label: "\u9891\u7387\u611F" }
+      },
+      // 4. 兼容性包装 (防止前端去 .data 路径下找) - 双重包装
+      data: {
+        globalAverage: defaultAverage,
+        totalUsers: 1,
+        dimensions: {
+          L: { label: "\u903B\u8F91\u529B" },
+          P: { label: "\u8010\u5FC3\u503C" },
+          D: { label: "\u7EC6\u817B\u5EA6" },
+          E: { label: "\u60C5\u7EEA\u5316" },
+          F: { label: "\u9891\u7387\u611F" }
+        }
+      },
+      // 5. 其他统计数据（默认值）
+      totalRoastWords: 0,
+      cityCount: 0,
+      locationRank: [],
+      recentVictims: [],
       message: "Supabase \u73AF\u5883\u53D8\u91CF\u672A\u914D\u7F6E",
       source: "default"
+    };
+    console.log("[Worker] \u53D1\u9001\u7ED9\u524D\u7AEF\u7684\u6570\u636E:", JSON.stringify(responseData, null, 2));
+    console.log("[Worker] \u2705 \u8FD4\u56DE\u9ED8\u8BA4\u503C\uFF08Supabase \u672A\u914D\u7F6E\uFF09:", {
+      hasGlobalAverage: !!responseData.globalAverage,
+      hasDimensions: !!responseData.dimensions,
+      hasTotalUsers: !!responseData.totalUsers,
+      hasData: !!responseData.data,
+      globalAverage: responseData.globalAverage
     });
+    return c.json(responseData);
   }
   try {
-    const res = await fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_view?select=*`, {
-      headers: {
-        "apikey": env.SUPABASE_KEY,
-        "Authorization": `Bearer ${env.SUPABASE_KEY}`
+    const [globalStatsRes, recentVictimsRes, allLocationsRes, dashboardSummaryRes] = await Promise.all([
+      // 1. 获取全局统计数据
+      fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_v3_view?select=*`, {
+        headers: {
+          "apikey": env.SUPABASE_KEY,
+          "Authorization": `Bearer ${env.SUPABASE_KEY}`
+        }
+      }),
+      // 2. 获取最近受害者（最新的 5 条记录）
+      fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=personality_type,ip_location,created_at&order=created_at.desc&limit=5`, {
+        headers: {
+          "apikey": env.SUPABASE_KEY,
+          "Authorization": `Bearer ${env.SUPABASE_KEY}`
+        }
+      }),
+      // 3. 获取所有地理位置（用于统计城市数和热力排行）
+      fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=ip_location&ip_location=not.is.null`, {
+        headers: {
+          "apikey": env.SUPABASE_KEY,
+          "Authorization": `Bearer ${env.SUPABASE_KEY}`
+        }
+      }),
+      // 4. 获取汇总统计数据（从 dashboard_summary_view 获取 total_words）
+      fetch(`${env.SUPABASE_URL}/rest/v1/dashboard_summary_view?select=total_words`, {
+        headers: {
+          "apikey": env.SUPABASE_KEY,
+          "Authorization": `Bearer ${env.SUPABASE_KEY}`
+        }
+      })
+    ]);
+    let globalAverage;
+    let totalUsers;
+    if (!globalStatsRes.ok || globalStatsRes.status === 404) {
+      console.warn("[Worker] \u26A0\uFE0F global_stats_v3_view \u67E5\u8BE2\u5931\u8D25\u6216\u4E0D\u5B58\u5728\uFF08\u72B6\u6001\u7801:", globalStatsRes.status, "\uFF09\uFF0C\u964D\u7EA7\u5230\u76F4\u63A5\u67E5\u8BE2 user_analysis \u8868");
+      const userAnalysisRes = await fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=l,p,d,e,f`, {
+        headers: {
+          "apikey": env.SUPABASE_KEY,
+          "Authorization": `Bearer ${env.SUPABASE_KEY}`
+        }
+      });
+      if (userAnalysisRes.ok) {
+        const userData = await userAnalysisRes.json();
+        if (Array.isArray(userData) && userData.length > 0) {
+          const sum = userData.reduce((acc, item) => ({
+            L: acc.L + (parseFloat(item.l) || 0),
+            P: acc.P + (parseFloat(item.p) || 0),
+            D: acc.D + (parseFloat(item.d) || 0),
+            E: acc.E + (parseFloat(item.e) || 0),
+            F: acc.F + (parseFloat(item.f) || 0)
+          }), { L: 0, P: 0, D: 0, E: 0, F: 0 });
+          const count = userData.length;
+          globalAverage = {
+            L: Math.round(sum.L / count || 50),
+            P: Math.round(sum.P / count || 50),
+            D: Math.round(sum.D / count || 50),
+            E: Math.round(sum.E / count || 50),
+            F: Math.round(sum.F / count || 50)
+          };
+          totalUsers = count;
+          console.log("[Worker] \u2705 \u4ECE user_analysis \u8868\u76F4\u63A5\u8BA1\u7B97\u5E73\u5747\u503C:", globalAverage, "\u603B\u7528\u6237\u6570:", totalUsers);
+        } else {
+          globalAverage = defaultAverage;
+          totalUsers = 1;
+          console.warn("[Worker] \u26A0\uFE0F user_analysis \u8868\u4E3A\u7A7A\uFF0C\u4F7F\u7528\u9ED8\u8BA4\u503C");
+        }
+      } else {
+        globalAverage = defaultAverage;
+        totalUsers = 1;
+        console.warn("[Worker] \u26A0\uFE0F user_analysis \u8868\u67E5\u8BE2\u5931\u8D25\uFF0C\u4F7F\u7528\u9ED8\u8BA4\u503C");
       }
-    });
-    if (!res.ok) {
-      throw new Error(`Supabase \u67E5\u8BE2\u5931\u8D25: ${res.status}`);
+    } else {
+      const globalData = await globalStatsRes.json();
+      const row = globalData[0] || {};
+      globalAverage = {
+        L: parseFloat(row.avg_l || 50),
+        P: parseFloat(row.avg_p || 50),
+        D: parseFloat(row.avg_d || 50),
+        E: parseFloat(row.avg_e || 50),
+        F: parseFloat(row.avg_f || 50)
+      };
+      totalUsers = parseInt(row.total_count || 0);
+      if (totalUsers <= 0) {
+        totalUsers = 1;
+      }
     }
-    const data = await res.json();
-    const row = data[0] || {};
-    const globalAverage = {
-      L: parseFloat(row.avg_l || 50),
-      P: parseFloat(row.avg_p || 50),
-      D: parseFloat(row.avg_d || 50),
-      E: parseFloat(row.avg_e || 50),
-      F: parseFloat(row.avg_f || 50)
-    };
-    let totalUsers = parseInt(row.total_count || 0);
-    if (totalUsers <= 0) {
-      totalUsers = 1;
+    let recentVictims = [];
+    if (recentVictimsRes.ok) {
+      try {
+        const victimsData = await recentVictimsRes.json();
+        recentVictims = victimsData.map((item) => ({
+          type: item.personality_type || "UNKNOWN",
+          location: item.ip_location || "\u672A\u77E5",
+          time: item.created_at || (/* @__PURE__ */ new Date()).toISOString()
+        }));
+      } catch (error) {
+        console.warn("[Worker] \u26A0\uFE0F \u89E3\u6790\u6700\u8FD1\u53D7\u5BB3\u8005\u6570\u636E\u5931\u8D25:", error);
+      }
+    }
+    let cityCount = 0;
+    let locationRank = [];
+    if (allLocationsRes.ok) {
+      try {
+        const locationsData = await allLocationsRes.json();
+        const locationMap = /* @__PURE__ */ new Map();
+        locationsData.forEach((item) => {
+          if (item.ip_location && item.ip_location !== "\u672A\u77E5") {
+            const count = locationMap.get(item.ip_location) || 0;
+            locationMap.set(item.ip_location, count + 1);
+          }
+        });
+        cityCount = locationMap.size;
+        locationRank = Array.from(locationMap.entries()).map(([location, count]) => ({ location, count })).sort((a, b) => b.count - a.count).slice(0, 5);
+      } catch (error) {
+        console.warn("[Worker] \u26A0\uFE0F \u89E3\u6790\u5730\u7406\u4F4D\u7F6E\u6570\u636E\u5931\u8D25:", error);
+      }
+    }
+    let totalRoastWords = 0;
+    if (dashboardSummaryRes.ok) {
+      try {
+        const summaryData = await dashboardSummaryRes.json();
+        const summaryRow = summaryData[0] || {};
+        totalRoastWords = parseInt(summaryRow.total_words || 0);
+        console.log("[Worker] \u2705 \u4ECE dashboard_summary_view \u83B7\u53D6 total_words:", totalRoastWords);
+      } catch (error) {
+        console.warn("[Worker] \u26A0\uFE0F \u89E3\u6790 dashboard_summary_view \u6570\u636E\u5931\u8D25:", error);
+        try {
+          const roastWordsRes = await fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=roast_text`, {
+            headers: {
+              "apikey": env.SUPABASE_KEY,
+              "Authorization": `Bearer ${env.SUPABASE_KEY}`
+            }
+          });
+          if (roastWordsRes.ok) {
+            const roastData = await roastWordsRes.json();
+            totalRoastWords = roastData.reduce((sum, item) => {
+              const text = item.roast_text || "";
+              return sum + text.length;
+            }, 0);
+            console.log("[Worker] \u2705 \u964D\u7EA7\u65B9\u6848\uFF1A\u4ECE user_analysis \u8BA1\u7B97 totalRoastWords:", totalRoastWords);
+          }
+        } catch (fallbackError) {
+          console.warn("[Worker] \u26A0\uFE0F \u964D\u7EA7\u65B9\u6848\u4E5F\u5931\u8D25:", fallbackError);
+        }
+      }
+    } else {
+      console.warn("[Worker] \u26A0\uFE0F dashboard_summary_view \u67E5\u8BE2\u5931\u8D25\uFF0CHTTP \u72B6\u6001:", dashboardSummaryRes.status);
+      try {
+        const roastWordsRes = await fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=roast_text`, {
+          headers: {
+            "apikey": env.SUPABASE_KEY,
+            "Authorization": `Bearer ${env.SUPABASE_KEY}`
+          }
+        });
+        if (roastWordsRes.ok) {
+          const roastData = await roastWordsRes.json();
+          totalRoastWords = roastData.reduce((sum, item) => {
+            const text = item.roast_text || "";
+            return sum + text.length;
+          }, 0);
+          console.log("[Worker] \u2705 \u964D\u7EA7\u65B9\u6848\uFF1A\u4ECE user_analysis \u8BA1\u7B97 totalRoastWords:", totalRoastWords);
+        }
+      } catch (fallbackError) {
+        console.warn("[Worker] \u26A0\uFE0F \u964D\u7EA7\u65B9\u6848\u4E5F\u5931\u8D25:", fallbackError);
+      }
     }
     if (updateKV && env.STATS_STORE) {
       try {
         const now = Math.floor(Date.now() / 1e3);
-        await env.STATS_STORE.put(KV_KEY_GLOBAL_AVERAGE, JSON.stringify(globalAverage));
+        const cachePayload = {
+          ...globalAverage,
+          dimensions: defaultDimensions
+          // 添加 dimensions 到缓存，用于版本校验
+        };
+        await env.STATS_STORE.put(KV_KEY_GLOBAL_AVERAGE, JSON.stringify(cachePayload));
         await env.STATS_STORE.put(KV_KEY_LAST_UPDATE, now.toString());
-        console.log("[Worker] \u2705 \u5DF2\u66F4\u65B0 KV \u7F13\u5B58");
+        console.log("[Worker] \u2705 \u5DF2\u66F4\u65B0 KV \u7F13\u5B58\uFF08\u5305\u542B dimensions\uFF09");
       } catch (error) {
         console.warn("[Worker] \u26A0\uFE0F KV \u5199\u5165\u5931\u8D25:", error);
       }
     }
-    return c.json({
+    const finalTotalUsers = totalUsers || 1;
+    const responseData = {
       status: "success",
+      success: true,
+      // 1. 维度分（统一使用 globalAverage，不要用 averages）
       globalAverage,
-      dimensions: defaultDimensions,
-      totalUsers,
+      // 2. 参与人数 (必须有，不然卡片显示 0)
+      totalUsers: finalTotalUsers,
+      // 3. 标签定义 (必须有，不然雷达图不显示文字) - 硬编码注入
+      dimensions: {
+        L: { label: "\u903B\u8F91\u529B" },
+        P: { label: "\u8010\u5FC3\u503C" },
+        D: { label: "\u7EC6\u817B\u5EA6" },
+        E: { label: "\u60C5\u7EEA\u5316" },
+        F: { label: "\u9891\u7387\u611F" }
+      },
+      // 4. 兼容性包装 (防止前端去 .data 路径下找) - 双重包装
+      data: {
+        globalAverage,
+        totalUsers: finalTotalUsers,
+        dimensions: {
+          L: { label: "\u903B\u8F91\u529B" },
+          P: { label: "\u8010\u5FC3\u503C" },
+          D: { label: "\u7EC6\u817B\u5EA6" },
+          E: { label: "\u60C5\u7EEA\u5316" },
+          F: { label: "\u9891\u7387\u611F" }
+        }
+      },
+      // 5. 其他统计数据
+      totalRoastWords,
+      cityCount,
+      locationRank,
+      recentVictims,
       source: updateKV ? "supabase_and_kv" : "supabase"
+    };
+    console.log("[Worker] \u53D1\u9001\u7ED9\u524D\u7AEF\u7684\u6570\u636E:", JSON.stringify(responseData, null, 2));
+    console.log("[Worker] \u2705 /api/global-average \u8FD4\u56DE\u5B8C\u6574\u6570\u636E:", {
+      hasGlobalAverage: !!responseData.globalAverage,
+      hasDimensions: !!responseData.dimensions,
+      hasTotalUsers: !!responseData.totalUsers,
+      hasData: !!responseData.data,
+      totalUsers: responseData.totalUsers,
+      totalRoastWords: responseData.totalRoastWords,
+      cityCount: responseData.cityCount,
+      locationRankCount: responseData.locationRank.length,
+      recentVictimsCount: responseData.recentVictims.length,
+      globalAverage: responseData.globalAverage
     });
+    return c.json(responseData);
   } catch (error) {
     console.error("[Worker] Supabase \u67E5\u8BE2\u5931\u8D25:", error);
-    return c.json({
+    const responseData = {
       status: "error",
+      success: false,
       error: error.message || "Supabase \u67E5\u8BE2\u5931\u8D25",
+      // 即使出错也返回默认值，确保前端不会崩溃（统一使用 globalAverage，不要用 averages）
       globalAverage: defaultAverage,
-      dimensions: defaultDimensions,
+      dimensions: {
+        L: { label: "\u903B\u8F91\u529B" },
+        P: { label: "\u8010\u5FC3\u503C" },
+        D: { label: "\u7EC6\u817B\u5EA6" },
+        E: { label: "\u60C5\u7EEA\u5316" },
+        F: { label: "\u9891\u7387\u611F" }
+      },
       totalUsers: 1,
+      // 兼容性包装 - 双重包装
+      data: {
+        globalAverage: defaultAverage,
+        totalUsers: 1,
+        dimensions: {
+          L: { label: "\u903B\u8F91\u529B" },
+          P: { label: "\u8010\u5FC3\u503C" },
+          D: { label: "\u7EC6\u817B\u5EA6" },
+          E: { label: "\u60C5\u7EEA\u5316" },
+          F: { label: "\u9891\u7387\u611F" }
+        }
+      },
+      // 其他统计数据（默认值）
+      totalRoastWords: 0,
+      cityCount: 0,
+      locationRank: [],
+      recentVictims: [],
       source: "error_fallback"
-    }, 500);
+    };
+    console.log("[Worker] \u53D1\u9001\u7ED9\u524D\u7AEF\u7684\u6570\u636E:", JSON.stringify(responseData, null, 2));
+    console.log("[Worker] \u26A0\uFE0F \u9519\u8BEF\u8FD4\u56DE\uFF08\u4F46\u5305\u542B\u5B8C\u6574\u5B57\u6BB5\uFF09:", {
+      hasGlobalAverage: !!responseData.globalAverage,
+      hasDimensions: !!responseData.dimensions,
+      hasTotalUsers: !!responseData.totalUsers,
+      hasData: !!responseData.data
+    });
+    return c.json(responseData, 500);
   }
 }
 __name(fetchFromSupabase, "fetchFromSupabase");
@@ -4768,7 +5348,7 @@ async function performAggregation(env) {
       console.warn(`[Worker] \u26A0\uFE0F ${error}`);
       return { success: false, error };
     }
-    const res = await fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_view?select=*`, {
+    const res = await fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_v3_view?select=*`, {
       headers: {
         "apikey": env.SUPABASE_KEY,
         "Authorization": `Bearer ${env.SUPABASE_KEY}`
@@ -4787,8 +5367,20 @@ async function performAggregation(env) {
       E: parseFloat(row.avg_e || 50),
       F: parseFloat(row.avg_f || 50)
     };
+    const defaultDimensions = {
+      L: { label: "\u903B\u8F91\u529B" },
+      P: { label: "\u8010\u5FC3\u503C" },
+      D: { label: "\u7EC6\u817B\u5EA6" },
+      E: { label: "\u60C5\u7EEA\u5316" },
+      F: { label: "\u9891\u7387\u611F" }
+    };
     const now = Math.floor(Date.now() / 1e3);
-    await env.STATS_STORE.put(KV_KEY_GLOBAL_AVERAGE, JSON.stringify(globalAverage));
+    const cachePayload = {
+      ...globalAverage,
+      dimensions: defaultDimensions
+      // 添加 dimensions 到缓存，用于版本校验
+    };
+    await env.STATS_STORE.put(KV_KEY_GLOBAL_AVERAGE, JSON.stringify(cachePayload));
     await env.STATS_STORE.put(KV_KEY_LAST_UPDATE, now.toString());
     console.log("[Worker] \u2705 \u6C47\u603B\u4EFB\u52A1\u5B8C\u6210\uFF0C\u5DF2\u5199\u5165 KV:", {
       globalAverage,
@@ -4853,7 +5445,7 @@ app.get("/", async (c) => {
     const env = c.env;
     if (env.SUPABASE_URL && env.SUPABASE_KEY) {
       try {
-        const res = await fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_view?select=total_count`, {
+        const res = await fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_v3_view?select=total_count`, {
           headers: {
             "apikey": env.SUPABASE_KEY,
             "Authorization": `Bearer ${env.SUPABASE_KEY}`

@@ -474,13 +474,23 @@
         async function initDashboard() {
             try {
                 console.log('[Dashboard] 开始加载数据...');
-                const response = await fetch(`${apiEndpoint}api/stats/dashboard`).catch(error => {
+                // 【自动刷新逻辑】确保前端请求 API 时带上随机时间戳，以绕过 Cloudflare 的边缘缓存
+                const timestamp = Date.now();
+                const response = await fetch(`${apiEndpoint}api/global-average?t=${timestamp}`).catch(error => {
                     console.error('[Dashboard] Fetch 请求失败:', error);
                     throw new Error(`网络请求失败: ${error.message}`);
                 });
                 
+                // 【调试日志】在 fetch 之后，res.json() 之前
+                console.log('[Debug] 正在请求 API...');
+                console.log('[Debug] Response status:', response.status);
+                console.log('[Debug] Response ok:', response.ok);
+                console.log('[Debug] Response headers:', Object.fromEntries(response.headers.entries()));
+                
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    const errorText = await response.text().catch(() => '无法读取错误信息');
+                    console.error('[Debug] HTTP 错误响应内容:', errorText);
+                    throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
                 }
                 
                 const result = await response.json().catch(error => {
@@ -489,71 +499,123 @@
                 });
                 
                 // 【调试日志】在执行数据校验之前输出接收到的数据
-                console.log('[Dashboard Debug] Received Data:', result);
+                console.log('[Debug] 接口返回的原始数据:', result);
+                console.log('[Debug] 原始数据类型:', typeof result);
+                console.log('[Debug] 原始数据是否为数组:', Array.isArray(result));
+                console.log('[Debug] 原始数据的键:', Object.keys(result || {}));
                 
-                // 【健壮性处理】如果 globalAverage 缺失，使用默认值
-                if (result.status === 'success') {
-                    // 检查是否有 data 字段（新格式）
-                    if (result.data) {
-                        dashboardData = result.data;
-                    } else {
-                        // 兼容旧格式：直接使用 result 作为数据
-                        dashboardData = result;
-                    }
-                    
-                    // 如果 globalAverage 或 globalAverages 缺失，使用默认值
-                    if (!dashboardData.globalAverage && !dashboardData.globalAverages) {
-                        console.warn('[Dashboard] ⚠️ globalAverage 缺失，使用预设数据');
-                        alert('使用预设数据');
-                        dashboardData.globalAverages = { L: 50, P: 50, D: 50, E: 50, F: 50 };
-                    }
-                    
-                    // 确保 totalUsers 存在
-                    if (!dashboardData.totalUsers) {
-                        dashboardData.totalUsers = 1;
-                    }
-                    
-                    console.log('[Dashboard] 数据加载成功:', dashboardData);
-                    
-                    // 更新所有UI组件
-                    updateStatsCards();
-                    renderRadarChart();
-                    renderLocationList();
-                    renderTimeline();
-                    renderRecentActivity();
-                } else {
-                    // 即使返回错误，也尝试使用默认值渲染
-                    console.warn('[Dashboard] ⚠️ API 返回错误状态，使用预设数据');
-                    alert('使用预设数据');
-                    dashboardData = {
-                        totalUsers: 1,
-                        globalAverages: { L: 50, P: 50, D: 50, E: 50, F: 50 },
-                        locationDistribution: [],
-                        recentActivity: [],
-                        systemDays: 1,
-                        cityCount: 0,
-                        totalChars: 0,
-                    };
-                    
-                    // 使用默认数据渲染
-                    updateStatsCards();
-                    renderRadarChart();
-                    renderLocationList();
-                    renderTimeline();
-                    renderRecentActivity();
+                // 【增强鲁棒性】修改解构赋值，增强鲁棒性
+                // 优先级：result.data.globalAverage > result.globalAverage > result.data.averages > result.averages
+                console.log('[Debug] 开始解析数据...');
+                console.log('[Debug] result.data 存在:', !!result.data);
+                console.log('[Debug] result.globalAverage 存在:', !!result.globalAverage);
+                console.log('[Debug] result.averages 存在:', !!result.averages);
+                if (result.data) {
+                    console.log('[Debug] result.data.globalAverage 存在:', !!result.data.globalAverage);
+                    console.log('[Debug] result.data.averages 存在:', !!result.data.averages);
                 }
+                
+                const data = result.data || result;
+                const globalAverage = data.globalAverage || data.averages || result.globalAverage || result.averages;
+                const totalUsers = data.totalUsers || result.totalUsers || data.total_users || result.total_users || 0;
+                
+                console.log('[Debug] 匹配到的平均分:', globalAverage);
+                console.log('[Debug] 匹配到的平均分类型:', typeof globalAverage);
+                console.log('[Debug] 匹配到的平均分是否为对象:', typeof globalAverage === 'object' && !Array.isArray(globalAverage));
+                if (globalAverage && typeof globalAverage === 'object') {
+                    console.log('[Debug] 平均分的键:', Object.keys(globalAverage));
+                    console.log('[Debug] 平均分的值:', globalAverage);
+                }
+                console.log('[Debug] 匹配到的总用户数:', totalUsers);
+                console.log('[Debug] 数据来源 (result.source):', result.source);
+                
+                // 检查是否有 data 字段（新格式）
+                if (result.data) {
+                    dashboardData = { ...result.data };
+                } else {
+                    // 兼容旧格式：直接使用 result 作为数据
+                    dashboardData = { ...result };
+                }
+                
+                // 【放宽渲染门槛】只要 globalAverage 存在且是对象，立即调用 updateRadarChart(globalAverage)
+                // 移除回退拦截：即使 source 是 error_fallback 且数值为 50，也要正常渲染图表
+                const hasValidGlobalAverage = globalAverage && 
+                    typeof globalAverage === 'object' && 
+                    !Array.isArray(globalAverage) &&
+                    Object.keys(globalAverage).length > 0;
+                
+                if (hasValidGlobalAverage) {
+                    // 【检查数据格式转换】确保 globalAverage 的格式是 {L: 60, P: 70...}
+                    // 如果后端返回的是数组或其他格式，进行转换
+                    let normalizedGlobalAverage = { ...globalAverage };
+                    
+                    // 确保所有维度都存在，缺失的用 50 填充
+                    const requiredKeys = ['L', 'P', 'D', 'E', 'F'];
+                    requiredKeys.forEach(key => {
+                        if (normalizedGlobalAverage[key] === undefined || normalizedGlobalAverage[key] === null) {
+                            normalizedGlobalAverage[key] = 50;
+                        }
+                        // 确保值是数字类型
+                        if (typeof normalizedGlobalAverage[key] !== 'number') {
+                            normalizedGlobalAverage[key] = parseFloat(normalizedGlobalAverage[key]) || 50;
+                        }
+                    });
+                    
+                    // 将处理后的数据赋值给 dashboardData
+                    dashboardData.globalAverage = normalizedGlobalAverage;
+                    dashboardData.globalAverages = normalizedGlobalAverage;
+                    
+                    console.log('[Dashboard] ✅ 成功解析 globalAverage:', normalizedGlobalAverage);
+                } else {
+                    // 如果 globalAverage 无效，使用默认值
+                    console.warn('[Dashboard] ⚠️ globalAverage 缺失或无效，使用预设数据');
+                    console.warn('[Dashboard] globalAverage 值:', globalAverage);
+                    dashboardData.globalAverages = { L: 50, P: 50, D: 50, E: 50, F: 50 };
+                    dashboardData.globalAverage = { L: 50, P: 50, D: 50, E: 50, F: 50 };
+                }
+                
+                // 确保所有必需字段存在，添加容错处理
+                // 使用从 result 中解析出的 totalUsers，如果没有则使用默认值
+                if (totalUsers > 0) {
+                    dashboardData.totalUsers = totalUsers;
+                } else if (!dashboardData.totalUsers) {
+                    dashboardData.totalUsers = 1;
+                }
+                
+                if (dashboardData.totalRoastWords === undefined || dashboardData.totalRoastWords === null) {
+                    dashboardData.totalRoastWords = 0;
+                }
+                if (dashboardData.cityCount === undefined || dashboardData.cityCount === null) {
+                    dashboardData.cityCount = 0;
+                }
+                if (!Array.isArray(dashboardData.locationRank)) {
+                    dashboardData.locationRank = [];
+                }
+                if (!Array.isArray(dashboardData.recentVictims)) {
+                    dashboardData.recentVictims = [];
+                }
+                
+                console.log('[Dashboard] 数据加载成功:', dashboardData);
+                
+                // 更新所有UI组件（无论数据来源，都正常渲染）
+                updateStatsCards();
+                renderRadarChart();
+                renderLocationList();
+                renderTimeline();
+                renderRecentActivity();
             } catch (error) {
                 console.error('[Dashboard] 加载数据失败:', error);
                 // 使用默认数据渲染，而不是直接报错
                 console.warn('[Dashboard] ⚠️ 使用预设数据继续渲染');
-                alert('使用预设数据');
                 dashboardData = {
                     totalUsers: 1,
                     globalAverages: { L: 50, P: 50, D: 50, E: 50, F: 50 },
-                    locationDistribution: [],
-                    recentActivity: [],
+                    globalAverage: { L: 50, P: 50, D: 50, E: 50, F: 50 },
+                    locationRank: [],
+                    recentVictims: [],
                     systemDays: 1,
                     cityCount: 0,
+                    totalRoastWords: 0,
                     totalChars: 0,
                 };
                 
@@ -574,6 +636,7 @@
 
             // 格式化数字
             const formatNumber = (num) => {
+                if (typeof num !== 'number' || isNaN(num)) return '0';
                 if (num >= 1000000) {
                     return (num / 1000000).toFixed(1) + 'M';
                 } else if (num >= 1000) {
@@ -582,14 +645,36 @@
                 return num.toString();
             };
 
-            document.getElementById('totalUsers').textContent = formatNumber(dashboardData.totalUsers || 0);
-            document.getElementById('totalChars').textContent = formatNumber(dashboardData.totalChars || 0);
-            document.getElementById('systemDays').textContent = (dashboardData.systemDays || 1).toString();
-            document.getElementById('cityCount').textContent = (dashboardData.cityCount || 0).toString();
+            // 总诊断人数
+            const totalUsersEl = document.getElementById('totalUsers');
+            if (totalUsersEl) {
+                totalUsersEl.textContent = formatNumber(dashboardData.totalUsers || 0);
+            }
+
+            // 累计吐槽字数（使用 totalRoastWords，如果没有则使用 totalChars）
+            const totalCharsEl = document.getElementById('totalChars');
+            if (totalCharsEl) {
+                const totalRoastWords = dashboardData.totalRoastWords || dashboardData.totalChars || 0;
+                totalCharsEl.textContent = formatNumber(totalRoastWords);
+            }
+
+            // 系统运行天数
+            const systemDaysEl = document.getElementById('systemDays');
+            if (systemDaysEl) {
+                systemDaysEl.textContent = (dashboardData.systemDays || 1).toString();
+            }
+
+            // 覆盖城市数（使用 cityCount）
+            const cityCountEl = document.getElementById('cityCount');
+            if (cityCountEl) {
+                cityCountEl.textContent = (dashboardData.cityCount || 0).toString();
+            }
         }
 
         /**
          * 渲染雷达图（双层：全网平均）
+         * 【放宽渲染门槛】只要 globalAverage 存在且是对象，立即调用此函数
+         * 【移除回退拦截】即使 source 是 error_fallback 且数值为 50，也要正常渲染图表
          */
         function renderRadarChart() {
             if (!dashboardData || !window.Chart) {
@@ -609,7 +694,9 @@
             }
 
             const ctx = canvas.getContext('2d');
-            const globalAverages = dashboardData.globalAverages || { L: 50, P: 50, D: 50, E: 50, F: 50 };
+            // 【字段对齐】优先使用 globalAverage，如果没有则使用 globalAverages（兼容旧代码）
+            // 确保 L, P, D, E, F 大小写统一（都是大写）
+            const globalAverages = dashboardData.globalAverage || dashboardData.globalAverages || { L: 50, P: 50, D: 50, E: 50, F: 50 };
 
             // 维度标签
             const dimLabels = ['L (语言)', 'P (模式)', 'D (深度)', 'E (效率)', 'F (频率)'];
@@ -700,26 +787,33 @@
         }
 
         /**
-         * 渲染地理位置列表
+         * 渲染地理位置列表（热力排行）
          */
         function renderLocationList() {
             if (!dashboardData) return;
 
             const locationList = document.getElementById('locationList');
-            const locations = dashboardData.locationDistribution || [];
+            if (!locationList) return;
 
-            if (locations.length === 0) {
+            // 优先使用 locationRank，如果没有则使用 locationDistribution（兼容旧格式）
+            const locations = dashboardData.locationRank || dashboardData.locationDistribution || [];
+
+            if (!Array.isArray(locations) || locations.length === 0) {
                 locationList.innerHTML = '<div style="text-align: center; color: var(--text-dim); padding: 20px;">暂无数据</div>';
                 return;
             }
 
-            locationList.innerHTML = locations.map((item, index) => `
-                <div class="location-item">
-                    <span class="location-rank">#${index + 1}</span>
-                    <span class="location-name">${item.location || '未知'}</span>
-                    <span class="location-count">${item.count} 次</span>
-                </div>
-            `).join('');
+            locationList.innerHTML = locations.map((item, index) => {
+                const location = item.location || '未知';
+                const count = item.count || 0;
+                return `
+                    <div class="location-item">
+                        <span class="location-rank">#${index + 1}</span>
+                        <span class="location-name">${location}</span>
+                        <span class="location-count">${count} 人</span>
+                    </div>
+                `;
+            }).join('');
         }
 
         /**
@@ -753,31 +847,40 @@
         }
 
         /**
-         * 渲染最近活动
+         * 渲染最近活动（最近被诊断的受害者）
          */
         function renderRecentActivity() {
             if (!dashboardData) return;
 
             const recentActivity = document.getElementById('recentActivity');
-            const activities = dashboardData.recentActivity || [];
+            if (!recentActivity) return;
 
-            if (activities.length === 0) {
+            // 优先使用 recentVictims，如果没有则使用 recentActivity（兼容旧格式）
+            const victims = dashboardData.recentVictims || dashboardData.recentActivity || [];
+
+            if (!Array.isArray(victims) || victims.length === 0) {
                 recentActivity.innerHTML = '<div style="text-align: center; color: var(--text-dim); padding: 20px;">暂无数据</div>';
                 return;
             }
 
-            recentActivity.innerHTML = activities.map(activity => `
-                <div class="timeline-item">
-                    <div class="timeline-content">
-                        <div class="timeline-time">${formatDateTime(activity.timestamp)}</div>
-                        <div class="timeline-text">
-                            <strong>${activity.location || '未知'}</strong> - 
-                            ${activity.personalityType || 'UNKNOWN'} 
-                            (${activity.vibeIndex || '00000'})
+            recentActivity.innerHTML = victims.map((victim, index) => {
+                // 兼容新旧格式
+                const type = victim.type || victim.personalityType || 'UNKNOWN';
+                const location = victim.location || victim.ip_location || '未知';
+                const time = victim.time || victim.created_at || victim.timestamp || new Date().toISOString();
+                
+                return `
+                    <div class="timeline-item">
+                        <div class="timeline-content">
+                            <div class="timeline-time">${formatDateTime(time)}</div>
+                            <div class="timeline-text">
+                                <strong>${location}</strong> - 
+                                ${type}
+                            </div>
                         </div>
                     </div>
-                </div>
-            `).join('');
+                `;
+            }).join('');
         }
 
         /**
