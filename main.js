@@ -760,13 +760,17 @@ async function uploadStatsToWorker(stats, onProgress = null) {
       }
     });
 
-    // 准备上传数据（字段名与 Work.js 的 findVal 匹配）
-    // Work.js findVal 期望的字段：
-    // - ketao: ['ketao', 'buCount', 'qingCount', 'politeCount']
+    // 准备上传数据（字段名与后端 /api/analyze 的 findVal 匹配）
+    // 【字段对齐】确保发送给 /api/analyze 的 Payload 包含所有必需字段
+    // 后端 findVal 期望的字段：
+    // - ketao: ['ketao', 'qingCount', 'politeCount']
     // - jiafang: ['jiafang', 'buCount', 'negationCount']
     // - totalChars: ['totalUserChars', 'totalChars', 'total_user_chars']
     // - userMessages: ['userMessages', 'totalMessages', 'user_messages', 'messageCount']
     // - days: ['usageDays', 'days', 'workDays']
+    // - dimensions: body.dimensions || body.stats?.dimensions || {}
+    // - vibeIndex: body.vibeIndex || body.stats?.vibeIndex || '00000'
+    // - personalityType: body.personalityType || body.personality || 'Unknown'
     const uploadData = {
       // 消息和字符数：提供多个字段名以匹配 findVal 的查找逻辑
       totalMessages: stats.totalMessages || 0,
@@ -778,7 +782,12 @@ async function uploadStatsToWorker(stats, onProgress = null) {
       buCount: stats.buCount || 0,     // 对应甲方上身 (jiafang)
       usageDays: stats.usageDays || stats.days || 1, // 对应上岗天数
       days: stats.usageDays || stats.days || 1,      // 兼容字段
-      avgMessageLength: stats.avgMessageLength || stats.avgUserMessageLength || 0
+      avgMessageLength: stats.avgMessageLength || stats.avgUserMessageLength || 0,
+      // 【字段对齐】添加 dimensions、vibeIndex 和 personalityType 字段
+      dimensions: stats.dimensions || window.vibeResult?.dimensions || {},
+      vibeIndex: stats.vibeIndex || window.vibeResult?.vibeIndex || '00000',
+      personalityType: stats.personalityType || window.vibeResult?.personalityType || 'Unknown',
+      personality: stats.personality || window.vibeResult?.personalityType || 'Unknown', // 兼容字段
     };
 
     // 发送 POST 请求到 Worker（使用 CORS 配置）

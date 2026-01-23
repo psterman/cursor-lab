@@ -190,30 +190,17 @@ app.post('/api/v2/analyze', async (c) => {
     const totalChars = userMessages.reduce((sum, msg) => sum + (msg.text?.length || 0), 0);
     const avgLength = totalChars / totalMessages || 0;
 
-    // 【地理位置采集】从 c.req.raw.cf 提取地理信息
-    // 格式要求：city, country（例如：beijing, cn）
-    let ipLocation = '未知';
+    // 【地理位置采集】从请求头获取 IP 国家信息
+    // 使用 c.req.header('cf-ipcountry') 获取国家代码
+    let ipLocation = 'Unknown';
     try {
-      const cf = (c.req.raw as any)?.cf;
-      if (cf) {
-        const city = (cf.city || '').toLowerCase().trim();
-        const country = (cf.country || '').toLowerCase().trim();
-        if (city || country) {
-          // 格式化为 "city, country" 格式
-          const parts: string[] = [];
-          if (city) parts.push(city);
-          if (country) parts.push(country);
-          ipLocation = parts.join(', ').trim();
-          console.log('[Worker] 采集到新位置:', { city, country, location: ipLocation });
-        } else {
-          console.log('[Worker] 未获取到地理位置信息，使用默认值"未知"');
-        }
-      } else {
-        console.log('[Worker] c.req.raw.cf 不存在，使用默认值"未知"');
+      const countryCode = c.req.header('cf-ipcountry');
+      if (countryCode && countryCode.trim() && countryCode !== 'XX') {
+        ipLocation = countryCode.toUpperCase();
       }
     } catch (error) {
-      console.warn('[Worker] 获取地理位置信息失败:', error);
-      ipLocation = '未知';
+      console.warn('[Worker] 获取 IP 国家信息失败:', error);
+      ipLocation = 'Unknown';
     }
 
     // 【计算排名数据】从 Supabase 查询真实排名
@@ -231,98 +218,6 @@ app.post('/api/v2/analyze', async (c) => {
       E_rank: 50,
       F_rank: 50,
     };
-
-    // 【保存到 Supabase】如果配置了 Supabase，保存分析结果到 user_analysis 表
-    if (env.SUPABASE_URL && env.SUPABASE_KEY) {
-      try {
-        // 生成用户身份标识
-        const userSignature = `${totalMessages}_${totalChars}_${vibeIndex}`;
-        const msgUint8 = new TextEncoder().encode(userSignature);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
-        const userIdentity = Array.from(new Uint8Array(hashBuffer))
-          .map(b => b.toString(16).padStart(2, '0')).join('');
-
-        // 【构造插入 Payload】将维度分映射为小写字段名
-        const analysisPayload = {
-          user_identity: userIdentity,
-          l: dimensions.L,        // 小写字段映射
-          p: dimensions.P,
-          d: dimensions.D,
-          e: dimensions.E,
-          f: dimensions.F,
-          dimensions: dimensions, // 同时保留完整的 JSONB 格式
-          vibe_index: vibeIndex,
-          personality_type: personalityType,
-          total_messages: totalMessages,
-          total_chars: totalChars,
-          ip_location: ipLocation, // 从 c.req.raw.cf 提取的地理信息
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-
-        const insertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis`;
-        // 【执行 Supabase 插入】Body 必须是数组格式
-        const insertBody = JSON.stringify([analysisPayload]);
-
-        console.log('[Worker] 📤 准备插入数据到 user_analysis 表:', {
-          url: insertUrl,
-          method: 'POST',
-          headers: {
-            'apikey': '***',
-            'Authorization': 'Bearer ***',
-            'Content-Type': 'application/json',
-            'Prefer': 'return=minimal',
-          },
-          body: insertBody,
-          payload: analysisPayload,
-        });
-
-        // 【执行插入】使用 fetch 发送 POST 请求
-        // Headers 必须包含 apikey, Authorization: Bearer, 和 'Prefer': 'return=minimal'
-        const writeRes = await fetch(insertUrl, {
-          method: 'POST',
-          headers: {
-            'apikey': env.SUPABASE_KEY,
-            'Authorization': `Bearer ${env.SUPABASE_KEY}`,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=minimal',
-          },
-          body: insertBody, // 数组格式：JSON.stringify([payload])
-        });
-
-        console.log('[Worker] 📥 Supabase 响应状态:', {
-          ok: writeRes.ok,
-          status: writeRes.status,
-          statusText: writeRes.statusText,
-        });
-
-        if (writeRes.ok) {
-          console.log('[Worker] ✅ 分析数据已保存到 user_analysis 表', {
-            userIdentity,
-            ipLocation,
-            vibeIndex,
-            personalityType,
-            dimensions: { l: dimensions.L, p: dimensions.P, d: dimensions.D, e: dimensions.E, f: dimensions.F },
-          });
-        } else {
-          // 【错误诊断】如果 !res.ok，必须打印 Supabase 错误详情
-          const errorText = await writeRes.text().catch(() => '无法读取错误信息');
-          console.error('[Supabase Error]', errorText);
-          console.error('[Worker] ❌ 保存到 user_analysis 表失败:', {
-            status: writeRes.status,
-            statusText: writeRes.statusText,
-            error: errorText,
-            userIdentity,
-            ipLocation,
-            payload: analysisPayload,
-            requestBody: insertBody,
-          });
-        }
-      } catch (error) {
-        console.error('[Worker] ❌ 保存分析数据时出错:', error);
-        // 即使保存失败，也返回结果（使用基于维度分计算的排名）
-      }
-    }
 
     // 【获取总用户数和真实排名数据】
     let totalUsers = 1;
@@ -414,7 +309,7 @@ app.post('/api/v2/analyze', async (c) => {
           ]);
 
           // 计算统计数据的排名（基于实际统计数据）
-          // 注意：user_analysis 表中可能没有这些字段，需要从 cursor_stats 表查询
+          // 注意：排名查询已改为从 user_analysis 表查询
           // 这里先使用维度排名作为占位符，后续可以优化
           const calcPct = (count: number): number => {
             if (totalUsers <= 0) return 50;
@@ -450,7 +345,7 @@ app.post('/api/v2/analyze', async (c) => {
     }
 
     // --- 核心修复：确保所有关键字段都在顶层，且名称与前端完全对齐 ---
-    return c.json({
+    const result = {
       status: 'success',
       // 1. 顶层字段（这是前端 React 组件直接解构的字段）
       dimensions: dimensions,
@@ -505,8 +400,79 @@ app.post('/api/v2/analyze', async (c) => {
           E_rank: ranks.E_rank || 50,
           F_rank: ranks.F_rank || 50,
         }
+      },
+      // 5. 添加 personality 对象（用于字段映射）
+      personality: {
+        type: personalityType,
       }
-    });
+    };
+
+    // 【异步入库控制】在 return 之前插入 waitUntil，确保数据持久化
+    if (env.SUPABASE_URL && env.SUPABASE_KEY) {
+      try {
+        const executionCtx = c.executionCtx;
+        if (executionCtx && typeof executionCtx.waitUntil === 'function') {
+          // 字段映射补全：确保所有必需字段都存在
+          // 优先使用 body 中的数据，否则使用计算的结果
+          const dimensionsForDb = body.dimensions || dimensions;
+          const payload = {
+            user_name: body.user_name || '匿名受害者',
+            personality_type: result.personality?.type || personalityType,
+            total_messages: body.total_messages || totalMessages || 0,
+            total_chars: body.total_chars || totalChars || 0,
+            roast_text: result.data?.roast || result.roastText || roastText || '',
+            vibe_index: result.vibeIndex || body.vibe_index || vibeIndex,
+            dimensions: dimensionsForDb,
+            l: dimensionsForDb?.L || dimensionsForDb?.l || dimensions.L || 0,
+            p: dimensionsForDb?.P || dimensionsForDb?.p || dimensions.P || 0,
+            d: dimensionsForDb?.D || dimensionsForDb?.d || dimensions.D || 0,
+            e: dimensionsForDb?.E || dimensionsForDb?.e || dimensions.E || 0,
+            f: dimensionsForDb?.F || dimensionsForDb?.f || dimensions.F || 0,
+            ip_location: c.req.header('cf-ipcountry') || ipLocation || 'Unknown',
+          };
+
+          console.log(`[DB] 准备为用户 ${payload.user_name} 写入数据`);
+
+          // 使用 waitUntil 异步执行数据库写入，不阻塞返回
+          executionCtx.waitUntil(
+            fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis`, {
+              method: 'POST',
+              headers: {
+                'apikey': env.SUPABASE_KEY,
+                'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=minimal',
+              },
+              body: JSON.stringify([payload]),
+            })
+              .then(res => {
+                console.log(`[DB] 写入完成，状态码: ${res.status}`);
+                if (!res.ok) {
+                  return res.text().then(errorText => {
+                    console.error('[DB] 写入失败:', {
+                      status: res.status,
+                      statusText: res.statusText,
+                      error: errorText,
+                      payload,
+                    });
+                  });
+                }
+              })
+              .catch(error => {
+                console.error('[DB] 写入异常:', error);
+              })
+          );
+        } else {
+          console.warn('[DB] ⚠️ executionCtx.waitUntil 不可用，跳过数据库写入');
+        }
+      } catch (error) {
+        // 异常防御：防止后台任务报错影响主进程
+        console.warn('[DB] ⚠️ 数据库写入逻辑异常，跳过写入:', error);
+      }
+    }
+
+    // 返回结果（不阻塞数据库写入）
+    return c.json(result);
   } catch (error: any) {
     console.error('[Worker] /api/v2/analyze 错误:', error);
     const errorRanks = {
@@ -634,48 +600,74 @@ app.post('/api/analyze', async (c) => {
         .map(b => b.toString(16).padStart(2, '0')).join('');
     }
     
-    // 3. 写入 Supabase
+    // 3. 写入 Supabase - 直接写入 user_analysis 表
+    // 【字段对齐】确保字段名与 user_analysis 表定义完全一致
+    // 参考 /api/v2/analyze 中的字段映射
+    // 【调试日志】在写入前添加调试日志
+    console.log('[Debug] 准备写入 user_analysis:', JSON.stringify(body, null, 2));
+    
     const payload = {
       user_identity: userIdentity,
-      user_messages: userMessages,
-      total_user_chars: totalChars,
-      days: days,
-      jiafang: jiafang,
-      ketao: ketao,
-      feihua: totalChars,
-      avg_length: avgLength,
+      l: dimensions.L || 0,        // 小写字段映射
+      p: dimensions.P || 0,
+      d: dimensions.D || 0,
+      e: dimensions.E || 0,
+      f: dimensions.F || 0,
+      dimensions: dimensions,      // 同时保留完整的 JSONB 格式
       vibe_index: vibeIndex,
-      personality: personality,
-      dimensions: dimensions,
-      metadata: { ...body.metadata, ...body.statistics },
+      personality_type: personality, // 注意：user_analysis 表使用 personality_type，不是 personality
+      total_messages: userMessages,  // 注意：user_analysis 表使用 total_messages，不是 user_messages
+      total_chars: totalChars,      // 注意：user_analysis 表使用 total_chars，不是 total_user_chars
+      ip_location: clientIP !== 'anonymous' ? clientIP : '未知', // 从请求头获取 IP
+      created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
     
-    const writeRes = await fetch(`${env.SUPABASE_URL}/rest/v1/cursor_stats`, {
+    const insertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis`;
+    // 【执行 Supabase 插入】Body 必须是数组格式
+    const insertBody = JSON.stringify([payload]);
+    
+    console.log('[Worker] 📤 准备插入数据到 user_analysis 表:', {
+      url: insertUrl,
+      method: 'POST',
+      headers: {
+        'apikey': '***',
+        'Authorization': 'Bearer ***',
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal',
+      },
+      body: insertBody,
+      payload: payload,
+    });
+    
+    const writeRes = await fetch(insertUrl, {
       method: 'POST',
       headers: {
         'apikey': env.SUPABASE_KEY,
         'Authorization': `Bearer ${env.SUPABASE_KEY}`,
         'Content-Type': 'application/json',
-        'Prefer': 'resolution=merge-duplicates',
+        'Prefer': 'return=minimal',
       },
-      body: JSON.stringify(payload),
+      body: insertBody, // 数组格式：JSON.stringify([payload])
     });
     
     if (!writeRes.ok) {
       const errorText = await writeRes.text().catch(() => '无法读取错误信息');
-      console.error('[Worker] ❌ 数据库写入失败:', {
+      console.error('[Worker] ❌ 保存到 user_analysis 表失败:', {
         status: writeRes.status,
         statusText: writeRes.statusText,
         error: errorText,
         userIdentity: userIdentity,
         payload: payload,
+        requestBody: insertBody,
       });
     } else {
-      const writeData = await writeRes.json().catch(() => null);
-      console.log('[Worker] ✅ 数据写入成功:', {
-        userIdentity: userIdentity,
-        method: Array.isArray(writeData) && writeData.length > 0 ? 'UPDATE' : 'INSERT',
+      console.log('[Worker] ✅ 分析数据已保存到 user_analysis 表', {
+        userIdentity,
+        ipLocation: payload.ip_location,
+        vibeIndex,
+        personalityType: personality,
+        dimensions: { l: dimensions.L, p: dimensions.P, d: dimensions.D, e: dimensions.E, f: dimensions.F },
       });
     }
     
@@ -732,7 +724,20 @@ app.post('/api/analyze', async (c) => {
           return 0;
         }
         
-        const queryUrl = `${env.SUPABASE_URL}/rest/v1/cursor_stats?${column}=lt.${numValue}&select=id`;
+        // 【移除 cursor_stats 查询】改为查询 user_analysis 表
+        // 字段名映射：user_messages -> total_messages, total_user_chars -> total_chars
+        let mappedColumn = column;
+        if (column === 'user_messages') {
+          mappedColumn = 'total_messages';
+        } else if (column === 'total_user_chars') {
+          mappedColumn = 'total_chars';
+        } else if (column === 'days' || column === 'jiafang' || column === 'ketao' || column === 'avg_length') {
+          // 这些字段在 user_analysis 表中不存在，跳过排名查询
+          console.warn(`[Worker] ⚠️ 字段 ${column} 在 user_analysis 表中不存在，跳过排名查询`);
+          return 0;
+        }
+        
+        const queryUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?${mappedColumn}=lt.${numValue}&select=id`;
         
         const res = await fetch(queryUrl, {
           headers: {
@@ -776,13 +781,18 @@ app.post('/api/analyze', async (c) => {
       }
     };
     
-    const [beatMsg, beatChar, beatDay, beatJia, beatKe, beatAvg] = await Promise.all([
-      getRankCount('user_messages', userMessages),
-      getRankCount('total_user_chars', totalChars),
-      getRankCount('days', days),
-      getRankCount('jiafang', jiafang),
-      getRankCount('ketao', ketao),
-      getRankCount('avg_length', avgLength),
+    // 【字段映射】user_analysis 表的字段名与 cursor_stats 不同
+    // user_messages -> total_messages
+    // total_user_chars -> total_chars
+    // days, jiafang, ketao, avg_length 在 user_analysis 表中不存在，使用维度分进行排名
+    const [beatMsg, beatChar, beatL, beatP, beatD, beatE, beatF] = await Promise.all([
+      getRankCount('total_messages', userMessages),  // 映射到 total_messages
+      getRankCount('total_chars', totalChars),        // 映射到 total_chars
+      getRankCount('l', dimensions.L || 0),           // 使用维度分 L
+      getRankCount('p', dimensions.P || 0),           // 使用维度分 P
+      getRankCount('d', dimensions.D || 0),           // 使用维度分 D
+      getRankCount('e', dimensions.E || 0),           // 使用维度分 E
+      getRankCount('f', dimensions.F || 0),           // 使用维度分 F
     ]);
     
     const calcPct = (count: number): number => {
@@ -791,13 +801,14 @@ app.post('/api/analyze', async (c) => {
       return Math.min(99, Math.max(0, percent));
     };
     
+    // 【排名计算】使用维度分进行排名，替代不存在的字段
     const ranks = {
       messageRank: calcPct(beatMsg),
       charRank: calcPct(beatChar),
-      daysRank: calcPct(beatDay),
-      jiafangRank: calcPct(beatJia),
-      ketaoRank: calcPct(beatKe),
-      avgRank: calcPct(beatAvg),
+      daysRank: calcPct(beatD),      // 使用维度 D 替代 days
+      jiafangRank: calcPct(beatE),   // 使用维度 E 替代 jiafang
+      ketaoRank: calcPct(beatF),     // 使用维度 F 替代 ketao
+      avgRank: Math.floor((calcPct(beatMsg) + calcPct(beatChar) + calcPct(beatL) + calcPct(beatP) + calcPct(beatD) + calcPct(beatE) + calcPct(beatF)) / 7),
     };
     
     // 6. 返回完整数据包
@@ -935,23 +946,32 @@ app.get('/api/global-average', async (c) => {
               }
 
               // 处理最近受害者
-              let recentVictims: Array<{ type: string; location: string; time: string }> = [];
+              // 确保 recentVictims 数组中包含 name 字段
+              let recentVictims: Array<{ name: string; type: string; location: string; time: string }> = [];
               if (recentVictimsRes.ok) {
                 try {
                   const victimsData = await recentVictimsRes.json();
-                  recentVictims = victimsData.map((item: any) => ({
-                    type: item.personality_type || 'UNKNOWN',
-                    location: item.ip_location || '未知',
-                    time: item.created_at || new Date().toISOString(),
-                  }));
+                  recentVictims = victimsData.map((item: any, index: number) => {
+                    const type = item.personality_type || 'UNKNOWN';
+                    const location = item.ip_location || '未知';
+                    // 如果数据库没有 user_name，根据 type 生成一个临时名称
+                    const name = item.user_name || item.name || `匿名受害者${index + 1}`;
+                    return {
+                      name: name,
+                      type: type,
+                      location: location,
+                      time: item.created_at || new Date().toISOString(),
+                    };
+                  });
                 } catch (error) {
                   console.warn('[Worker] ⚠️ 解析最近受害者数据失败:', error);
                 }
               }
 
               // 处理地理位置统计
+              // 将 locationRank 中的字段统一为前端要求的格式：{ name: string, value: number }
               let cityCount = 0;
-              let locationRank: Array<{ location: string; count: number }> = [];
+              let locationRank: Array<{ name: string; value: number }> = [];
               
               if (allLocationsRes.ok) {
                 try {
@@ -964,9 +984,10 @@ app.get('/api/global-average', async (c) => {
                     }
                   });
                   cityCount = locationMap.size;
+                  // 映射为前端要求的格式：{ name: location, value: count }
                   locationRank = Array.from(locationMap.entries())
-                    .map(([location, count]) => ({ location, count }))
-                    .sort((a, b) => b.count - a.count)
+                    .map(([location, count]) => ({ name: location, value: count }))
+                    .sort((a, b) => b.value - a.value)
                     .slice(0, 5);
                 } catch (error) {
                   console.warn('[Worker] ⚠️ 解析地理位置数据失败:', error);
@@ -1088,6 +1109,7 @@ app.get('/api/global-average', async (c) => {
               };
 
               // 【调试日志】在返回前输出完整数据，方便调试
+              console.log('[Debug] 最终发送数据:', JSON.stringify(responseData, null, 2));
               console.log('[Worker] 发送给前端的数据:', JSON.stringify(responseData, null, 2));
               console.log('[Worker] ✅ 从 KV 缓存返回完整数据:', {
                 hasGlobalAverage: !!responseData.globalAverage,
@@ -1096,6 +1118,7 @@ app.get('/api/global-average', async (c) => {
                 hasData: !!responseData.data,
                 totalUsers: responseData.totalUsers,
                 globalAverage: responseData.globalAverage,
+                source: responseData.source,
               });
 
               return c.json(responseData);
@@ -1157,6 +1180,7 @@ app.get('/api/global-average', async (c) => {
               };
 
               // 【调试日志】在返回前输出完整数据，方便调试
+              console.log('[Debug] 最终发送数据:', JSON.stringify(responseData, null, 2));
               console.log('[Worker] 发送给前端的数据:', JSON.stringify(responseData, null, 2));
               console.log('[Worker] ⚠️ 降级返回（统计数据获取失败）:', {
                 hasGlobalAverage: !!responseData.globalAverage,
@@ -1164,6 +1188,7 @@ app.get('/api/global-average', async (c) => {
                 hasTotalUsers: !!responseData.totalUsers,
                 hasData: !!responseData.data,
                 globalAverage: responseData.globalAverage,
+                source: responseData.source,
               });
 
               return c.json(responseData);
@@ -1225,6 +1250,7 @@ app.get('/api/global-average', async (c) => {
             };
 
             // 【调试日志】在返回前输出完整数据，方便调试
+            console.log('[Debug] 最终发送数据:', JSON.stringify(responseData, null, 2));
             console.log('[Worker] 发送给前端的数据:', JSON.stringify(responseData, null, 2));
             console.log('[Worker] ⚠️ 无 Supabase 配置，返回默认值:', {
               hasGlobalAverage: !!responseData.globalAverage,
@@ -1232,6 +1258,7 @@ app.get('/api/global-average', async (c) => {
               hasTotalUsers: !!responseData.totalUsers,
               hasData: !!responseData.data,
               globalAverage: responseData.globalAverage,
+              source: responseData.source,
             });
 
             return c.json(responseData);
@@ -1263,7 +1290,7 @@ app.get('/api/global-average', async (c) => {
     
     // 【硬编码注入】在返回之前，手动将 dimensions 字典注入到 JSON 中，确保万无一失
     // 统一使用 globalAverage 字段（不要用 averages）
-    const responseData = {
+    const responseData: any = {
       status: 'error',
       success: false,
       error: error.message || '未知错误',
@@ -1294,9 +1321,11 @@ app.get('/api/global-average', async (c) => {
       cityCount: 0,
       locationRank: [],
       recentVictims: [],
+      source: 'error_fallback', // 添加 source 字段
     };
 
     // 【调试日志】在返回前输出完整数据，方便调试
+    console.log('[Debug] 最终发送数据:', JSON.stringify(responseData, null, 2));
     console.log('[Worker] 发送给前端的数据:', JSON.stringify(responseData, null, 2));
     console.log('[Worker] ⚠️ 路由错误返回（但包含完整字段）:', {
       hasGlobalAverage: !!responseData.globalAverage,
@@ -1304,6 +1333,7 @@ app.get('/api/global-average', async (c) => {
       hasTotalUsers: !!responseData.totalUsers,
       hasData: !!responseData.data,
       globalAverage: responseData.globalAverage,
+      source: responseData.source,
     });
 
     return c.json(responseData, 500);
@@ -1533,6 +1563,7 @@ async function fetchFromSupabase(
     };
 
     // 【调试日志】在返回前输出完整数据，方便调试
+    console.log('[Debug] 最终发送数据:', JSON.stringify(responseData, null, 2));
     console.log('[Worker] 发送给前端的数据:', JSON.stringify(responseData, null, 2));
     console.log('[Worker] ✅ 返回默认值（Supabase 未配置）:', {
       hasGlobalAverage: !!responseData.globalAverage,
@@ -1540,37 +1571,29 @@ async function fetchFromSupabase(
       hasTotalUsers: !!responseData.totalUsers,
       hasData: !!responseData.data,
       globalAverage: responseData.globalAverage,
+      source: responseData.source,
     });
 
     return c.json(responseData);
   }
 
+  // 用于跟踪是否使用了降级方案（直接查询 user_analysis）
+  let usedFallbackQuery = false;
+  
   try {
-    // 并行查询所有需要的数据
-    const [globalStatsRes, recentVictimsRes, allLocationsRes, dashboardSummaryRes] = await Promise.all([
-      // 1. 获取全局统计数据
-      fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_v3_view?select=*`, {
+    // 【多视图合成】放弃请求 global_stats_v3_view，改为从两个视图获取数据
+    // 视图 A (dashboard_summary_view)：获取 total_roast_words, city_count, total_users 以及平均分数据
+    // 视图 B (extended_stats_view)：获取 location_rank 和 recent_victims 数据
+    const [dashboardSummaryRes, extendedStatsRes] = await Promise.all([
+      // 视图 A：获取汇总数据和平均分
+      fetch(`${env.SUPABASE_URL}/rest/v1/dashboard_summary_view?select=*`, {
         headers: {
           'apikey': env.SUPABASE_KEY,
           'Authorization': `Bearer ${env.SUPABASE_KEY}`,
         },
       }),
-      // 2. 获取最近受害者（最新的 5 条记录）
-      fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=personality_type,ip_location,created_at&order=created_at.desc&limit=5`, {
-        headers: {
-          'apikey': env.SUPABASE_KEY,
-          'Authorization': `Bearer ${env.SUPABASE_KEY}`,
-        },
-      }),
-      // 3. 获取所有地理位置（用于统计城市数和热力排行）
-      fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=ip_location&ip_location=not.is.null`, {
-        headers: {
-          'apikey': env.SUPABASE_KEY,
-          'Authorization': `Bearer ${env.SUPABASE_KEY}`,
-        },
-      }),
-      // 4. 获取汇总统计数据（从 dashboard_summary_view 获取 total_words）
-      fetch(`${env.SUPABASE_URL}/rest/v1/dashboard_summary_view?select=total_words`, {
+      // 视图 B：获取地理位置排行和最近受害者
+      fetch(`${env.SUPABASE_URL}/rest/v1/extended_stats_view?select=*`, {
         headers: {
           'apikey': env.SUPABASE_KEY,
           'Authorization': `Bearer ${env.SUPABASE_KEY}`,
@@ -1578,15 +1601,18 @@ async function fetchFromSupabase(
       }),
     ]);
 
-    // 处理全局统计数据
-    let globalAverage: { L: number; P: number; D: number; E: number; F: number };
-    let totalUsers: number;
+    // 【处理视图 A (dashboard_summary_view)】获取 total_roast_words, city_count, total_users 以及平均分数据
+    let globalAverage: { L: number; P: number; D: number; E: number; F: number } = defaultAverage;
+    let totalUsers: number = 1;
+    let totalRoastWords: number = 0;
+    let cityCount: number = 0;
 
-    // 【跳过视图检查】如果 global_stats_v3_view 持续报 404，直接查询 user_analysis 表
-    if (!globalStatsRes.ok || globalStatsRes.status === 404) {
-      console.warn('[Worker] ⚠️ global_stats_v3_view 查询失败或不存在（状态码:', globalStatsRes.status, '），降级到直接查询 user_analysis 表');
+    if (!dashboardSummaryRes.ok) {
+      console.error('[View Error] dashboard_summary_view:', `HTTP ${dashboardSummaryRes.status} - ${dashboardSummaryRes.statusText}`);
+      // 如果视图 A 失败，降级到直接查询 user_analysis 表
+      usedFallbackQuery = true;
+      console.warn('[Worker] ⚠️ dashboard_summary_view 查询失败，降级到直接查询 user_analysis 表');
       
-      // 直接查询 user_analysis 表计算平均值
       const userAnalysisRes = await fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=l,p,d,e,f`, {
         headers: {
           'apikey': env.SUPABASE_KEY,
@@ -1607,148 +1633,127 @@ async function fetchFromSupabase(
           }), { L: 0, P: 0, D: 0, E: 0, F: 0 });
 
           const count = userData.length;
-          globalAverage = {
-            L: Math.round((sum.L / count) || 50),
-            P: Math.round((sum.P / count) || 50),
-            D: Math.round((sum.D / count) || 50),
-            E: Math.round((sum.E / count) || 50),
-            F: Math.round((sum.F / count) || 50),
-          };
+          if (count > 0) {
+            globalAverage = {
+              L: Math.round(sum.L / count),
+              P: Math.round(sum.P / count),
+              D: Math.round(sum.D / count),
+              E: Math.round(sum.E / count),
+              F: Math.round(sum.F / count),
+            };
+          }
           totalUsers = count;
-          console.log('[Worker] ✅ 从 user_analysis 表直接计算平均值:', globalAverage, '总用户数:', totalUsers);
-        } else {
-          // 如果没有数据，使用默认值
-          globalAverage = defaultAverage;
-          totalUsers = 1;
-          console.warn('[Worker] ⚠️ user_analysis 表为空，使用默认值');
         }
-      } else {
-        // 查询失败，使用默认值
-        globalAverage = defaultAverage;
-        totalUsers = 1;
-        console.warn('[Worker] ⚠️ user_analysis 表查询失败，使用默认值');
       }
     } else {
-      // 正常情况：从视图获取数据
-      const globalData = await globalStatsRes.json();
-      const row = globalData[0] || {};
-
-      // 确保 globalAverage 内部的键名是大写的 L, P, D, E, F
-      globalAverage = {
-        L: parseFloat(row.avg_l || 50),
-        P: parseFloat(row.avg_p || 50),
-        D: parseFloat(row.avg_d || 50),
-        E: parseFloat(row.avg_e || 50),
-        F: parseFloat(row.avg_f || 50),
-      };
-
-      // 获取总用户数
-      totalUsers = parseInt(row.total_count || 0);
-      if (totalUsers <= 0) {
-        totalUsers = 1;
-      }
-    }
-
-    // 处理最近受害者
-    let recentVictims: Array<{ type: string; location: string; time: string }> = [];
-    if (recentVictimsRes.ok) {
-      try {
-        const victimsData = await recentVictimsRes.json();
-        recentVictims = victimsData.map((item: any) => ({
-          type: item.personality_type || 'UNKNOWN',
-          location: item.ip_location || '未知',
-          time: item.created_at || new Date().toISOString(),
-        }));
-      } catch (error) {
-        console.warn('[Worker] ⚠️ 解析最近受害者数据失败:', error);
-      }
-    }
-
-    // 处理地理位置统计
-    let cityCount = 0;
-    let locationRank: Array<{ location: string; count: number }> = [];
-    
-    if (allLocationsRes.ok) {
-      try {
-        const locationsData = await allLocationsRes.json();
-        
-        // 统计每个地理位置的出现次数
-        const locationMap = new Map<string, number>();
-        locationsData.forEach((item: any) => {
-          if (item.ip_location && item.ip_location !== '未知') {
-            const count = locationMap.get(item.ip_location) || 0;
-            locationMap.set(item.ip_location, count + 1);
-          }
-        });
-        
-        // 覆盖城市数 = 去重后的地理位置数量
-        cityCount = locationMap.size;
-        
-        // 地理热力排行：按人数排序，取 Top 5
-        locationRank = Array.from(locationMap.entries())
-          .map(([location, count]) => ({ location, count }))
-          .sort((a, b) => b.count - a.count)
-          .slice(0, 5);
-      } catch (error) {
-        console.warn('[Worker] ⚠️ 解析地理位置数据失败:', error);
-      }
-    }
-
-    // 获取吐槽字数统计（从 dashboard_summary_view 获取 total_words）
-    let totalRoastWords = 0;
-    if (dashboardSummaryRes.ok) {
       try {
         const summaryData = await dashboardSummaryRes.json();
-        // dashboard_summary_view 返回的是数组，取第一条记录
-        const summaryRow = summaryData[0] || {};
-        totalRoastWords = parseInt(summaryRow.total_words || 0);
-        console.log('[Worker] ✅ 从 dashboard_summary_view 获取 total_words:', totalRoastWords);
-      } catch (error) {
-        console.warn('[Worker] ⚠️ 解析 dashboard_summary_view 数据失败:', error);
-        // 降级方案：如果 dashboard_summary_view 不存在或失败，尝试查询所有记录并计算
-        try {
-          const roastWordsRes = await fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=roast_text`, {
-            headers: {
-              'apikey': env.SUPABASE_KEY,
-              'Authorization': `Bearer ${env.SUPABASE_KEY}`,
-            },
-          });
-          
-          if (roastWordsRes.ok) {
-            const roastData = await roastWordsRes.json();
-            totalRoastWords = roastData.reduce((sum: number, item: any) => {
-              const text = item.roast_text || '';
-              return sum + text.length;
-            }, 0);
-            console.log('[Worker] ✅ 降级方案：从 user_analysis 计算 totalRoastWords:', totalRoastWords);
-          }
-        } catch (fallbackError) {
-          console.warn('[Worker] ⚠️ 降级方案也失败:', fallbackError);
-        }
-      }
-    } else {
-      console.warn('[Worker] ⚠️ dashboard_summary_view 查询失败，HTTP 状态:', dashboardSummaryRes.status);
-      // 降级方案：如果 dashboard_summary_view 不存在，尝试查询所有记录并计算
-      try {
-        const roastWordsRes = await fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=roast_text`, {
-          headers: {
-            'apikey': env.SUPABASE_KEY,
-            'Authorization': `Bearer ${env.SUPABASE_KEY}`,
-          },
-        });
+        const row = summaryData[0] || {};
         
-        if (roastWordsRes.ok) {
-          const roastData = await roastWordsRes.json();
-          totalRoastWords = roastData.reduce((sum: number, item: any) => {
-            const text = item.roast_text || '';
-            return sum + text.length;
-          }, 0);
-          console.log('[Worker] ✅ 降级方案：从 user_analysis 计算 totalRoastWords:', totalRoastWords);
+        // 从视图 A 获取平均分数据
+        globalAverage = {
+          L: parseFloat(row.avg_l || row.avg_L || 50),
+          P: parseFloat(row.avg_p || row.avg_P || 50),
+          D: parseFloat(row.avg_d || row.avg_D || 50),
+          E: parseFloat(row.avg_e || row.avg_E || 50),
+          F: parseFloat(row.avg_f || row.avg_F || 50),
+        };
+        
+        // 获取总用户数
+        totalUsers = parseInt(row.total_users || row.total_count || 0);
+        if (totalUsers <= 0) {
+          totalUsers = 1;
         }
-      } catch (fallbackError) {
-        console.warn('[Worker] ⚠️ 降级方案也失败:', fallbackError);
+        
+        // 获取累计吐槽字数
+        totalRoastWords = parseInt(row.total_roast_words || row.total_words || 0);
+        
+        // 获取覆盖城市数
+        cityCount = parseInt(row.city_count || 0);
+        
+        console.log('[Worker] ✅ 从 dashboard_summary_view 获取数据:', {
+          totalUsers,
+          totalRoastWords,
+          cityCount,
+          globalAverage,
+        });
+      } catch (error: any) {
+        console.error('[View Error] dashboard_summary_view:', error.message || '解析失败');
+        usedFallbackQuery = true;
       }
     }
+
+    // 【处理视图 B (extended_stats_view)】获取 location_rank 和 recent_victims 数据
+    let locationRank: Array<{ name: string; value: number }> = [];
+    let recentVictims: Array<{ name: string; type: string; location: string; time: string }> = [];
+
+    if (!extendedStatsRes.ok) {
+      console.error('[View Error] extended_stats_view:', `HTTP ${extendedStatsRes.status} - ${extendedStatsRes.statusText}`);
+      // 如果视图 B 失败，使用空数组
+      console.warn('[Worker] ⚠️ extended_stats_view 查询失败，使用空数据');
+    } else {
+      try {
+        const extendedData = await extendedStatsRes.json();
+        const row = extendedData[0] || {};
+        
+        // 【字段映射转换】处理地理位置排行
+        // 将 extended_stats_view 返回的地区数据映射为 { name: location, value: count }
+        if (row.location_rank && Array.isArray(row.location_rank)) {
+          locationRank = row.location_rank.map((item: any) => {
+            // 兼容不同的字段名格式
+            const name = item.name || item.location || '未知';
+            const value = item.value !== undefined ? item.value : (item.count !== undefined ? item.count : 0);
+            return { name, value };
+          }).slice(0, 5); // 取 Top 5
+        } else if (row.location_rank && typeof row.location_rank === 'object') {
+          // 如果是对象格式，转换为数组
+          locationRank = Object.entries(row.location_rank).map(([name, count]: [string, any]) => ({
+            name,
+            value: typeof count === 'number' ? count : parseInt(count) || 0,
+          })).sort((a, b) => b.value - a.value).slice(0, 5);
+        }
+        
+        // 【字段映射转换】处理最近受害者
+        // 将返回的列表映射为 { name, location, time, type }
+        if (row.recent_victims && Array.isArray(row.recent_victims)) {
+          recentVictims = row.recent_victims.map((item: any, index: number) => {
+            const name = item.name || item.user_name || `匿名受害者${index + 1}`;
+            const location = item.location || item.ip_location || '未知';
+            const time = item.time || item.created_at || item.timestamp || new Date().toISOString();
+            const type = item.type || item.personality_type || 'UNKNOWN';
+            return { name, location, time, type };
+          });
+        }
+        
+        console.log('[Worker] ✅ 从 extended_stats_view 获取数据:', {
+          locationRankCount: locationRank.length,
+          recentVictimsCount: recentVictims.length,
+        });
+      } catch (error: any) {
+        console.error('[View Error] extended_stats_view:', error.message || '解析失败');
+      }
+    }
+    
+    // 【汇总数据】确保 totalRoastWords 和 cityCount 被正确赋值
+    // 如果视图 A 没有提供这些数据，尝试从视图 B 获取
+    if (totalRoastWords === 0 && extendedStatsRes.ok) {
+      try {
+        const extendedData = await extendedStatsRes.json();
+        const row = extendedData[0] || {};
+        if (row.total_roast_words) {
+          totalRoastWords = parseInt(row.total_roast_words) || 0;
+        }
+      } catch (error) {
+        // 忽略错误
+      }
+    }
+    
+    if (cityCount === 0 && locationRank.length > 0) {
+      // 如果 locationRank 有数据，使用去重后的数量作为 cityCount
+      cityCount = locationRank.length;
+    }
+
+    // totalRoastWords 和 cityCount 已在视图 A 处理中获取，这里不再重复处理
 
     // 如果启用 KV 更新，写入缓存（包含 dimensions 字段，用于版本校验）
     if (updateKV && env.STATS_STORE) {
@@ -1770,7 +1775,16 @@ async function fetchFromSupabase(
     // 【核心重构】确保返回的 JSON 包含所有前端需要的 Key，严格按照用户要求的格式
     const finalTotalUsers = totalUsers || 1;
     
+    // 【确保 source 字段正确】根据数据来源设置正确的 source 值
+    let dataSource = 'supabase';
+    if (usedFallbackQuery) {
+      dataSource = 'database_direct';
+    } else if (updateKV) {
+      dataSource = 'supabase_and_kv';
+    }
+    
     // 【硬编码注入】在返回之前，手动将 dimensions 字典注入到 JSON 中，确保万无一失
+    // 最终返回给前端的 JSON 必须包含：globalAverage, totalUsers, totalRoastWords, cityCount, locationRank, recentVictims
     const responseData = {
       status: 'success',
       success: true,
@@ -1798,15 +1812,17 @@ async function fetchFromSupabase(
           F: { label: '频率感' }
         },
       },
-      // 5. 其他统计数据
+      // 5. 其他统计数据（必须包含）
       totalRoastWords: totalRoastWords,
       cityCount: cityCount,
-      locationRank: locationRank,
-      recentVictims: recentVictims,
-      source: updateKV ? 'supabase_and_kv' : 'supabase',
+      locationRank: locationRank, // 格式：{ name: string, value: number }
+      recentVictims: recentVictims, // 格式：{ name: string, type: string, location: string, time: string }
+      source: dataSource, // supabase_and_kv 或 database_direct 或 supabase
     };
 
-    // 【调试日志】在返回前输出完整数据，方便调试
+    // 【调试日志】添加调试日志：console.log('[Debug] 最终合成数据:', JSON.stringify(responseData))
+    console.log('[Debug] 最终合成数据:', JSON.stringify(responseData, null, 2));
+    console.log('[Debug] 最终发送数据:', JSON.stringify(responseData, null, 2));
     console.log('[Worker] 发送给前端的数据:', JSON.stringify(responseData, null, 2));
     console.log('[Worker] ✅ /api/global-average 返回完整数据:', {
       hasGlobalAverage: !!responseData.globalAverage,
@@ -1819,6 +1835,7 @@ async function fetchFromSupabase(
       locationRankCount: responseData.locationRank.length,
       recentVictimsCount: responseData.recentVictims.length,
       globalAverage: responseData.globalAverage,
+      source: responseData.source,
     });
 
     return c.json(responseData);
@@ -1861,12 +1878,14 @@ async function fetchFromSupabase(
     };
 
     // 【调试日志】在返回前输出完整数据，方便调试
+    console.log('[Debug] 最终发送数据:', JSON.stringify(responseData, null, 2));
     console.log('[Worker] 发送给前端的数据:', JSON.stringify(responseData, null, 2));
     console.log('[Worker] ⚠️ 错误返回（但包含完整字段）:', {
       hasGlobalAverage: !!responseData.globalAverage,
       hasDimensions: !!responseData.dimensions,
       hasTotalUsers: !!responseData.totalUsers,
       hasData: !!responseData.data,
+      source: responseData.source,
     });
 
     return c.json(responseData, 500);

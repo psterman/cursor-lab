@@ -804,13 +804,15 @@
             }
 
             locationList.innerHTML = locations.map((item, index) => {
-                const location = item.location || '未知';
-                const count = item.count || 0;
+                // 【字段对齐】更新解析逻辑，确保读取正确的 name 和 value 字段
+                // 兼容旧格式：{ location, count } 和新格式：{ name, value }
+                const name = item.name || item.location || '未知';
+                const value = item.value !== undefined ? item.value : (item.count !== undefined ? item.count : 0);
                 return `
                     <div class="location-item">
                         <span class="location-rank">#${index + 1}</span>
-                        <span class="location-name">${location}</span>
-                        <span class="location-count">${count} 人</span>
+                        <span class="location-name">${name}</span>
+                        <span class="location-count">${value} 人</span>
                     </div>
                 `;
             }).join('');
@@ -864,7 +866,9 @@
             }
 
             recentActivity.innerHTML = victims.map((victim, index) => {
+                // 【字段对齐】确保列表显示时，优先读取 v.name，其次是 v.location
                 // 兼容新旧格式
+                const name = victim.name || `匿名受害者${index + 1}`;
                 const type = victim.type || victim.personalityType || 'UNKNOWN';
                 const location = victim.location || victim.ip_location || '未知';
                 const time = victim.time || victim.created_at || victim.timestamp || new Date().toISOString();
@@ -874,8 +878,7 @@
                         <div class="timeline-content">
                             <div class="timeline-time">${formatDateTime(time)}</div>
                             <div class="timeline-text">
-                                <strong>${location}</strong> - 
-                                ${type}
+                                <strong>${name}</strong> - ${location} - ${type}
                             </div>
                         </div>
                     </div>
