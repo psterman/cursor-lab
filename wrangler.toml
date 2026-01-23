@@ -1,32 +1,31 @@
 name = "cursor-clinical-analysis"
-main = "src/index.js"
+# 核心：指向你的 TypeScript 入口文件
+main = "src/worker/index.ts"
 compatibility_date = "2024-04-03"
 
-# 1. 答案之书数据库 (保留原有 D1)
+# [第一阶段] 环境变量：通过这里统一管理 Supabase
+# 提示：生产环境的 SUPABASE_KEY 建议在 Cloudflare 网页后台设置为 "Secret" 以保证安全
+# 访问路径：Workers & Pages → cursor-clinical-analysis → Settings → Variables → Secrets
+[vars]
+SUPABASE_URL = "https://dtcplfhcgnxdzpigmotb.supabase.co"
+# SUPABASE_KEY 建议在后台添加为 Secret，不要写在明文配置文件里
+# 设置方法：wrangler secret put SUPABASE_KEY
+
+# [第二阶段] KV 绑定：这是缓存"全网均值"的关键
+# 注意：需要在 Cloudflare Dashboard 中创建 KV namespace
+# 访问路径：Workers & Pages → KV → Create a namespace
+# 创建后，将 namespace ID 填入下面的 id 字段
+[[kv_namespaces]]
+binding = "STATS_STORE"
+id = "991ddbdb18fa4b50998c722a7332f4c0"  # 请在此处填入你创建的 KV namespace ID
+preview_id = "e6f9014fb49b45eb83c8288f1d1cc1d4" # 新增这一行
+# [第二阶段] 定期汇总任务：每小时自动校准全网平均分
+# 注意：Cron 触发器需要 Worker 付费计划（Free 计划不支持）
+[triggers]
+crons = ["0 * * * *"]
+
+# [保留原有] D1 数据库：答案之书
 [[d1_databases]]
 binding = "prompts_library"
 database_name = "prompts_library"
 database_id = "921a6870-94b9-43df-8d2d-5dad83f93fd2"
-
-# 2. KV 存储绑定（用于去重检查）
-# 注意：需要在 Cloudflare Dashboard 中创建 KV namespace
-# 访问路径：Workers & Pages → KV → Create a namespace
-# 创建后，在 Worker 的 Settings → Variables → KV Namespace Bindings 中绑定
-# 或者使用以下配置（需要替换为实际的 namespace_id）：
-# [[kv_namespaces]]
-# binding = "STATS_STORE"
-# id = "your_kv_namespace_id_here"
-
-# 3. Supabase 环境变量配置
-# 注意：实际值需要在 Cloudflare Dashboard 中设置
-# 访问路径：Workers & Pages → cursor-clinical-analysis → Settings → Variables
-# 需要配置以下环境变量：
-# - SUPABASE_URL: Supabase 项目 URL (例如: https://xxxxx.supabase.co)
-# - SUPABASE_KEY: Supabase anon 或 service_role key
-#
-# 如果使用 RLS (Row Level Security)，建议使用 service_role key
-# 如果未使用 RLS，可以使用 anon key
-#
-# 本地开发时，可以在 .dev.vars 文件中配置（不提交到 git）：
-# SUPABASE_URL=https://xxxxx.supabase.co
-# SUPABASE_KEY=your_supabase_key_here

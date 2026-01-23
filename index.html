@@ -1689,6 +1689,7 @@
             const hostname = window.location.hostname;
             const isDev = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.includes('localhost') || hostname.includes('192.168.');
             const isGitHubPages = hostname.includes('github.io');
+            const isWorkersDev = hostname.includes('workers.dev') || hostname.includes('pages.dev');
             
             // 设置加载状态
             window.analysisModuleLoading = true;
@@ -1754,12 +1755,22 @@
                     // 获取当前目录（用于相对路径）
                     currentDir = pathname.substring(0, pathname.lastIndexOf('/')) || '';
                     
-                    // 构建路径列表（强制使用相对路径）
+                    // 构建路径列表（适配不同部署环境）
                     const paths = [];
                     
-                    // 强制使用相对路径，避免 GitHub Pages 路径问题
-                    paths.push('./main.js');
-                    paths.push('./dist/main.js');
+                    // Cloudflare Workers/Pages: 使用相对路径（同域名，无跨域问题）
+                    if (isWorkersDev) {
+                        paths.push('./main.js');
+                        paths.push('./dist/main.js');
+                    } else if (isGitHubPages) {
+                        // GitHub Pages: 使用相对路径
+                        paths.push('./main.js');
+                        paths.push('./dist/main.js');
+                    } else {
+                        // 其他环境: 使用相对路径
+                        paths.push('./main.js');
+                        paths.push('./dist/main.js');
+                    }
                     
                     console.log('[Main] 当前 URL:', window.location.href);
                     console.log('[Main] 当前路径:', pathname);
@@ -1874,31 +1885,41 @@
                         
                         const i18nPaths = [];
                         
-                        // 1. GitHub Pages 绝对路径（最高优先级）
-                        if (isGitHubPages && effectiveBasePath) {
-                            // 确保 basePath 以 / 开头，但不以 / 结尾
-                            const normalizedBasePath = effectiveBasePath.startsWith('/') ? effectiveBasePath : '/' + effectiveBasePath;
-                            const cleanBasePath = normalizedBasePath.endsWith('/') ? normalizedBasePath.slice(0, -1) : normalizedBasePath;
-                            i18nPaths.push(`${cleanBasePath}/src/i18n.js`);
+                        // Cloudflare Workers/Pages: 优先使用相对路径（同域名，无跨域问题）
+                        if (isWorkersDev) {
+                            i18nPaths.push('./src/i18n.js');
+                            i18nPaths.push('src/i18n.js');
+                        } else if (isGitHubPages) {
+                            // 1. GitHub Pages 绝对路径（最高优先级）
+                            if (effectiveBasePath) {
+                                // 确保 basePath 以 / 开头，但不以 / 结尾
+                                const normalizedBasePath = effectiveBasePath.startsWith('/') ? effectiveBasePath : '/' + effectiveBasePath;
+                                const cleanBasePath = normalizedBasePath.endsWith('/') ? normalizedBasePath.slice(0, -1) : normalizedBasePath;
+                                i18nPaths.push(`${cleanBasePath}/src/i18n.js`);
+                            }
+                            
+                            // 2. 基于当前目录的路径
+                            if (effectiveCurrentDir) {
+                                i18nPaths.push(`${effectiveCurrentDir}/src/i18n.js`);
+                            }
+                            
+                            // 3. 基于 window.BASE_PATH 的路径（如果存在）
+                            if (window.BASE_PATH) {
+                                const cleanBase = window.BASE_PATH.endsWith('/') ? window.BASE_PATH.slice(0, -1) : window.BASE_PATH;
+                                i18nPaths.push(`${cleanBase}/src/i18n.js`);
+                            }
+                            
+                            // 4. 相对路径（备用）
+                            i18nPaths.push('./src/i18n.js');
+                            i18nPaths.push('src/i18n.js');
+                            
+                            // 5. 绝对路径（最后尝试）
+                            i18nPaths.push('/src/i18n.js');
+                        } else {
+                            // 其他环境: 使用相对路径
+                            i18nPaths.push('./src/i18n.js');
+                            i18nPaths.push('src/i18n.js');
                         }
-                        
-                        // 2. 基于当前目录的路径
-                        if (effectiveCurrentDir) {
-                            i18nPaths.push(`${effectiveCurrentDir}/src/i18n.js`);
-                        }
-                        
-                        // 3. 基于 window.BASE_PATH 的路径（如果存在）
-                        if (window.BASE_PATH) {
-                            const cleanBase = window.BASE_PATH.endsWith('/') ? window.BASE_PATH.slice(0, -1) : window.BASE_PATH;
-                            i18nPaths.push(`${cleanBase}/src/i18n.js`);
-                        }
-                        
-                        // 4. 相对路径（备用）
-                        i18nPaths.push('./src/i18n.js');
-                        i18nPaths.push('src/i18n.js');
-                        
-                        // 5. 绝对路径（最后尝试）
-                        i18nPaths.push('/src/i18n.js');
                         
                         console.log('[i18n] 当前 URL:', window.location.href);
                         console.log('[i18n] 基础路径 (basePath):', typeof basePath !== 'undefined' ? basePath : 'undefined');
@@ -4091,7 +4112,9 @@
                         }
                         
                         // 调用 uploadToSupabase 上传数据并获取排名（内部已发送 submit_stats）
-                        rankingResult = await analyzer.uploadToSupabase(vibeResult);
+                        // 尝试从全局变量获取 chatData，如果不存在则传入 null（方法内部会尝试其他来源）
+                        const chatDataForUpload = window.allChatData || null;
+                        rankingResult = await analyzer.uploadToSupabase(vibeResult, chatDataForUpload);
                         
                         console.log('[React] uploadToSupabase 返回结果:', rankingResult);
                         // ✅ 关键调试：检查 ranks 对象是否存在
@@ -4182,8 +4205,8 @@
                             
                             const apiEndpoint = getApiEndpoint();
                             const apiUrl = apiEndpoint.endsWith('/') 
-                                ? `${apiEndpoint}api/analyze` 
-                                : `${apiEndpoint}/api/analyze`;
+                                ? `${apiEndpoint}api/v2/analyze` 
+                                : `${apiEndpoint}/api/v2/analyze`;
                             
                             const response = await fetch(apiUrl, {
                                 method: 'POST',

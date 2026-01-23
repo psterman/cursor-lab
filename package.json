@@ -6,7 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "generate-content": "node scripts/generate-content.cjs",
+    "prebuild": "npm run generate-content",
+    "worker:dev": "wrangler dev",
+    "worker:deploy": "wrangler deploy",
+    "worker:tail": "wrangler tail",
+    "worker:test": "powershell -ExecutionPolicy Bypass -File ./test-worker.ps1"
   },
   "keywords": [
     "cursor",
@@ -18,10 +24,12 @@
   "license": "MIT",
   "devDependencies": {
     "terser": "^5.44.1",
-    "vite": "^5.0.0"
+    "vite": "^5.0.0",
+    "wrangler": "^4.60.0"
   },
   "dependencies": {
     "chart.js": "^4.5.1",
+    "hono": "^4.11.5",
     "html2canvas": "^1.4.1",
     "sql.js": "^1.13.0"
   }

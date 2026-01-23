@@ -104,35 +104,42 @@ export default {
           updated_at: new Date().toISOString()
         };
 
-        // ✅ 修复 3：添加错误处理和日志
-        const writeRes = await fetch(`${env.SUPABASE_URL}/rest/v1/cursor_stats`, {
-          method: 'POST',
-          headers: {
-            'apikey': env.SUPABASE_KEY,
-            'Authorization': `Bearer ${env.SUPABASE_KEY}`,
-            'Content-Type': 'application/json',
-            'Prefer': 'resolution=merge-duplicates'
-          },
-          body: JSON.stringify(payload)
-        });
+        // 【第三阶段】使用 ctx.waitUntil 异步化 Supabase 写入
+        // 不阻塞主响应，让前端秒出结果
+        ctx.waitUntil(
+          (async () => {
+            try {
+              const writeRes = await fetch(`${env.SUPABASE_URL}/rest/v1/cursor_stats`, {
+                method: 'POST',
+                headers: {
+                  'apikey': env.SUPABASE_KEY,
+                  'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+                  'Content-Type': 'application/json',
+                  'Prefer': 'resolution=merge-duplicates'
+                },
+                body: JSON.stringify(payload)
+              });
 
-        if (!writeRes.ok) {
-          const errorText = await writeRes.text().catch(() => '无法读取错误信息');
-          console.error('[Worker] ❌ 数据库写入失败:', {
-            status: writeRes.status,
-            statusText: writeRes.statusText,
-            error: errorText,
-            userIdentity: userIdentity,
-            payload: payload
-          });
-          // 不抛出错误，继续执行排名查询（使用现有数据）
-        } else {
-          const writeData = await writeRes.json().catch(() => null);
-          console.log('[Worker] ✅ 数据写入成功:', {
-            userIdentity: userIdentity,
-            method: Array.isArray(writeData) && writeData.length > 0 ? 'UPDATE' : 'INSERT'
-          });
-        }
+              if (!writeRes.ok) {
+                const errorText = await writeRes.text().catch(() => '无法读取错误信息');
+                console.error('[Worker] ❌ 数据库写入失败（异步）:', {
+                  status: writeRes.status,
+                  statusText: writeRes.statusText,
+                  error: errorText,
+                  userIdentity: userIdentity,
+                });
+              } else {
+                const writeData = await writeRes.json().catch(() => null);
+                console.log('[Worker] ✅ 数据写入成功（异步）:', {
+                  userIdentity: userIdentity,
+                  method: Array.isArray(writeData) && writeData.length > 0 ? 'UPDATE' : 'INSERT'
+                });
+              }
+            } catch (error) {
+              console.error('[Worker] ❌ 数据库写入异常（异步）:', error);
+            }
+          })()
+        );
 
         // 3. 并行计算排名 + 获取全局平均值（雷达图需要）
         const [totalUsersRes, globalRes] = await Promise.all([

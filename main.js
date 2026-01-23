@@ -194,8 +194,8 @@ class VibeCodingApp {
 
       try {
         // 步骤3: 立即 await 调用 uploadToSupabase 联网获取真实排名
-        // 传递完整的 result 对象，函数内部会从 result 中提取所有数据
-        const liveRank = await this.analyzer.uploadToSupabase(result, onProgress);
+        // 传递完整的 result 对象和 chatData，确保能获取原始聊天数据
+        const liveRank = await this.analyzer.uploadToSupabase(result, chatData, onProgress);
         
         // 如果后端返回了 globalAverage，更新全局变量
         if (liveRank && liveRank.globalAverage) {
@@ -301,8 +301,8 @@ class VibeCodingApp {
 
       try {
         // 步骤3: 立即 await 调用 uploadToSupabase 联网获取真实排名
-        // 传递完整的 result 对象，函数内部会从 result 中提取所有数据
-        const liveRank = await this.analyzer.uploadToSupabase(result, onProgress);
+        // 传递完整的 result 对象和 chatData，确保能获取原始聊天数据
+        const liveRank = await this.analyzer.uploadToSupabase(result, chatData, onProgress);
         
           // 如果后端返回了 globalAverage，更新全局变量
           if (liveRank && liveRank.globalAverage) {
@@ -397,7 +397,7 @@ let vibeAnalyzer = null;
 let vibeResult = null;
 let globalAverageData = { L: 50, P: 50, D: 50, E: 50, F: 50 }; // 存储从后端获取的全局平均值，默认值作为保底
 let globalAverageDataLoaded = false; // 标记是否已从 API 成功加载数据
-let globalAverageDataLoading = false; // 标记是否正在加载中，避免重复请求
+let globalAverageDataLoading = false; // 标记是否正在加载数据（防止重复请求）
 
 // 创建全局 VibeCodingApp 实例
 let vibeCodingApp = null;
@@ -510,8 +510,8 @@ export const reanalyzeWithLanguage = async (lang) => {
       vibeResult.statistics.usageDays = usageDays;
       
       try {
-        // 传递完整的 vibeResult 对象，函数内部会从 vibeResult 中提取所有数据
-        const liveRank = await vibeAnalyzer.uploadToSupabase(vibeResult);
+        // 传递完整的 vibeResult 对象和 allChatData，确保能获取原始聊天数据
+        const liveRank = await vibeAnalyzer.uploadToSupabase(vibeResult, allChatData);
         
         // 如果后端返回了 globalAverage，更新全局变量
         if (liveRank && liveRank.globalAverage) {
@@ -584,8 +584,8 @@ export const reanalyzeWithLanguage = async (lang) => {
       vibeResult.statistics.usageDays = usageDays;
       
       try {
-        // 传递完整的 vibeResult 对象，函数内部会从 vibeResult 中提取所有数据
-        const liveRank = await vibeAnalyzer.uploadToSupabase(vibeResult);
+        // 传递完整的 vibeResult 对象和 allChatData，确保能获取原始聊天数据
+        const liveRank = await vibeAnalyzer.uploadToSupabase(vibeResult, allChatData);
         
         // 如果后端返回了 globalAverage，更新全局变量
         if (liveRank && liveRank.globalAverage) {
@@ -2413,7 +2413,14 @@ function displayVibeCodingerAnalysis() {
 
   const { personalityType, dimensions, analysis, semanticFingerprint, statistics, vibeIndex, roastText, personalityName, lpdef } = vibeResult;
 
-  // 生成人格头衔（根据索引特征）
+  // 【优化】文案已迁移到后端，直接使用后端返回的 roastText 和 personalityName
+  // 不再调用本地 matchRoast 或 getRoastText 函数
+  // 确保使用后端返回的精准数据：
+  // - roastText: 后端返回的吐槽文案
+  // - personalityName: 后端返回的人格标题
+  // - dimensions: 后端返回的精准维度得分（已在 uploadToSupabase 中同步）
+
+  // 生成人格头衔（根据索引特征，用于显示维度组合）
   const getPersonalityTitle = (index) => {
     const lang = getCurrentLang();
     const personalityTitles = lang === 'en' 
@@ -2579,10 +2586,31 @@ function displayVibeCodingerAnalysis() {
   `;
 
   // 渲染雷达图（增强版，显示所有维度）
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/77cf65a2-f6f6-400e-839c-82d53b031ba9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'main.js:2354',message:'calling renderVibeRadarChart',data:{hasChart:!!(window.Chart||globalThis.Chart),hasCanvas:!!document.getElementById('vibeRadarChart')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
-  renderVibeRadarChart();
+  // 【优化】确保在渲染前获取全局平均值（用于背景参考线）
+  // 如果全局平均值未加载，先尝试获取，然后再渲染
+  if (!globalAverageDataLoaded && !globalAverageDataLoading) {
+    console.log('[Main] 渲染前检测到全局平均值未加载，先获取数据...');
+    globalAverageDataLoading = true;
+    fetchGlobalAverage().then(avg => {
+      const isDefaultValue = avg.L === 50 && avg.P === 50 && avg.D === 50 && avg.E === 50 && avg.F === 50;
+      if (!isDefaultValue) {
+        globalAverageData = avg;
+        globalAverageDataLoaded = true;
+        console.log('[Main] ✅ 渲染前获取全局平均值成功:', globalAverageData);
+      }
+      globalAverageDataLoading = false;
+      // 数据获取完成后渲染雷达图
+      renderVibeRadarChart();
+    }).catch(error => {
+      console.error('[Main] ❌ 渲染前获取全局平均值失败:', error);
+      globalAverageDataLoading = false;
+      // 即使失败也渲染雷达图（使用默认值）
+      renderVibeRadarChart();
+    });
+  } else {
+    // 如果数据已加载或正在加载，直接渲染
+    renderVibeRadarChart();
+  }
 }
 
 // 获取维度颜色
@@ -2958,24 +2986,29 @@ async function fetchWithCORS(url, options = {}) {
 }
 
 /**
- * 从后端 API 获取全局平均值
+ * 从后端 API 获取全局平均值（用于雷达图背景参考线）
  * @returns {Promise<Object>} 返回全局平均值对象 {L, P, D, E, F}，如果失败则返回默认值
  */
-// 强制锁定 Cloudflare 绝对地址，跳过路径解析
-const API_URL = 'https://cursor-clinical-analysis.psterman.workers.dev/api/global-average';
-
 async function fetchGlobalAverage() {
   const defaultAverage = { L: 50, P: 50, D: 50, E: 50, F: 50 };
   
   try {
-    console.log('[Main] 开始获取全局平均值，URL:', API_URL);
+    // 使用 API_ENDPOINT 常量，确保指向生产环境
+    const apiEndpoint = getApiEndpoint();
+    const apiUrl = apiEndpoint.endsWith('/') 
+      ? `${apiEndpoint}api/global-average` 
+      : `${apiEndpoint}/api/global-average`;
     
-    // 直接请求，不拼接任何变量
-    const res = await fetch(API_URL, {
+    console.log('[Main] 开始获取全局平均值，URL:', apiUrl);
+    
+    // 发送请求
+    const res = await fetch(apiUrl, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       },
+      mode: 'cors',
+      credentials: 'omit',
     });
     
     if (!res.ok) {
@@ -3196,7 +3229,9 @@ async function displayRealtimeStats(vibeResult) {
           }
           
           console.log('[Main] displayRealtimeStats: 调用 uploadToSupabase 上传数据并获取排名');
-          const liveRank = await vibeAnalyzer.uploadToSupabase(currentVibeResult);
+          // 尝试从全局变量获取 chatData
+          const chatDataForUpload = typeof allChatData !== 'undefined' ? allChatData : (typeof window !== 'undefined' && window.allChatData) || null;
+          const liveRank = await vibeAnalyzer.uploadToSupabase(currentVibeResult, chatDataForUpload);
           
           // 如果后端返回了 globalAverage，更新全局变量
           if (liveRank && liveRank.globalAverage) {
