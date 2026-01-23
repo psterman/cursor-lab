@@ -66,17 +66,22 @@ app.use('/*', cors({
 }));
 
 /**
- * 路由：/api/v2/analyze (第三阶段：正式接口)
+ * 路由：/api/v2/analyze (全量重构版本)
  * 功能：接收聊天数据，计算 5 维度得分，返回完整分析结果（包括文案）
- * 注意：这是正式接口，替代前端本地计算
+ * 核心特性：
+ * 1. 身份匿名化：统一将 user_name 设为 '匿名受害者'
+ * 2. 全量维度指标：包含五维分、衍生排名、基础统计、特征编码
+ * 3. 异步存储：使用 waitUntil + merge-duplicates 策略
+ * 4. 地理与环境：支持 IP 定位和语言识别
  */
 app.post('/api/v2/analyze', async (c) => {
   try {
     const body = await c.req.json();
-    const { chatData, lang = 'zh-CN' } = body;
+    // 【地理与环境】使用 body.lang 或默认 'zh-CN'
+    const lang = body.lang || 'zh-CN';
+    const { chatData } = body;
 
     // 【防御性编程】检测旧版前端数据格式
-    // 如果存在 dimensions 但不存在 chatData，说明是旧版前端发来的数据
     if (body.dimensions && (!chatData || !Array.isArray(chatData))) {
       console.warn('[Worker] 检测到旧版前端数据格式:', {
         hasDimensions: !!body.dimensions,
@@ -122,9 +127,8 @@ app.post('/api/v2/analyze', async (c) => {
       };
       return c.json({
         status: 'success',
-        // 1. 顶层字段（前端期望的格式）
         dimensions: defaultDimensions,
-        roastText: defaultRoast,        // 必须叫 roastText 而不是 roast
+        roastText: defaultRoast,
         personalityName: defaultPersonalityName,
         vibeIndex: '00000',
         personalityType: 'UNKNOWN',
@@ -134,11 +138,8 @@ app.post('/api/v2/analyze', async (c) => {
           avgMessageLength: 0,
           totalChars: 0,
         },
-        // 2. 核心 ranks 对象
         ranks: defaultRanks,
-        // 3. 统计字段（解决 totalUsers: 0 的显示问题）
         totalUsers: 1,
-        // 4. 兼容性 data 对象（确保旧版逻辑不崩溃）
         data: {
           roast: defaultRoast,
           type: 'UNKNOWN',
@@ -165,7 +166,7 @@ app.post('/api/v2/analyze', async (c) => {
       sampleMessage: userMessages[0]?.text?.substring(0, 50) || 'N/A',
     });
 
-    // 生成索引和人格类型
+    // 【特征编码】生成索引和人格类型
     const vibeIndex = getVibeIndex(dimensions);
     const personalityType = determinePersonalityType(dimensions);
     const lpdef = generateLPDEF(dimensions);
@@ -185,26 +186,18 @@ app.post('/api/v2/analyze', async (c) => {
       getPersonalityName(vibeIndex, lang, personalityType, env),
     ]);
 
-    // 计算统计信息
+    // 【基础统计】计算统计信息
     const totalMessages = userMessages.length;
     const totalChars = userMessages.reduce((sum, msg) => sum + (msg.text?.length || 0), 0);
-    const avgLength = totalChars / totalMessages || 0;
+    const avgMessageLength = Math.round(totalChars / totalMessages || 0);
 
-    // 【地理位置采集】从请求头获取 IP 国家信息
-    // 使用 c.req.header('cf-ipcountry') 获取国家代码
-    let ipLocation = 'Unknown';
-    try {
-      const countryCode = c.req.header('cf-ipcountry');
-      if (countryCode && countryCode.trim() && countryCode !== 'XX') {
-        ipLocation = countryCode.toUpperCase();
-      }
-    } catch (error) {
-      console.warn('[Worker] 获取 IP 国家信息失败:', error);
-      ipLocation = 'Unknown';
-    }
+    // 【地理与环境】从请求头获取 IP 国家信息
+    const ipLocation = c.req.header('cf-ipcountry') || 'Unknown';
+    const normalizedIpLocation = (ipLocation && ipLocation.trim() && ipLocation !== 'XX') 
+      ? ipLocation.toUpperCase() 
+      : 'Unknown';
 
     // 【计算排名数据】从 Supabase 查询真实排名
-    // 初始化 ranks 对象，默认值为 50（中等排名）
     let ranks = {
       messageRank: 50,
       charRank: 50,
@@ -219,19 +212,12 @@ app.post('/api/v2/analyze', async (c) => {
       F_rank: 50,
     };
 
-    // 【获取总用户数和真实排名数据】
     let totalUsers = 1;
     if (env.SUPABASE_URL && env.SUPABASE_KEY) {
       try {
         // 并行获取总用户数和全局统计数据
-        const [totalUsersRes, globalRes] = await Promise.all([
+        const [totalUsersRes] = await Promise.all([
           fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_v3_view?select=total_count`, {
-            headers: {
-              'apikey': env.SUPABASE_KEY,
-              'Authorization': `Bearer ${env.SUPABASE_KEY}`,
-            },
-          }),
-          fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_v3_view?select=*`, {
             headers: {
               'apikey': env.SUPABASE_KEY,
               'Authorization': `Bearer ${env.SUPABASE_KEY}`,
@@ -300,31 +286,31 @@ app.post('/api/v2/analyze', async (c) => {
           };
 
           // 计算各维度的排名（基于维度分）
-          const [beatL, beatP, beatD, beatE, beatF] = await Promise.all([
+          const [beatL, beatP, beatD, beatE, beatF, beatMsg, beatChar] = await Promise.all([
             getRankCount('l', dimensions.L),
             getRankCount('p', dimensions.P),
             getRankCount('d', dimensions.D),
             getRankCount('e', dimensions.E),
             getRankCount('f', dimensions.F),
+            getRankCount('total_messages', totalMessages),
+            getRankCount('total_chars', totalChars),
           ]);
 
-          // 计算统计数据的排名（基于实际统计数据）
-          // 注意：排名查询已改为从 user_analysis 表查询
-          // 这里先使用维度排名作为占位符，后续可以优化
+          // 计算百分比排名
           const calcPct = (count: number): number => {
             if (totalUsers <= 0) return 50;
             const percent = Math.floor((count / totalUsers) * 100);
             return Math.min(99, Math.max(0, percent));
           };
 
-          // 更新 ranks 对象
+          // 更新 ranks 对象（使用实际统计数据计算排名）
           ranks = {
-            messageRank: calcPct(beatL),      // 消息数排名（用 L 维度）
-            charRank: calcPct(beatP),          // 字符数排名（用 P 维度）
-            daysRank: calcPct(beatD),         // 天数排名（用 D 维度）
-            jiafangRank: calcPct(beatE),       // 甲方上身排名（用 E 维度）
-            ketaoRank: calcPct(beatF),         // 赛博磕头排名（用 F 维度）
-            avgRank: Math.floor((calcPct(beatL) + calcPct(beatP) + calcPct(beatD) + calcPct(beatE) + calcPct(beatF)) / 5),
+            messageRank: calcPct(beatMsg),
+            charRank: calcPct(beatChar),
+            daysRank: calcPct(beatD),
+            jiafangRank: calcPct(beatE),
+            ketaoRank: calcPct(beatF),
+            avgRank: Math.floor((calcPct(beatMsg) + calcPct(beatChar) + calcPct(beatD) + calcPct(beatE) + calcPct(beatF)) / 5),
             L_rank: calcPct(beatL),
             P_rank: calcPct(beatP),
             D_rank: calcPct(beatD),
@@ -344,43 +330,34 @@ app.post('/api/v2/analyze', async (c) => {
       }
     }
 
-    // --- 核心修复：确保所有关键字段都在顶层，且名称与前端完全对齐 ---
+    // 构建返回结果
     const result = {
       status: 'success',
-      // 1. 顶层字段（这是前端 React 组件直接解构的字段）
       dimensions: dimensions,
-      roastText: roastText,        // 必须叫 roastText 而不是 roast
+      roastText: roastText,
       personalityName: personalityName,
       vibeIndex: vibeIndex,
       personalityType: personalityType,
       lpdef: lpdef,
       statistics: {
         totalMessages,
-        avgMessageLength: Math.round(avgLength),
+        avgMessageLength,
         totalChars,
       },
-      // 2. 核心 ranks 对象（用于显示百分比排名）
-      // 前端期望的格式：messageRank, charRank, daysRank, jiafangRank, ketaoRank, avgRank
-      // 同时保留 LPDEF 排名（用于雷达图对比）
       ranks: {
-        // 统计数据排名（前端期望的 6 个字段）
         messageRank: ranks.messageRank || 50,
         charRank: ranks.charRank || 50,
         daysRank: ranks.daysRank || 50,
         jiafangRank: ranks.jiafangRank || 50,
         ketaoRank: ranks.ketaoRank || 50,
         avgRank: ranks.avgRank || 50,
-        // LPDEF 维度排名（保留用于向后兼容和雷达图）
         L_rank: ranks.L_rank || 50,
         P_rank: ranks.P_rank || 50,
         D_rank: ranks.D_rank || 50,
         E_rank: ranks.E_rank || 50,
         F_rank: ranks.F_rank || 50,
       },
-      // 3. 统计字段（解决 totalUsers: 0 的显示问题）
       totalUsers: totalUsers > 0 ? totalUsers : 1,
-      
-      // 4. 兼容性 data 对象（确保旧版逻辑不崩溃）
       data: {
         roast: roastText,
         type: personalityType,
@@ -401,47 +378,77 @@ app.post('/api/v2/analyze', async (c) => {
           F_rank: ranks.F_rank || 50,
         }
       },
-      // 5. 添加 personality 对象（用于字段映射）
       personality: {
         type: personalityType,
       }
     };
 
-    // 【异步入库控制】在 return 之前插入 waitUntil，确保数据持久化
+    // 【异步存储】使用 waitUntil 异步写入 Supabase
     if (env.SUPABASE_URL && env.SUPABASE_KEY) {
       try {
         const executionCtx = c.executionCtx;
         if (executionCtx && typeof executionCtx.waitUntil === 'function') {
-          // 字段映射补全：确保所有必需字段都存在
-          // 优先使用 body 中的数据，否则使用计算的结果
-          const dimensionsForDb = body.dimensions || dimensions;
+          // 【唯一冲突标识】生成 fingerprint 哈希
+          const fingerprintSource = `${lpdef}${totalChars}${totalMessages}`;
+          const fingerprintUint8 = new TextEncoder().encode(fingerprintSource);
+          const fingerprintBuffer = await crypto.subtle.digest('SHA-256', fingerprintUint8);
+          const fingerprint = Array.from(new Uint8Array(fingerprintBuffer))
+            .map(b => b.toString(16).padStart(2, '0'))
+            .join('');
+
+          // 【全量维度指标】构建完整的数据负载
           const payload = {
-            user_name: body.user_name || '匿名受害者',
-            personality_type: result.personality?.type || personalityType,
-            total_messages: body.total_messages || totalMessages || 0,
-            total_chars: body.total_chars || totalChars || 0,
-            roast_text: result.data?.roast || result.roastText || roastText || '',
-            vibe_index: result.vibeIndex || body.vibe_index || vibeIndex,
-            dimensions: dimensionsForDb,
-            l: dimensionsForDb?.L || dimensionsForDb?.l || dimensions.L || 0,
-            p: dimensionsForDb?.P || dimensionsForDb?.p || dimensions.P || 0,
-            d: dimensionsForDb?.D || dimensionsForDb?.d || dimensions.D || 0,
-            e: dimensionsForDb?.E || dimensionsForDb?.e || dimensions.E || 0,
-            f: dimensionsForDb?.F || dimensionsForDb?.f || dimensions.F || 0,
-            ip_location: c.req.header('cf-ipcountry') || ipLocation || 'Unknown',
+            // 【身份匿名化】统一设为 '匿名受害者'
+            user_name: '匿名受害者',
+            // 【五维分】来自 result.dimensions
+            l: dimensions.L || 0,
+            p: dimensions.P || 0,
+            d: dimensions.D || 0,
+            e: dimensions.E || 0,
+            f: dimensions.F || 0,
+            dimensions: dimensions, // 保留完整 JSONB 格式
+            // 【衍生排名】来自 result.ranks
+            jiafang_rank: ranks.jiafangRank || 50,
+            ketao_rank: ranks.ketaoRank || 50,
+            days_rank: ranks.daysRank || 50,
+            avg_rank: ranks.avgRank || 50,
+            // 【基础统计】
+            total_messages: totalMessages,
+            total_chars: totalChars,
+            avg_message_length: avgMessageLength,
+            // 【特征编码】
+            lpdef: lpdef,
+            vibe_index: vibeIndex,
+            personality_type: personalityType,
+            // 【地理与环境】
+            ip_location: normalizedIpLocation,
+            lang: lang,
+            // 【唯一冲突标识】
+            fingerprint: fingerprint,
+            // 时间戳
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
           };
 
-          console.log(`[DB] 准备为用户 ${payload.user_name} 写入数据`);
+          console.log(`[DB] 准备写入数据（匿名受害者）:`, {
+            fingerprint,
+            lpdef,
+            total_messages: totalMessages,
+            total_chars: totalChars,
+            ip_location: normalizedIpLocation,
+            lang,
+          });
 
-          // 使用 waitUntil 异步执行数据库写入，不阻塞返回
+          // 【异步存储】使用 waitUntil + merge-duplicates 策略
           executionCtx.waitUntil(
-            fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis`, {
+            fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=fingerprint`, {
               method: 'POST',
               headers: {
                 'apikey': env.SUPABASE_KEY,
                 'Authorization': `Bearer ${env.SUPABASE_KEY}`,
                 'Content-Type': 'application/json',
-                'Prefer': 'return=minimal',
+                // 这里的 resolution=merge-duplicates 配合 URL 上的 on_conflict 才会生效
+                'Prefer': 'resolution=merge-duplicates,return=minimal', 
               },
               body: JSON.stringify([payload]),
             })
@@ -453,8 +460,15 @@ app.post('/api/v2/analyze', async (c) => {
                       status: res.status,
                       statusText: res.statusText,
                       error: errorText,
+                      fingerprint,
                       payload,
                     });
+                  });
+                } else {
+                  console.log('[DB] ✅ 数据已成功写入 Supabase:', {
+                    fingerprint,
+                    lpdef,
+                    ip_location: normalizedIpLocation,
                   });
                 }
               })
@@ -491,9 +505,7 @@ app.post('/api/v2/analyze', async (c) => {
     return c.json({
       status: 'error',
       error: error.message || '未知错误',
-      // 即使出错也返回 ranks 字段（默认值）
       ranks: errorRanks,
-      // 兼容性 data 对象
       data: {
         ranks: errorRanks
       },
