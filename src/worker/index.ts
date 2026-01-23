@@ -837,11 +837,18 @@ app.get('/api/global-average', async (c) => {
   try {
     const env = c.env;
     const defaultAverage = { L: 50, P: 50, D: 50, E: 50, F: 50 };
+    const defaultDimensions = {
+      L: { label: '逻辑力' },
+      P: { label: '耐心值' },
+      D: { label: '细腻度' },
+      E: { label: '情绪化' },
+      F: { label: '频率感' }
+    };
 
     // 如果没有配置 KV，直接查询 Supabase
     if (!env.STATS_STORE) {
       console.warn('[Worker] KV 未配置，直接查询 Supabase');
-      return await fetchFromSupabase(env, defaultAverage, c);
+      return await fetchFromSupabase(env, defaultAverage, defaultDimensions, c);
     }
 
     // 尝试从 KV 读取缓存
@@ -857,10 +864,34 @@ app.get('/api/global-average', async (c) => {
         // 如果缓存未过期（1小时内），直接返回
         if (age < KV_CACHE_TTL) {
           console.log(`[Worker] ✅ 从 KV 返回缓存数据（${age}秒前更新）`);
+          
+          // 获取总用户数
+          let totalUsers = 1;
+          if (env.SUPABASE_URL && env.SUPABASE_KEY) {
+            try {
+              const totalUsersRes = await fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_view?select=total_count`, {
+                headers: {
+                  'apikey': env.SUPABASE_KEY,
+                  'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+                },
+              });
+              if (totalUsersRes.ok) {
+                const totalData = await totalUsersRes.json();
+                totalUsers = totalData[0]?.total_count || 1;
+                if (totalUsers <= 0) {
+                  totalUsers = 1;
+                }
+              }
+            } catch (error) {
+              console.warn('[Worker] ⚠️ 获取总用户数失败，使用默认值 1:', error);
+            }
+          }
+          
           return c.json({
             status: 'success',
-            success: true, // 兼容字段
             globalAverage: cachedData,
+            dimensions: defaultDimensions,
+            totalUsers: totalUsers,
             source: 'kv_cache',
             cachedAt: lastUpdateTime,
             age: age,
@@ -874,13 +905,21 @@ app.get('/api/global-average', async (c) => {
     }
 
     // KV 缓存不存在或已过期，从 Supabase 查询并更新 KV
-    return await fetchFromSupabase(env, defaultAverage, c, true);
+    return await fetchFromSupabase(env, defaultAverage, defaultDimensions, c, true);
   } catch (error: any) {
     console.error('[Worker] /api/global-average 错误:', error);
     return c.json({
       status: 'error',
       error: error.message || '未知错误',
       globalAverage: { L: 50, P: 50, D: 50, E: 50, F: 50 },
+      dimensions: {
+        L: { label: '逻辑力' },
+        P: { label: '耐心值' },
+        D: { label: '细腻度' },
+        E: { label: '情绪化' },
+        F: { label: '频率感' }
+      },
+      totalUsers: 1,
     }, 500);
   }
 });
@@ -1052,12 +1091,14 @@ app.get('/api/stats/dashboard', async (c) => {
  * 【第二阶段新增】从 Supabase 查询全局平均值
  * @param env - 环境变量
  * @param defaultAverage - 默认平均值
+ * @param defaultDimensions - 默认维度定义
  * @param c - Hono 上下文
  * @param updateKV - 是否更新 KV 缓存
  */
 async function fetchFromSupabase(
   env: Env,
   defaultAverage: { L: number; P: number; D: number; E: number; F: number },
+  defaultDimensions: { L: { label: string }; P: { label: string }; D: { label: string }; E: { label: string }; F: { label: string } },
   c: any,
   updateKV: boolean = false
 ) {
@@ -1065,8 +1106,9 @@ async function fetchFromSupabase(
     console.warn('[Worker] ⚠️ Supabase 环境变量未配置，返回默认值');
     return c.json({
       status: 'success',
-      success: true, // 兼容字段
       globalAverage: defaultAverage,
+      dimensions: defaultDimensions,
+      totalUsers: 1,
       message: 'Supabase 环境变量未配置',
       source: 'default',
     });
@@ -1087,6 +1129,7 @@ async function fetchFromSupabase(
     const data = await res.json();
     const row = data[0] || {};
 
+    // 确保 globalAverage 内部的键名是大写的 L, P, D, E, F
     const globalAverage = {
       L: parseFloat(row.avg_l || 50),
       P: parseFloat(row.avg_p || 50),
@@ -1094,6 +1137,12 @@ async function fetchFromSupabase(
       E: parseFloat(row.avg_e || 50),
       F: parseFloat(row.avg_f || 50),
     };
+
+    // 获取总用户数
+    let totalUsers = parseInt(row.total_count || 0);
+    if (totalUsers <= 0) {
+      totalUsers = 1;
+    }
 
     // 如果启用 KV 更新，写入缓存
     if (updateKV && env.STATS_STORE) {
@@ -1109,9 +1158,9 @@ async function fetchFromSupabase(
 
     return c.json({
       status: 'success',
-      success: true, // 兼容字段
-      globalAverage,
-      totalUsers: parseInt(row.total_count || 0),
+      globalAverage: globalAverage,
+      dimensions: defaultDimensions,
+      totalUsers: totalUsers,
       source: updateKV ? 'supabase_and_kv' : 'supabase',
     });
   } catch (error: any) {
@@ -1120,6 +1169,8 @@ async function fetchFromSupabase(
       status: 'error',
       error: error.message || 'Supabase 查询失败',
       globalAverage: defaultAverage,
+      dimensions: defaultDimensions,
+      totalUsers: 1,
       source: 'error_fallback',
     }, 500);
   }

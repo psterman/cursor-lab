@@ -4486,9 +4486,16 @@ app.get("/api/global-average", async (c) => {
   try {
     const env = c.env;
     const defaultAverage = { L: 50, P: 50, D: 50, E: 50, F: 50 };
+    const defaultDimensions = {
+      L: { label: "\u903B\u8F91\u529B" },
+      P: { label: "\u8010\u5FC3\u503C" },
+      D: { label: "\u7EC6\u817B\u5EA6" },
+      E: { label: "\u60C5\u7EEA\u5316" },
+      F: { label: "\u9891\u7387\u611F" }
+    };
     if (!env.STATS_STORE) {
       console.warn("[Worker] KV \u672A\u914D\u7F6E\uFF0C\u76F4\u63A5\u67E5\u8BE2 Supabase");
-      return await fetchFromSupabase(env, defaultAverage, c);
+      return await fetchFromSupabase(env, defaultAverage, defaultDimensions, c);
     }
     try {
       const cachedData = await env.STATS_STORE.get(KV_KEY_GLOBAL_AVERAGE, "json");
@@ -4499,11 +4506,31 @@ app.get("/api/global-average", async (c) => {
         const age = now - lastUpdateTime;
         if (age < KV_CACHE_TTL) {
           console.log(`[Worker] \u2705 \u4ECE KV \u8FD4\u56DE\u7F13\u5B58\u6570\u636E\uFF08${age}\u79D2\u524D\u66F4\u65B0\uFF09`);
+          let totalUsers = 1;
+          if (env.SUPABASE_URL && env.SUPABASE_KEY) {
+            try {
+              const totalUsersRes = await fetch(`${env.SUPABASE_URL}/rest/v1/global_stats_view?select=total_count`, {
+                headers: {
+                  "apikey": env.SUPABASE_KEY,
+                  "Authorization": `Bearer ${env.SUPABASE_KEY}`
+                }
+              });
+              if (totalUsersRes.ok) {
+                const totalData = await totalUsersRes.json();
+                totalUsers = totalData[0]?.total_count || 1;
+                if (totalUsers <= 0) {
+                  totalUsers = 1;
+                }
+              }
+            } catch (error) {
+              console.warn("[Worker] \u26A0\uFE0F \u83B7\u53D6\u603B\u7528\u6237\u6570\u5931\u8D25\uFF0C\u4F7F\u7528\u9ED8\u8BA4\u503C 1:", error);
+            }
+          }
           return c.json({
             status: "success",
-            success: true,
-            // 兼容字段
             globalAverage: cachedData,
+            dimensions: defaultDimensions,
+            totalUsers,
             source: "kv_cache",
             cachedAt: lastUpdateTime,
             age
@@ -4515,13 +4542,21 @@ app.get("/api/global-average", async (c) => {
     } catch (error) {
       console.warn("[Worker] KV \u8BFB\u53D6\u5931\u8D25\uFF0C\u964D\u7EA7\u5230 Supabase:", error);
     }
-    return await fetchFromSupabase(env, defaultAverage, c, true);
+    return await fetchFromSupabase(env, defaultAverage, defaultDimensions, c, true);
   } catch (error) {
     console.error("[Worker] /api/global-average \u9519\u8BEF:", error);
     return c.json({
       status: "error",
       error: error.message || "\u672A\u77E5\u9519\u8BEF",
-      globalAverage: { L: 50, P: 50, D: 50, E: 50, F: 50 }
+      globalAverage: { L: 50, P: 50, D: 50, E: 50, F: 50 },
+      dimensions: {
+        L: { label: "\u903B\u8F91\u529B" },
+        P: { label: "\u8010\u5FC3\u503C" },
+        D: { label: "\u7EC6\u817B\u5EA6" },
+        E: { label: "\u60C5\u7EEA\u5316" },
+        F: { label: "\u9891\u7387\u611F" }
+      },
+      totalUsers: 1
     }, 500);
   }
 });
@@ -4656,14 +4691,14 @@ app.get("/api/stats/dashboard", async (c) => {
     }, 500);
   }
 });
-async function fetchFromSupabase(env, defaultAverage, c, updateKV = false) {
+async function fetchFromSupabase(env, defaultAverage, defaultDimensions, c, updateKV = false) {
   if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
     console.warn("[Worker] \u26A0\uFE0F Supabase \u73AF\u5883\u53D8\u91CF\u672A\u914D\u7F6E\uFF0C\u8FD4\u56DE\u9ED8\u8BA4\u503C");
     return c.json({
       status: "success",
-      success: true,
-      // 兼容字段
       globalAverage: defaultAverage,
+      dimensions: defaultDimensions,
+      totalUsers: 1,
       message: "Supabase \u73AF\u5883\u53D8\u91CF\u672A\u914D\u7F6E",
       source: "default"
     });
@@ -4687,6 +4722,10 @@ async function fetchFromSupabase(env, defaultAverage, c, updateKV = false) {
       E: parseFloat(row.avg_e || 50),
       F: parseFloat(row.avg_f || 50)
     };
+    let totalUsers = parseInt(row.total_count || 0);
+    if (totalUsers <= 0) {
+      totalUsers = 1;
+    }
     if (updateKV && env.STATS_STORE) {
       try {
         const now = Math.floor(Date.now() / 1e3);
@@ -4699,10 +4738,9 @@ async function fetchFromSupabase(env, defaultAverage, c, updateKV = false) {
     }
     return c.json({
       status: "success",
-      success: true,
-      // 兼容字段
       globalAverage,
-      totalUsers: parseInt(row.total_count || 0),
+      dimensions: defaultDimensions,
+      totalUsers,
       source: updateKV ? "supabase_and_kv" : "supabase"
     });
   } catch (error) {
@@ -4711,6 +4749,8 @@ async function fetchFromSupabase(env, defaultAverage, c, updateKV = false) {
       status: "error",
       error: error.message || "Supabase \u67E5\u8BE2\u5931\u8D25",
       globalAverage: defaultAverage,
+      dimensions: defaultDimensions,
+      totalUsers: 1,
       source: "error_fallback"
     }, 500);
   }

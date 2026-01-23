@@ -5,8 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>全网数据大盘 - Vibe Coding</title>
     <!-- API 端点配置（Cloudflare Workers） -->
-	<meta name="api-endpoint" content="http://127.0.0.1:8787/">
-<meta name="api-endpoint" content="https://cursor-clinical-analysis.psterman.workers.dev/">
     <meta name="api-endpoint" content="https://cursor-clinical-analysis.psterman.workers.dev/">
     <!-- 引入必要的库 -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -476,16 +474,45 @@
         async function initDashboard() {
             try {
                 console.log('[Dashboard] 开始加载数据...');
-                const response = await fetch(`${apiEndpoint}api/stats/dashboard`);
+                const response = await fetch(`${apiEndpoint}api/stats/dashboard`).catch(error => {
+                    console.error('[Dashboard] Fetch 请求失败:', error);
+                    throw new Error(`网络请求失败: ${error.message}`);
+                });
                 
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 
-                const result = await response.json();
+                const result = await response.json().catch(error => {
+                    console.error('[Dashboard] JSON 解析失败:', error);
+                    throw new Error(`数据解析失败: ${error.message}`);
+                });
                 
-                if (result.status === 'success' && result.data) {
-                    dashboardData = result.data;
+                // 【调试日志】在执行数据校验之前输出接收到的数据
+                console.log('[Dashboard Debug] Received Data:', result);
+                
+                // 【健壮性处理】如果 globalAverage 缺失，使用默认值
+                if (result.status === 'success') {
+                    // 检查是否有 data 字段（新格式）
+                    if (result.data) {
+                        dashboardData = result.data;
+                    } else {
+                        // 兼容旧格式：直接使用 result 作为数据
+                        dashboardData = result;
+                    }
+                    
+                    // 如果 globalAverage 或 globalAverages 缺失，使用默认值
+                    if (!dashboardData.globalAverage && !dashboardData.globalAverages) {
+                        console.warn('[Dashboard] ⚠️ globalAverage 缺失，使用预设数据');
+                        alert('使用预设数据');
+                        dashboardData.globalAverages = { L: 50, P: 50, D: 50, E: 50, F: 50 };
+                    }
+                    
+                    // 确保 totalUsers 存在
+                    if (!dashboardData.totalUsers) {
+                        dashboardData.totalUsers = 1;
+                    }
+                    
                     console.log('[Dashboard] 数据加载成功:', dashboardData);
                     
                     // 更新所有UI组件
@@ -495,11 +522,47 @@
                     renderTimeline();
                     renderRecentActivity();
                 } else {
-                    throw new Error(result.error || '数据格式错误');
+                    // 即使返回错误，也尝试使用默认值渲染
+                    console.warn('[Dashboard] ⚠️ API 返回错误状态，使用预设数据');
+                    alert('使用预设数据');
+                    dashboardData = {
+                        totalUsers: 1,
+                        globalAverages: { L: 50, P: 50, D: 50, E: 50, F: 50 },
+                        locationDistribution: [],
+                        recentActivity: [],
+                        systemDays: 1,
+                        cityCount: 0,
+                        totalChars: 0,
+                    };
+                    
+                    // 使用默认数据渲染
+                    updateStatsCards();
+                    renderRadarChart();
+                    renderLocationList();
+                    renderTimeline();
+                    renderRecentActivity();
                 }
             } catch (error) {
                 console.error('[Dashboard] 加载数据失败:', error);
-                showError('加载数据失败，请稍后重试');
+                // 使用默认数据渲染，而不是直接报错
+                console.warn('[Dashboard] ⚠️ 使用预设数据继续渲染');
+                alert('使用预设数据');
+                dashboardData = {
+                    totalUsers: 1,
+                    globalAverages: { L: 50, P: 50, D: 50, E: 50, F: 50 },
+                    locationDistribution: [],
+                    recentActivity: [],
+                    systemDays: 1,
+                    cityCount: 0,
+                    totalChars: 0,
+                };
+                
+                // 使用默认数据渲染
+                updateStatsCards();
+                renderRadarChart();
+                renderLocationList();
+                renderTimeline();
+                renderRecentActivity();
             }
         }
 
