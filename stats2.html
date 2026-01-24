@@ -6,10 +6,14 @@
     <title>Global Statistics Dashboard - Vibe Coding</title>
     <!-- API Endpoint -->
     <meta name="api-endpoint" content="https://cursor-clinical-analysis.psterman.workers.dev/">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/echarts/map/js/world.js" onload="this.setAttribute('data-loaded', 'true')"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts-gl/dist/echarts-gl.min.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts/map/js/world.js" onload="this.setAttribute('data-loaded', 'true')"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
         
@@ -346,6 +350,8 @@
         };
 
         let mapChart, radarChart;
+        // 地图渲染令牌：防止并发 init / dispose 导致 getZr 为空
+        let mapRenderSeq = 0;
 
         /**
          * 数字格式化函数（智能处理大数字）
@@ -510,7 +516,19 @@
         }
 
         /**
-         * 初始化世界地图
+         * 检测浏览器是否支持 WebGL（用于 3D 地球渲染）
+         */
+        function isWebGLSupported() {
+            try {
+                const canvas = document.createElement('canvas');
+                return !!(canvas.getContext('webgl') || canvas.getContext('experimental-webgl'));
+            } catch (e) {
+                return false;
+            }
+        }
+
+        /**
+         * 初始化 3D 地球（修复动画显示问题）
          * @param {Array} locationData - 地理位置数据 [{name: string, value: number}]
          */
         async function initGlobalMap(locationData) {
@@ -520,48 +538,32 @@
                 return;
             }
             
-            // 检查 ECharts 是否已加载
+            // 检查 ECharts 和 ECharts GL 是否已加载
             if (typeof echarts === 'undefined') {
                 console.warn('[Map] ⚠️ ECharts 未加载，无法渲染地图');
                 return;
             }
             
-            // 等待地图数据加载完成
-            const mapLoaded = await waitForMapData(10000);
-            if (!mapLoaded) {
-                console.error('[Map] ❌ 地图数据加载失败，无法渲染地图');
-                chartDom.innerHTML = '<div class="flex items-center justify-center h-full text-zinc-500 text-sm">地图数据加载中...</div>';
-                return;
+            // 渲染令牌（只允许最后一次调用继续执行）
+            const seq = ++mapRenderSeq;
+
+            // 等待地图数据加载完成（简化版，不强制要求）
+            let mapLoaded = false;
+            try {
+                mapLoaded = await waitForMapData(5000);
+            } catch (e) {
+                console.warn('[Map] ⚠️ 地图数据检查超时，继续尝试渲染');
             }
             
-            // 【地图注册检查】确保地图已注册，如果没有则尝试手动注册
             try {
-                // 检查地图是否已注册
-                if (typeof echarts.getMap === 'function') {
-                    const existingMap = echarts.getMap('world');
-                    if (!existingMap) {
-                        console.warn('[Map] ⚠️ 地图未注册，尝试从全局变量注册...');
-                        // world.js 加载后，地图数据可能在全局变量中
-                        // 尝试从常见的全局变量名获取
-                        if (typeof window !== 'undefined') {
-                            // world.js 可能将数据存储在 window 对象上
-                            const possibleMapData = window.worldMapData || window.world || window.worldGeoJSON;
-                            if (possibleMapData) {
-                                echarts.registerMap('world', possibleMapData);
-                                console.log('[Map] ✅ 从全局变量手动注册地图成功');
-                            } else {
-                                console.warn('[Map] ⚠️ 无法找到地图数据，地图可能无法正常显示');
-                            }
-                        }
-                    } else {
-                        console.log('[Map] ✅ 地图已注册，可以正常渲染');
-                    }
+                // 如果这次调用已经过期，直接退出（避免 dispose 后还继续 setOption）
+                if (seq !== mapRenderSeq) return;
+
+                // 如果 WebGL 不可用，直接走 2D（避免 echarts-gl 在某些环境下崩溃）
+                if (!isWebGLSupported()) {
+                    throw new Error('WebGL not supported');
                 }
-            } catch (registerError) {
-                console.warn('[Map] ⚠️ 地图注册检查失败:', registerError);
-            }
-            
-            try {
+
                 // 销毁旧图表
                 if (mapChart) {
                     mapChart.dispose();
@@ -579,7 +581,23 @@
                 
                 console.log('[Map] 处理后的数据:', processedData);
                 
-                // 配置地图选项
+                // 国家代码到经纬度的映射（用于 3D 散点）
+                const countryCoords = {
+                    'China': [104.0, 35.0],
+                    'United States': [-95.0, 39.0],
+                    'USA': [-95.0, 39.0],
+                    'Japan': [139.0, 36.0],
+                    'United Kingdom': [-2.0, 54.0],
+                    'UK': [-2.0, 54.0],
+                    'Germany': [10.0, 51.0],
+                    'Singapore': [103.8, 1.3],
+                    'Hong Kong': [114.1, 22.3],
+                    'Taiwan': [121.0, 23.5],
+                    'Canada': [-106.0, 56.0],
+                    'Australia': [133.0, -25.0]
+                };
+                
+                // 配置 3D 地球选项
                 const option = {
                     backgroundColor: 'transparent',
                     tooltip: {
@@ -588,36 +606,101 @@
                         borderColor: '#27272a',
                         textStyle: { color: '#00ff41', fontFamily: 'JetBrains Mono' },
                         formatter: (params) => {
+                            if (params.seriesType === 'scatter3D' && params.data && params.data.length >= 4) {
+                                const item = params.data[3];
+                                const label = countryNameMap[item?.name]?.zh || item?.name || '未知';
+                                return `${label}: ${params.data[2] || 0} Victims`;
+                            }
                             const label = countryNameMap[params.data?.name]?.zh || params.name;
-                            return `${label}: ${params.value || 0}`;
+                            return `${label}: ${params.value || 0} Victims`;
                         }
                     },
-                    visualMap: {
-                        min: 0,
-                        max: Math.max(20, ...processedData.map(d => d.value || 0)),
-                        show: false,
-                        inRange: { color: ['#064e3b', '#065f46', '#00ff41'] }
+                    globe: {
+                        // 重要：不要设置 baseTexture/heightTexture/layers.texture 为 null
+                        // echarts-gl 某些版本会因此触发 loadTexture，且在 dispose 并发时容易出现 getZr 空指针
+                        globeRadius: 100,
+                        globeOuterRadius: 120,
+                        shading: 'lambert',
+                        light: {
+                            main: {
+                                intensity: 1.2,
+                                shadow: true
+                            },
+                            ambient: {
+                                intensity: 0.3
+                            }
+                        },
+                        viewControl: {
+                            autoRotate: true, // 启用自动旋转
+                            autoRotateDirection: 'cw',
+                            autoRotateSpeed: 10,
+                            distance: 200,
+                            minDistance: 100,
+                            maxDistance: 400,
+                            alpha: 20,
+                            beta: 0,
+                            rotateSensitivity: 1,
+                            zoomSensitivity: 1,
+                            panSensitivity: 1,
+                            animation: true,
+                            animationDurationUpdate: 1000
+                        }
                     },
-                    series: [{
-                        type: 'map',
-                        map: 'world', // 使用已注册的 'world' 地图
-                        roam: true,
-                        zoom: 1.2,
-                        itemStyle: {
-                            areaColor: 'rgba(39, 39, 42, 0.4)',
-                            borderColor: 'rgba(0, 255, 65, 0.2)',
-                            borderWidth: 0.5
+                    series: [
+                        // 3D 散点图（显示数据点）
+                        {
+                            type: 'scatter3D',
+                            coordinateSystem: 'globe',
+                            blendMode: 'lighter',
+                            symbolSize: (val) => {
+                                const value = Array.isArray(val) ? val[2] : (val.value || 0);
+                                return Math.max(8, Math.min(20, value * 2));
+                            },
+                            itemStyle: {
+                                color: '#00ff41',
+                                opacity: 0.8
+                            },
+                            data: processedData.map(item => {
+                                const coords = countryCoords[item.name] || [0, 0];
+                                // 返回 [经度, 纬度, 值, 原始数据对象]
+                                return [coords[0], coords[1], item.value, item];
+                            }),
+                            emphasis: {
+                                itemStyle: {
+                                    color: '#34d399',
+                                    opacity: 1
+                                }
+                            }
                         },
-                        emphasis: {
-                            itemStyle: { areaColor: '#00ff41' },
-                            label: { show: false }
-                        },
-                        data: processedData
-                    }]
+                        // 3D 地图（如果地图数据可用）
+                        ...(mapLoaded ? [{
+                            type: 'map3D',
+                            map: 'world',
+                            coordinateSystem: 'globe',
+                            shading: 'lambert',
+                            itemStyle: {
+                                color: 'rgba(39, 39, 42, 0.6)',
+                                borderColor: 'rgba(0, 255, 65, 0.3)',
+                                borderWidth: 0.5,
+                                opacity: 0.8
+                            },
+                            emphasis: {
+                                itemStyle: {
+                                    color: 'rgba(0, 255, 65, 0.4)',
+                                    borderColor: '#00ff41',
+                                    borderWidth: 1
+                                }
+                            },
+                            data: processedData.map(item => ({
+                                name: item.name,
+                                value: item.value
+                            }))
+                        }] : [])
+                    ]
                 };
                 
                 // 设置地图选项
-                mapChart.setOption(option);
+                mapChart.setOption(option, { notMerge: true, lazyUpdate: false });
                 
                 // 响应式调整
                 const resizeHandler = () => {
@@ -632,10 +715,84 @@
                     window.mapResizeHandler = resizeHandler;
                 }
                 
-                console.log('[Map] ✅ 地图渲染完成');
+                console.log('[Map] ✅ 3D 地球渲染完成');
             } catch (error) {
-                console.error('[Map] ❌ 地图渲染失败:', error);
-                chartDom.innerHTML = '<div class="flex items-center justify-center h-full text-zinc-500 text-sm">地图渲染失败</div>';
+                console.error('[Map] ❌ 3D 地球渲染失败，尝试降级到 2D 地图:', error);
+                // 降级到 2D 地图
+                try {
+                    // 如果这次调用已经过期，直接退出
+                    if (seq !== mapRenderSeq) return;
+
+                    // 关键：3D setOption 可能部分成功并遗留 GL 图层，2D 降级必须重新 init（否则仍会触发 loadTexture/getZr 报错）
+                    if (mapChart) {
+                        try {
+                            mapChart.dispose();
+                        } catch (e) {
+                            // ignore
+                        }
+                        mapChart = null;
+                    }
+                    mapChart = echarts.init(chartDom, null, { renderer: 'canvas' });
+
+                    // 地图数据必须已注册，否则直接提示（避免 setOption 继续抛错）
+                    if (!echarts.getMap || !echarts.getMap('world')) {
+                        console.warn('[Map] ⚠️ world 地图数据未注册（world.js 未加载完成）');
+                        chartDom.innerHTML = '<div class="flex items-center justify-center h-full text-zinc-500 text-sm">地图数据未加载完成</div>';
+                        return;
+                    }
+
+                    // 确保 processedData 已定义
+                    const processedData = (locationData || []).map(item => ({
+                        // 2D 世界地图名称需要与 world.js 的英文国家名匹配
+                        name: (countryNameMap[item.name] ? countryNameMap[item.name].en : (item.name === 'USA' ? 'United States' : item.name)),
+                        value: item.value || 0
+                    }));
+                    
+                    const fallbackOption = {
+                        backgroundColor: 'transparent',
+                        tooltip: {
+                            trigger: 'item',
+                            backgroundColor: '#18181b',
+                            borderColor: '#27272a',
+                            textStyle: { color: '#00ff41', fontFamily: 'JetBrains Mono' },
+                            formatter: (params) => {
+                                const label = countryNameMap[params.data?.name]?.zh || params.name;
+                                return `${label}: ${params.value || 0} Victims`;
+                            }
+                        },
+                        visualMap: {
+                            min: 0,
+                            max: Math.max(20, ...processedData.map(d => d.value || 0)),
+                            show: false,
+                            inRange: {
+                                color: ['#064e3b', '#065f46', '#00ff41', '#34d399']
+                            }
+                        },
+                        series: [{
+                            type: 'map',
+                            map: 'world',
+                            roam: false,
+                            zoom: 1.2,
+                            top: '20%',
+                            itemStyle: {
+                                areaColor: 'rgba(39, 39, 42, 0.4)',
+                                borderColor: 'rgba(0, 255, 65, 0.2)',
+                                borderWidth: 1
+                            },
+                            emphasis: {
+                                itemStyle: { areaColor: '#00ff41' },
+                                label: { show: false }
+                            },
+                            data: processedData
+                        }]
+                    };
+                    // notMerge: true 彻底替换，避免残留 3D 配置
+                    mapChart.setOption(fallbackOption, { notMerge: true, lazyUpdate: false });
+                    console.log('[Map] ✅ 降级到 2D 地图渲染完成');
+                } catch (fallbackError) {
+                    console.error('[Map] ❌ 2D 地图降级也失败:', fallbackError);
+                    chartDom.innerHTML = '<div class="flex items-center justify-center h-full text-zinc-500 text-sm">地图渲染失败</div>';
+                }
             }
         }
 

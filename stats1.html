@@ -183,14 +183,15 @@
             border: 1px solid var(--card-border);
             border-radius: 2px;
             padding: 20px;
-            transition: border-color 0.2s ease;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             position: relative;
             overflow: visible;
         }
         
         .stat-card:hover {
             border-color: var(--accent-terminal);
-            box-shadow: 0 0 8px rgba(0, 255, 65, 0.3);
+            transform: translateY(-2px);
+            box-shadow: 0 0 20px rgba(0, 255, 65, 0.1);
         }
 
         .stat-label {
@@ -484,7 +485,7 @@
             <!-- 地图置于 Hero 核心 -->
             <div id="map-container"></div>
 
-            <!-- 浮动统计面板（使用 stats.html 的数据） -->
+            <!-- 浮动统计面板（从 stats2.html 移植） -->
             <div class="floating-stats">
                 <div class="stat-card">
                     <div class="stat-label">总诊断人数</div>
@@ -505,23 +506,48 @@
             </div>
         </header>
 
-        <!-- 顶部数字卡片（stats.html 的完整卡片） -->
-        <div class="stats-grid" id="statsCards">
-            <div class="stat-card-large">
-                <div class="stat-label-large">总诊断人数</div>
-                <div class="stat-value-large" id="totalUsersLarge">-</div>
+        <!-- 数据卡片区域（从 stats2.html 移植） -->
+        <div class="grid grid-cols-1 xl:grid-cols-4 gap-6 mt-6">
+            <!-- Side Panel: Core Metrics -->
+            <div class="xl:col-span-1 flex flex-col gap-4">
+                <div class="hacker-border p-6 rounded-sm stat-card">
+                    <div class="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest">已诊断开发者</div>
+                    <div id="totalUsersCard" class="text-4xl font-bold text-[var(--accent-terminal)]">0</div>
+                    <div class="mt-4 text-[9px] text-zinc-600 font-mono">USERS_RECOGNIZED_SUCCESSFULLY</div>
+                </div>
+
+                <div class="hacker-border p-6 rounded-sm stat-card">
+                    <div class="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest">全网扫描次数</div>
+                    <div id="totalAnalysisCard" class="text-4xl font-bold">0</div>
+                    <div class="mt-4 text-[9px] text-zinc-600 font-mono">TOTAL_SCAN_COUNT</div>
+                </div>
+
+                <div class="hacker-border p-6 rounded-sm stat-card">
+                    <div class="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest">累计吐槽字数</div>
+                    <div id="totalCharsCard" class="text-4xl font-bold">0</div>
+                    <div class="mt-4 h-1 bg-zinc-800 w-full overflow-hidden">
+                        <div class="bg-[var(--accent-terminal)] h-full w-[65%]"></div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4 stat-card">
+                    <div class="hacker-border p-4 rounded-sm bg-zinc-900/50">
+                        <div class="text-zinc-500 text-[10px] uppercase tracking-tighter mb-1">Avg Words / 人均平均篇幅</div>
+                        <div id="avgPerUserCard" class="text-2xl font-bold font-mono text-[var(--accent-terminal)]">0</div>
+                        <div class="text-[9px] text-zinc-600 mt-1 uppercase">Per Developer Basis</div>
+                    </div>
+                    
+                    <div class="hacker-border p-4 rounded-sm bg-zinc-900/50">
+                        <div class="text-zinc-500 text-[10px] uppercase tracking-tighter mb-1">Scan Words / 单次平均篇幅</div>
+                        <div id="avgPerScanCard" class="text-2xl font-bold font-mono text-blue-400">0</div>
+                        <div class="text-[9px] text-zinc-600 mt-1 uppercase">Per Analysis Basis</div>
+                    </div>
+                </div>
             </div>
-            <div class="stat-card-large">
-                <div class="stat-label-large">累计吐槽字数</div>
-                <div class="stat-value-large" id="totalCharsLarge">-</div>
-            </div>
-            <div class="stat-card-large">
-                <div class="stat-label-large">系统运行天数</div>
-                <div class="stat-value-large" id="systemDaysLarge">-</div>
-            </div>
-            <div class="stat-card-large">
-                <div class="stat-label-large">覆盖城市数</div>
-                <div class="stat-value-large" id="cityCountLarge">-</div>
+
+            <!-- Main Content Area -->
+            <div class="xl:col-span-3">
+                <!-- 其他内容区域 -->
             </div>
         </div>
 
@@ -563,495 +589,382 @@
             </div>
         </div>
     </div>
-
     <script>
-        // 获取 API 端点
+        // 1. API 端点配置
         const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content || 'https://cursor-clinical-analysis.psterman.workers.dev/';
 
-        // 全局数据
+        // 2. 全局实例变量
         let dashboardData = null;
         let radarChartInstance = null;
         let mapChartInstance = null;
 
-        // 国家代码转换表 (映射 Supabase 的 ip_location 到 ECharts World Map)
+        // 3. 国家名称映射 (ECharts使用的是英文全称，数据库可能存的是代码或中文)
         const countryMap = {
-            'CN': 'China',
-            'US': 'United States',
-            'JP': 'Japan',
-            'GB': 'United Kingdom',
-            'DE': 'Germany',
-            'SG': 'Singapore',
-            'HK': 'Hong Kong',
-            'TW': 'Taiwan',
-            'CA': 'Canada',
-            'AU': 'Australia'
+            'CN': 'China', 'China': 'China', '中国': 'China',
+            'US': 'United States', 'USA': 'United States', 'United States': 'United States',
+            'JP': 'Japan', 'Japan': 'Japan',
+            'GB': 'United Kingdom', 'UK': 'United Kingdom',
+            'DE': 'Germany', 'Germany': 'Germany',
+            'SG': 'Singapore', 'Singapore': 'Singapore',
+            'HK': 'Hong Kong', 'Hong Kong': 'Hong Kong',
+            'TW': 'Taiwan', 'Taiwan': 'Taiwan',
+            'CA': 'Canada', 'Canada': 'Canada',
+            'AU': 'Australia', 'Australia': 'Australia',
+            'KR': 'South Korea', 'South Korea': 'South Korea',
+            'Unknown': null, '未知': null
         };
 
         /**
-         * 初始化世界地图（保留 stats2.html 的地图功能）
-         */
-        function initGlobalMap(locationData) {
-            const chartDom = document.getElementById('map-container');
-            if (!chartDom) return;
-            
-            mapChartInstance = echarts.init(chartDom);
-            
-            // 将 API 的简写转换成地图全称
-            const processedData = (locationData || []).map(item => ({
-                name: countryMap[item.name] || item.name,
-                value: item.value
-            }));
-
-            const option = {
-                backgroundColor: 'transparent',
-                tooltip: {
-                    trigger: 'item',
-                    backgroundColor: '#18181b',
-                    borderColor: '#27272a',
-                    textStyle: { color: '#00ff41', fontFamily: 'JetBrains Mono' },
-                    formatter: '{b}: {c} Victims'
-                },
-                visualMap: {
-                    min: 0,
-                    max: 20,
-                    show: false,
-                    inRange: {
-                        color: ['#064e3b', '#065f46', '#00ff41', '#34d399']
-                    }
-                },
-                series: [{
-                    type: 'map',
-                    map: 'world',
-                    roam: false,
-                    zoom: 1.2,
-                    top: '20%',
-                    itemStyle: {
-                        areaColor: 'rgba(39, 39, 42, 0.4)',
-                        borderColor: 'rgba(0, 255, 65, 0.2)',
-                        borderWidth: 1
-                    },
-                    emphasis: {
-                        itemStyle: { areaColor: '#00ff41' },
-                        label: { show: false }
-                    },
-                    data: processedData
-                }]
-            };
-
-            mapChartInstance.setOption(option);
-            window.addEventListener('resize', () => {
-                if (mapChartInstance) mapChartInstance.resize();
-            });
-        }
-
-        /**
-         * 初始化大盘数据
+         * 初始化数据大盘 (核心逻辑)
          */
         async function initDashboard() {
             try {
                 console.log('[Dashboard] 开始加载数据...');
                 const timestamp = Date.now();
-                const response = await fetch(`${apiEndpoint}api/global-average?t=${timestamp}`).catch(error => {
-                    console.error('[Dashboard] Fetch 请求失败:', error);
-                    throw new Error(`网络请求失败: ${error.message}`);
-                });
                 
-                console.log('[Debug] 正在请求 API...');
-                console.log('[Debug] Response status:', response.status);
-                console.log('[Debug] Response ok:', response.ok);
+                // 请求你的 Worker 接口
+                const response = await fetch(`${apiEndpoint}api/global-average?t=${timestamp}`);
                 
                 if (!response.ok) {
-                    const errorText = await response.text().catch(() => '无法读取错误信息');
-                    console.error('[Debug] HTTP 错误响应内容:', errorText);
-                    throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 
-                const result = await response.json().catch(error => {
-                    console.error('[Dashboard] JSON 解析失败:', error);
-                    throw new Error(`数据解析失败: ${error.message}`);
-                });
-                
-                console.log('[Debug] 接口返回的原始数据:', result);
-                
-                const data = result.data || result;
-                const globalAverage = data.globalAverage || data.averages || result.globalAverage || result.averages;
-                const totalUsers = data.totalUsers || result.totalUsers || data.total_users || result.total_users || 0;
-                
-                console.log('[Debug] 匹配到的平均分:', globalAverage);
-                console.log('[Debug] 匹配到的总用户数:', totalUsers);
-                
-                if (result.data) {
-                    dashboardData = { ...result.data };
-                } else {
-                    dashboardData = { ...result };
-                }
-                
-                const hasValidGlobalAverage = globalAverage && 
-                    typeof globalAverage === 'object' && 
-                    !Array.isArray(globalAverage) &&
-                    Object.keys(globalAverage).length > 0;
-                
-                if (hasValidGlobalAverage) {
-                    let normalizedGlobalAverage = { ...globalAverage };
-                    
-                    const requiredKeys = ['L', 'P', 'D', 'E', 'F'];
-                    requiredKeys.forEach(key => {
-                        if (normalizedGlobalAverage[key] === undefined || normalizedGlobalAverage[key] === null) {
-                            normalizedGlobalAverage[key] = 50;
-                        }
-                        if (typeof normalizedGlobalAverage[key] !== 'number') {
-                            normalizedGlobalAverage[key] = parseFloat(normalizedGlobalAverage[key]) || 50;
-                        }
-                    });
-                    
-                    dashboardData.globalAverage = normalizedGlobalAverage;
-                    dashboardData.globalAverages = normalizedGlobalAverage;
-                    
-                    console.log('[Dashboard] ✅ 成功解析 globalAverage:', normalizedGlobalAverage);
-                } else {
-                    console.warn('[Dashboard] ⚠️ globalAverage 缺失或无效，使用预设数据');
-                    dashboardData.globalAverages = { L: 50, P: 50, D: 50, E: 50, F: 50 };
-                    dashboardData.globalAverage = { L: 50, P: 50, D: 50, E: 50, F: 50 };
-                }
-                
-                if (totalUsers > 0) {
-                    dashboardData.totalUsers = totalUsers;
-                } else if (!dashboardData.totalUsers) {
-                    dashboardData.totalUsers = 1;
-                }
-                
-                if (dashboardData.totalRoastWords === undefined || dashboardData.totalRoastWords === null) {
-                    dashboardData.totalRoastWords = 0;
-                }
-                if (dashboardData.cityCount === undefined || dashboardData.cityCount === null) {
-                    dashboardData.cityCount = 0;
-                }
-                if (!Array.isArray(dashboardData.locationRank)) {
-                    dashboardData.locationRank = [];
-                }
-                if (!Array.isArray(dashboardData.recentVictims)) {
-                    dashboardData.recentVictims = [];
-                }
-                
-                console.log('[Dashboard] 数据加载成功:', dashboardData);
-                
-                // 更新所有UI组件
-                updateStatsCards();
-                renderRadarChart();
-                renderLocationList();
-                renderTimeline();
-                renderRecentActivity();
-                // 初始化地图
-                initGlobalMap(dashboardData.locationRank);
-            } catch (error) {
-                console.error('[Dashboard] 加载数据失败:', error);
-                console.warn('[Dashboard] ⚠️ 使用预设数据继续渲染');
+                // 获取 Worker 返回的原始 JSON
+                const apiResult = await response.json();
+                console.log('[Dashboard] API 返回数据:', apiResult);
+
+                // --- 数据清洗与映射 ---
+                // Worker index.ts 返回的数据结构直接就在 apiResult 根目录下
                 dashboardData = {
-                    totalUsers: 1,
-                    globalAverages: { L: 50, P: 50, D: 50, E: 50, F: 50 },
-                    globalAverage: { L: 50, P: 50, D: 50, E: 50, F: 50 },
-                    locationRank: [],
-                    recentVictims: [],
-                    systemDays: 1,
-                    cityCount: 0,
-                    totalRoastWords: 0,
-                    totalChars: 0,
+                    // 基础统计
+                    totalUsers: Number(apiResult.totalUsers) || 0,
+                    totalRoastWords: Number(apiResult.totalRoastWords || apiResult.totalChars) || 0,
+                    systemDays: Number(apiResult.systemDays) || 1,
+                    cityCount: Number(apiResult.cityCount) || 0,
+                    
+                    // 深度分析
+                    totalAnalysis: Number(apiResult.totalAnalysis) || 0,
+                    avgPerUser: Number(apiResult.avgPerUser) || 0,
+                    avgPerScan: Number(apiResult.avgPerScan) || 0,
+                    
+                    // 图表数据
+                    globalAverage: apiResult.globalAverage || { L: 50, P: 50, D: 50, E: 50, F: 50 },
+                    locationRank: Array.isArray(apiResult.locationRank) ? apiResult.locationRank : [],
+                    recentVictims: Array.isArray(apiResult.recentVictims) ? apiResult.recentVictims : []
                 };
-                
-                updateStatsCards();
-                renderRadarChart();
-                renderLocationList();
-                renderTimeline();
-                renderRecentActivity();
-                initGlobalMap([]);
+
+                console.log('[Dashboard] 数据清洗完成:', dashboardData);
+
+                // --- 渲染 UI ---
+                updateStatsCards();      // 更新顶部浮动卡片和侧边大卡片
+                renderRadarChart();      // 更新雷达图
+                renderLocationList();    // 更新地理位置列表
+                renderTimeline();        // 更新时间轴
+                renderRecentActivity();  // 更新最近活动
+                initGlobalMap(dashboardData.locationRank); // 更新地图
+
+            } catch (error) {
+                console.error('[Dashboard] 加载失败:', error);
+                // 错误时的降级显示
+                renderErrorState();
             }
         }
 
         /**
-         * 更新数字卡片
+         * 更新所有数字卡片
          */
         function updateStatsCards() {
             if (!dashboardData) return;
 
-            const formatNumber = (num) => {
-                if (typeof num !== 'number' || isNaN(num)) return '0';
-                if (num >= 1000000) {
-                    return (num / 1000000).toFixed(1) + 'M';
-                } else if (num >= 1000) {
-                    return (num / 1000).toFixed(1) + 'K';
+            // 1. 更新顶部浮动小卡片 (Hero区域)
+            updateTextContent('totalUsers', formatNumber(dashboardData.totalUsers));
+            updateTextContent('totalChars', formatNumber(dashboardData.totalRoastWords));
+            updateTextContent('systemDays', dashboardData.systemDays);
+            updateTextContent('cityCount', dashboardData.cityCount);
+
+            // 2. 更新左侧核心指标大卡片 (带动画)
+            safeAnimateValue(document.getElementById('totalUsersCard'), 0, dashboardData.totalUsers, 1500, true);
+            safeAnimateValue(document.getElementById('totalAnalysisCard'), 0, dashboardData.totalAnalysis, 1500, true);
+            
+            // 累计吐槽字数 (如果数字过大显示 '万')
+            const charCard = document.getElementById('totalCharsCard');
+            if (charCard) {
+                if (dashboardData.totalRoastWords > 100000) {
+                    charCard.innerText = (dashboardData.totalRoastWords / 10000).toFixed(1) + ' 万';
+                } else {
+                    safeAnimateValue(charCard, 0, dashboardData.totalRoastWords, 1500, true);
                 }
-                return num.toString();
-            };
-
-            // 更新浮动面板
-            const totalUsersEl = document.getElementById('totalUsers');
-            if (totalUsersEl) {
-                totalUsersEl.textContent = formatNumber(dashboardData.totalUsers || 0);
             }
 
-            const totalCharsEl = document.getElementById('totalChars');
-            if (totalCharsEl) {
-                const totalRoastWords = dashboardData.totalRoastWords || dashboardData.totalChars || 0;
-                totalCharsEl.textContent = formatNumber(totalRoastWords);
-            }
-
-            const systemDaysEl = document.getElementById('systemDays');
-            if (systemDaysEl) {
-                systemDaysEl.textContent = (dashboardData.systemDays || 1).toString();
-            }
-
-            const cityCountEl = document.getElementById('cityCount');
-            if (cityCountEl) {
-                cityCountEl.textContent = (dashboardData.cityCount || 0).toString();
-            }
-
-            // 更新大卡片
-            const totalUsersLargeEl = document.getElementById('totalUsersLarge');
-            if (totalUsersLargeEl) {
-                totalUsersLargeEl.textContent = formatNumber(dashboardData.totalUsers || 0);
-            }
-
-            const totalCharsLargeEl = document.getElementById('totalCharsLarge');
-            if (totalCharsLargeEl) {
-                const totalRoastWords = dashboardData.totalRoastWords || dashboardData.totalChars || 0;
-                totalCharsLargeEl.textContent = formatNumber(totalRoastWords);
-            }
-
-            const systemDaysLargeEl = document.getElementById('systemDaysLarge');
-            if (systemDaysLargeEl) {
-                systemDaysLargeEl.textContent = (dashboardData.systemDays || 1).toString();
-            }
-
-            const cityCountLargeEl = document.getElementById('cityCountLarge');
-            if (cityCountLargeEl) {
-                cityCountLargeEl.textContent = (dashboardData.cityCount || 0).toString();
-            }
+            safeAnimateValue(document.getElementById('avgPerUserCard'), 0, dashboardData.avgPerUser, 1000, false);
+            safeAnimateValue(document.getElementById('avgPerScanCard'), 0, dashboardData.avgPerScan, 1000, false);
         }
 
         /**
          * 渲染雷达图
          */
         function renderRadarChart() {
-            if (!dashboardData || !window.Chart) {
-                console.warn('[Dashboard] Chart.js 未加载或数据未就绪');
-                return;
-            }
-
             const canvas = document.getElementById('radarChart');
-            if (!canvas) {
-                console.warn('[Dashboard] 找不到雷达图 canvas');
-                return;
-            }
+            if (!canvas || !window.Chart || !dashboardData) return;
 
-            if (radarChartInstance) {
-                radarChartInstance.destroy();
-            }
+            if (radarChartInstance) radarChartInstance.destroy();
 
-            const ctx = canvas.getContext('2d');
-            const globalAverages = dashboardData.globalAverage || dashboardData.globalAverages || { L: 50, P: 50, D: 50, E: 50, F: 50 };
-
-            const dimLabels = ['L (语言)', 'P (模式)', 'D (深度)', 'E (效率)', 'F (频率)'];
-
-            radarChartInstance = new Chart(ctx, {
+            const avg = dashboardData.globalAverage;
+            
+            radarChartInstance = new Chart(canvas.getContext('2d'), {
                 type: 'radar',
                 data: {
-                    labels: dimLabels,
-                    datasets: [
-                        {
-                            label: '全网平均',
-                            data: [
-                                globalAverages.L,
-                                globalAverages.P,
-                                globalAverages.D,
-                                globalAverages.E,
-                                globalAverages.F,
-                            ],
-                            backgroundColor: 'rgba(0, 255, 65, 0.2)',
-                            borderColor: 'rgba(0, 255, 65, 1)',
-                            borderWidth: 2,
-                            pointBackgroundColor: 'rgba(0, 255, 65, 1)',
-                            pointBorderColor: '#fff',
-                            pointHoverBackgroundColor: '#fff',
-                            pointHoverBorderColor: 'rgba(0, 255, 65, 1)',
-                            pointRadius: 5,
-                            pointHoverRadius: 7,
-                        },
-                    ],
+                    labels: ['L (逻辑)', 'P (耐心)', 'D (细节)', 'E (情绪)', 'F (频率)'],
+                    datasets: [{
+                        label: '全网平均值',
+                        data: [avg.L, avg.P, avg.D, avg.E, avg.F],
+                        backgroundColor: 'rgba(0, 255, 65, 0.2)',
+                        borderColor: '#00ff41',
+                        borderWidth: 2,
+                        pointBackgroundColor: '#00ff41',
+                        pointBorderColor: '#fff'
+                    }]
                 },
                 options: {
                     responsive: true,
-                    maintainAspectRatio: true,
-                    layout: {
-                        padding: {
-                            top: 20,
-                            bottom: 20,
-                            left: 20,
-                            right: 20
-                        }
-                    },
+                    maintainAspectRatio: false,
                     scales: {
                         r: {
                             beginAtZero: true,
                             max: 100,
-                            ticks: {
-                                stepSize: 20,
-                                display: true,
-                                color: '#ffffff',
-                                font: {
-                                    family: "'JetBrains Mono', monospace",
-                                },
-                            },
-                            grid: {
-                                color: 'rgba(0, 255, 65, 0.1)',
-                            },
+                            ticks: { display: false, stepSize: 20 },
+                            grid: { color: 'rgba(0, 255, 65, 0.1)' },
                             pointLabels: {
-                                font: {
-                                    size: 12,
-                                    family: "'JetBrains Mono', monospace",
-                                },
-                                color: '#ffffff',
-                            },
-                        },
+                                color: '#fff',
+                                font: { family: "'JetBrains Mono', monospace", size: 12 }
+                            }
+                        }
                     },
                     plugins: {
-                        legend: {
-                            display: true,
-                            position: 'top',
-                            labels: {
-                                color: '#ffffff',
-                                font: {
-                                    family: "'JetBrains Mono', monospace",
-                                },
-                            },
-                        },
+                        legend: { display: false },
                         tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    return `${context.label}: ${context.parsed.r}分`;
-                                },
-                            },
-                        },
-                    },
-                },
+                            backgroundColor: 'rgba(0,0,0,0.9)',
+                            titleColor: '#00ff41',
+                            bodyColor: '#fff',
+                            borderColor: '#27272a',
+                            borderWidth: 1
+                        }
+                    }
+                }
             });
         }
 
         /**
-         * 渲染地理位置列表
+         * 初始化世界地图
          */
-        function renderLocationList() {
-            if (!dashboardData) return;
+        function initGlobalMap(locationRank) {
+            const chartDom = document.getElementById('map-container');
+            if (!chartDom || !window.echarts) return;
+            
+            mapChartInstance = echarts.init(chartDom);
+            
+            // 转换数据格式以适配 ECharts World Map
+            const mapData = locationRank.map(item => {
+                // 尝试映射名称，如果映射失败则保留原名（可能是英文）
+                const mappedName = countryMap[item.name] || item.name;
+                // 如果映射结果为 null (Unknown)，则过滤掉（filter在下面）
+                return {
+                    name: mappedName,
+                    value: item.value,
+                    originalName: item.name
+                };
+            }).filter(item => item.name); // 过滤掉无效的地理位置
 
-            const locationList = document.getElementById('locationList');
-            if (!locationList) return;
+            const option = {
+                backgroundColor: 'transparent',
+                tooltip: {
+                    trigger: 'item',
+                    backgroundColor: '#18181b',
+                    borderColor: '#00ff41',
+                    textStyle: { color: '#fff', fontFamily: 'JetBrains Mono' },
+                    formatter: function(params) {
+                        return `${params.name}<br/><span style="color:#00ff41">●</span> 受害者: ${params.value}`;
+                    }
+                },
+                visualMap: {
+                    min: 0,
+                    max: Math.max(...mapData.map(d => d.value), 10), // 动态计算最大值
+                    left: 'left',
+                    top: 'bottom',
+                    text: ['High', 'Low'],
+                    textStyle: { color: '#71717a' },
+                    inRange: {
+                        color: ['rgba(0, 255, 65, 0.1)', '#00ff41']
+                    },
+                    calculable: true
+                },
+                series: [{
+                    type: 'map',
+                    map: 'world',
+                    roam: true,
+                    zoom: 1.2,
+                    label: { show: false },
+                    itemStyle: {
+                        areaColor: '#18181b',
+                        borderColor: '#27272a'
+                    },
+                    emphasis: {
+                        itemStyle: {
+                            areaColor: 'rgba(0, 255, 65, 0.3)',
+                            borderColor: '#00ff41'
+                        },
+                        label: { show: false }
+                    },
+                    data: mapData
+                }]
+            };
 
-            const locations = dashboardData.locationRank || dashboardData.locationDistribution || [];
-
-            if (!Array.isArray(locations) || locations.length === 0) {
-                locationList.innerHTML = '<div style="text-align: center; color: var(--text-dim); padding: 20px;">暂无数据</div>';
-                return;
-            }
-
-            locationList.innerHTML = locations.map((item, index) => {
-                const name = item.name || item.location || '未知';
-                const value = item.value !== undefined ? item.value : (item.count !== undefined ? item.count : 0);
-                return `
-                    <div class="location-item">
-                        <span class="location-rank">#${index + 1}</span>
-                        <span class="location-name">${name}</span>
-                        <span class="location-count">${value} 人</span>
-                    </div>
-                `;
-            }).join('');
+            mapChartInstance.setOption(option);
+            
+            // 响应窗口大小变化
+            window.addEventListener('resize', () => mapChartInstance.resize());
         }
 
         /**
-         * 渲染时间轴
+         * 渲染地理位置排行列表
+         */
+        function renderLocationList() {
+            const container = document.getElementById('locationList');
+            if (!container || !dashboardData) return;
+
+            const list = dashboardData.locationRank.slice(0, 6); // 只显示前6
+            
+            if (list.length === 0) {
+                container.innerHTML = '<div class="loading">暂无地理数据</div>';
+                return;
+            }
+
+            container.innerHTML = list.map((item, index) => `
+                <div class="location-item">
+                    <span class="location-rank">#${index + 1}</span>
+                    <span class="location-name">${item.name}</span>
+                    <span class="location-count">${item.value}</span>
+                </div>
+            `).join('');
+        }
+
+        /**
+         * 渲染时间轴 (基于 systemDays 反推启动时间)
          */
         function renderTimeline() {
-            if (!dashboardData) return;
+            const container = document.getElementById('timeline');
+            if (!container || !dashboardData) return;
 
-            const timeline = document.getElementById('timeline');
-            const systemDays = dashboardData.systemDays || 1;
-            const totalUsers = dashboardData.totalUsers || 0;
-
+            const days = dashboardData.systemDays;
             const startDate = new Date();
-            startDate.setDate(startDate.getDate() - systemDays);
+            startDate.setDate(startDate.getDate() - days);
 
-            timeline.innerHTML = `
+            container.innerHTML = `
                 <div class="timeline-item">
                     <div class="timeline-content">
                         <div class="timeline-time">${formatDate(startDate)}</div>
-                        <div class="timeline-text">项目启动</div>
+                        <div class="timeline-text text-[var(--accent-terminal)]">Vibe Coding 协议启动</div>
                     </div>
                 </div>
                 <div class="timeline-item">
                     <div class="timeline-content">
-                        <div class="timeline-time">${formatDate(new Date())}</div>
-                        <div class="timeline-text">累计诊断 ${totalUsers} 人，运行 ${systemDays} 天</div>
+                        <div class="timeline-time">运行中</div>
+                        <div class="timeline-text">系统已稳定运行 ${days} 天</div>
                     </div>
                 </div>
             `;
         }
 
         /**
-         * 渲染最近活动
+         * 渲染最近活动 (Right Panel)
          */
         function renderRecentActivity() {
-            if (!dashboardData) return;
+            const container = document.getElementById('recentActivity');
+            if (!container || !dashboardData) return;
 
-            const recentActivity = document.getElementById('recentActivity');
-            if (!recentActivity) return;
-
-            const victims = dashboardData.recentVictims || dashboardData.recentActivity || [];
-
-            if (!Array.isArray(victims) || victims.length === 0) {
-                recentActivity.innerHTML = '<div style="text-align: center; color: var(--text-dim); padding: 20px;">暂无数据</div>';
+            const victims = dashboardData.recentVictims;
+            
+            if (victims.length === 0) {
+                container.innerHTML = '<div class="loading">暂无最近活动</div>';
                 return;
             }
 
-            recentActivity.innerHTML = victims.map((victim, index) => {
-                const name = victim.name || `匿名受害者${index + 1}`;
-                const type = victim.type || victim.personalityType || 'UNKNOWN';
-                const location = victim.location || victim.ip_location || '未知';
-                const time = victim.time || victim.created_at || victim.timestamp || new Date().toISOString();
-                
-                return `
-                    <div class="timeline-item">
-                        <div class="timeline-content">
-                            <div class="timeline-time">${formatDateTime(time)}</div>
-                            <div class="timeline-text">
-                                <strong>${name}</strong> - ${location} - ${type}
+            container.innerHTML = victims.map(v => `
+                <div class="timeline-item">
+                    <div class="timeline-content hover:border-[var(--accent-terminal)] transition-colors">
+                        <div class="timeline-time">${formatDateTime(v.time)}</div>
+                        <div class="timeline-text">
+                            <span class="text-zinc-400">检测到</span> 
+                            <span class="text-white font-bold">${v.name}</span>
+                            <div class="text-[10px] mt-1 text-[var(--accent-terminal)]">
+                                [${v.location}] 诊断结果: ${v.type}
                             </div>
                         </div>
                     </div>
-                `;
-            }).join('');
+                </div>
+            `).join('');
         }
 
-        /**
-         * 格式化日期
-         */
+        // --- 工具函数 ---
+
+        function updateTextContent(id, value) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value;
+        }
+
+        function safeAnimateValue(obj, start, end, duration, format) {
+            if (!obj) return;
+            start = Number(start) || 0;
+            end = Number(end) || 0;
+            
+            let startTimestamp = null;
+            const step = (timestamp) => {
+                if (!startTimestamp) startTimestamp = timestamp;
+                const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+                const current = Math.floor(progress * (end - start) + start);
+                
+                obj.innerHTML = format ? formatNumber(current) : current;
+                
+                if (progress < 1) {
+                    window.requestAnimationFrame(step);
+                } else {
+                    obj.innerHTML = format ? formatNumber(end) : end;
+                }
+            };
+            window.requestAnimationFrame(step);
+        }
+
+        function formatNumber(num) {
+            if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+            if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+            return num.toString();
+        }
+
         function formatDate(date) {
-            if (!date) return '未知';
-            const d = new Date(date);
-            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            return date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
         }
 
-        /**
-         * 格式化日期时间
-         */
-        function formatDateTime(dateString) {
-            if (!dateString) return '未知';
-            const d = new Date(dateString);
-            return `${formatDate(d)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        function formatDateTime(isoString) {
+            try {
+                const date = new Date(isoString);
+                return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+            } catch (e) {
+                return '刚刚';
+            }
         }
 
-        // 页面加载完成后初始化
-        document.addEventListener('DOMContentLoaded', () => {
-            console.log('[Dashboard] 页面加载完成，开始初始化...');
-            initDashboard();
-        });
+        function renderErrorState() {
+            // 在这里处理 UI 的错误状态显示，例如将数字设为 0
+            dashboardData = {
+                totalUsers: 0, totalRoastWords: 0, systemDays: 1, cityCount: 0,
+                globalAverage: { L: 50, P: 50, D: 50, E: 50, F: 50 },
+                locationRank: [], recentVictims: []
+            };
+            updateStatsCards();
+        }
+
+        // 启动
+        document.addEventListener('DOMContentLoaded', initDashboard);
     </script>
 </body>
 </html>
