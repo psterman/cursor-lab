@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Global Statistics Dashboard - Vibe Coding</title>
+    <!-- API Endpoint -->
+    <meta name="api-endpoint" content="https://cursor-clinical-analysis.psterman.workers.dev/">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts/map/js/world.js" onload="this.setAttribute('data-loaded', 'true')"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        :root {
+            --bg-color: #050505;
+            --card-bg: rgba(24, 24, 27, 0.7);
+            --card-border: #27272a;
+            --text-main: #ffffff;
+            --text-dim: #71717a;
+            --accent-terminal: #00ff41;
+        }
+
+        body {
+            font-family: 'JetBrains Mono', monospace;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            overflow-x: hidden;
+            position: relative;
+        }
+        
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+            background-image: 
+                repeating-linear-gradient(
+                    0deg,
+                    transparent,
+                    transparent 2px,
+                    rgba(0, 255, 65, 0.02) 2px,
+                    rgba(0, 255, 65, 0.02) 4px
+                ),
+                radial-gradient(
+                    circle,
+                    rgba(0, 255, 65, 0.03) 1px,
+                    transparent 1px
+                );
+            background-size: 100% 4px, 20px 20px;
+        }
+        
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 2;
+            background: linear-gradient(
+                180deg,
+                transparent 0%,
+                rgba(0, 255, 65, 0.05) 50%,
+                transparent 100%
+            );
+            animation: scanline 8s linear infinite;
+        }
+        
+        @keyframes scanline {
+            0% { transform: translateY(-100%); }
+            100% { transform: translateY(100%); }
+        }
+
+        .hacker-border {
+            border: 1px solid var(--card-border);
+            position: relative;
+            background: var(--card-bg);
+            backdrop-filter: blur(10px);
+        }
+
+        .hacker-border::before {
+            content: '';
+            position: absolute;
+            top: -1px; left: 0; width: 60px; height: 1px;
+            background: var(--accent-terminal);
+            box-shadow: 0 0 10px var(--accent-terminal);
+        }
+
+        #map-container {
+            width: 100%;
+            height: 600px;
+        }
+
+        .stat-card {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .stat-card:hover {
+            border-color: var(--accent-terminal);
+            transform: translateY(-2px);
+            box-shadow: 0 0 20px rgba(0, 255, 65, 0.1);
+        }
+
+        .lang-btn {
+            border: 1px solid var(--card-border);
+            color: var(--text-dim);
+            transition: all 0.2s;
+        }
+
+        .lang-btn.active {
+            border-color: var(--accent-terminal);
+            color: var(--accent-terminal);
+            background: rgba(0, 255, 65, 0.05);
+        }
+
+        .loading-overlay {
+            position: absolute;
+            inset: 0;
+            background: var(--bg-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+        }
+
+        @keyframes pulse-soft {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .pulse { animation: pulse-soft 2s infinite; }
+        
+        /* 确保内容在背景动画之上 */
+        body > div {
+            position: relative;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="max-w-[1600px] mx-auto">
+        <!-- Header -->
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+            <div>
+                <h1 class="text-3xl font-black tracking-tighter italic flex items-center gap-2">
+                    <span class="text-white">GLOBAL</span>
+                    <span class="text-[var(--accent-terminal)]">DATA_STATION</span>
+                </h1>
+                <p id="sub-title" class="text-[10px] text-zinc-500 tracking-[0.3em] font-bold uppercase mt-1">Telemetry Uplink: Active // Source: Central_Pacific</p>
+            </div>
+            
+            <div class="flex gap-2">
+                <button onclick="switchLang('zh')" id="btn-zh" class="lang-btn active px-4 py-1 text-[10px] font-bold uppercase">ZH</button>
+                <button onclick="switchLang('en')" id="btn-en" class="lang-btn px-4 py-1 text-[10px] font-bold uppercase">EN</button>
+            </div>
+        </div>
+
+        <!-- Main Dashboard Layout -->
+        <div class="grid grid-cols-1 xl:grid-cols-4 gap-6">
+            
+            <!-- Side Panel: Core Metrics -->
+            <div class="xl:col-span-1 flex flex-col gap-4 order-2 xl:order-1">
+                <div class="hacker-border p-6 rounded-sm stat-card">
+                    <div class="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest lang-key" data-key="total-victims">已诊断开发者</div>
+                    <div id="totalUsers" class="text-4xl font-bold text-[var(--accent-terminal)]">0</div>
+                    <div class="mt-4 text-[9px] text-zinc-600 font-mono">USERS_RECOGNIZED_SUCCESSFULLY</div>
+                </div>
+
+                <div class="hacker-border p-6 rounded-sm stat-card">
+                    <div class="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest lang-key" data-key="total-analysis">全网扫描次数</div>
+                    <div id="totalAnalysis" class="text-4xl font-bold">0</div>
+                    <div class="mt-4 text-[9px] text-zinc-600 font-mono">TOTAL_SCAN_COUNT</div>
+                </div>
+
+                <div class="hacker-border p-6 rounded-sm stat-card">
+                    <div class="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest lang-key" data-key="total-roast">累计吐槽字数</div>
+                    <div id="totalChars" class="text-4xl font-bold">0</div>
+                    <div class="mt-4 h-1 bg-zinc-800 w-full overflow-hidden">
+                        <div class="bg-[var(--accent-terminal)] h-full w-[65%]"></div>
+                    </div>
+                </div>
+
+                <div class="hacker-border p-6 rounded-sm stat-card">
+                    <div class="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest lang-key" data-key="avg-chars">平均吐槽字数</div>
+                    <div id="avgChars" class="text-4xl font-bold">0</div>
+                    <div class="mt-4 text-[9px] text-zinc-600 font-mono">AVG_ROAST_WORDS</div>
+                </div>
+
+                <div class="hacker-border p-6 rounded-sm stat-card bg-zinc-900/40">
+                    <div class="text-[10px] text-zinc-500 mb-4 uppercase tracking-widest lang-key" data-key="radar-title">全网平均开发者画像</div>
+                    <div class="aspect-square">
+                        <canvas id="radarChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Central Map Area -->
+            <div class="xl:col-span-3 order-1 xl:order-2">
+                <div class="hacker-border rounded-sm overflow-hidden relative group">
+                    <div id="map-container"></div>
+                    
+                    <!-- Top Overlay Indicators -->
+                    <div class="absolute top-4 left-4 pointer-events-none">
+                        <div class="flex gap-4">
+                            <div class="bg-black/60 border border-zinc-800 px-3 py-2 rounded">
+                                <span class="text-[9px] block text-zinc-500 lang-key" data-key="active-nodes">活跃节点</span>
+                                <span class="text-xs font-bold text-emerald-400 flex items-center gap-1">
+                                    <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full pulse"></span>
+                                    242 CONNECTED
+                                </span>
+                            </div>
+                            <div class="bg-black/60 border border-zinc-800 px-3 py-2 rounded">
+                                <span class="text-[9px] block text-zinc-500 lang-key" data-key="threat-level">风险评级</span>
+                                <span class="text-xs font-bold text-red-500">LEVEL_CRITICAL</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Bottom Horizontal Stats -->
+                    <div class="absolute bottom-4 left-4 right-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div class="bg-black/80 backdrop-blur-md border border-zinc-800 p-4 rounded">
+                            <div class="text-[9px] text-zinc-500 mb-1 uppercase lang-key" data-key="top-hotspot">最密集热区</div>
+                            <div id="top-country" class="text-sm font-bold truncate">...</div>
+                        </div>
+                        <div class="bg-black/80 backdrop-blur-md border border-zinc-800 p-4 rounded">
+                            <div class="text-[9px] text-zinc-500 mb-1 uppercase lang-key" data-key="sys-days">运行天数</div>
+                            <div id="systemDays" class="text-xl font-bold">0</div>
+                        </div>
+                        <div class="bg-black/80 backdrop-blur-md border border-zinc-800 p-4 rounded">
+                            <div class="text-[9px] text-zinc-500 mb-1 uppercase lang-key" data-key="city-coverage">城市覆盖</div>
+                            <div id="cityCount" class="text-xl font-bold">0</div>
+                        </div>
+                        <div class="bg-black/80 backdrop-blur-md border border-zinc-800 p-4 rounded">
+                            <div class="text-[9px] text-zinc-500 mb-1 uppercase lang-key" data-key="sync-rate">同步速率</div>
+                            <div class="text-xl font-bold text-[var(--accent-terminal)]">99.8%</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Secondary Charts & Logs -->
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mt-6">
+            <div class="hacker-border p-6 rounded-sm">
+                <h3 class="text-xs font-bold text-zinc-400 mb-6 uppercase tracking-widest lang-key" data-key="hot-list">地理位置热力排行</h3>
+                <div id="locationList" class="space-y-3">
+                    <div class="animate-pulse space-y-2">
+                        <div class="h-8 bg-zinc-800 rounded"></div>
+                        <div class="h-8 bg-zinc-800 rounded"></div>
+                        <div class="h-8 bg-zinc-800 rounded"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="hacker-border p-6 rounded-sm">
+                <h3 class="text-xs font-bold text-zinc-400 mb-6 uppercase tracking-widest lang-key" data-key="personality-dist">人格分布排行</h3>
+                <div id="personalityDistribution" class="space-y-3">
+                    <div class="animate-pulse space-y-2">
+                        <div class="h-8 bg-zinc-800 rounded"></div>
+                        <div class="h-8 bg-zinc-800 rounded"></div>
+                        <div class="h-8 bg-zinc-800 rounded"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="hacker-border p-6 rounded-sm flex flex-col">
+                <h3 class="text-xs font-bold text-zinc-400 mb-6 uppercase tracking-widest lang-key" data-key="recent-activity">实时诊断活动</h3>
+                <div id="recentActivity" class="flex-1 overflow-y-auto max-h-[300px] text-[10px] font-mono space-y-4 pr-2">
+                    <!-- Logs here -->
+                </div>
+            </div>
+
+            <div class="hacker-border p-6 rounded-sm bg-zinc-900/20">
+                <h3 class="text-xs font-bold text-zinc-400 mb-6 uppercase tracking-widest lang-key" data-key="system-logs">核心系统日志</h3>
+                <div id="log-console" class="text-[9px] font-mono text-emerald-900/80 leading-relaxed overflow-hidden">
+                    <div>[SYS] Handshake with Cloudflare... OK</div>
+                    <div>[DB] Querying Supabase v_global_stats...</div>
+                    <div>[MAP] World mesh topology built</div>
+                    <div>[AUTH] AES-256 encrypted channel active</div>
+                    <div id="dynamic-log"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content;
+        let currentLang = 'zh';
+
+        const i18n = {
+            zh: {
+                'sub-title': '实时远程监测状态 // 节点：太平洋中部',
+                'total-victims': '已诊断开发者',
+                'total-analysis': '全网扫描次数',
+                'total-roast': '累计吐槽字数',
+                'avg-chars': '平均吐槽字数',
+                'radar-title': '全网平均开发者画像',
+                'personality-dist': '人格分布排行',
+                'active-nodes': '活跃节点',
+                'threat-level': '风险评级',
+                'top-hotspot': '最密集热区',
+                'sys-days': '运行天数',
+                'city-coverage': '城市覆盖',
+                'sync-rate': '同步速率',
+                'hot-list': '地理位置热力排行',
+                'recent-activity': '实时诊断活动',
+                'system-logs': '核心系统日志',
+                'victim': '受害者',
+                'loading': '初始化中...',
+                'rank': '排名'
+            },
+            en: {
+                'sub-title': 'Telemetry Status // Node: Central_Pacific',
+                'total-victims': 'Total Developers',
+                'total-analysis': 'Total Scans',
+                'total-roast': 'Total Roast Words',
+                'avg-chars': 'Avg Roast Words',
+                'radar-title': 'Global Developer Persona',
+                'personality-dist': 'Personality Distribution',
+                'active-nodes': 'Active Nodes',
+                'threat-level': 'Threat Level',
+                'top-hotspot': 'Primary Hotspot',
+                'sys-days': 'Days Online',
+                'city-coverage': 'City Coverage',
+                'sync-rate': 'Sync Rate',
+                'hot-list': 'Geographic Hotspots',
+                'recent-activity': 'Live Activity Feed',
+                'system-logs': 'Core System Logs',
+                'victim': 'Victim',
+                'loading': 'Initializing...',
+                'rank': 'Rank'
+            }
+        };
+
+        const countryNameMap = {
+            'CN': { zh: '中国', en: 'China' },
+            'US': { zh: '美国', en: 'USA' },
+            'JP': { zh: '日本', en: 'Japan' },
+            'GB': { zh: '英国', en: 'UK' },
+            'DE': { zh: '德国', en: 'Germany' },
+            'SG': { zh: '新加坡', en: 'Singapore' },
+            'HK': { zh: '中国香港', en: 'Hong Kong' },
+            'TW': { zh: '中国台湾', en: 'Taiwan' }
+        };
+
+        let mapChart, radarChart;
+
+        /**
+         * 数字格式化函数（智能处理大数字）
+         * @param {number} num - 要格式化的数字
+         * @returns {string} 格式化后的字符串（如 1.2M, 3.5K）
+         */
+        function formatNumber(num) {
+            if (typeof num !== 'number' || isNaN(num)) {
+                return '0';
+            }
+            if (num >= 1000000) {
+                return (num / 1000000).toFixed(1) + 'M';
+            }
+            if (num >= 1000) {
+                return (num / 1000).toFixed(1) + 'K';
+            }
+            return num.toString();
+        }
+
+        /**
+         * 数字滚动动画函数
+         * @param {HTMLElement} element - 目标元素
+         * @param {number} start - 起始值
+         * @param {number} end - 结束值
+         * @param {number} duration - 动画持续时间（毫秒）
+         * @param {boolean} useFormat - 是否使用 formatNumber 格式化（默认 true）
+         */
+        function animateValue(element, start, end, duration = 1500, useFormat = true) {
+            if (!element) return;
+            
+            // 确保 start 和 end 都是数字类型
+            start = Number(start) || 0;
+            end = Number(end) || 0;
+            
+            const startTime = performance.now();
+            const isInteger = Number.isInteger(start) && Number.isInteger(end);
+            
+            function update(currentTime) {
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                
+                // 使用缓动函数（easeOutCubic）
+                const easeOutCubic = 1 - Math.pow(1 - progress, 3);
+                const current = start + (end - start) * easeOutCubic;
+                
+                // 根据是否使用格式化来决定显示方式
+                if (useFormat) {
+                    // 使用 formatNumber 格式化显示（智能处理大数字）
+                    element.textContent = formatNumber(Math.floor(current));
+                } else {
+                    // 使用原始数字显示
+                    if (isInteger) {
+                        element.textContent = Math.floor(current).toLocaleString();
+                    } else {
+                        element.textContent = current.toFixed(1).toLocaleString();
+                    }
+                }
+                
+                if (progress < 1) {
+                    requestAnimationFrame(update);
+                } else {
+                    // 确保最终值准确
+                    if (useFormat) {
+                        element.textContent = formatNumber(end);
+                    } else {
+                        if (isInteger) {
+                            element.textContent = end.toLocaleString();
+                        } else {
+                            element.textContent = end.toFixed(1).toLocaleString();
+                        }
+                    }
+                }
+            }
+            
+            requestAnimationFrame(update);
+        }
+
+        function switchLang(lang) {
+            currentLang = lang;
+            document.getElementById('btn-zh').classList.toggle('active', lang === 'zh');
+            document.getElementById('btn-en').classList.toggle('active', lang === 'en');
+            
+            // 更新静态文案
+            document.getElementById('sub-title').innerText = i18n[lang]['sub-title'];
+            document.querySelectorAll('.lang-key').forEach(el => {
+                const key = el.getAttribute('data-key');
+                el.innerText = i18n[lang][key];
+            });
+
+            // 重新渲染数据依赖型组件
+            if (window.lastData) {
+                renderLocationList(window.lastData.locationRank);
+                const activityData = window.lastData.latestRecords || window.lastData.recentVictims || [];
+                renderRecentActivity(activityData);
+                renderPersonalityDistribution(window.lastData.personalityDistribution);
+                // 异步渲染地图，确保地图数据已加载
+                initGlobalMap(window.lastData.locationRank).catch(err => {
+                    console.warn('[Dashboard] 语言切换时地图渲染失败:', err);
+                });
+            }
+        }
+
+        /**
+         * 检查地图数据是否已加载
+         * world.js 加载后会在 echarts 中注册 'world' 地图
+         */
+        async function checkMapLoaded() {
+            if (typeof echarts === 'undefined') {
+                return false;
+            }
+            
+            // 检查地图是否已注册
+            // ECharts 5.x 使用 getMap 方法检查
+            try {
+                if (typeof echarts.getMap === 'function') {
+                    const mapData = echarts.getMap('world');
+                    if (mapData) {
+                        console.log('[Map] ✅ 地图数据已注册');
+                        return true;
+                    }
+                }
+                
+                // 降级检查：尝试注册地图（如果 world.js 已加载，地图数据会在全局变量中）
+                // world.js 通常会将地图数据存储在某个全局变量中
+                // 如果存在，手动注册
+                if (typeof window !== 'undefined' && window.worldMapData) {
+                    echarts.registerMap('world', window.worldMapData);
+                    console.log('[Map] ✅ 从全局变量注册地图');
+                    return true;
+                }
+                
+                // 检查脚本标签是否已加载
+                const worldScript = document.querySelector('script[src*="world.js"]');
+                if (worldScript && worldScript.getAttribute('data-loaded') === 'true') {
+                    console.log('[Map] ✅ world.js 脚本已标记为加载');
+                    return true;
+                }
+                
+                console.warn('[Map] ⚠️ 地图数据未找到，等待 world.js 加载...');
+                return false;
+            } catch (error) {
+                console.warn('[Map] ⚠️ 检查地图数据时出错:', error);
+                return false;
+            }
+        }
+
+        /**
+         * 等待地图数据加载完成
+         */
+        async function waitForMapData(maxWait = 10000) {
+            const startTime = Date.now();
+            
+            while (Date.now() - startTime < maxWait) {
+                if (await checkMapLoaded()) {
+                    return true;
+                }
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            
+            console.warn('[Map] ⚠️ 等待地图数据超时');
+            return false;
+        }
+
+        /**
+         * 初始化世界地图
+         * @param {Array} locationData - 地理位置数据 [{name: string, value: number}]
+         */
+        async function initGlobalMap(locationData) {
+            const chartDom = document.getElementById('map-container');
+            if (!chartDom) {
+                console.warn('[Map] ⚠️ 找不到地图容器元素');
+                return;
+            }
+            
+            // 检查 ECharts 是否已加载
+            if (typeof echarts === 'undefined') {
+                console.warn('[Map] ⚠️ ECharts 未加载，无法渲染地图');
+                return;
+            }
+            
+            // 等待地图数据加载完成
+            const mapLoaded = await waitForMapData(10000);
+            if (!mapLoaded) {
+                console.error('[Map] ❌ 地图数据加载失败，无法渲染地图');
+                chartDom.innerHTML = '<div class="flex items-center justify-center h-full text-zinc-500 text-sm">地图数据加载中...</div>';
+                return;
+            }
+            
+            // 【地图注册检查】确保地图已注册，如果没有则尝试手动注册
+            try {
+                // 检查地图是否已注册
+                if (typeof echarts.getMap === 'function') {
+                    const existingMap = echarts.getMap('world');
+                    if (!existingMap) {
+                        console.warn('[Map] ⚠️ 地图未注册，尝试从全局变量注册...');
+                        // world.js 加载后，地图数据可能在全局变量中
+                        // 尝试从常见的全局变量名获取
+                        if (typeof window !== 'undefined') {
+                            // world.js 可能将数据存储在 window 对象上
+                            const possibleMapData = window.worldMapData || window.world || window.worldGeoJSON;
+                            if (possibleMapData) {
+                                echarts.registerMap('world', possibleMapData);
+                                console.log('[Map] ✅ 从全局变量手动注册地图成功');
+                            } else {
+                                console.warn('[Map] ⚠️ 无法找到地图数据，地图可能无法正常显示');
+                            }
+                        }
+                    } else {
+                        console.log('[Map] ✅ 地图已注册，可以正常渲染');
+                    }
+                }
+            } catch (registerError) {
+                console.warn('[Map] ⚠️ 地图注册检查失败:', registerError);
+            }
+            
+            try {
+                // 销毁旧图表
+                if (mapChart) {
+                    mapChart.dispose();
+                    mapChart = null;
+                }
+                
+                // 初始化图表
+                mapChart = echarts.init(chartDom);
+                
+                // 处理地理位置数据
+                const processedData = (locationData || []).map(item => ({
+                    name: (countryNameMap[item.name] ? countryNameMap[item.name].en : item.name),
+                    value: item.value || 0
+                }));
+                
+                console.log('[Map] 处理后的数据:', processedData);
+                
+                // 配置地图选项
+                const option = {
+                    backgroundColor: 'transparent',
+                    tooltip: {
+                        trigger: 'item',
+                        backgroundColor: '#18181b',
+                        borderColor: '#27272a',
+                        textStyle: { color: '#00ff41', fontFamily: 'JetBrains Mono' },
+                        formatter: (params) => {
+                            const label = countryNameMap[params.data?.name]?.zh || params.name;
+                            return `${label}: ${params.value || 0}`;
+                        }
+                    },
+                    visualMap: {
+                        min: 0,
+                        max: Math.max(20, ...processedData.map(d => d.value || 0)),
+                        show: false,
+                        inRange: { color: ['#064e3b', '#065f46', '#00ff41'] }
+                    },
+                    series: [{
+                        type: 'map',
+                        map: 'world', // 使用已注册的 'world' 地图
+                        roam: true,
+                        zoom: 1.2,
+                        itemStyle: {
+                            areaColor: 'rgba(39, 39, 42, 0.4)',
+                            borderColor: 'rgba(0, 255, 65, 0.2)',
+                            borderWidth: 0.5
+                        },
+                        emphasis: {
+                            itemStyle: { areaColor: '#00ff41' },
+                            label: { show: false }
+                        },
+                        data: processedData
+                    }]
+                };
+                
+                // 设置地图选项
+                mapChart.setOption(option);
+                
+                // 响应式调整
+                const resizeHandler = () => {
+                    if (mapChart) {
+                        mapChart.resize();
+                    }
+                };
+                window.addEventListener('resize', resizeHandler);
+                
+                // 保存 resize handler，以便后续清理
+                if (!window.mapResizeHandler) {
+                    window.mapResizeHandler = resizeHandler;
+                }
+                
+                console.log('[Map] ✅ 地图渲染完成');
+            } catch (error) {
+                console.error('[Map] ❌ 地图渲染失败:', error);
+                chartDom.innerHTML = '<div class="flex items-center justify-center h-full text-zinc-500 text-sm">地图渲染失败</div>';
+            }
+        }
+
+        function renderRadarChart(averages) {
+            const ctx = document.getElementById('radarChart').getContext('2d');
+            if (radarChart) radarChart.destroy();
+
+            const labels = currentLang === 'zh' ? ['语言', '模式', '深度', '效率', '频率'] : ['Lang', 'Pattern', 'Depth', 'Effi', 'Freq'];
+            const data = [averages.L, averages.P, averages.D, averages.E, averages.F];
+
+            radarChart = new Chart(ctx, {
+                type: 'radar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        borderColor: '#00ff41',
+                        backgroundColor: 'rgba(0, 255, 65, 0.1)',
+                        borderWidth: 1,
+                        pointRadius: 2
+                    }]
+                },
+                options: {
+                    scales: {
+                        r: {
+                            angleLines: { color: '#27272a' },
+                            grid: { color: '#27272a' },
+                            pointLabels: { color: '#71717a', font: { size: 9 } },
+                            ticks: { display: false },
+                            suggestedMin: 0,
+                            suggestedMax: 100
+                        }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        function renderLocationList(data) {
+            const list = document.getElementById('locationList');
+            if (!data || data.length === 0) return;
+            
+            list.innerHTML = data.slice(0, 5).map((item, i) => {
+                const name = countryNameMap[item.name] ? countryNameMap[item.name][currentLang] : item.name;
+                return `
+                <div class="flex justify-between items-center text-[11px] border-b border-zinc-800 pb-2">
+                    <span class="text-zinc-500 font-mono">0${i+1}</span>
+                    <span class="font-bold uppercase tracking-tighter">${name}</span>
+                    <span class="text-[var(--accent-terminal)] font-bold">${item.value}</span>
+                </div>`;
+            }).join('');
+
+            const top = data[0];
+            document.getElementById('top-country').innerText = countryNameMap[top.name] ? countryNameMap[top.name][currentLang] : top.name;
+        }
+
+        function renderRecentActivity(victims) {
+            const box = document.getElementById('recentActivity');
+            if (!box) return;
+            
+            // 优先使用 latestRecords，如果没有则使用 recentVictims
+            const records = victims || [];
+            
+            if (records.length === 0) {
+                box.innerHTML = '<div class="text-zinc-500 text-center py-4">暂无数据</div>';
+                return;
+            }
+            
+            box.innerHTML = records.map((v, index) => {
+                // 兼容两种数据格式：latestRecords 和 recentVictims
+                const time = v.time || v.created_at || new Date().toISOString();
+                const type = v.type || v.personality_type || 'UNKNOWN';
+                const location = v.location || v.ip_location || '未知';
+                const name = v.name || `记录${index + 1}`;
+                
+                return `
+                <div class="border-l-2 border-zinc-800 pl-3 py-1">
+                    <div class="text-zinc-500">${new Date(time).toLocaleTimeString()}</div>
+                    <div class="text-white">${name.length > 6 ? name.slice(0,6) + '...' : name}</div>
+                    <div class="text-[var(--accent-terminal)]">${type} @ ${location}</div>
+                </div>
+            `;
+            }).join('');
+        }
+
+        /**
+         * 渲染人格分布排行
+         * @param {Array} distribution - 人格分布数据 [{type: string, count: number}]
+         */
+        function renderPersonalityDistribution(distribution) {
+            const list = document.getElementById('personalityDistribution');
+            if (!list) return;
+            
+            if (!distribution || !Array.isArray(distribution) || distribution.length === 0) {
+                list.innerHTML = '<div class="text-center text-zinc-500 py-4 text-[10px]">暂无数据</div>';
+                return;
+            }
+            
+            list.innerHTML = distribution.map((item, i) => {
+                const type = item.type || 'UNKNOWN';
+                const count = Number(item.count) || 0;
+                return `
+                <div class="flex justify-between items-center text-[11px] border-b border-zinc-800 pb-2">
+                    <span class="text-zinc-500 font-mono">0${i+1}</span>
+                    <span class="font-bold uppercase tracking-tighter">${type}</span>
+                    <span class="text-[var(--accent-terminal)] font-bold">${count}</span>
+                </div>`;
+            }).join('');
+        }
+
+        /**
+         * 获取并渲染大盘数据
+         * 基于 index.ts 的接口返回格式（数据包裹在 data 字段中）
+         */
+        async function fetchData() {
+            const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content;
+            console.group('%c 🚀 Dashboard Data Sync Starting ', 'background: #222; color: #bada55; font-size: 12px;');
+            
+            try {
+                // 检查必要的库是否已加载
+                if (typeof Chart === 'undefined') {
+                    console.warn('[Dashboard] Chart.js 未加载，等待加载...');
+                    await new Promise(resolve => {
+                        const checkChart = setInterval(() => {
+                            if (typeof Chart !== 'undefined') {
+                                clearInterval(checkChart);
+                                resolve(true);
+                            }
+                        }, 100);
+                        setTimeout(() => {
+                            clearInterval(checkChart);
+                            resolve(false);
+                        }, 10000);
+                    });
+                }
+                
+                if (typeof echarts === 'undefined') {
+                    console.warn('[Dashboard] ECharts 未加载，等待加载...');
+                    await new Promise(resolve => {
+                        const checkEcharts = setInterval(() => {
+                            if (typeof echarts !== 'undefined') {
+                                clearInterval(checkEcharts);
+                                resolve(true);
+                            }
+                        }, 100);
+                        setTimeout(() => {
+                            clearInterval(checkEcharts);
+                            resolve(false);
+                        }, 10000);
+                    });
+                }
+                
+                console.log(`[1/5] 正在建立连接: ${apiEndpoint}api/global-average`);
+                const response = await fetch(`${apiEndpoint}api/global-average`);
+                
+                if (!response.ok) throw new Error(`HTTP Error! Status: ${response.status}`);
+                
+                const result = await response.json();
+                console.log('[2/5] 收到原始响应:', result);
+
+                // 数据解构逻辑：优先使用根级别数据，如果没有则使用 data 字段
+                const data = {
+                    totalUsers: result.totalUsers ?? result.data?.totalUsers ?? 0,
+                    totalAnalysis: result.totalAnalysis ?? result.data?.totalAnalysis ?? 0,
+                    totalChars: result.totalChars ?? result.data?.totalChars ?? result.totalRoastWords ?? result.data?.totalRoastWords ?? 0,
+                    systemDays: result.systemDays ?? result.data?.systemDays ?? 0,
+                    cityCount: result.cityCount ?? result.data?.cityCount ?? 0,
+                    avgChars: result.avgChars ?? result.data?.avgChars ?? 0,
+                    globalAverage: result.globalAverage ?? result.averages ?? result.data?.globalAverage ?? result.data?.averages ?? { L: 50, P: 50, D: 50, E: 50, F: 50 },
+                    locationRank: result.locationRank ?? result.data?.locationRank ?? [],
+                    recentVictims: result.recentVictims ?? result.data?.recentVictims ?? [],
+                    latestRecords: result.latestRecords ?? result.data?.latestRecords ?? [],
+                    personalityDistribution: result.personalityDistribution ?? result.data?.personalityDistribution ?? [],
+                };
+                
+                // 保存到全局变量，供语言切换时使用
+                window.lastData = data;
+                
+                console.log('[3/5] 数据解构完成:', data);
+
+                // --- 逐个卡片进行数据读取与加载日志 ---
+                
+                // 1. 已诊断开发者
+                const totalUsers = Number(data.totalUsers) || 0;
+                const totalUsersEl = document.getElementById('totalUsers');
+                console.log(`[卡片: 已诊断] 数据: ${totalUsers} | DOM节点: ${totalUsersEl ? '✅找到' : '❌缺失'}`);
+                if (totalUsersEl) animateValue(totalUsersEl, 0, totalUsers, 1500, true);
+
+                // 2. 全网扫描次数
+                const totalAnalysis = Number(data.totalAnalysis) || 0;
+                const totalAnalysisEl = document.getElementById('totalAnalysis');
+                console.log(`[卡片: 扫描次数] 数据: ${totalAnalysis} | DOM节点: ${totalAnalysisEl ? '✅找到' : '❌缺失'}`);
+                if (totalAnalysisEl) animateValue(totalAnalysisEl, 0, totalAnalysis, 1500, true);
+
+                // 3. 累计吐槽字数
+                const totalChars = Number(data.totalChars) || 0;
+                const totalCharsEl = document.getElementById('totalChars');
+                console.log(`[卡片: 累计字数] 数据: ${totalChars} | DOM节点: ${totalCharsEl ? '✅找到' : '❌缺失'}`);
+                if (totalCharsEl) animateValue(totalCharsEl, 0, totalChars, 1500, true);
+
+                // 4. 系统运行天数
+                const systemDays = Number(data.systemDays) || 0;
+                const systemDaysEl = document.getElementById('systemDays');
+                console.log(`[卡片: 运行天数] 数据: ${systemDays} | DOM节点: ${systemDaysEl ? '✅找到' : '❌缺失'}`);
+                if (systemDaysEl) animateValue(systemDaysEl, 0, systemDays, 1000, false);
+
+                // 5. 覆盖城市数
+                const cityCount = Number(data.cityCount) || 0;
+                const cityCountEl = document.getElementById('cityCount');
+                console.log(`[卡片: 覆盖城市] 数据: ${cityCount} | DOM节点: ${cityCountEl ? '✅找到' : '❌缺失'}`);
+                if (cityCountEl) animateValue(cityCountEl, 0, cityCount, 1000, false);
+
+                // 6. 平均吐槽字数（如果存在该元素）
+                const avgCharsEl = document.getElementById('avgChars');
+                if (avgCharsEl) {
+                    const avgChars = Number(data.avgChars) || 0;
+                    console.log(`[卡片: 平均字数] 数据: ${avgChars} | DOM节点: ✅找到`);
+                    animateValue(avgCharsEl, 0, avgChars, 1500, false);
+                }
+
+                // --- 复杂组件加载 ---
+                console.log('[4/5] 开始渲染地理图表与画像...');
+                
+                // 渲染地理位置热力排行
+                if (data.locationRank && Array.isArray(data.locationRank) && data.locationRank.length > 0) {
+                    console.log('[组件: 地理位置] 数据:', data.locationRank);
+                    renderLocationList(data.locationRank);
+                } else {
+                    console.warn('[组件: 地理位置] ⚠️ 数据为空');
+                    const locationListEl = document.getElementById('locationList');
+                    if (locationListEl) {
+                        locationListEl.innerHTML = '<div class="text-center text-zinc-500 py-4 text-[10px]">暂无数据</div>';
+                    }
+                }
+                
+                // 渲染世界地图（异步，等待地图数据加载）
+                if (data.locationRank && Array.isArray(data.locationRank) && typeof echarts !== 'undefined') {
+                    console.log('[组件: 世界地图] 开始渲染...');
+                    await initGlobalMap(data.locationRank);
+                } else {
+                    console.warn('[组件: 世界地图] ⚠️ locationRank 为空或 ECharts 未加载');
+                    const mapContainer = document.getElementById('map-container');
+                    if (mapContainer) {
+                        mapContainer.innerHTML = '<div class="flex items-center justify-center h-full text-zinc-500 text-sm">暂无地理位置数据</div>';
+                    }
+                }
+                
+                // 渲染雷达图
+                if (data.globalAverage && typeof data.globalAverage === 'object' && typeof Chart !== 'undefined') {
+                    console.log('[组件: 雷达图] 数据:', data.globalAverage);
+                    renderRadarChart(data.globalAverage);
+                } else {
+                    console.warn('[组件: 雷达图] ⚠️ globalAverage 无效或 Chart.js 未加载');
+                }
+                
+                // 渲染实时诊断活动（优先使用 latestRecords）
+                const activityData = data.latestRecords && data.latestRecords.length > 0 
+                    ? data.latestRecords 
+                    : (data.recentVictims || []);
+                
+                if (activityData && Array.isArray(activityData) && activityData.length > 0) {
+                    console.log('[组件: 实时活动] 数据:', activityData);
+                    renderRecentActivity(activityData);
+                } else {
+                    console.warn('[组件: 实时活动] ⚠️ 数据为空');
+                    const recentActivityEl = document.getElementById('recentActivity');
+                    if (recentActivityEl) {
+                        recentActivityEl.innerHTML = '<div class="text-zinc-500 text-center py-4">暂无数据</div>';
+                    }
+                }
+                
+                // 渲染人格分布
+                if (data.personalityDistribution && Array.isArray(data.personalityDistribution) && data.personalityDistribution.length > 0) {
+                    console.log('[组件: 人格分布] 数据:', data.personalityDistribution);
+                    renderPersonalityDistribution(data.personalityDistribution);
+                } else {
+                    console.warn('[组件: 人格分布] ⚠️ 数据为空');
+                    const personalityEl = document.getElementById('personalityDistribution');
+                    if (personalityEl) {
+                        personalityEl.innerHTML = '<div class="text-center text-zinc-500 py-4 text-[10px]">暂无数据</div>';
+                    }
+                }
+
+                console.log('%c [5/5] ✅ 所有逻辑执行完毕 ', 'color: #00ff41');
+
+            } catch (err) {
+                console.error('%c [ERROR] Dashboard 加载崩溃 ', 'background: #ff0000; color: #fff', err);
+                
+                // 显示错误提示
+                const container = document.querySelector('.max-w-\\[1600px\\]');
+                if (container) {
+                    const errorDiv = document.createElement('div');
+                    errorDiv.className = 'fixed top-4 right-4 bg-red-900/80 text-white px-4 py-2 rounded border border-red-500 z-50';
+                    errorDiv.textContent = `错误: ${err.message || '数据加载失败'}`;
+                    container.appendChild(errorDiv);
+                    
+                    setTimeout(() => {
+                        errorDiv.remove();
+                    }, 5000);
+                }
+            } finally {
+                console.groupEnd();
+            }
+        }
+
+        // 模拟实时日志
+        setInterval(() => {
+            const log = document.getElementById('dynamic-log');
+            const msgs = ["[DB] Snapshot saved", "[NET] Syncing node " + Math.floor(Math.random()*100), "[SYS] Health check passing"];
+            const p = document.createElement('div');
+            p.innerText = `> ${msgs[Math.floor(Math.random()*msgs.length)]}`;
+            log.prepend(p);
+            if(log.children.length > 5) log.lastChild.remove();
+        }, 4000);
+
+        window.onload = fetchData;
+    </script>
+</body>
+</html>
