@@ -187,10 +187,18 @@
                     </div>
                 </div>
 
-                <div class="hacker-border p-6 rounded-sm stat-card">
-                    <div class="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest lang-key" data-key="avg-chars">平均吐槽字数</div>
-                    <div id="avgChars" class="text-4xl font-bold">0</div>
-                    <div class="mt-4 text-[9px] text-zinc-600 font-mono">AVG_ROAST_WORDS</div>
+                <div class="grid grid-cols-2 gap-4 stat-card">
+                    <div class="hacker-border p-4 rounded-sm bg-zinc-900/50">
+                        <div class="text-zinc-500 text-[10px] uppercase tracking-tighter mb-1">Avg Words / 人均平均篇幅</div>
+                        <div id="avgPerUser" class="text-2xl font-bold font-mono text-[var(--accent-terminal)]">0</div>
+                        <div class="text-[9px] text-zinc-600 mt-1 uppercase">Per Developer Basis</div>
+                    </div>
+                    
+                    <div class="hacker-border p-4 rounded-sm bg-zinc-900/50">
+                        <div class="text-zinc-500 text-[10px] uppercase tracking-tighter mb-1">Scan Words / 单次平均篇幅</div>
+                        <div id="avgPerScan" class="text-2xl font-bold font-mono text-blue-400">0</div>
+                        <div class="text-[9px] text-zinc-600 mt-1 uppercase">Per Analysis Basis</div>
+                    </div>
                 </div>
 
                 <div class="hacker-border p-6 rounded-sm stat-card bg-zinc-900/40">
@@ -276,17 +284,6 @@
                     <!-- Logs here -->
                 </div>
             </div>
-
-            <div class="hacker-border p-6 rounded-sm bg-zinc-900/20">
-                <h3 class="text-xs font-bold text-zinc-400 mb-6 uppercase tracking-widest lang-key" data-key="system-logs">核心系统日志</h3>
-                <div id="log-console" class="text-[9px] font-mono text-emerald-900/80 leading-relaxed overflow-hidden">
-                    <div>[SYS] Handshake with Cloudflare... OK</div>
-                    <div>[DB] Querying Supabase v_global_stats...</div>
-                    <div>[MAP] World mesh topology built</div>
-                    <div>[AUTH] AES-256 encrypted channel active</div>
-                    <div id="dynamic-log"></div>
-                </div>
-            </div>
         </div>
     </div>
 
@@ -300,7 +297,7 @@
                 'total-victims': '已诊断开发者',
                 'total-analysis': '全网扫描次数',
                 'total-roast': '累计吐槽字数',
-                'avg-chars': '平均吐槽字数',
+                'avg-chars': '人均吐槽量',
                 'radar-title': '全网平均开发者画像',
                 'personality-dist': '人格分布排行',
                 'active-nodes': '活跃节点',
@@ -311,7 +308,6 @@
                 'sync-rate': '同步速率',
                 'hot-list': '地理位置热力排行',
                 'recent-activity': '实时诊断活动',
-                'system-logs': '核心系统日志',
                 'victim': '受害者',
                 'loading': '初始化中...',
                 'rank': '排名'
@@ -321,7 +317,7 @@
                 'total-victims': 'Total Developers',
                 'total-analysis': 'Total Scans',
                 'total-roast': 'Total Roast Words',
-                'avg-chars': 'Avg Roast Words',
+                'avg-chars': 'Avg Roast Per User',
                 'radar-title': 'Global Developer Persona',
                 'personality-dist': 'Personality Distribution',
                 'active-nodes': 'Active Nodes',
@@ -332,7 +328,6 @@
                 'sync-rate': 'Sync Rate',
                 'hot-list': 'Geographic Hotspots',
                 'recent-activity': 'Live Activity Feed',
-                'system-logs': 'Core System Logs',
                 'victim': 'Victim',
                 'loading': 'Initializing...',
                 'rank': 'Rank'
@@ -771,6 +766,170 @@
         }
 
         /**
+         * 【适配层重写】强制映射层：从多个可能的字段路径提取数据
+         * @param {Object} result - API 返回的原始数据
+         * @returns {Object} 标准化后的数据对象
+         */
+        function normalizeData(result) {
+            const data = result || {};
+            
+            // 【强制映射层】totalAnalysis：依次尝试 result.totalAnalysis, result.data.totalAnalysis, 若都缺失则取 result.recentVictims.length
+            let totalAnalysis = data.totalAnalysis;
+            if (totalAnalysis === undefined || totalAnalysis === null) {
+                totalAnalysis = data.data?.totalAnalysis;
+            }
+            if (totalAnalysis === undefined || totalAnalysis === null) {
+                const recentVictims = data.recentVictims || data.latestRecords || [];
+                totalAnalysis = recentVictims.length;
+            }
+            
+            // 【强制映射层】totalRoastWords：依次尝试 result.totalRoastWords, result.totalChars, result.data.total_roast_words
+            let totalRoastWords = data.totalRoastWords;
+            if (totalRoastWords === undefined || totalRoastWords === null) {
+                totalRoastWords = data.totalChars;
+            }
+            if (totalRoastWords === undefined || totalRoastWords === null) {
+                totalRoastWords = data.data?.total_roast_words;
+            }
+            
+            // 【强制映射层】avgPerUser 和 avgPerScan：依次尝试 result.avgPerUser/avgPerScan, result.data.avgPerUser/avgPerScan
+            let avgPerUser = data.avgPerUser;
+            if (avgPerUser === undefined || avgPerUser === null) {
+                avgPerUser = data.data?.avgPerUser;
+            }
+            // 兼容旧字段名
+            if (avgPerUser === undefined || avgPerUser === null) {
+                avgPerUser = data.avgChars;
+            }
+            
+            let avgPerScan = data.avgPerScan;
+            if (avgPerScan === undefined || avgPerScan === null) {
+                avgPerScan = data.data?.avgPerScan;
+            }
+            
+            return {
+                totalUsers: data.totalUsers || 0,
+                totalAnalysis: totalAnalysis || 0,
+                totalRoastWords: totalRoastWords || 0,
+                avgPerUser: avgPerUser || 0,
+                avgPerScan: avgPerScan || 0,
+                cityCount: data.cityCount || 0,
+                systemDays: data.systemDays || 1,
+                personalityRank: data.personalityRank || data.personalityDistribution || [],
+                personalityDistribution: data.personalityDistribution || data.personalityRank || [],
+                globalAverage: data.globalAverage || data.averages || { L: 50, P: 50, D: 50, E: 50, F: 50 },
+                averages: data.averages || data.globalAverage || { L: 50, P: 50, D: 50, E: 50, F: 50 },
+                locationRank: data.locationRank || [],
+                recentVictims: data.recentVictims || data.latestRecords || [],
+                latestRecords: data.latestRecords || data.recentVictims || [],
+            };
+        }
+
+        /**
+         * 【动画容错】安全的动画函数，防止 NaN 或 undefined 导致崩溃
+         * @param {HTMLElement} element - 目标元素
+         * @param {number} start - 起始值
+         * @param {number} end - 结束值
+         * @param {number} duration - 动画持续时间
+         * @param {boolean} useFormat - 是否使用格式化
+         */
+        function safeAnimateValue(element, start, end, duration = 1500, useFormat = true) {
+            if (!element) {
+                console.warn('[动画] ❌ DOM 元素不存在');
+                return;
+            }
+            
+            // 【动画容错】在调用 animateValue 之前，添加 if (isNaN(value)) value = 0; 的判断
+            if (isNaN(start)) start = 0;
+            if (isNaN(end)) end = 0;
+            
+            start = Number(start) || 0;
+            end = Number(end) || 0;
+            
+            animateValue(element, start, end, duration, useFormat);
+        }
+
+        /**
+         * 【人格排行渲染函数】独立的 renderPersonalityRank 函数，包含前端自计算降级逻辑
+         * @param {Array} rankData - 人格排行数据 [{type, count, percentage}]
+         * @param {Array} recentVictims - 最近受害者数据（用于降级计算）
+         */
+        function renderPersonalityRank(rankData, recentVictims = []) {
+            const personalityEl = document.getElementById('personalityDistribution');
+            if (!personalityEl) {
+                console.warn('[人格排行] ❌ DOM 元素不存在');
+                return;
+            }
+            
+            // 如果后端 personalityRank 存在且不为空，直接渲染
+            if (rankData && Array.isArray(rankData) && rankData.length > 0) {
+                personalityEl.innerHTML = rankData.map((item, i) => {
+                    const type = item.type || '未知';
+                    const count = Number(item.count || 0);
+                    const percentage = Number(item.percentage || 0);
+                    return `
+                        <div class="mb-3">
+                            <div class="flex justify-between text-[10px] mb-1 uppercase tracking-widest">
+                                <span class="text-zinc-400">${i+1}. ${type}</span>
+                                <span class="text-[var(--accent-terminal)]">${count} Hits</span>
+                            </div>
+                            <div class="w-full bg-zinc-800/50 h-1">
+                                <div class="bg-[var(--accent-terminal)] h-full shadow-[0_0_8px_rgba(0,255,65,0.4)]" 
+                                     style="width: ${percentage}%"></div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                console.log(`[人格排行] ✅ 渲染成功 (${rankData.length} 条)`);
+                return;
+            }
+            
+            // 【前端自计算降级逻辑】若后端 personalityRank 为空，则根据 recentVictims 实时计算占比并渲染进度条
+            if (recentVictims && recentVictims.length > 0) {
+                console.log('[人格排行] ⚠️ personalityRank 为空，使用 recentVictims 降级方案');
+                const typeMap = new Map();
+                recentVictims.forEach((v) => {
+                    const type = v.type || v.personality_type || 'UNKNOWN';
+                    typeMap.set(type, (typeMap.get(type) || 0) + 1);
+                });
+                
+                const total = recentVictims.length;
+                const personalityRank = Array.from(typeMap.entries())
+                    .map(([type, count]) => ({
+                        type: type,
+                        count: Number(count) || 0,
+                        percentage: Math.round((Number(count) / total) * 100) || 0,
+                    }))
+                    .sort((a, b) => b.count - a.count)
+                    .slice(0, 5);
+                
+                personalityEl.innerHTML = personalityRank.map((item, i) => {
+                    const type = item.type || '未知';
+                    const count = Number(item.count || 0);
+                    const percentage = Number(item.percentage || 0);
+                    return `
+                        <div class="mb-3">
+                            <div class="flex justify-between text-[10px] mb-1 uppercase tracking-widest">
+                                <span class="text-zinc-400">${i+1}. ${type}</span>
+                                <span class="text-[var(--accent-terminal)]">${count} Hits</span>
+                            </div>
+                            <div class="w-full bg-zinc-800/50 h-1">
+                                <div class="bg-[var(--accent-terminal)] h-full shadow-[0_0_8px_rgba(0,255,65,0.4)]" 
+                                     style="width: ${percentage}%"></div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                console.log(`[人格排行] ✅ 降级方案渲染成功 (${personalityRank.length} 条)`);
+                return;
+            }
+            
+            // 如果都没有数据，显示空状态
+            personalityEl.innerHTML = '<div class="text-center text-zinc-500 py-4 text-[10px]">暂无数据</div>';
+            console.warn('[人格排行] ❌ 无可用数据');
+        }
+
+        /**
          * 获取并渲染大盘数据
          * 基于 index.ts 的接口返回格式（数据直接返回，不包裹在 data 字段中）
          */
@@ -787,160 +946,70 @@
                 const result = await response.json();
                 console.log('[2/5] 收到原始响应:', result);
 
-                // --- 【统一解构逻辑】使用 const data = result 兼容直接返回的对象结构 ---
-                const data = result;
+                // 【适配层重写】使用强制映射层标准化数据
+                const data = normalizeData(result);
+                console.log('[3/5] 数据适配完成:', data);
 
                 // 保存到全局变量，供语言切换时使用
                 window.lastData = data;
 
-                console.log('[3/5] 数据适配完成:', data);
-
                 // --- 渲染数字卡片 ---
                 // 【ID 存在性检查】在执行 animateValue 前，必须检查 document.getElementById 是否非空
-                // 【增强日志】明确输出每个卡片获取到的具体数值
+                // 【动画容错】防止 NaN 或 undefined 导致崩溃
                 
                 // 1. 已诊断开发者
                 const totalUsers = Number(data.totalUsers) || 0;
                 const totalUsersEl = document.getElementById('totalUsers');
                 console.log(`[卡片: 已诊断开发者] 数据: ${totalUsers} | DOM: ${totalUsersEl ? '✅' : '❌'}`);
-                if (totalUsersEl) {
-                    animateValue(totalUsersEl, 0, totalUsers, 1500, true);
-                } else {
-                    console.warn('[卡片: 已诊断开发者] ❌ DOM 元素不存在');
-                }
+                safeAnimateValue(totalUsersEl, 0, totalUsers, 1500, true);
 
-                // 2. 扫描次数 (解决"全网扫描次数未加载")
+                // 2. 扫描次数 (totalAnalysis)
                 const totalAnalysis = Number(data.totalAnalysis) || 0;
                 const totalAnalysisEl = document.getElementById('totalAnalysis');
                 console.log(`[卡片: 扫描次数] 数据: ${totalAnalysis} | DOM: ${totalAnalysisEl ? '✅' : '❌'}`);
-                if (totalAnalysisEl) {
-                    animateValue(totalAnalysisEl, 0, totalAnalysis, 1500, true);
-                } else {
-                    console.warn('[卡片: 扫描次数] ❌ DOM 元素不存在');
-                }
+                safeAnimateValue(totalAnalysisEl, 0, totalAnalysis, 1500, true);
 
-                // 3. 累计字数 (解决"累计吐槽字数未获取")
-                const totalChars = Number(data.totalRoastWords || data.totalChars) || 0;
+                // 3. 累计字数 (totalRoastWords)
+                const totalRoastWords = Number(data.totalRoastWords) || 0;
                 const totalCharsEl = document.getElementById('totalChars');
-                console.log(`[卡片: 累计字数] 数据: ${totalChars} | DOM: ${totalCharsEl ? '✅' : '❌'}`);
+                console.log(`[卡片: 累计字数] 数据: ${totalRoastWords} | DOM: ${totalCharsEl ? '✅' : '❌'}`);
                 if (totalCharsEl) {
-                    animateValue(totalCharsEl, 0, totalChars, 1500, true);
-                } else {
-                    console.warn('[卡片: 累计字数] ❌ DOM 元素不存在');
+                    // 单位转换：如果超过 100 万，显示为"万"单位
+                    const val = totalRoastWords;
+                    if (val >= 1000000) {
+                        totalCharsEl.innerText = (val / 10000).toFixed(1) + ' 万';
+                    } else {
+                        safeAnimateValue(totalCharsEl, 0, val, 1500, true);
+                    }
                 }
 
-                // 4. 平均字数 (解决"平均吐槽字数未加载")
-                // 【ID 存在性检查】avgChars 必须检查
-                const avgChars = Number(data.avgChars) || 0;
-                const avgCharsEl = document.getElementById('avgChars');
-                console.log(`[卡片: 平均字数] 数据: ${avgChars} | DOM: ${avgCharsEl ? '✅' : '❌'}`);
-                if (avgCharsEl) {
-                    animateValue(avgCharsEl, 0, avgChars, 1000, false);
-                } else {
-                    console.warn('[卡片: 平均字数] ❌ DOM 元素不存在');
-                }
+                // 4. 人均平均篇幅 (avgPerUser)
+                const avgPerUser = Number(data.avgPerUser || 0);
+                const avgPerUserEl = document.getElementById('avgPerUser');
+                console.log(`[卡片: 人均平均篇幅] 数据: ${avgPerUser} | DOM: ${avgPerUserEl ? '✅' : '❌'}`);
+                safeAnimateValue(avgPerUserEl, 0, avgPerUser, 1000, false);
 
-                // 5. 运行天数
+                // 5. 单次平均篇幅 (avgPerScan)
+                const avgPerScan = Number(data.avgPerScan || 0);
+                const avgPerScanEl = document.getElementById('avgPerScan');
+                console.log(`[卡片: 单次平均篇幅] 数据: ${avgPerScan} | DOM: ${avgPerScanEl ? '✅' : '❌'}`);
+                safeAnimateValue(avgPerScanEl, 0, avgPerScan, 1000, false);
+
+                // 6. 运行天数
                 const systemDays = Number(data.systemDays) || 1;
                 const systemDaysEl = document.getElementById('systemDays');
                 console.log(`[卡片: 运行天数] 数据: ${systemDays} | DOM: ${systemDaysEl ? '✅' : '❌'}`);
-                if (systemDaysEl) {
-                    animateValue(systemDaysEl, 0, systemDays, 1000, false);
-                } else {
-                    console.warn('[卡片: 运行天数] ❌ DOM 元素不存在');
-                }
+                safeAnimateValue(systemDaysEl, 0, systemDays, 1000, false);
 
-                // 6. 覆盖城市
+                // 7. 覆盖城市
                 const cityCount = Number(data.cityCount) || 0;
                 const cityCountEl = document.getElementById('cityCount');
                 console.log(`[卡片: 覆盖城市] 数据: ${cityCount} | DOM: ${cityCountEl ? '✅' : '❌'}`);
-                if (cityCountEl) {
-                    animateValue(cityCountEl, 0, cityCount, 1000, false);
-                } else {
-                    console.warn('[卡片: 覆盖城市] ❌ DOM 元素不存在');
-                }
+                safeAnimateValue(cityCountEl, 0, cityCount, 1000, false);
 
-                // --- 渲染人格分布排行 (解决"人格分布未加载") ---
-                // 【ID 存在性检查】personalityChart 必须检查
-                const personalityEl = document.getElementById('personalityDistribution');
-                console.log(`[卡片: 人格分布] DOM: ${personalityEl ? '✅' : '❌'}`);
-                
-                if (personalityEl) {
-                    // 优先使用 personalityRank（从 v_personality_rank 视图获取）
-                    if (data.personalityRank && Array.isArray(data.personalityRank) && data.personalityRank.length > 0) {
-                        // 如果 data.personalityRank 存在，遍历并渲染带有 percentage 宽度的进度条
-                        personalityEl.innerHTML = data.personalityRank.map((item, i) => {
-                            const type = item.type || '未知';
-                            const count = Number(item.count || 0);
-                            const percentage = Number(item.percentage || 0);
-                            return `
-                                <div class="mb-3">
-                                    <div class="flex justify-between text-[10px] mb-1 uppercase tracking-widest">
-                                        <span class="text-zinc-400">${i+1}. ${type}</span>
-                                        <span class="text-[var(--accent-terminal)]">${count} Hits</span>
-                                    </div>
-                                    <div class="w-full bg-zinc-800/50 h-1">
-                                        <div class="bg-[var(--accent-terminal)] h-full shadow-[0_0_8px_rgba(0,255,65,0.4)]" 
-                                             style="width: ${percentage}%"></div>
-                                    </div>
-                                </div>
-                            `;
-                        }).join('');
-                        console.log(`[卡片: 人格分布] ✅ 渲染成功 (${data.personalityRank.length} 条)`);
-                    } else if (data.personalityDistribution && Array.isArray(data.personalityDistribution) && data.personalityDistribution.length > 0) {
-                        // 兼容旧格式
-                        renderPersonalityDistribution(data.personalityDistribution);
-                        console.log('[卡片: 人格分布] ✅ 使用兼容格式渲染成功');
-                    } else {
-                        // 【人格排行降级方案】如果不存在，根据 recentVictims 数组中的 type 字段，前端实时计算一个分布比例作为备份展示
-                        const recentVictims = data.recentVictims || data.latestRecords || [];
-                        if (recentVictims.length > 0) {
-                            console.log('[卡片: 人格分布] ⚠️ personalityRank 不存在，使用 recentVictims 降级方案');
-                            // 统计每个人格类型的出现次数
-                            const typeMap = new Map();
-                            recentVictims.forEach((v) => {
-                                const type = v.type || v.personality_type || 'UNKNOWN';
-                                typeMap.set(type, (typeMap.get(type) || 0) + 1);
-                            });
-                            
-                            // 计算百分比
-                            const total = recentVictims.length;
-                            const personalityRank = Array.from(typeMap.entries())
-                                .map(([type, count]) => ({
-                                    type: type,
-                                    count: Number(count) || 0,
-                                    percentage: Math.round((Number(count) / total) * 100) || 0,
-                                }))
-                                .sort((a, b) => b.count - a.count)
-                                .slice(0, 5); // 取前 5 个
-                            
-                            // 渲染降级数据
-                            personalityEl.innerHTML = personalityRank.map((item, i) => {
-                                const type = item.type || '未知';
-                                const count = Number(item.count || 0);
-                                const percentage = Number(item.percentage || 0);
-                                return `
-                                    <div class="mb-3">
-                                        <div class="flex justify-between text-[10px] mb-1 uppercase tracking-widest">
-                                            <span class="text-zinc-400">${i+1}. ${type}</span>
-                                            <span class="text-[var(--accent-terminal)]">${count} Hits</span>
-                                        </div>
-                                        <div class="w-full bg-zinc-800/50 h-1">
-                                            <div class="bg-[var(--accent-terminal)] h-full shadow-[0_0_8px_rgba(0,255,65,0.4)]" 
-                                                 style="width: ${percentage}%"></div>
-                                        </div>
-                                    </div>
-                                `;
-                            }).join('');
-                            console.log(`[卡片: 人格分布] ✅ 降级方案渲染成功 (${personalityRank.length} 条)`);
-                        } else {
-                            personalityEl.innerHTML = '<div class="text-center text-zinc-500 py-4 text-[10px]">暂无数据</div>';
-                            console.warn('[卡片: 人格分布] ❌ 数据缺失');
-                        }
-                    }
-                } else {
-                    console.warn('[卡片: 人格分布] ❌ DOM 元素不存在');
-                }
+                // --- 渲染人格分布排行 ---
+                // 【人格排行渲染函数】使用独立的 renderPersonalityRank 函数
+                renderPersonalityRank(data.personalityRank, data.recentVictims);
 
                 // --- 渲染图表组件 ---
                 // 渲染地理位置热力排行和地图
@@ -1002,15 +1071,6 @@
             }
         }
 
-        // 模拟实时日志
-        setInterval(() => {
-            const log = document.getElementById('dynamic-log');
-            const msgs = ["[DB] Snapshot saved", "[NET] Syncing node " + Math.floor(Math.random()*100), "[SYS] Health check passing"];
-            const p = document.createElement('div');
-            p.innerText = `> ${msgs[Math.floor(Math.random()*msgs.length)]}`;
-            log.prepend(p);
-            if(log.children.length > 5) log.lastChild.remove();
-        }, 4000);
 
         window.onload = fetchData;
     </script>
