@@ -55,6 +55,24 @@ const KV_KEY_GLOBAL_AVERAGES = 'GLOBAL_AVERAGES'; // 大盘汇总数据键名
 const KV_KEY_GLOBAL_STATS_CACHE = 'GLOBAL_STATS_CACHE'; // 完整统计数据缓存（原子性）
 const KV_CACHE_TTL = 3600; // 缓存有效期：1小时（秒）
 
+/**
+ * 生成用于 Supabase 幂等 Upsert 的指纹。
+ *
+ * 约束：
+ * - 同一 userId 必须生成固定 fingerprint（保证幂等更新）
+ * - 保留 totalChars 参数以兼容调用方，但不参与指纹计算（避免“总字数变化导致指纹漂移”）
+ */
+async function generateFingerprint(userId: string, _totalChars?: number): Promise<string> {
+  const safeUserId = String(userId || '').trim();
+  if (!safeUserId) return 'anonymous';
+
+  const msgUint8 = new TextEncoder().encode(`user:${safeUserId}`);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 // 创建 Hono 应用
 const app = new Hono<{ Bindings: Env }>();
 
@@ -72,7 +90,7 @@ app.use('/*', cors({
  * 核心特性：
  * 1. 身份匿名化：统一将 user_name 设为 '匿名受害者'
  * 2. 全量维度指标：包含五维分、衍生排名、基础统计、特征编码
- * 3. 异步存储：使用 waitUntil + merge-duplicates 策略
+ * 3. 异步存储：使用 waitUntil 幂等 Upsert（按 fingerprint 覆盖更新）
  * 4. 地理与环境：支持 IP 定位和语言识别
  */
 app.post('/api/v2/analyze', async (c) => {
@@ -389,7 +407,7 @@ app.post('/api/v2/analyze', async (c) => {
       try {
         const executionCtx = c.executionCtx;
         if (executionCtx && typeof executionCtx.waitUntil === 'function') {
-          // 【唯一冲突标识】生成 fingerprint 哈希
+          // 【幂等 Upsert】生成稳定 userId + 基于 userId 的固定 fingerprint
           // 只根据前 10 条消息的内容生成指纹，忽略由于后续对话增加导致的字符总数变化
           // 使用静态特征（消息内容）而非统计结果（total_chars, total_messages）
           const stableMessages = userMessages.slice(0, 10);
@@ -401,12 +419,17 @@ app.post('/api/v2/analyze', async (c) => {
           const fingerprintSource = stableContent || lpdef;
           const fingerprintUint8 = new TextEncoder().encode(fingerprintSource);
           const fingerprintBuffer = await crypto.subtle.digest('SHA-256', fingerprintUint8);
-          const fingerprint = Array.from(new Uint8Array(fingerprintBuffer))
+          const stableFingerprint = Array.from(new Uint8Array(fingerprintBuffer))
             .map(b => b.toString(16).padStart(2, '0'))
             .join('');
           
+          // 当前 V2 接口请求体仅包含 chatData/lang，因此将稳定内容指纹作为 userId（幂等身份）
+          const userId = stableFingerprint;
+          const fingerprint = await generateFingerprint(userId, totalChars);
+          
           console.log('[Worker] 🔑 生成指纹（基于前10条消息内容）:', {
             fingerprint,
+            stableFingerprint,
             messagesUsed: stableMessages.length,
             contentLength: stableContent.length,
             fallbackUsed: !stableContent,
@@ -414,35 +437,24 @@ app.post('/api/v2/analyze', async (c) => {
 
           // 【全量维度指标】构建完整的数据负载
           // 注意：created_at 和 updated_at 由数据库自动生成，不需要手动设置
+          // 【精简 Payload】删除 id 显式赋值，让数据库默认 UUID 自动填充
+          // 核心：fingerprint 作为幂等 Upsert 的业务主键
           const payload = {
-            // 【身份匿名化】统一设为 '匿名受害者'
+            fingerprint: fingerprint,
             user_name: '匿名受害者',
-            // 【五维分】来自 result.dimensions
-            l: dimensions.L || 0,
-            p: dimensions.P || 0,
-            d: dimensions.D || 0,
-            e: dimensions.E || 0,
-            f: dimensions.F || 0,
-            dimensions: dimensions, // 保留完整 JSONB 格式
-            // 【衍生排名】来自 result.ranks
-            jiafang_rank: ranks.jiafangRank || 50,
-            ketao_rank: ranks.ketaoRank || 50,
-            days_rank: ranks.daysRank || 50,
-            avg_rank: ranks.avgRank || 50,
-            // 【基础统计】
+            l: dimensions?.L,
+            p: dimensions?.P,
+            d: dimensions?.D,
+            e: dimensions?.E,
+            f: dimensions?.F,
             total_messages: totalMessages,
             total_chars: totalChars,
-            avg_message_length: avgMessageLength,
-            // 【特征编码】
-            lpdef: lpdef,
-            vibe_index: vibeIndex,
             personality_type: personalityType,
-            // 【地理与环境】
             ip_location: normalizedIpLocation,
+            vibe_index: vibeIndex,
+            lpdef: lpdef,
             lang: lang,
-            // 【唯一冲突标识】
-            fingerprint: fingerprint,
-            // 注意：created_at 和 updated_at 由数据库自动生成，已移除
+            updated_at: new Date().toISOString(),
           };
 
           console.log(`[DB] 准备写入数据（匿名受害者）:`, {
@@ -454,18 +466,18 @@ app.post('/api/v2/analyze', async (c) => {
             lang,
           });
 
-          // 【异步存储】使用 waitUntil + merge-duplicates 策略
+          // 【异步存储】使用 waitUntil 幂等 Upsert（按 fingerprint 冲突则更新）
+          const supabaseUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=fingerprint`;
           executionCtx.waitUntil(
-            fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=fingerprint`, {
+            fetch(supabaseUrl, {
               method: 'POST',
               headers: {
                 'apikey': env.SUPABASE_KEY,
                 'Authorization': `Bearer ${env.SUPABASE_KEY}`,
                 'Content-Type': 'application/json',
-                // 这里的 resolution=merge-duplicates 配合 URL 上的 on_conflict 才会生效
-                'Prefer': 'resolution=merge-duplicates,return=minimal', 
+                'Prefer': 'resolution=merge-duplicates',
               },
-              body: JSON.stringify([payload]),
+              body: JSON.stringify(payload),
             })
               .then(res => {
                 console.log(`[DB] 写入完成，状态码: ${res.status}`);
@@ -635,11 +647,12 @@ app.post('/api/analyze', async (c) => {
     
     const payload = {
       user_identity: userIdentity,
-      l: dimensions.L || 0,        // 小写字段映射
-      p: dimensions.P || 0,
-      d: dimensions.D || 0,
-      e: dimensions.E || 0,
-      f: dimensions.F || 0,
+      // 强制写入明确数值（保底 50），并与数据库列名（小写）保持一致
+      l: Number(dimensions?.L) || 50,        // 小写字段映射
+      p: Number(dimensions?.P) || 50,
+      d: Number(dimensions?.D) || 50,
+      e: Number(dimensions?.E) || 50,
+      f: Number(dimensions?.F) || 50,
       dimensions: dimensions,      // 同时保留完整的 JSONB 格式
       vibe_index: vibeIndex,
       personality_type: personality, // 注意：user_analysis 表使用 personality_type，不是 personality
@@ -1012,10 +1025,15 @@ app.get('/api/global-average', async (c) => {
           const totalRoastWords = Number(stats.totalRoastWords ?? stats.total_roast_words ?? stats.total_words ?? 0);
           const totalChars = totalRoastWords; // 兼容字段
           
-          // 【明确字段提取】从 v_global_stats_v6 返回的 stats 中提取 avgPerScan / avgCharsPerUser
-          // 按要求：avgPerScan 优先使用 Supabase 的值，不再做本地计算兜底
-          const avgPerScan = Number(stats.avgPerScan ?? stats.avg_per_scan ?? 0) || 0;
-          const avgCharsPerUser = Number(stats.avgCharsPerUser ?? stats.avg_chars_per_user ?? stats.avgPerUser ?? stats.avg_per_user ?? 0) || 0;
+          // 【统计口径校准】
+          // Scan Words：totalRoastWords / totalAnalysis（平均每次扫描的字数）
+          // Avg Words：totalRoastWords / totalUsers（全网人均累计字数）
+          const calcAvg = (total: number, base: number): number => {
+            if (!base || base <= 0 || !Number.isFinite(base)) return 0;
+            return Number((total / base).toFixed(1));
+          };
+          const avgPerScan = calcAvg(totalRoastWords, totalAnalysis);
+          const avgCharsPerUser = calcAvg(totalRoastWords, totalUsers);
           // 向后兼容：保留旧字段 avgPerUser（与 avgCharsPerUser 等价）
           const avgPerUser = avgCharsPerUser;
           
@@ -2535,6 +2553,16 @@ async function fetchFromSupabase(
           totalCharsSum = Number(totalCharsSum) || 0;
           systemDays = Number(systemDays) || 1;
           avgChars = Number(avgChars) || 0;
+
+          // 【统计口径校准】统一按定义计算均值（覆盖视图/旧字段差异）
+          // Scan Words：totalRoastWords / totalAnalysis
+          // Avg Words：totalRoastWords / totalUsers
+          const calcAvg = (total: number, base: number): number => {
+            if (!base || base <= 0 || !Number.isFinite(base)) return 0;
+            return Number((total / base).toFixed(1));
+          };
+          avgPerScan = calcAvg(Number(totalRoastWords) || 0, totalAnalysis);
+          avgCharsPerUser = calcAvg(Number(totalRoastWords) || 0, Number(totalUsers) || 0);
           
           console.log('[Worker] ✅ 聚合查询完成（已强制转换为数字）:', {
             totalAnalysis,
@@ -2557,6 +2585,14 @@ async function fetchFromSupabase(
           avgChars = 0;
           personalityDistribution = [];
           latestRecords = [];
+
+          // 【统计口径校准】聚合失败时也按定义计算均值
+          const calcAvg = (total: number, base: number): number => {
+            if (!base || base <= 0 || !Number.isFinite(base)) return 0;
+            return Number((total / base).toFixed(1));
+          };
+          avgPerScan = calcAvg(Number(totalRoastWords) || 0, totalAnalysis);
+          avgCharsPerUser = calcAvg(Number(totalRoastWords) || 0, Number(totalUsers) || 0);
         }
       } catch (error: any) {
         console.error('[View Error] v_global_stats_v6:', error.message || '解析失败');
