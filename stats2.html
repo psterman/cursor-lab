@@ -645,11 +645,30 @@
         }
 
         function renderRadarChart(averages) {
-            const ctx = document.getElementById('radarChart').getContext('2d');
+            // 【ID 存在性检查】在执行前，必须检查 document.getElementById 是否非空
+            const radarCanvas = document.getElementById('radarChart');
+            if (!radarCanvas) {
+                console.warn('[雷达图] ❌ DOM 元素不存在');
+                return;
+            }
+            
+            const ctx = radarCanvas.getContext('2d');
+            if (!ctx) {
+                console.warn('[雷达图] ❌ 无法获取 Canvas 上下文');
+                return;
+            }
+            
             if (radarChart) radarChart.destroy();
 
             const labels = currentLang === 'zh' ? ['语言', '模式', '深度', '效率', '频率'] : ['Lang', 'Pattern', 'Depth', 'Effi', 'Freq'];
-            const data = [averages.L, averages.P, averages.D, averages.E, averages.F];
+            // 【环境对齐】确保所有的 Number() 转换逻辑在赋值前完成
+            const data = [
+                Number(averages.L || 50),
+                Number(averages.P || 50),
+                Number(averages.D || 50),
+                Number(averages.E || 50),
+                Number(averages.F || 50)
+            ];
 
             radarChart = new Chart(ctx, {
                 type: 'radar',
@@ -753,47 +772,14 @@
 
         /**
          * 获取并渲染大盘数据
-         * 基于 index.ts 的接口返回格式（数据包裹在 data 字段中）
+         * 基于 index.ts 的接口返回格式（数据直接返回，不包裹在 data 字段中）
          */
         async function fetchData() {
             const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content;
             console.group('%c 🚀 Dashboard Data Sync Starting ', 'background: #222; color: #bada55; font-size: 12px;');
             
             try {
-                // 检查必要的库是否已加载
-                if (typeof Chart === 'undefined') {
-                    console.warn('[Dashboard] Chart.js 未加载，等待加载...');
-                    await new Promise(resolve => {
-                        const checkChart = setInterval(() => {
-                            if (typeof Chart !== 'undefined') {
-                                clearInterval(checkChart);
-                                resolve(true);
-                            }
-                        }, 100);
-                        setTimeout(() => {
-                            clearInterval(checkChart);
-                            resolve(false);
-                        }, 10000);
-                    });
-                }
-                
-                if (typeof echarts === 'undefined') {
-                    console.warn('[Dashboard] ECharts 未加载，等待加载...');
-                    await new Promise(resolve => {
-                        const checkEcharts = setInterval(() => {
-                            if (typeof echarts !== 'undefined') {
-                                clearInterval(checkEcharts);
-                                resolve(true);
-                            }
-                        }, 100);
-                        setTimeout(() => {
-                            clearInterval(checkEcharts);
-                            resolve(false);
-                        }, 10000);
-                    });
-                }
-                
-                console.log(`[1/5] 正在建立连接: ${apiEndpoint}api/global-average`);
+                console.log(`[1/5] 正在请求: ${apiEndpoint}api/global-average`);
                 const response = await fetch(`${apiEndpoint}api/global-average`);
                 
                 if (!response.ok) throw new Error(`HTTP Error! Status: ${response.status}`);
@@ -801,133 +787,203 @@
                 const result = await response.json();
                 console.log('[2/5] 收到原始响应:', result);
 
-                // 数据解构逻辑：优先使用根级别数据，如果没有则使用 data 字段
-                const data = {
-                    totalUsers: result.totalUsers ?? result.data?.totalUsers ?? 0,
-                    totalAnalysis: result.totalAnalysis ?? result.data?.totalAnalysis ?? 0,
-                    totalChars: result.totalChars ?? result.data?.totalChars ?? result.totalRoastWords ?? result.data?.totalRoastWords ?? 0,
-                    systemDays: result.systemDays ?? result.data?.systemDays ?? 0,
-                    cityCount: result.cityCount ?? result.data?.cityCount ?? 0,
-                    avgChars: result.avgChars ?? result.data?.avgChars ?? 0,
-                    globalAverage: result.globalAverage ?? result.averages ?? result.data?.globalAverage ?? result.data?.averages ?? { L: 50, P: 50, D: 50, E: 50, F: 50 },
-                    locationRank: result.locationRank ?? result.data?.locationRank ?? [],
-                    recentVictims: result.recentVictims ?? result.data?.recentVictims ?? [],
-                    latestRecords: result.latestRecords ?? result.data?.latestRecords ?? [],
-                    personalityDistribution: result.personalityDistribution ?? result.data?.personalityDistribution ?? [],
-                };
-                
+                // --- 【统一解构逻辑】使用 const data = result 兼容直接返回的对象结构 ---
+                const data = result;
+
                 // 保存到全局变量，供语言切换时使用
                 window.lastData = data;
-                
-                console.log('[3/5] 数据解构完成:', data);
 
-                // --- 逐个卡片进行数据读取与加载日志 ---
+                console.log('[3/5] 数据适配完成:', data);
+
+                // --- 渲染数字卡片 ---
+                // 【ID 存在性检查】在执行 animateValue 前，必须检查 document.getElementById 是否非空
+                // 【增强日志】明确输出每个卡片获取到的具体数值
                 
                 // 1. 已诊断开发者
                 const totalUsers = Number(data.totalUsers) || 0;
                 const totalUsersEl = document.getElementById('totalUsers');
-                console.log(`[卡片: 已诊断] 数据: ${totalUsers} | DOM节点: ${totalUsersEl ? '✅找到' : '❌缺失'}`);
-                if (totalUsersEl) animateValue(totalUsersEl, 0, totalUsers, 1500, true);
-
-                // 2. 全网扫描次数
-                const totalAnalysis = Number(data.totalAnalysis) || 0;
-                const totalAnalysisEl = document.getElementById('totalAnalysis');
-                console.log(`[卡片: 扫描次数] 数据: ${totalAnalysis} | DOM节点: ${totalAnalysisEl ? '✅找到' : '❌缺失'}`);
-                if (totalAnalysisEl) animateValue(totalAnalysisEl, 0, totalAnalysis, 1500, true);
-
-                // 3. 累计吐槽字数
-                const totalChars = Number(data.totalChars) || 0;
-                const totalCharsEl = document.getElementById('totalChars');
-                console.log(`[卡片: 累计字数] 数据: ${totalChars} | DOM节点: ${totalCharsEl ? '✅找到' : '❌缺失'}`);
-                if (totalCharsEl) animateValue(totalCharsEl, 0, totalChars, 1500, true);
-
-                // 4. 系统运行天数
-                const systemDays = Number(data.systemDays) || 0;
-                const systemDaysEl = document.getElementById('systemDays');
-                console.log(`[卡片: 运行天数] 数据: ${systemDays} | DOM节点: ${systemDaysEl ? '✅找到' : '❌缺失'}`);
-                if (systemDaysEl) animateValue(systemDaysEl, 0, systemDays, 1000, false);
-
-                // 5. 覆盖城市数
-                const cityCount = Number(data.cityCount) || 0;
-                const cityCountEl = document.getElementById('cityCount');
-                console.log(`[卡片: 覆盖城市] 数据: ${cityCount} | DOM节点: ${cityCountEl ? '✅找到' : '❌缺失'}`);
-                if (cityCountEl) animateValue(cityCountEl, 0, cityCount, 1000, false);
-
-                // 6. 平均吐槽字数（如果存在该元素）
-                const avgCharsEl = document.getElementById('avgChars');
-                if (avgCharsEl) {
-                    const avgChars = Number(data.avgChars) || 0;
-                    console.log(`[卡片: 平均字数] 数据: ${avgChars} | DOM节点: ✅找到`);
-                    animateValue(avgCharsEl, 0, avgChars, 1500, false);
+                console.log(`[卡片: 已诊断开发者] 数据: ${totalUsers} | DOM: ${totalUsersEl ? '✅' : '❌'}`);
+                if (totalUsersEl) {
+                    animateValue(totalUsersEl, 0, totalUsers, 1500, true);
+                } else {
+                    console.warn('[卡片: 已诊断开发者] ❌ DOM 元素不存在');
                 }
 
-                // --- 复杂组件加载 ---
-                console.log('[4/5] 开始渲染地理图表与画像...');
+                // 2. 扫描次数 (解决"全网扫描次数未加载")
+                const totalAnalysis = Number(data.totalAnalysis) || 0;
+                const totalAnalysisEl = document.getElementById('totalAnalysis');
+                console.log(`[卡片: 扫描次数] 数据: ${totalAnalysis} | DOM: ${totalAnalysisEl ? '✅' : '❌'}`);
+                if (totalAnalysisEl) {
+                    animateValue(totalAnalysisEl, 0, totalAnalysis, 1500, true);
+                } else {
+                    console.warn('[卡片: 扫描次数] ❌ DOM 元素不存在');
+                }
+
+                // 3. 累计字数 (解决"累计吐槽字数未获取")
+                const totalChars = Number(data.totalRoastWords || data.totalChars) || 0;
+                const totalCharsEl = document.getElementById('totalChars');
+                console.log(`[卡片: 累计字数] 数据: ${totalChars} | DOM: ${totalCharsEl ? '✅' : '❌'}`);
+                if (totalCharsEl) {
+                    animateValue(totalCharsEl, 0, totalChars, 1500, true);
+                } else {
+                    console.warn('[卡片: 累计字数] ❌ DOM 元素不存在');
+                }
+
+                // 4. 平均字数 (解决"平均吐槽字数未加载")
+                // 【ID 存在性检查】avgChars 必须检查
+                const avgChars = Number(data.avgChars) || 0;
+                const avgCharsEl = document.getElementById('avgChars');
+                console.log(`[卡片: 平均字数] 数据: ${avgChars} | DOM: ${avgCharsEl ? '✅' : '❌'}`);
+                if (avgCharsEl) {
+                    animateValue(avgCharsEl, 0, avgChars, 1000, false);
+                } else {
+                    console.warn('[卡片: 平均字数] ❌ DOM 元素不存在');
+                }
+
+                // 5. 运行天数
+                const systemDays = Number(data.systemDays) || 1;
+                const systemDaysEl = document.getElementById('systemDays');
+                console.log(`[卡片: 运行天数] 数据: ${systemDays} | DOM: ${systemDaysEl ? '✅' : '❌'}`);
+                if (systemDaysEl) {
+                    animateValue(systemDaysEl, 0, systemDays, 1000, false);
+                } else {
+                    console.warn('[卡片: 运行天数] ❌ DOM 元素不存在');
+                }
+
+                // 6. 覆盖城市
+                const cityCount = Number(data.cityCount) || 0;
+                const cityCountEl = document.getElementById('cityCount');
+                console.log(`[卡片: 覆盖城市] 数据: ${cityCount} | DOM: ${cityCountEl ? '✅' : '❌'}`);
+                if (cityCountEl) {
+                    animateValue(cityCountEl, 0, cityCount, 1000, false);
+                } else {
+                    console.warn('[卡片: 覆盖城市] ❌ DOM 元素不存在');
+                }
+
+                // --- 渲染人格分布排行 (解决"人格分布未加载") ---
+                // 【ID 存在性检查】personalityChart 必须检查
+                const personalityEl = document.getElementById('personalityDistribution');
+                console.log(`[卡片: 人格分布] DOM: ${personalityEl ? '✅' : '❌'}`);
                 
-                // 渲染地理位置热力排行
+                if (personalityEl) {
+                    // 优先使用 personalityRank（从 v_personality_rank 视图获取）
+                    if (data.personalityRank && Array.isArray(data.personalityRank) && data.personalityRank.length > 0) {
+                        // 如果 data.personalityRank 存在，遍历并渲染带有 percentage 宽度的进度条
+                        personalityEl.innerHTML = data.personalityRank.map((item, i) => {
+                            const type = item.type || '未知';
+                            const count = Number(item.count || 0);
+                            const percentage = Number(item.percentage || 0);
+                            return `
+                                <div class="mb-3">
+                                    <div class="flex justify-between text-[10px] mb-1 uppercase tracking-widest">
+                                        <span class="text-zinc-400">${i+1}. ${type}</span>
+                                        <span class="text-[var(--accent-terminal)]">${count} Hits</span>
+                                    </div>
+                                    <div class="w-full bg-zinc-800/50 h-1">
+                                        <div class="bg-[var(--accent-terminal)] h-full shadow-[0_0_8px_rgba(0,255,65,0.4)]" 
+                                             style="width: ${percentage}%"></div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('');
+                        console.log(`[卡片: 人格分布] ✅ 渲染成功 (${data.personalityRank.length} 条)`);
+                    } else if (data.personalityDistribution && Array.isArray(data.personalityDistribution) && data.personalityDistribution.length > 0) {
+                        // 兼容旧格式
+                        renderPersonalityDistribution(data.personalityDistribution);
+                        console.log('[卡片: 人格分布] ✅ 使用兼容格式渲染成功');
+                    } else {
+                        // 【人格排行降级方案】如果不存在，根据 recentVictims 数组中的 type 字段，前端实时计算一个分布比例作为备份展示
+                        const recentVictims = data.recentVictims || data.latestRecords || [];
+                        if (recentVictims.length > 0) {
+                            console.log('[卡片: 人格分布] ⚠️ personalityRank 不存在，使用 recentVictims 降级方案');
+                            // 统计每个人格类型的出现次数
+                            const typeMap = new Map();
+                            recentVictims.forEach((v) => {
+                                const type = v.type || v.personality_type || 'UNKNOWN';
+                                typeMap.set(type, (typeMap.get(type) || 0) + 1);
+                            });
+                            
+                            // 计算百分比
+                            const total = recentVictims.length;
+                            const personalityRank = Array.from(typeMap.entries())
+                                .map(([type, count]) => ({
+                                    type: type,
+                                    count: Number(count) || 0,
+                                    percentage: Math.round((Number(count) / total) * 100) || 0,
+                                }))
+                                .sort((a, b) => b.count - a.count)
+                                .slice(0, 5); // 取前 5 个
+                            
+                            // 渲染降级数据
+                            personalityEl.innerHTML = personalityRank.map((item, i) => {
+                                const type = item.type || '未知';
+                                const count = Number(item.count || 0);
+                                const percentage = Number(item.percentage || 0);
+                                return `
+                                    <div class="mb-3">
+                                        <div class="flex justify-between text-[10px] mb-1 uppercase tracking-widest">
+                                            <span class="text-zinc-400">${i+1}. ${type}</span>
+                                            <span class="text-[var(--accent-terminal)]">${count} Hits</span>
+                                        </div>
+                                        <div class="w-full bg-zinc-800/50 h-1">
+                                            <div class="bg-[var(--accent-terminal)] h-full shadow-[0_0_8px_rgba(0,255,65,0.4)]" 
+                                                 style="width: ${percentage}%"></div>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('');
+                            console.log(`[卡片: 人格分布] ✅ 降级方案渲染成功 (${personalityRank.length} 条)`);
+                        } else {
+                            personalityEl.innerHTML = '<div class="text-center text-zinc-500 py-4 text-[10px]">暂无数据</div>';
+                            console.warn('[卡片: 人格分布] ❌ 数据缺失');
+                        }
+                    }
+                } else {
+                    console.warn('[卡片: 人格分布] ❌ DOM 元素不存在');
+                }
+
+                // --- 渲染图表组件 ---
+                // 渲染地理位置热力排行和地图
                 if (data.locationRank && Array.isArray(data.locationRank) && data.locationRank.length > 0) {
-                    console.log('[组件: 地理位置] 数据:', data.locationRank);
+                    if (typeof echarts !== 'undefined') {
+                        await initGlobalMap(data.locationRank);
+                    }
                     renderLocationList(data.locationRank);
                 } else {
-                    console.warn('[组件: 地理位置] ⚠️ 数据为空');
                     const locationListEl = document.getElementById('locationList');
                     if (locationListEl) {
                         locationListEl.innerHTML = '<div class="text-center text-zinc-500 py-4 text-[10px]">暂无数据</div>';
                     }
                 }
                 
-                // 渲染世界地图（异步，等待地图数据加载）
-                if (data.locationRank && Array.isArray(data.locationRank) && typeof echarts !== 'undefined') {
-                    console.log('[组件: 世界地图] 开始渲染...');
-                    await initGlobalMap(data.locationRank);
+                // 渲染雷达图（优先使用 globalAverage，否则使用 averages）
+                // 【环境对齐】确保所有的 Number() 转换逻辑在赋值前完成
+                const radarData = data.globalAverage || data.averages || { L: 50, P: 50, D: 50, E: 50, F: 50 };
+                if (typeof radarData === 'object' && typeof Chart !== 'undefined') {
+                    // 确保所有值都是数字类型
+                    const normalizedRadarData = {
+                        L: Number(radarData.L || 50),
+                        P: Number(radarData.P || 50),
+                        D: Number(radarData.D || 50),
+                        E: Number(radarData.E || 50),
+                        F: Number(radarData.F || 50),
+                    };
+                    console.log(`[雷达图] 数据: L=${normalizedRadarData.L}, P=${normalizedRadarData.P}, D=${normalizedRadarData.D}, E=${normalizedRadarData.E}, F=${normalizedRadarData.F}`);
+                    renderRadarChart(normalizedRadarData);
                 } else {
-                    console.warn('[组件: 世界地图] ⚠️ locationRank 为空或 ECharts 未加载');
-                    const mapContainer = document.getElementById('map-container');
-                    if (mapContainer) {
-                        mapContainer.innerHTML = '<div class="flex items-center justify-center h-full text-zinc-500 text-sm">暂无地理位置数据</div>';
-                    }
-                }
-                
-                // 渲染雷达图
-                if (data.globalAverage && typeof data.globalAverage === 'object' && typeof Chart !== 'undefined') {
-                    console.log('[组件: 雷达图] 数据:', data.globalAverage);
-                    renderRadarChart(data.globalAverage);
-                } else {
-                    console.warn('[组件: 雷达图] ⚠️ globalAverage 无效或 Chart.js 未加载');
+                    console.warn('[雷达图] ❌ 数据格式错误或 Chart.js 未加载');
                 }
                 
                 // 渲染实时诊断活动（优先使用 latestRecords）
                 const activityData = data.latestRecords && data.latestRecords.length > 0 
                     ? data.latestRecords 
                     : (data.recentVictims || []);
-                
-                if (activityData && Array.isArray(activityData) && activityData.length > 0) {
-                    console.log('[组件: 实时活动] 数据:', activityData);
-                    renderRecentActivity(activityData);
-                } else {
-                    console.warn('[组件: 实时活动] ⚠️ 数据为空');
-                    const recentActivityEl = document.getElementById('recentActivity');
-                    if (recentActivityEl) {
-                        recentActivityEl.innerHTML = '<div class="text-zinc-500 text-center py-4">暂无数据</div>';
-                    }
-                }
-                
-                // 渲染人格分布
-                if (data.personalityDistribution && Array.isArray(data.personalityDistribution) && data.personalityDistribution.length > 0) {
-                    console.log('[组件: 人格分布] 数据:', data.personalityDistribution);
-                    renderPersonalityDistribution(data.personalityDistribution);
-                } else {
-                    console.warn('[组件: 人格分布] ⚠️ 数据为空');
-                    const personalityEl = document.getElementById('personalityDistribution');
-                    if (personalityEl) {
-                        personalityEl.innerHTML = '<div class="text-center text-zinc-500 py-4 text-[10px]">暂无数据</div>';
-                    }
-                }
+                renderRecentActivity(activityData);
 
-                console.log('%c [5/5] ✅ 所有逻辑执行完毕 ', 'color: #00ff41');
+                console.log('%c [5/5] ✅ 渲染逻辑同步完毕 ', 'color: #00ff41');
 
             } catch (err) {
-                console.error('%c [ERROR] Dashboard 加载崩溃 ', 'background: #ff0000; color: #fff', err);
+                console.error('[ERROR] Dashboard 渲染崩溃:', err);
                 
                 // 显示错误提示
                 const container = document.querySelector('.max-w-\\[1600px\\]');

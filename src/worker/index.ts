@@ -874,12 +874,181 @@ app.post('/api/analyze', async (c) => {
  */
 app.get('/api/global-average', async (c) => {
   try {
-    // 【强制置顶判断】将 force_refresh 判断放在函数第一行
-    const forceRefresh = c.req.query('force_refresh') === 'true';
-    
     const env = c.env;
     
-    // 强制补全 dimensions 字典（前端雷达图显示文字的关键）
+    // 【禁用旧缓存测试】暂时注释掉 KV 缓存读取逻辑，强制每次请求都实时查询 Supabase
+    // 【简化版本】优先使用视图直接获取数据
+    if (env.SUPABASE_URL && env.SUPABASE_KEY) {
+      try {
+        // 1. 获取视图数据（从 v_global_stats_v4 视图）
+        const statsRes = await fetch(`${env.SUPABASE_URL}/rest/v1/v_global_stats_v4?select=*`, {
+          headers: { 
+            'apikey': env.SUPABASE_KEY, 
+            'Authorization': `Bearer ${env.SUPABASE_KEY}` 
+          }
+        });
+        
+        if (statsRes.ok) {
+          const statsData = await statsRes.json();
+          const stats = statsData[0] || {};
+
+          // 2. 获取人格排行 (调用 v_personality_rank 视图)
+          let personalityRank: Array<{ type: string; count: number; percentage: number }> = [];
+          try {
+            const rankRes = await fetch(`${env.SUPABASE_URL}/rest/v1/v_personality_rank?select=*`, {
+              headers: { 
+                'apikey': env.SUPABASE_KEY, 
+                'Authorization': `Bearer ${env.SUPABASE_KEY}` 
+              }
+            });
+            
+            if (rankRes.ok) {
+              const rankData = await rankRes.json();
+              personalityRank = rankData.map((item: any) => ({
+                type: item.personality_type || item.type || 'UNKNOWN',
+                count: Number(item.count || item.personality_count || 0),
+                percentage: Number(item.percentage || 0),
+              }));
+            }
+          } catch (rankError) {
+            console.warn('[Worker] ⚠️ 获取人格排行失败，使用空数组:', rankError);
+          }
+
+          // 3. 获取地理位置排行
+          let locationRank: Array<{ name: string; value: number }> = [];
+          try {
+            const locationRes = await fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=ip_location&ip_location=not.is.null`, {
+              headers: { 
+                'apikey': env.SUPABASE_KEY, 
+                'Authorization': `Bearer ${env.SUPABASE_KEY}` 
+              }
+            });
+            
+            if (locationRes.ok) {
+              const locationData = await locationRes.json();
+              const locationMap = new Map<string, number>();
+              locationData.forEach((item: any) => {
+                if (item.ip_location && item.ip_location !== '未知') {
+                  const count = locationMap.get(item.ip_location) || 0;
+                  locationMap.set(item.ip_location, count + 1);
+                }
+              });
+              locationRank = Array.from(locationMap.entries())
+                .map(([location, count]) => ({ name: location, value: Number(count) || 0 }))
+                .sort((a, b) => b.value - a.value)
+                .slice(0, 5);
+            }
+          } catch (locationError) {
+            console.warn('[Worker] ⚠️ 获取地理位置排行失败，使用空数组:', locationError);
+          }
+
+          // 4. 获取最近受害者
+          let recentVictims: Array<{ name: string; type: string; location: string; time: string }> = [];
+          try {
+            const recentRes = await fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=personality_type,ip_location,created_at,user_name&order=created_at.desc&limit=5`, {
+              headers: { 
+                'apikey': env.SUPABASE_KEY, 
+                'Authorization': `Bearer ${env.SUPABASE_KEY}` 
+              }
+            });
+            
+            if (recentRes.ok) {
+              const recentData = await recentRes.json();
+              recentVictims = recentData.map((item: any, index: number) => ({
+                name: item.user_name || `匿名受害者${index + 1}`,
+                type: item.personality_type || 'UNKNOWN',
+                location: item.ip_location || '未知',
+                time: item.created_at || new Date().toISOString(),
+              }));
+            }
+          } catch (recentError) {
+            console.warn('[Worker] ⚠️ 获取最近受害者失败，使用空数组:', recentError);
+          }
+
+          // 5. 构建返回结构（严格按照视图字段映射）
+          // 【视图字段映射】从 v_global_stats_v4 视图中提取以下字段，并严格按照此命名返回
+          const responseData = {
+            status: "success",
+            // 严格按照视图字段映射
+            totalUsers: Number(stats.total_users || 0),           // 对应 total_users
+            totalAnalysis: Number(stats.total_analysis || 0),      // 对应 total_analysis
+            totalRoastWords: Number(stats.total_roast_words || 0),  // 对应 total_roast_words
+            avgChars: Number(stats.avg_chars || 0),                // 对应 avg_chars
+            cityCount: Number(stats.city_count || 0),               // 对应 city_count
+            systemDays: Number(stats.system_days || 1),
+            // 人格排行集成：从 v_personality_rank 视图获取
+            personalityRank: personalityRank,
+            personalityDistribution: personalityRank, // 兼容字段
+            globalAverage: {
+              L: Number(stats.avg_l || stats.avg_L || 50),
+              P: Number(stats.avg_p || stats.avg_P || 50),
+              D: Number(stats.avg_d || stats.avg_D || 50),
+              E: Number(stats.avg_e || stats.avg_E || 50),
+              F: Number(stats.avg_f || stats.avg_F || 50),
+            },
+            averages: {
+              L: Number(stats.avg_l || stats.avg_L || 50),
+              P: Number(stats.avg_p || stats.avg_P || 50),
+              D: Number(stats.avg_d || stats.avg_D || 50),
+              E: Number(stats.avg_e || stats.avg_E || 50),
+              F: Number(stats.avg_f || stats.avg_F || 50),
+            },
+            locationRank: locationRank,
+            recentVictims: recentVictims,
+            latestRecords: recentVictims.map((v: any) => ({
+              personality_type: v.type,
+              ip_location: v.location,
+              created_at: v.time,
+              name: v.name,
+              type: v.type,
+              location: v.location,
+              time: v.time,
+            })),
+            cachedAt: Math.floor(Date.now() / 1000),
+            source: 'live_database', // 标记为实时数据库查询
+          };
+
+          console.log('[Worker] ✅ 从视图直接返回数据:', {
+            totalUsers: responseData.totalUsers,
+            totalAnalysis: responseData.totalAnalysis,
+            totalRoastWords: responseData.totalRoastWords,
+            avgChars: responseData.avgChars,
+            cityCount: responseData.cityCount,
+            personalityRankCount: responseData.personalityRank.length,
+            source: responseData.source,
+          });
+
+          // 【缓存更新】在返回前，将这些新数据以 live_database 为 source 写入 KV，TTL 设置为 60 秒
+          if (env.STATS_STORE) {
+            try {
+              const cacheData = {
+                ...responseData,
+                source: 'live_database',
+                cachedAt: Math.floor(Date.now() / 1000),
+              };
+              // 使用 put 方法的 options 参数设置 TTL（60 秒）
+              // 注意：Cloudflare KV put 方法支持第三个参数设置 TTL，但类型定义可能未更新
+              await (env.STATS_STORE.put as any)(KV_KEY_GLOBAL_STATS_CACHE, JSON.stringify(cacheData), {
+                expirationTtl: 60, // TTL 设置为 60 秒
+              });
+              await env.STATS_STORE.put(KV_KEY_LAST_UPDATE, Math.floor(Date.now() / 1000).toString());
+              console.log('[Worker] ✅ 已写入 KV 缓存（source: live_database, TTL: 60秒）');
+            } catch (kvError) {
+              console.warn('[Worker] ⚠️ 写入 KV 缓存失败（不影响返回）:', kvError);
+            }
+          }
+
+          return c.json(responseData);
+        }
+      } catch (viewError) {
+        console.warn('[Worker] ⚠️ 视图查询失败，降级到原有逻辑:', viewError);
+        // 降级到原有逻辑
+      }
+    }
+
+    // 【原有逻辑】如果视图查询失败或未配置，使用原有逻辑
+    // 【禁用旧缓存测试】暂时注释掉 KV 缓存读取逻辑，强制每次请求都实时查询 Supabase
+    // 降级：如果视图查询失败，直接调用 fetchFromSupabase
     const defaultDimensions = {
       L: { label: '逻辑力' },
       P: { label: '耐心值' },
@@ -888,6 +1057,14 @@ app.get('/api/global-average', async (c) => {
       F: { label: '频率感' }
     };
     const defaultAverage = { L: 50, P: 50, D: 50, E: 50, F: 50 };
+    
+    console.log('[Worker] ⚠️ 视图查询失败或未配置，降级到 fetchFromSupabase');
+    console.log('--- 正在穿透缓存获取最新数据 ---');
+    return await fetchFromSupabase(env, defaultAverage, defaultDimensions, c, true);
+    
+    /* 【已禁用】旧 KV 缓存读取逻辑
+    // 【强制置顶判断】将 force_refresh 判断放在函数第一行
+    const forceRefresh = c.req.query('force_refresh') === 'true';
 
     // 【强制刷新逻辑】如果是 true，必须跳过任何 KV 读取逻辑，直接进入数据库查询
     if (forceRefresh) {
@@ -1108,7 +1285,7 @@ app.get('/api/global-average', async (c) => {
           if (env.SUPABASE_URL && env.SUPABASE_KEY) {
             try {
               // 并行查询统计数据
-              const [totalUsersRes, recentVictimsRes, allLocationsRes, dashboardSummaryRes] = await Promise.all([
+              const [totalUsersRes, recentVictimsRes, allLocationsRes, dashboardSummaryRes, totalCharsRes, personalityRes] = await Promise.all([
                 // 总用户数（从 v_global_stats_v4 视图获取）
                 fetch(`${env.SUPABASE_URL}/rest/v1/v_global_stats_v4?select=total_users`, {
                   headers: {
@@ -1137,15 +1314,108 @@ app.get('/api/global-average', async (c) => {
                     'Authorization': `Bearer ${env.SUPABASE_KEY}`,
                   },
                 }),
+                // 获取所有 total_chars（用于计算总和、总数和平均值）
+                fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=total_chars`, {
+                  headers: {
+                    'apikey': env.SUPABASE_KEY,
+                    'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+                    'Prefer': 'count=exact',
+                  },
+                }),
+                // 获取所有 personality_type（用于统计人格分布）
+                fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=personality_type`, {
+                  headers: {
+                    'apikey': env.SUPABASE_KEY,
+                    'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+                  },
+                }),
               ]);
 
               // 处理总用户数（从 v_global_stats_v4 视图获取）
               let totalUsers = 1;
+              let totalAnalysis = 0;
+              let totalCharsSum = 0;
+              let avgChars = 0;
+              let personalityDistribution: Array<{ type: string; count: number }> = [];
+              
               if (totalUsersRes.ok) {
                 const totalData = await totalUsersRes.json();
                 totalUsers = totalData[0]?.total_users || 1;
                 if (totalUsers <= 0) {
                   totalUsers = 1;
+                }
+              }
+              
+              // 处理 total_chars 总和查询（用于计算 totalAnalysis、totalCharsSum 和 avgChars）
+              if (totalCharsRes && totalCharsRes.ok) {
+                try {
+                  const contentRange = totalCharsRes.headers.get('content-range');
+                  if (contentRange) {
+                    const parts = contentRange.split('/');
+                    if (parts.length === 2) {
+                      totalAnalysis = Number(parts[1]) || 0;
+                      if (isNaN(totalAnalysis)) {
+                        totalAnalysis = 0;
+                      }
+                    }
+                  }
+                  
+                  const charsData = await totalCharsRes.json();
+                  if (Array.isArray(charsData)) {
+                    // 如果 content-range 没有，使用数组长度作为总记录数
+                    if (totalAnalysis === 0) {
+                      totalAnalysis = Number(charsData.length) || 0;
+                    }
+                    
+                    // 计算 total_chars 的总和
+                    totalCharsSum = charsData.reduce((sum: number, item: any) => {
+                      const chars = Number(item.total_chars) || 0;
+                      if (isNaN(chars)) {
+                        return sum;
+                      }
+                      return sum + chars;
+                    }, 0);
+                    
+                    totalCharsSum = Number(totalCharsSum) || 0;
+                    
+                    // 计算平均吐槽字数
+                    if (totalAnalysis > 0 && totalCharsSum > 0) {
+                      avgChars = Number((totalCharsSum / totalAnalysis).toFixed(2)) || 0;
+                    } else {
+                      avgChars = 0;
+                    }
+                  }
+                } catch (error) {
+                  console.warn('[Worker] ⚠️ 处理 total_chars 数据失败:', error);
+                }
+              }
+              
+              // 处理人格分布
+              if (personalityRes && personalityRes.ok) {
+                try {
+                  const personalityData = await personalityRes.json();
+                  if (Array.isArray(personalityData)) {
+                    // 统计每个人格类型的出现次数
+                    const personalityMap = new Map<string, number>();
+                    personalityData.forEach((item: any) => {
+                      const type = item.personality_type || 'UNKNOWN';
+                      const count = personalityMap.get(type) || 0;
+                      personalityMap.set(type, count + 1);
+                    });
+                    
+                    // 转换为数组并按出现次数排序，取前三个
+                    personalityDistribution = Array.from(personalityMap.entries())
+                      .map(([type, count]) => ({
+                        type: type,
+                        count: Number(count) || 0,
+                      }))
+                      .sort((a, b) => b.count - a.count)
+                      .slice(0, 3);
+                    
+                    console.log('[Worker] ✅ 人格分布统计完成:', personalityDistribution);
+                  }
+                } catch (error) {
+                  console.warn('[Worker] ⚠️ 处理人格分布失败:', error);
                 }
               }
 
@@ -1311,11 +1581,23 @@ app.get('/api/global-average', async (c) => {
                 },
                 // 5. 其他统计数据
                 totalRoastWords: totalRoastWords,
-                totalChars: cachedTotalChars || totalRoastWords, // 优先使用缓存，否则使用 totalRoastWords
-                totalAnalysis: cachedTotalAnalysis || finalTotalUsers, // 优先使用缓存，否则使用 totalUsers
+                totalChars: cachedTotalChars || totalCharsSum || totalRoastWords, // 优先使用缓存，否则使用查询结果，最后使用 totalRoastWords
+                totalAnalysis: cachedTotalAnalysis || totalAnalysis || finalTotalUsers, // 优先使用缓存，否则使用查询结果，最后使用 totalUsers
+                systemDays: 1, // 旧版缓存可能没有 systemDays，使用默认值
+                avgChars: avgChars, // 从数据库查询获取
                 cityCount: cityCount,
                 locationRank: locationRank,
                 recentVictims: recentVictims,
+                personalityDistribution: personalityDistribution, // 从数据库查询获取
+                latestRecords: recentVictims.map((v: any) => ({
+                  personality_type: v.type,
+                  ip_location: v.location,
+                  created_at: v.time,
+                  name: v.name,
+                  type: v.type,
+                  location: v.location,
+                  time: v.time,
+                })), // 从 recentVictims 转换
                 source: 'kv_cache',
                 cachedAt: lastUpdateTime,
                 age: age,
@@ -1388,9 +1670,13 @@ app.get('/api/global-average', async (c) => {
                 totalRoastWords: 0,
                 totalChars: cachedTotalChars || 0,
                 totalAnalysis: cachedTotalAnalysis || 1,
+                systemDays: 1,
+                avgChars: 0,
                 cityCount: 0,
                 locationRank: [],
                 recentVictims: [],
+                personalityDistribution: [],
+                latestRecords: [],
                 source: 'kv_cache',
                 cachedAt: lastUpdateTime,
                 age: age,
@@ -1462,9 +1748,13 @@ app.get('/api/global-average', async (c) => {
               totalRoastWords: 0,
               totalChars: 0,
               totalAnalysis: 1,
+              systemDays: 1,
+              avgChars: 0,
               cityCount: 0,
               locationRank: [],
               recentVictims: [],
+              personalityDistribution: [],
+              latestRecords: [],
               source: 'kv_cache',
               cachedAt: lastUpdateTime,
               age: age,
@@ -1501,10 +1791,8 @@ app.get('/api/global-average', async (c) => {
       return await fetchFromSupabase(env, defaultAverage, defaultDimensions, c, true);
     }
 
-    // KV 缓存不存在或已过期，从 Supabase 查询并更新 KV
-    console.log('[Worker] ⚠️ 所有缓存路径都未命中，最终降级到 Supabase');
-    console.log('--- 正在穿透缓存获取最新数据 ---');
-    return await fetchFromSupabase(env, defaultAverage, defaultDimensions, c, true);
+    // 【已禁用】旧 KV 缓存逻辑结束
+    */
   } catch (error: any) {
     console.error('[Worker] /api/global-average 错误:', error);
     const defaultAverage = { L: 50, P: 50, D: 50, E: 50, F: 50 };
