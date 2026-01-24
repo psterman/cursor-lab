@@ -1758,19 +1758,17 @@
                     // 构建路径列表（适配不同部署环境）
                     const paths = [];
                     
-                    // Cloudflare Workers/Pages: 使用相对路径（同域名，无跨域问题）
-                    if (isWorkersDev) {
-                        paths.push('./main.js');
-                        paths.push('./dist/main.js');
-                    } else if (isGitHubPages) {
-                        // GitHub Pages: 使用相对路径
-                        paths.push('./main.js');
-                        paths.push('./dist/main.js');
-                    } else {
-                        // 其他环境: 使用相对路径
-                        paths.push('./main.js');
-                        paths.push('./dist/main.js');
+                    // 统一：优先相对路径，其次尝试 basePath 绝对路径（兼容 /cursor-lab/ 这类子路径部署）
+                    // 注意：有些部署只上传 dist 内容，此时 main.js 在站点根目录而不是 /dist/main.js
+                    paths.push('./main.js');
+                    paths.push('./dist/main.js');
+                    if (basePath) {
+                        paths.push(`${basePath}/main.js`);
+                        paths.push(`${basePath}/dist/main.js`);
                     }
+                    // 最后兜底：站点根路径
+                    paths.push('/main.js');
+                    paths.push('/dist/main.js');
                     
                     console.log('[Main] 当前 URL:', window.location.href);
                     console.log('[Main] 当前路径:', pathname);
@@ -4204,9 +4202,10 @@
                             };
                             
                             const apiEndpoint = getApiEndpoint();
+                            // 降级请求应走 /api/analyze（旧格式统计上传），不要打到 /api/v2/analyze（只接受 {chatData, lang}）
                             const apiUrl = apiEndpoint.endsWith('/') 
-                                ? `${apiEndpoint}api/v2/analyze` 
-                                : `${apiEndpoint}/api/v2/analyze`;
+                                ? `${apiEndpoint}api/analyze` 
+                                : `${apiEndpoint}/api/analyze`;
                             
                             const response = await fetch(apiUrl, {
                                 method: 'POST',

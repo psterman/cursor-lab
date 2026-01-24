@@ -1476,7 +1476,7 @@
             }
         }
     </style>
-  <script type="module" crossorigin src="/cursor-lab/assets/main-CLTQWZi1.js"></script>
+  <script type="module" crossorigin src="/cursor-lab/assets/main-BQbiyyVX.js"></script>
 </head>
 <body class="bg-[#050505]">
     <div id="root"></div>
@@ -3603,7 +3603,9 @@
                         }
                         
                         // 调用 uploadToSupabase 上传数据并获取排名（内部已发送 submit_stats）
-                        rankingResult = await analyzer.uploadToSupabase(vibeResult);
+                        // 尝试从全局变量获取 chatData，如果不存在则传入 null（方法内部会尝试其他来源）
+                        const chatDataForUpload = window.allChatData || null;
+                        rankingResult = await analyzer.uploadToSupabase(vibeResult, chatDataForUpload);
                         
                         console.log('[React] uploadToSupabase 返回结果:', rankingResult);
                         // ✅ 关键调试：检查 ranks 对象是否存在
@@ -3693,6 +3695,7 @@
                             };
                             
                             const apiEndpoint = getApiEndpoint();
+                            // 降级请求应走 /api/analyze（旧格式统计上传），不要打到 /api/v2/analyze（只接受 {chatData, lang}）
                             const apiUrl = apiEndpoint.endsWith('/') 
                                 ? `${apiEndpoint}api/analyze` 
                                 : `${apiEndpoint}/api/analyze`;

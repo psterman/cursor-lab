@@ -49,26 +49,26 @@ function preprocessDimensionData(rawData, dimension) {
   // 【防御性检查】验证 rawData 是否存在且包含 data 字段
   if (!rawData || typeof rawData !== 'object') {
     console.warn(`[VibeAnalyzer] 维度 ${dimension} 数据无效，使用空数据`);
-    return { 
-        error: err.message,
-        errorType: err.name,
-        isNetworkError: err.message.includes('fetch') || err.message.includes('network') || err.message.includes('CORS'),
-        isTimeout: err.message.includes('timeout') || err.message.includes('Timeout'),
-        timestamp: new Date().toISOString(),
-        url: analyzeUrl,
-        dimension, data: {}, stats: { totalTerms: 0, levels: { L1: 0, L2: 0, L3: 0 } } };
+    return {
+      dimension,
+      data: {},
+      stats: { totalTerms: 0, levels: { L1: 0, L2: 0, L3: 0 } },
+      error: 'invalid_dimension_data',
+      errorType: 'InvalidData',
+      timestamp: new Date().toISOString(),
+    };
   }
 
   if (!rawData.data || typeof rawData.data !== 'object') {
     console.warn(`[VibeAnalyzer] 维度 ${dimension} 缺少 data 字段，使用空数据`);
-    return { 
-        error: err.message,
-        errorType: err.name,
-        isNetworkError: err.message.includes('fetch') || err.message.includes('network') || err.message.includes('CORS'),
-        isTimeout: err.message.includes('timeout') || err.message.includes('Timeout'),
-        timestamp: new Date().toISOString(),
-        url: analyzeUrl,
-        dimension, data: {}, stats: { totalTerms: 0, levels: { L1: 0, L2: 0, L3: 0 } } };
+    return {
+      dimension,
+      data: {},
+      stats: { totalTerms: 0, levels: { L1: 0, L2: 0, L3: 0 } },
+      error: 'missing_dimension_data_field',
+      errorType: 'InvalidData',
+      timestamp: new Date().toISOString(),
+    };
   }
 
   const processedData = {};

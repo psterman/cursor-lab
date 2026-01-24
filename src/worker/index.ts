@@ -218,7 +218,7 @@ app.post('/api/v2/analyze', async (c) => {
       try {
         // 并行获取总用户数和全局统计数据
         const [totalUsersRes] = await Promise.all([
-          fetch(`${env.SUPABASE_URL}/rest/v1/v_global_stats_v6?select=total_users`, {
+          fetch(`${env.SUPABASE_URL}/rest/v1/v_global_stats_v6?select=totalUsers`, {
             headers: {
               'apikey': env.SUPABASE_KEY,
               'Authorization': `Bearer ${env.SUPABASE_KEY}`,
@@ -228,7 +228,7 @@ app.post('/api/v2/analyze', async (c) => {
 
         if (totalUsersRes.ok) {
           const totalData = await totalUsersRes.json();
-          totalUsers = totalData[0]?.total_users || 1;
+          totalUsers = totalData[0]?.totalUsers || 1;
           if (totalUsers <= 0) {
             totalUsers = 1;
           }
@@ -700,7 +700,7 @@ app.post('/api/analyze', async (c) => {
     
     // 4. 并行计算排名 + 获取全局平均值
     const [totalUsersRes, globalRes] = await Promise.all([
-      fetch(`${env.SUPABASE_URL}/rest/v1/v_global_stats_v6?select=total_users`, {
+      fetch(`${env.SUPABASE_URL}/rest/v1/v_global_stats_v6?select=totalUsers`, {
         headers: { 
           'apikey': env.SUPABASE_KEY, 
           'Authorization': `Bearer ${env.SUPABASE_KEY}` 
@@ -719,7 +719,7 @@ app.post('/api/analyze', async (c) => {
     
     try {
       const totalData = await totalUsersRes.json();
-      totalUsers = totalData[0]?.total_users || 1;
+      totalUsers = totalData[0]?.totalUsers || 1;
       if (totalUsers <= 0) {
         console.warn('[Worker] ⚠️ 总人数为 0 或无效，使用默认值 1');
         totalUsers = 1;
@@ -997,7 +997,7 @@ app.get('/api/global-average', async (c) => {
             console.warn('[Worker] ⚠️ 获取最近受害者失败，使用空数组:', recentError);
           }
 
-          // 5. 构建返回结构（严格按照 stats2.html 期望的格式）
+        // 5. 构建返回结构（严格按照 stats2.html 期望的格式）
           const globalAverage = {
             L: Number(stats.avg_l || stats.avg_L || 50),
             P: Number(stats.avg_p || stats.avg_P || 50),
@@ -1006,19 +1006,18 @@ app.get('/api/global-average', async (c) => {
             F: Number(stats.avg_f || stats.avg_F || 50),
           };
           
-          const totalUsers = Number(stats.total_users || 0);
-          const totalAnalysis = Number(stats.total_analysis || 0);
-          const totalRoastWords = Number(stats.total_roast_words || 0);
+          // 【字段映射修正】优先使用视图输出的小驼峰字段；兼容旧下划线字段
+          const totalUsers = Number(stats.totalUsers ?? stats.total_users ?? 0);
+          const totalAnalysis = Number(stats.totalAnalysis ?? stats.total_analysis ?? 0);
+          const totalRoastWords = Number(stats.totalRoastWords ?? stats.total_roast_words ?? stats.total_words ?? 0);
           const totalChars = totalRoastWords; // 兼容字段
           
-          // 从视图获取平均值（v6 视图已包含 avg_per_user 和 avg_per_scan）
-          // 注意：这里必须用 ?? 而不是 ||，避免视图返回 0 时被误判为“无值”
-          const avgPerUser = Number(
-            (stats.avg_per_user ?? (totalUsers > 0 ? (totalRoastWords / totalUsers).toFixed(1) : 0))
-          );
-          const avgPerScan = Number(
-            (stats.avg_per_scan ?? (totalAnalysis > 0 ? (totalRoastWords / totalAnalysis).toFixed(1) : 0))
-          );
+          // 【明确字段提取】从 v_global_stats_v6 返回的 stats 中提取 avgPerScan / avgCharsPerUser
+          // 按要求：avgPerScan 优先使用 Supabase 的值，不再做本地计算兜底
+          const avgPerScan = Number(stats.avgPerScan ?? stats.avg_per_scan ?? 0) || 0;
+          const avgCharsPerUser = Number(stats.avgCharsPerUser ?? stats.avg_chars_per_user ?? stats.avgPerUser ?? stats.avg_per_user ?? 0) || 0;
+          // 向后兼容：保留旧字段 avgPerUser（与 avgCharsPerUser 等价）
+          const avgPerUser = avgCharsPerUser;
           
           // 构建 latestRecords（兼容格式）
           const latestRecords = recentVictims.map((v: any) => ({
@@ -1060,6 +1059,8 @@ app.get('/api/global-average', async (c) => {
             totalAnalysis: totalAnalysis,
             avgPerUser: avgPerUser,
             avgPerScan: avgPerScan,
+            // 【显式返回新字段】给前端/缓存刷新使用
+            avgCharsPerUser: avgCharsPerUser,
             systemDays: Number(stats.system_days || 1),
             cityCount: Number(stats.city_count || 0),
             avgChars: Number(stats.avg_chars || 0),
@@ -1077,6 +1078,7 @@ app.get('/api/global-average', async (c) => {
             totalRoastWords: responseData.totalRoastWords,
             avgPerUser: responseData.avgPerUser,
             avgPerScan: responseData.avgPerScan,
+            avgCharsPerUser: responseData.avgCharsPerUser,
             cityCount: responseData.cityCount,
             personalityRankCount: responseData.personalityRank.length,
             locationRankCount: responseData.locationRank.length,
@@ -1175,6 +1177,8 @@ app.get('/api/global-average', async (c) => {
           const finalCityCount = Number(globalStatsCache.cityCount) || 0;
           const finalSystemDays = Number(globalStatsCache.systemDays) || 1;
           const finalAvgChars = Number(globalStatsCache.avgChars) || 0;
+          const finalAvgPerScan = Number(globalStatsCache.avgPerScan) || 0;
+          const finalAvgCharsPerUser = Number(globalStatsCache.avgCharsPerUser) || 0;
           const finalPersonalityDistribution = globalStatsCache.personalityDistribution || [];
           const finalLatestRecords = globalStatsCache.latestRecords || [];
           
@@ -1253,6 +1257,10 @@ app.get('/api/global-average', async (c) => {
                 totalUsers: finalTotalUsers,
                 totalAnalysis: finalTotalAnalysis,
                 totalChars: finalTotalChars,
+                avgPerScan: finalAvgPerScan,
+                avgCharsPerUser: finalAvgCharsPerUser,
+                // 向后兼容
+                avgPerUser: finalAvgCharsPerUser,
                 systemDays: finalSystemDays,
                 avgChars: finalAvgChars,
                 dimensions: globalStatsCache.dimensions || defaultDimensions,
@@ -1261,6 +1269,9 @@ app.get('/api/global-average', async (c) => {
                   totalUsers: finalTotalUsers,
                   totalAnalysis: finalTotalAnalysis,
                   totalChars: finalTotalChars,
+                  avgPerScan: finalAvgPerScan,
+                  avgCharsPerUser: finalAvgCharsPerUser,
+                  avgPerUser: finalAvgCharsPerUser,
                   systemDays: finalSystemDays,
                   avgChars: finalAvgChars,
                   dimensions: globalStatsCache.dimensions || defaultDimensions,
@@ -1300,6 +1311,9 @@ app.get('/api/global-average', async (c) => {
       totalUsers: finalTotalUsers,
       totalAnalysis: finalTotalAnalysis,
       totalChars: finalTotalChars,
+      avgPerScan: finalAvgPerScan,
+      avgCharsPerUser: finalAvgCharsPerUser,
+      avgPerUser: finalAvgCharsPerUser,
       systemDays: finalSystemDays,
       avgChars: finalAvgChars,
       dimensions: globalStatsCache.dimensions || defaultDimensions,
@@ -1308,6 +1322,9 @@ app.get('/api/global-average', async (c) => {
         totalUsers: finalTotalUsers,
         totalAnalysis: finalTotalAnalysis,
         totalChars: finalTotalChars,
+        avgPerScan: finalAvgPerScan,
+        avgCharsPerUser: finalAvgCharsPerUser,
+        avgPerUser: finalAvgCharsPerUser,
         systemDays: finalSystemDays,
         avgChars: finalAvgChars,
         dimensions: globalStatsCache.dimensions || defaultDimensions,
@@ -1355,7 +1372,7 @@ app.get('/api/global-average', async (c) => {
               // 并行查询统计数据
               const [totalUsersRes, recentVictimsRes, allLocationsRes, dashboardSummaryRes, totalCharsRes, personalityRes] = await Promise.all([
                 // 总用户数（从 v_global_stats_v6 视图获取）
-                fetch(`${env.SUPABASE_URL}/rest/v1/v_global_stats_v6?select=total_users`, {
+                fetch(`${env.SUPABASE_URL}/rest/v1/v_global_stats_v6?select=totalUsers`, {
                   headers: {
                     'apikey': env.SUPABASE_KEY,
                     'Authorization': `Bearer ${env.SUPABASE_KEY}`,
@@ -1408,7 +1425,7 @@ app.get('/api/global-average', async (c) => {
               
               if (totalUsersRes.ok) {
                 const totalData = await totalUsersRes.json();
-                totalUsers = totalData[0]?.total_users || 1;
+                totalUsers = totalData[0]?.totalUsers || 1;
                 if (totalUsers <= 0) {
                   totalUsers = 1;
                 }
@@ -1898,6 +1915,11 @@ app.get('/api/global-average', async (c) => {
       totalRoastWords: 0,
       totalChars: 0,
       totalAnalysis: 0,
+      // 【显式补齐字段】与 v_global_stats_v6 返回结构对齐
+      avgPerScan: 0,
+      avgCharsPerUser: 0,
+      // 向后兼容
+      avgPerUser: 0,
       systemDays: 1,
       avgChars: 0,
       cityCount: 0,
@@ -1938,7 +1960,7 @@ app.get('/api/stats/dashboard', async (c) => {
     let totalUsers = 0;
     if (env.SUPABASE_URL && env.SUPABASE_KEY) {
       try {
-        const res = await fetch(`${env.SUPABASE_URL}/rest/v1/v_global_stats_v6?select=total_users`, {
+        const res = await fetch(`${env.SUPABASE_URL}/rest/v1/v_global_stats_v6?select=totalUsers`, {
           headers: {
             'apikey': env.SUPABASE_KEY,
             'Authorization': `Bearer ${env.SUPABASE_KEY}`,
@@ -1946,7 +1968,7 @@ app.get('/api/stats/dashboard', async (c) => {
         });
         if (res.ok) {
           const data = await res.json();
-          totalUsers = data[0]?.total_users || 0;
+          totalUsers = data[0]?.totalUsers || 0;
           console.log('[Worker] 获取总用户数:', totalUsers);
         }
       } catch (error) {
@@ -2143,6 +2165,11 @@ async function fetchFromSupabase(
       totalRoastWords: 0,
       totalChars: 0,
       totalAnalysis: 0,
+      // 【显式补齐字段】与 v_global_stats_v6 返回结构对齐
+      avgPerScan: 0,
+      avgCharsPerUser: 0,
+      // 向后兼容
+      avgPerUser: 0,
       systemDays: 1,
       avgChars: 0,
       cityCount: 0,
@@ -2236,6 +2263,8 @@ async function fetchFromSupabase(
     let totalCharsSum: number = 0; // total_chars 的总和（吐槽字数）
     let systemDays: number = 1; // 系统运行天数（从最早记录到现在）
     let avgChars: number = 0; // 平均吐槽字数（AVG(total_chars)）
+    let avgPerScan: number = 0; // 【新增】单次平均篇幅（优先使用视图字段）
+    let avgCharsPerUser: number = 0; // 【新增】人均平均篇幅（优先使用视图字段）
     let personalityDistribution: Array<{ type: string; count: number }> = []; // 人格分布（前三个）
     let latestRecords: Array<{ personality_type: string; ip_location: string; created_at: string; name: string; type: string; location: string; time: string }> = []; // 最新 5 条记录
 
@@ -2312,10 +2341,13 @@ async function fetchFromSupabase(
         let row = statsData[0] || {};
         
         // 【保底逻辑】如果数据库还没写入（第一个用户），手动返回保底对象
-        if (!row || !row.total_users || row.total_users === 0) {
-          console.log('[Worker] ⚠️ 数据库返回为空或 total_users 为 0，使用保底数据（当前用户）');
+        // v_global_stats_v6 可能输出 totalUsers（小驼峰），兼容旧 total_users
+        const viewTotalUsers = Number(row?.totalUsers ?? row?.total_users ?? 0) || 0;
+        if (!row || viewTotalUsers <= 0) {
+          console.log('[Worker] ⚠️ 数据库返回为空或 totalUsers 为 0，使用保底数据（当前用户）');
           row = {
-            total_users: 1, // 强制显示 1，因为当前用户就在这
+            totalUsers: 1, // 强制显示 1，因为当前用户就在这
+            total_users: 1, // 兼容旧字段
             avg_l: 65,
             avg_p: 45,
             avg_d: 50,
@@ -2335,14 +2367,16 @@ async function fetchFromSupabase(
         };
         
         // 获取总用户数（从 total_users 字段）- 强制转换为数字
-        totalUsers = Number(row.total_users) || 0;
+        // 【字段映射修正】兼容视图输出小驼峰（totalUsers）与旧下划线（total_users）
+        totalUsers = Number(row.totalUsers ?? row.total_users ?? 0) || 0;
         if (isNaN(totalUsers) || totalUsers <= 0) {
           totalUsers = 1;
         }
         totalUsers = Number(totalUsers); // 确保是数字类型
         
         // 获取累计吐槽字数（如果视图包含）- 强制转换为数字
-        totalRoastWords = Number(row.total_roast_words || row.total_words || 0) || 0;
+        // 【字段映射修正】兼容视图输出小驼峰（totalRoastWords）与旧下划线（total_roast_words）
+        totalRoastWords = Number(row.totalRoastWords ?? row.total_roast_words ?? row.total_words ?? 0) || 0;
         if (isNaN(totalRoastWords)) {
           totalRoastWords = 0;
         }
@@ -2354,12 +2388,19 @@ async function fetchFromSupabase(
           cityCount = 0;
         }
         cityCount = Number(cityCount); // 确保是数字类型
+
+        // 【明确字段提取】avgPerScan / avgCharsPerUser（优先使用 Supabase 视图字段，不做本地计算兜底）
+        // 按要求：const avgPerScan = stats.avgPerScan || 0;
+        avgPerScan = Number(row.avgPerScan ?? row.avg_per_scan ?? 0) || 0;
+        avgCharsPerUser = Number(row.avgCharsPerUser ?? row.avg_chars_per_user ?? row.avgPerUser ?? row.avg_per_user ?? 0) || 0;
         
         console.log('[Worker] ✅ 从 v_global_stats_v6 获取数据:', {
           totalUsers,
           totalRoastWords,
           cityCount,
           globalAverage,
+          avgPerScan,
+          avgCharsPerUser,
         });
         
         // 【处理聚合查询】获取总记录数、total_chars 总和、systemDays、人格分布、平均长度和最新记录
@@ -2621,6 +2662,9 @@ async function fetchFromSupabase(
           cityCount: Number(cityCount) || 0,
           systemDays: Number(systemDays) || 1,
           avgChars: Number(avgChars) || 0, // 平均吐槽字数
+          // 【新增字段同步到 KV】强制覆盖旧缓存（包含新字段）
+          avgPerScan: Number(avgPerScan) || 0,
+          avgCharsPerUser: Number(avgCharsPerUser) || 0,
           // 人格分布（前三个）
           personalityDistribution: personalityDistribution,
           // 最新记录（最近 5 条）
@@ -2647,6 +2691,8 @@ async function fetchFromSupabase(
           totalAnalysis: globalStatsCache.totalAnalysis,
           totalChars: globalStatsCache.totalChars,
           avgChars: globalStatsCache.avgChars,
+          avgPerScan: globalStatsCache.avgPerScan,
+          avgCharsPerUser: globalStatsCache.avgCharsPerUser,
           systemDays: globalStatsCache.systemDays,
           personalityDistributionCount: globalStatsCache.personalityDistribution?.length || 0,
           latestRecordsCount: globalStatsCache.latestRecords?.length || 0,
@@ -2706,6 +2752,11 @@ async function fetchFromSupabase(
       totalRoastWords: totalRoastWords,
       totalChars: Number(totalCharsSum) || 0, // total_chars 的总和（吐槽字数）- 强制转换为数字
       totalAnalysis: Number(totalAnalysis) || 0, // 总记录数（分析次数）- 强制转换为数字
+      // 【显式返回新字段】与 v_global_stats_v6 对齐
+      avgPerScan: Number(avgPerScan) || 0,
+      avgCharsPerUser: Number(avgCharsPerUser) || 0,
+      // 向后兼容：旧字段名
+      avgPerUser: Number(avgCharsPerUser) || 0,
       systemDays: Number(systemDays) || 1, // 系统运行天数 - 强制转换为数字
       cityCount: Number(cityCount) || 0, // 覆盖城市数 - 强制转换为数字
       avgChars: Number(avgChars) || 0, // 平均吐槽字数（AVG(total_chars)）- 强制转换为数字
@@ -2770,6 +2821,11 @@ async function fetchFromSupabase(
       totalRoastWords: 0,
       totalChars: 0, // total_chars 的总和（吐槽字数）
       totalAnalysis: 0, // 总记录数（分析次数）
+      // 【显式补齐字段】与 v_global_stats_v6 返回结构对齐
+      avgPerScan: 0,
+      avgCharsPerUser: 0,
+      // 向后兼容
+      avgPerUser: 0,
       systemDays: 1,
       avgChars: 0, // 平均吐槽字数
       cityCount: 0,
@@ -2832,10 +2888,13 @@ async function performAggregation(env: Env): Promise<{ success: boolean; globalA
     let row = data[0] || {};
 
     // 【保底逻辑】如果数据库还没写入（第一个用户），手动返回保底对象
-    if (!row || !row.total_users || row.total_users === 0) {
-      console.log('[Worker] ⚠️ performAggregation: 数据库返回为空或 total_users 为 0，使用保底数据（当前用户）');
+    // v_global_stats_v6 可能输出 totalUsers（小驼峰），兼容旧 total_users
+    const viewTotalUsers = Number(row?.totalUsers ?? row?.total_users ?? 0) || 0;
+    if (!row || viewTotalUsers <= 0) {
+      console.log('[Worker] ⚠️ performAggregation: 数据库返回为空或 totalUsers 为 0，使用保底数据（当前用户）');
       row = {
-        total_users: 1, // 强制显示 1，因为当前用户就在这
+        totalUsers: 1, // 强制显示 1，因为当前用户就在这
+        total_users: 1, // 兼容旧字段
         avg_l: 65,
         avg_p: 45,
         avg_d: 50,
@@ -2956,7 +3015,7 @@ app.get('/', async (c) => {
     // 如果配置了 Supabase，查询总用户数
     if (env.SUPABASE_URL && env.SUPABASE_KEY) {
       try {
-        const res = await fetch(`${env.SUPABASE_URL}/rest/v1/v_global_stats_v6?select=total_users`, {
+        const res = await fetch(`${env.SUPABASE_URL}/rest/v1/v_global_stats_v6?select=totalUsers`, {
           headers: { 
             'apikey': env.SUPABASE_KEY, 
             'Authorization': `Bearer ${env.SUPABASE_KEY}` 
@@ -2965,7 +3024,7 @@ app.get('/', async (c) => {
         const data = await res.json();
         return c.json({
           status: 'success',
-          totalUsers: data[0]?.total_users || 0,
+          totalUsers: data[0]?.totalUsers || 0,
           message: 'Cursor Vibe API is active',
           endpoints: {
             analyze: '/api/analyze',
