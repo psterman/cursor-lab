@@ -108,16 +108,61 @@
             box-shadow: 0 0 20px rgba(0, 255, 65, 0.1);
         }
 
-        .lang-btn {
-            border: 1px solid var(--card-border);
-            color: var(--text-dim);
-            transition: all 0.2s;
+        /* =========================
+           Language Switch (Flags)
+           ========================= */
+        .lang-flag-btn {
+            padding: 0;
+            background: transparent;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            font-family: 'JetBrains Mono', monospace;
+            transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 44px;
+            height: 44px;
+            opacity: 0.6;
+            transform: scale(1);
+            box-shadow: none;
+            overflow: hidden;
         }
 
-        .lang-btn.active {
-            border-color: var(--accent-terminal);
-            color: var(--accent-terminal);
-            background: rgba(0, 255, 65, 0.05);
+        .lang-flag-btn img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            border-radius: 50%;
+            transition: all 0.4s ease;
+            padding: 2px;
+            outline: none;
+            border: none;
+            box-shadow: none;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+
+        .lang-flag-btn.active {
+            opacity: 1;
+            border: 3px solid var(--accent-terminal);
+            box-shadow: 0 0 16px rgba(0, 255, 65, 0.6), 0 0 32px rgba(0, 255, 65, 0.3), inset 0 0 20px rgba(0, 255, 65, 0.1);
+            transform: scale(1.1);
+        }
+
+        .lang-flag-btn:hover:not(.active) {
+            opacity: 0.9;
+            transform: scale(1.15);
+            transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        .lang-flag-btn:hover.active {
+            /* 选中状态：保持 3px 粗边框，只改变缩放和阴影 */
+            border: 3px solid var(--accent-terminal);
+            transform: scale(1.15);
+            box-shadow: 0 0 20px rgba(0, 255, 65, 0.8), 0 0 40px rgba(0, 255, 65, 0.4), inset 0 0 25px rgba(0, 255, 65, 0.15);
+            transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s ease;
         }
 
         .loading-overlay {
@@ -136,6 +181,83 @@
         }
 
         .pulse { animation: pulse-soft 2s infinite; }
+
+        /* =========================
+           Cyberpunk Loading Effects
+           ========================= */
+        @keyframes skeleton-shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+
+        /* 流光骨架屏：用于数字占位（主题色绿+蓝） */
+        .skeleton {
+            position: relative;
+            color: transparent !important;
+            user-select: none;
+            border-radius: 2px;
+            background: linear-gradient(
+                90deg,
+                rgba(39, 39, 42, 0.25) 0%,
+                rgba(0, 255, 65, 0.18) 40%,
+                rgba(59, 130, 246, 0.14) 55%,
+                rgba(39, 39, 42, 0.25) 100%
+            );
+            background-size: 240% 100%;
+            animation: skeleton-shimmer 1.2s ease-in-out infinite;
+            box-shadow: 0 0 18px rgba(0, 255, 65, 0.06);
+        }
+
+        /* 骨架屏期间保持布局高度稳定 */
+        #totalUsers.skeleton,
+        #totalAnalysis.skeleton,
+        #totalChars.skeleton {
+            min-height: 2.5rem;
+        }
+        #avgPerUser.skeleton,
+        #avgPerScan.skeleton,
+        #systemDays.skeleton,
+        #cityCount.skeleton {
+            min-height: 1.6rem;
+        }
+
+        @keyframes scan-sweep {
+            0% { transform: translateY(-120%); opacity: 0; }
+            10% { opacity: 0.9; }
+            90% { opacity: 0.9; }
+            100% { transform: translateY(120%); opacity: 0; }
+        }
+
+        /* 全屏扫描线：加载期间叠加 */
+        .scan-line {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 40;
+            opacity: 0;
+            mix-blend-mode: screen;
+        }
+        .scan-line::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 18vh;
+            top: -20vh;
+            background: linear-gradient(
+                180deg,
+                transparent 0%,
+                rgba(0, 255, 65, 0.14) 45%,
+                rgba(59, 130, 246, 0.10) 60%,
+                transparent 100%
+            );
+            filter: blur(1px);
+            box-shadow: 0 0 30px rgba(0, 255, 65, 0.12);
+            animation: scan-sweep 1.6s linear infinite;
+        }
+        .scan-line.active {
+            opacity: 1;
+        }
         
         /* 确保内容在背景动画之上 */
         body > div {
@@ -145,6 +267,7 @@
     </style>
 </head>
 <body class="p-4 md:p-8">
+    <div id="scanLine" class="scan-line" aria-hidden="true"></div>
     <div class="max-w-[1600px] mx-auto">
         <!-- Header -->
         <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
@@ -156,9 +279,13 @@
                 <p id="sub-title" class="text-[10px] text-zinc-500 tracking-[0.3em] font-bold uppercase mt-1">Telemetry Uplink: Active // Source: Central_Pacific</p>
             </div>
             
-            <div class="flex gap-2">
-                <button onclick="switchLang('zh')" id="btn-zh" class="lang-btn active px-4 py-1 text-[10px] font-bold uppercase">ZH</button>
-                <button onclick="switchLang('en')" id="btn-en" class="lang-btn px-4 py-1 text-[10px] font-bold uppercase">EN</button>
+            <div class="flex gap-3 items-center">
+                <button onclick="switchLang('zh')" id="btn-zh" class="lang-flag-btn active" title="中文">
+                    <img src="images/zh.png" alt="中文" />
+                </button>
+                <button onclick="switchLang('en')" id="btn-en" class="lang-flag-btn" title="English">
+                    <img src="images/us.png" alt="English" />
+                </button>
             </div>
         </div>
 
@@ -368,61 +495,72 @@
         }
 
         /**
-         * 数字滚动动画函数
-         * @param {HTMLElement} element - 目标元素
-         * @param {number} start - 起始值
+         * 数字滚动动画（requestAnimationFrame）
+         * 需求：animateValue(id, end, duration) + 千分位格式化
+         * @param {string} id - 目标元素 id
          * @param {number} end - 结束值
          * @param {number} duration - 动画持续时间（毫秒）
-         * @param {boolean} useFormat - 是否使用 formatNumber 格式化（默认 true）
+         * @param {Object} options - 可选项
          */
-        function animateValue(element, start, end, duration = 1500, useFormat = true) {
-            if (!element) return;
-            
-            // 确保 start 和 end 都是数字类型
-            start = Number(start) || 0;
-            end = Number(end) || 0;
-            
+        function animateValue(id, end, duration = 1200, options = {}) {
+            const el = document.getElementById(id);
+            if (!el) return;
+
+            const { start = 0, decimals = 0, useThousands = true } = options;
+            const s = Number(start) || 0;
+            const e = Number(end) || 0;
             const startTime = performance.now();
-            const isInteger = Number.isInteger(start) && Number.isInteger(end);
-            
-            function update(currentTime) {
-                const elapsed = currentTime - startTime;
-                const progress = Math.min(elapsed / duration, 1);
-                
-                // 使用缓动函数（easeOutCubic）
-                const easeOutCubic = 1 - Math.pow(1 - progress, 3);
-                const current = start + (end - start) * easeOutCubic;
-                
-                // 根据是否使用格式化来决定显示方式
-                if (useFormat) {
-                    // 使用 formatNumber 格式化显示（智能处理大数字）
-                    element.textContent = formatNumber(Math.floor(current));
-                } else {
-                    // 使用原始数字显示
-                    if (isInteger) {
-                        element.textContent = Math.floor(current).toLocaleString();
-                    } else {
-                        element.textContent = current.toFixed(1).toLocaleString();
-                    }
+
+            const format = (val) => {
+                const n = Number(val) || 0;
+                if (useThousands) {
+                    return n.toLocaleString(undefined, {
+                        minimumFractionDigits: decimals,
+                        maximumFractionDigits: decimals
+                    });
                 }
-                
-                if (progress < 1) {
-                    requestAnimationFrame(update);
-                } else {
-                    // 确保最终值准确
-                    if (useFormat) {
-                        element.textContent = formatNumber(end);
-                    } else {
-                        if (isInteger) {
-                            element.textContent = end.toLocaleString();
-                        } else {
-                            element.textContent = end.toFixed(1).toLocaleString();
-                        }
-                    }
-                }
+                return decimals > 0 ? n.toFixed(decimals) : String(Math.round(n));
+            };
+
+            const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+
+            function tick(now) {
+                const t = Math.min((now - startTime) / duration, 1);
+                const eased = easeOutCubic(t);
+                const current = s + (e - s) * eased;
+                el.textContent = format(decimals > 0 ? current : Math.floor(current));
+                if (t < 1) requestAnimationFrame(tick);
+                else el.textContent = format(e);
             }
-            
-            requestAnimationFrame(update);
+
+            requestAnimationFrame(tick);
+        }
+
+        /**
+         * 加载态骨架屏注入/移除
+         */
+        const numericIds = [
+            'totalUsers',
+            'totalAnalysis',
+            'totalChars',
+            'avgPerUser',
+            'avgPerScan',
+            'systemDays',
+            'cityCount',
+        ];
+
+        function setLoadingState(isLoading) {
+            const scan = document.getElementById('scanLine');
+            if (scan) scan.classList.toggle('active', !!isLoading);
+
+            numericIds.forEach((id) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.classList.toggle('skeleton', !!isLoading);
+                if (isLoading) {
+                    el.textContent = '000000';
+                }
+            });
         }
 
         function switchLang(lang) {
@@ -665,21 +803,21 @@
             if (radarChart) radarChart.destroy();
 
             const labels = currentLang === 'zh' ? ['语言', '模式', '深度', '效率', '频率'] : ['Lang', 'Pattern', 'Depth', 'Effi', 'Freq'];
-            // 【环境对齐】确保所有的 Number() 转换逻辑在赋值前完成
-            const data = [
+            const targetData = [
                 Number(averages.L || 50),
                 Number(averages.P || 50),
                 Number(averages.D || 50),
                 Number(averages.E || 50),
                 Number(averages.F || 50)
             ];
+            const zeroData = [0, 0, 0, 0, 0];
 
             radarChart = new Chart(ctx, {
                 type: 'radar',
                 data: {
                     labels: labels,
                     datasets: [{
-                        data: data,
+                        data: zeroData,
                         borderColor: '#00ff41',
                         backgroundColor: 'rgba(0, 255, 65, 0.1)',
                         borderWidth: 1,
@@ -687,6 +825,12 @@
                     }]
                 },
                 options: {
+                    animation: {
+                        duration: 900,
+                        easing: 'easeOutQuart',
+                        animateScale: true,
+                        animateRotate: true
+                    },
                     scales: {
                         r: {
                             angleLines: { color: '#27272a' },
@@ -700,6 +844,14 @@
                     plugins: { legend: { display: false } }
                 }
             });
+
+            // 触发一次 update，让雷达图从中心扩张到真实值
+            try {
+                radarChart.data.datasets[0].data = targetData;
+                radarChart.update();
+            } catch (e) {
+                console.warn('[雷达图] ⚠️ update 动画触发失败:', e);
+            }
         }
 
         function renderLocationList(data) {
@@ -947,6 +1099,9 @@
             console.group('%c 🚀 Dashboard Data Sync Starting ', 'background: #222; color: #bada55; font-size: 12px;');
             
             try {
+                // 加载过场：骨架屏 + 扫描线
+                setLoadingState(true);
+
                 console.log(`[1/5] 正在请求: ${apiEndpoint}api/global-average`);
                 const response = await fetch(`${apiEndpoint}api/global-average`);
                 
@@ -966,55 +1121,36 @@
                 // 【ID 存在性检查】在执行 animateValue 前，必须检查 document.getElementById 是否非空
                 // 【动画容错】防止 NaN 或 undefined 导致崩溃
                 
-                // 1. 已诊断开发者
+                // 数据返回：移除骨架屏并开始数字滚动
+                setLoadingState(false);
+
+                // 1. 已诊断开发者（千分位）
                 const totalUsers = Number(data.totalUsers) || 0;
-                const totalUsersEl = document.getElementById('totalUsers');
-                console.log(`[卡片: 已诊断开发者] 数据: ${totalUsers} | DOM: ${totalUsersEl ? '✅' : '❌'}`);
-                safeAnimateValue(totalUsersEl, 0, totalUsers, 1500, true);
+                animateValue('totalUsers', totalUsers, 1400, { decimals: 0, useThousands: true });
 
                 // 2. 扫描次数 (totalAnalysis)
                 const totalAnalysis = Number(data.totalAnalysis) || 0;
-                const totalAnalysisEl = document.getElementById('totalAnalysis');
-                console.log(`[卡片: 扫描次数] 数据: ${totalAnalysis} | DOM: ${totalAnalysisEl ? '✅' : '❌'}`);
-                safeAnimateValue(totalAnalysisEl, 0, totalAnalysis, 1500, true);
+                animateValue('totalAnalysis', totalAnalysis, 1400, { decimals: 0, useThousands: true });
 
                 // 3. 累计字数 (totalRoastWords)
                 const totalRoastWords = Number(data.totalRoastWords) || 0;
-                const totalCharsEl = document.getElementById('totalChars');
-                console.log(`[卡片: 累计字数] 数据: ${totalRoastWords} | DOM: ${totalCharsEl ? '✅' : '❌'}`);
-                if (totalCharsEl) {
-                    // 单位转换：如果超过 100 万，显示为"万"单位
-                    const val = totalRoastWords;
-                    if (val >= 1000000) {
-                        totalCharsEl.innerText = (val / 10000).toFixed(1) + ' 万';
-                    } else {
-                        safeAnimateValue(totalCharsEl, 0, val, 1500, true);
-                    }
-                }
+                animateValue('totalChars', totalRoastWords, 1400, { decimals: 0, useThousands: true });
 
                 // 4. 人均平均篇幅 (avgPerUser)
                 const avgPerUser = Number(data.avgPerUser || 0);
-                const avgPerUserEl = document.getElementById('avgPerUser');
-                console.log(`[卡片: 人均平均篇幅] 数据: ${avgPerUser} | DOM: ${avgPerUserEl ? '✅' : '❌'}`);
-                safeAnimateValue(avgPerUserEl, 0, avgPerUser, 1000, false);
+                animateValue('avgPerUser', avgPerUser, 900, { decimals: 1, useThousands: true });
 
                 // 5. 单次平均篇幅 (avgPerScan)
                 const avgPerScan = Number(data.avgPerScan || 0);
-                const avgPerScanEl = document.getElementById('avgPerScan');
-                console.log(`[卡片: 单次平均篇幅] 数据: ${avgPerScan} | DOM: ${avgPerScanEl ? '✅' : '❌'}`);
-                safeAnimateValue(avgPerScanEl, 0, avgPerScan, 1000, false);
+                animateValue('avgPerScan', avgPerScan, 900, { decimals: 1, useThousands: true });
 
                 // 6. 运行天数
                 const systemDays = Number(data.systemDays) || 1;
-                const systemDaysEl = document.getElementById('systemDays');
-                console.log(`[卡片: 运行天数] 数据: ${systemDays} | DOM: ${systemDaysEl ? '✅' : '❌'}`);
-                safeAnimateValue(systemDaysEl, 0, systemDays, 1000, false);
+                animateValue('systemDays', systemDays, 900, { decimals: 0, useThousands: true });
 
                 // 7. 覆盖城市
                 const cityCount = Number(data.cityCount) || 0;
-                const cityCountEl = document.getElementById('cityCount');
-                console.log(`[卡片: 覆盖城市] 数据: ${cityCount} | DOM: ${cityCountEl ? '✅' : '❌'}`);
-                safeAnimateValue(cityCountEl, 0, cityCount, 1000, false);
+                animateValue('cityCount', cityCount, 900, { decimals: 0, useThousands: true });
 
                 // --- 渲染人格分布排行 ---
                 // 【人格排行渲染函数】使用独立的 renderPersonalityRank 函数
@@ -1076,6 +1212,8 @@
                     }, 5000);
                 }
             } finally {
+                // 确保异常情况下也关闭加载过场
+                setLoadingState(false);
                 console.groupEnd();
             }
         }

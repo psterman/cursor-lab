@@ -1,7 +1,7 @@
 /**
  * content-data.ts - 文案库数据（自动生成）
  * 此文件由 scripts/generate-content.cjs 自动生成，请勿手动编辑
- * 生成时间: 2026-01-24T12:28:10.501Z
+ * 生成时间: 2026-01-24T16:05:57.125Z
  */
 
 export const ROAST_LIBRARY_ZH: Record<string, string> = {
