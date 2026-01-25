@@ -916,10 +916,10 @@ app.get('/api/global-average', async (c) => {
         const statsData = await statsRes.json();
         const stats = statsData[0] || {};
         
-        // 验证数据是否有效
+        // 验证数据是否有效（如果为空，使用兜底逻辑）
         if (!stats || Object.keys(stats).length === 0) {
-          console.warn('[Worker] ⚠️ 视图返回空数据，降级到原有逻辑');
-          throw new Error('视图返回空数据');
+          console.warn('[Worker] ⚠️ 视图返回空数据，使用默认值');
+          // 不抛出错误，而是使用默认值继续处理
         }
 
         // 2. 获取人格排行 (调用 v_personality_rank 视图)
@@ -1010,43 +1010,74 @@ app.get('/api/global-average', async (c) => {
             console.warn('[Worker] ⚠️ 获取最近受害者失败，使用空数组:', recentError);
           }
 
-        // 5. 构建返回结构（严格按照 stats2.html 期望的格式）
+          // 4.5. 获取王者池数据（用于前端选拔各维度最强王者）
+          // 关键：只选取 l_score > 0 或 total_messages > 0 的记录（剔除无意义的自动上报空数据）
+          let allUsersData: any[] = [];
+          try {
+            // 方案1：先获取最近 100 条记录，然后在客户端过滤
+            // 因为 Supabase PostgREST 的 or 查询语法较复杂，我们采用客户端过滤
+            const userAnalysisRes = await fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=*&order=created_at.desc&limit=100`, {
+              headers: { 
+                'apikey': env.SUPABASE_KEY, 
+                'Authorization': `Bearer ${env.SUPABASE_KEY}` 
+              }
+            });
+            
+            if (userAnalysisRes.ok) {
+              const rawData = await userAnalysisRes.json();
+              // 客户端过滤：只保留 l_score > 0 或 total_messages > 0 的记录
+              allUsersData = rawData.filter((user: any) => {
+                const lScore = Number(user.l_score ?? user.l ?? 0);
+                const totalMessages = Number(user.total_messages ?? 0);
+                return lScore > 0 || totalMessages > 0;
+              });
+              console.log('[Worker] ✅ 获取王者池数据成功:', allUsersData.length, '条（已从', rawData.length, '条中过滤）');
+            } else {
+              const errorText = await userAnalysisRes.text().catch(() => '无法读取错误信息');
+              console.warn('[Worker] ⚠️ 获取王者池数据失败，HTTP 状态:', userAnalysisRes.status, errorText);
+            }
+          } catch (allUsersError) {
+            console.warn('[Worker] ⚠️ 获取王者池数据失败，使用空数组:', allUsersError);
+          }
+
+        // 5. 数据清洗与聚合：字段精准映射（对齐 stats2.html 需求）
+          // 5.1. 全局平均值（兜底逻辑：即使视图返回 null 或 0，也要有默认值）
           const globalAverage = {
-            L: Number(stats.avg_l || stats.avg_L || 50),
-            P: Number(stats.avg_p || stats.avg_P || 50),
-            D: Number(stats.avg_d || stats.avg_D || 50),
-            E: Number(stats.avg_e || stats.avg_E || 50),
-            F: Number(stats.avg_f || stats.avg_F || 50),
+            L: Number(stats.avg_l ?? stats.avg_L ?? 50),
+            P: Number(stats.avg_p ?? stats.avg_P ?? 50),
+            D: Number(stats.avg_d ?? stats.avg_D ?? 50),
+            E: Number(stats.avg_e ?? stats.avg_E ?? 50),
+            F: Number(stats.avg_f ?? stats.avg_F ?? 50),
           };
           
-          // 【字段映射修正】优先使用视图输出的小驼峰字段；兼容旧下划线字段
+          // 5.2. 核心统计字段（兜底逻辑：使用 ?? 确保 null/undefined 时使用默认值）
+          // totalUsers: 独立用户数（fingerprint 去重）- 从视图获取
           const totalUsers = Number(stats.totalUsers ?? stats.total_users ?? 0);
+          
+          // totalAnalysis: 汇总 total_messages - 从视图获取
           const totalAnalysis = Number(stats.totalAnalysis ?? stats.total_analysis ?? 0);
-          const totalRoastWords = Number(stats.totalRoastWords ?? stats.total_roast_words ?? stats.total_words ?? 0);
+          
+          // totalRoastWords: 汇总 total_chars（当前应约为 277,194）- 从视图获取
+          const totalRoastWords = Number(stats.totalRoastWords ?? stats.total_roast_words ?? stats.total_chars ?? stats.total_words ?? 0);
           const totalChars = totalRoastWords; // 兼容字段
           
-          // 【统计口径校准】
-          // Scan Words：totalRoastWords / totalAnalysis（平均每次扫描的字数）
-          // Avg Words：totalRoastWords / totalUsers（全网人均累计字数）
+          // 5.3. 计算平均值（防御性除法）
           const calcAvg = (total: number, base: number): number => {
             if (!base || base <= 0 || !Number.isFinite(base)) return 0;
             return Number((total / base).toFixed(1));
           };
-          const avgPerScan = calcAvg(totalRoastWords, totalAnalysis);
+          
+          // avgCharsPerUser: totalRoastWords / totalUsers
           const avgCharsPerUser = calcAvg(totalRoastWords, totalUsers);
+          
+          // avgPerScan: totalRoastWords / totalAnalysis（当前应约为 288.4）
+          const avgPerScan = calcAvg(totalRoastWords, totalAnalysis);
+          
           // 向后兼容：保留旧字段 avgPerUser（与 avgCharsPerUser 等价）
           const avgPerUser = avgCharsPerUser;
           
-          // 构建 latestRecords（兼容格式）
-          const latestRecords = recentVictims.map((v: any) => ({
-            personality_type: v.type,
-            ip_location: v.location,
-            created_at: v.time,
-            name: v.name,
-            type: v.type,
-            location: v.location,
-            time: v.time,
-          }));
+          // 5.4. latestRecords: 过滤后的原始数据数组（用于前端 LPDEF 专家榜筛选）
+          const latestRecords = allUsersData.length > 0 ? allUsersData : [];
           
           const responseData = {
             status: "success",
@@ -1087,7 +1118,7 @@ app.get('/api/global-average', async (c) => {
             personalityRank: personalityRank,
             personalityDistribution: personalityRank,
             latestRecords: latestRecords,
-            source: 'live_database_v6', // ✅ 成功请求到 Supabase REST 接口时返回 live_database_v6
+            source: 'live_database_v7', // ✅ 重构后版本：包含过滤后的王者池数据
           };
 
           console.log('[Worker] ✅ 从视图直接返回数据:', {
@@ -1127,10 +1158,52 @@ app.get('/api/global-average', async (c) => {
 
         return c.json(responseData);
       } catch (viewError: any) {
-        // 🔴 这就是你现在看到 database_direct 的原因
-        console.error('[Worker] ❌ 视图查询失败，降级到 fetchFromSupabase:', viewError);
-        console.warn('[Worker] ⚠️ 视图查询失败，降级到原有逻辑:', viewError);
-        // 降级到原有逻辑
+        // 异常处理：如果 Supabase 查询结果为空，返回默认的统计数值
+        console.error('[Worker] ❌ 视图查询失败，返回默认值:', viewError);
+        
+        // 返回默认值，防止前端卡片崩掉
+        const defaultResponse = {
+          status: "success",
+          success: true,
+          averages: { L: 50, P: 50, D: 50, E: 50, F: 50 },
+          globalAverage: { L: 50, P: 50, D: 50, E: 50, F: 50 },
+          totalUsers: 0,
+          totalAnalysis: 0,
+          totalRoastWords: 0,
+          totalChars: 0,
+          avgPerUser: 0,
+          avgPerScan: 0,
+          avgCharsPerUser: 0,
+          systemDays: 1,
+          cityCount: 0,
+          avgChars: 0,
+          locationRank: [],
+          recentVictims: [],
+          personalityRank: [],
+          personalityDistribution: [],
+          latestRecords: [],
+          dimensions: {
+            L: { label: '逻辑力' },
+            P: { label: '耐心值' },
+            D: { label: '细腻度' },
+            E: { label: '情绪化' },
+            F: { label: '频率感' }
+          },
+          data: {
+            globalAverage: { L: 50, P: 50, D: 50, E: 50, F: 50 },
+            totalUsers: 0,
+            dimensions: {
+              L: { label: '逻辑力' },
+              P: { label: '耐心值' },
+              D: { label: '细腻度' },
+              E: { label: '情绪化' },
+              F: { label: '频率感' }
+            }
+          },
+          source: 'default_fallback'
+        };
+        
+        return c.json(defaultResponse);
       }
     }
 
