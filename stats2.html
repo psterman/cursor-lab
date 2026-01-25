@@ -429,6 +429,11 @@
             transition: all 0.3s ease;
         }
         
+        #online-users-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
         .live-nodes-content::-webkit-scrollbar {
             width: 6px;
         }
@@ -1971,33 +1976,32 @@
                         .channel('online_users')
                         .on('presence', { event: 'sync' }, () => {
                             // sync 回调：获取当前在线的所有状态对象
-                            const state = presenceChannel.presenceState();
+                            const newState = presenceChannel.presenceState();
                             
-                            // 计算在线人数：遍历所有状态对象并计算总数（去重后）
+                            // 调试日志：输出所有同步到的用户
+                            console.log('[Presence] 当前同步到的所有用户:', newState);
+                            
+                            // 计算在线人数：遍历所有状态对象并计算总数（使用 user_name 去重）
                             const userMap = new Map();
-                            if (state) {
-                                Object.keys(state).forEach((key) => {
-                                    const presenceEntries = state[key];
+                            if (newState) {
+                                Object.keys(newState).forEach((key) => {
+                                    const presenceEntries = newState[key];
                                     const entries = Array.isArray(presenceEntries) ? presenceEntries : [presenceEntries];
                                     
                                     entries.forEach(entry => {
                                         if (!entry || !entry.online_at) return;
-                                        const githubId = entry.github_id || entry.github_username || 'Guest';
-                                        if (!userMap.has(githubId) || new Date(entry.online_at) > new Date(userMap.get(githubId).online_at)) {
-                                            userMap.set(githubId, entry);
+                                        // 使用 user_name 作为去重键
+                                        const userName = entry.user_name || entry.github_id || entry.github_username || 'Guest';
+                                        if (!userMap.has(userName) || new Date(entry.online_at) > new Date(userMap.get(userName).online_at)) {
+                                            userMap.set(userName, entry);
                                         }
                                     });
                                 });
                             }
                             
-                            // 排除当前用户自己
-                            const currentUserId = localStorage.getItem('github_username') || null;
-                            if (currentUserId && userMap.has(currentUserId)) {
-                                userMap.delete(currentUserId);
-                            }
-                            
+                            // 注意：不排除当前用户自己，因为用户要求在列表中可见
                             const onlineCount = userMap.size;
-                            console.log('[Presence] 👥 在线人数同步（去重后，排除自己）:', onlineCount);
+                            console.log('[Presence] 👥 在线人数同步（去重后，包含自己）:', onlineCount);
 
                             // 更新页面上 #online-count-value 的数字（地图上的）
                             const onlineCountElement = document.getElementById('online-count-value');
@@ -2005,15 +2009,15 @@
                                 // 添加缩放动画类
                                 onlineCountElement.classList.add('online-count-update');
                                 
-                                // 更新数字（包含自己）
-                                onlineCountElement.textContent = onlineCount + 1;
+                                // 更新数字
+                                onlineCountElement.textContent = onlineCount;
                                 
                                 // 动画结束后移除类（以便下次更新时可以再次触发动画）
                                 setTimeout(() => {
                                     onlineCountElement.classList.remove('online-count-update');
                                 }, 400); // 与 CSS 动画时长一致
                                 
-                                console.log('[Presence] ✅ 已更新在线人数显示（地图）:', onlineCount + 1);
+                                console.log('[Presence] ✅ 已更新在线人数显示（地图）:', onlineCount);
                             } else {
                                 console.warn('[Presence] ⚠️ 找不到 #online-count-value 元素');
                             }
@@ -2024,17 +2028,53 @@
                                 onlineCountText.textContent = onlineCount;
                             }
                             
-                            // 渲染用户列表
-                            renderOnlineUsersList(state);
+                            // 渲染用户列表（使用 updateOnlineList 确保获取最新状态）
+                            updateOnlineList();
                         })
-                        .on('broadcast', { event: 'private_message' }, ({ payload }) => {
-                            // 接收私信
+                        .on('broadcast', { event: 'burn_msg' }, ({ payload }) => {
+                            // 接收私信（阅后即焚消息）
+                            console.log('[Message] 收到原始广播:', payload);
+                            
                             const githubUsername = localStorage.getItem('github_username') || null;
+                            const myId = githubUsername;
                             
                             // 检查是否是发给当前用户的消息
-                            if (payload && payload.to === githubUsername) {
+                            // 统一使用 target_id 或 to 字段进行匹配，支持 GitHub ID 和 user_name
+                            const targetId = payload.target_id || payload.to;
+                            const isForMe = targetId === myId || 
+                                          targetId === githubUsername || 
+                                          (!myId && targetId === 'Guest');
+                            
+                            if (payload && isForMe) {
                                 console.log('[Message] 📨 收到私信:', payload);
-                                showMessagePopup(payload);
+                                const content = payload.content || payload.message || '';
+                                const fromId = payload.from || 'Unknown';
+                                const statusColor = payload.status_color || '#00ff41';
+                                
+                                showBurnMsg(content, fromId, statusColor);
+                            } else {
+                                console.log('[Message] ⚠️ 消息不是发给我的:', { targetId, myId, githubUsername });
+                            }
+                        })
+                        .on('broadcast', { event: 'private_message' }, ({ payload }) => {
+                            // 兼容旧的事件名
+                            console.log('[Message] 收到原始广播 (private_message):', payload);
+                            
+                            const githubUsername = localStorage.getItem('github_username') || null;
+                            const myId = githubUsername;
+                            
+                            const targetId = payload.target_id || payload.to;
+                            const isForMe = targetId === myId || 
+                                          targetId === githubUsername || 
+                                          (!myId && targetId === 'Guest');
+                            
+                            if (payload && isForMe) {
+                                console.log('[Message] 📨 收到私信 (兼容模式):', payload);
+                                const content = payload.content || payload.message || '';
+                                const fromId = payload.from || 'Unknown';
+                                const statusColor = payload.status_color || '#00ff41';
+                                
+                                showBurnMsg(content, fromId, statusColor);
                             }
                         })
                         .on('presence', { event: 'join' }, ({ key, newPresences }) => {
@@ -2047,8 +2087,8 @@
                             if (status === 'SUBSCRIBED') {
                                 console.log('[Presence] ✅ 已成功订阅 online_users 频道');
                                 
-                                // 用户进入时调用 track，标记在线状态
-                                await syncPresenceState();
+                                // 强制同步自身状态（必须显式调用）
+                                await trackSelf();
                             } else if (status === 'CHANNEL_ERROR') {
                                 console.error('[Presence] ❌ Presence 频道错误');
                             } else {
@@ -2138,45 +2178,90 @@
         }
         
         /**
-         * 同步Presence状态（包含所有用户信息）
+         * 获取用户地理位置（经纬度）
+         * @returns {Promise<Object>} 包含 lat, lng 的对象
          */
-        async function syncPresenceState() {
+        async function getUserLocation() {
+            try {
+                // 使用 ip-api.com API 获取 IP 归属地信息
+                const ipResponse = await fetch('http://ip-api.com/json/', {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' }
+                });
+
+                if (ipResponse.ok) {
+                    const ipInfo = await ipResponse.json();
+                    const lat = ipInfo.lat ? Number(ipInfo.lat) : null;
+                    const lng = ipInfo.lon ? Number(ipInfo.lon) : null; // 注意：ip-api.com 使用 lon
+                    return { lat, lng };
+                }
+            } catch (error) {
+                console.warn('[Location] ⚠️ 获取地理位置失败:', error);
+            }
+            return { lat: null, lng: null };
+        }
+
+        /**
+         * 强制同步自身状态（trackSelf）
+         * 在 SUBSCRIBED 回调中显式调用
+         */
+        async function trackSelf() {
             if (!presenceChannel) {
                 console.warn('[Presence] ⚠️ Presence频道未初始化');
                 return;
             }
             
             try {
-                const githubUsername = localStorage.getItem('github_username') || null;
-                let avatarUrl = null;
+                // 获取 GitHub 用户名
+                const ghUsername = localStorage.getItem('github_username') || null;
                 
-                if (isValidGitHubUsername(githubUsername)) {
-                    avatarUrl = getGitHubAvatarUrl(githubUsername);
-                } else {
-                    avatarUrl = DEFAULT_AVATAR;
-                }
+                // 生成 user_name
+                const userName = ghUsername && isValidGitHubUsername(ghUsername) 
+                    ? ghUsername 
+                    : `Guest_${Math.floor(Math.random() * 1000)}`;
                 
-                const statusConfig = USER_STATUSES[currentUserStatus];
+                // 生成 avatar_url
+                const avatarUrl = ghUsername && isValidGitHubUsername(ghUsername)
+                    ? `https://github.com/${ghUsername}.png`
+                    : DEFAULT_AVATAR;
                 
-                await presenceChannel.track({
+                // 获取状态信息
+                const statusConfig = USER_STATUSES[currentUserStatus] || USER_STATUSES.idle;
+                const status = statusConfig.status || 'idle';
+                const statusColor = statusConfig.status_color || '#00ff41';
+                
+                // 获取经纬度
+                const location = await getUserLocation();
+                
+                // 构建 Presence 数据
+                const myPresence = {
+                    user_name: userName,
+                    avatar_url: avatarUrl,
+                    github_id: ghUsername || null,
+                    github_username: ghUsername || null,
+                    status: status,
+                    status_color: statusColor,
                     online_at: new Date().toISOString(),
-                    avatar_url: avatarUrl,
-                    github_id: githubUsername,
-                    github_username: githubUsername,
-                    status: statusConfig.status,
-                    status_color: statusConfig.status_color,
+                    lat: location.lat,
+                    lng: location.lng,
                     last_vibe: new Date().toISOString()
-                });
+                };
                 
-                console.log('[Presence] ✅ 状态已同步:', {
-                    github_id: githubUsername,
-                    avatar_url: avatarUrl,
-                    status: statusConfig.status,
-                    status_color: statusConfig.status_color
-                });
+                // 显式调用 track
+                await presenceChannel.track(myPresence);
+                
+                console.log('[Presence] ✅ 自身状态已同步:', myPresence);
             } catch (error) {
-                console.warn('[Presence] ⚠️ 同步状态失败:', error);
+                console.error('[Presence] ❌ 同步自身状态失败:', error);
             }
+        }
+
+        /**
+         * 同步Presence状态（包含所有用户信息）
+         * 兼容旧代码，内部调用 trackSelf
+         */
+        async function syncPresenceState() {
+            await trackSelf();
         }
         
         /**
@@ -2217,6 +2302,21 @@
         }
         
         /**
+         * 更新在线用户列表（核心渲染逻辑）
+         * 在 onlineChannel.on('presence', { event: 'sync' }) 回调中调用
+         */
+        function updateOnlineList() {
+            if (!presenceChannel) {
+                console.warn('[UserList] ⚠️ Presence频道未初始化');
+                return;
+            }
+            
+            // 通过 onlineChannel.presenceState() 获取最新状态
+            const state = presenceChannel.presenceState();
+            renderOnlineUsersList(state);
+        }
+        
+        /**
          * 渲染在线用户列表（分类显示：已实名/匿名）
          * @param {Object} presenceState - Presence状态对象
          */
@@ -2227,9 +2327,11 @@
                 return;
             }
             
-            // 收集所有用户，去重（同一用户多设备登录只显示一次）
+            // 即时清空容器，移除 "Scanning..." 提示
+            listContainer.innerHTML = '';
+            
+            // 收集所有用户，使用 user_name 作为去重键
             const userMap = new Map();
-            const currentUserId = localStorage.getItem('github_username') || null;
             
             if (presenceState && Object.keys(presenceState).length > 0) {
                 Object.keys(presenceState).forEach((key) => {
@@ -2239,110 +2341,83 @@
                     entries.forEach(entry => {
                         if (!entry || !entry.online_at) return;
                         
-                        const githubId = entry.github_id || entry.github_username || 'Guest';
+                        // 使用 user_name 作为去重键
+                        const userName = entry.user_name || entry.github_id || entry.github_username || 'Guest';
                         
                         // 去重逻辑：如果已存在该用户，保留最新的
-                        if (!userMap.has(githubId) || new Date(entry.online_at) > new Date(userMap.get(githubId).online_at)) {
-                            userMap.set(githubId, {
+                        if (!userMap.has(userName) || new Date(entry.online_at) > new Date(userMap.get(userName).online_at)) {
+                            userMap.set(userName, {
                                 ...entry,
-                                github_id: githubId,
-                                github_username: githubId
+                                user_name: userName,
+                                github_id: entry.github_id || entry.github_username || null,
+                                github_username: entry.github_username || entry.github_id || null
                             });
                         }
                     });
                 });
             }
             
-            // 排除当前用户自己
-            if (currentUserId && userMap.has(currentUserId)) {
-                userMap.delete(currentUserId);
-            }
+            // 注意：不排除当前用户自己，因为用户要求在列表中可见
             
             // 转换为数组并分类
             const allUsers = Array.from(userMap.values());
             
-            // 分类：已实名用户（有有效GitHub ID）和匿名用户（Guest或无效ID）
+            // 分类：已实名用户（有 github_id 且不为默认值）和匿名用户
             const verifiedUsers = allUsers.filter(user => {
-                const githubId = user.github_id || user.github_username || 'Guest';
-                return isValidGitHubUsername(githubId) && githubId !== 'Guest';
+                const githubId = user.github_id || user.github_username;
+                return githubId && isValidGitHubUsername(githubId) && !githubId.startsWith('Guest_');
             });
             
             const anonymousUsers = allUsers.filter(user => {
-                const githubId = user.github_id || user.github_username || 'Guest';
-                return !isValidGitHubUsername(githubId) || githubId === 'Guest';
+                const githubId = user.github_id || user.github_username;
+                return !githubId || !isValidGitHubUsername(githubId) || githubId.startsWith('Guest_');
             });
             
             // 排序：按在线时间倒序
             verifiedUsers.sort((a, b) => new Date(b.online_at) - new Date(a.online_at));
             anonymousUsers.sort((a, b) => new Date(b.online_at) - new Date(a.online_at));
             
-            // 如果没有其他用户，显示空状态
+            // 如果没有用户，显示空状态
             if (verifiedUsers.length === 0 && anonymousUsers.length === 0) {
                 listContainer.innerHTML = '<div class="text-zinc-500 text-center py-8 text-[10px]">Scanning for nearby nodes...</div>';
                 return;
             }
             
-            // 渲染已实名用户
+            // 渲染已实名用户（排在最前）
             let html = '';
             
             if (verifiedUsers.length > 0) {
                 html += verifiedUsers.map(user => {
-                    const githubId = user.github_id || user.github_username || 'Guest';
+                    const userName = user.user_name || user.github_id || user.github_username || 'Guest';
+                    const githubId = user.github_id || user.github_username || userName;
                     const avatarUrl = user.avatar_url || DEFAULT_AVATAR;
                     const status = user.status || 'idle';
                     const statusConfig = USER_STATUSES[status] || USER_STATUSES.idle;
-                    const statusColor = user.status_color || statusConfig.status_color;
+                    const statusLabel = statusConfig.label;
                     
-                    // 头像HTML（带呼吸灯边框）
-                    const avatarHtml = `
-                        <div class="avatar-pulse" style="color: ${statusColor};">
+                    // 使用用户要求的 HTML 结构，包裹 <a> 标签，链接指向 GitHub
+                    // 添加 onclick="event.stopPropagation()" 防止触发抽屉折叠
+                    return `
+                        <a 
+                            href="https://github.com/${userName}" 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            class="flex items-center gap-3 p-2 hover:bg-white/10 rounded-lg transition-all group"
+                            onclick="event.stopPropagation(); openMessageInput('${userName}'); return false;"
+                        >
                             <img 
                                 src="${avatarUrl}" 
-                                alt="${githubId}" 
-                                class="rounded-full" 
-                                width="32" 
-                                height="32" 
-                                loading="lazy" 
-                                style="object-fit: cover; display: block;"
+                                alt="${userName}" 
+                                class="w-8 h-8 rounded-full border border-[var(--accent-terminal)]"
+                                loading="lazy"
                                 onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
                             />
-                        </div>
-                    `;
-                    
-                    return `
-                        <div class="user-item user-item-verified" onclick="openMessageInput('${githubId}')">
-                            ${avatarHtml}
-                            <div class="flex-1 min-w-0">
-                                <div class="text-white text-xs font-bold truncate">
-                                    <a 
-                                        href="https://github.com/${githubId}" 
-                                        target="_blank" 
-                                        rel="noopener noreferrer"
-                                        class="hover:text-[var(--accent-terminal)] transition-colors"
-                                        onclick="event.stopPropagation()"
-                                    >
-                                        ${githubId}
-                                    </a>
-                                </div>
+                            <div class="flex flex-col flex-1 min-w-0">
+                                <span class="text-xs text-white font-mono group-hover:text-[var(--accent-terminal)] truncate">${userName}</span>
+                                <span class="text-[10px] text-[var(--text-dim)] uppercase">${statusLabel}</span>
                             </div>
-                            <div class="flex items-center gap-2">
-                                <div class="text-[10px] font-bold uppercase" style="color: ${statusColor};">
-                                    ${statusConfig.emoji} ${statusConfig.label}
-                                </div>
-                                <a 
-                                    href="https://github.com/${githubId}" 
-                                    target="_blank" 
-                                    rel="noopener noreferrer"
-                                    class="github-link-icon"
-                                    onclick="event.stopPropagation()"
-                                    title="View Profile"
-                                >
-                                    <svg fill="currentColor" viewBox="0 0 24 24" width="14" height="14">
-                                        <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-                                    </svg>
-                                </a>
-                            </div>
-                        </div>
+                            <i class="ml-auto opacity-0 group-hover:opacity-100 transition-opacity text-[var(--accent-terminal)]">🔗</i>
+                        </a>
                     `;
                 }).join('');
             }
@@ -2350,38 +2425,27 @@
             // 渲染匿名用户
             if (anonymousUsers.length > 0) {
                 html += anonymousUsers.map(user => {
-                    const githubId = user.github_id || user.github_username || 'Guest';
+                    const userName = user.user_name || 'Guest';
                     const avatarUrl = user.avatar_url || DEFAULT_AVATAR;
                     const status = user.status || 'idle';
                     const statusConfig = USER_STATUSES[status] || USER_STATUSES.idle;
-                    const statusColor = user.status_color || statusConfig.status_color;
-                    
-                    // 头像HTML（带呼吸灯边框）
-                    const avatarHtml = `
-                        <div class="avatar-pulse" style="color: ${statusColor};">
-                            <img 
-                                src="${avatarUrl}" 
-                                alt="${githubId}" 
-                                class="rounded-full" 
-                                width="32" 
-                                height="32" 
-                                loading="lazy" 
-                                style="object-fit: cover; display: block;"
-                                onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
-                            />
-                        </div>
-                    `;
+                    const statusLabel = statusConfig.label;
                     
                     return `
-                        <div class="user-item user-item-anonymous" onclick="openMessageInput('${githubId}')">
-                            ${avatarHtml}
-                            <div class="flex-1 min-w-0">
-                                <div class="text-zinc-400 text-xs font-mono truncate">
-                                    ${githubId}
-                                </div>
-                            </div>
-                            <div class="text-[10px] font-bold uppercase" style="color: ${statusColor};">
-                                ${statusConfig.emoji} ${statusConfig.label}
+                        <div 
+                            class="flex items-center gap-3 p-2 hover:bg-white/5 rounded-lg transition-all opacity-70"
+                            onclick="openMessageInput('${userName}')"
+                        >
+                            <img 
+                                src="${avatarUrl}" 
+                                alt="${userName}" 
+                                class="w-8 h-8 rounded-full border border-zinc-700"
+                                loading="lazy"
+                                onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
+                            />
+                            <div class="flex flex-col flex-1 min-w-0">
+                                <span class="text-xs text-zinc-400 font-mono truncate">${userName}</span>
+                                <span class="text-[10px] text-zinc-600 uppercase">${statusLabel}</span>
                             </div>
                         </div>
                     `;
@@ -2445,6 +2509,28 @@
         }
         
         /**
+         * 显示发送成功提示
+         * @param {string} message - 提示消息
+         */
+        function showNotification(message) {
+            // 创建提示元素
+            const notification = document.createElement('div');
+            notification.className = 'fixed top-4 right-4 bg-[var(--accent-terminal)]/20 border border-[var(--accent-terminal)] px-4 py-2 rounded text-[var(--accent-terminal)] text-xs font-bold uppercase tracking-wider z-50';
+            notification.textContent = message;
+            notification.style.animation = 'popup-appear 0.3s ease-out';
+            
+            document.body.appendChild(notification);
+            
+            // 3秒后自动移除
+            setTimeout(() => {
+                notification.style.animation = 'popup-destroy 0.3s ease-out forwards';
+                setTimeout(() => {
+                    notification.remove();
+                }, 300);
+            }, 3000);
+        }
+
+        /**
          * 发送私信（使用Broadcast）
          * @param {string} targetUserId - 目标用户ID
          */
@@ -2462,70 +2548,130 @@
                 return;
             }
             
-            const githubUsername = localStorage.getItem('github_username') || 'Guest';
+            const myId = localStorage.getItem('github_username') || null;
+            const githubUsername = myId || 'Guest';
             const statusConfig = USER_STATUSES[currentUserStatus];
             
             // 使用Broadcast发送消息
             presenceChannel.send({
                 type: 'broadcast',
-                event: 'private_message',
+                event: 'burn_msg',
                 payload: {
                     from: githubUsername,
                     to: targetUserId,
-                    message: message,
+                    target_id: targetUserId,
+                    content: message,
+                    message: message, // 兼容旧字段名
                     timestamp: new Date().toISOString(),
                     status_color: statusConfig.status_color
                 }
             });
             
-            console.log('[Message] ✅ 私信已发送:', { from: githubUsername, to: targetUserId });
+            console.log('[Message] ✅ 私信已发送:', { from: githubUsername, to: targetUserId, message });
+            
+            // 💡 修复逻辑：如果是发给自己，直接在本地运行显示逻辑
+            if (targetUserId === myId || targetUserId === githubUsername) {
+                // 自接收：直接显示消息
+                showBurnMsg(message, githubUsername, statusConfig.status_color);
+                console.log('[Message] 🔄 自接收消息已显示');
+            } else {
+                // 发送给他人：显示发送成功提示
+                showNotification('密信已发出');
+            }
             
             // 关闭输入框
             const overlay = document.querySelector('.message-input-overlay');
             if (overlay) overlay.remove();
         }
         
+        // 全局变量：用于管理倒计时，防止多个弹窗重叠
+        let currentBurnMsgInterval = null;
+        let currentBurnMsgPopup = null;
+
         /**
-         * 显示私信弹窗（接收端）
-         * @param {Object} messageData - 消息数据
+         * 统一消息显示函数（阅后即焚弹窗）
+         * @param {string} content - 消息内容
+         * @param {string} fromId - 发送者ID
+         * @param {string} statusColor - 状态颜色（可选）
          */
-        function showMessagePopup(messageData) {
-            // 创建弹窗
+        function showBurnMsg(content, fromId, statusColor = '#00ff41') {
+            // 如果已有弹窗，先清除旧的倒计时
+            if (currentBurnMsgInterval) {
+                clearInterval(currentBurnMsgInterval);
+                currentBurnMsgInterval = null;
+            }
+            
+            // 如果已有弹窗，先移除
+            if (currentBurnMsgPopup) {
+                currentBurnMsgPopup.classList.add('destroying');
+                setTimeout(() => {
+                    if (currentBurnMsgPopup && currentBurnMsgPopup.parentNode) {
+                        currentBurnMsgPopup.remove();
+                    }
+                }, 300);
+            }
+            
+            // 创建新弹窗
             const popup = document.createElement('div');
             popup.className = 'message-popup';
+            currentBurnMsgPopup = popup;
             
-            const statusColor = messageData.status_color || '#00ff41';
             let countdown = 5;
+            
+            // 判断是否为自传消息
+            const myId = localStorage.getItem('github_username') || null;
+            const isSelf = fromId === myId || fromId === '系统 (自传)';
+            const fromLabel = isSelf ? '系统 (自传)' : fromId;
             
             popup.innerHTML = `
                 <div class="flex items-center gap-3 mb-3">
-                    <div class="text-[10px] text-zinc-500 uppercase tracking-widest">来自 ${messageData.from}</div>
+                    <div class="text-[10px] text-zinc-500 uppercase tracking-widest">From: ${fromLabel}</div>
                     <div class="flex-1"></div>
-                    <div class="text-[10px] font-bold" style="color: ${statusColor};" id="countdown">5秒</div>
+                    <div class="text-[10px] font-bold" style="color: ${statusColor};" id="countdown-${Date.now()}">5秒</div>
                 </div>
-                <div class="text-white text-sm mb-3 font-mono" style="min-height: 60px;">${messageData.message}</div>
+                <div class="text-white text-sm mb-3 font-mono" style="min-height: 60px; word-break: break-word;">${content}</div>
                 <div class="text-[9px] text-zinc-600 font-mono">阅后即焚 // 自动销毁</div>
             `;
             
             document.body.appendChild(popup);
             
-            // 倒计时
-            const countdownEl = popup.querySelector('#countdown');
-            const countdownInterval = setInterval(() => {
+            // 倒计时逻辑（确保每次新消息到达时都能正确重置）
+            const countdownId = `countdown-${Date.now()}`;
+            const countdownEl = popup.querySelector(`#${countdownId}`);
+            
+            currentBurnMsgInterval = setInterval(() => {
                 countdown--;
                 if (countdownEl) {
                     countdownEl.textContent = `${countdown}秒`;
                 }
                 
                 if (countdown <= 0) {
-                    clearInterval(countdownInterval);
+                    clearInterval(currentBurnMsgInterval);
+                    currentBurnMsgInterval = null;
                     // 销毁动画
                     popup.classList.add('destroying');
                     setTimeout(() => {
-                        popup.remove();
+                        if (popup && popup.parentNode) {
+                            popup.remove();
+                        }
+                        if (currentBurnMsgPopup === popup) {
+                            currentBurnMsgPopup = null;
+                        }
                     }, 500);
                 }
             }, 1000);
+        }
+
+        /**
+         * 显示私信弹窗（接收端）- 兼容旧函数名
+         * @param {Object} messageData - 消息数据
+         */
+        function showMessagePopup(messageData) {
+            const content = messageData.content || messageData.message || '';
+            const fromId = messageData.from || 'Unknown';
+            const statusColor = messageData.status_color || '#00ff41';
+            
+            showBurnMsg(content, fromId, statusColor);
         }
         
         /**
