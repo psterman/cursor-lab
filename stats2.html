@@ -183,6 +183,17 @@
 
         .pulse { animation: pulse-soft 2s infinite; }
 
+        /* 在线人数数字更新时的缩放动画 */
+        @keyframes scale-bounce {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+
+        .online-count-update {
+            animation: scale-bounce 0.4s ease-out;
+        }
+
         /* =========================
            Cyberpunk Loading Effects
            ========================= */
@@ -265,6 +276,202 @@
             position: relative;
             z-index: 10;
         }
+        
+        /* 状态按钮激活样式 */
+        .status-btn.active {
+            border-width: 2px;
+            box-shadow: 0 0 10px currentColor;
+        }
+        
+        /* 用户列表项样式 */
+        .user-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+        
+        .user-item:hover {
+            background: rgba(39, 39, 42, 0.5);
+            border-color: var(--card-border);
+        }
+        
+        /* 头像呼吸灯边框 */
+        .avatar-pulse {
+            position: relative;
+            border-radius: 50%;
+            padding: 2px;
+        }
+        
+        .avatar-pulse::before {
+            content: '';
+            position: absolute;
+            inset: -2px;
+            border-radius: 50%;
+            border: 2px solid currentColor;
+            opacity: 0.6;
+            animation: pulse-border 2s ease-in-out infinite;
+        }
+        
+        @keyframes pulse-border {
+            0%, 100% { opacity: 0.6; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.05); }
+        }
+        
+        /* 私信浮窗样式 */
+        .message-popup {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: var(--card-bg);
+            border: 2px solid var(--accent-terminal);
+            border-radius: 8px;
+            padding: 20px;
+            min-width: 300px;
+            max-width: 500px;
+            z-index: 1000;
+            box-shadow: 0 0 30px rgba(0, 255, 65, 0.3);
+            animation: popup-appear 0.3s ease-out;
+        }
+        
+        @keyframes popup-appear {
+            from {
+                opacity: 0;
+                transform: translate(-50%, -50%) scale(0.9);
+            }
+            to {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1);
+            }
+        }
+        
+        .message-popup.destroying {
+            animation: popup-destroy 0.5s ease-out forwards;
+        }
+        
+        @keyframes popup-destroy {
+            to {
+                opacity: 0;
+                transform: translate(-50%, -50%) scale(0.8);
+            }
+        }
+        
+        /* 私信输入框样式 */
+        .message-input-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .message-input-box {
+            background: var(--card-bg);
+            border: 2px solid var(--accent-terminal);
+            border-radius: 8px;
+            padding: 20px;
+            min-width: 400px;
+            z-index: 1000;
+        }
+        
+        /* 悬浮抽屉式列表样式 */
+        .live-nodes-drawer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .live-nodes-drawer.collapsed {
+            transform: translateY(calc(100% - 48px));
+        }
+        
+        .live-nodes-drawer.expanded {
+            transform: translateY(0);
+        }
+        
+        .live-nodes-header {
+            background: rgba(24, 24, 27, 0.9);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-top: 2px solid var(--accent-terminal);
+            box-shadow: 0 -4px 20px rgba(0, 255, 65, 0.2);
+            padding: 12px 16px;
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: all 0.3s ease;
+        }
+        
+        .live-nodes-header:hover {
+            background: rgba(24, 24, 27, 0.95);
+            box-shadow: 0 -4px 30px rgba(0, 255, 65, 0.3);
+        }
+        
+        .live-nodes-content {
+            background: rgba(24, 24, 27, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-top: 1px solid rgba(0, 255, 65, 0.2);
+            max-height: 400px;
+            overflow-y: auto;
+            transition: all 0.3s ease;
+        }
+        
+        .live-nodes-content::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .live-nodes-content::-webkit-scrollbar-track {
+            background: rgba(39, 39, 42, 0.5);
+        }
+        
+        .live-nodes-content::-webkit-scrollbar-thumb {
+            background: rgba(0, 255, 65, 0.3);
+            border-radius: 3px;
+        }
+        
+        .live-nodes-content::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 255, 65, 0.5);
+        }
+        
+        .chevron-icon {
+            transition: transform 0.3s ease;
+        }
+        
+        .live-nodes-drawer.expanded .chevron-icon {
+            transform: rotate(180deg);
+        }
+        
+        .user-item-verified {
+            border-left: 2px solid var(--accent-terminal);
+        }
+        
+        .user-item-anonymous {
+            opacity: 0.7;
+        }
+        
+        .github-link-icon {
+            width: 14px;
+            height: 14px;
+            opacity: 0.6;
+            transition: opacity 0.2s ease;
+        }
+        
+        .user-item:hover .github-link-icon {
+            opacity: 1;
+        }
     </style>
 </head>
 <body class="p-4 md:p-8">
@@ -295,6 +502,60 @@
             
             <!-- Side Panel: Core Metrics -->
             <div class="xl:col-span-1 flex flex-col gap-4 order-2 xl:order-1">
+                <!-- ID SETTING 面板 -->
+                <div class="hacker-border p-4 rounded-sm stat-card">
+                    <div class="text-[10px] text-zinc-500 mb-3 uppercase tracking-widest">ID SETTING</div>
+                    
+                    <!-- GitHub ID 输入框 -->
+                    <div class="mb-4">
+                        <div class="flex gap-2">
+                            <input 
+                                type="text" 
+                                id="githubUsername" 
+                                placeholder="输入 GitHub ID"
+                                class="flex-1 bg-zinc-900/50 border border-zinc-800 px-3 py-2 rounded text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[var(--accent-terminal)] transition-colors"
+                                onkeypress="if(event.key === 'Enter') saveGitHubUsername()"
+                            />
+                            <button 
+                                onclick="saveGitHubUsername()"
+                                class="px-3 py-2 bg-[var(--accent-terminal)]/20 border border-[var(--accent-terminal)] text-[var(--accent-terminal)] text-xs font-bold uppercase tracking-wider hover:bg-[var(--accent-terminal)]/30 transition-colors"
+                            >
+                                保存
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- 状态切换按钮 -->
+                    <div class="flex gap-2">
+                        <button 
+                            id="status-idle"
+                            onclick="setUserStatus('idle')"
+                            class="flex-1 px-3 py-2 bg-zinc-900/50 border border-zinc-800 text-xs font-bold uppercase tracking-wider hover:border-[#00ff41] transition-colors status-btn"
+                            data-status="idle"
+                        >
+                            🟢 极速
+                        </button>
+                        <button 
+                            id="status-busy"
+                            onclick="setUserStatus('busy')"
+                            class="flex-1 px-3 py-2 bg-zinc-900/50 border border-zinc-800 text-xs font-bold uppercase tracking-wider hover:border-[#ff8c00] transition-colors status-btn"
+                            data-status="busy"
+                        >
+                            🟠 忙碌
+                        </button>
+                        <button 
+                            id="status-sprint"
+                            onclick="setUserStatus('sprint')"
+                            class="flex-1 px-3 py-2 bg-zinc-900/50 border border-zinc-800 text-xs font-bold uppercase tracking-wider hover:border-[#ff006e] transition-colors status-btn"
+                            data-status="sprint"
+                        >
+                            🚀 冲刺
+                        </button>
+                    </div>
+                    
+                    <div class="mt-3 text-[9px] text-zinc-600 font-mono">USER_IDENTITY_CONFIG</div>
+                </div>
+                
                 <div class="hacker-border p-6 rounded-sm stat-card">
                     <div class="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest lang-key" data-key="total-victims">已诊断开发者</div>
                     <div id="totalUsers" class="text-4xl font-bold text-[var(--accent-terminal)]">0</div>
@@ -349,7 +610,7 @@
                                 <span class="text-[9px] block text-zinc-500 lang-key" data-key="active-nodes">活跃节点</span>
                                 <span class="text-xs font-bold text-emerald-400 flex items-center gap-1">
                                     <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full pulse"></span>
-                                    242 CONNECTED
+                                    <span id="online-count-value">0</span> CONNECTED
                                 </span>
                             </div>
                             <div class="bg-black/60 border border-zinc-800 px-3 py-2 rounded">
@@ -414,6 +675,25 @@
             </div>
         </div>
     </div>
+    
+    <!-- 悬浮抽屉式在线用户列表 -->
+    <div id="live-nodes-drawer" class="live-nodes-drawer expanded">
+        <div class="live-nodes-header" onclick="toggleDrawer()">
+            <div class="flex items-center gap-3">
+                <span class="text-[10px] text-zinc-500 uppercase tracking-widest lang-key" data-key="active-nodes">Live Nodes</span>
+                <span id="online-count-badge" class="w-2 h-2 bg-[var(--accent-terminal)] rounded-full pulse"></span>
+                <span id="online-count-text" class="text-xs font-bold text-[var(--accent-terminal)]">0</span>
+            </div>
+            <svg class="chevron-icon w-4 h-4 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+            </svg>
+        </div>
+        <div class="live-nodes-content">
+            <div id="online-users-list" class="p-4 space-y-2">
+                <div class="text-zinc-500 text-center py-4 text-[10px]">Scanning for nearby nodes...</div>
+            </div>
+        </div>
+    </div>
 
     <script>
         // =========================
@@ -425,8 +705,46 @@
         // Supabase 相关变量（全局作用域，不在任何函数内）
         let supabaseClient = null;
         let realtimeChannel = null;
+        let presenceChannel = null; // Presence 频道，用于统计在线人数
         const SUPABASE_URL = 'https://dtcplfhcgnxdzpigmotb.supabase.co';
         const SUPABASE_KEY = 'sb_publishable_-rrlujgXDNxqb-UsMJckNw_G2rn2e8x';
+        
+        // 默认头像常量
+        const DEFAULT_AVATAR = 'https://github.com/identicons/guest.png';
+        
+        // 无效用户名的默认值列表（这些值不应该请求GitHub头像）
+        const INVALID_USERNAME_VALUES = ['自动上报用户', 'Anonymous', 'Guest', 'guest', 'anonymous', ''];
+        
+        // 用户状态配置
+        const USER_STATUSES = {
+            idle: { 
+                label: '极速', 
+                emoji: '🟢', 
+                color: '#00ff41',
+                status_color: '#00ff41',
+                status: 'idle'
+            },
+            busy: { 
+                label: '忙碌', 
+                emoji: '🟠', 
+                color: '#ff8c00',
+                status_color: '#ff8c00',
+                status: 'busy'
+            },
+            sprint: { 
+                label: '冲刺', 
+                emoji: '🚀', 
+                color: '#ff006e',
+                status_color: '#ff006e',
+                status: 'sprint'
+            }
+        };
+        
+        // 当前用户状态（从localStorage加载）
+        let currentUserStatus = localStorage.getItem('user_status') || 'idle';
+        
+        // 抽屉展开/折叠状态（从localStorage加载）
+        let drawerExpanded = localStorage.getItem('drawer_expanded') !== 'false'; // 默认展开
 
         // 初始化 Supabase 客户端（全局作用域直接执行）
         // 使用轮询方式等待 SDK 加载完成
@@ -759,9 +1077,58 @@
                         borderColor: '#27272a',
                         textStyle: { color: '#00ff41', fontFamily: 'JetBrains Mono' },
                         formatter: (params) => {
-                            const label = countryNameMap[params.data?.name]?.zh || params.name;
-                            return `${label}: ${params.value || 0} Victims`;
-                        }
+                            // 如果是地图国家数据，显示国家信息
+                            if (params.seriesType === 'map') {
+                                const label = countryNameMap[params.data?.name]?.zh || params.name;
+                                return `${label}: ${params.value || 0} Victims`;
+                            }
+                            // 如果是脉冲点（effectScatter），显示用户信息（包含头像预览）
+                            if (params.seriesType === 'effectScatter' && params.data) {
+                                const pointData = params.data;
+                                // 从数据点中获取头像信息
+                                const avatarUrl = pointData.avatarUrl || params.series?.avatarUrl || null;
+                                const username = pointData.username || params.series?.username || null;
+                                const userName = params.name || username || '用户';
+                                
+                                if (avatarUrl || username) {
+                                    // 判断逻辑：如果 username 无效，使用 DEFAULT_AVATAR
+                                    let finalAvatarUrl = avatarUrl;
+                                    if (!finalAvatarUrl && username) {
+                                        if (isValidGitHubUsername(username)) {
+                                            finalAvatarUrl = getGitHubAvatarUrl(username);
+                                        } else {
+                                            finalAvatarUrl = DEFAULT_AVATAR;
+                                        }
+                                    }
+                                    // 如果还是没有有效的头像URL，使用默认头像
+                                    if (!finalAvatarUrl) {
+                                        finalAvatarUrl = DEFAULT_AVATAR;
+                                    }
+                                    
+                                    // 使用HTML格式返回，包含头像图片
+                                    // ECharts tooltip支持HTML，可以直接嵌入img标签
+                                    return `
+                                        <div style="display: flex; align-items: center; gap: 8px; padding: 4px;">
+                                            <img 
+                                                src="${finalAvatarUrl}" 
+                                                alt="avatar" 
+                                                style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover; border: 1px solid #27272a;"
+                                                onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
+                                            />
+                                            <div>
+                                                <div style="color: #00ff41; font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: bold;">${userName}</div>
+                                                <div style="color: #71717a; font-family: 'JetBrains Mono', monospace; font-size: 10px;">${label || ''}</div>
+                                            </div>
+                                        </div>
+                                    `;
+                                }
+                                
+                                return `<div style="color: #00ff41; font-family: 'JetBrains Mono', monospace;">👤 ${userName}</div>`;
+                            }
+                            return params.name || '';
+                        },
+                        // 启用HTML渲染模式
+                        extraCssText: 'box-shadow: 0 0 10px rgba(0, 255, 65, 0.2);'
                     },
                     visualMap: {
                         min: 0,
@@ -848,7 +1215,16 @@
          * @param {string} label - 显示的标签文字
          * @param {string} color - 颜色值（十六进制，如 '#00ff41' 或 '#ffffff'）
          */
-        function triggerMapPulse(lng, lat, label = '', color = '#00ff41') {
+        /**
+         * 地图脉冲特效：在地图上动态添加涟漪特效点（支持动态颜色和头像）
+         * @param {number} lng - 经度
+         * @param {number} lat - 纬度
+         * @param {string} label - 显示的标签文字
+         * @param {string} color - 颜色值（十六进制，如 '#00ff41' 或 '#ffffff'）
+         * @param {string} avatarUrl - 头像URL（可选）
+         * @param {string} username - GitHub用户名（用于头像和identicon兜底）
+         */
+        function triggerMapPulse(lng, lat, label = '', color = '#00ff41', avatarUrl = null, username = null) {
             // 健壮性检查：确保 ECharts 实例已初始化且未销毁
             if (!mapChart || (typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) {
                 console.warn('[MapPulse] ⚠️ 地图实例未初始化，跳过脉冲特效');
@@ -875,10 +1251,16 @@
                 }
 
                 // 创建临时涟漪特效系列（所有颜色绑定到 color 参数）
+                // 将头像信息存储到系列的自定义属性中，供tooltip使用
                 const pulseSeries = {
                     type: 'effectScatter',
                     coordinateSystem: 'geo',
-                    data: [[lng, lat]],
+                    data: [{
+                        value: [lng, lat],
+                        name: label || '用户',
+                        avatarUrl: avatarUrl || null,
+                        username: username || null
+                    }],
                     symbolSize: 20,
                     showEffectOn: 'render',
                     rippleEffect: {
@@ -900,6 +1282,9 @@
                         fontSize: 10,
                         fontFamily: 'JetBrains Mono'
                     },
+                    // 将头像信息存储到系列级别，供tooltip formatter使用
+                    avatarUrl: avatarUrl || null,
+                    username: username || null,
                     zlevel: 10,
                     z: 10
                 };
@@ -1046,6 +1431,91 @@
             document.getElementById('top-country').innerText = countryNameMap[top.name] ? countryNameMap[top.name][currentLang] : top.name;
         }
 
+        /**
+         * 判断用户名是否为有效GitHub用户名
+         * @param {string} username - 用户名
+         * @returns {boolean} 是否为有效用户名
+         */
+        function isValidGitHubUsername(username) {
+            if (!username || typeof username !== 'string') {
+                return false;
+            }
+            const trimmed = username.trim();
+            if (trimmed === '') {
+                return false;
+            }
+            // 检查是否为无效的默认值
+            if (INVALID_USERNAME_VALUES.includes(trimmed)) {
+                return false;
+            }
+            // 检查是否以 'Guest_' 开头（自动生成的访客用户名）
+            if (trimmed.startsWith('Guest_')) {
+                return false;
+            }
+            // 检查是否包含中文字符（GitHub用户名不支持中文）
+            if (/[\u4e00-\u9fa5]/.test(trimmed)) {
+                console.warn('[GitHub] ⚠️ GitHub用户名不能包含中文字符:', trimmed);
+                return false;
+            }
+            // GitHub用户名只能包含字母、数字、连字符和下划线
+            // 必须以字母或数字开头，长度在1-39之间
+            const githubUsernamePattern = /^[a-zA-Z0-9]([a-zA-Z0-9]|-(?![.-])){0,38}$/;
+            if (!githubUsernamePattern.test(trimmed)) {
+                console.warn('[GitHub] ⚠️ GitHub用户名格式无效:', trimmed);
+                return false;
+            }
+            return true;
+        }
+
+        /**
+         * 获取GitHub头像URL
+         * @param {string} username - GitHub用户名
+         * @returns {string|null} 头像URL，如果用户名无效则返回null
+         */
+        function getGitHubAvatarUrl(username) {
+            // 如果用户名无效，返回null（不请求GitHub图片）
+            if (!isValidGitHubUsername(username)) {
+                return null;
+            }
+            // GitHub头像URL格式: https://github.com/[用户名].png
+            return `https://github.com/${username.trim()}.png`;
+        }
+
+        /**
+         * 创建头像HTML，包含onerror兜底逻辑
+         * @param {string} avatarUrl - 头像URL
+         * @param {string} username - GitHub用户名（用于identicon）
+         * @param {number} size - 头像尺寸（像素）
+         * @returns {string} 头像HTML字符串
+         */
+        function createAvatarHtml(avatarUrl, username, size = 32) {
+            // 如果没有有效的头像URL，直接使用默认头像
+            if (!avatarUrl || !isValidGitHubUsername(username)) {
+                return `<img 
+                    src="${DEFAULT_AVATAR}" 
+                    alt="avatar" 
+                    class="rounded-full" 
+                    width="${size}" 
+                    height="${size}" 
+                    loading="lazy" 
+                    style="object-fit: cover;"
+                    onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
+                />`;
+            }
+
+            // 如果有有效的头像URL，使用它，但onerror时回退到DEFAULT_AVATAR
+            return `<img 
+                src="${avatarUrl}" 
+                alt="avatar" 
+                class="rounded-full" 
+                width="${size}" 
+                height="${size}" 
+                loading="lazy" 
+                style="object-fit: cover;"
+                onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
+            />`;
+        }
+
         function renderRecentActivity(victims) {
             const box = document.getElementById('recentActivity');
             if (!box) return;
@@ -1065,11 +1535,41 @@
                 const location = v.location || v.ip_location || '未知';
                 const name = v.name || `记录${index + 1}`;
                 
+                // 获取头像信息
+                const avatarUrl = v.avatar_url || null;
+                const githubUsername = v.github_username || null;
+                
+                // 判断逻辑：如果 github_username 为空、或者是默认值，则不要请求 GitHub 图片
+                let finalAvatarUrl = avatarUrl;
+                if (!finalAvatarUrl && githubUsername) {
+                    if (isValidGitHubUsername(githubUsername)) {
+                        // 只有有效的GitHub用户名才生成头像URL
+                        finalAvatarUrl = getGitHubAvatarUrl(githubUsername);
+                    } else {
+                        // 无效用户名时，使用默认头像
+                        finalAvatarUrl = DEFAULT_AVATAR;
+                    }
+                }
+                // 如果还是没有有效的头像URL，使用默认头像
+                if (!finalAvatarUrl) {
+                    finalAvatarUrl = DEFAULT_AVATAR;
+                }
+                
+                const finalUsername = githubUsername || name;
+                
+                // 生成头像HTML
+                const avatarHtml = createAvatarHtml(finalAvatarUrl, finalUsername, 32);
+                
                 return `
-                <div class="border-l-2 border-zinc-800 pl-3 py-1">
-                    <div class="text-zinc-500">${new Date(time).toLocaleTimeString()}</div>
-                    <div class="text-white">${name.length > 6 ? name.slice(0,6) + '...' : name}</div>
-                    <div class="text-[var(--accent-terminal)]">${type} @ ${location}</div>
+                <div class="border-l-2 border-zinc-800 pl-3 py-1 flex items-start gap-2">
+                    <div class="flex-shrink-0 mt-0.5">
+                        ${avatarHtml}
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="text-zinc-500">${new Date(time).toLocaleTimeString()}</div>
+                        <div class="text-white">${name.length > 6 ? name.slice(0,6) + '...' : name}</div>
+                        <div class="text-[var(--accent-terminal)]">${type} @ ${location}</div>
+                    </div>
                 </div>
             `;
             }).join('');
@@ -1406,8 +1906,31 @@
 
                                 // 如果成功提取到经纬度，触发地图脉冲（使用判定后的颜色和标签）
                                 if (lng !== null && lat !== null && !isNaN(lng) && !isNaN(lat)) {
-                                    triggerMapPulse(lng, lat, pulseLabel, pulseColor);
-                                    console.log(`[Realtime] ✅ 已触发地图脉冲: [${lng}, ${lat}] ${pulseLabel} (颜色: ${pulseColor}, VPN: ${isVpn})`);
+                                    // 提取头像信息
+                                    let avatarUrl = newRecord.avatar_url || null;
+                                    const githubUsername = newRecord.github_username || newRecord.github_id || null;
+                                    const userName = newRecord.name || newRecord.vibe_name || newRecord.personality_type || '';
+                                    
+                                    // 判断逻辑：如果 github_username 为空、或者是默认值，则不要请求 GitHub 图片
+                                    if (!avatarUrl && githubUsername) {
+                                        if (isValidGitHubUsername(githubUsername)) {
+                                            // 只有有效的GitHub用户名才生成头像URL
+                                            avatarUrl = getGitHubAvatarUrl(githubUsername);
+                                        } else {
+                                            // 无效用户名时，使用默认头像
+                                            avatarUrl = DEFAULT_AVATAR;
+                                        }
+                                    }
+                                    // 如果还是没有有效的头像URL，使用默认头像
+                                    if (!avatarUrl) {
+                                        avatarUrl = DEFAULT_AVATAR;
+                                    }
+                                    
+                                    // 获取用户状态颜色（如果存在），否则使用VPN判定颜色
+                                    const statusColor = newRecord.status_color || pulseColor;
+                                    
+                                    triggerMapPulse(lng, lat, pulseLabel, statusColor, avatarUrl, githubUsername || userName);
+                                    console.log(`[Realtime] ✅ 已触发地图脉冲: [${lng}, ${lat}] ${pulseLabel} (颜色: ${statusColor}, VPN: ${isVpn}, 头像: ${avatarUrl}, 用户名: ${githubUsername || userName})`);
                                 } else {
                                     console.log('[Realtime] ℹ️ 新数据未包含有效的地理位置信息，跳过地图脉冲');
                                 }
@@ -1427,6 +1950,117 @@
                     });
 
                 console.log('[Realtime] 🚀 Realtime 监听已启动');
+
+                // =========================
+                // Supabase Presence 功能：统计实时在线人数
+                // =========================
+                
+                // 如果已有 Presence 频道，先取消订阅
+                if (presenceChannel) {
+                    try {
+                        supabaseClient.removeChannel(presenceChannel);
+                        console.log('[Presence] ✅ 已取消旧的 Presence 频道');
+                    } catch (error) {
+                        console.warn('[Presence] ⚠️ 取消旧 Presence 频道时出错:', error);
+                    }
+                }
+
+                try {
+                    // 创建名为 online_users 的 Presence 频道
+                    presenceChannel = supabaseClient
+                        .channel('online_users')
+                        .on('presence', { event: 'sync' }, () => {
+                            // sync 回调：获取当前在线的所有状态对象
+                            const state = presenceChannel.presenceState();
+                            
+                            // 计算在线人数：遍历所有状态对象并计算总数（去重后）
+                            const userMap = new Map();
+                            if (state) {
+                                Object.keys(state).forEach((key) => {
+                                    const presenceEntries = state[key];
+                                    const entries = Array.isArray(presenceEntries) ? presenceEntries : [presenceEntries];
+                                    
+                                    entries.forEach(entry => {
+                                        if (!entry || !entry.online_at) return;
+                                        const githubId = entry.github_id || entry.github_username || 'Guest';
+                                        if (!userMap.has(githubId) || new Date(entry.online_at) > new Date(userMap.get(githubId).online_at)) {
+                                            userMap.set(githubId, entry);
+                                        }
+                                    });
+                                });
+                            }
+                            
+                            // 排除当前用户自己
+                            const currentUserId = localStorage.getItem('github_username') || null;
+                            if (currentUserId && userMap.has(currentUserId)) {
+                                userMap.delete(currentUserId);
+                            }
+                            
+                            const onlineCount = userMap.size;
+                            console.log('[Presence] 👥 在线人数同步（去重后，排除自己）:', onlineCount);
+
+                            // 更新页面上 #online-count-value 的数字（地图上的）
+                            const onlineCountElement = document.getElementById('online-count-value');
+                            if (onlineCountElement) {
+                                // 添加缩放动画类
+                                onlineCountElement.classList.add('online-count-update');
+                                
+                                // 更新数字（包含自己）
+                                onlineCountElement.textContent = onlineCount + 1;
+                                
+                                // 动画结束后移除类（以便下次更新时可以再次触发动画）
+                                setTimeout(() => {
+                                    onlineCountElement.classList.remove('online-count-update');
+                                }, 400); // 与 CSS 动画时长一致
+                                
+                                console.log('[Presence] ✅ 已更新在线人数显示（地图）:', onlineCount + 1);
+                            } else {
+                                console.warn('[Presence] ⚠️ 找不到 #online-count-value 元素');
+                            }
+                            
+                            // 更新抽屉中的在线人数（即使折叠状态也要更新）
+                            const onlineCountText = document.getElementById('online-count-text');
+                            if (onlineCountText) {
+                                onlineCountText.textContent = onlineCount;
+                            }
+                            
+                            // 渲染用户列表
+                            renderOnlineUsersList(state);
+                        })
+                        .on('broadcast', { event: 'private_message' }, ({ payload }) => {
+                            // 接收私信
+                            const githubUsername = localStorage.getItem('github_username') || null;
+                            
+                            // 检查是否是发给当前用户的消息
+                            if (payload && payload.to === githubUsername) {
+                                console.log('[Message] 📨 收到私信:', payload);
+                                showMessagePopup(payload);
+                            }
+                        })
+                        .on('presence', { event: 'join' }, ({ key, newPresences }) => {
+                            console.log('[Presence] ➕ 用户加入:', key, newPresences);
+                        })
+                        .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
+                            console.log('[Presence] ➖ 用户离开:', key, leftPresences);
+                        })
+                        .subscribe(async (status) => {
+                            if (status === 'SUBSCRIBED') {
+                                console.log('[Presence] ✅ 已成功订阅 online_users 频道');
+                                
+                                // 用户进入时调用 track，标记在线状态
+                                await syncPresenceState();
+                            } else if (status === 'CHANNEL_ERROR') {
+                                console.error('[Presence] ❌ Presence 频道错误');
+                            } else {
+                                console.log(`[Presence] ℹ️ Presence 订阅状态: ${status}`);
+                            }
+                        });
+
+                    console.log('[Presence] 🚀 Presence 监听已启动');
+                } catch (presenceError) {
+                    console.error('[Presence] ❌ 启动 Presence 监听失败:', presenceError);
+                }
+
             } catch (error) {
                 console.error('[Realtime] ❌ 启动 Realtime 监听失败:', error);
             }
@@ -1436,6 +2070,7 @@
          * 停止 Supabase Realtime 监听
          */
         function stopRealtimeListener() {
+            // 停止 postgres_changes 监听
             if (realtimeChannel && supabaseClient) {
                 try {
                     supabaseClient.removeChannel(realtimeChannel);
@@ -1444,6 +2079,505 @@
                 } catch (error) {
                     console.warn('[Realtime] ⚠️ 停止监听时出错:', error);
                 }
+            }
+
+            // 停止 Presence 监听
+            if (presenceChannel && supabaseClient) {
+                try {
+                    // 先取消跟踪，然后移除频道
+                    presenceChannel.untrack();
+                    supabaseClient.removeChannel(presenceChannel);
+                    presenceChannel = null;
+                    console.log('[Presence] ✅ 已停止 Presence 监听');
+                } catch (error) {
+                    console.warn('[Presence] ⚠️ 停止 Presence 监听时出错:', error);
+                }
+            }
+        }
+
+        /**
+         * 设置用户状态
+         * @param {string} status - 状态类型 ('idle', 'busy', 'sprint')
+         */
+        function setUserStatus(status) {
+            if (!USER_STATUSES[status]) {
+                console.warn('[Status] ⚠️ 无效的状态类型:', status);
+                return;
+            }
+            
+            currentUserStatus = status;
+            localStorage.setItem('user_status', status);
+            
+            // 更新按钮样式
+            document.querySelectorAll('.status-btn').forEach(btn => {
+                btn.classList.remove('active');
+                const btnStatus = btn.getAttribute('data-status');
+                if (btnStatus === status) {
+                    btn.classList.add('active');
+                    const statusConfig = USER_STATUSES[status];
+                    btn.style.borderColor = statusConfig.color;
+                    btn.style.color = statusConfig.color;
+                } else {
+                    btn.style.borderColor = '';
+                    btn.style.color = '';
+                }
+            });
+            
+            // 立即同步状态到Presence
+            syncPresenceState();
+            
+            console.log('[Status] ✅ 用户状态已更新:', status, USER_STATUSES[status]);
+        }
+        
+        /**
+         * 初始化状态按钮样式
+         */
+        function initStatusButtons() {
+            const savedStatus = localStorage.getItem('user_status') || 'idle';
+            setUserStatus(savedStatus);
+        }
+        
+        /**
+         * 同步Presence状态（包含所有用户信息）
+         */
+        async function syncPresenceState() {
+            if (!presenceChannel) {
+                console.warn('[Presence] ⚠️ Presence频道未初始化');
+                return;
+            }
+            
+            try {
+                const githubUsername = localStorage.getItem('github_username') || null;
+                let avatarUrl = null;
+                
+                if (isValidGitHubUsername(githubUsername)) {
+                    avatarUrl = getGitHubAvatarUrl(githubUsername);
+                } else {
+                    avatarUrl = DEFAULT_AVATAR;
+                }
+                
+                const statusConfig = USER_STATUSES[currentUserStatus];
+                
+                await presenceChannel.track({
+                    online_at: new Date().toISOString(),
+                    avatar_url: avatarUrl,
+                    github_id: githubUsername,
+                    github_username: githubUsername,
+                    status: statusConfig.status,
+                    status_color: statusConfig.status_color,
+                    last_vibe: new Date().toISOString()
+                });
+                
+                console.log('[Presence] ✅ 状态已同步:', {
+                    github_id: githubUsername,
+                    avatar_url: avatarUrl,
+                    status: statusConfig.status,
+                    status_color: statusConfig.status_color
+                });
+            } catch (error) {
+                console.warn('[Presence] ⚠️ 同步状态失败:', error);
+            }
+        }
+        
+        /**
+         * 切换抽屉展开/折叠状态
+         */
+        function toggleDrawer() {
+            drawerExpanded = !drawerExpanded;
+            const drawer = document.getElementById('live-nodes-drawer');
+            if (!drawer) return;
+            
+            if (drawerExpanded) {
+                drawer.classList.remove('collapsed');
+                drawer.classList.add('expanded');
+            } else {
+                drawer.classList.remove('expanded');
+                drawer.classList.add('collapsed');
+            }
+            
+            // 保存到localStorage
+            localStorage.setItem('drawer_expanded', drawerExpanded.toString());
+            console.log('[Drawer] ✅ 抽屉状态已切换:', drawerExpanded ? '展开' : '折叠');
+        }
+        
+        /**
+         * 初始化抽屉状态
+         */
+        function initDrawerState() {
+            const drawer = document.getElementById('live-nodes-drawer');
+            if (!drawer) return;
+            
+            if (drawerExpanded) {
+                drawer.classList.remove('collapsed');
+                drawer.classList.add('expanded');
+            } else {
+                drawer.classList.remove('expanded');
+                drawer.classList.add('collapsed');
+            }
+        }
+        
+        /**
+         * 渲染在线用户列表（分类显示：已实名/匿名）
+         * @param {Object} presenceState - Presence状态对象
+         */
+        function renderOnlineUsersList(presenceState) {
+            const listContainer = document.getElementById('online-users-list');
+            if (!listContainer) {
+                console.warn('[UserList] ⚠️ 找不到用户列表容器');
+                return;
+            }
+            
+            // 收集所有用户，去重（同一用户多设备登录只显示一次）
+            const userMap = new Map();
+            const currentUserId = localStorage.getItem('github_username') || null;
+            
+            if (presenceState && Object.keys(presenceState).length > 0) {
+                Object.keys(presenceState).forEach((key) => {
+                    const presenceEntries = presenceState[key];
+                    const entries = Array.isArray(presenceEntries) ? presenceEntries : [presenceEntries];
+                    
+                    entries.forEach(entry => {
+                        if (!entry || !entry.online_at) return;
+                        
+                        const githubId = entry.github_id || entry.github_username || 'Guest';
+                        
+                        // 去重逻辑：如果已存在该用户，保留最新的
+                        if (!userMap.has(githubId) || new Date(entry.online_at) > new Date(userMap.get(githubId).online_at)) {
+                            userMap.set(githubId, {
+                                ...entry,
+                                github_id: githubId,
+                                github_username: githubId
+                            });
+                        }
+                    });
+                });
+            }
+            
+            // 排除当前用户自己
+            if (currentUserId && userMap.has(currentUserId)) {
+                userMap.delete(currentUserId);
+            }
+            
+            // 转换为数组并分类
+            const allUsers = Array.from(userMap.values());
+            
+            // 分类：已实名用户（有有效GitHub ID）和匿名用户（Guest或无效ID）
+            const verifiedUsers = allUsers.filter(user => {
+                const githubId = user.github_id || user.github_username || 'Guest';
+                return isValidGitHubUsername(githubId) && githubId !== 'Guest';
+            });
+            
+            const anonymousUsers = allUsers.filter(user => {
+                const githubId = user.github_id || user.github_username || 'Guest';
+                return !isValidGitHubUsername(githubId) || githubId === 'Guest';
+            });
+            
+            // 排序：按在线时间倒序
+            verifiedUsers.sort((a, b) => new Date(b.online_at) - new Date(a.online_at));
+            anonymousUsers.sort((a, b) => new Date(b.online_at) - new Date(a.online_at));
+            
+            // 如果没有其他用户，显示空状态
+            if (verifiedUsers.length === 0 && anonymousUsers.length === 0) {
+                listContainer.innerHTML = '<div class="text-zinc-500 text-center py-8 text-[10px]">Scanning for nearby nodes...</div>';
+                return;
+            }
+            
+            // 渲染已实名用户
+            let html = '';
+            
+            if (verifiedUsers.length > 0) {
+                html += verifiedUsers.map(user => {
+                    const githubId = user.github_id || user.github_username || 'Guest';
+                    const avatarUrl = user.avatar_url || DEFAULT_AVATAR;
+                    const status = user.status || 'idle';
+                    const statusConfig = USER_STATUSES[status] || USER_STATUSES.idle;
+                    const statusColor = user.status_color || statusConfig.status_color;
+                    
+                    // 头像HTML（带呼吸灯边框）
+                    const avatarHtml = `
+                        <div class="avatar-pulse" style="color: ${statusColor};">
+                            <img 
+                                src="${avatarUrl}" 
+                                alt="${githubId}" 
+                                class="rounded-full" 
+                                width="32" 
+                                height="32" 
+                                loading="lazy" 
+                                style="object-fit: cover; display: block;"
+                                onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
+                            />
+                        </div>
+                    `;
+                    
+                    return `
+                        <div class="user-item user-item-verified" onclick="openMessageInput('${githubId}')">
+                            ${avatarHtml}
+                            <div class="flex-1 min-w-0">
+                                <div class="text-white text-xs font-bold truncate">
+                                    <a 
+                                        href="https://github.com/${githubId}" 
+                                        target="_blank" 
+                                        rel="noopener noreferrer"
+                                        class="hover:text-[var(--accent-terminal)] transition-colors"
+                                        onclick="event.stopPropagation()"
+                                    >
+                                        ${githubId}
+                                    </a>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <div class="text-[10px] font-bold uppercase" style="color: ${statusColor};">
+                                    ${statusConfig.emoji} ${statusConfig.label}
+                                </div>
+                                <a 
+                                    href="https://github.com/${githubId}" 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    class="github-link-icon"
+                                    onclick="event.stopPropagation()"
+                                    title="View Profile"
+                                >
+                                    <svg fill="currentColor" viewBox="0 0 24 24" width="14" height="14">
+                                        <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                                    </svg>
+                                </a>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+            
+            // 渲染匿名用户
+            if (anonymousUsers.length > 0) {
+                html += anonymousUsers.map(user => {
+                    const githubId = user.github_id || user.github_username || 'Guest';
+                    const avatarUrl = user.avatar_url || DEFAULT_AVATAR;
+                    const status = user.status || 'idle';
+                    const statusConfig = USER_STATUSES[status] || USER_STATUSES.idle;
+                    const statusColor = user.status_color || statusConfig.status_color;
+                    
+                    // 头像HTML（带呼吸灯边框）
+                    const avatarHtml = `
+                        <div class="avatar-pulse" style="color: ${statusColor};">
+                            <img 
+                                src="${avatarUrl}" 
+                                alt="${githubId}" 
+                                class="rounded-full" 
+                                width="32" 
+                                height="32" 
+                                loading="lazy" 
+                                style="object-fit: cover; display: block;"
+                                onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
+                            />
+                        </div>
+                    `;
+                    
+                    return `
+                        <div class="user-item user-item-anonymous" onclick="openMessageInput('${githubId}')">
+                            ${avatarHtml}
+                            <div class="flex-1 min-w-0">
+                                <div class="text-zinc-400 text-xs font-mono truncate">
+                                    ${githubId}
+                                </div>
+                            </div>
+                            <div class="text-[10px] font-bold uppercase" style="color: ${statusColor};">
+                                ${statusConfig.emoji} ${statusConfig.label}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+            
+            listContainer.innerHTML = html;
+        }
+        
+        /**
+         * 打开私信输入框
+         * @param {string} targetUserId - 目标用户ID
+         */
+        function openMessageInput(targetUserId) {
+            // 创建遮罩层
+            const overlay = document.createElement('div');
+            overlay.className = 'message-input-overlay';
+            overlay.onclick = (e) => {
+                if (e.target === overlay) {
+                    overlay.remove();
+                }
+            };
+            
+            // 创建输入框
+            const inputBox = document.createElement('div');
+            inputBox.className = 'message-input-box';
+            inputBox.onclick = (e) => e.stopPropagation();
+            
+            inputBox.innerHTML = `
+                <div class="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest">发送私信给 ${targetUserId}</div>
+                <textarea 
+                    id="messageTextInput" 
+                    placeholder="输入消息（阅后即焚，5秒后自动销毁）"
+                    class="w-full bg-zinc-900/50 border border-zinc-800 px-3 py-2 rounded text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[var(--accent-terminal)] transition-colors resize-none"
+                    rows="4"
+                ></textarea>
+                <div class="flex gap-2 mt-3">
+                    <button 
+                        onclick="sendMessage('${targetUserId}')"
+                        class="flex-1 px-4 py-2 bg-[var(--accent-terminal)]/20 border border-[var(--accent-terminal)] text-[var(--accent-terminal)] text-xs font-bold uppercase tracking-wider hover:bg-[var(--accent-terminal)]/30 transition-colors"
+                    >
+                        发送
+                    </button>
+                    <button 
+                        onclick="this.closest('.message-input-overlay').remove()"
+                        class="px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-400 text-xs font-bold uppercase tracking-wider hover:bg-zinc-700 transition-colors"
+                    >
+                        取消
+                    </button>
+                </div>
+            `;
+            
+            overlay.appendChild(inputBox);
+            document.body.appendChild(overlay);
+            
+            // 聚焦输入框
+            setTimeout(() => {
+                const textarea = document.getElementById('messageTextInput');
+                if (textarea) textarea.focus();
+            }, 100);
+        }
+        
+        /**
+         * 发送私信（使用Broadcast）
+         * @param {string} targetUserId - 目标用户ID
+         */
+        function sendMessage(targetUserId) {
+            const textarea = document.getElementById('messageTextInput');
+            const message = textarea?.value.trim();
+            
+            if (!message) {
+                alert('消息不能为空');
+                return;
+            }
+            
+            if (!presenceChannel) {
+                alert('连接未建立，无法发送消息');
+                return;
+            }
+            
+            const githubUsername = localStorage.getItem('github_username') || 'Guest';
+            const statusConfig = USER_STATUSES[currentUserStatus];
+            
+            // 使用Broadcast发送消息
+            presenceChannel.send({
+                type: 'broadcast',
+                event: 'private_message',
+                payload: {
+                    from: githubUsername,
+                    to: targetUserId,
+                    message: message,
+                    timestamp: new Date().toISOString(),
+                    status_color: statusConfig.status_color
+                }
+            });
+            
+            console.log('[Message] ✅ 私信已发送:', { from: githubUsername, to: targetUserId });
+            
+            // 关闭输入框
+            const overlay = document.querySelector('.message-input-overlay');
+            if (overlay) overlay.remove();
+        }
+        
+        /**
+         * 显示私信弹窗（接收端）
+         * @param {Object} messageData - 消息数据
+         */
+        function showMessagePopup(messageData) {
+            // 创建弹窗
+            const popup = document.createElement('div');
+            popup.className = 'message-popup';
+            
+            const statusColor = messageData.status_color || '#00ff41';
+            let countdown = 5;
+            
+            popup.innerHTML = `
+                <div class="flex items-center gap-3 mb-3">
+                    <div class="text-[10px] text-zinc-500 uppercase tracking-widest">来自 ${messageData.from}</div>
+                    <div class="flex-1"></div>
+                    <div class="text-[10px] font-bold" style="color: ${statusColor};" id="countdown">5秒</div>
+                </div>
+                <div class="text-white text-sm mb-3 font-mono" style="min-height: 60px;">${messageData.message}</div>
+                <div class="text-[9px] text-zinc-600 font-mono">阅后即焚 // 自动销毁</div>
+            `;
+            
+            document.body.appendChild(popup);
+            
+            // 倒计时
+            const countdownEl = popup.querySelector('#countdown');
+            const countdownInterval = setInterval(() => {
+                countdown--;
+                if (countdownEl) {
+                    countdownEl.textContent = `${countdown}秒`;
+                }
+                
+                if (countdown <= 0) {
+                    clearInterval(countdownInterval);
+                    // 销毁动画
+                    popup.classList.add('destroying');
+                    setTimeout(() => {
+                        popup.remove();
+                    }, 500);
+                }
+            }, 1000);
+        }
+        
+        /**
+         * 保存GitHub用户名到localStorage
+         */
+        function saveGitHubUsername() {
+            const input = document.getElementById('githubUsername');
+            if (!input) {
+                console.warn('[GitHub] ⚠️ 找不到输入框元素');
+                return;
+            }
+            
+            const username = input.value.trim();
+            if (username === '') {
+                // 如果输入为空，清除localStorage
+                localStorage.removeItem('github_username');
+                console.log('[GitHub] ✅ 已清除GitHub用户名');
+                alert('已清除GitHub用户名');
+                return;
+            }
+            
+            // 保存到localStorage
+            localStorage.setItem('github_username', username);
+            console.log('[GitHub] ✅ 已保存GitHub用户名:', username);
+            
+            // 如果Presence频道已连接，立即同步状态
+            if (presenceChannel) {
+                syncPresenceState().then(() => {
+                    console.log('[GitHub] ✅ 已更新在线状态（包含新头像）');
+                    alert('GitHub用户名已保存并更新在线状态');
+                }).catch((err) => {
+                    console.warn('[GitHub] ⚠️ 更新在线状态失败:', err);
+                    alert('GitHub用户名已保存，但更新在线状态失败');
+                });
+            } else {
+                alert('GitHub用户名已保存');
+            }
+        }
+
+        /**
+         * 从localStorage加载GitHub用户名并填充到输入框
+         */
+        function loadGitHubUsername() {
+            const input = document.getElementById('githubUsername');
+            if (!input) {
+                return;
+            }
+            
+            const savedUsername = localStorage.getItem('github_username');
+            if (savedUsername) {
+                input.value = savedUsername;
+                console.log('[GitHub] ✅ 已加载保存的GitHub用户名:', savedUsername);
             }
         }
 
@@ -1599,9 +2733,13 @@
                     });
                 }
 
-                // 4. 构建提交数据
+                // 4. 生成随机访客用户名：Guest_XXXX（XXXX为4位随机数字）
+                const randomGuestId = Math.floor(1000 + Math.random() * 9000); // 生成1000-9999的随机数
+                const guestUserName = `Guest_${randomGuestId}`;
+
+                // 5. 构建提交数据
                 const payload = {
-                    user_name: '自动上报用户',
+                    user_name: guestUserName,
                     personality_type: 'AUTO_REPORT',
                     lat: lat,
                     lng: lng,
@@ -1630,19 +2768,41 @@
                 if (lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng)) {
                     // 性能保护：检查 triggerMapPulse 函数是否已定义
                     if (typeof triggerMapPulse === 'function') {
-                        // 根据 VPN 判定结果设置标签和颜色
+                        // 根据 VPN 判定结果设置标签
                         const pulseLabel = is_vpn ? 'YOU [VPN PROXY]' : 'YOU [DIRECT]';
-                        const pulseColor = is_vpn ? '#00ff41' : '#ffffff'; // VPN 用户绿色，正常用户白色
+                        
+                        // 获取用户状态颜色（优先使用当前状态颜色）
+                        const statusConfig = USER_STATUSES[currentUserStatus] || USER_STATUSES.idle;
+                        const statusColor = statusConfig.status_color;
+                        // 如果VPN，使用绿色；否则使用状态颜色
+                        const pulseColor = is_vpn ? '#00ff41' : statusColor;
 
+                        // 获取GitHub用户名和头像URL
+                        // 判断逻辑：如果 github_username 为空、或者是默认值，则不要请求 GitHub 图片
+                        const githubUsername = localStorage.getItem('github_username') || null;
+                        let avatarUrl = null;
+                        
+                        if (isValidGitHubUsername(githubUsername)) {
+                            // 只有有效的GitHub用户名才生成头像URL
+                            avatarUrl = getGitHubAvatarUrl(githubUsername);
+                        } else {
+                            // 无效用户名时，使用默认头像
+                            avatarUrl = DEFAULT_AVATAR;
+                        }
+                        
                         // 立即调用 triggerMapPulse 显示自己的位置
                         try {
-                            triggerMapPulse(lng, lat, pulseLabel, pulseColor);
+                            triggerMapPulse(lng, lat, pulseLabel, pulseColor, avatarUrl, githubUsername);
                             console.log('[AutoReport] 🗺️ 已在地图上显示自己的位置:', {
                                 lng,
                                 lat,
                                 label: pulseLabel,
                                 color: pulseColor,
-                                is_vpn
+                                status: currentUserStatus,
+                                is_vpn,
+                                avatarUrl,
+                                githubUsername,
+                                isValid: isValidGitHubUsername(githubUsername)
                             });
                         } catch (pulseError) {
                             console.warn('[AutoReport] ⚠️ 调用 triggerMapPulse 失败:', pulseError);
@@ -1858,6 +3018,15 @@
 
 
         window.onload = async () => {
+            // 加载保存的GitHub用户名
+            loadGitHubUsername();
+            
+            // 初始化状态按钮
+            initStatusButtons();
+            
+            // 初始化抽屉状态
+            initDrawerState();
+            
             // 先执行初始数据加载
             await fetchData();
             
