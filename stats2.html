@@ -719,57 +719,62 @@
                     <div id="lpdef-container" class="absolute bottom-4 left-4 right-4 grid grid-cols-2 md:grid-cols-5 gap-4">
                         <!-- L 维度卡片 -->
                         <div id="card-L" class="bg-black/80 backdrop-blur-md border border-zinc-800 p-4 rounded lpdef-card cursor-pointer hover:border-[var(--accent-terminal)] transition-all relative" onclick="openExpertGitHub('L')">
-                            <div class="text-[9px] text-zinc-500 mb-2 uppercase tracking-widest">L · 逻辑专家</div>
+                            <div id="expert-label-L" class="text-white text-[10px] font-bold mb-2 tracking-tight text-center">架构师的直觉</div>
                             <div id="expert-avatar-L" class="w-12 h-12 rounded-full bg-zinc-800 mb-2 flex items-center justify-center overflow-hidden border-2 border-zinc-700 mx-auto">
                                 <div class="text-zinc-600 text-[10px] text-center">加载中...</div>
                             </div>
                             <div id="expert-name-L" class="text-sm font-bold truncate mb-1 text-center">...</div>
                             <div id="expert-title-L" class="text-[10px] text-zinc-500 mb-1 truncate text-center">...</div>
                             <div id="expert-score-L" class="text-xl font-bold text-[var(--accent-terminal)] text-center">0</div>
+                            <div id="expert-desc-L" class="text-[10px] text-zinc-500 mt-1 text-center">在逻辑迷宫中一眼看穿本质</div>
                         </div>
                         
                         <!-- P 维度卡片 -->
                         <div id="card-P" class="bg-black/80 backdrop-blur-md border border-zinc-800 p-4 rounded lpdef-card cursor-pointer hover:border-[var(--accent-terminal)] transition-all relative" onclick="openExpertGitHub('P')">
-                            <div class="text-[9px] text-zinc-500 mb-2 uppercase tracking-widest">P · 耐心大师</div>
+                            <div id="expert-label-P" class="text-white text-[10px] font-bold mb-2 tracking-tight text-center">深海潜航者</div>
                             <div id="expert-avatar-P" class="w-12 h-12 rounded-full bg-zinc-800 mb-2 flex items-center justify-center overflow-hidden border-2 border-zinc-700 mx-auto">
                                 <div class="text-zinc-600 text-[10px] text-center">加载中...</div>
                             </div>
                             <div id="expert-name-P" class="text-sm font-bold truncate mb-1 text-center">...</div>
                             <div id="expert-title-P" class="text-[10px] text-zinc-500 mb-1 truncate text-center">...</div>
                             <div id="expert-score-P" class="text-xl font-bold text-[var(--accent-terminal)] text-center">0</div>
+                            <div id="expert-desc-P" class="text-[10px] text-zinc-500 mt-1 text-center">面对复杂逻辑拥有极致的静气</div>
                         </div>
                         
                         <!-- D 维度卡片 -->
                         <div id="card-D" class="bg-black/80 backdrop-blur-md border border-zinc-800 p-4 rounded lpdef-card cursor-pointer hover:border-[var(--accent-terminal)] transition-all relative" onclick="openExpertGitHub('D')">
-                            <div class="text-[9px] text-zinc-500 mb-2 uppercase tracking-widest">D · 细节狂魔</div>
+                            <div id="expert-label-D" class="text-white text-[10px] font-bold mb-2 tracking-tight text-center">像素级侦探</div>
                             <div id="expert-avatar-D" class="w-12 h-12 rounded-full bg-zinc-800 mb-2 flex items-center justify-center overflow-hidden border-2 border-zinc-700 mx-auto">
                                 <div class="text-zinc-600 text-[10px] text-center">加载中...</div>
                             </div>
                             <div id="expert-name-D" class="text-sm font-bold truncate mb-1 text-center">...</div>
                             <div id="expert-title-D" class="text-[10px] text-zinc-500 mb-1 truncate text-center">...</div>
                             <div id="expert-score-D" class="text-xl font-bold text-[var(--accent-terminal)] text-center">0</div>
+                            <div id="expert-desc-D" class="text-[10px] text-zinc-500 mt-1 text-center">任何微小的代码瑕疵都无所遁形</div>
                         </div>
                         
                         <!-- E 维度卡片 -->
                         <div id="card-E" class="bg-black/80 backdrop-blur-md border border-zinc-800 p-4 rounded lpdef-card cursor-pointer hover:border-[var(--accent-terminal)] transition-all relative" onclick="openExpertGitHub('E')">
-                            <div class="text-[9px] text-zinc-500 mb-2 uppercase tracking-widest">E · 探索先锋</div>
+                            <div id="expert-label-E" class="text-white text-[10px] font-bold mb-2 tracking-tight text-center">共情架构师</div>
                             <div id="expert-avatar-E" class="w-12 h-12 rounded-full bg-zinc-800 mb-2 flex items-center justify-center overflow-hidden border-2 border-zinc-700 mx-auto">
                                 <div class="text-zinc-600 text-[10px] text-center">加载中...</div>
                             </div>
                             <div id="expert-name-E" class="text-sm font-bold truncate mb-1 text-center">...</div>
                             <div id="expert-title-E" class="text-[10px] text-zinc-500 mb-1 truncate text-center">...</div>
                             <div id="expert-score-E" class="text-xl font-bold text-[var(--accent-terminal)] text-center">0</div>
+                            <div id="expert-desc-E" class="text-[10px] text-zinc-500 mt-1 text-center">代码中流淌着对用户体验的极致理解</div>
                         </div>
                         
                         <!-- F 维度卡片 -->
                         <div id="card-F" class="bg-black/80 backdrop-blur-md border border-zinc-800 p-4 rounded lpdef-card cursor-pointer hover:border-[var(--accent-terminal)] transition-all relative" onclick="openExpertGitHub('F')">
-                            <div class="text-[9px] text-zinc-500 mb-2 uppercase tracking-widest">F · 反馈达人</div>
+                            <div id="expert-label-F" class="text-white text-[10px] font-bold mb-2 tracking-tight text-center">指尖打击乐手</div>
                             <div id="expert-avatar-F" class="w-12 h-12 rounded-full bg-zinc-800 mb-2 flex items-center justify-center overflow-hidden border-2 border-zinc-700 mx-auto">
                                 <div class="text-zinc-600 text-[10px] text-center">加载中...</div>
                             </div>
                             <div id="expert-name-F" class="text-sm font-bold truncate mb-1 text-center">...</div>
                             <div id="expert-title-F" class="text-[10px] text-zinc-500 mb-1 truncate text-center">...</div>
                             <div id="expert-score-F" class="text-xl font-bold text-[var(--accent-terminal)] text-center">0</div>
+                            <div id="expert-desc-F" class="text-[10px] text-zinc-500 mt-1 text-center">极致的输入频率下保持着惊人的准确率</div>
                         </div>
                     </div>
                 </div>
@@ -964,6 +969,15 @@
 
         let mapChart, radarChart;
         let selectedCountry = null; // 当前选中的国家
+        // 🔍 称号与说明映射（完全同步 content.ts 的业务语义）
+        const DIMENSION_TITLES = {
+            L: { title: '架构师的直觉', description: '在逻辑迷宫中一眼看穿本质' },
+            P: { title: '深海潜航者', description: '面对复杂逻辑拥有极致的静气' },
+            D: { title: '像素级侦探', description: '任何微小的代码瑕疵都无所遁形' },
+            E: { title: '共情架构师', description: '代码中流淌着对用户体验的极致理解' },
+            F: { title: '指尖打击乐手', description: '极致的输入频率下保持着惊人的准确率' }
+        };
+        
         let lpdefExperts = { L: null, P: null, D: null, E: null, F: null }; // 存储当前五个维度的专家信息
         // 地图渲染令牌：防止并发 init / dispose 导致 getZr 为空
         let mapRenderSeq = 0;
@@ -1987,6 +2001,8 @@
                 const nameEl = document.getElementById(`expert-name-${dim}`);
                 const titleEl = document.getElementById(`expert-title-${dim}`);
                 const scoreEl = document.getElementById(`expert-score-${dim}`);
+                const labelEl = document.getElementById(`expert-label-${dim}`);
+                const descEl = document.getElementById(`expert-desc-${dim}`);
 
                 if (avatarEl) {
                     const img = avatarEl.querySelector('img');
@@ -2011,6 +2027,15 @@
                 
                 if (scoreEl) {
                     scoreEl.textContent = '0';
+                }
+                
+                // 重置称号和说明（保持维度专属称号和说明）
+                if (labelEl && DIMENSION_TITLES[dim]) {
+                    labelEl.textContent = DIMENSION_TITLES[dim].title;
+                }
+                
+                if (descEl && DIMENSION_TITLES[dim]) {
+                    descEl.textContent = DIMENSION_TITLES[dim].description;
                 }
 
                 // 取消点击事件
@@ -2133,7 +2158,19 @@
                     console.log(`[LPDEF] ✅ 维度 ${dim} 用户名已更新: ${displayName}`);
                 }
 
-                // 防御性代码：更新称号
+                // 防御性代码：更新称号（左上角）- 使用维度专属称号
+                const labelEl = document.getElementById(`expert-label-${dim}`);
+                if (labelEl && DIMENSION_TITLES[dim]) {
+                    labelEl.textContent = DIMENSION_TITLES[dim].title;
+                }
+                
+                // 防御性代码：更新说明（分数下方）- 使用维度专属说明
+                const descEl = document.getElementById(`expert-desc-${dim}`);
+                if (descEl && DIMENSION_TITLES[dim]) {
+                    descEl.textContent = DIMENSION_TITLES[dim].description;
+                }
+                
+                // 防御性代码：更新 personality_type（保留原有逻辑，但不在主要位置显示）
                 const titleEl = document.getElementById(`expert-title-${dim}`);
                 if (titleEl) {
                     titleEl.textContent = topUser.personality_type || topUser.type || 'UNKNOWN';
@@ -2238,6 +2275,8 @@
             const nameEl = document.getElementById(`expert-name-${dim}`);
             const titleEl = document.getElementById(`expert-title-${dim}`);
             const scoreEl = document.getElementById(`expert-score-${dim}`);
+            const labelEl = document.getElementById(`expert-label-${dim}`);
+            const descEl = document.getElementById(`expert-desc-${dim}`);
 
             if (expert) {
                 // 更新头像
@@ -2267,7 +2306,17 @@
                     nameEl.textContent = expert.username || 'Unknown';
                 }
 
-                // 更新称号（基于 personality_type）
+                // 更新称号（左上角）- 使用维度专属称号
+                if (labelEl && DIMENSION_TITLES[dim]) {
+                    labelEl.textContent = DIMENSION_TITLES[dim].title;
+                }
+                
+                // 更新说明（分数下方）- 使用维度专属说明
+                if (descEl && DIMENSION_TITLES[dim]) {
+                    descEl.textContent = DIMENSION_TITLES[dim].description;
+                }
+                
+                // 更新 personality_type（保留原有逻辑，但不在主要位置显示）
                 if (titleEl) {
                     titleEl.textContent = expert.personalityType || 'UNKNOWN';
                 }
@@ -2284,6 +2333,15 @@
                 }
             } else {
                 // 无数据时的显示（包括无人区状态）
+                // 保持称号和说明（维度专属）
+                if (labelEl && DIMENSION_TITLES[dim]) {
+                    labelEl.textContent = DIMENSION_TITLES[dim].title;
+                }
+                
+                if (descEl && DIMENSION_TITLES[dim]) {
+                    descEl.textContent = DIMENSION_TITLES[dim].description;
+                }
+                
                 if (avatarEl) {
                     // 无人区状态：使用默认头像
                     avatarEl.innerHTML = `<img 

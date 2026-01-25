@@ -4,6 +4,9 @@
   "description": "Cursor 对话历史分析工具 - WebAssembly 版本",
   "type": "module",
   "scripts": {
+	  "dev": "npm run generate-content && vite",
+    "generate-content": "node scripts/generate-content.cjs",
+    "prebuild": "npm run generate-content",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
