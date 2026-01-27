@@ -9,9 +9,6 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { calculateDimensions, RARITY_SCORES, DIMENSIONS } from './scoring';
 import { getRoastText, getPersonalityName, getVibeIndex, determinePersonalityType, generateLPDEF } from './content';
-import { getRankResult, RANK_DATA } from './rank';
-// 直接从 rank-content.ts 导入 RANK_RESOURCES（rank.ts 已导入但未导出）
-import { RANK_RESOURCES } from '../rank-content';
 
 // Cloudflare Workers 类型定义（兼容性处理）
 type KVNamespace = {
@@ -58,403 +55,6 @@ const KV_KEY_GLOBAL_AVERAGES = 'GLOBAL_AVERAGES'; // 大盘汇总数据键名
 const KV_KEY_GLOBAL_STATS_CACHE = 'GLOBAL_STATS_CACHE'; // 完整统计数据缓存（原子性）
 const KV_KEY_GLOBAL_STATS_V6 = 'GLOBAL_STATS_V6'; // V6 协议全局统计（用于动态排名）
 const KV_CACHE_TTL = 3600; // 缓存有效期：1小时（秒）
-
-/**
- * 【维度标识符映射表】
- * 将 scoring.ts 的维度 Key (L, P, D, E, F) 映射到 rank-content.ts 的一级 Key
- * 
- * 【验证】rank-content.ts 中的一级 Key 有：ai, day, no, please, say, word
- * 映射关系必须完全对应，确保每个维度都能找到对应的文案
- */
-const DIMENSION_KEY_MAPPING: Record<string, string> = {
-  'L': 'word',  // 逻辑力 → word (平均长度排名) ✓
-  'P': 'no',    // 耐心值 → no (甲方上身排名) ✓
-  'D': 'say',   // 细腻度 → say (废话输出排名) ✓
-  'E': 'ai',    // 探索欲 → ai (调戏 AI 排名) ✓
-  'F': 'please' // 反馈感 → please (赛博磕头排名) ✓
-};
-
-// 【验证】确保所有映射的 Key 都在 rank-content.ts 中存在
-const VALID_RANK_KEYS = ['ai', 'day', 'no', 'please', 'say', 'word'];
-Object.entries(DIMENSION_KEY_MAPPING).forEach(([dimKey, rankKey]) => {
-  if (!VALID_RANK_KEYS.includes(rankKey)) {
-    console.error(`[Worker] ❌ 映射错误：维度 ${dimKey} 映射到 ${rankKey}，但该 Key 不在 rank-content.ts 中`);
-  }
-});
-
-/**
- * 【维度值映射函数】
- * 将维度得分转换为 rank-content.ts 所需的数值
- * 注意：rank-content.ts 中的范围是基于实际统计值（如对话回合数、字数等），
- * 而不是维度得分（0-100）。因此需要使用 stats 中的实际统计值。
- */
-function mapDimensionValueToRankValue(
-  dimensionKey: string,
-  dimensionValue: number,
-  stats: V6Stats
-): number {
-  switch (dimensionKey) {
-    case 'L': // 逻辑力 → word (平均长度排名)
-      // word 的范围通常是字符数，使用 avg_payload（平均消息长度）
-      return Math.round(stats.avg_payload || 0);
-    case 'P': // 耐心值 → no (甲方上身排名)
-      // no 的范围是"不"字次数，使用 jiafang_count
-      return stats.jiafang_count || 0;
-    case 'D': // 细腻度 → say (废话输出排名)
-      // say 的范围是总字符数，使用 totalChars
-      return stats.totalChars || 0;
-    case 'E': // 探索欲 → ai (调戏 AI 排名)
-      // ai 的范围是对话回合数，使用 totalMessages
-      return stats.totalMessages || 0;
-    case 'F': // 反馈感 → please (赛博磕头排名)
-      // please 的范围是"请"字次数，使用 ketao_count
-      return stats.ketao_count || 0;
-    default:
-      // 降级：如果无法映射，使用维度得分本身（可能需要调整范围）
-      return Math.round(dimensionValue);
-  }
-}
-
-/**
- * 【维度得分映射到 level】
- * 将维度得分 (0-100) 映射到 answer_book 表的 level (0, 1, 2)
- * - 0-33: level 0 (低)
- * - 34-66: level 1 (中)
- * - 67-100: level 2 (高)
- */
-function mapDimensionScoreToLevel(score: number): number {
-  if (score <= 33) return 0;
-  if (score <= 66) return 1;
-  return 2;
-}
-
-/**
- * 【从 Supabase 获取维度吐槽文案】
- * 从 answer_book 表查询指定维度、level 和语言的吐槽文案
- * @param env - 环境变量（包含 SUPABASE_URL 和 SUPABASE_KEY）
- * @param dimension - 维度代码 (L, P, D, E, F)
- * @param level - 等级 (0, 1, 2)
- * @param lang - 语言 ('cn' 或 'en')
- * @returns 吐槽文案，如果未找到则返回 null
- */
-async function getRoastFromSupabase(
-  env: Env,
-  dimension: string,
-  level: number,
-  lang: string
-): Promise<string | null> {
-  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
-    console.warn('[Worker] ⚠️ Supabase 配置缺失，无法从数据库获取吐槽文案');
-    return null;
-  }
-
-  try {
-    // 将语言代码转换为数据库格式 ('zh-CN' -> 'cn', 'en' -> 'en')
-    const dbLang = lang === 'en' ? 'en' : 'cn';
-    
-    // 查询 answer_book 表，获取所有匹配的记录以便随机选择
-    const url = `${env.SUPABASE_URL}/rest/v1/answer_book?dimension=eq.${dimension}&level=eq.${level}&lang=eq.${dbLang}&select=content`;
-    
-    console.log(`[Worker] 📖 查询 answer_book: dimension=${dimension}, level=${level}, lang=${dbLang}`);
-    
-    const response = await fetch(url, {
-      headers: {
-        'apikey': env.SUPABASE_KEY,
-        'Authorization': `Bearer ${env.SUPABASE_KEY}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
-      console.warn(`[Worker] ⚠️ Supabase answer_book 查询失败: ${response.status} ${response.statusText}`, errorText);
-      return null;
-    }
-
-    const data = await response.json();
-    console.log(`[Worker] 📖 answer_book 查询结果: 找到 ${Array.isArray(data) ? data.length : 0} 条记录`);
-    
-    if (Array.isArray(data) && data.length > 0) {
-      // 随机选择一条文案
-      const randomIndex = Math.floor(Math.random() * data.length);
-      const content = data[randomIndex].content;
-      console.log(`[Worker] ✅ 随机选择第 ${randomIndex + 1} 条: ${content?.substring(0, 30)}...`);
-      return content || null;
-    }
-    
-    console.warn(`[Worker] ⚠️ answer_book 中未找到 dimension=${dimension}, level=${level}, lang=${dbLang} 的记录`);
-    return null;
-  } catch (error) {
-    console.error(`[Worker] ❌ 从 Supabase 获取吐槽文案失败:`, error);
-    return null;
-  }
-}
-
-/**
- * 【从 Supabase 获取维度标签】
- * 从 rank.ts 的 RANK_DATA 获取标签，作为降级方案
- */
-function getDimensionLabelFromRank(
-  dimensionKey: string,
-  dimensionValue: number,
-  rankLang: 'zh' | 'en'
-): string {
-  const rankId = DIMENSION_KEY_MAPPING[dimensionKey];
-  if (!rankId || !RANK_DATA[rankId]) {
-    return '未知';
-  }
-
-  // 将维度得分映射到 rank-content.ts 所需的数值（使用默认 stats）
-  const defaultStats: V6Stats = {
-    totalChars: 0,
-    totalMessages: 0,
-    ketao_count: 0,
-    jiafang_count: 0,
-    tease_count: 0,
-    nonsense_count: 0,
-    slang_count: 0,
-    abuse_count: 0,
-    abuse_value: 0,
-    tech_stack: {},
-    work_days: 0,
-    code_ratio: 0,
-    feedback_density: 0,
-    balance_score: 50,
-    diversity_score: 0,
-    style_index: 0,
-    style_label: '',
-    avg_payload: 0,
-    blackword_hits: {
-      chinese_slang: {},
-      english_slang: {},
-    },
-  };
-  
-  const rankValue = mapDimensionValueToRankValue(dimensionKey, dimensionValue, defaultStats);
-  const rankResult = getRankResult(rankId, rankValue, rankLang);
-  
-  if (rankResult && rankResult.level) {
-    return rankLang === 'en' 
-      ? (rankResult.level.labelEn || rankResult.level.label || '未知')
-      : (rankResult.level.label || '未知');
-  }
-  
-  return '未知';
-}
-
-/**
- * 【适配器函数】matchLPDEFContent
- * 将 L, P, D, E, F 维度分数映射到 rank-content.ts 的文案
- * 
- * @param dimensions - 维度得分对象 { L, P, D, E, F }
- * @param lang - 语言代码 ('zh-CN' | 'en')
- * @returns 包含每个维度称号和随机吐槽的数组
- */
-function matchLPDEFContent(
-  dimensions: { L: number; P: number; D: number; E: number; F: number },
-  lang: string = 'zh-CN'
-): Array<{
-  dimension: string;
-  score: number;
-  label: string;
-  roast: string;
-}> {
-  const result: Array<{
-    dimension: string;
-    score: number;
-    label: string;
-    roast: string;
-  }> = [];
-  
-  // 维度映射：L -> 'word', P -> 'no', D -> 'say', E -> 'ai', F -> 'please'
-  const dimensionMapping: Record<string, string> = {
-    'L': 'word',
-    'P': 'no',
-    'D': 'say',
-    'E': 'ai',
-    'F': 'please'
-  };
-  
-  // 确定语言（'zh' 或 'en'）
-  const isZh = lang !== 'en' && !lang.startsWith('en');
-  const langKey = isZh ? 'commentsZh' : 'commentsEn';
-  const labelKey = isZh ? 'label' : 'labelEn';
-  
-  // 遍历每个维度
-  console.log('[Adapter] 🔍 开始匹配维度，输入:', {
-    dimensionsKeys: Object.keys(dimensions),
-    dimensionsValues: Object.values(dimensions),
-    dimensionMapping,
-    availableResources: Object.keys(RANK_RESOURCES),
-  });
-  
-  for (const [dimKey, dimScore] of Object.entries(dimensions)) {
-    console.log(`[Adapter] 🔍 处理维度 ${dimKey}, 分数: ${dimScore}`);
-    
-    const rankId = dimensionMapping[dimKey];
-    if (!rankId) {
-      console.warn(`[Adapter] ⚠️ 未知维度: ${dimKey}, 跳过`);
-      continue;
-    }
-    
-    console.log(`[Adapter] 🔍 维度 ${dimKey} 映射到 rankId: ${rankId}`);
-    
-    // 获取对应的 RANK_RESOURCES 配置
-    const resource = RANK_RESOURCES[rankId];
-    if (!resource || !resource.levels || !Array.isArray(resource.levels)) {
-      console.warn(`[Adapter] ⚠️ 未找到 rank-content 配置: ${rankId}`, {
-        resourceExists: !!resource,
-        hasLevels: !!resource?.levels,
-        isArray: Array.isArray(resource?.levels),
-        levelsLength: resource?.levels?.length || 0,
-      });
-      // 降级：使用默认值
-      result.push({
-        dimension: dimKey,
-        score: dimScore,
-        label: '未知',
-        roast: '暂无吐槽文案'
-      });
-      continue;
-    }
-    
-    console.log(`[Adapter] ✅ 找到资源 ${rankId}, levels 数量: ${resource.levels.length}`);
-    
-    // 【关键修复】将维度分数（0-100）映射到 rank-content.ts 的数值范围
-    // 注意：rank-content.ts 中的范围是基于实际统计值（如对话回合数、字数等），
-    // 而不是维度得分（0-100）。因此需要将维度得分转换为对应的 rank 值。
-    
-    // 将维度分数（0-100）转换为 rank 值
-    // 对于不同维度，映射方式不同：
-    // - L (逻辑力): 分数越高，代码比例越高，对应 word 的字符数范围
-    // - P (耐心值): 分数越低，否定词越多，对应 no 的计数范围（需要反向映射）
-    // - D (细腻度): 分数越高，修饰词越多，对应 say 的字符数范围
-    // - E (探索欲): 分数越高，技术词越多，对应 ai 的对话回合数范围
-    // - F (反馈感): 分数越高，礼貌词越多，对应 please 的计数范围
-    
-    let rankValue = Math.max(0, Math.min(100, Math.round(dimScore)));
-    
-    // 特殊处理：某些维度的范围映射
-    if (dimKey === 'E') {
-      // E 维度：探索欲，rank-content.ts 中 ai 的范围通常是 1-200+，需要放大
-      rankValue = Math.round(dimScore * 2); // 将 0-100 映射到 0-200
-    } else if (dimKey === 'P') {
-      // P 维度：耐心值，分数越低否定词越多，但 rank-content.ts 中 no 的范围是正向的
-      // 保持原值，但需要确保能匹配到合适的区间
-      rankValue = Math.round(dimScore);
-    }
-    
-    // 【关键修复】在 levels 数组中查找匹配的区间
-    // 修正：确保 0 分也能命中第一个档位（即使 min === 1）
-    let matchedLevel = resource.levels.find((level: any) => {
-      const min = level.min || 0;
-      const max = level.max || 999999;
-      
-      // 【修复】如果 min === 1，允许 0 分也匹配到第一个档位
-      const adjustedMin = (min === 1 && rankValue === 0) ? 0 : min;
-      
-      return rankValue >= adjustedMin && rankValue <= max;
-    });
-    
-    // 【降级处理】如果没有匹配到，使用第一个或最后一个 level
-    if (!matchedLevel) {
-      if (resource.levels.length > 0) {
-        const firstLevel = resource.levels[0];
-        const lastLevel = resource.levels[resource.levels.length - 1];
-        const firstMin = firstLevel.min || 0;
-        const lastMax = lastLevel.max || 999999;
-        
-        // 如果分数太低（包括 0 分），使用第一个 level
-        if (rankValue <= firstMin) {
-          matchedLevel = firstLevel;
-          console.log(`[Adapter] ⚠️ 维度 ${dimKey} 分数 ${rankValue} 低于最小值 ${firstMin}，使用第一个 level`);
-        }
-        // 如果分数太高，使用最后一个 level
-        else if (rankValue > lastMax) {
-          matchedLevel = lastLevel;
-          console.log(`[Adapter] ⚠️ 维度 ${dimKey} 分数 ${rankValue} 高于最大值 ${lastMax}，使用最后一个 level`);
-        }
-        // 否则使用第一个 level（兜底）
-        else {
-          matchedLevel = firstLevel;
-          console.log(`[Adapter] ⚠️ 维度 ${dimKey} 分数 ${rankValue} 无法匹配，使用第一个 level 作为兜底`);
-        }
-      } else {
-        console.warn(`[Adapter] ⚠️ ${rankId} 没有可用的 levels`);
-        result.push({
-          dimension: dimKey,
-          score: dimScore,
-          label: '未知',
-          roast: '暂无吐槽文案'
-        });
-        continue;
-      }
-    }
-    
-    // 【关键修复】获取标签
-    const label = matchedLevel[labelKey] || matchedLevel.label || '未知';
-    
-    // 【关键修复】从 commentsZh 或 commentsEn 数组中随机抽取一个 content
-    // 修正：确保正确提取 content 字符串，而不是整个对象
-    const comments = matchedLevel[langKey] || [];
-    let roast = '暂无吐槽文案';
-    
-    if (Array.isArray(comments) && comments.length > 0) {
-      // 随机选择一个评论
-      const randomIndex = Math.floor(Math.random() * comments.length);
-      const selectedComment = comments[randomIndex];
-      
-      // 【修复】确保正确提取 content 字段
-      if (selectedComment) {
-        if (typeof selectedComment === 'string') {
-          // 如果直接是字符串，直接使用
-          roast = selectedComment;
-        } else if (selectedComment.content && typeof selectedComment.content === 'string') {
-          // 如果是对象，提取 content 字段
-          roast = selectedComment.content;
-        } else {
-          console.warn(`[Adapter] ⚠️ 维度 ${dimKey} 的评论格式异常:`, selectedComment);
-        }
-      }
-      
-      // 【验证】确保 roast 是有效的字符串
-      if (!roast || roast === '暂无吐槽文案') {
-        console.warn(`[Adapter] ⚠️ 维度 ${dimKey} 无法提取有效的 roast，comments 长度: ${comments.length}`);
-      }
-    } else {
-      console.warn(`[Adapter] ⚠️ 维度 ${dimKey} 的 ${langKey} 数组为空或不存在`);
-    }
-    
-    // 添加到结果数组
-    result.push({
-      dimension: dimKey,
-      score: dimScore,
-      label: label,
-      roast: roast
-    });
-    
-    console.log(`[Adapter] ✅ 维度 ${dimKey} 匹配成功:`, {
-      rankId,
-      originalScore: dimScore,
-      rankValue,
-      label,
-      roastLength: roast.length,
-      roastPreview: roast.length > 50 ? roast.substring(0, 50) + '...' : roast,
-      matchedLevelRange: `${matchedLevel.min}-${matchedLevel.max}`,
-      commentsCount: (matchedLevel[langKey] || []).length,
-    });
-  }
-  
-  console.log('[Adapter] ✅ 适配器函数完成，返回结果:', {
-    resultCount: result.length,
-    resultDimensions: result.map(r => r.dimension),
-    allDimensionsPresent: ['L', 'P', 'D', 'E', 'F'].every(
-      dim => result.find(r => r.dimension === dim)
-    ),
-  });
-  
-  return result;
-}
 
 /**
  * 【V6 协议类型定义】V6Stats 接口
@@ -739,25 +339,21 @@ function generateVibeDiagnosis(
     };
   }
 
-  // 【安全修复】确保 style_index 是有效数字，防止 undefined.toFixed() 错误
-  const safeStyleIndex = Number(stats.style_index) || 50;
-  const safeAvgPayload = Number(stats.avg_payload) || 0;
-  
   // 默认：根据 style_index 生成
-  if (safeStyleIndex > 100) {
+  if (stats.style_index > 100) {
     return {
       title: isZh ? '雄辩家' : 'Eloquent Speaker',
       content: isZh
-        ? `你的平均消息长度为 ${Math.round(safeAvgPayload)} 字符，交互风格指数为 ${safeStyleIndex.toFixed(1)}。你属于"雄辩家"类型，喜欢长篇大论地描述需求。这种详细的沟通方式显示你可能是一个注重细节的人，或者你只是习惯性地把所有想法都写出来。`
-        : `Your average message length is ${Math.round(safeAvgPayload)} characters, with a style index of ${safeStyleIndex.toFixed(1)}. You're an "eloquent speaker" who likes to describe requirements in detail. This detailed communication style suggests you might be detail-oriented, or you're just used to writing down all your thoughts.`,
+        ? `你的平均消息长度为 ${Math.round(stats.avg_payload)} 字符，交互风格指数为 ${stats.style_index.toFixed(1)}。你属于"雄辩家"类型，喜欢长篇大论地描述需求。这种详细的沟通方式显示你可能是一个注重细节的人，或者你只是习惯性地把所有想法都写出来。`
+        : `Your average message length is ${Math.round(stats.avg_payload)} characters, with a style index of ${stats.style_index.toFixed(1)}. You're an "eloquent speaker" who likes to describe requirements in detail. This detailed communication style suggests you might be detail-oriented, or you're just used to writing down all your thoughts.`,
       vibe_level: '雄辩家',
     };
-  } else if (safeStyleIndex < 20) {
+  } else if (stats.style_index < 20) {
     return {
       title: isZh ? '冷酷极客' : 'Cold Geek',
       content: isZh
-        ? `你的平均消息长度为 ${Math.round(safeAvgPayload)} 字符，交互风格指数为 ${safeStyleIndex.toFixed(1)}。你属于"冷酷极客"类型，喜欢简洁指令。这种极简的沟通方式显示你可能是一个效率至上的人，或者你只是不喜欢说废话。`
-        : `Your average message length is ${Math.round(safeAvgPayload)} characters, with a style index of ${safeStyleIndex.toFixed(1)}. You're a "cold geek" who prefers concise commands. This minimalist communication style suggests you might be efficiency-first, or you just don't like small talk.`,
+        ? `你的平均消息长度为 ${Math.round(stats.avg_payload)} 字符，交互风格指数为 ${stats.style_index.toFixed(1)}。你属于"冷酷极客"类型，喜欢简洁指令。这种极简的沟通方式显示你可能是一个效率至上的人，或者你只是不喜欢说废话。`
+        : `Your average message length is ${Math.round(stats.avg_payload)} characters, with a style index of ${stats.style_index.toFixed(1)}. You're a "cold geek" who prefers concise commands. This minimalist communication style suggests you might be efficiency-first, or you just don't like small talk.`,
       vibe_level: '冷酷极客',
     };
   }
@@ -766,8 +362,8 @@ function generateVibeDiagnosis(
   return {
     title: isZh ? '标准型开发者' : 'Standard Developer',
     content: isZh
-      ? `你的交互风格指数为 ${safeStyleIndex.toFixed(1)}，属于标准型开发者。你在与 AI 的对话中保持了平衡的沟通方式，既不过于详细，也不过于简洁。`
-      : `Your style index is ${safeStyleIndex.toFixed(1)}, making you a standard developer. You maintain a balanced communication style with AI, neither too detailed nor too concise.`,
+      ? `你的交互风格指数为 ${stats.style_index.toFixed(1)}，属于标准型开发者。你在与 AI 的对话中保持了平衡的沟通方式，既不过于详细，也不过于简洁。`
+      : `Your style index is ${stats.style_index.toFixed(1)}, making you a standard developer. You maintain a balanced communication style with AI, neither too detailed nor too concise.`,
     vibe_level: '标准型',
   };
 }
@@ -891,32 +487,12 @@ app.post('/api/v2/analyze', async (c) => {
     // 【V6 协议】构建或使用前端上报的 stats
     let finalStats: V6Stats;
     if (v6Stats && v6Stats.totalChars !== undefined) {
-      // 【安全修复】确保前端上报的 stats 包含所有必需字段
-      const totalChars = Number(v6Stats.totalChars) || 0;
-      const totalMessages = Number(v6Stats.totalMessages) || userMessages.length || 1;
-      const calculatedStyleIndex = totalMessages > 0 ? totalChars / totalMessages : 50;
-      
-      finalStats = {
-        ...v6Stats,
-        // 【关键修复】确保 style_index 和 avg_payload 有值
-        style_index: Number(v6Stats.style_index) || calculatedStyleIndex,
-        avg_payload: Number(v6Stats.avg_payload) || calculatedStyleIndex,
-        // 确保其他必需字段有默认值
-        tease_count: Number(v6Stats.tease_count) || 0,
-        nonsense_count: Number(v6Stats.nonsense_count) || 0,
-        slang_count: Number(v6Stats.slang_count) || 0,
-        abuse_count: Number(v6Stats.abuse_count) || 0,
-        abuse_value: Number(v6Stats.abuse_value) || 0,
-        ketao_count: Number(v6Stats.ketao_count) || 0,
-        jiafang_count: Number(v6Stats.jiafang_count) || 0,
-      };
+      finalStats = v6Stats;
       console.log('[Worker] 📊 使用前端上报的 V6 stats:', {
         totalChars: finalStats.totalChars,
         ketao_count: finalStats.ketao_count,
         jiafang_count: finalStats.jiafang_count,
         tease_count: finalStats.tease_count,
-        style_index: finalStats.style_index,
-        avg_payload: finalStats.avg_payload,
       });
     } else {
       // 从 chatData 计算基础 stats（简化版本，完整版本应由前端 Worker 计算）
@@ -1036,8 +612,8 @@ app.post('/api/v2/analyze', async (c) => {
       });
     }
 
-    // 构建基础统计对象（用于 payload）
-    const basicAnalysis = {
+    // 构建 analysis 对象（用于 payload）
+    const analysis = {
       day: workDays,
       no: jiafangCount,
       please: ketaoCount,
@@ -1275,193 +851,7 @@ app.post('/api/v2/analyze', async (c) => {
     const answerBook = generateVibeDiagnosis(finalStats, dimensions, lang);
     console.log('[Worker] 📖 答案之书文案已生成:', answerBook);
 
-    // 【重构】使用适配器函数 matchLPDEFContent 从 rank-content.ts 获取每个维度的称号和吐槽文案
-    // 优先使用适配器函数（直接匹配 rank-content.ts）
-    let detailedStats: Array<{
-      dimension: string;
-      score: number;
-      label: string;
-      roast: string;
-    }> = [];
-    
-    try {
-      // 使用新的适配器函数
-      console.log('[Worker] 🔍 开始调用适配器函数 matchLPDEFContent:', {
-        dimensions,
-        lang,
-        dimensionsKeys: Object.keys(dimensions),
-        dimensionsValues: Object.values(dimensions),
-      });
-      
-      detailedStats = matchLPDEFContent(dimensions, lang);
-      
-      console.log('[Worker] ✅ 通过适配器函数生成详细统计数据:', {
-        count: detailedStats.length,
-        dimensions: detailedStats.map(s => ({
-          dimension: s.dimension,
-          score: s.score,
-          hasLabel: !!s.label,
-          hasRoast: !!s.roast && s.roast !== '暂无吐槽文案',
-          labelPreview: s.label?.substring(0, 20),
-          roastPreview: s.roast?.substring(0, 30),
-        })),
-      });
-      
-      // 【降级方案】如果适配器函数返回的数据不完整，尝试从 Supabase 获取
-      if (detailedStats.length < 5) {
-        console.warn('[Worker] ⚠️ 适配器函数返回数据不完整，尝试降级方案:', {
-          expected: 5,
-          actual: detailedStats.length,
-          missingDimensions: ['L', 'P', 'D', 'E', 'F'].filter(
-            dim => !detailedStats.find(s => s.dimension === dim)
-          ),
-        });
-        const dbLang = lang === 'en' ? 'en' : 'cn';
-        const rankLang = lang === 'en' ? 'en' : 'zh';
-        
-        // 遍历缺失的维度
-        for (const [dimKey, dimValue] of Object.entries(dimensions)) {
-          const existing = detailedStats.find(s => s.dimension === dimKey);
-          if (!existing) {
-            const level = mapDimensionScoreToLevel(dimValue);
-            let roast = await getRoastFromSupabase(env, dimKey, level, dbLang);
-            const label = getDimensionLabelFromRank(dimKey, dimValue, rankLang);
-            
-            if (!roast) {
-              const rankId = DIMENSION_KEY_MAPPING[dimKey];
-              if (rankId && RANK_DATA[rankId]) {
-                const rankValue = mapDimensionValueToRankValue(dimKey, dimValue, finalStats);
-                const rankResult = getRankResult(rankId, rankValue, rankLang);
-                if (rankResult?.comment?.content) {
-                  roast = rankResult.comment.content;
-                } else if (rankResult?.commentEn?.content && rankLang === 'en') {
-                  roast = rankResult.commentEn.content;
-                }
-              }
-            }
-            
-            detailedStats.push({
-              dimension: dimKey,
-              score: dimValue,
-              label: label,
-              roast: roast || '暂无吐槽文案'
-            });
-          }
-        }
-      }
-    } catch (error) {
-      console.error('[Worker] ❌ 适配器函数执行失败，使用降级方案:', error);
-      // 降级到原有逻辑
-      const dbLang = lang === 'en' ? 'en' : 'cn';
-      const rankLang = lang === 'en' ? 'en' : 'zh';
-      
-      for (const [dimKey, dimValue] of Object.entries(dimensions)) {
-        const level = mapDimensionScoreToLevel(dimValue);
-        let roast = await getRoastFromSupabase(env, dimKey, level, dbLang);
-        const label = getDimensionLabelFromRank(dimKey, dimValue, rankLang);
-        
-        if (!roast) {
-          const rankId = DIMENSION_KEY_MAPPING[dimKey];
-          if (rankId && RANK_DATA[rankId]) {
-            const rankValue = mapDimensionValueToRankValue(dimKey, dimValue, finalStats);
-            const rankResult = getRankResult(rankId, rankValue, rankLang);
-            if (rankResult?.comment?.content) {
-              roast = rankResult.comment.content;
-            } else if (rankResult?.commentEn?.content && rankLang === 'en') {
-              roast = rankResult.commentEn.content;
-            }
-          }
-        }
-        
-        detailedStats.push({
-          dimension: dimKey,
-          score: dimValue,
-          label: label,
-          roast: roast || '暂无吐槽文案'
-        });
-      }
-    }
-    
-    console.log('[Worker] ✅ 详细统计数据已生成（最终）:', {
-      count: detailedStats.length,
-      dimensions: detailedStats.map(s => ({
-        dimension: s.dimension,
-        score: s.score,
-        label: s.label,
-        roastLength: s.roast?.length || 0,
-        roastPreview: s.roast?.substring(0, 50) + '...',
-      })),
-      allDimensionsPresent: ['L', 'P', 'D', 'E', 'F'].every(
-        dim => detailedStats.find(s => s.dimension === dim)
-      ),
-    });
-
-    // 【V6 架构】将所有维度的吐槽文案合并成完整的 roast_text（用于保存到 user_analysis 表）
-    const combinedRoastText = detailedStats
-      .filter(stat => stat.roast && stat.roast !== '暂无吐槽文案')
-      .map(stat => `【${stat.dimension}维度】${stat.roast}`)
-      .join('\n\n');
-    
-    console.log('[Worker] ✅ 合并后的吐槽文案:', combinedRoastText.substring(0, 100) + '...');
-
-    // 【新增】生成 analysis 对象（人格分析详情）
-    const analysis = {
-      type: personalityType,
-      name: personalityName,
-      description: roastText,
-      traits: [
-        dimensions.L >= 70 ? (lang === 'en' ? 'Code-Heavy' : '代码重度使用者') : null,
-        dimensions.P >= 70 ? (lang === 'en' ? 'Patient' : '耐心型') : dimensions.P < 40 ? (lang === 'en' ? 'Impatient' : '急躁型') : null,
-        dimensions.D >= 70 ? (lang === 'en' ? 'Detail-Oriented' : '细节控') : null,
-        dimensions.E >= 10 ? (lang === 'en' ? 'Tech Explorer' : '技术探索者') : null,
-        dimensions.F >= 70 ? (lang === 'en' ? 'Polite' : '礼貌型') : null,
-      ].filter(Boolean),
-      dimensions: {
-        L: { value: dimensions.L, level: dimensions.L >= 70 ? 'high' : dimensions.L >= 40 ? 'mid' : 'low' },
-        P: { value: dimensions.P, level: dimensions.P >= 70 ? 'high' : dimensions.P >= 40 ? 'mid' : 'low' },
-        D: { value: dimensions.D, level: dimensions.D >= 70 ? 'high' : dimensions.D >= 40 ? 'mid' : 'low' },
-        E: { value: dimensions.E, level: dimensions.E >= 10 ? 'high' : dimensions.E >= 5 ? 'mid' : 'low' },
-        F: { value: dimensions.F, level: dimensions.F >= 70 ? 'high' : dimensions.F >= 40 ? 'mid' : 'low' },
-      },
-    };
-
-    // 【新增】生成 semanticFingerprint 对象（语义指纹）- 完整版本
-    const getLevelLabel = (val: number, dim: string, isZh: boolean) => {
-      const threshold = dim === 'E' ? 12 : 40;
-      const highThreshold = dim === 'E' ? 30 : 70;
-      if (val >= highThreshold) return isZh ? '高' : 'High';
-      if (val >= threshold) return isZh ? '中' : 'Med';
-      return isZh ? '低' : 'Low';
-    };
-    
-    const isZh = lang === 'zh-CN';
-    const codeRatioPercent = Math.round((finalStats.code_ratio || 0) * 100);
-    const feedbackDensityPercent = Math.round(dimensions.F);
-    
-    const semanticFingerprint = {
-      lpdef: lpdef,
-      vibeIndex: vibeIndex,
-      compositeScore: Math.round((dimensions.L + dimensions.P + dimensions.D + dimensions.E + dimensions.F) / 5),
-      techDiversity: dimensions.E >= 30 ? (isZh ? '极高' : 'Extreme') : (dimensions.E >= 12 ? (isZh ? '中等' : 'Moderate') : (isZh ? '较低' : 'Low')),
-      interactionStyle: dimensions.F >= 70 ? (isZh ? 'Warm' : 'Warm') : dimensions.F >= 40 ? (isZh ? 'Balanced' : 'Balanced') : (isZh ? 'Cold' : 'Cold'),
-      codeRatio: `${codeRatioPercent}%`,
-      patienceLevel: getLevelLabel(dimensions.P, 'P', isZh) + (isZh ? '耐心' : ' Patience'),
-      detailLevel: getLevelLabel(dimensions.D, 'D', isZh) + (isZh ? '细腻' : ' Detail'),
-      techExploration: getLevelLabel(dimensions.E, 'E', isZh) + (isZh ? '探索' : ' Explore'),
-      feedbackDensity: `${feedbackDensityPercent}%`,
-      avgPayload: finalStats.avg_payload || 0,
-      // 添加描述文本
-      codeRatioDesc: isZh ? `代码占比 ${codeRatioPercent}%，反映你的对话中代码内容的比例` : `Code ratio ${codeRatioPercent}%, reflecting the proportion of code content in your conversations`,
-      patienceLevelDesc: isZh ? `耐心水平为${getLevelLabel(dimensions.P, 'P', isZh)}，${dimensions.P >= 70 ? '你很有耐心，愿意等待AI的回复' : dimensions.P < 40 ? '你比较急躁，希望快速得到结果' : '你的耐心水平处于中等'}` : `Patience level is ${getLevelLabel(dimensions.P, 'P', isZh)}, ${dimensions.P >= 70 ? 'you are very patient and willing to wait for AI responses' : dimensions.P < 40 ? 'you are impatient and want quick results' : 'your patience level is moderate'}`,
-      detailLevelDesc: isZh ? `细腻程度为${getLevelLabel(dimensions.D, 'D', isZh)}，${dimensions.D >= 70 ? '你注重细节，会详细描述需求' : dimensions.D < 40 ? '你倾向于简洁表达' : '你的表达方式较为平衡'}` : `Detail level is ${getLevelLabel(dimensions.D, 'D', isZh)}, ${dimensions.D >= 70 ? 'you pay attention to details and describe requirements in detail' : dimensions.D < 40 ? 'you tend to express concisely' : 'your expression is relatively balanced'}`,
-      techExplorationDesc: isZh ? `技术探索为${getLevelLabel(dimensions.E, 'E', isZh)}，${dimensions.E >= 30 ? '你广泛探索各种技术栈' : dimensions.E >= 12 ? '你探索中等数量的技术' : '你专注于少数技术领域'}` : `Tech exploration is ${getLevelLabel(dimensions.E, 'E', isZh)}, ${dimensions.E >= 30 ? 'you explore a wide range of tech stacks' : dimensions.E >= 12 ? 'you explore a moderate number of technologies' : 'you focus on a few technical areas'}`,
-      feedbackDensityDesc: isZh ? `反馈密度为${feedbackDensityPercent}%，反映你与AI的互动频率` : `Feedback density is ${feedbackDensityPercent}%, reflecting your interaction frequency with AI`,
-      compositeScoreDesc: isZh ? `综合得分 ${Math.round((dimensions.L + dimensions.P + dimensions.D + dimensions.E + dimensions.F) / 5)} 分，基于五维度的加权平均` : `Composite score ${Math.round((dimensions.L + dimensions.P + dimensions.D + dimensions.E + dimensions.F) / 5)} points, based on weighted average of five dimensions`,
-      techDiversityDesc: isZh ? `技术多样性为${dimensions.E >= 30 ? '极高' : dimensions.E >= 12 ? '中等' : '较低'}，反映你使用的技术栈范围` : `Tech diversity is ${dimensions.E >= 30 ? 'extreme' : dimensions.E >= 12 ? 'moderate' : 'low'}, reflecting the range of tech stacks you use`,
-      interactionStyleDesc: isZh ? `交互风格为${dimensions.F >= 70 ? 'Warm' : dimensions.F >= 40 ? 'Balanced' : 'Cold'}，${dimensions.F >= 70 ? '你与AI的交互非常友好和礼貌' : dimensions.F >= 40 ? '你与AI的交互保持平衡' : '你与AI的交互较为直接和简洁'}` : `Interaction style is ${dimensions.F >= 70 ? 'Warm' : dimensions.F >= 40 ? 'Balanced' : 'Cold'}, ${dimensions.F >= 70 ? 'your interaction with AI is very friendly and polite' : dimensions.F >= 40 ? 'your interaction with AI is balanced' : 'your interaction with AI is direct and concise'}`,
-    };
-
-    // 【V6 协议】构建返回结果（包含 answer_book、analysis、semanticFingerprint）
+    // 【V6 协议】构建返回结果（包含 answer_book）
     const result = {
       status: 'success',
       dimensions: dimensions,
@@ -1491,10 +881,6 @@ app.post('/api/v2/analyze', async (c) => {
       totalUsers: totalUsers > 0 ? totalUsers : 1,
       // 【V6 协议】答案之书文案
       answer_book: answerBook,
-      // 【新增】人格分析详情
-      analysis: analysis,
-      // 【新增】语义指纹
-      semanticFingerprint: semanticFingerprint,
       data: {
         roast: roastText,
         type: personalityType,
@@ -1519,8 +905,6 @@ app.post('/api/v2/analyze', async (c) => {
       },
       personality: {
         type: personalityType,
-        // 【重构】详细统计数据数组，包含每个维度的称号和吐槽文案
-        detailedStats: detailedStats,
       }
     };
 
@@ -1567,66 +951,27 @@ app.post('/api/v2/analyze', async (c) => {
             fingerprint: v6Dimensions ? (body.fingerprint || fingerprint) : fingerprint,
             user_name: body.userName || '匿名受害者',
             personality_type: personalityType,
-            
-            // 【字段名对齐】使用数据库字段名：l_score, p_score, d_score, e_score, f_score
-            l_score: Math.max(0, Math.min(100, Math.round(dimensions.L))),
-            p_score: Math.max(0, Math.min(100, Math.round(dimensions.P))),
-            d_score: Math.max(0, Math.min(100, Math.round(dimensions.D))),
-            e_score: Math.max(0, Math.min(100, Math.round(dimensions.E))),
-            f_score: Math.max(0, Math.min(100, Math.round(dimensions.F))),
-            
-            // 【向后兼容】保留旧字段名（如果数据库需要）
-            l: Math.max(0, Math.min(100, Math.round(dimensions.L))),
-            p: Math.max(0, Math.min(100, Math.round(dimensions.P))),
-            d: Math.max(0, Math.min(100, Math.round(dimensions.D))),
-            e: Math.max(0, Math.min(100, Math.round(dimensions.E))),
-            f: Math.max(0, Math.min(100, Math.round(dimensions.F))),
+            l: dimensions.L,
+            p: dimensions.P,
+            d: dimensions.D,
+            e: dimensions.E,
+            f: dimensions.F,
             
             // 【V6 协议】核心字段：使用 finalStats 的值
-            work_days: v6StatsForStorage.work_days || basicAnalysis.day || 1,
-            jiafang_count: v6StatsForStorage.jiafang_count || basicAnalysis.no || 0,
-            ketao_count: v6StatsForStorage.ketao_count || basicAnalysis.please || 0,
+            work_days: v6StatsForStorage.work_days || analysis.day || 1,
+            jiafang_count: v6StatsForStorage.jiafang_count || analysis.no || 0,
+            ketao_count: v6StatsForStorage.ketao_count || analysis.please || 0,
             
             vibe_index: vibeIndex,
-            total_messages: v6StatsForStorage.totalMessages || basicAnalysis.totalMessages,
-            total_chars: v6StatsForStorage.totalChars || basicAnalysis.totalChars,
+            total_messages: v6StatsForStorage.totalMessages || analysis.totalMessages,
+            total_chars: v6StatsForStorage.totalChars || analysis.totalChars,
             lpdef: lpdef,
             lang: body.lang || 'zh-CN',
             updated_at: new Date().toISOString(),
             
-            // 【V6 架构】保存从 answer_book 获取的合并吐槽文案
-            roast_text: combinedRoastText || null,
-            
             // 【V6 协议】将完整的 stats 存入 jsonb 字段（确保未来维度增加到 100 个时也不需要改数据库 Schema）
             stats: v6StatsForStorage, // 完整的 V6Stats 对象，包含所有 40 个维度
-            
-            // 【关键修复】添加 personality 对象，包含 detailedStats 数组（五维语义指纹数据）
-            // 数据格式：{ type: string, detailedStats: Array<{ dimension, score, label, roast }> }
-            personality: {
-              type: personalityType,
-              detailedStats: detailedStats, // 包含 L, P, D, E, F 五个维度的详细统计数据
-            },
-            
-            // 【新增】personality_data 字段：包含称号和随机吐槽的五个维度数组（JSONB）
-            // 格式：Array<{ dimension, score, label, roast }>
-            personality_data: detailedStats, // 直接使用 detailedStats 数组
           };
-          
-          // 【调试日志】验证 payload 中的数据
-          console.log('[Worker] 🔍 Payload 数据验证:', {
-            hasDetailedStats: !!detailedStats,
-            detailedStatsLength: detailedStats?.length || 0,
-            hasPersonality: !!payload.personality,
-            personalityDetailedStatsLength: payload.personality?.detailedStats?.length || 0,
-            hasPersonalityData: !!payload.personality_data,
-            personalityDataLength: payload.personality_data?.length || 0,
-            personalityDataPreview: payload.personality_data?.slice(0, 2).map((d: any) => ({
-              dimension: d.dimension,
-              score: d.score,
-              hasLabel: !!d.label,
-              hasRoast: !!d.roast,
-            })),
-          });
 
           // 检查是否在内网/VPN 环境
           // 尝试从 Cloudflare 请求对象获取国家信息
@@ -1659,37 +1004,27 @@ app.post('/api/v2/analyze', async (c) => {
           const supabaseUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=fingerprint`;
           executionCtx.waitUntil(
             Promise.all([
-              // 写入 Supabase（增强错误处理）
-              (async () => {
-                try {
-                  const res = await fetch(supabaseUrl, {
-                    method: 'POST',
-                    headers: {
-                      'apikey': env.SUPABASE_KEY!,
-                      'Authorization': `Bearer ${env.SUPABASE_KEY}`,
-                      'Content-Type': 'application/json',
-                      'Prefer': 'resolution=merge-duplicates',
-                    },
-                    body: JSON.stringify(payload),
-                  });
-                  
+              // 写入 Supabase
+              fetch(supabaseUrl, {
+                method: 'POST',
+                headers: {
+                  'apikey': env.SUPABASE_KEY,
+                  'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+                  'Content-Type': 'application/json',
+                  'Prefer': 'resolution=merge-duplicates',
+                },
+                body: JSON.stringify(payload),
+              })
+                .then(res => {
                   if (!res.ok) {
-                    const errorText = await res.text().catch(() => '无法读取错误信息');
-                    console.error('[Supabase] ❌ Upsert 失败:', {
-                      status: res.status,
-                      statusText: res.statusText,
-                      error: errorText,
-                      fingerprint: payload.fingerprint,
-                      payloadKeys: Object.keys(payload),
-                      l_score: payload.l_score,
-                      p_score: payload.p_score,
-                      d_score: payload.d_score,
-                      e_score: payload.e_score,
-                      f_score: payload.f_score,
-                      hasPersonalityData: !!payload.personality_data,
-                      personalityDataLength: payload.personality_data?.length || 0,
+                    return res.text().then(errorText => {
+                      console.error('[Supabase] Upsert Error:', {
+                        status: res.status,
+                        statusText: res.statusText,
+                        error: errorText,
+                        payload,
+                      });
                     });
-                    throw new Error(`Supabase Upsert 失败: ${res.status} ${res.statusText} - ${errorText}`);
                   } else {
                     console.log('[Supabase] ✅ 数据已成功写入:', {
                       fingerprint: payload.fingerprint,
@@ -1697,45 +1032,17 @@ app.post('/api/v2/analyze', async (c) => {
                       jiafang_count: payload.jiafang_count,
                       ketao_count: payload.ketao_count,
                       hasStats: !!payload.stats,
-                      hasPersonality: !!payload.personality,
-                      detailedStatsCount: payload.personality?.detailedStats?.length || 0,
-                      hasPersonalityData: !!payload.personality_data,
-                      personalityDataLength: payload.personality_data?.length || 0,
-                      l_score: payload.l_score,
-                      p_score: payload.p_score,
-                      d_score: payload.d_score,
-                      e_score: payload.e_score,
-                      f_score: payload.f_score,
                     });
                   }
-                } catch (err: any) {
-                  console.error('[Supabase] ❌ Upsert 异常:', {
-                    error: err.message || err,
-                    stack: err.stack,
-                    fingerprint: payload.fingerprint,
-                    payloadPreview: JSON.stringify(payload).substring(0, 500),
-                  });
-                  // 不抛出错误，避免影响主流程
-                }
-              })(),
+                })
+                .catch(err => {
+                  console.error('[Supabase] Upsert Error:', err);
+                }),
               // 【V6 协议】增量更新 KV 全局统计
-              (async () => {
-                try {
-                  await updateGlobalStatsV6(env, finalStats, dimensions);
-                } catch (err: any) {
-                  console.warn('[Worker] ⚠️ V6 全局统计更新失败:', {
-                    error: err.message || err,
-                    stack: err.stack,
-                  });
-                }
-              })(),
-            ]).catch(err => {
-              // 全局错误捕获
-              console.error('[Worker] ❌ waitUntil 任务执行失败:', {
-                error: err.message || err,
-                stack: err.stack,
-              });
-            })
+              updateGlobalStatsV6(env, finalStats, dimensions).catch(err => {
+                console.warn('[Worker] ⚠️ V6 全局统计更新失败:', err);
+              }),
+            ])
           );
         } else {
           console.warn('[DB] ⚠️ executionCtx.waitUntil 不可用，跳过数据库写入');
@@ -1893,7 +1200,6 @@ app.post('/api/analyze', async (c) => {
       total_messages: userMessages,  // 注意：user_analysis 表使用 total_messages，不是 user_messages
       total_chars: totalChars,      // 注意：user_analysis 表使用 total_chars，不是 total_user_chars
       ip_location: clientIP !== 'anonymous' ? clientIP : '未知', // 从请求头获取 IP
-      // 注意：roast_text 由 /api/v2/analyze 路由生成并保存
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };

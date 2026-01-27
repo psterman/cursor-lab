@@ -162,24 +162,8 @@ function mapSegmentToRange(
 
 // ==================== 数据导入 ====================
 
-// 导入中文数据（单个 JSON 对象）
-import aiZh from '../ai.json';
-import dayZh from '../day.json';
-import noZh from '../no.json';
-import pleaseZh from '../please.json';
-import sayZh from '../say.json';
-import wordZh from '../word.json';
-
-// 导入英文数据
-// 注意：英文文件可能包含多个 JSON 对象，TypeScript import 只能导入第一个
-// 我们需要使用动态方式处理，或者将数据内嵌
-// 这里先使用 import，然后在运行时处理
-import aiEnFirst from '../ai2.json';
-import dayEnFirst from '../day2.json';
-import noEnFirst from '../no2.json';
-import pleaseEnFirst from '../please2.json';
-import sayEnFirst from '../say2.json';
-import wordEnFirst from '../word2.json';
+// 【重构】使用 rank-content.ts 的数据，避免直接导入包含多个 JSON 对象的文件
+import { RANK_RESOURCES } from '../rank-content';
 
 /**
  * 解析包含多个 JSON 对象的文本
@@ -280,172 +264,50 @@ function normalizeEnData(enData: any): any[] {
   return [];
 }
 
-// 规范化英文数据
-// ⚠️ 注意：由于英文 JSON 文件包含多个 JSON 对象（如 ai2.json 有3个对象），
-// TypeScript 的 import 只能导入第一个对象。
-// 
-// 解决方案：
-// 1. 创建构建脚本，将所有 JSON 对象合并为一个数组
-// 2. 使用运行时 fetch 加载完整数据（见下方 initRankData 函数）
-// 3. 手动内嵌处理好的数据
-//
-// 当前实现：使用第一个对象作为兜底，实际使用时建议通过构建脚本处理
-const aiEn = normalizeEnData(aiEnFirst);
-const dayEn = normalizeEnData(dayEnFirst);
-const noEn = normalizeEnData(noEnFirst);
-const pleaseEn = normalizeEnData(pleaseEnFirst);
-const sayEn = normalizeEnData(sayEnFirst);
-const wordEn = normalizeEnData(wordEnFirst);
+// 【重构】不再需要规范化英文数据，直接使用 RANK_RESOURCES
 
 // ==================== 数据清洗与合并 ====================
 
 /**
- * 处理英文数据：将多个 segment 对象合并并按 segment 排序
+ * 【重构】从 RANK_RESOURCES 构建单个维度的配置
+ * RANK_RESOURCES 已经包含了中英文数据，直接使用即可
  */
-function processEnData(enData: any): RankComment[] {
-  // 如果 enData 是数组，需要合并所有对象的 comments
-  if (Array.isArray(enData)) {
-    const allComments: RankComment[] = [];
-    enData.forEach((item: any) => {
-      if (item.comments && Array.isArray(item.comments)) {
-        allComments.push(...item.comments);
-      }
-    });
-    return allComments;
+function buildRankConfigFromResources(id: string): RankConfig | null {
+  const resource = RANK_RESOURCES[id];
+  if (!resource || !resource.levels) {
+    console.warn(`[Rank] ⚠️ 未找到资源: ${id}`);
+    return null;
   }
   
-  // 如果是单个对象
-  if (enData.comments && Array.isArray(enData.comments)) {
-    return enData.comments;
-  }
-  
-  return [];
-}
-
-/**
- * 根据数值范围匹配中英文数据
- */
-function mergeZhEnLevels(
-  zhLevel: any,
-  enData: any,
-  allZhRanges?: Array<{ range: string; parsed: { min: number; max: number } }>,
-  isRankBased: boolean = false
-): RankLevel | null {
-  const range = parseRange(zhLevel.range);
-  const label = zhLevel.label || '';
-  const commentsZh = zhLevel.comments || [];
-  
-  // 处理英文数据：尝试匹配 segment
-  let commentsEn: RankComment[] = [];
-  
-  if (Array.isArray(enData) && enData.length > 0) {
-    // 如果是数组，需要根据 segment 匹配
-    enData.forEach((item: any) => {
-      if (item.segment) {
-        const segRange = parseSegment(item.segment);
-        if (segRange) {
-          // 对于排名类数据，segment 可能需要映射到 range
-          let targetRange = segRange;
-          if (allZhRanges) {
-            const mapped = mapSegmentToRange(segRange, allZhRanges, isRankBased);
-            if (mapped) {
-              targetRange = mapped;
-            }
-          }
-          
-          // 检查是否匹配当前 zhLevel 的 range
-          if (targetRange.min === range.min && targetRange.max === range.max) {
-            if (item.comments && Array.isArray(item.comments)) {
-              commentsEn.push(...item.comments);
-            }
-          }
-        }
-      } else if (item.comments && Array.isArray(item.comments)) {
-        // 如果没有 segment，但有 comments，也加入（作为兜底）
-        commentsEn.push(...item.comments);
-      }
-    });
-  } else {
-    // 如果是单个对象，直接使用
-    commentsEn = processEnData(enData);
-  }
-  
-  // 如果没有匹配到英文数据，尝试使用所有英文 comments（作为兜底）
-  if (commentsEn.length === 0) {
-    commentsEn = processEnData(enData);
-  }
-  
-  return {
-    min: range.min,
-    max: range.max,
-    label,
-    commentsZh,
-    commentsEn
-  };
-}
-
-/**
- * 构建单个维度的配置
- */
-function buildRankConfig(
-  id: string,
-  name: string,
-  zhData: any,
-  enData: any,
-  isRankBased: boolean = false
-): RankConfig {
-  const levels: RankLevel[] = [];
-  
-  // 预先解析所有中文 ranges，用于 segment 映射
-  const allZhRanges: Array<{ range: string; parsed: { min: number; max: number } }> = [];
-  if (zhData.levels && Array.isArray(zhData.levels)) {
-    zhData.levels.forEach((zhLevel: any) => {
-      allZhRanges.push({
-        range: zhLevel.range,
-        parsed: parseRange(zhLevel.range)
-      });
-    });
-  }
-  
-  if (zhData.levels && Array.isArray(zhData.levels)) {
-    zhData.levels.forEach((zhLevel: any) => {
-      const mergedLevel = mergeZhEnLevels(zhLevel, enData, allZhRanges, isRankBased);
-      if (mergedLevel) {
-        levels.push(mergedLevel);
-      }
-    });
-  }
+  const levels: RankLevel[] = resource.levels.map((level: any) => ({
+    min: level.min,
+    max: level.max,
+    label: level.label || '',
+    labelEn: level.labelEn,
+    commentsZh: level.commentsZh || [],
+    commentsEn: level.commentsEn || []
+  }));
   
   // 按 min 值排序
   levels.sort((a, b) => a.min - b.min);
   
   return {
-    id,
-    name,
+    id: resource.id || id,
+    name: resource.name || id,
     levels
   };
 }
 
 // ==================== 构建所有维度数据 ====================
 
+// 【重构】从 RANK_RESOURCES 构建 RANK_DATA
 export const RANK_DATA: Record<string, RankConfig> = {
-  // L: 对话回合（调戏 AI 的持久度）
-  ai: buildRankConfig('ai', '调戏 AI 排名', aiZh, aiEn, false),
-  
-  // P: 输入字数（Token 霸权/输入密度）
-  say: buildRankConfig('say', '废话输出排名', sayZh, sayEn, false),
-  
-  // D: 上岗天数（资历与压榨时长）
-  day: buildRankConfig('day', '上岗天数排名', dayZh, dayEn, false),
-  
-  // E: 礼貌程度（赛博磕头）- 排名类数据
-  please: buildRankConfig('please', '赛博磕头排名', pleaseZh, pleaseEn, true),
-  
-  // F: 否定频率（霸总觉醒）
-  no: buildRankConfig('no', '甲方上身排名', noZh, noEn, false),
-  
-  // word: 平均长度（需求的复杂/啰嗦程度）
-  word: buildRankConfig('word', '平均长度排名', wordZh, wordEn, false)
+  ai: buildRankConfigFromResources('ai') || { id: 'ai', name: '调戏 AI 排名', levels: [] },
+  say: buildRankConfigFromResources('say') || { id: 'say', name: '废话输出排名', levels: [] },
+  day: buildRankConfigFromResources('day') || { id: 'day', name: '上岗天数排名', levels: [] },
+  please: buildRankConfigFromResources('please') || { id: 'please', name: '赛博磕头排名', levels: [] },
+  no: buildRankConfigFromResources('no') || { id: 'no', name: '甲方上身排名', levels: [] },
+  word: buildRankConfigFromResources('word') || { id: 'word', name: '平均长度排名', levels: [] }
 };
 
 // ==================== 辅助函数 ====================

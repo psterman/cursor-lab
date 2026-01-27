@@ -951,6 +951,14 @@
             color: var(--text-main);
             font-family: 'JetBrains Mono', monospace;
         }
+        .fingerprint-desc {
+            font-size: 12px;
+            color: var(--text-dim);
+            line-height: 1.4;
+            margin-top: 4px;
+            text-align: left;
+            opacity: 0.8;
+        }
         .vibe-chart-container {
             margin-bottom: 32px;
         }
@@ -1473,6 +1481,325 @@
             .fixed.bottom-24.right-4 {
                 bottom: 80px !important;
                 right: 12px !important;
+            }
+        }
+        /* ========== V6 高级报告样式 ========== */
+        /* 完整报告容器 - 确保内容完整显示 */
+        .full-report-container {
+            min-height: 2000px;
+            position: relative;
+        }
+        /* V6 高级报告容器 */
+        #v6-advanced-report {
+            display: none;
+            margin-top: 40px;
+            scroll-margin-top: 80px;
+        }
+        #v6-advanced-report.visible {
+            display: block;
+            animation: fadeInUp 0.6s ease-out;
+        }
+        /* 行为标签容器 */
+        .vibe-tag-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 32px;
+            padding: 24px;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 2px;
+        }
+        .vibe-tag {
+            display: inline-flex;
+            align-items: center;
+            padding: 10px 20px;
+            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            color: #ffffff;
+            border-radius: 24px;
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
+            animation: tagGlow 2s ease-in-out infinite;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            text-transform: uppercase;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .vibe-tag:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.6);
+        }
+        @keyframes tagGlow {
+            0%, 100% {
+                box-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
+            }
+            50% {
+                box-shadow: 0 0 20px rgba(59, 130, 246, 0.7), 0 0 30px rgba(139, 92, 246, 0.4);
+            }
+        }
+        /* 【V6 CSS 注入检查】为所有 V6_METRIC_CONFIG 中提到的 tag 类名添加渐变背景样式 */
+        .vibe-tag.tag-ketao {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            box-shadow: 0 0 12px rgba(245, 158, 11, 0.4);
+        }
+        .vibe-tag.tag-ketao:hover {
+            box-shadow: 0 0 20px rgba(245, 158, 11, 0.6);
+        }
+        .vibe-tag.tag-jiafang {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+        }
+        .vibe-tag.tag-jiafang:hover {
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.6);
+        }
+        .vibe-tag.tag-tease {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
+        }
+        .vibe-tag.tag-tease:hover {
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.6);
+        }
+        .vibe-tag.tag-nonsense {
+            background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+            box-shadow: 0 0 12px rgba(139, 92, 246, 0.4);
+        }
+        .vibe-tag.tag-nonsense:hover {
+            box-shadow: 0 0 20px rgba(139, 92, 246, 0.6);
+        }
+        .vibe-tag.tag-abuse {
+            background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+            box-shadow: 0 0 12px rgba(249, 115, 22, 0.4);
+        }
+        .vibe-tag.tag-abuse:hover {
+            box-shadow: 0 0 20px rgba(249, 115, 22, 0.6);
+        }
+        .vibe-tag.tag-style-label {
+            background: linear-gradient(135deg, #00D4FF 0%, #0099cc 100%);
+            box-shadow: 0 0 12px rgba(0, 212, 255, 0.4);
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+        .vibe-tag.tag-style-label:hover {
+            box-shadow: 0 0 20px rgba(0, 212, 255, 0.6);
+        }
+        /* 【V6 骨架屏】全网数据加载前的占位样式 */
+        [data-v6-key] {
+            transition: opacity 0.5s ease-in-out;
+        }
+        /* 骨架屏占位符动画（数据未加载时） */
+        [data-v6-key]:empty::before,
+        [data-v6-key][data-skeleton="true"]::before {
+            content: '...';
+            color: rgba(255, 255, 255, 0.3);
+            animation: skeletonPulse 1.5s ease-in-out infinite;
+        }
+        @keyframes skeletonPulse {
+            0%, 100% {
+                opacity: 0.3;
+            }
+            50% {
+                opacity: 0.6;
+            }
+        }
+        /* 稳定性卡片 */
+        .vibe-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 2px;
+            padding: 24px;
+            margin-bottom: 32px;
+        }
+        .vibe-card-title {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 20px;
+            color: var(--text-main);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .vibe-card-title::before {
+            content: '> ';
+            color: var(--accent-terminal);
+        }
+        /* 稳定性进度条 */
+        .stability-progress {
+            position: relative;
+            width: 100%;
+            height: 32px;
+            background: rgba(24, 24, 27, 0.8);
+            border: 1px solid var(--card-border);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+        .stability-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #f59e0b 0%, #ef4444 100%);
+            transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s ease;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding-right: 12px;
+            font-size: 12px;
+            font-weight: 700;
+            color: #ffffff;
+            font-family: 'JetBrains Mono', monospace;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+        }
+        .stability-progress-bar.high {
+            background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+        }
+        .stability-progress-bar.medium {
+            background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%);
+        }
+        .stability-progress-bar.low {
+            background: linear-gradient(90deg, #ef4444 0%, #dc2626 100%);
+        }
+        .stability-progress-label {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 12px;
+            color: var(--text-dim);
+            font-family: 'JetBrains Mono', monospace;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        /* 全局排名横幅 */
+        .global-banner {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
+            border: 1px solid var(--card-border);
+            border-left: 3px solid var(--accent-terminal);
+            border-radius: 2px;
+            padding: 20px 24px;
+            margin-bottom: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+        .global-banner-content {
+            flex: 1;
+            min-width: 200px;
+        }
+        .global-banner-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 8px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .global-banner-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--accent-terminal);
+            font-family: 'JetBrains Mono', monospace;
+            text-shadow: 0 0 8px rgba(0, 255, 65, 0.3);
+        }
+        .global-banner-label {
+            font-size: 12px;
+            color: var(--text-dim);
+            margin-top: 4px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        /* 答案之书引用框 */
+        .quote-box {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-left: 3px solid var(--accent-terminal);
+            border-radius: 2px;
+            padding: 24px 32px;
+            margin-bottom: 32px;
+            position: relative;
+            font-style: italic;
+            line-height: 1.8;
+            color: var(--text-main);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .quote-box::before {
+            content: '"';
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            font-size: 48px;
+            color: var(--accent-terminal);
+            opacity: 0.3;
+            font-family: Georgia, serif;
+            line-height: 1;
+        }
+        .quote-box::after {
+            content: '"';
+            position: absolute;
+            bottom: 16px;
+            right: 24px;
+            font-size: 48px;
+            color: var(--accent-terminal);
+            opacity: 0.3;
+            font-family: Georgia, serif;
+            line-height: 1;
+        }
+        .quote-box-content {
+            position: relative;
+            z-index: 1;
+            font-size: 15px;
+        }
+        /* 淡入向上动画 */
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        /* 响应式适配 */
+        @media (max-width: 768px) {
+            .vibe-tag-container {
+                padding: 16px;
+                gap: 8px;
+            }
+
+            .vibe-tag {
+                padding: 8px 16px;
+                font-size: 12px;
+            }
+
+            .global-banner {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .global-banner-value {
+                font-size: 24px;
+            }
+
+            .quote-box {
+                padding: 20px 24px;
+            }
+
+            .quote-box::before,
+            .quote-box::after {
+                font-size: 36px;
+            }
+        }
+        /* 高 DPI 屏幕文字清晰度优化 */
+        @media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+            .vibe-tag,
+            .stability-progress-bar,
+            .global-banner-value,
+            .quote-box-content {
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
+                text-rendering: optimizeLegibility;
             }
         }
     </style>
@@ -2285,6 +2612,35 @@
                             
                             <!-- 人格锁定、人格特征、语义指纹、维度雷达图 -->
                             <div id="personality-lock" className="vibe-codinger-section chart-card" style="margin-top: 40px; scroll-margin-top: 80px;"></div>
+                            
+                            <!-- V6 高级报告容器（40维度深度画像） -->
+                            <div id="v6-advanced-report" style="display: none;">
+                                <!-- 行为标签容器 -->
+                                <div id="behavior-tags" class="vibe-tag-container"></div>
+                                
+                                <!-- 人格稳定性卡片 -->
+                                <div id="personality-stability" class="vibe-card">
+                                    <h3 class="vibe-card-title">${getText('dashboard.personalityStability') || '人格稳定性'}</h3>
+                                    <div class="stability-progress">
+                                        <span class="stability-progress-label">${getText('dashboard.balanceScore') || '平衡度'}</span>
+                                        <div class="stability-progress-bar" id="stability-progress-bar" style="width: 0%;">0%</div>
+                                    </div>
+                                </div>
+                                
+                                <!-- 全局排名横幅 -->
+                                <div id="global-rank-banner" class="global-banner">
+                                    <div class="global-banner-content">
+                                        <div class="global-banner-title">${getText('dashboard.globalRank') || '全网排名'}</div>
+                                        <div class="global-banner-value" id="global-rank-value">--</div>
+                                        <div class="global-banner-label" id="global-rank-label">${getText('dashboard.totalDiagnostics') || '总诊断数'}: --</div>
+                                    </div>
+                                </div>
+                                
+                                <!-- 答案之书引用框 -->
+                                <div id="answer-book-quote" class="quote-box" style="display: none;">
+                                    <div class="quote-box-content" id="answer-book-content"></div>
+                                </div>
+                            </div>
                             
                             <!-- 聊天记录 -->
                             <div id="chat-history" className="chat-list-section" style="margin-top: 40px; scroll-margin-top: 80px;">
@@ -3924,6 +4280,28 @@
                     setUnlockedCount(Math.min(100, parseFloat((cached / 1000).toFixed(1))));
                 }
                 
+                // 【关键修复】在进入 fullReport 前，将 analysisData 保存到全局变量
+                if (analysisData && window.analysisModule) {
+                    if (analysisData.stats && window.analysisModule.setGlobalStats) {
+                        window.analysisModule.setGlobalStats(analysisData.stats);
+                        console.log('[React] ✅ 已保存 stats 到全局变量');
+                    }
+                    if (analysisData.vibeResult && window.analysisModule.setVibeResult) {
+                        window.analysisModule.setVibeResult(analysisData.vibeResult);
+                        console.log('[React] ✅ 已保存 vibeResult 到全局变量:', {
+                            hasPersonalityName: !!analysisData.vibeResult.personalityName,
+                            hasRoastText: !!analysisData.vibeResult.roastText,
+                            hasDimensions: !!analysisData.vibeResult.dimensions,
+                            hasAnalysis: !!analysisData.vibeResult.analysis,
+                            hasSemanticFingerprint: !!analysisData.vibeResult.semanticFingerprint
+                        });
+                    }
+                    if (analysisData.chatData && window.analysisModule.setAllChatData) {
+                        window.analysisModule.setAllChatData(analysisData.chatData);
+                        console.log('[React] ✅ 已保存 chatData 到全局变量');
+                    }
+                }
+                
                 setStep('fullReport');
                 // 延迟渲染，确保 DOM 已更新
                 setTimeout(() => {
@@ -3950,7 +4328,8 @@
                             const vibeResult = window.analysisModule.getVibeResult();
                             console.log('数据状态:', {
                                 hasStats: !!stats,
-                                hasVibeResult: !!vibeResult
+                                hasVibeResult: !!vibeResult,
+                                vibeResultKeys: vibeResult ? Object.keys(vibeResult) : null
                             });
                             
                             // 渲染完整 Dashboard，传递 vibeResult 参数

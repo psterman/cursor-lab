@@ -691,10 +691,23 @@ export function getRoastText(index, lang = 'zh-CN') {
 }
 
 /**
- * Vibe Codinger 分析器类
+ * Vibe Codinger 分析器类（v5.0 全维度数据聚合中枢）
+ * 【2026-01-27 架构升级】全维度数据聚合、环境上下文注入、Worker Singleton
+ * 
+ * 核心职责：
+ * 1. 环境上下文注入（ip, lang, timezone, fingerprint, isVpn, isProxy）
+ * 2. Worker 统计数据与本地环境元数据整合
+ * 3. 输出符合 /api/v2/analyze 标准的大 JSON
+ * 4. Worker 实例 Singleton 模式
+ * 5. 异常兜底，默认值设为 0
  */
+
+// 【v5.0 Worker Singleton】全局 Worker 实例
+let globalWorkerInstance = null;
+let globalWorkerReady = false;
+
 export class VibeCodingerAnalyzer {
-  constructor(lang = 'zh-CN') {
+  constructor(lang = 'zh-CN', dimensionConfig = null) {
     this.lang = lang;
     this.userMessages = [];
     this.chatData = []; // 保存原始聊天数据，用于上传到后端
@@ -703,12 +716,38 @@ export class VibeCodingerAnalyzer {
     this.workerReady = false;
     this.pendingTasks = [];
     
-    // 【第一阶段新增】影子调用验证计数器
-    this.shadowCallCount = 0;
-    this.shadowMatchCount = 0;
-    this.shadowMismatches = [];
+    // 【v4.0 元数据驱动】动态维度配置
+    // 如果未提供配置，则从Worker返回的keys动态生成，或使用默认5维度
+    this.dimensionKeys = dimensionConfig?.keys || null; // 将在Worker初始化后动态获取
+    this.dimensionMetadata = dimensionConfig?.metadata || {}; // 维度元数据（名称、描述等）
     
-    // 初始化 Web Worker
+    // 【v4.0 稀疏数据处理】仅存储得分非零的维度
+    this.sparseDimensions = new Map(); // Map<dimensionKey, score>
+    
+    // 【v5.0 架构清理】已删除所有 shadowCall、compareDimensions 等冗余对比逻辑
+    
+    // 【v4.0 全球化上下文】
+    this.countryCode = null; // 当前国家代码（ISO 3166-1 alpha-2）
+    this.countryAverage = null; // 国家平均分 {dimension: average}
+    this.countryContext = {}; // 国家上下文数据
+    
+    // 【v4.0 性能优化】并发锁与超时保护
+    this.analysisLock = false; // 并发锁，防止任务竞争
+    this.analysisTimeout = 5000; // 5秒超时
+    this.activeTimeouts = new Map(); // Map<taskId, timeoutId>
+    
+    // 【v4.0 逻辑漏洞修复】MessageChannel清理
+    this.messageChannels = new Set(); // 追踪所有MessageChannel实例
+    
+    // 【v4.0 一票否决权】hasRageWord拦截机制
+    this.hasRageWord = false; // 是否检测到咆哮词
+    this.rageWordIntercepted = false; // 是否已触发拦截
+    
+    // 【v5.0 Worker Singleton】使用全局 Worker 实例
+    this.worker = null;
+    this.workerReady = false;
+    
+    // 初始化 Web Worker（Singleton 模式）
     this.initWorker();
   }
 
@@ -721,9 +760,34 @@ export class VibeCodingerAnalyzer {
   }
 
   /**
-   * 初始化 Web Worker
+   * 初始化 Web Worker（v5.0 Singleton 模式）
+   * 【v5.0 改进】Worker 实例 Singleton，所有分析器实例共享同一个 Worker
    */
   initWorker() {
+    // 【v5.0 Worker Singleton】如果全局 Worker 已存在，直接复用
+    if (globalWorkerInstance && globalWorkerReady) {
+      this.worker = globalWorkerInstance;
+      this.workerReady = true;
+      console.log('[VibeAnalyzer] 复用全局 Worker 实例（Singleton）');
+      return;
+    }
+    
+    // 如果全局 Worker 存在但未就绪，等待初始化完成
+    if (globalWorkerInstance && !globalWorkerReady) {
+      console.log('[VibeAnalyzer] Worker 初始化中，等待就绪...');
+      // 等待 Worker 就绪（通过轮询检查）
+      const checkReady = setInterval(() => {
+        if (globalWorkerReady) {
+          clearInterval(checkReady);
+          this.worker = globalWorkerInstance;
+          this.workerReady = true;
+          console.log('[VibeAnalyzer] Worker 已就绪，复用全局实例');
+        }
+      }, 100);
+      return;
+    }
+    
+    // 【v5.0 Worker Singleton】创建全局 Worker 实例
     try {
       // 动态获取 Worker 路径，适配不同环境
       let workerUrl;
@@ -745,69 +809,122 @@ export class VibeCodingerAnalyzer {
         }
       }
       
-      this.worker = new Worker(workerUrl, {
+      // 创建全局 Worker 实例
+      globalWorkerInstance = new Worker(workerUrl, {
         type: 'module',
       });
+      this.worker = globalWorkerInstance;
 
-      // 监听 Worker 消息
-      this.worker.onmessage = (e) => {
-        const { type, payload } = e.data;
+      // 【v5.0 Worker Singleton】创建全局消息处理器（仅初始化一次）
+      if (!globalWorkerInstance._messageHandler) {
+        const messageHandler = (e) => {
+          const { type, payload } = e.data;
 
-        switch (type) {
-          case 'INIT_SUCCESS':
-            this.workerReady = true;
-            console.log('[VibeAnalyzer] Worker 初始化成功:', payload);
-            // 处理待处理的任务
-            this.processPendingTasks();
-            break;
+          switch (type) {
+            case 'INIT_SUCCESS':
+              globalWorkerReady = true;
+              console.log('[VibeAnalyzer] 全局 Worker 初始化成功:', payload);
+              
+              // 【v5.0 架构清理】已删除维度识别逻辑，由 Worker 直接返回
+              // 通知所有等待的实例
+              if (globalWorkerInstance._pendingInstances) {
+                globalWorkerInstance._pendingInstances.forEach(instance => {
+                  instance.workerReady = true;
+                  instance.processPendingTasks();
+                });
+                globalWorkerInstance._pendingInstances = [];
+              }
+              break;
 
-          case 'ANALYZE_SUCCESS':
-            // 处理分析结果
-            const task = this.pendingTasks.shift();
-            if (task && task.resolve) {
-              task.resolve(payload);
-            }
-            break;
+            case 'ANALYZE_SUCCESS':
+              // 处理分析结果（通过任务ID路由到对应的实例）
+              if (payload.taskId && globalWorkerInstance._taskMap) {
+                const task = globalWorkerInstance._taskMap.get(payload.taskId);
+                if (task) {
+                  globalWorkerInstance._taskMap.delete(payload.taskId);
+                  const timeoutId = task.timeoutId;
+                  if (timeoutId) {
+                    clearTimeout(timeoutId);
+                  }
+                  if (task.resolve) {
+                    task.resolve(payload);
+                  }
+                }
+              }
+              break;
 
-          case 'ERROR':
-            console.error('[VibeAnalyzer] Worker 错误:', payload);
-            const errorTask = this.pendingTasks.shift();
-            if (errorTask && errorTask.reject) {
-              errorTask.reject(new Error(payload.message));
-            }
-            break;
-        }
-      };
+            case 'ERROR':
+              console.error('[VibeAnalyzer] Worker 错误:', payload);
+              if (payload.taskId && globalWorkerInstance._taskMap) {
+                const task = globalWorkerInstance._taskMap.get(payload.taskId);
+                if (task) {
+                  globalWorkerInstance._taskMap.delete(payload.taskId);
+                  const timeoutId = task.timeoutId;
+                  if (timeoutId) {
+                    clearTimeout(timeoutId);
+                  }
+                  if (task.reject) {
+                    task.reject(new Error(payload.message));
+                  }
+                }
+              }
+              break;
+          }
+        };
+
+        globalWorkerInstance.onmessage = messageHandler;
+        globalWorkerInstance._messageHandler = messageHandler;
+        globalWorkerInstance._taskMap = new Map(); // 任务ID到Promise的映射
+        globalWorkerInstance._pendingInstances = []; // 等待初始化的实例列表
+      }
+      
+      // 【v5.0 Worker Singleton】如果 Worker 未就绪，将当前实例加入等待列表
+      if (!globalWorkerReady) {
+        globalWorkerInstance._pendingInstances.push(this);
+      } else {
+        this.workerReady = true;
+      }
 
       this.worker.onerror = (error) => {
         console.error('[VibeAnalyzer] Worker 运行时错误:', error);
         this.workerReady = false;
         // 降级到同步处理
         const errorTask = this.pendingTasks.shift();
-        if (errorTask && errorTask.reject) {
-          errorTask.reject(error);
+        if (errorTask) {
+          const timeoutId = this.activeTimeouts.get(errorTask.id);
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+            this.activeTimeouts.delete(errorTask.id);
+          }
+          
+          if (errorTask.reject) {
+            errorTask.reject(error);
+          }
         }
       };
 
-      // 【2026-01-20 新增】预处理维度数据，为 AC 自动机准备优化的词库结构
-      const preprocessedDimensions = preprocessAllDimensions();
+      // 【v5.0 Worker Singleton】仅在首次初始化时发送 INIT 消息
+      if (!globalWorkerInstance._initialized) {
+        const preprocessedDimensions = preprocessAllDimensions();
+        const dimensionData = {};
+        const defaultKeys = ['L', 'P', 'D', 'E', 'F'];
+        const keysToUse = this.dimensionKeys || defaultKeys;
+        
+        keysToUse.forEach(key => {
+          if (preprocessedDimensions[key]) {
+            dimensionData[key] = preprocessedDimensions[key];
+          }
+        });
 
-      // 准备维度数据（使用预处理后的数据）
-      const dimensionData = {
-        L: preprocessedDimensions.L,
-        P: preprocessedDimensions.P,
-        D: preprocessedDimensions.D,
-        E: preprocessedDimensions.E,
-        F: preprocessedDimensions.F,
-      };
+        console.log('[VibeAnalyzer] 全局 Worker 维度数据预处理完成，发送 INIT:', Object.keys(dimensionData));
 
-      console.log('[VibeAnalyzer] 维度数据预处理完成，发送到 Worker');
-
-      // 发送初始化消息
-      this.worker.postMessage({
-        type: 'INIT',
-        payload: dimensionData,
-      });
+        globalWorkerInstance.postMessage({
+          type: 'INIT',
+          payload: dimensionData,
+        });
+        
+        globalWorkerInstance._initialized = true;
+      }
     } catch (error) {
       console.warn('[VibeAnalyzer] Web Worker 初始化失败，将使用同步处理:', error);
       this.workerReady = false;
@@ -815,20 +932,148 @@ export class VibeCodingerAnalyzer {
   }
 
   /**
-   * 处理待处理的任务
+   * 【v4.0 新增】识别Top 5核心维度
+   * 用于影子调用一致性监控，优先对比核心维度以确保主指标稳定性
+   * @param {Array} dimensionKeys - 维度键数组
+   * @param {Object} dimensionMetadata - 维度元数据（包含权重等信息）
+   * @returns {Array} Top 5核心维度键
+   */
+  identifyTopCoreDimensions(dimensionKeys, dimensionMetadata = {}) {
+    if (!dimensionKeys || dimensionKeys.length === 0) {
+      return ['L', 'P', 'D', 'E', 'F'].slice(0, 5); // 默认Top 5
+    }
+    
+    // 如果维度数量<=5，全部返回
+    if (dimensionKeys.length <= 5) {
+      return dimensionKeys;
+    }
+    
+    // 根据元数据中的权重或重要性排序
+    const sorted = dimensionKeys
+      .map(key => ({
+        key,
+        weight: dimensionMetadata[key]?.weight || 1,
+        importance: dimensionMetadata[key]?.importance || 0
+      }))
+      .sort((a, b) => {
+        // 优先按重要性，其次按权重
+        if (a.importance !== b.importance) {
+          return b.importance - a.importance;
+        }
+        return b.weight - a.weight;
+      });
+    
+    return sorted.slice(0, 5).map(item => item.key);
+  }
+
+  /**
+   * 【v5.0 文本清洗】清洗原始文本，移除 Markdown 代码块和链接
+   * 目的：防止"逻辑（Logic）"维度因代码词汇过载而失真
+   * 
+   * @param {string} rawText - 原始文本
+   * @returns {string} 清洗后的文本
+   * @private
+   */
+  _sanitizeText(rawText) {
+    if (!rawText || typeof rawText !== 'string') {
+      return '';
+    }
+    
+    let sanitized = rawText;
+    
+    // 1. 移除 Markdown 代码块（```...```之间的内容，包括多行代码块）
+    // 匹配模式：```可选语言标识\n代码内容\n```
+    sanitized = sanitized.replace(/```[\s\S]*?```/g, '');
+    
+    // 2. 移除行内代码（`code`）
+    // 匹配模式：`代码内容`，但不匹配 ``（空的反引号）
+    sanitized = sanitized.replace(/`([^`\n]+)`/g, '');
+    
+    // 3. 移除 Markdown 链接语法 [text](url)，仅保留 text
+    // 匹配模式：[链接文本](URL) 或 [链接文本](URL "标题")
+    sanitized = sanitized.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
+    
+    // 4. 清理多余空白行（连续3个或以上换行符替换为2个）
+    sanitized = sanitized.replace(/\n{3,}/g, '\n\n');
+    
+    // 5. 清理行首行尾空白
+    sanitized = sanitized.trim();
+    
+    // 6. 清理行内多余空格（连续2个或以上空格替换为1个）
+    sanitized = sanitized.replace(/[ \t]{2,}/g, ' ');
+    
+    return sanitized;
+  }
+
+  /**
+   * 【v5.0 文本清洗】清洗 chatData 数组中的所有文本
+   * 
+   * @param {Array} chatData - 原始聊天数据
+   * @returns {Array} 清洗后的聊天数据
+   * @private
+   */
+  _sanitizeChatData(chatData) {
+    if (!chatData || !Array.isArray(chatData)) {
+      return chatData || [];
+    }
+    
+    return chatData.map(item => {
+      if (!item || typeof item !== 'object') {
+        return item;
+      }
+      
+      // 创建新对象，避免修改原对象
+      const sanitizedItem = { ...item };
+      
+      // 清洗 text 或 content 字段
+      if (sanitizedItem.text) {
+        sanitizedItem.text = this._sanitizeText(sanitizedItem.text);
+      }
+      if (sanitizedItem.content) {
+        sanitizedItem.content = this._sanitizeText(sanitizedItem.content);
+      }
+      
+      return sanitizedItem;
+    }).filter(item => {
+      // 过滤掉清洗后文本为空的用户消息
+      if (item.role === 'USER') {
+        const text = item.text || item.content || '';
+        return text.trim().length > 0;
+      }
+      return true; // 保留非用户消息（如 ASSISTANT）
+    });
+  }
+
+  /**
+   * 【v5.0 Worker Singleton】处理待处理的任务
+   * 通过任务ID路由到对应的Promise resolve/reject
    */
   processPendingTasks() {
-    if (this.pendingTasks.length > 0 && this.workerReady) {
-      const task = this.pendingTasks[0];
+    if (this.pendingTasks.length > 0 && this.workerReady && this.worker) {
+      const task = this.pendingTasks.shift();
+      const taskId = task.id || `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      // 【v5.0 Worker Singleton】将任务注册到全局任务映射
+      if (this.worker._taskMap) {
+        this.worker._taskMap.set(taskId, {
+          resolve: task.resolve,
+          reject: task.reject,
+          timeoutId: task.timeoutId
+        });
+      }
+      
+      // 发送分析请求（包含任务ID）
       this.worker.postMessage({
         type: 'ANALYZE',
+        taskId: taskId, // 【v5.0 新增】任务ID用于路由
         payload: task.payload,
       });
     }
   }
 
   /**
-   * 分析用户消息，生成人格画像（第三阶段：完全云端化）
+   * 分析用户消息，生成人格画像（v4.0 重构版）
+   * 【v4.0 改进】并发锁、超时保护、hasRageWord拦截、稀疏数据处理
    * @param {Array} chatData - 聊天数据
    * @param {string} lang - 语言代码
    * @param {Object} extraStats - 额外的统计数据（用于上传排名）
@@ -837,60 +1082,229 @@ export class VibeCodingerAnalyzer {
    * @param {number} extraStats.usageDays - 使用天数
    * @param {Function} onProgress - 进度回调函数，用于显示加载提示
    */
-  async analyze(chatData, lang, extraStats = null, onProgress = null) {
-    if (lang) this.lang = lang;
-    const currentLang = this.lang;
-
-    // 保存原始聊天数据，用于后续上传到后端
-    this.chatData = chatData || [];
-
-    // 提取用户消息
-    this.userMessages = chatData.filter(item => item.role === 'USER');
-    
-    if (this.userMessages.length === 0) {
-      return this.getDefaultResult();
+  /**
+   * 分析用户消息，生成人格画像（v5.0 全维度数据聚合中枢）
+   * 【v5.0 架构升级】环境上下文注入、数据封装、输出对齐
+   * 
+   * @param {Array} chatData - 聊天数据
+   * @param {Object} context - 环境上下文信息（必需）
+   * @param {string} context.ip - IP 地址
+   * @param {string} context.lang - 语言代码（如 'zh-CN', 'en-US'）
+   * @param {string} context.timezone - 时区（如 'Asia/Shanghai', 'America/New_York'）
+   * @param {string} context.fingerprint - 浏览器指纹（可选）
+   * @param {boolean} context.isVpn - 是否使用 VPN
+   * @param {boolean} context.isProxy - 是否使用代理
+   * @param {Object} extraStats - 额外的统计数据（可选，已废弃，保留兼容性）
+   * @param {Function} onProgress - 进度回调函数（可选）
+   * @returns {Promise<Object>} 符合 /api/v2/analyze 标准的大 JSON
+   * @returns {Object} fingerprint - 语义指纹
+   * @returns {Object} dimensions - 维度分数
+   * @returns {Object} stats - 行为特征统计
+   * @returns {Object} meta - 环境信息元数据
+   */
+  async analyze(chatData, context, extraStats = null, onProgress = null) {
+    // 【v5.0 异常兜底】参数验证与默认值
+    if (!chatData || !Array.isArray(chatData) || chatData.length === 0) {
+      console.warn('[VibeAnalyzer] chatData 为空或无效，返回默认结果');
+      return this.getDefaultResultWithContext(context);
     }
-
-    // 【第三阶段】直接调用 Worker 接口，不再本地计算
-    try {
-      const result = await this.analyzeFromWorker(chatData, currentLang);
-      
-      // 生成详细分析（仍需要本地生成，因为涉及 UI 展示）
-      const analysis = this.generateAnalysis(result.dimensions, result.personalityType);
-      
-      // 生成语义指纹（仍需要本地生成）
-      const semanticFingerprint = this.generateSemanticFingerprint(result.dimensions);
-      
-      this.analysisResult = {
-        personalityType: result.personalityType,
-        dimensions: result.dimensions,
-        analysis,
-        statistics: result.statistics,
-        semanticFingerprint,
-        vibeIndex: result.vibeIndex,
-        roastText: result.roastText,
-        personalityName: result.personalityName,
-        lpdef: result.lpdef,
-        globalAverage: this.globalAverage || null,
-        metadata: result.metadata || null,
-        rankData: null, // 排名数据将在外部获取后注入
+    
+    // 【v5.0 异常兜底】context 参数验证与默认值
+    if (!context || typeof context !== 'object') {
+      console.warn('[VibeAnalyzer] context 参数无效，使用默认值');
+      context = {
+        ip: '0.0.0.0',
+        lang: this.lang || 'zh-CN',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+        fingerprint: null,
+        isVpn: false,
+        isProxy: false
       };
+    }
+    
+    // 【v5.0 异常兜底】确保所有必需字段都有默认值
+    const safeContext = {
+      ip: context.ip || '0.0.0.0',
+      lang: context.lang || this.lang || 'zh-CN',
+      timezone: context.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+      fingerprint: context.fingerprint || null,
+      isVpn: Boolean(context.isVpn || context.isVPN || false),
+      isProxy: Boolean(context.isProxy || false)
+    };
+    
+    // 【v5.0 并发锁】防止快速点击导致任务竞争
+    if (this.analysisLock) {
+      console.warn('[VibeAnalyzer] 分析任务正在进行中，请稍候...');
+      throw new Error('Analysis already in progress. Please wait for the current task to complete.');
+    }
+    
+    this.analysisLock = true;
+    const taskId = `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    try {
+      // 更新语言
+      this.lang = safeContext.lang;
+      
+      // 【v5.0 文本清洗】在发送到 Worker 之前清洗 chatData
+      // 移除 Markdown 代码块、行内代码、链接语法，防止 Logic 维度失真
+      const sanitizedChatData = this._sanitizeChatData(chatData);
+      
+      // 保存原始数据（用于后续上传）
+      this.chatData = chatData;
+      
+      // 使用清洗后的数据进行分析
+      this.userMessages = sanitizedChatData.filter(item => item.role === 'USER');
+      
+      if (this.userMessages.length === 0) {
+        console.warn('[VibeAnalyzer] 文本清洗后，用户消息为空，返回默认结果');
+        return this.getDefaultResultWithContext(safeContext);
+      }
 
-      return this.analysisResult;
+      // 【v5.0 超时保护】设置5秒超时
+      const timeoutPromise = new Promise((_, reject) => {
+        const timeoutId = setTimeout(() => {
+          reject(new Error(`Analysis timeout after ${this.analysisTimeout}ms`));
+        }, this.analysisTimeout);
+        this.activeTimeouts.set(taskId, timeoutId);
+      });
+
+      // 【v5.0 Worker Singleton】通过全局 Worker 实例调用分析
+      // 使用清洗后的 chatData，确保代码内容不影响语义分析
+      const analysisPromise = this.analyzeFromWorker(sanitizedChatData, safeContext);
+      
+      let workerResult;
+      try {
+        workerResult = await Promise.race([analysisPromise, timeoutPromise]);
+      } catch (error) {
+        const timeoutId = this.activeTimeouts.get(taskId);
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          this.activeTimeouts.delete(taskId);
+        }
+        
+        if (error.message.includes('timeout')) {
+          console.warn('[VibeAnalyzer] 分析超时，降级到本地简单匹配');
+          // 降级方案也使用清洗后的数据
+          return await this.analyzeSync(sanitizedChatData, safeContext.lang, extraStats, onProgress);
+        }
+        throw error;
+      }
+      
+      // 【v5.0 数据封装】整合 Worker 返回的 stats 统计数据与环境元数据
+      const workerStats = workerResult.stats || workerResult.statistics || {};
+      
+      // 【v5.0 异常兜底】确保所有 stats 字段都有默认值 0
+      const safeStats = {
+        totalChars: Number(workerStats.totalChars) || 0,
+        totalMessages: Number(workerStats.totalMessages) || 0,
+        ketao_count: Number(workerStats.ketao_count) || 0,
+        jiafang_count: Number(workerStats.jiafang_count) || 0,
+        tech_stack: workerStats.tech_stack && typeof workerStats.tech_stack === 'object' 
+          ? workerStats.tech_stack 
+          : {},
+        work_days: Number(workerStats.work_days) || 0,
+        avg_payload: Number(workerStats.avg_payload) || 0
+      };
+      
+      // 【v5.0 异常兜底】确保所有 dimensions 字段都有默认值 0
+      const safeDimensions = {};
+      const dimensionKeys = this.dimensionKeys || Object.keys(workerResult.dimensions || {});
+      dimensionKeys.forEach(key => {
+        const value = workerResult.dimensions?.[key];
+        safeDimensions[key] = Number(value) || 0;
+      });
+      
+      // 【v5.0 输出对齐】生成符合 /api/v2/analyze 标准的大 JSON
+      const semanticFingerprint = this.generateSemanticFingerprint(safeDimensions);
+      
+      const result = {
+        // fingerprint: 语义指纹
+        fingerprint: {
+          codeRatio: semanticFingerprint.codeRatio || '0%',
+          patienceLevel: semanticFingerprint.patienceLevel || 'Low Patience',
+          detailLevel: semanticFingerprint.detailLevel || 'Low Detail',
+          techExploration: semanticFingerprint.techExploration || 'Low Explore',
+          feedbackDensity: semanticFingerprint.feedbackDensity || '0%',
+          compositeScore: Number(semanticFingerprint.compositeScore) || 0,
+          techDiversity: semanticFingerprint.techDiversity || 'Low',
+          interactionStyle: semanticFingerprint.interactionStyle || 'Balanced',
+          balanceIndex: semanticFingerprint.balanceIndex || 'Slightly Imbalanced'
+        },
+        
+        // dimensions: 维度分数（异常兜底，默认值 0）
+        dimensions: safeDimensions,
+        
+        // stats: 行为特征统计（异常兜底，默认值 0）
+        stats: safeStats,
+        
+        // meta: 环境信息元数据
+        meta: {
+          ip: safeContext.ip,
+          lang: safeContext.lang,
+          timezone: safeContext.timezone,
+          fingerprint: safeContext.fingerprint,
+          isVpn: safeContext.isVpn,
+          isProxy: safeContext.isProxy,
+          timestamp: new Date().toISOString(),
+          countryCode: this.countryCode || null,
+          hasRageWord: Boolean(workerResult.metadata?.hasRageWord || workerResult.hasRageWord || false),
+          personalityType: workerResult.personalityType || 'UNKNOWN',
+          vibeIndex: workerResult.vibeIndex || '00000',
+          lpdef: workerResult.lpdef || 'L0P0D0E0F0'
+        }
+      };
+      
+      // 【关键修复】生成完整的 analysis 对象
+      const analysis = this.generateAnalysis(safeDimensions, result.meta.personalityType);
+      
+      // 【关键修复】构建完整的返回结果（包含所有字段）
+      const fullResult = {
+        ...result,
+        // 【关键字段】人格名称和吐槽文案 - 预览页面需要
+        personalityName: workerResult.personalityName || 'Unknown',
+        roastText: workerResult.roastText || '',
+        personalityType: result.meta.personalityType,
+        vibeIndex: result.meta.vibeIndex,
+        lpdef: result.meta.lpdef,
+        // 【关键字段】人格分析详情 - 完整报告需要
+        analysis: analysis,
+        // 【关键字段】语义指纹对象 - 完整报告需要
+        semanticFingerprint: semanticFingerprint,
+        // 统计数据
+        statistics: safeStats
+      };
+      
+      // 保存分析结果（兼容旧版本）
+      this.analysisResult = fullResult;
+
+      return fullResult;
     } catch (error) {
       console.error('[VibeAnalyzer] Worker 分析失败，使用降级方案:', error);
       // 降级方案：使用同步方法（保留作为后备）
-      return await this.analyzeSync(chatData, currentLang, extraStats, onProgress);
+      // 注意：这里使用原始 chatData，因为 analyzeSync 可能需要完整数据
+      // 但 analyzeSync 内部也会进行文本清洗（如果需要）
+      return await this.analyzeSync(chatData, this.lang, extraStats, onProgress);
+    } finally {
+      // 【v4.0 并发锁】释放锁
+      this.analysisLock = false;
+      
+      // 清理超时定时器
+      const timeoutId = this.activeTimeouts.get(taskId);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        this.activeTimeouts.delete(taskId);
+      }
     }
   }
 
   /**
-   * 【第三阶段新增】从 Worker 获取分析结果
+   * 【v5.0 升级】从 Worker 获取分析结果（Worker Singleton 模式）
+   * 【v5.0 改进】环境上下文注入、V6 Stats对接、异常兜底
    * @param {Array} chatData - 聊天数据
-   * @param {string} lang - 语言代码
-   * @returns {Promise<Object>} 分析结果
+   * @param {Object} context - 环境上下文信息（必需）
+   * @returns {Promise<Object>} Worker 返回的分析结果
    */
-  async analyzeFromWorker(chatData, lang) {
+  async analyzeFromWorker(chatData, context) {
     // 获取 API 端点
     const getApiEndpoint = () => {
       if (typeof window !== 'undefined') {
@@ -912,10 +1326,35 @@ export class VibeCodingerAnalyzer {
       ? `${apiEndpoint}api/v2/analyze` 
       : `${apiEndpoint}/api/v2/analyze`;
 
+    // 【v5.0 环境上下文注入】构建请求体，包含完整环境信息
+    const requestBody = { 
+      chatData, 
+      lang: context.lang,
+      countryCode: this.countryCode || null,
+      context: {
+        ip: context.ip || '0.0.0.0',
+        lang: context.lang || 'zh-CN',
+        timezone: context.timezone || 'UTC',
+        fingerprint: context.fingerprint || null,
+        vpn: context.isVpn || false, // 【V6 统一化】使用 vpn 字段名
+        proxy: context.isProxy || false // 【V6 统一化】使用 proxy 字段名
+      },
+      // 【V6 环境与网络安全】meta 字段完整包含所有环境信息
+      meta: {
+        ip: context.ip || '0.0.0.0',
+        lang: context.lang || 'zh-CN',
+        timezone: context.timezone || 'UTC',
+        fingerprint: context.fingerprint || null,
+        vpn: context.isVpn || false,
+        proxy: context.isProxy || false,
+        timestamp: new Date().toISOString()
+      }
+    };
+
     const response = await fetch(analyzeUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chatData, lang }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
@@ -925,7 +1364,49 @@ export class VibeCodingerAnalyzer {
     const result = await response.json();
     
     if (result.status === 'success') {
-      return result;
+      // 【v4.0 V6 Stats对接】确保stats对象完整解析
+      const stats = result.stats || {};
+      
+      // 解析tech_stack（如果存在）
+      let techStack = {};
+      if (stats.tech_stack) {
+        if (typeof stats.tech_stack === 'string') {
+          try {
+            techStack = JSON.parse(stats.tech_stack);
+          } catch (e) {
+            console.warn('[VibeAnalyzer] tech_stack解析失败:', e);
+            techStack = {};
+          }
+        } else if (typeof stats.tech_stack === 'object') {
+          techStack = stats.tech_stack;
+        }
+      }
+      
+      // 构建完整的stats对象
+      const fullStats = {
+        totalChars: stats.totalChars || 0,
+        totalMessages: stats.totalMessages || 0,
+        ketao_count: stats.ketao_count || 0,
+        jiafang_count: stats.jiafang_count || 0,
+        tech_stack: techStack, // 格式：{"React": 5, "Rust": 2}
+        work_days: stats.work_days || 1,
+        avg_payload: stats.avg_payload || 0,
+        ...stats // 保留其他字段
+      };
+      
+      // 【v4.0 hasRageWord检测】从metadata或stats中提取
+      const hasRageWord = result.metadata?.hasRageWord || stats.hasRageWord || false;
+      
+      return {
+        ...result,
+        stats: fullStats,
+        hasRageWord, // 【v4.0 新增】明确标记hasRageWord
+        metadata: {
+          ...(result.metadata || {}),
+          hasRageWord, // 确保metadata中也包含
+          stats: fullStats // 将完整stats也放入metadata
+        }
+      };
     } else {
       throw new Error(result.error || 'Worker 返回错误');
     }
@@ -942,14 +1423,17 @@ export class VibeCodingerAnalyzer {
     if (lang) this.lang = lang;
     const currentLang = this.lang;
 
-    // 提取用户消息
-    this.userMessages = chatData.filter(item => item.role === 'USER');
+    // 【v5.0 文本清洗】降级方案也进行文本清洗
+    const sanitizedChatData = this._sanitizeChatData(chatData);
+    
+    // 提取用户消息（使用清洗后的数据）
+    this.userMessages = sanitizedChatData.filter(item => item.role === 'USER');
     
     if (this.userMessages.length === 0) {
       return this.getDefaultResult(currentLang);
     }
 
-    // 使用原有的同步方法计算维度
+    // 使用原有的同步方法计算维度（基于清洗后的数据）
     const dimensions = this.calculateDimensions();
     
     // 生成索引和吐槽文案
@@ -1717,18 +2201,99 @@ export class VibeCodingerAnalyzer {
       
       const apiEndpoint = getApiEndpoint();
 
-      // 4. 构造 V2 接口请求体：严格遵循 { chatData: [...], lang: 'zh-CN' } 格式
-      // 【重构】不再发送 dimensions、vibeIndex 等本地计算结果
+      // 4. 构造 V2 接口请求体：严格遵循 { chatData: [...], lang: 'zh-CN', stats: {...} } 格式
+      // 【v4.0 重构】不再发送 dimensions、vibeIndex 等本地计算结果
+      // 【v4.0 全球化】传递国家代码以获取国家平均值
+      // 【V6 适配】包含 stats 字段（40维度数据）
+      
+      // 从 vibeResult 中提取 stats 对象（如果存在）
+      let statsToUpload = null;
+      if (vibeResult) {
+        // 优先使用 vibeResult.stats（V6 标准格式）
+        if (vibeResult.stats) {
+          statsToUpload = vibeResult.stats;
+        } 
+        // 降级：从 vibeResult.statistics 中构建
+        else if (vibeResult.statistics) {
+          // 解析 tech_stack（如果存在）
+          let techStack = {};
+          if (vibeResult.statistics.tech_stack) {
+            if (typeof vibeResult.statistics.tech_stack === 'string') {
+              try {
+                techStack = JSON.parse(vibeResult.statistics.tech_stack);
+              } catch (e) {
+                console.warn('[VibeAnalyzer] tech_stack解析失败:', e);
+                techStack = {};
+              }
+            } else if (typeof vibeResult.statistics.tech_stack === 'object') {
+              techStack = vibeResult.statistics.tech_stack;
+            }
+          }
+          
+          statsToUpload = {
+            totalChars: vibeResult.statistics.totalChars || vibeResult.statistics.totalUserChars || 0,
+            totalMessages: vibeResult.statistics.totalMessages || vibeResult.statistics.userMessages || 0,
+            ketao_count: vibeResult.statistics.ketao_count || vibeResult.statistics.qingCount || 0,
+            jiafang_count: vibeResult.statistics.jiafang_count || vibeResult.statistics.buCount || 0,
+            tech_stack: techStack,
+            work_days: vibeResult.statistics.work_days || vibeResult.statistics.usageDays || 1,
+            avg_payload: vibeResult.statistics.avg_payload || 0
+          };
+        }
+      }
+      
+      // 如果仍然没有 stats，使用默认值（健壮性保障）
+      if (!statsToUpload) {
+        statsToUpload = {
+          totalChars: 0,
+          totalMessages: 0,
+          ketao_count: 0,
+          jiafang_count: 0,
+          tech_stack: {},
+          work_days: 1,
+          avg_payload: 0
+        };
+      }
+      
+      // 【V6 上报协议对齐】构建完整的 Payload，包含 fingerprint, dimensions, stats, meta
+      // 从 vibeResult 中提取完整数据
+      const fingerprint = vibeResult?.meta?.fingerprint || vibeResult?.fingerprint || null;
+      const dimensions = vibeResult?.dimensions || {};
+      
+      // 【V6 环境与网络安全】确保 meta 字段完整包含所有环境信息
+      // 优先使用 vibeResult.meta，如果不存在则从 context 构建
+      let meta = vibeResult?.meta || {};
+      if (!meta.ip || meta.ip === '0.0.0.0') {
+        // 如果 meta 不完整，尝试从 context 构建
+        const context = vibeResult?.context || {};
+        meta = {
+          ip: context.ip || '0.0.0.0',
+          lang: context.lang || this.lang || 'zh-CN',
+          timezone: context.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+          fingerprint: context.fingerprint || fingerprint || null,
+          vpn: context.isVpn || context.vpn || false,
+          proxy: context.isProxy || context.proxy || false,
+          timestamp: new Date().toISOString()
+        };
+      }
+
       const uploadData = {
         chatData: formattedChatData,
-        lang: this.lang || 'zh-CN'
+        lang: this.lang || 'zh-CN',
+        countryCode: this.countryCode || null, // 【v4.0 新增】传递国家代码
+        fingerprint: fingerprint, // 【V6 新增】浏览器指纹
+        dimensions: dimensions, // 【V6 新增】LPDEF 分数
+        stats: statsToUpload, // 【V6 适配】包含 stats 字段
+        meta: meta // 【V6 新增】环境信息元数据（完整包含 ip, lang, timezone, fingerprint, vpn, proxy）
       };
 
       console.log('[VibeAnalyzer] 发送原始聊天数据到 /api/v2/analyze:', {
         messageCount: formattedChatData.length,
         lang: uploadData.lang,
         sampleMessage: formattedChatData[0],
-        payloadFormat: '严格遵循 { chatData: [...], lang: "zh-CN" } 格式'
+        payloadFormat: '严格遵循 { chatData: [...], lang: "zh-CN", stats: {...} } 格式',
+        hasStats: !!uploadData.stats,
+        statsKeys: uploadData.stats ? Object.keys(uploadData.stats) : []
       });
 
       // 5. 发送请求到 /api/v2/analyze 端点
@@ -1749,6 +2314,16 @@ export class VibeCodingerAnalyzer {
 
       const result = await response.json();
       console.log('[VibeAnalyzer] 后端返回数据:', result);
+      
+      // 【V6 上报协议对齐】保存后端返回的 global_stats 到本地
+      if (result.global_stats) {
+        try {
+          localStorage.setItem('vibe_global_stats', JSON.stringify(result.global_stats));
+          console.log('[VibeAnalyzer] ✅ 已保存 global_stats 到本地:', result.global_stats);
+        } catch (error) {
+          console.warn('[VibeAnalyzer] 保存 global_stats 失败:', error);
+        }
+      }
       
       // 6. 处理 V2 接口响应：使用后端返回的精准数据更新实例状态和 UI
       if (result.status === 'success') {
@@ -1774,16 +2349,58 @@ export class VibeCodingerAnalyzer {
           this.analysisResult.personalityType = backendPersonalityType;
           this.analysisResult.lpdef = backendLpdef;
           
-          // 如果后端返回了统计信息，也更新
-          if (result.statistics) {
+          // 【v4.0 V6 Stats对接】完整解析stats对象
+          if (result.stats || result.statistics) {
+            const stats = result.stats || result.statistics || {};
+            
+            // 解析tech_stack（如果存在）
+            let techStack = {};
+            if (stats.tech_stack) {
+              if (typeof stats.tech_stack === 'string') {
+                try {
+                  techStack = JSON.parse(stats.tech_stack);
+                } catch (e) {
+                  console.warn('[VibeAnalyzer] tech_stack解析失败:', e);
+                  techStack = {};
+                }
+              } else if (typeof stats.tech_stack === 'object') {
+                techStack = stats.tech_stack;
+              }
+            }
+            
+            // 构建完整的stats对象（V6接口标准）
+            const fullStats = {
+              totalChars: stats.totalChars || 0,
+              totalMessages: stats.totalMessages || 0,
+              ketao_count: stats.ketao_count || 0,
+              jiafang_count: stats.jiafang_count || 0,
+              tech_stack: techStack, // 格式：{"React": 5, "Rust": 2}
+              work_days: stats.work_days || 1,
+              avg_payload: stats.avg_payload || 0,
+              ...stats // 保留其他字段
+            };
+            
             this.analysisResult.statistics = {
               ...this.analysisResult.statistics,
-              ...result.statistics
+              ...fullStats
             };
+            
+            // 同时更新metadata中的stats
+            if (!this.analysisResult.metadata) {
+              this.analysisResult.metadata = {};
+            }
+            this.analysisResult.metadata.stats = fullStats;
+          }
+          
+          // 【v4.0 全球化上下文】如果后端返回了国家平均值，更新
+          if (result.countryAverage) {
+            this.countryAverage = result.countryAverage;
+            this.analysisResult.countryAverage = result.countryAverage;
           }
           
           // 如果后端返回了全局平均值，更新
           if (result.globalAverage) {
+            this.globalAverage = result.globalAverage;
             this.analysisResult.globalAverage = result.globalAverage;
           }
           
@@ -1802,6 +2419,30 @@ export class VibeCodingerAnalyzer {
         const ranks = result.ranks || null;
         const globalAverage = result.globalAverage || result.global_average || null;
         
+        // 【关键修复】合并后端返回的完整数据，包括 analysis 和 semanticFingerprint
+        // 更新 this.analysisResult，确保包含所有必需字段
+        if (this.analysisResult) {
+          // 如果后端返回了 analysis 对象，更新它
+          if (result.analysis) {
+            this.analysisResult.analysis = result.analysis;
+          }
+          
+          // 如果后端返回了 semanticFingerprint 对象，更新它
+          if (result.semanticFingerprint) {
+            this.analysisResult.semanticFingerprint = result.semanticFingerprint;
+          }
+          
+          // 如果后端返回了 stats 对象，更新它
+          if (result.stats) {
+            this.analysisResult.stats = result.stats;
+          }
+          
+          // 如果后端返回了 fingerprint 字符串，更新它
+          if (result.fingerprint) {
+            this.analysisResult.fingerprint = result.fingerprint;
+          }
+        }
+        
         // 构造返回数据：包含分析结果和排名信息
         const returnData = {
           // 分析结果（V2 接口返回的精准数据）
@@ -1811,6 +2452,17 @@ export class VibeCodingerAnalyzer {
           vibeIndex: backendVibeIndex,
           personalityType: backendPersonalityType,
           lpdef: backendLpdef,
+          
+          // 【关键修复】包含后端返回的完整数据，如果后端没有返回则使用 vibeResult 中的数据
+          analysis: result.analysis || vibeResult?.analysis || this.analysisResult?.analysis || null, // 包含 name, description, dimensions, traits
+          semanticFingerprint: result.semanticFingerprint || vibeResult?.semanticFingerprint || this.analysisResult?.semanticFingerprint || null, // 语义指纹对象
+          stats: result.stats || result.data?.stats || null, // 完整的 stats 数据
+          fingerprint: result.fingerprint || null, // 语义指纹字符串
+          
+          // 【V6 架构修复】优先从 personality.detailedStats 读取数据
+          // 数据流向：后端 scoring.ts → rank-content.ts → matchRankLevel → personality.detailedStats
+          personality: result.personality || null, // 包含 detailedStats 数组
+          detailedStats: result.personality?.detailedStats || result.detailedStats || null, // 详细统计数据数组，包含每个维度的称号和吐槽文案（优先从 personality.detailedStats 读取）
           
           // 排名信息（如果后端返回了）
           rankPercent: Number(finalRank),
@@ -1862,130 +2514,189 @@ export class VibeCodingerAnalyzer {
     }
   }
   /**
-   * 获取默认结果
+   * 【v5.0 新增】获取默认结果（带环境上下文）
+   * @param {Object} context - 环境上下文信息
+   * @returns {Object} 符合 /api/v2/analyze 标准的默认 JSON
    */
-  getDefaultResult(lang = 'zh-CN') {
-    const isEn = lang === 'en';
+  getDefaultResultWithContext(context = {}) {
+    const lang = context.lang || this.lang || 'zh-CN';
+    const isEn = lang === 'en' || lang.startsWith('en');
+    
+    // 【v5.0 异常兜底】默认维度分数为 0
+    const defaultDimensions = {};
+    const dimensionKeys = this.dimensionKeys || ['L', 'P', 'D', 'E', 'F'];
+    dimensionKeys.forEach(key => {
+      defaultDimensions[key] = 0;
+    });
+    
     return {
-      personalityType: 'UNKNOWN',
-      dimensions: { L: 0, P: 0, D: 0, E: 0, F: 0 },
-      analysis: {
-        type: 'UNKNOWN',
-        name: isEn ? 'Unknown' : '未知类型',
-        description: isEn ? 'Insufficient data for analysis' : '数据不足，无法进行准确分析',
+      fingerprint: {
+        codeRatio: '0%',
+        patienceLevel: 'Low Patience',
+        detailLevel: 'Low Detail',
+        techExploration: 'Low Explore',
+        feedbackDensity: '0%',
+        compositeScore: 0,
+        techDiversity: 'Low',
+        interactionStyle: 'Balanced',
+        balanceIndex: 'Slightly Imbalanced'
       },
-      statistics: {},
-      semanticFingerprint: {},
-      vibeIndex: '00000',
-      roastText: isEn ? 'Insufficient data for a roast' : '数据不足，无法生成吐槽',
-      personalityName: isEn ? 'Mystery Coder' : '未知人格',
-      lpdef: 'L0P0D0E0F0',
+      dimensions: defaultDimensions,
+      stats: {
+        totalChars: 0,
+        totalMessages: 0,
+        ketao_count: 0,
+        jiafang_count: 0,
+        tech_stack: {},
+        work_days: 0,
+        avg_payload: 0
+      },
+      meta: {
+        ip: context.ip || '0.0.0.0',
+        lang: lang,
+        timezone: context.timezone || 'UTC',
+        fingerprint: context.fingerprint || null,
+        isVpn: Boolean(context.isVpn || false),
+        isProxy: Boolean(context.isProxy || false),
+        timestamp: new Date().toISOString(),
+        countryCode: this.countryCode || null,
+        hasRageWord: false,
+        personalityType: 'UNKNOWN',
+        vibeIndex: '00000',
+        lpdef: 'L0P0D0E0F0'
+      }
     };
   }
 
   /**
-   * 【第一阶段新增】影子调用 Worker 接口进行对比验证
-   * 不阻塞主线程，异步发送数据到 /api/v2/analyze
-   * @param {Array} chatData - 聊天数据
-   * @param {Object} localDimensions - 本地计算的维度得分
+   * 获取默认结果（兼容旧版本）
    */
-  async shadowCallToWorker(chatData, localDimensions) {
-    try {
-      // 获取 API 端点（与 uploadToSupabase 保持一致）
-      const getApiEndpoint = () => {
-        if (typeof window !== 'undefined') {
-          const envApiUrl = window.__API_ENDPOINT__ || window.API_ENDPOINT;
-          if (envApiUrl) {
-            return envApiUrl;
-          }
-          const metaApi = document.querySelector('meta[name="api-endpoint"]');
-          if (metaApi && metaApi.content) {
-            const apiUrl = metaApi.content.trim();
-            return apiUrl.endsWith('/') ? apiUrl : apiUrl + '/';
-          }
-        }
-        return 'https://cursor-clinical-analysis.psterman.workers.dev/';
-      };
+  getDefaultResult(lang = 'zh-CN') {
+    return this.getDefaultResultWithContext({ lang });
+  }
 
-      const apiEndpoint = getApiEndpoint();
-      const analyzeUrl = apiEndpoint.endsWith('/') 
-        ? `${apiEndpoint}api/v2/analyze` 
-        : `${apiEndpoint}/api/v2/analyze`;
+  /**
+   * 【v5.0 架构清理】已删除 shadowCallToWorker 和 compareDimensions 方法
+   * 所有冗余对比逻辑已移除，实现纯净分析流
+   */
 
-      // 发送请求到 Worker 影子接口
-      const response = await fetch(analyzeUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatData }),
-      });
+  /**
+   * 【v4.0 新增】设置国家上下文
+   * 注入国家平均值，用于计算个人得分与国家平均分的偏离度
+   * @param {string} countryCode - 国家代码（ISO 3166-1 alpha-2，如 'US', 'CN', 'JP'）
+   * @param {Object} countryAverage - 国家平均分对象 {dimension: average}
+   * @param {Object} countryContext - 国家上下文数据（可选）
+   */
+  setCountryContext(countryCode, countryAverage = null, countryContext = {}) {
+    this.countryCode = countryCode;
+    this.countryAverage = countryAverage;
+    this.countryContext = {
+      ...this.countryContext,
+      ...countryContext,
+      countryCode,
+      updatedAt: new Date().toISOString()
+    };
+    
+    console.log(`[VibeAnalyzer] 国家上下文已设置: ${countryCode}`, {
+      countryAverage,
+      contextKeys: Object.keys(countryContext)
+    });
+  }
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
+  /**
+   * 【v4.0 新增】计算个人得分与国家平均分的偏离度
+   * @param {Object} personalDimensions - 个人维度得分
+   * @returns {Object} 偏离度对象 {dimension: deviation, overallDeviation: number}
+   */
+  calculateDeviationFromCountry(personalDimensions) {
+    if (!this.countryAverage || !personalDimensions) {
+      return null;
+    }
+    
+    const deviations = {};
+    const dimensionKeys = this.dimensionKeys || Object.keys(personalDimensions);
+    let totalDeviation = 0;
+    let validCount = 0;
+    
+    dimensionKeys.forEach(key => {
+      const personal = personalDimensions[key] || 0;
+      const country = this.countryAverage[key] || 0;
       
-      if (result.status === 'success' && result.dimensions) {
-        const remoteDimensions = result.dimensions;
+      if (country > 0) {
+        // 计算相对偏离度（百分比）
+        const deviation = ((personal - country) / country) * 100;
+        deviations[key] = {
+          personal,
+          country,
+          deviation: deviation.toFixed(2),
+          deviationPercent: `${deviation >= 0 ? '+' : ''}${deviation.toFixed(2)}%`
+        };
         
-        // 对比本地和远程计算结果
-        const isMatch = this.compareDimensions(localDimensions, remoteDimensions);
-        
-        this.shadowCallCount++;
-        if (isMatch) {
-          this.shadowMatchCount++;
-        } else {
-          this.shadowMismatches.push({
-            local: localDimensions,
-            remote: remoteDimensions,
-            timestamp: new Date().toISOString(),
-          });
-        }
-
-        // 控制台输出对比结果
-        console.log(`[VibeAnalyzer] 影子调用 #${this.shadowCallCount}:`, {
-          match: isMatch ? '✅ 完全一致' : '❌ 不一致',
-          local: localDimensions,
-          remote: remoteDimensions,
-          matchRate: `${this.shadowMatchCount}/${this.shadowCallCount}`,
-          consecutiveMatches: this.shadowMatchCount,
-        });
-
-        // 如果连续 50 次完全一致，说明大脑已经"发育成功"
-        if (this.shadowMatchCount >= 50 && this.shadowCallCount === this.shadowMatchCount) {
-          console.log('[VibeAnalyzer] 🎉 大脑发育成功！连续 50 次计算结果完全一致！');
-        }
+        totalDeviation += Math.abs(deviation);
+        validCount++;
       }
-    } catch (error) {
-      // 影子调用失败不影响主流程，只记录警告
-      console.warn('[VibeAnalyzer] 影子调用失败:', error);
-    }
+    });
+    
+    const overallDeviation = validCount > 0 ? totalDeviation / validCount : 0;
+    
+    return {
+      deviations,
+      overallDeviation: overallDeviation.toFixed(2),
+      interpretation: this.interpretDeviation(overallDeviation)
+    };
   }
 
   /**
-   * 【第一阶段新增】对比两个维度得分对象是否完全一致
-   * @param {Object} local - 本地计算的维度得分
-   * @param {Object} remote - 远程计算的维度得分
-   * @returns {boolean} 是否完全一致
+   * 【v4.0 新增】解释偏离度
+   * @param {number} deviation - 平均偏离度
+   * @returns {string} 偏离度解释
    */
-  compareDimensions(local, remote) {
-    const keys = ['L', 'P', 'D', 'E', 'F'];
-    for (const key of keys) {
-      if (Math.abs((local[key] || 0) - (remote[key] || 0)) > 0.01) {
-        return false;
-      }
-    }
-    return true;
+  interpretDeviation(deviation) {
+    const d = parseFloat(deviation);
+    if (d < 5) return '与全国平均水平非常接近';
+    if (d < 15) return '略高于/低于全国平均水平';
+    if (d < 30) return '明显高于/低于全国平均水平';
+    return '显著偏离全国平均水平';
   }
 
   /**
-   * 清理资源
+   * 【v4.0 修复】清理资源（彻底清理MessageChannel和事件监听器）
    */
   destroy() {
+    // 【v4.0 修复】清理所有MessageChannel实例
+    this.messageChannels.forEach(channel => {
+      try {
+        channel.port1.close();
+        channel.port2.close();
+      } catch (e) {
+        console.warn('[VibeAnalyzer] 清理MessageChannel失败:', e);
+      }
+    });
+    this.messageChannels.clear();
+    
+    // 【v4.0 修复】移除Worker事件监听器
     if (this.worker) {
+      if (this._messageHandler) {
+        this.worker.removeEventListener('message', this._messageHandler);
+        this._messageHandler = null;
+      }
       this.worker.terminate();
       this.worker = null;
       this.workerReady = false;
     }
+    
+    // 【v4.0 修复】清理所有超时定时器
+    this.activeTimeouts.forEach(timeoutId => {
+      clearTimeout(timeoutId);
+    });
+    this.activeTimeouts.clear();
+    
+    // 释放并发锁
+    this.analysisLock = false;
+    
+    // 清空稀疏维度数据
+    this.sparseDimensions.clear();
+    
+    console.log('[VibeAnalyzer] 资源清理完成');
   }
 }

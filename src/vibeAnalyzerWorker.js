@@ -79,6 +79,24 @@ const BM25_CONFIG = {
 };
 
 /**
+ * 【2026-01-27 V6.0 新增】V6 行为阈值配置
+ * 定义各项指标的敏感度阈值，用于判断是否触发行为特征
+ */
+const V6_BEHAVIOR_THRESHOLDS = {
+  ketao_threshold: 10,      // 赛博磕头阈值：命中"Feedback"维度中语义偏向"求助/请求"的频次
+  jiafang_threshold: 5,     // 甲方上身阈值：指令性动词在总匹配中的占比加权
+  tease_threshold: 3,       // 调戏AI阈值：语气助词、表情符号或非技术性调侃词的频次
+  nonsense_threshold: 20,   // 废话输出阈值：NOISE_WORDS 或短词重复出现的频次
+  repeat_message_threshold: 3, // 连续重复消息阈值：相同消息连续出现次数
+};
+
+/**
+ * 【2026-01-27 V6.0 新增】最大分析字符数限制
+ * 防止超大型 SQLite 文本导致 Worker 内存溢出（OOM）
+ */
+const MAX_ANALYSIS_CHARS = 50000;
+
+/**
  * 【2026-01-20 新增】稀有度分值（IDF 模拟值）
  * 专业词汇权重大于通用词汇
  */
@@ -120,6 +138,153 @@ const INTENSIFIER_PREFIXES = {
   chinese: ['非常', '特别', '极其', '相当', '十分', '很', '太'],
   english: ['very', 'extremely', 'really', 'quite', 'rather', 'too', 'so'],
 };
+
+/**
+ * 【2026-01-27 新增】行为特征捕获正则表达式（双语）
+ * KETAO_REG: 赛博磕头（谢谢、辛苦、麻烦等）
+ * JIAFANG_REG: 甲方上身（马上、赶紧、必须等）
+ * ABUSE_REG: 受虐倾向（error, failed, 报错等）
+ * TEASE_REG: 调戏AI（调皮词汇）
+ * NONSENSE_REG: 废话输出（无意义词汇）
+ * 预编译在循环外部，提升性能
+ */
+/**
+ * 【2026-01-27 新增】噪音词列表（Noise Words）
+ * 极高频的代码关键词，在进入 BM25 评分前应被过滤，防止干扰 Logic 和 Detail 维度评分
+ */
+const NOISE_WORDS = new Set([
+  // JavaScript/TypeScript 关键字
+  'const', 'let', 'var', 'function', 'class', 'import', 'export', 'return', 'if', 'else',
+  'for', 'while', 'switch', 'case', 'try', 'catch', 'async', 'await', 'new', 'this',
+  'typeof', 'instanceof', 'in', 'of', 'from', 'as', 'extends', 'implements', 'interface',
+  // 常见操作符和符号
+  '=>', '=', '==', '===', '!==', '!=', '>', '<', '>=', '<=',
+  // 常见代码模式
+  'console', 'log', 'debugger', 'break', 'continue', 'default'
+]);
+
+/**
+ * 【2026-01-27 新增】文本清洗函数
+ * 1. 过滤掉所有不含中文字符或英文字母的纯符号词汇
+ * 2. 移除以 + 或 - 开头的代码行前缀（Cursor Diff 输出）
+ * 3. 移除噪音词
+ * 
+ * @param {string} text - 原始文本
+ * @returns {string} 清洗后的文本
+ */
+function sanitizeText(text) {
+  if (!text || typeof text !== 'string') return '';
+  
+  let cleaned = text;
+  
+  // 步骤1: 移除 Cursor Diff 输出的行前缀（+ 或 - 开头）
+  // 匹配行首的 + 或 -，后跟空格或制表符
+  cleaned = cleaned.replace(/^[\+\-]\s+/gm, '');
+  
+  // 步骤2: 移除纯符号词汇（不含中文或英文字母的词汇）
+  // 匹配由纯符号、数字、标点组成的"词汇"（被空格或标点包围）
+  // 保留包含至少一个中文或英文字母的词汇
+  cleaned = cleaned.replace(/\b[^\u4e00-\u9fa5a-zA-Z\s]+\b/g, '');
+  
+  // 步骤3: 移除连续的纯符号序列（如 ===, =>, -> 等）
+  // 但保留在代码上下文中的这些符号（如函数定义中的 =>）
+  // 这里简化处理：移除独立的符号序列
+  cleaned = cleaned.replace(/\s+[=\-<>!&|]+\s+/g, ' ');
+  
+  return cleaned.trim();
+}
+
+/**
+ * 【2026-01-27 新增】关键词映射归一化表
+ * 将常见技术词汇的缩写或小写形式映射为标准格式（首字母大写）
+ */
+const TECH_KEYWORD_MAP = {
+  // 编程语言
+  'ts': 'TypeScript',
+  'js': 'JavaScript',
+  'py': 'Python',
+  'go': 'Go',
+  'rs': 'Rust',
+  'rb': 'Ruby',
+  'php': 'PHP',
+  'java': 'Java',
+  'cpp': 'C++',
+  'csharp': 'C#',
+  'swift': 'Swift',
+  'kotlin': 'Kotlin',
+  'dart': 'Dart',
+  // 框架/库
+  'react': 'React',
+  'vue': 'Vue',
+  'angular': 'Angular',
+  'node': 'Node.js',
+  'express': 'Express',
+  'next': 'Next.js',
+  'nuxt': 'Nuxt.js',
+  'svelte': 'Svelte',
+  'jquery': 'jQuery',
+  'bootstrap': 'Bootstrap',
+  'tailwind': 'Tailwind',
+  'webpack': 'Webpack',
+  'vite': 'Vite',
+  'rollup': 'Rollup',
+  'esbuild': 'esbuild',
+  // 数据库
+  'mysql': 'MySQL',
+  'postgres': 'PostgreSQL',
+  'mongodb': 'MongoDB',
+  'redis': 'Redis',
+  'sqlite': 'SQLite',
+  // 工具/平台
+  'git': 'Git',
+  'docker': 'Docker',
+  'kubernetes': 'Kubernetes',
+  'aws': 'AWS',
+  'azure': 'Azure',
+  'gcp': 'GCP',
+};
+
+/**
+ * 【2026-01-27 修复】关键词归一化函数
+ * 将命中词统一为首字母大写格式，防止频次分裂
+ */
+function normalizeTechKeyword(word) {
+  if (!word || typeof word !== 'string') return word;
+  
+  // 先检查映射表
+  const lowerWord = word.toLowerCase();
+  if (TECH_KEYWORD_MAP[lowerWord]) {
+    return TECH_KEYWORD_MAP[lowerWord];
+  }
+  
+  // 如果没有映射，则统一为首字母大写格式
+  return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+}
+
+// 【2026-01-27 修复】全词匹配正则表达式（使用边界符 \b 防止误匹配）
+const KETAO_REG = /\b(谢谢|辛苦|麻烦|请问|跪求|拜托|感谢|大佬|thanks|thank you|appreciate|kindly|please|sorry)\b/gi;
+const JIAFANG_REG = /\b(马上|赶紧|必须|重写|改一下|优化|速度|ASAP|immediately|must|rewrite|fix|rework|quickly|why)\b/gi;
+const ABUSE_REG = /\b(error|failed|fail|报错|错误|失败|崩溃|bug|exception|crash|broken|wrong|incorrect|问题|issue|problem)\b/gi;
+const TEASE_REG = /(哈哈|嘿嘿|嘻嘻|😄|😊|😆|\blol\b|\bhaha\b|\bhehe\b|\blmao\b|\brofl\b|调皮|逗|开玩笑|\bfunny\b|\bjoke\b)/gi;
+const NONSENSE_REG = /(嗯|啊|呃|额|那个|这个|就是|然后|所以|但是|不过|其实|话说|\bem\b|\bum\b|\buh\b|\ber\b|\bah\b|\bwell\b|\byou know\b|\blike\b)/gi;
+const SLANG_REG = /\b(deep dive|low hanging fruit|paradigm shift|game changer|touch base|best practice|scalability|idempotent|synergy|leverage|disrupt|pivot|scale|unicorn|moonshot|bandwidth|circle back|unblock)\b/gi;
+
+/**
+ * 【2026-01-27 新增】硅谷黑话识别词库
+ * 技术圈常用黑话，用于识别用户的"圈内人"程度
+ */
+const SILICON_VALLEY_BLACKWORDS = [
+  // 技术黑话
+  '赋能', '抓手', '闭环', '沉淀', '对齐', '打通', '落地', '复盘', '赋能', '抓手',
+  '迭代', '复盘', '赋能', '抓手', '闭环', '沉淀', '对齐', '打通', '落地', '复盘',
+  '赋能', '抓手', '闭环', '沉淀', '对齐', '打通', '落地', '复盘', '赋能', '抓手',
+  // 英文黑话
+  'synergy', 'leverage', 'disrupt', 'pivot', 'scale', 'unicorn', 'moonshot',
+  'deep dive', 'low-hanging fruit', 'think outside the box', 'move the needle',
+  'bandwidth', 'circle back', 'touch base', 'ping', 'sync', 'align', 'unblock',
+  // 技术术语黑话化
+  '架构', '重构', '优化', '性能', '瓶颈', '痛点', '场景', '方案', '落地', '上线'
+];
 
 // ==========================================
 // 2. AC 自动机 (Aho-Corasick Automaton)
@@ -298,6 +463,7 @@ class ACAutomaton {
   /**
    * 搜索关键词（单次扫描，O(n) 复杂度）
    * 【2026-01-20 更新】支持上下文检测（否定前缀、强化前缀）
+   * 【2026-01-27 更新】添加 tech_stack 词频提取（仅 L1 和 L2）
    */
   search(text) {
     const results = {
@@ -307,9 +473,10 @@ class ACAutomaton {
       E: { L1: 0, L2: 0, L3: 0 },
       F: { L1: 0, L2: 0, L3: 0 },
     };
+    const techStackHits = {}; // 【2026-01-27 新增】tech_stack 词频统计（仅 L1 和 L2）
 
     if (!this.isBuilt) {
-      return results;
+      return { results, techStackHits };
     }
 
     let node = this.root;
@@ -346,6 +513,12 @@ class ACAutomaton {
             continue;
           }
 
+          // 【2026-01-27 新增】噪音词过滤：跳过极高频代码关键词（防止干扰 Logic 和 Detail 维度评分）
+          const termLower = (matchNode.term || '').toLowerCase();
+          if (NOISE_WORDS.has(termLower)) {
+            continue; // 跳过噪音词，不进行任何计数
+          }
+
           // 避免同一位置重复计数（防止短词覆盖长词）
           const posKey = `${key}_${i}`;
           if (!matchedPositions.has(posKey)) {
@@ -353,12 +526,19 @@ class ACAutomaton {
             const effectiveCount = Math.round(matchNode.weight * intensifierFactor);
             results[matchNode.dimension][matchNode.level] += effectiveCount;
             matchedPositions.add(posKey);
+
+            // 【2026-01-27 修复】tech_stack 词频提取（仅 L1 和 L2）+ 关键词映射归一化
+            if ((matchNode.level === 'L1' || matchNode.level === 'L2') && matchNode.term) {
+              // 使用归一化函数，防止频次分裂（如 ts -> TypeScript, react -> React）
+              const normalizedWord = normalizeTechKeyword(matchNode.term);
+              techStackHits[normalizedWord] = (techStackHits[normalizedWord] || 0) + 1;
+            }
           }
         }
       }
     }
 
-    return results;
+    return { results, techStackHits };
   }
 
   /**
@@ -436,6 +616,7 @@ class ACAutomaton {
   /**
    * 统计每个关键词的命中次数（用于 BM25 计算）
    * 【2026-01-20 更新】支持上下文检测
+   * 【2026-01-27 更新】添加 tech_stack 词频提取（仅 L1 和 L2）
    */
   searchWithTermFrequency(text) {
     const results = {
@@ -447,9 +628,10 @@ class ACAutomaton {
     };
 
     const termFrequencyMap = {}; // 词频映射：{term: count}
+    const techStackHits = {}; // 【2026-01-27 新增】tech_stack 词频统计（仅 L1 和 L2）
 
     if (!this.isBuilt) {
-      return { results, termFrequencyMap };
+      return { results, termFrequencyMap, techStackHits };
     }
 
     let node = this.root;
@@ -481,6 +663,12 @@ class ACAutomaton {
             continue;
           }
 
+          // 【2026-01-27 新增】噪音词过滤：跳过极高频代码关键词（防止干扰 Logic 和 Detail 维度评分）
+          const termLower = (matchNode.term || '').toLowerCase();
+          if (NOISE_WORDS.has(termLower)) {
+            continue; // 跳过噪音词，不进行任何计数
+          }
+
           const posKey = `${key}_${i}`;
 
           if (!matchedPositions.has(posKey)) {
@@ -493,13 +681,20 @@ class ACAutomaton {
             const termKey = `${key}_${matchNode.term}`;
             termFrequencyMap[termKey] = (termFrequencyMap[termKey] || 0) + effectiveCount;
 
+            // 【2026-01-27 修复】tech_stack 词频提取（仅 L1 和 L2）+ 关键词映射归一化
+            if ((matchNode.level === 'L1' || matchNode.level === 'L2') && matchNode.term) {
+              // 使用归一化函数，防止频次分裂（如 ts -> TypeScript, react -> React）
+              const normalizedWord = normalizeTechKeyword(matchNode.term);
+              techStackHits[normalizedWord] = (techStackHits[normalizedWord] || 0) + 1;
+            }
+
             matchedPositions.add(posKey);
           }
         }
       }
     }
 
-    return { results, termFrequencyMap };
+    return { results, termFrequencyMap, techStackHits };
   }
 }
 
@@ -688,11 +883,53 @@ class BM25Scorer {
 function scanAndMatch(chatData, patterns) {
   const userMessages = chatData.filter(item => item.role === 'USER');
 
+  // 【2026-01-27 V6.0 新增】字符数限制检查，防止 OOM
+  let totalCharsBeforeLimit = 0;
+  userMessages.forEach(msg => {
+    totalCharsBeforeLimit += (msg.text || '').length;
+  });
+  
+  // 如果总字符数超过限制，进行截断
+  if (totalCharsBeforeLimit > MAX_ANALYSIS_CHARS) {
+    console.warn(`[Worker] 文本总字符数 ${totalCharsBeforeLimit} 超过限制 ${MAX_ANALYSIS_CHARS}，进行截断`);
+    // 按比例截断消息，保留前面的消息
+    const ratio = MAX_ANALYSIS_CHARS / totalCharsBeforeLimit;
+    const maxMessages = Math.max(1, Math.floor(userMessages.length * ratio));
+    userMessages.splice(maxMessages);
+  }
+
   let negativeWordCount = 0;
   let totalTextLength = 0;
   let estimatedWordCount = 0;
   let comboHits = 0; // 连击次数：同时命中 L 和 D 的片段数
   let hasRageWord = false; // 是否检测到负向咆哮词
+  let ketaoCount = 0; // 【2026-01-27 V6.0】赛博磕头计数：命中"Feedback"维度中语义偏向"求助/请求"的频次
+  let jiafangCount = 0; // 【2026-01-27 V6.0】甲方上身计数：指令性动词在总匹配中的占比加权
+  let abuseCount = 0; // 【2026-01-27 新增】受虐倾向计数
+  let teaseCount = 0; // 【2026-01-27 V6.0】调戏AI计数：语气助词、表情符号或非技术性调侃词的频次
+  let nonsenseCount = 0; // 【2026-01-27 V6.0】废话输出计数：NOISE_WORDS 或短词重复出现的频次
+  let slangCount = 0; // 【2026-01-27 新增】硅谷黑话计数
+  let blackwordHits = {}; // 【2026-01-27 新增】黑话命中统计
+  let chineseSlangHits = {}; // 【V6 新增】中文黑话（功德簿）
+  let englishSlangHits = {}; // 【V6 新增】英文黑话（硅谷黑话）
+  let abuseValue = 0; // 【V6 新增】受虐值：统计特定咆哮词/否定词频次
+  let totalCodeChars = 0; // 【2026-01-27 新增】代码总字符数
+  let minTs = null; // 【2026-01-27 新增】最小时间戳
+  let maxTs = null; // 【2026-01-27 新增】最大时间戳
+  
+  // 【2026-01-27 V6.0 新增】连续重复消息检测
+  let lastMessageText = null;
+  let repeatMessageCount = 0;
+  
+  // 【V6 新增】受虐值关键词：特定咆哮词或否定词（如"重写"、"不对"）
+  const ABUSE_VALUE_WORDS = {
+    chinese: ['重写', '不对', '错了', '不行', '不对', '错误', '失败', '改', '改一下', '优化', '速度', '赶紧', '马上', '必须'],
+    english: ['rewrite', 'wrong', 'incorrect', 'error', 'failed', 'fail', 'fix', 'rework', 'broken', 'must', 'immediately', 'ASAP', 'quickly']
+  };
+  const abuseValuePattern = {
+    chinese: new RegExp(`(?:${ABUSE_VALUE_WORDS.chinese.join('|')})`, 'gi'),
+    english: new RegExp(`\\b(?:${ABUSE_VALUE_WORDS.english.join('|')})\\b`, 'gi')
+  };
 
   // 扩展负面词库 - 分为两级
   // 【新增】一级负面词（咆哮词）：一票否决，直接封顶60分
@@ -718,15 +955,176 @@ function scanAndMatch(chatData, patterns) {
   };
 
   const wordFrequencyMap = {}; // 词频统计表
+  const techStackHits = {}; // 【2026-01-27 新增】tech_stack 词频统计（仅 L1 和 L2）
 
   userMessages.forEach(msg => {
-    const text = msg.text || '';
+    let text = msg.text || '';
     if (!text || text.length < 2) return;
+
+    // 【2026-01-27 新增】文本清洗：过滤纯符号词汇、移除 Diff 前缀
+    text = sanitizeText(text);
+    if (!text || text.length < 2) return; // 清洗后可能为空，需要再次检查
+
+    // 【2026-01-27 V6.0 新增】连续重复消息检测
+    const normalizedText = text.trim().toLowerCase();
+    if (normalizedText === lastMessageText) {
+      repeatMessageCount++;
+      // 如果连续重复超过阈值，增加 nonsense_count
+      if (repeatMessageCount >= V6_BEHAVIOR_THRESHOLDS.repeat_message_threshold) {
+        nonsenseCount += repeatMessageCount;
+      }
+    } else {
+      lastMessageText = normalizedText;
+      repeatMessageCount = 0;
+    }
 
     totalTextLength += text.length;
 
-    // 估算单词数：中文按字符，英文按空格
-    const enWords = text.split(/\s+/).length;
+    // 【2026-01-27 V6.0】行为特征捕获（双语正则框架）
+    // 注意：ketao_count 和 jiafang_count 会在 AC 自动机匹配后根据维度更新
+    const ketaoMatches = (text.match(KETAO_REG) || []).length;
+    const jiafangMatches = (text.match(JIAFANG_REG) || []).length;
+
+    const abuseMatches = (text.match(ABUSE_REG) || []).length;
+    abuseCount += abuseMatches;
+
+    const teaseMatches = (text.match(TEASE_REG) || []).length;
+    teaseCount += teaseMatches;
+
+    // 【2026-01-27 V6.0】nonsense_count: NOISE_WORDS 或短词重复出现的频次
+    const nonsenseMatches = (text.match(NONSENSE_REG) || []).length;
+    nonsenseCount += nonsenseMatches;
+    
+    // 【2026-01-27 V6.0 新增】检测短词重复（如"嗯嗯"、"好好"、"对对"）
+    const shortWordRepeatPattern = /(\S{1,2})\1{2,}/g; // 匹配1-2个字符重复3次以上
+    const shortWordRepeats = (text.match(shortWordRepeatPattern) || []).length;
+    nonsenseCount += shortWordRepeats;
+    
+    // 【2026-01-27 V6.0 新增】检测 NOISE_WORDS 在文本中的出现
+    const words = text.toLowerCase().split(/\s+/);
+    words.forEach(word => {
+      if (NOISE_WORDS.has(word)) {
+        nonsenseCount += 1; // 每个噪音词计数一次
+      }
+    });
+
+    // 【2026-01-27 新增】硅谷黑话识别（SLANG_REG）
+    const slangMatches = (text.match(SLANG_REG) || []).length;
+    slangCount += slangMatches;
+    
+    // 【V6 新增】受虐值计算：统计特定咆哮词/否定词频次
+    const chineseAbuseMatches = (text.match(abuseValuePattern.chinese) || []).length;
+    const englishAbuseMatches = (text.match(abuseValuePattern.english) || []).length;
+    abuseValue += (chineseAbuseMatches + englishAbuseMatches);
+    
+    // 【V6 优化】黑话命中统计：分为 chinese_slang 和 english_slang
+    // 中文黑话（功德簿）
+    const chineseBlackwords = ['功德', '善哉', '阿弥陀佛', '善', '功德无量', '福报', '积德'];
+    chineseBlackwords.forEach(word => {
+      const regex = new RegExp(word, 'gi');
+      const matches = text.match(regex);
+      if (matches && matches.length > 0) {
+        chineseSlangHits[word] = (chineseSlangHits[word] || 0) + matches.length;
+      }
+    });
+    
+    // 英文黑话（硅谷黑话）- 保留原有逻辑
+    SILICON_VALLEY_BLACKWORDS.forEach(blackword => {
+      const regex = new RegExp(`\\b${blackword}\\b`, 'gi'); // 添加边界符
+      const matches = text.match(regex);
+      if (matches && matches.length > 0) {
+        englishSlangHits[blackword] = (englishSlangHits[blackword] || 0) + matches.length;
+        // 兼容旧格式
+        blackwordHits[blackword] = (blackwordHits[blackword] || 0) + matches.length;
+      }
+    });
+
+    // 【2026-01-27 新增】代码行占比计算（检测代码块）
+    // 检测代码块标记：```代码块```、`行内代码`、代码关键字等
+    const codeBlockPattern = /```[\s\S]*?```/g; // 多行代码块
+    const inlineCodePattern = /`[^`\n]+`/g; // 行内代码
+    const codeKeywordPattern = /\b(function|class|const|let|var|import|export|return|if|else|for|while|switch|case|try|catch|async|await|=>)\b/gi;
+    
+    // 统计代码块字符数
+    const codeBlocks = text.match(codeBlockPattern) || [];
+    codeBlocks.forEach(block => {
+      totalCodeChars += block.length;
+    });
+    
+    // 统计行内代码字符数（避免重复计算）
+    const inlineCodes = text.match(inlineCodePattern) || [];
+    inlineCodes.forEach(code => {
+      // 检查是否已在代码块中
+      let isInBlock = false;
+      for (const block of codeBlocks) {
+        if (block.includes(code)) {
+          isInBlock = true;
+          break;
+        }
+      }
+      if (!isInBlock) {
+        totalCodeChars += code.length;
+      }
+    });
+    
+    // 统计代码关键字（仅统计不在代码块中的关键字）
+    const keywords = text.match(codeKeywordPattern) || [];
+    keywords.forEach(keyword => {
+      const keywordIndex = text.indexOf(keyword);
+      let isInCode = false;
+      // 检查是否在代码块或行内代码中
+      for (const block of codeBlocks) {
+        const blockStart = text.indexOf(block);
+        if (keywordIndex >= blockStart && keywordIndex < blockStart + block.length) {
+          isInCode = true;
+          break;
+        }
+      }
+      if (!isInCode) {
+        for (const inline of inlineCodes) {
+          const inlineStart = text.indexOf(inline);
+          if (keywordIndex >= inlineStart && keywordIndex < inlineStart + inline.length) {
+            isInCode = true;
+            break;
+          }
+        }
+      }
+      // 如果不在代码中，则可能是自然语言提及，不计入代码字符
+      // 这里简化处理：只统计代码块和行内代码
+    });
+
+    // 【2026-01-27 新增】时间维度计算
+    if (msg.timestamp) {
+      let ts = null;
+      try {
+        // 处理时间戳：可能是 ISO 字符串或数字
+        if (typeof msg.timestamp === 'string') {
+          ts = new Date(msg.timestamp).getTime();
+        } else if (typeof msg.timestamp === 'number') {
+          // 如果时间戳长度为 10 位（秒），则乘以 1000 转为毫秒
+          ts = msg.timestamp.toString().length === 10 ? msg.timestamp * 1000 : msg.timestamp;
+        }
+
+        if (ts && !isNaN(ts)) {
+          if (minTs === null || ts < minTs) {
+            minTs = ts;
+          }
+          if (maxTs === null || ts > maxTs) {
+            maxTs = ts;
+          }
+        }
+      } catch (e) {
+        // 防御性编程：时间戳解析失败时平滑跳过
+        console.warn('[Worker] 时间戳解析失败:', e);
+      }
+    }
+
+    // 【2026-01-27 新增】估算单词数：使用清洗后的文本
+    // 中文按字符，英文按空格（过滤纯符号词汇）
+    const enWords = text.split(/\s+/).filter(word => {
+      // 过滤掉纯符号词汇（不含中文或英文字母）
+      return /[\u4e00-\u9fa5a-zA-Z]/.test(word);
+    }).length;
     const cnChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
     estimatedWordCount += (cnChars + Math.max(0, enWords - 1));
 
@@ -747,13 +1145,38 @@ function scanAndMatch(chatData, patterns) {
     const ngramResults = acAutomaton.searchWithNGram(text);
 
     // 单词匹配：用于统计词频
-    const { results, termFrequencyMap: localTermFreqMap } = acAutomaton.searchWithTermFrequency(text);
+    const { results, termFrequencyMap: localTermFreqMap, techStackHits: localTechStackHits } = acAutomaton.searchWithTermFrequency(text);
+
+    // 【2026-01-27 新增】累加 tech_stack 词频（仅 L1 和 L2）
+    if (localTechStackHits) {
+      Object.keys(localTechStackHits).forEach(word => {
+        techStackHits[word] = (techStackHits[word] || 0) + localTechStackHits[word];
+      });
+    }
+
+    // 【2026-01-27 V6.0 新增】根据维度匹配更新行为计数器
+    let totalMatches = 0; // 总匹配数（用于 jiafang_count 占比计算）
+    let instructionVerbMatches = 0; // 指令性动词匹配数
 
     // 累加匹配结果
     Object.keys(results).forEach(dimension => {
       const dimResults = results[dimension];
       ['L1', 'L2', 'L3'].forEach(level => {
-        aggregatedResults[dimension][level] += dimResults[level];
+        const matchCount = dimResults[level];
+        aggregatedResults[dimension][level] += matchCount;
+        totalMatches += matchCount;
+
+        // 【2026-01-27 V6.0】ketao_count: 命中"Feedback"维度中语义偏向"求助/请求"的频次
+        // F 维度通常包含反馈、请求、求助等语义，累加 F 维度的匹配次数
+        if (dimension === 'F' && matchCount > 0) {
+          ketaoCount += matchCount;
+        }
+
+        // 【2026-01-27 V6.0】jiafang_count: 指令性动词在总匹配中的占比加权
+        // 指令性动词通常出现在 L（Logic）和 D（Detail）维度中
+        if (dimension === 'L' || dimension === 'D') {
+          instructionVerbMatches += matchCount;
+        }
 
         // 累加词频统计
         Object.keys(localTermFreqMap).forEach(termKey => {
@@ -763,6 +1186,18 @@ function scanAndMatch(chatData, patterns) {
         });
       });
     });
+
+    // 【2026-01-27 V6.0】计算 jiafang_count 占比加权
+    // 基础计数：正则匹配到的指令性动词
+    jiafangCount += jiafangMatches;
+    // 占比加权：如果指令性动词在总匹配中占比高，则加权放大
+    if (totalMatches > 0) {
+      const jiafangRatio = instructionVerbMatches / totalMatches;
+      jiafangCount += Math.round(jiafangRatio * jiafangMatches * 5); // 加权放大
+    }
+    
+    // 【2026-01-27 V6.0】ketao_count: 基础计数（正则匹配）+ F 维度匹配
+    ketaoCount += ketaoMatches;
 
     // 维度匹配，同时检测连击
     let hasLogic = results.L.L1 + results.L.L2 + results.L.L3 > 0;
@@ -789,6 +1224,31 @@ function scanAndMatch(chatData, patterns) {
   estimatedWordCount = Math.max(100, estimatedWordCount);
   totalTextLength = Math.max(1, totalTextLength);
 
+  // 【2026-01-27 新增】计算 work_days（工作天数）
+  let workDays = 1; // 默认至少为 1
+  if (minTs !== null && maxTs !== null && maxTs > minTs) {
+    workDays = Math.max(1, Math.ceil((maxTs - minTs) / 86400000)); // 86400000 毫秒 = 1 天
+  }
+
+  // 【2026-01-27 新增】语义指纹计算
+  // 代码行占比：代码字符数 / 总字符数
+  const codeRatio = totalTextLength > 0 ? (totalCodeChars / totalTextLength) : 0;
+  
+  // 消息反馈密度：总消息数 / 工作天数
+  const feedbackDensity = workDays > 0 ? (userMessages.length / workDays) : userMessages.length;
+  
+  // 【2026-01-27 新增】技术多样性：techStackHits 中不同 Key 的数量
+  const diversityScore = Object.keys(techStackHits).length;
+  
+  // 【2026-01-27 新增】黑话命中总数
+  const totalSlangCount = slangCount + Object.values(blackwordHits).reduce((sum, count) => sum + count, 0);
+  
+  // 【2026-01-27 新增】交互风格指数（Interaction Style Index）
+  // style_index = totalChars / (totalMessages || 1)
+  // > 100: "雄辩家"（长篇大论型）
+  // < 20: "冷酷极客"（简洁指令型）
+  const styleIndex = (totalTextLength / (userMessages.length || 1));
+
   return {
     matchResults: aggregatedResults,
     negativeWordCount,
@@ -798,6 +1258,23 @@ function scanAndMatch(chatData, patterns) {
     comboHits, // 连击次数
     hasRageWord, // 【新增】是否有咆哮词
     wordFrequencyMap: termTotalFreq, // 【新增】词频统计
+    ketaoCount, // 【2026-01-27 新增】赛博磕头计数
+    jiafangCount, // 【2026-01-27 新增】甲方上身计数
+    abuseCount, // 【2026-01-27 新增】受虐倾向计数
+    abuseValue, // 【V6 新增】受虐值：特定咆哮词/否定词频次
+    teaseCount, // 【2026-01-27 新增】调戏AI计数
+    nonsenseCount, // 【2026-01-27 新增】废话输出计数
+    slangCount, // 【2026-01-27 新增】硅谷黑话计数
+    blackwordHits, // 【2026-01-27 新增】黑话命中统计（兼容旧格式）
+    chineseSlangHits, // 【V6 新增】中文黑话（功德簿）
+    englishSlangHits, // 【V6 新增】英文黑话（硅谷黑话）
+    techStackHits, // 【2026-01-27 新增】tech_stack 词频统计（仅 L1 和 L2）
+    workDays, // 【2026-01-27 新增】工作天数
+    codeRatio, // 【2026-01-27 新增】代码行占比
+    feedbackDensity, // 【2026-01-27 新增】消息反馈密度
+    diversityScore, // 【2026-01-27 新增】技术多样性
+    totalSlangCount, // 【2026-01-27 新增】黑话命中总数
+    styleIndex, // 【2026-01-27 新增】交互风格指数
   };
 }
 
@@ -971,6 +1448,59 @@ function sharpenTraits(scores) {
   return scores;
 }
 
+/**
+ * 【2026-01-27 新增】计算维度平衡度 (Balance Score)
+ * 计算5个维度（LPDEF）的标准差，标准差越小，证明开发者能力越均衡
+ * 平衡度 = Math.max(0, 100 - (StdDev * 2))
+ * 
+ * @param {Object} scores - 各维度得分 {L: 80, P: 75, D: 70, E: 65, F: 60}
+ * @returns {number} 平衡度分数 (0-100)
+ */
+function calculateBalanceScore(scores) {
+  const dimensions = ['L', 'P', 'D', 'E', 'F'];
+  const values = dimensions.map(dim => scores[dim] || 0);
+  
+  // 计算平均值
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  
+  // 计算标准差
+  const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
+  const stdDev = Math.sqrt(variance);
+  
+  // 平衡度 = Math.max(0, 100 - (StdDev * 2))
+  // 标准差为 0 时，平衡度为 100（完全均衡）
+  // 标准差为 50 时，平衡度为 0（极度偏科）
+  const balanceScore = Math.max(0, 100 - (stdDev * 2));
+  
+  return Math.round(balanceScore * 100) / 100; // 保留2位小数
+}
+
+/**
+ * 【2026-01-27 V6.0 新增】计算 Vibe Score（综合 Vibe 指数）
+ * 基于 5 维加权后的综合指数
+ * 公式：vibe_score = (L * 0.25 + P * 0.20 + D * 0.25 + E * 0.15 + F * 0.15)
+ * 
+ * @param {Object} dimensions - 各维度得分 {L: 80, P: 75, D: 70, E: 65, F: 60}
+ * @returns {number} Vibe Score (0-100)
+ */
+function calculateVibeScore(dimensions) {
+  const weights = {
+    L: 0.25, // Logic 权重 25%
+    P: 0.20, // Patience 权重 20%
+    D: 0.25, // Detail 权重 25%
+    E: 0.15, // Exploration 权重 15%
+    F: 0.15  // Feedback 权重 15%
+  };
+  
+  let vibeScore = 0;
+  Object.keys(weights).forEach(dim => {
+    const score = dimensions[dim] || 0;
+    vibeScore += score * weights[dim];
+  });
+  
+  return Math.round(vibeScore * 100) / 100; // 保留2位小数
+}
+
 // ==========================================
 // 8. 主逻辑：计算与处理
 // ==========================================
@@ -1012,7 +1542,25 @@ self.onmessage = function(e) {
           estimatedWordCount,
           comboHits,
           hasRageWord, // 【新增】是否有咆哮词
-          wordFrequencyMap // 【新增】词频统计
+          wordFrequencyMap, // 【新增】词频统计
+          ketaoCount, // 【2026-01-27 新增】赛博磕头计数
+          jiafangCount, // 【2026-01-27 新增】甲方上身计数
+          abuseCount, // 【2026-01-27 新增】受虐倾向计数
+          abuseValue, // 【V6 新增】受虐值：特定咆哮词/否定词频次
+          teaseCount, // 【2026-01-27 新增】调戏AI计数
+          nonsenseCount, // 【2026-01-27 新增】废话输出计数
+          slangCount, // 【2026-01-27 新增】硅谷黑话计数
+          blackwordHits, // 【2026-01-27 新增】黑话命中统计（兼容旧格式）
+          chineseSlangHits, // 【V6 新增】中文黑话（功德簿）
+          englishSlangHits, // 【V6 新增】英文黑话（硅谷黑话）
+          techStackHits, // 【2026-01-27 新增】tech_stack 词频统计
+          workDays, // 【2026-01-27 新增】工作天数
+          codeRatio, // 【2026-01-27 新增】代码行占比
+          feedbackDensity, // 【2026-01-27 新增】消息反馈密度
+          diversityScore, // 【2026-01-27 新增】技术多样性
+          totalSlangCount, // 【2026-01-27 新增】黑话命中总数
+          styleIndex, // 【2026-01-27 新增】交互风格指数
+          messageCount // 消息数量
         } = scanResult;
 
         // ==========================================
@@ -1073,7 +1621,15 @@ self.onmessage = function(e) {
         normalizedScores = sharpenTraits(normalizedScores);
 
         // ==========================================
-        // 步骤 7: 取整并生成元数据
+        // 步骤 7: 计算维度平衡度 (Balance Score) 和 Vibe Score
+        // 【2026-01-27 新增】在 LPDEF 分数计算完成后计算平衡度
+        // 【2026-01-27 V6.0 新增】计算综合 Vibe 指数
+        // ==========================================
+        const balanceScore = calculateBalanceScore(normalizedScores);
+        const vibeScore = calculateVibeScore(normalizedScores);
+
+        // ==========================================
+        // 步骤 8: 取整并生成元数据
         // ==========================================
         Object.keys(normalizedScores).forEach(key => {
           normalizedScores[key] = Math.round(normalizedScores[key]);
@@ -1085,12 +1641,56 @@ self.onmessage = function(e) {
           densityMap[k] = ((rawScores[k] / totalTextLength) * 1000).toFixed(2);
         });
 
+        // 【2026-01-27 新增】计算交互风格标签
+        let styleLabel = '标准型'; // 默认标签
+        if (styleIndex > 100) {
+          styleLabel = '雄辩家'; // 长篇大论型
+        } else if (styleIndex < 20) {
+          styleLabel = '冷酷极客'; // 简洁指令型
+        }
+
+        // 【2026-01-27 V6.0 新增】构建 stats 字段（V6 接口标准）
+        // 确保完整覆盖前端 main.js 中 V6_METRIC_CONFIG 所需的离散计数器
+        const stats = {
+          // 核心计数器（必需字段）
+          ketao_count: ketaoCount, // 【V6.0】赛博磕头：命中"Feedback"维度中语义偏向"求助/请求"的频次
+          jiafang_count: jiafangCount, // 【V6.0】甲方上身：指令性动词在总匹配中的占比加权
+          tease_count: teaseCount, // 【V6.0】调戏AI：语气助词、表情符号或非技术性调侃词的频次
+          nonsense_count: nonsenseCount, // 【V6.0】废话输出：NOISE_WORDS 或短词重复出现的频次
+          abuse_value: abuseValue, // 【V6.0】受虐值：特定咆哮词/否定词频次
+          
+          // 扩展字段
+          totalChars: totalTextLength,
+          totalMessages: messageCount,
+          abuse_count: abuseCount, // 受虐倾向（保留兼容性）
+          tech_stack: techStackHits || {}, // 格式：{"React": 5, "Rust": 2}
+          work_days: workDays,
+          code_ratio: Math.round(codeRatio * 100) / 100, // 代码行占比（保留2位小数）
+          feedback_density: Math.round(feedbackDensity * 100) / 100, // 消息反馈密度（保留2位小数）
+          balance_score: balanceScore, // 【2026-01-27 新增】维度平衡度
+          diversity_score: diversityScore, // 【2026-01-27 新增】技术多样性
+          slang_count: totalSlangCount, // 【2026-01-27 新增】黑话命中总数
+          style_index: Math.round(styleIndex * 100) / 100, // 【2026-01-27 新增】交互风格指数（保留2位小数）
+          style_label: styleLabel, // 【2026-01-27 新增】交互风格标签
+          avg_payload: Math.round(totalTextLength / (messageCount || 1)),
+          vibe_score: vibeScore, // 【2026-01-27 V6.0 新增】基于5维加权后的综合 Vibe 指数
+          
+          // 【V6 优化】黑话命中统计：分为 chinese_slang 和 english_slang
+          blackword_hits: {
+            chinese_slang: chineseSlangHits || {}, // 中文黑话（功德簿）
+            english_slang: englishSlangHits || {}, // 英文黑话（硅谷黑话）
+            // 兼容旧格式
+            ...(blackwordHits || {})
+          }
+        };
+
         // 返回结果
         self.postMessage({
           type: 'ANALYZE_SUCCESS',
           payload: {
             dimensions: normalizedScores,
             rawScores, // 仅供调试
+            stats, // 【2026-01-27 新增】V6 接口标准 stats 字段
             metadata: {
               wordCount: estimatedWordCount,
               totalChars: totalTextLength,
@@ -1099,7 +1699,7 @@ self.onmessage = function(e) {
               hasRageWord, // 【新增】是否触发咆哮词一票否决
               confidenceCoeff: confidenceCoeff.toFixed(3), // 置信度系数
               density: Object.keys(densityMap).map(k => `${k}:${densityMap[k]}`).join(', '),
-              algorithmVersion: '2026-01-20-v3.0', // 【新增】算法版本标识
+              algorithmVersion: '2026-01-27-v6.0', // 【2026-01-27 V6.0 更新】算法版本标识
               bm25Config: BM25_CONFIG, // 【新增】BM25 参数
             },
             // 注意：全局平均值不再在 Worker 中硬编码，由主线程从后端 API 获取

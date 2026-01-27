@@ -7,6 +7,127 @@ import { CursorParser } from './src/CursorParser.js';
 import { VibeCodingerAnalyzer, DIMENSIONS } from './src/VibeCodingerAnalyzer.js';
 
 /**
+ * 【V6 维度字典】V6_METRIC_CONFIG - 全量40维度配置
+ * 包含勋章类、指标类、全网类三大类别的维度定义
+ */
+const V6_METRIC_CONFIG = {
+  // 勋章类：离散计数（超过阈值显示徽章）
+  badges: {
+    ketao_count: { 
+      label: { 'zh-CN': '赛博磕头', 'en': 'Ketao Count' },
+      threshold: 10,
+      className: 'tag-ketao',
+      icon: '🙏'
+    },
+    jiafang_count: { 
+      label: { 'zh-CN': '甲方上身', 'en': 'Jiafang Index' },
+      threshold: 5,
+      className: 'tag-jiafang',
+      icon: '💼'
+    },
+    tease_count: { 
+      label: { 'zh-CN': '调戏AI', 'en': 'Tease AI' },
+      threshold: 3,
+      className: 'tag-tease',
+      icon: '😄'
+    },
+    nonsense_count: { 
+      label: { 'zh-CN': '废话输出', 'en': 'Nonsense Output' },
+      threshold: 20,
+      className: 'tag-nonsense',
+      icon: '💬'
+    },
+    abuse_value: {
+      label: { 'zh-CN': '受虐值', 'en': 'Abuse Value' },
+      threshold: 5,
+      className: 'tag-abuse',
+      icon: '😤'
+    }
+  },
+  
+  // 指标类：连续数值（显示进度条或数值）
+  metrics: {
+    avg_payload: { 
+      label: { 'zh-CN': '平均长度', 'en': 'Avg Payload' },
+      unit: 'chars',
+      max: 500,
+      className: 'metric-avg-payload'
+    },
+    work_days: { 
+      label: { 'zh-CN': '上岗天数', 'en': 'Work Days' },
+      unit: 'days',
+      max: 365,
+      className: 'metric-work-days'
+    },
+    logic_score: { 
+      label: { 'zh-CN': '逻辑力', 'en': 'Logic Score' },
+      unit: '',
+      max: 100,
+      className: 'metric-logic-score'
+    },
+    balance_score: {
+      label: { 'zh-CN': '人格稳定性', 'en': 'Personality Stability' },
+      unit: '%',
+      max: 100,
+      className: 'metric-balance-score'
+    },
+    code_ratio: {
+      label: { 'zh-CN': '代码占比', 'en': 'Code Ratio' },
+      unit: '%',
+      max: 100,
+      className: 'metric-code-ratio'
+    },
+    feedback_density: {
+      label: { 'zh-CN': '反馈密度', 'en': 'Feedback Density' },
+      unit: 'msg/day',
+      max: 50,
+      className: 'metric-feedback-density'
+    },
+    diversity_score: {
+      label: { 'zh-CN': '技术多样性', 'en': 'Tech Diversity' },
+      unit: '',
+      max: 20,
+      className: 'metric-diversity-score'
+    },
+    style_index: {
+      label: { 'zh-CN': '交互风格指数', 'en': 'Style Index' },
+      unit: '',
+      max: 200,
+      className: 'metric-style-index'
+    }
+  },
+  
+  // 全网类：宏观统计数据
+  global: {
+    total_users: { 
+      label: { 'zh-CN': '诊断总人数', 'en': 'Total Users' },
+      key: 'total_count',
+      className: 'global-total-users'
+    },
+    global_chars: { 
+      label: { 'zh-CN': '累计吐槽字数', 'en': 'Global Chars' },
+      key: 'total_chars',
+      className: 'global-chars'
+    },
+    global_avg_payload: { 
+      label: { 'zh-CN': '全网平均篇幅', 'en': 'Global Avg Payload' },
+      key: 'avg_payload',
+      className: 'global-avg-payload'
+    },
+    geo_hotmap_summary: {
+      label: { 'zh-CN': '地理位置分布', 'en': 'Geographic Distribution' },
+      key: 'geo_hotmap_summary',
+      className: 'global-geo-summary'
+    },
+    answer_text: {
+      label: { 'zh-CN': '今日答案之书', 'en': "Today's Answer Book" },
+      key: 'answer_text',
+      className: 'global-answer-text'
+    }
+  }
+};
+
+/**
  * 创建 VibeCodingerAnalyzer 实例（适配 GitHub Pages 环境）
  * 注意：Worker 路径需要在 VibeCodingerAnalyzer.js 中修改以支持 GitHub Pages
  * 当前实现会在 Worker 初始化失败时自动降级到同步处理
@@ -132,6 +253,174 @@ class VibeCodingApp {
     this.allChatData = [];
     this.globalStats = null;
     this.vibeResult = null;
+    this.globalStatsCache = null; // 【V6 新增】存储后端返回的 global_stats
+  }
+
+  /**
+   * 【V6 环境感知】生成环境上下文
+   * @returns {Object} 包含 fingerprint, timezone, lang, isVpn 等环境信息
+   */
+  generateContext() {
+    // 1. 获取或生成 fingerprint
+    let fingerprint = null;
+    try {
+      fingerprint = localStorage.getItem('vibe_fp');
+      if (!fingerprint) {
+        // 生成随机 16 位 ID
+        fingerprint = Array.from(crypto.getRandomValues(new Uint8Array(8)))
+          .map(b => b.toString(16).padStart(2, '0'))
+          .join('')
+          .substring(0, 16);
+        localStorage.setItem('vibe_fp', fingerprint);
+        console.log('[VibeCodingApp] ✅ 已生成并持久化 fingerprint:', fingerprint);
+      }
+    } catch (error) {
+      console.warn('[VibeCodingApp] fingerprint 生成失败，使用降级方案:', error);
+      fingerprint = `fp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`.substring(0, 16);
+    }
+
+    // 2. 获取 timezone
+    let timezone = 'UTC';
+    try {
+      timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    } catch (error) {
+      console.warn('[VibeCodingApp] timezone 获取失败:', error);
+    }
+
+    // 3. 获取 lang
+    const lang = getCurrentLang() || 'zh-CN';
+
+    // 4. 检测 isVpn（V6 扩展：对比时区与 IP 推测时区的差异）
+    let isVpn = false;
+    try {
+      // 获取当前时间的小时数（本地时间）
+      const localHour = new Date().getHours();
+      
+      // 根据时区计算 UTC 偏移小时数
+      const getTimezoneOffset = (tz) => {
+        const now = new Date();
+        const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+        const tzTime = new Date(utcTime + (getTimezoneOffsetHours(tz) * 3600000));
+        return tzTime.getHours();
+      };
+      
+      // 获取时区偏移小时数（简化版）
+      const getTimezoneOffsetHours = (tz) => {
+        // 常见时区偏移（简化处理）
+        const tzOffsets = {
+          'Asia/Shanghai': 8,
+          'Asia/Hong_Kong': 8,
+          'Asia/Tokyo': 9,
+          'America/New_York': -5,
+          'America/Los_Angeles': -8,
+          'Europe/London': 0,
+          'UTC': 0
+        };
+        return tzOffsets[tz] || 0;
+      };
+      
+      // 【V6 VPN 探测强化】时区偏差探测
+      // 计算时区对应的预期小时数
+      const expectedHour = (localHour + getTimezoneOffsetHours(timezone)) % 24;
+      
+      // 如果时区与本地时间偏差超过 2 小时，可能是 VPN
+      const hourDiff = Math.abs(localHour - expectedHour);
+      const isLargeTimeDiff = hourDiff > 2 && hourDiff < 22; // 排除跨日边界情况
+      
+      // 【V6 强化】时区偏移与 IP 归属地时区不符检测
+      // 获取当前时区的 UTC 偏移（分钟）
+      const currentTimezoneOffset = new Date().getTimezoneOffset(); // 返回的是 UTC 与本地时间的差值（分钟）
+      const currentTimezoneOffsetHours = -currentTimezoneOffset / 60; // 转换为小时
+      
+      // 根据 timezone 字符串计算预期偏移
+      const expectedOffsetHours = getTimezoneOffsetHours(timezone);
+      
+      // 如果实际偏移与预期偏移不一致（偏差超过 1 小时），可能是 VPN
+      const offsetDiff = Math.abs(currentTimezoneOffsetHours - expectedOffsetHours);
+      const isTimezoneOffsetMismatch = offsetDiff > 1;
+      
+      // 原有逻辑：时区与语言不匹配
+      const commonVpnTimezones = ['UTC', 'America/New_York', 'Europe/London'];
+      const isTimezoneMismatch = commonVpnTimezones.includes(timezone) && lang.startsWith('zh');
+      const isUtcWithNonEnglish = timezone === 'UTC' && !lang.startsWith('en');
+      
+      // 【V6 综合判断】时区偏差、时区偏移不符或时区语言不匹配
+      isVpn = isLargeTimeDiff || isTimezoneOffsetMismatch || isTimezoneMismatch || isUtcWithNonEnglish;
+      
+      if (isVpn) {
+        console.log('[VibeCodingApp] ⚠️ VPN 检测触发:', {
+          timezone,
+          localHour,
+          expectedHour,
+          hourDiff,
+          isLargeTimeDiff,
+          isTimezoneOffsetMismatch,
+          isTimezoneMismatch,
+          isUtcWithNonEnglish,
+          currentTimezoneOffsetHours,
+          expectedOffsetHours,
+          offsetDiff
+        });
+      }
+    } catch (error) {
+      console.warn('[VibeCodingApp] VPN 检测失败:', error);
+    }
+
+    // 5. 检测 isProxy 和 IP（V6 增强：使用 WebRTC 探测）
+    let isProxy = false;
+    let detectedIp = '0.0.0.0';
+    
+    // 【V6 WebRTC 探测】尝试通过 WebRTC 获取本地 IP（异步，不阻塞主流程）
+    // 注意：WebRTC 探测是异步的，这里先设置默认值，实际 IP 由后端获取
+    try {
+      if (typeof RTCPeerConnection !== 'undefined') {
+        const rtc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+        rtc.createDataChannel('');
+        
+        rtc.onicecandidate = (event) => {
+          if (event.candidate) {
+            const candidate = event.candidate.candidate;
+            const ipMatch = candidate.match(/([0-9]{1,3}\.){3}[0-9]{1,3}/);
+            if (ipMatch && !ipMatch[0].startsWith('127.') && !ipMatch[0].startsWith('192.168.') && !ipMatch[0].startsWith('10.')) {
+              detectedIp = ipMatch[0];
+              console.log('[VibeCodingApp] ✅ WebRTC 探测到 IP:', detectedIp);
+              rtc.close();
+            }
+          }
+        };
+        
+        rtc.createOffer().then(offer => rtc.setLocalDescription(offer)).catch(err => {
+          console.warn('[VibeCodingApp] WebRTC createOffer 失败:', err);
+          rtc.close();
+        });
+        
+        // 超时处理（2秒，不阻塞主流程）
+        setTimeout(() => {
+          rtc.close();
+          if (detectedIp === '0.0.0.0') {
+            console.log('[VibeCodingApp] WebRTC 探测超时，使用默认 IP（后端将获取真实 IP）');
+          }
+        }, 2000);
+      }
+      
+      // Proxy 检测：如果检测到多个 IP 或 IP 与预期不符，可能是代理
+      // 简化处理：暂时保持 false，后续可根据实际需求增强
+    } catch (error) {
+      console.warn('[VibeCodingApp] WebRTC 探测失败（使用默认值）:', error);
+      // 降级：使用默认值，IP 由后端获取
+    }
+
+    const context = {
+      fingerprint,
+      timezone,
+      lang,
+      isVpn,
+      isProxy,
+      ip: detectedIp // 【V6 增强】使用 WebRTC 探测的 IP
+    };
+
+    console.log('[VibeCodingApp] ✅ 环境上下文已生成:', context);
+    return context;
   }
 
   /**
@@ -155,6 +444,322 @@ class VibeCodingApp {
   }
 
   /**
+   * 【V6 自动化渲染引擎】renderBehaviorTags：遍历 V6_METRIC_CONFIG 自动生成 DOM
+   * @param {Object} stats - stats 对象
+   * @param {string} containerId - 容器 ID（默认为 'behavior-tags-container'）
+   */
+  renderBehaviorTags(stats, containerId = 'behavior-tags-container') {
+    if (!stats) {
+      console.warn('[VibeCodingApp] renderBehaviorTags: stats 不存在');
+      return;
+    }
+
+    const container = document.getElementById(containerId) || document.querySelector(`#${containerId}`);
+    if (!container) {
+      console.warn(`[VibeCodingApp] renderBehaviorTags: 容器 ${containerId} 未找到`);
+      return;
+    }
+
+    const lang = getCurrentLang();
+    const badges = V6_METRIC_CONFIG.badges;
+    
+    // 遍历配置，自动生成标签
+    const tags = Object.entries(badges)
+      .filter(([key, config]) => {
+        const value = stats[key] || 0;
+        return value >= config.threshold;
+      })
+      .map(([key, config]) => {
+        const value = stats[key] || 0;
+        const label = config.label[lang] || config.label['zh-CN'];
+        return `
+          <span class="vibe-tag ${config.className}" data-v6-key="${key}" data-v6-value="${value}">
+            ${config.icon ? `${config.icon} ` : ''}${escapeHtml(label)}
+          </span>
+        `;
+      });
+
+    // 核心人设：style_label（始终显示）
+    if (stats.style_label) {
+      tags.push(`
+        <span class="vibe-tag tag-style-label" data-v6-key="style_label" style="font-weight: bold; font-size: 1.1em; background: var(--accent-terminal); color: white;">
+          ${escapeHtml(stats.style_label)}
+        </span>
+      `);
+    }
+
+    container.innerHTML = tags.length > 0 
+      ? tags.join('')
+      : `<div class="vibe-tag-empty">${lang === 'en' ? 'No behavior tags yet' : '暂无行为标签'}</div>`;
+
+    console.log('[VibeCodingApp] ✅ renderBehaviorTags 完成，生成', tags.length, '个标签');
+  }
+
+  /**
+   * 【V6 云端维度绑定】updateV6UI：从 detailedStats 数组更新维度 UI
+   * @param {Object} apiData - API 返回的数据对象，包含 detailedStats 数组
+   */
+  updateV6UI(apiData) {
+    if (!apiData || !apiData.detailedStats || !Array.isArray(apiData.detailedStats)) {
+      console.warn('[VibeCodingApp] updateV6UI: detailedStats 无效或不存在');
+      return;
+    }
+
+    const detailedStats = apiData.detailedStats;
+    let updatedCount = 0;
+
+    // 【调试】验证所有维度容器是否存在
+    const allDimensionCards = document.querySelectorAll('[data-v6-dim]');
+    console.log('[VibeCodingApp] updateV6UI: 找到的维度容器:', Array.from(allDimensionCards).map(el => ({
+      dimension: el.getAttribute('data-v6-dim'),
+      hasRankLabel: !!el.querySelector('.rank-label'),
+      hasRoastText: !!el.querySelector('.roast-text')
+    })));
+
+    // 遍历 detailedStats 数组
+    detailedStats.forEach((item) => {
+      const { dimension, label, roast, score } = item;
+      
+      if (!dimension) {
+        console.warn('[VibeCodingApp] updateV6UI: 维度标识缺失', item);
+        return;
+      }
+
+      // 通过 data-v6-dim 属性找到对应的 DOM 元素
+      const dimensionCard = document.querySelector(`[data-v6-dim="${dimension}"]`);
+      if (!dimensionCard) {
+        console.warn(`[VibeCodingApp] updateV6UI: 未找到维度 ${dimension} 的容器`);
+        // 【调试】列出所有可用的维度容器
+        const availableDimensions = Array.from(document.querySelectorAll('[data-v6-dim]')).map(el => el.getAttribute('data-v6-dim'));
+        console.warn(`[VibeCodingApp] updateV6UI: 可用的维度容器:`, availableDimensions);
+        return;
+      }
+
+      // 更新称号（.rank-label）
+      const rankLabelEl = dimensionCard.querySelector('.rank-label');
+      if (!rankLabelEl) {
+        console.warn(`[VibeCodingApp] updateV6UI: 维度 ${dimension} 的容器中未找到 .rank-label 元素`);
+        // 【调试】列出容器内的所有元素
+        const allElements = Array.from(dimensionCard.querySelectorAll('*')).map(el => ({
+          tag: el.tagName,
+          classes: el.className,
+          id: el.id
+        }));
+        console.warn(`[VibeCodingApp] updateV6UI: 容器内的元素:`, allElements);
+      } else {
+        // 如果后端返回的 label 为"未知"，保留前端计算的降级文案
+        if (label && label !== '未知') {
+          rankLabelEl.textContent = label;
+          updatedCount++;
+          console.log(`[VibeCodingApp] updateV6UI: 维度 ${dimension} 的称号已更新为 "${label}"`);
+        } else {
+          console.log(`[VibeCodingApp] updateV6UI: 维度 ${dimension} 的 label 为"未知"，保留前端降级文案`);
+        }
+      }
+
+      // 更新吐槽文案（.roast-text）
+      const roastTextEl = dimensionCard.querySelector('.roast-text');
+      if (!roastTextEl) {
+        console.warn(`[VibeCodingApp] updateV6UI: 维度 ${dimension} 的容器中未找到 .roast-text 元素`);
+      } else {
+        if (roast && roast !== '暂无吐槽文案') {
+          roastTextEl.textContent = roast;
+          updatedCount++;
+          console.log(`[VibeCodingApp] updateV6UI: 维度 ${dimension} 的吐槽文案已更新`);
+        } else {
+          console.log(`[VibeCodingApp] updateV6UI: 维度 ${dimension} 的 roast 为空，保留前端降级文案`);
+        }
+      }
+
+      // 更新进度条数值（如果 score 存在）
+      if (score !== undefined && score !== null) {
+        const dimensionValueEl = dimensionCard.querySelector('.dimension-value');
+        if (dimensionValueEl) {
+          dimensionValueEl.textContent = Math.round(score);
+        }
+        
+        // 更新进度条宽度
+        const dimensionBarEl = dimensionCard.querySelector('.dimension-bar');
+        if (dimensionBarEl) {
+          const percentage = Math.min(100, Math.max(0, score));
+          dimensionBarEl.style.width = `${percentage}%`;
+        }
+      }
+    });
+
+    console.log('[VibeCodingApp] ✅ updateV6UI 完成，更新了', updatedCount, '个维度元素');
+  }
+
+  /**
+   * 【V6 全网数据自动填空】syncGlobalStats：使用 data-v6-key 自动填充数据
+   * 【装修级优化】加入渐入动画，让用户感知到数据是从全网实时同步回来的
+   * @param {Object} globalStats - 后端返回的 global_stats 对象
+   */
+  syncGlobalStats(globalStats) {
+    if (!globalStats || typeof globalStats !== 'object') {
+      console.warn('[VibeCodingApp] syncGlobalStats: globalStats 无效');
+      return;
+    }
+
+    // 查找所有带有 data-v6-key 属性的元素
+    const elements = document.querySelectorAll('[data-v6-key]');
+    let updatedCount = 0;
+
+    elements.forEach((element, index) => {
+      const key = element.getAttribute('data-v6-key');
+      if (!key) return;
+
+      // 从 globalStats 中查找对应的值
+      let value = null;
+      
+      // 优先使用 global 配置中的 key 映射
+      const globalConfig = V6_METRIC_CONFIG.global[key];
+      if (globalConfig && globalConfig.key) {
+        value = globalStats[globalConfig.key];
+      } else {
+        // 直接使用 key
+        value = globalStats[key];
+      }
+
+      if (value !== null && value !== undefined) {
+        // 【骨架屏渐入动画】先设置透明度为0，然后渐入
+        // 移除骨架屏标记（如果存在）
+        element.removeAttribute('data-skeleton');
+        element.style.opacity = '0';
+        element.style.transition = 'opacity 0.5s ease-in-out';
+        
+        // 格式化数值
+        if (typeof value === 'number') {
+          element.textContent = value.toLocaleString();
+        } else {
+          element.textContent = escapeHtml(String(value));
+        }
+        
+        // 使用 requestAnimationFrame 确保 DOM 更新后再触发动画
+        // 添加延迟，让每个元素依次渐入（错开 50ms），形成流畅的加载效果
+        setTimeout(() => {
+          requestAnimationFrame(() => {
+            element.style.opacity = '1';
+          });
+        }, index * 50);
+        
+        updatedCount++;
+      } else {
+        // 如果值为空，保持骨架屏状态（显示占位符或保持原值）
+        if (!element.textContent || element.textContent.trim() === '' || element.textContent === '0') {
+          element.setAttribute('data-skeleton', 'true');
+          element.style.opacity = '0.3'; // 半透明表示数据未加载
+          // 如果元素为空，添加占位符文本
+          if (!element.textContent || element.textContent.trim() === '') {
+            element.textContent = '...';
+          }
+        }
+      }
+    });
+
+    console.log('[VibeCodingApp] ✅ syncGlobalStats 完成，更新了', updatedCount, '个元素（带渐入动画）');
+  }
+
+  /**
+   * 【V6 统一映射】AutoMappingEngine：自动将 stats 和 global_stats 分发到 UI 容器
+   * @param {Object} result - 分析结果对象
+   * @param {Object} globalStats - 后端返回的 global_stats（可选）
+   */
+  updateUIWithStats(result, globalStats = null) {
+    if (!result || !result.stats) {
+      console.warn('[VibeCodingApp] updateUIWithStats: result.stats 不存在');
+      return;
+    }
+
+    const stats = result.stats;
+    const lang = getCurrentLang();
+
+    // 【V6 维度注册表】定义数据到容器的映射关系
+    const dimensionRegistry = {
+      // badge-grid: 离散计数（徽章展示）
+      badgeGrid: {
+        ketao_count: { label: lang === 'en' ? 'Ketao Count' : '赛博磕头', value: stats.ketao_count || 0 },
+        jiafang_count: { label: lang === 'en' ? 'Jiafang Index' : '甲方指数', value: stats.jiafang_count || 0 },
+        abuse_value: { label: lang === 'en' ? 'Abuse Value' : '受虐值', value: stats.abuse_value || 0 },
+        work_days: { label: lang === 'en' ? 'Work Days' : '上岗天数', value: stats.work_days || 1 },
+        tease_count: { label: lang === 'en' ? 'Tease Count' : '调戏AI', value: stats.tease_count || 0 },
+        nonsense_count: { label: lang === 'en' ? 'Nonsense Count' : '废话输出', value: stats.nonsense_count || 0 }
+      },
+      // fingerprint-bars: 连续数值（进度条展示）
+      fingerprintBars: {
+        balance_score: { label: lang === 'en' ? 'Personality Stability' : '人格稳定性', value: stats.balance_score || 0, max: 100 },
+        code_ratio: { label: lang === 'en' ? 'Code Ratio' : '代码占比', value: (stats.code_ratio || 0) * 100, max: 100 },
+        feedback_density: { label: lang === 'en' ? 'Feedback Density' : '反馈密度', value: stats.feedback_density || 0, max: 50 },
+        diversity_score: { label: lang === 'en' ? 'Tech Diversity' : '技术多样性', value: stats.diversity_score || 0, max: 20 }
+      },
+      // global-insights: 全网宏观数据
+      globalInsights: {
+        total_count: { label: lang === 'en' ? 'Total Scans' : '全网扫描次数', value: globalStats?.total_count || 0 },
+        geo_hotmap_summary: { label: lang === 'en' ? 'Geographic Distribution' : '地理位置分布', value: globalStats?.geo_hotmap_summary || '' },
+        answer_text: { label: lang === 'en' ? "Today's Answer Book" : '今日答案之书', value: globalStats?.answer_text || '' }
+      }
+    };
+
+    // 更新 badge-grid 容器
+    const badgeGrid = document.getElementById('badge-grid') || document.querySelector('.badge-grid');
+    if (badgeGrid) {
+      const badges = Object.entries(dimensionRegistry.badgeGrid)
+        .filter(([key, item]) => item.value > 0) // 只显示非零值
+        .map(([key, item]) => `
+          <div class="badge-item">
+            <span class="badge-label">${item.label}</span>
+            <span class="badge-value">${item.value}</span>
+          </div>
+        `).join('');
+      badgeGrid.innerHTML = badges || `<div class="badge-empty">${lang === 'en' ? 'No badges yet' : '暂无徽章'}</div>`;
+    }
+
+    // 更新 fingerprint-bars 容器
+    const fingerprintBars = document.getElementById('fingerprint-bars') || document.querySelector('.fingerprint-bars');
+    if (fingerprintBars) {
+      const bars = Object.entries(dimensionRegistry.fingerprintBars)
+        .map(([key, item]) => {
+          const percentage = Math.min(100, (item.value / item.max) * 100);
+          return `
+            <div class="fingerprint-bar-item">
+              <div class="bar-header">
+                <span class="bar-label">${item.label}</span>
+                <span class="bar-value">${item.value.toFixed(1)}${key === 'code_ratio' ? '%' : ''}</span>
+              </div>
+              <div class="bar-container">
+                <div class="bar-fill" style="width: ${percentage}%; background: var(--accent-terminal);"></div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      fingerprintBars.innerHTML = bars;
+    }
+
+    // 更新 global-insights 容器
+    const globalInsights = document.getElementById('global-insights') || document.querySelector('.global-insights');
+    if (globalInsights) {
+      const insights = Object.entries(dimensionRegistry.globalInsights)
+        .map(([key, item]) => `
+          <div class="insight-item">
+            <span class="insight-label">${item.label}:</span>
+            <span class="insight-value">${typeof item.value === 'number' ? item.value.toLocaleString() : escapeHtml(item.value)}</span>
+          </div>
+        `).join('');
+      globalInsights.innerHTML = insights;
+    }
+
+    // 【V6 自动化渲染引擎】调用 renderBehaviorTags 自动生成行为标签
+    this.renderBehaviorTags(stats, 'behavior-tags-container');
+
+    // 【V6 全网数据自动填空】调用 syncGlobalStats 自动填充全网数据
+    if (globalStats) {
+      this.syncGlobalStats(globalStats);
+    }
+
+    console.log('[VibeCodingApp] ✅ AutoMappingEngine 已完成 UI 更新');
+  }
+
+  /**
    * 处理文件上传并进行分析
    * @param {Array} chatData - 聊天数据
    * @param {Object} extraStats - 额外的统计数据（用于上传排名）
@@ -169,9 +774,52 @@ class VibeCodingApp {
     const currentLang = getCurrentLang();
     this.analyzer.setLanguage(currentLang);
 
-    // 步骤1: 调用 analyze 进行本地分析
-    const result = await this.analyzer.analyze(chatData, currentLang, null, onProgress);
+    // 【V6 环境感知】生成环境上下文
+    const context = this.generateContext();
+
+    // 步骤1: 调用 analyze 进行本地分析（传入 context 对象）
+    const result = await this.analyzer.analyze(chatData, context, null, onProgress);
     console.log('[VibeCodingApp] analyze 完成:', result);
+
+    // 【V6 适配】确保 stats 对象被正确保存
+    // 从 result.stats 或 result.statistics 中提取 stats 对象
+    if (result && !result.stats) {
+      // 如果 result.stats 不存在，从 result.statistics 中构建
+      if (result.statistics) {
+        result.stats = {
+          totalChars: result.statistics.totalChars || result.statistics.totalUserChars || 0,
+          totalMessages: result.statistics.totalMessages || result.statistics.userMessages || 0,
+          ketao_count: result.statistics.ketao_count || result.statistics.qingCount || 0,
+          jiafang_count: result.statistics.jiafang_count || result.statistics.buCount || 0,
+          abuse_value: result.statistics.abuse_value || result.statistics.abuseValue || 0, // 【V6 新增】受虐值
+          tech_stack: result.statistics.tech_stack || {},
+          work_days: result.statistics.work_days || result.statistics.usageDays || 1,
+          avg_payload: result.statistics.avg_payload || 0,
+          balance_score: result.statistics.balance_score || 0, // 【V6 新增】人格稳定性
+          style_label: result.statistics.style_label || '标准型', // 【V6 新增】交互风格标签
+          blackword_hits: result.statistics.blackword_hits || {}, // 【V6 新增】黑话命中统计
+          ...result.statistics // 保留其他字段
+        };
+      } else {
+        // 降级：使用默认值
+        result.stats = {
+          totalChars: 0,
+          totalMessages: 0,
+          ketao_count: 0,
+          jiafang_count: 0,
+          abuse_value: 0,
+          tech_stack: {},
+          work_days: 1,
+          avg_payload: 0,
+          balance_score: 0,
+          style_label: '标准型',
+          blackword_hits: {}
+        };
+      }
+    }
+    
+    // 【V6 统一映射】使用 AutoMappingEngine 一次性更新所有 UI
+    this.updateUIWithStats(result, this.globalStatsCache);
 
     // 步骤2: 立即 await 调用 uploadToSupabase 获取真实排名
     if (result && result.statistics) {
@@ -196,6 +844,26 @@ class VibeCodingApp {
         // 步骤3: 立即 await 调用 uploadToSupabase 联网获取真实排名
         // 传递完整的 result 对象和 chatData，确保能获取原始聊天数据
         const liveRank = await this.analyzer.uploadToSupabase(result, chatData, onProgress);
+        
+        // 【V6 上报协议对齐】从本地存储读取 global_stats（由 uploadToSupabase 保存）
+        try {
+          const savedGlobalStats = localStorage.getItem('vibe_global_stats');
+          if (savedGlobalStats) {
+            this.globalStatsCache = JSON.parse(savedGlobalStats);
+            console.log('[VibeCodingApp] ✅ 已加载 global_stats:', this.globalStatsCache);
+            // 【V6 统一映射】更新 UI（包含 global_stats）
+            this.updateUIWithStats(result, this.globalStatsCache);
+            // 【V6 全网数据自动填空】调用 syncGlobalStats 自动填充
+            this.syncGlobalStats(this.globalStatsCache);
+          } else {
+            // 即使没有 global_stats，也要更新 UI（仅使用 stats）
+            this.updateUIWithStats(result, null);
+          }
+        } catch (error) {
+          console.warn('[VibeCodingApp] 读取 global_stats 失败:', error);
+          // 降级：只使用 stats 更新 UI
+          this.updateUIWithStats(result, null);
+        }
         
         // 如果后端返回了 globalAverage，更新全局变量
         if (liveRank && liveRank.globalAverage) {
@@ -230,10 +898,74 @@ class VibeCodingApp {
             console.log('[VibeCodingApp] ✅ ranks 对象已注入:', liveRank.ranks);
           }
           
+          // ✅ 【关键修复】合并后端返回的完整数据
+          // 注入 analysis 对象（包含 name, description, dimensions, traits）
+          if (liveRank.analysis) {
+            result.analysis = liveRank.analysis;
+            console.log('[VibeCodingApp] ✅ analysis 对象已注入:', liveRank.analysis);
+          }
+          
+          // 注入 semanticFingerprint 对象（语义指纹）
+          if (liveRank.semanticFingerprint) {
+            result.semanticFingerprint = liveRank.semanticFingerprint;
+            console.log('[VibeCodingApp] ✅ semanticFingerprint 对象已注入:', liveRank.semanticFingerprint);
+          }
+          
+          // 注入 stats 对象（完整的统计数据）
+          if (liveRank.stats) {
+            result.stats = liveRank.stats;
+            console.log('[VibeCodingApp] ✅ stats 对象已注入:', liveRank.stats);
+          }
+          
+          // 注入 fingerprint 字符串（语义指纹）
+          if (liveRank.fingerprint) {
+            result.fingerprint = liveRank.fingerprint;
+            console.log('[VibeCodingApp] ✅ fingerprint 已注入:', liveRank.fingerprint);
+          }
+          
+          // 【V6 架构修复】优先从 personality.detailedStats 读取数据
+          // 数据流向：后端 scoring.ts → rank-content.ts → matchRankLevel → personality.detailedStats
+          if (liveRank.personality) {
+            result.personality = liveRank.personality;
+            console.log('[VibeCodingApp] ✅ personality 对象已注入:', liveRank.personality);
+            
+            // 【V6 架构】直接从 personality.detailedStats 读取数据
+            if (liveRank.personality.detailedStats && Array.isArray(liveRank.personality.detailedStats)) {
+              result.detailedStats = liveRank.personality.detailedStats;
+              result.personality.detailedStats = liveRank.personality.detailedStats;
+              console.log('[VibeCodingApp] ✅ 从 personality.detailedStats 读取数据:', liveRank.personality.detailedStats);
+              
+              // 【V6 云端维度绑定】在 API 返回后调用 updateV6UI 更新维度 UI
+              if (liveRank.personality.detailedStats.length > 0) {
+                // 通过 this (VibeCodingApp 实例) 调用 updateV6UI
+                if (this && typeof this.updateV6UI === 'function') {
+                  this.updateV6UI({ detailedStats: liveRank.personality.detailedStats });
+                  console.log('[VibeCodingApp] ✅ 已调用 updateV6UI 更新维度 UI');
+                } else {
+                  console.warn('[VibeCodingApp] ⚠️ updateV6UI 方法不存在');
+                }
+              }
+            } else {
+              console.warn('[VibeCodingApp] ⚠️ personality.detailedStats 不存在或不是数组');
+            }
+          } else {
+            // 降级：尝试从顶层 detailedStats 读取（向后兼容）
+            if (liveRank.detailedStats) {
+              result.detailedStats = liveRank.detailedStats;
+              console.log('[VibeCodingApp] ⚠️ 使用降级路径：从 liveRank.detailedStats 读取数据');
+            }
+          }
+          
           console.log('[VibeCodingApp] 真实排名数据已获取并更新:', {
             rankPercent: liveRank.rankPercent,
             totalUsers: liveRank.totalUsers,
-            hasRanks: !!liveRank.ranks
+            hasRanks: !!liveRank.ranks,
+            hasAnalysis: !!liveRank.analysis,
+            hasSemanticFingerprint: !!liveRank.semanticFingerprint,
+            hasStats: !!liveRank.stats,
+            hasPersonality: !!liveRank.personality,
+            hasDetailedStats: !!(liveRank.personality?.detailedStats || liveRank.detailedStats),
+            detailedStatsPath: liveRank.personality?.detailedStats ? 'personality.detailedStats' : (liveRank.detailedStats ? 'detailedStats' : 'none')
           });
         } else {
           console.warn('[VibeCodingApp] uploadToSupabase 未返回有效的 rankPercent');
@@ -276,9 +1008,53 @@ class VibeCodingApp {
     const currentLang = getCurrentLang();
     this.analyzer.setLanguage(currentLang);
 
-    // 步骤1: 调用 analyzeSync 进行本地分析（同步方法）
-    const result = await this.analyzer.analyzeSync(chatData, currentLang, null, onProgress);
+    // 【V6 环境感知】生成环境上下文
+    const context = this.generateContext();
+
+    // 步骤1: 调用 analyzeSync 进行本地分析（同步方法，传入 context）
+    // 注意：analyzeSync 可能需要适配 context 参数，这里先传入 lang 作为兼容
+    const result = await this.analyzer.analyzeSync(chatData, context.lang || currentLang, null, onProgress);
     console.log('[VibeCodingApp] analyzeSync 完成:', result);
+
+    // 【V6 适配】确保 stats 对象被正确保存
+    // 从 result.stats 或 result.statistics 中提取 stats 对象
+    if (result && !result.stats) {
+      // 如果 result.stats 不存在，从 result.statistics 中构建
+      if (result.statistics) {
+        result.stats = {
+          totalChars: result.statistics.totalChars || result.statistics.totalUserChars || 0,
+          totalMessages: result.statistics.totalMessages || result.statistics.userMessages || 0,
+          ketao_count: result.statistics.ketao_count || result.statistics.qingCount || 0,
+          jiafang_count: result.statistics.jiafang_count || result.statistics.buCount || 0,
+          abuse_value: result.statistics.abuse_value || result.statistics.abuseValue || 0, // 【V6 新增】受虐值
+          tech_stack: result.statistics.tech_stack || {},
+          work_days: result.statistics.work_days || result.statistics.usageDays || 1,
+          avg_payload: result.statistics.avg_payload || 0,
+          balance_score: result.statistics.balance_score || 0, // 【V6 新增】人格稳定性
+          style_label: result.statistics.style_label || '标准型', // 【V6 新增】交互风格标签
+          blackword_hits: result.statistics.blackword_hits || {}, // 【V6 新增】黑话命中统计
+          ...result.statistics // 保留其他字段
+        };
+      } else {
+        // 降级：使用默认值
+        result.stats = {
+          totalChars: 0,
+          totalMessages: 0,
+          ketao_count: 0,
+          jiafang_count: 0,
+          abuse_value: 0,
+          tech_stack: {},
+          work_days: 1,
+          avg_payload: 0,
+          balance_score: 0,
+          style_label: '标准型',
+          blackword_hits: {}
+        };
+      }
+    }
+    
+    // 【V6 统一映射】使用 AutoMappingEngine 一次性更新所有 UI
+    this.updateUIWithStats(result, this.globalStatsCache);
 
     // 步骤2: 立即 await 调用 uploadToSupabase 获取真实排名
     if (result && result.statistics) {
@@ -295,9 +1071,24 @@ class VibeCodingApp {
       stats.buCount = extraStats?.buCount || globalStats?.buCount || 0;       // 对应甲方上身
       stats.usageDays = extraStats?.usageDays || globalStats?.usageDays || 1; // 对应上岗天数
       
+      // 【修复数据一致性】确保发送给后端的 stats 包含真实的 totalChars 和 totalMessages
+      // 计算真实的 totalChars 和 totalMessages
+      let realTotalChars = 0;
+      let realTotalMessages = 0;
+      if (chatData && Array.isArray(chatData)) {
+        chatData.forEach(item => {
+          if (item.role === 'USER' && item.text) {
+            realTotalChars += item.text.length;
+            realTotalMessages++;
+          }
+        });
+      }
+      
       // 确保这俩也有，以匹配 Work.js 的 findVal 查找逻辑
-      stats.totalUserChars = stats.totalUserChars || stats.totalChars || 0;
-      stats.userMessages = stats.userMessages || stats.totalMessages || 0;
+      stats.totalUserChars = realTotalChars || stats.totalUserChars || stats.totalChars || 0;
+      stats.totalChars = realTotalChars || stats.totalChars || stats.totalUserChars || 0;
+      stats.userMessages = realTotalMessages || stats.userMessages || stats.totalMessages || 0;
+      stats.totalMessages = realTotalMessages || stats.totalMessages || stats.userMessages || 0;
 
       try {
         // 步骤3: 立即 await 调用 uploadToSupabase 联网获取真实排名
@@ -336,10 +1127,45 @@ class VibeCodingApp {
             console.log('[VibeCodingApp] ✅ ranks 对象已注入（同步方法）:', liveRank.ranks);
           }
           
+          // 【关键修复】注入 personality 对象和 detailedStats 数组（包含每个维度的称号和吐槽文案）
+          if (liveRank.personality) {
+            result.personality = liveRank.personality;
+            console.log('[VibeCodingApp] ✅ personality 对象已注入（同步方法）:', liveRank.personality);
+          }
+          if (liveRank.detailedStats) {
+            result.detailedStats = liveRank.detailedStats;
+            console.log('[VibeCodingApp] ✅ detailedStats 数组已注入（同步方法）:', liveRank.detailedStats);
+          }
+          
+          // 【V6 架构修复】优先从 personality.detailedStats 读取数据
+          // 数据流向：后端 scoring.ts → rank-content.ts → matchRankLevel → personality.detailedStats
+          if (liveRank.personality?.detailedStats && Array.isArray(liveRank.personality.detailedStats)) {
+            vibeResult.detailedStats = liveRank.personality.detailedStats;
+            vibeResult.personality = vibeResult.personality || {};
+            vibeResult.personality.detailedStats = liveRank.personality.detailedStats;
+            console.log('[VibeCodingApp] ✅ 从 personality.detailedStats 读取数据（同步方法）:', liveRank.personality.detailedStats);
+            
+            // 【V6 云端维度绑定】在 API 返回后调用 updateV6UI 更新维度 UI
+            if (liveRank.personality.detailedStats.length > 0) {
+              // 通过 vibeCodingApp 实例调用 updateV6UI
+              if (vibeCodingApp && typeof vibeCodingApp.updateV6UI === 'function') {
+                vibeCodingApp.updateV6UI({ detailedStats: liveRank.personality.detailedStats });
+                console.log('[VibeCodingApp] ✅ 已调用 updateV6UI 更新维度 UI（同步方法）');
+              } else {
+                console.warn('[VibeCodingApp] ⚠️ vibeCodingApp 或 updateV6UI 方法不存在（同步方法）');
+              }
+            }
+          } else {
+            console.warn('[VibeCodingApp] ⚠️ personality.detailedStats 不存在或不是数组（同步方法）');
+          }
+          
           console.log('[VibeCodingApp] 真实排名数据已获取并更新（同步方法）:', {
             rankPercent: liveRank.rankPercent,
             totalUsers: liveRank.totalUsers,
-            hasRanks: !!liveRank.ranks
+            hasRanks: !!liveRank.ranks,
+            hasPersonality: !!liveRank.personality,
+            hasDetailedStats: !!(liveRank.personality?.detailedStats || liveRank.detailedStats),
+            detailedStatsPath: liveRank.personality?.detailedStats ? 'personality.detailedStats' : (liveRank.detailedStats ? 'detailedStats' : 'none')
           });
         } else {
           console.warn('[VibeCodingApp] uploadToSupabase 未返回有效的 rankPercent（同步方法）');
@@ -498,8 +1324,20 @@ export const reanalyzeWithLanguage = async (lang) => {
       usageDays = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
     }
     
+    // 【修复】生成 context 对象，而不是直接传递 lang 字符串
+    const context = vibeCodingApp ? vibeCodingApp.generateContext() : {
+      ip: '0.0.0.0',
+      lang: lang,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+      fingerprint: null,
+      isVpn: false,
+      isProxy: false
+    };
+    // 确保 lang 正确设置
+    context.lang = lang;
+    
     // 重新分析（本地计算，不联网）
-    vibeResult = await vibeAnalyzer.analyze(allChatData, lang, null);
+    vibeResult = await vibeAnalyzer.analyze(allChatData, context, null);
     console.log('[Main] 重新分析完成');
     
     // 立即 await 调用 uploadToSupabase 获取真实排名
@@ -543,10 +1381,46 @@ export const reanalyzeWithLanguage = async (lang) => {
             console.log('[Main] ✅ ranks 对象已注入:', liveRank.ranks);
           }
           
+          // 【V6 架构修复】优先从 personality.detailedStats 读取数据
+          // 数据流向：后端 scoring.ts → rank-content.ts → matchRankLevel → personality.detailedStats
+          if (liveRank.personality) {
+            vibeResult.personality = liveRank.personality;
+            console.log('[Main] ✅ personality 对象已注入:', liveRank.personality);
+            
+            // 【V6 架构】直接从 personality.detailedStats 读取数据
+            if (liveRank.personality.detailedStats && Array.isArray(liveRank.personality.detailedStats)) {
+              vibeResult.detailedStats = liveRank.personality.detailedStats;
+              vibeResult.personality.detailedStats = liveRank.personality.detailedStats;
+              console.log('[Main] ✅ 从 personality.detailedStats 读取数据:', liveRank.personality.detailedStats);
+              
+              // 【V6 云端维度绑定】在 API 返回后调用 updateV6UI 更新维度 UI
+              if (liveRank.personality.detailedStats.length > 0) {
+                // 通过 vibeCodingApp 实例调用 updateV6UI
+                if (vibeCodingApp && typeof vibeCodingApp.updateV6UI === 'function') {
+                  vibeCodingApp.updateV6UI({ detailedStats: liveRank.personality.detailedStats });
+                  console.log('[Main] ✅ 已调用 updateV6UI 更新维度 UI');
+                } else {
+                  console.warn('[Main] ⚠️ vibeCodingApp 或 updateV6UI 方法不存在');
+                }
+              }
+            } else {
+              console.warn('[Main] ⚠️ personality.detailedStats 不存在或不是数组');
+            }
+          } else {
+            // 降级：尝试从顶层 detailedStats 读取（向后兼容）
+            if (liveRank.detailedStats) {
+              vibeResult.detailedStats = liveRank.detailedStats;
+              console.log('[Main] ⚠️ 使用降级路径：从 liveRank.detailedStats 读取数据');
+            }
+          }
+          
           console.log('[Main] 真实排名数据已获取并覆盖:', {
             rankPercent: liveRank.rankPercent,
             totalUsers: liveRank.totalUsers,
-            hasRanks: !!liveRank.ranks
+            hasRanks: !!liveRank.ranks,
+            hasPersonality: !!liveRank.personality,
+            hasDetailedStats: !!(liveRank.personality?.detailedStats || liveRank.detailedStats),
+            detailedStatsPath: liveRank.personality?.detailedStats ? 'personality.detailedStats' : (liveRank.detailedStats ? 'detailedStats' : 'none')
           });
         }
       } catch (uploadError) {
@@ -573,8 +1447,20 @@ export const reanalyzeWithLanguage = async (lang) => {
       usageDays = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
     }
     
+    // 【修复】生成 context 对象，而不是直接传递 lang 字符串
+    const contextSync = vibeCodingApp ? vibeCodingApp.generateContext() : {
+      ip: '0.0.0.0',
+      lang: lang,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+      fingerprint: null,
+      isVpn: false,
+      isProxy: false
+    };
+    // 确保 lang 正确设置
+    contextSync.lang = lang;
+    
     // 重新分析（本地计算，不联网）
-    vibeResult = await vibeAnalyzer.analyzeSync(allChatData, lang, null);
+    vibeResult = await vibeAnalyzer.analyzeSync(allChatData, contextSync.lang || lang, null);
     
     // 立即 await 调用 uploadToSupabase 获取真实排名
     if (vibeResult && vibeResult.statistics) {
@@ -637,9 +1523,23 @@ export const reanalyzeWithLanguage = async (lang) => {
 };
 
 // 导出渲染函数
-export const renderFullDashboard = async (vibeResult) => {
+export const renderFullDashboard = async (passedVibeResult) => {
   // 如果没有传入参数，使用全局变量（向后兼容）
-  const currentVibeResult = vibeResult || window.vibeResult || globalThis.vibeResult;
+  const currentVibeResult = passedVibeResult || window.vibeResult || globalThis.vibeResult;
+  
+  // 【关键修复】更新全局变量，确保所有渲染函数都能访问到最新数据
+  if (currentVibeResult) {
+    window.vibeResult = currentVibeResult;
+    vibeResult = currentVibeResult;
+    console.log('[Main] ✅ 已更新全局 vibeResult:', {
+      hasPersonalityName: !!currentVibeResult.personalityName,
+      hasRoastText: !!currentVibeResult.roastText,
+      hasDimensions: !!currentVibeResult.dimensions,
+      hasAnalysis: !!currentVibeResult.analysis,
+      hasSemanticFingerprint: !!currentVibeResult.semanticFingerprint,
+      dimensionsKeys: currentVibeResult.dimensions ? Object.keys(currentVibeResult.dimensions) : null
+    });
+  }
   
   console.log('[Main] renderFullDashboard 被调用');
   console.log('[Main] 数据状态:', {
@@ -714,6 +1614,43 @@ function updateElementReferences() {
     buCount: !!statsElements.buCount,
     chatList: !!elements.chatList
   });
+  
+  // 【修复】重新绑定搜索框事件监听器
+  // 当 DOM 被重新创建（如语言切换）时，需要重新绑定事件
+  if (elements.searchInput) {
+    // 移除可能存在的旧事件监听器（通过克隆节点）
+    const oldSearchInput = elements.searchInput;
+    const newSearchInput = oldSearchInput.cloneNode(true);
+    oldSearchInput.parentNode.replaceChild(newSearchInput, oldSearchInput);
+    elements.searchInput = newSearchInput;
+    
+    // 绑定新的事件监听器
+    const searchHandler = debounce(handleSearch, 300);
+    elements.searchInput.addEventListener('input', searchHandler);
+    console.log('[Main] ✅ 搜索框事件已重新绑定');
+  } else {
+    console.warn('[Main] ⚠️ searchInput 元素未找到，无法绑定事件');
+  }
+  
+  // 【修复】重新绑定分页器事件
+  if (elements.paginationPrev) {
+    elements.paginationPrev.addEventListener('click', () => {
+      if (currentPage > 1) {
+        currentPage--;
+        renderChatList(filteredChatData);
+      }
+    });
+  }
+  
+  if (elements.paginationNext) {
+    elements.paginationNext.addEventListener('click', () => {
+      const totalPages = Math.ceil(filteredChatData.length / itemsPerPage);
+      if (currentPage < totalPages) {
+        currentPage++;
+        renderChatList(filteredChatData);
+      }
+    });
+  }
 }
 /**
  * 上传统计数据到 Worker 并获取排名
@@ -1026,7 +1963,13 @@ function bindEvents() {
 
   // 搜索
   if (elements.searchInput) {
-    elements.searchInput.addEventListener('input', debounce(handleSearch, 300));
+    // 【修复】确保搜索框事件正确绑定
+    // 使用 once: false 确保可以多次绑定（debounce 会处理重复调用）
+    const searchHandler = debounce(handleSearch, 300);
+    elements.searchInput.addEventListener('input', searchHandler);
+    console.log('[Main] ✅ 搜索框事件已绑定');
+  } else {
+    console.warn('[Main] ⚠️ searchInput 元素未找到，可能 DOM 尚未加载');
   }
 
   // 分页器事件
@@ -1442,6 +2385,11 @@ async function handleFileUpload(event, type, callbacks = {}) {
       }
       currentPage = 1;
       renderChatList(allChatData);
+      
+      // 【修复】确保搜索框在数据加载后也能正常工作
+      if (elements.searchInput && allChatData && allChatData.length > 0) {
+        console.log('[Main] ✅ 数据加载完成，搜索功能已就绪，共', allChatData.length, '条记录');
+      }
     }
   } catch (error) {
     console.error('[Main] 处理失败:', error);
@@ -2304,20 +3252,96 @@ function renderPagination(totalItems, totalPages) {
 
 // 处理搜索
 function handleSearch(event) {
+  if (!event || !event.target) {
+    console.warn('[Main] ⚠️ handleSearch 事件对象无效');
+    return;
+  }
+
   const keyword = event.target.value.trim();
+
+  // 【调试】检查数据源
+  console.log('[Main] 🔍 搜索触发:', {
+    keyword,
+    allChatDataLength: allChatData?.length || 0,
+    filteredChatDataLength: filteredChatData?.length || 0,
+    allChatDataExists: !!allChatData,
+    isArray: Array.isArray(allChatData),
+  });
 
   // 重置到第一页
   currentPage = 1;
 
+  // 如果没有关键词，显示所有数据
   if (!keyword) {
-    renderChatList(allChatData);
+    const dataToShow = allChatData && allChatData.length > 0 ? allChatData : filteredChatData;
+    console.log('[Main] 🔍 清空搜索，显示所有数据:', dataToShow.length, '条');
+    renderChatList(dataToShow);
     return;
   }
 
-  const filtered = allChatData.filter(
-    (item) => item.text.toLowerCase().includes(keyword.toLowerCase())
-  );
+  // 【修复】确定数据源：优先使用 allChatData，如果为空则使用 filteredChatData
+  const dataSource = (allChatData && allChatData.length > 0) ? allChatData : filteredChatData;
+  
+  if (!dataSource || !Array.isArray(dataSource) || dataSource.length === 0) {
+    console.warn('[Main] ⚠️ 搜索数据源为空，无法执行搜索');
+    renderChatList([]);
+    return;
+  }
 
+  // 【修复】增强搜索逻辑，处理多种数据结构和字段名
+  const lowerKeyword = keyword.toLowerCase();
+  let matchCount = 0;
+  
+  const filtered = dataSource.filter((item, index) => {
+    if (!item) {
+      return false;
+    }
+    
+    // 尝试多种可能的文本字段
+    const text = item.text || item.content || item.message?.text || item.message?.content || '';
+    
+    // 如果文本为空，跳过
+    if (!text || typeof text !== 'string') {
+      return false;
+    }
+    
+    // 执行搜索（不区分大小写）
+    const matches = text.toLowerCase().includes(lowerKeyword);
+    
+    // 【调试】记录前几个匹配项
+    if (matches && matchCount < 3) {
+      console.log(`[Main] 🔍 匹配项 ${matchCount + 1}:`, {
+        index,
+        textPreview: text.substring(0, 50) + '...',
+        role: item.role || 'unknown',
+      });
+      matchCount++;
+    }
+    
+    return matches;
+  });
+
+  console.log(`[Main] 🔍 搜索关键词: "${keyword}", 从 ${dataSource.length} 条记录中找到 ${filtered.length} 条匹配记录`);
+  
+  if (filtered.length === 0) {
+    console.log('[Main] 🔍 未找到匹配记录，可能的原因：');
+    console.log('  - 关键词拼写错误');
+    console.log('  - 数据源为空或格式不正确');
+    console.log('  - 文本字段不存在');
+    
+    // 【调试】显示数据源的前几条记录结构
+    if (dataSource.length > 0) {
+      console.log('[Main] 🔍 数据源示例（前3条）:', dataSource.slice(0, 3).map((item, idx) => ({
+        index: idx,
+        hasText: !!item.text,
+        hasContent: !!item.content,
+        hasMessage: !!item.message,
+        textPreview: (item.text || item.content || '').substring(0, 30),
+        keys: Object.keys(item),
+      })));
+    }
+  }
+  
   renderChatList(filtered);
 }
 
@@ -2326,10 +3350,60 @@ async function handleExport() {
   const exportArea = elements.exportArea;
 
   try {
+    // 【V6 同步逻辑锁】确保在获取到后端 /api/v2/analyze 的返回数据（特别是答案之书文案）之前处于 loading 状态
+    // 检查是否已获取到后端数据（答案之书文案）
+    let answerTextEl = document.querySelector('[data-v6-key="answer_text"]');
+    let hasAnswerText = answerTextEl && answerTextEl.textContent && answerTextEl.textContent.trim() !== '';
+    
+    // 如果答案之书文案为空，说明后端数据还未返回，等待数据
+    if (!hasAnswerText) {
+      console.log('[Main] ⏳ 等待后端数据（答案之书文案）...');
+      // 显示导出中提示
+      const originalText = elements.exportBtn.innerHTML;
+      elements.exportBtn.innerHTML = '<span class="btn-icon">⏳</span><span>等待数据中...</span>';
+      elements.exportBtn.disabled = true;
+      
+      // 轮询等待答案之书文案（最多等待 5 秒）
+      let waitCount = 0;
+      const maxWait = 50; // 50 * 100ms = 5秒
+      while (!hasAnswerText && waitCount < maxWait) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        waitCount++;
+        answerTextEl = document.querySelector('[data-v6-key="answer_text"]');
+        hasAnswerText = answerTextEl && answerTextEl.textContent && answerTextEl.textContent.trim() !== '';
+        if (hasAnswerText) {
+          console.log('[Main] ✅ 后端数据已就绪');
+          break;
+        }
+      }
+      
+      if (waitCount >= maxWait) {
+        console.warn('[Main] ⚠️ 等待后端数据超时，继续导出（可能缺少答案之书文案）');
+      }
+    }
+    
     // 显示导出中提示
     const originalText = elements.exportBtn.innerHTML;
     elements.exportBtn.innerHTML = '<span class="btn-icon">⏳</span><span>生成中...</span>';
     elements.exportBtn.disabled = true;
+
+    // 【V6 约束】确保所有动态数据注入都在 html2canvas 截图触发前完成
+    // 等待所有异步 UI 更新完成
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    // 确保行为标签已渲染
+    if (vibeCodingApp && vibeResult && vibeResult.stats) {
+      if (typeof vibeCodingApp.renderBehaviorTags === 'function') {
+        vibeCodingApp.renderBehaviorTags(vibeResult.stats, 'behavior-tags-container');
+      }
+      // 确保全网数据已同步
+      if (typeof vibeCodingApp.syncGlobalStats === 'function' && vibeCodingApp.globalStatsCache) {
+        vibeCodingApp.syncGlobalStats(vibeCodingApp.globalStatsCache);
+      }
+    }
+    
+    // 再次等待 DOM 更新
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     // 使用全局 html2canvas 对象（通过 CDN 加载）
     const html2canvas = window.html2canvas || globalThis.html2canvas;
@@ -2420,7 +3494,55 @@ function displayVibeCodingerAnalysis() {
     return;
   }
 
-  const { personalityType, dimensions, analysis, semanticFingerprint, statistics, vibeIndex, roastText, personalityName, lpdef } = vibeResult;
+  const { personalityType, dimensions, analysis, semanticFingerprint, statistics, vibeIndex, roastText, personalityName, stats } = vibeResult;
+  
+  // 【V6 语义指纹统一化】从 VibeCodingerAnalyzer 的 generateLPDEF 方法获取结果
+  let lpdef = vibeResult.lpdef;
+  if (!lpdef && dimensions && vibeAnalyzer && typeof vibeAnalyzer.generateLPDEF === 'function') {
+    try {
+      lpdef = vibeAnalyzer.generateLPDEF(dimensions);
+      console.log('[Main] ✅ 从 analyzer.generateLPDEF 获取 LPDEF:', lpdef);
+    } catch (error) {
+      console.warn('[Main] generateLPDEF 调用失败:', error);
+      lpdef = 'L0P0D0E0F0'; // 降级默认值
+    }
+  } else if (!lpdef) {
+    lpdef = 'L0P0D0E0F0'; // 降级默认值
+  }
+  
+  // 【关键修复】确保 semanticFingerprint 完整，如果后端返回的不完整，使用前端生成
+  let finalSemanticFingerprint = semanticFingerprint;
+  if (!finalSemanticFingerprint || !finalSemanticFingerprint.codeRatio || !finalSemanticFingerprint.patienceLevel) {
+    console.log('[Main] ⚠️ semanticFingerprint 不完整，使用前端生成');
+    if (dimensions && vibeAnalyzer && typeof vibeAnalyzer.generateSemanticFingerprint === 'function') {
+      try {
+        finalSemanticFingerprint = vibeAnalyzer.generateSemanticFingerprint(dimensions);
+        console.log('[Main] ✅ 从 analyzer.generateSemanticFingerprint 获取完整语义指纹');
+      } catch (error) {
+        console.warn('[Main] generateSemanticFingerprint 调用失败:', error);
+      }
+    }
+  }
+  
+  // 如果仍然不完整，使用默认值
+  if (!finalSemanticFingerprint) {
+    finalSemanticFingerprint = {
+      codeRatio: '0%',
+      patienceLevel: 'N/A',
+      detailLevel: 'N/A',
+      techExploration: 'N/A',
+      feedbackDensity: '0%',
+      compositeScore: 0,
+      techDiversity: 'N/A',
+      interactionStyle: 'N/A',
+    };
+  }
+  
+  // 【V6 适配】从 stats 对象中提取数据（健壮性保障：使用默认值）
+  const safeStats = stats || statistics || {};
+  const ketaoCount = safeStats.ketao_count || safeStats.qingCount || 0;
+  const jiafangCount = safeStats.jiafang_count || safeStats.buCount || 0;
+  const workDays = safeStats.work_days || safeStats.usageDays || 1;
 
   // 【优化】文案已迁移到后端，直接使用后端返回的 roastText 和 personalityName
   // 不再调用本地 matchRoast 或 getRoastText 函数
@@ -2505,22 +3627,32 @@ function displayVibeCodingerAnalysis() {
     <div class="vibe-dimensions">
       <h3 class="dimensions-title">${t('vibeCodinger.dimensionsTitle')}</h3>
       ${Object.entries(dimensions).map(([key, value]) => {
-        const dimInfo = analysis.dimensions[key];
+        // 【V6 架构修复】优先从 personality.detailedStats 读取数据
+        // 数据流向：后端 scoring.ts → rank-content.ts → matchRankLevel → personality.detailedStats
+        const detailedStats = vibeResult.personality?.detailedStats || vibeResult.detailedStats || [];
+        const detailedStat = detailedStats.find(stat => stat.dimension === key);
+        
+        // 优先使用 detailedStats 中的文案，降级到 analysis.dimensions[key]
+        const dimInfo = detailedStat ? {
+          level: detailedStat.label || '未知',
+          interpretation: detailedStat.roast || '暂无吐槽文案'
+        } : (analysis.dimensions[key] || { level: '未知', interpretation: '暂无吐槽文案' });
+        
         const percentage = value;
         const dimLabel = window.i18n?.getI18nText(getCurrentLang())?.dimensions?.[key]?.label || DIMENSIONS[key].label;
         const dimDesc = window.i18n?.getI18nText(getCurrentLang())?.dimensions?.[key]?.description || DIMENSIONS[key].description;
         return `
-          <div class="dimension-card">
+          <div class="dimension-card" data-v6-dim="${key}">
             <div class="dimension-header">
               <span class="dimension-key">${key}</span>
               <span class="dimension-label">${dimLabel}</span>
               <span class="dimension-value">${value}</span>
-              <span class="dimension-level">${dimInfo.level}</span>
+              <span class="dimension-level rank-label">${dimInfo.level}</span>
             </div>
             <div class="dimension-bar-container">
               <div class="dimension-bar" style="width: ${percentage}%; background: var(--accent-terminal)"></div>
             </div>
-            <p class="dimension-interpretation">${dimInfo.interpretation}</p>
+            <p class="dimension-interpretation roast-text">${dimInfo.interpretation}</p>
             <p class="dimension-desc">${dimDesc}</p>
           </div>
         `;
@@ -2541,50 +3673,67 @@ function displayVibeCodingerAnalysis() {
       <div class="fingerprint-grid">
         <div class="fingerprint-item">
           <span class="fingerprint-label">${t('fingerprint.codeRatio')}</span>
-          <span class="fingerprint-value">${semanticFingerprint.codeRatio || 'N/A'}</span>
+          <span class="fingerprint-value">${finalSemanticFingerprint.codeRatio || 'N/A'}</span>
+          ${finalSemanticFingerprint.codeRatioDesc ? `<span class="fingerprint-desc">${finalSemanticFingerprint.codeRatioDesc}</span>` : ''}
         </div>
         <div class="fingerprint-item">
           <span class="fingerprint-label">${t('fingerprint.patienceLevel')}</span>
-          <span class="fingerprint-value">${semanticFingerprint.patienceLevel || 'N/A'}</span>
+          <span class="fingerprint-value">${finalSemanticFingerprint.patienceLevel || 'N/A'}</span>
+          ${finalSemanticFingerprint.patienceLevelDesc ? `<span class="fingerprint-desc">${finalSemanticFingerprint.patienceLevelDesc}</span>` : ''}
         </div>
         <div class="fingerprint-item">
           <span class="fingerprint-label">${t('fingerprint.detailLevel')}</span>
-          <span class="fingerprint-value">${semanticFingerprint.detailLevel || 'N/A'}</span>
+          <span class="fingerprint-value">${finalSemanticFingerprint.detailLevel || 'N/A'}</span>
+          ${finalSemanticFingerprint.detailLevelDesc ? `<span class="fingerprint-desc">${finalSemanticFingerprint.detailLevelDesc}</span>` : ''}
         </div>
         <div class="fingerprint-item">
           <span class="fingerprint-label">${t('fingerprint.techExploration')}</span>
-          <span class="fingerprint-value">${semanticFingerprint.techExploration || 'N/A'}</span>
+          <span class="fingerprint-value">${finalSemanticFingerprint.techExploration || 'N/A'}</span>
+          ${finalSemanticFingerprint.techExplorationDesc ? `<span class="fingerprint-desc">${finalSemanticFingerprint.techExplorationDesc}</span>` : ''}
         </div>
         <div class="fingerprint-item">
           <span class="fingerprint-label">${t('fingerprint.feedbackDensity')}</span>
-          <span class="fingerprint-value">${semanticFingerprint.feedbackDensity || 'N/A'}</span>
+          <span class="fingerprint-value">${finalSemanticFingerprint.feedbackDensity || 'N/A'}</span>
+          ${finalSemanticFingerprint.feedbackDensityDesc ? `<span class="fingerprint-desc">${finalSemanticFingerprint.feedbackDensityDesc}</span>` : ''}
         </div>
-        ${semanticFingerprint.compositeScore ? `
+        ${finalSemanticFingerprint.compositeScore !== undefined ? `
         <div class="fingerprint-item">
           <span class="fingerprint-label">${t('fingerprint.score')}</span>
-          <span class="fingerprint-value">${semanticFingerprint.compositeScore}</span>
+          <span class="fingerprint-value">${finalSemanticFingerprint.compositeScore}</span>
+          ${finalSemanticFingerprint.compositeScoreDesc ? `<span class="fingerprint-desc">${finalSemanticFingerprint.compositeScoreDesc}</span>` : ''}
         </div>
         ` : ''}
-        ${semanticFingerprint.techDiversity ? `
+        ${finalSemanticFingerprint.techDiversity ? `
         <div class="fingerprint-item">
           <span class="fingerprint-label">${t('fingerprint.diversity')}</span>
-          <span class="fingerprint-value">${semanticFingerprint.techDiversity}</span>
+          <span class="fingerprint-value">${finalSemanticFingerprint.techDiversity}</span>
+          ${finalSemanticFingerprint.techDiversityDesc ? `<span class="fingerprint-desc">${finalSemanticFingerprint.techDiversityDesc}</span>` : ''}
         </div>
         ` : ''}
-        ${semanticFingerprint.interactionStyle ? `
+        ${finalSemanticFingerprint.interactionStyle ? `
         <div class="fingerprint-item">
           <span class="fingerprint-label">${t('fingerprint.style')}</span>
-          <span class="fingerprint-value">${semanticFingerprint.interactionStyle}</span>
-        </div>
-        ` : ''}
-        ${semanticFingerprint.balanceIndex ? `
-        <div class="fingerprint-item">
-          <span class="fingerprint-label">${t('fingerprint.balance')}</span>
-          <span class="fingerprint-value">${semanticFingerprint.balanceIndex}</span>
+          <span class="fingerprint-value">${finalSemanticFingerprint.interactionStyle}</span>
+          ${finalSemanticFingerprint.interactionStyleDesc ? `<span class="fingerprint-desc">${finalSemanticFingerprint.interactionStyleDesc}</span>` : ''}
         </div>
         ` : ''}
       </div>
     </div>
+
+
+    <!-- 【V6 UI 渲染引擎升级】稳定性勋章 -->
+    ${safeStats?.balance_score !== undefined ? `
+    <div class="balance-score-section" id="balance-score-section" style="scroll-margin-top: 80px; margin-top: 20px;">
+      <h3 class="balance-score-title">${getCurrentLang() === 'en' ? 'Personality Stability' : '人格稳定性'}</h3>
+      <div class="balance-score-progress-container">
+        <div class="balance-score-progress-bar" style="width: ${Math.min(100, Math.max(0, safeStats.balance_score || 0))}%; background: linear-gradient(90deg, var(--accent-terminal), #4CAF50); height: 30px; border-radius: 15px; transition: width 0.5s ease;">
+          <span class="balance-score-text" style="line-height: 30px; padding: 0 15px; color: white; font-weight: bold;">
+            ${Math.round(safeStats.balance_score || 0)}%
+          </span>
+        </div>
+      </div>
+    </div>
+    ` : ''}
 
     <div class="vibe-chart-container" id="radar-chart" style="scroll-margin-top: 80px;">
       <h3 class="chart-title">${t('vibeCodinger.chartTitle')}</h3>
@@ -2592,7 +3741,44 @@ function displayVibeCodingerAnalysis() {
         <canvas id="vibeRadarChart"></canvas>
       </div>
     </div>
+
+    <!-- 【V6 全网数据仪式感模块】（使用 data-v6-key 自动填空） -->
+    <div class="global-stats-ceremony" id="global-stats-ceremony" style="scroll-margin-top: 80px; margin-top: 30px; padding: 20px; background: rgba(0, 212, 255, 0.1); border-radius: 10px; border: 1px solid rgba(0, 212, 255, 0.3);">
+      <h3 class="ceremony-title" style="margin-bottom: 15px; color: var(--accent-terminal);">${getCurrentLang() === 'en' ? 'Global Statistics' : '全网数据'}</h3>
+      <div class="ceremony-content" style="display: flex; flex-direction: column; gap: 10px;">
+        <div class="ceremony-item">
+          <span class="ceremony-label">${getCurrentLang() === 'en' ? 'Total Scans' : '全网扫描次数'}:</span>
+          <span class="ceremony-value" data-v6-key="total_users">0</span>
+        </div>
+        <div class="ceremony-item">
+          <span class="ceremony-label">${getCurrentLang() === 'en' ? 'Geographic Distribution' : '地理位置分布'}:</span>
+          <span class="ceremony-value" data-v6-key="geo_hotmap_summary">${getCurrentLang() === 'en' ? 'Loading...' : '加载中...'}</span>
+        </div>
+        <div class="ceremony-item">
+          <span class="ceremony-label">${getCurrentLang() === 'en' ? "Today's Answer Book" : '今日答案之书'}:</span>
+          <span class="ceremony-value" data-v6-key="answer_text" style="font-style: italic; color: var(--accent-terminal);">${getCurrentLang() === 'en' ? 'Loading...' : '加载中...'}</span>
+        </div>
+      </div>
+    </div>
   `;
+  
+  // 【V6 自动化渲染引擎】在 DOM 渲染完成后调用 renderBehaviorTags
+  setTimeout(() => {
+    if (vibeCodingApp && typeof vibeCodingApp.renderBehaviorTags === 'function') {
+      vibeCodingApp.renderBehaviorTags(safeStats, 'behavior-tags-container');
+    }
+  }, 100);
+
+  // 【V6 自动化渲染引擎】在 DOM 渲染完成后调用 renderBehaviorTags 和 syncGlobalStats
+  setTimeout(() => {
+    if (vibeCodingApp && typeof vibeCodingApp.renderBehaviorTags === 'function') {
+      vibeCodingApp.renderBehaviorTags(safeStats, 'behavior-tags-container');
+    }
+    // 同步全网数据（如果已加载）
+    if (vibeCodingApp && typeof vibeCodingApp.syncGlobalStats === 'function' && vibeCodingApp.globalStatsCache) {
+      vibeCodingApp.syncGlobalStats(vibeCodingApp.globalStatsCache);
+    }
+  }, 100);
 
   // 渲染雷达图（增强版，显示所有维度）
   // 【优化】确保在渲染前获取全局平均值（用于背景参考线）
@@ -3795,25 +4981,127 @@ function renderWordClouds() {
     }
   }
 
-  // 渲染英文词云（合并原来的中文词云和英文词云）
+  // 渲染英文词云（合并 tech_stack、中文词组和英文词组）
   const englishCanvas = document.getElementById('englishWordCloud');
   if (!englishCanvas) {
     console.warn('[Main] 英文词云canvas未找到');
   } else {
-    // 合并中文词组和英文词组
+    // 【V6 适配】合并 tech_stack、中文词组和英文词组
     const mergedWords = {};
     
-    // 添加中文词组（原中文词云内容，排除情绪类词组）
-    if (globalStats.chineseWords) {
-      Object.entries(globalStats.chineseWords).forEach(([word, count]) => {
-        // 排除情绪类词组（已在AI情绪词云中显示）
-        if (!globalStats.chineseEmotionWords || !globalStats.chineseEmotionWords[word]) {
-          mergedWords[word] = (mergedWords[word] || 0) + count;
+    // 【V6 黑话合并】在词云渲染前，将 chinese_slang 和 english_slang 合并为一个统一的词频对象
+    // 【装修级优化】使用 Object.entries().reduce 显式合并，以防极端情况下只显示其中一种词频
+    try {
+      const currentVibeResult = vibeResult || window.vibeResult || globalThis.vibeResult;
+      if (currentVibeResult && currentVibeResult.stats) {
+        const blackwordHits = currentVibeResult.stats.blackword_hits || {};
+        
+        // 合并 chinese_slang 和 english_slang
+        const chineseSlang = blackwordHits.chinese_slang || {};
+        const englishSlang = blackwordHits.english_slang || {};
+        
+        // 【显式合并】使用 reduce 确保两种黑话都被正确处理，即使其中一种为空
+        const mergedSlang = [
+          ...Object.entries(chineseSlang).map(([word, count]) => ({ word, count, type: 'chinese' })),
+          ...Object.entries(englishSlang).map(([word, count]) => ({ word, count, type: 'english' }))
+        ].reduce((acc, { word, count, type }) => {
+          if (word && typeof count === 'number' && count > 0) {
+            // 统一权重：黑话词条权重 = rawCount * 2
+            acc[word] = (acc[word] || 0) + (count * 2);
+          }
+          return acc;
+        }, {});
+        
+        // 将合并后的黑话数据添加到 mergedWords
+        Object.entries(mergedSlang).forEach(([word, weightedCount]) => {
+          mergedWords[word] = (mergedWords[word] || 0) + weightedCount;
+        });
+        
+        if (Object.keys(chineseSlang).length > 0 || Object.keys(englishSlang).length > 0) {
+          console.log('[Main] ✅ 已合并黑话数据到词云（显式合并）:', {
+            chineseSlang: Object.keys(chineseSlang).length,
+            englishSlang: Object.keys(englishSlang).length,
+            mergedCount: Object.keys(mergedSlang).length
+          });
         }
-      });
+      }
+    } catch (error) {
+      console.warn('[Main] 黑话合并失败（已降级）:', error);
     }
     
-    // 添加英文词组
+    // 1. 添加 tech_stack 数据（调高权重，使其更显眼）
+    // 获取 vibeResult 中的 stats.tech_stack（健壮性保障）
+    try {
+      const currentVibeResult = vibeResult || window.vibeResult || globalThis.vibeResult;
+      if (currentVibeResult && currentVibeResult.stats) {
+        const techStack = currentVibeResult.stats.tech_stack;
+        if (techStack) {
+          // 处理字符串格式的 tech_stack（JSON 字符串）
+          let parsedTechStack = techStack;
+          if (typeof techStack === 'string') {
+            try {
+              parsedTechStack = JSON.parse(techStack);
+            } catch (e) {
+              console.warn('[Main] tech_stack JSON 解析失败:', e);
+              parsedTechStack = {};
+            }
+          }
+          
+          if (typeof parsedTechStack === 'object' && parsedTechStack !== null && !Array.isArray(parsedTechStack)) {
+            Object.entries(parsedTechStack).forEach(([tech, count]) => {
+              if (tech && typeof count === 'number' && count > 0) {
+                // 【V6 动态提权】tech_stack 词条权重 = rawCount * 8
+                mergedWords[tech] = (mergedWords[tech] || 0) + (count * 8);
+              }
+            });
+            console.log('[Main] ✅ 已添加 tech_stack 数据到词云，共', Object.keys(parsedTechStack).length, '项技术');
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('[Main] 获取 tech_stack 数据时出错（已降级）:', error);
+      // 降级：继续执行，不影响后续词云渲染
+    }
+    
+    // 2. 添加中文词组（从 parser.getTopChineseWords() 获取，排除情绪类词组）
+    // 【V6 词云算法重构】加权融合：slang 词条权重 = rawCount * 5
+    if (parser && typeof parser.getTopChineseWords === 'function') {
+      try {
+        const topChineseWords = parser.getTopChineseWords(50); // 获取前50个中文词组
+        topChineseWords.forEach(({ word, count }) => {
+          if (word && count > 0) {
+            // 排除情绪类词组（已在AI情绪词云中显示）
+            if (!globalStats.chineseEmotionWords || !globalStats.chineseEmotionWords[word]) {
+              // 【V6 动态提权】slang 词条权重 = rawCount * 5
+              mergedWords[word] = (mergedWords[word] || 0) + (count * 5);
+            }
+          }
+        });
+        console.log('[Main] ✅ 已添加 parser.getTopChineseWords() 数据到词云（权重*5），共', topChineseWords.length, '个词组');
+      } catch (error) {
+        console.warn('[Main] parser.getTopChineseWords() 调用失败:', error);
+        // 降级：使用 globalStats.chineseWords
+        if (globalStats.chineseWords) {
+          Object.entries(globalStats.chineseWords).forEach(([word, count]) => {
+            if (!globalStats.chineseEmotionWords || !globalStats.chineseEmotionWords[word]) {
+              mergedWords[word] = (mergedWords[word] || 0) + (count * 5); // 同样应用权重
+            }
+          });
+        }
+      }
+    } else {
+      // 降级：使用 globalStats.chineseWords（原逻辑）
+      if (globalStats.chineseWords) {
+        Object.entries(globalStats.chineseWords).forEach(([word, count]) => {
+          // 排除情绪类词组（已在AI情绪词云中显示）
+          if (!globalStats.chineseEmotionWords || !globalStats.chineseEmotionWords[word]) {
+            mergedWords[word] = (mergedWords[word] || 0) + (count * 5); // 同样应用权重
+          }
+        });
+      }
+    }
+    
+    // 3. 添加英文词组（普通权重）
     if (globalStats.englishWords) {
       Object.entries(globalStats.englishWords).forEach(([word, count]) => {
         mergedWords[word] = (mergedWords[word] || 0) + count;
@@ -3876,6 +5164,31 @@ function renderWordClouds() {
             return colors[index];
           };
           
+          // 【V6 样式区分】构建技术词条映射表
+          const techStackMap = {};
+          try {
+            const currentVibeResult = vibeResult || window.vibeResult || globalThis.vibeResult;
+            if (currentVibeResult?.stats?.tech_stack && typeof currentVibeResult.stats.tech_stack === 'object') {
+              Object.keys(currentVibeResult.stats.tech_stack).forEach(tech => {
+                techStackMap[tech] = true;
+              });
+            }
+          } catch (e) {
+            console.warn('[Main] 构建 techStackMap 失败:', e);
+          }
+
+          // 自定义颜色函数（技术词条使用品牌色）
+          const enhancedColorFn = function(word, weight, fontSize, distance, theta) {
+            if (techStackMap[word]) {
+              // 技术词条使用品牌色
+              return '#00D4FF'; // 品牌色
+            }
+            // 其他词条使用原颜色函数
+            const colors = ['#2c3e50', '#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#34495e', '#16a085'];
+            const index = Math.floor(Math.random() * colors.length);
+            return colors[index];
+          };
+
           WordCloud(englishCanvas, {
             list: mergedData,
             gridSize: Math.round(Math.max(6, Math.min(10, width / 50))), // 减小网格，让词更密集
@@ -3888,7 +5201,7 @@ function renderWordClouds() {
               return minFontSize + normalizedSize * (maxFontSize - minFontSize);
             },
             fontFamily: 'Arial, "Microsoft YaHei", "微软雅黑", sans-serif', // 支持中英文混排
-            color: colorFn,
+            color: enhancedColorFn,
             rotateRatio: 0.6, // 增加旋转比例，使词云更生动
             backgroundColor: 'transparent',
             minSize: 8, // 最小字体大小

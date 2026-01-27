@@ -64,7 +64,7 @@
             width: 100%;
             height: 100%;
             pointer-events: none;
-            z-index: 2;
+            z-index: 1;
             background: linear-gradient(
                 180deg,
                 transparent 0%,
@@ -95,8 +95,420 @@
         }
 
         #map-container {
+            position: fixed;
+            top: 0;
+            left: 0;
             width: 100%;
-            height: 600px;
+            height: 100%;
+            z-index: 0;
+            pointer-events: auto;
+            background: transparent;
+        }
+
+        /* 确保主容器允许穿透，但交互元素可点击 */
+        .max-w-\[1600px\] {
+            pointer-events: none;
+        }
+
+        /* 所有可交互元素恢复 pointer-events */
+        .max-w-\[1600px\] button,
+        .max-w-\[1600px\] input,
+        .max-w-\[1600px\] select,
+        .max-w-\[1600px\] textarea,
+        .max-w-\[1600px\] a,
+        .max-w-\[1600px\] [onclick],
+        .max-w-\[1600px\] .stat-card,
+        .max-w-\[1600px\] .hacker-border,
+        .max-w-\[1600px\] canvas,
+        .max-w-\[1600px\] #rank-cards-container,
+        .max-w-\[1600px\] #rank-cards-container > *,
+        .max-w-\[1600px\] .lang-flag-btn,
+        .max-w-\[1600px\] img[onerror] {
+            pointer-events: auto;
+        }
+
+        /* =========================
+           顶部固定 Header 样式
+           ========================= */
+        .top-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 50; /* 在地图(z-index: 0)之上，但低于抽屉(z-index: 100) */
+            background: rgba(5, 5, 5, 0.95);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(0, 255, 65, 0.2);
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.5);
+            pointer-events: auto; /* 确保可以点击 */
+        }
+
+        .top-header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .top-header-title {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .top-header-title h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 900;
+            letter-spacing: -0.02em;
+            font-style: italic;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .top-header-title p {
+            margin: 4px 0 0 0;
+            font-size: 9px;
+            color: #71717a;
+            letter-spacing: 0.3em;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .top-header-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .top-header-cards {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        /* 响应式调整 */
+        @media (max-width: 768px) {
+            .top-header {
+                padding: 8px 12px;
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+
+            .top-header-left {
+                width: 100%;
+            }
+
+            .top-header-right {
+                width: 100%;
+                justify-content: space-between;
+            }
+
+            .top-header-title h1 {
+                font-size: 18px;
+            }
+
+            .top-header-title p {
+                font-size: 8px;
+            }
+
+            .top-header-card {
+                padding: 6px 10px;
+            }
+
+            .top-header-card-label {
+                font-size: 8px;
+            }
+
+            .top-header-card-value {
+                font-size: 10px;
+            }
+
+            body.p-4 {
+                padding-top: 140px !important;
+            }
+        }
+
+        .top-header-card {
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(0, 255, 65, 0.2);
+            border-radius: 4px;
+            padding: 8px 12px;
+            backdrop-filter: blur(10px);
+        }
+
+        .top-header-card-label {
+            font-size: 9px;
+            color: #71717a;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 4px;
+        }
+
+        .top-header-card-value {
+            font-size: 11px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* 为 body 添加顶部 padding，避免内容被 header 遮挡 */
+        body.p-4 {
+            padding-top: 100px !important;
+        }
+        
+        @media (min-width: 768px) {
+            body.md\:p-8 {
+                padding-top: 120px !important;
+            }
+        }
+
+        /* =========================
+           赛博朋克抽屉样式
+           ========================= */
+        .cyber-drawer {
+            position: fixed;
+            top: 60px; /* 在顶部 header 下方，不遮盖 header */
+            width: 400px;
+            height: calc(100vh - 60px); /* 减去 header 高度 */
+            z-index: 100; /* 高于顶部 header (z-index: 50) */
+            pointer-events: none;
+            transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .left-drawer {
+            left: 0;
+            transform: translateX(-100%);
+        }
+
+        .right-drawer {
+            right: 0;
+            transform: translateX(100%);
+        }
+
+        @media (max-width: 768px) {
+            .cyber-drawer {
+                top: 140px; /* 移动端 header 更高 */
+                height: calc(100vh - 140px);
+            }
+        }
+
+        .left-drawer.active {
+            transform: translateX(0);
+            pointer-events: auto;
+        }
+
+        .right-drawer.active {
+            transform: translateX(0);
+            pointer-events: auto;
+        }
+
+        .drawer-content {
+            width: 100%;
+            height: 100%;
+            background: rgba(5, 5, 5, 0.85);
+            backdrop-filter: blur(20px);
+            border-right: 1px solid rgba(0, 255, 65, 0.3);
+            border-left: 1px solid rgba(0, 255, 65, 0.3);
+            box-shadow: 
+                0 0 30px rgba(0, 255, 65, 0.2),
+                inset 0 0 50px rgba(0, 255, 65, 0.05);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .right-drawer .drawer-content {
+            border-right: none;
+            border-left: 1px solid rgba(0, 255, 65, 0.3);
+        }
+
+        .left-drawer .drawer-content {
+            border-left: none;
+            border-right: 1px solid rgba(0, 255, 65, 0.3);
+        }
+
+        /* 赛博朋克扫描线效果 */
+        .drawer-content::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(
+                90deg,
+                transparent,
+                rgba(0, 255, 65, 0.8),
+                transparent
+            );
+            animation: drawer-scanline 3s linear infinite;
+            z-index: 1;
+        }
+
+        @keyframes drawer-scanline {
+            0% { transform: translateY(0); opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { transform: translateY(100vh); opacity: 0; }
+        }
+
+        /* 抽屉头部 */
+        .drawer-header {
+            padding: 20px;
+            border-bottom: 1px solid rgba(0, 255, 65, 0.2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(0, 255, 65, 0.05);
+            position: relative;
+            z-index: 2;
+        }
+
+        .drawer-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .drawer-icon {
+            font-size: 20px;
+            filter: drop-shadow(0 0 5px rgba(0, 255, 65, 0.8));
+        }
+
+        .drawer-title-text {
+            font-size: 16px;
+            font-weight: bold;
+            color: #00ff41;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            font-family: 'JetBrains Mono', monospace;
+            text-shadow: 0 0 10px rgba(0, 255, 65, 0.5);
+        }
+
+        .drawer-close-btn {
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(0, 255, 65, 0.3);
+            color: #00ff41;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 18px;
+            font-weight: bold;
+            background: rgba(0, 255, 65, 0.1);
+        }
+
+        .drawer-close-btn:hover {
+            background: rgba(0, 255, 65, 0.3);
+            border-color: #00ff41;
+            box-shadow: 0 0 15px rgba(0, 255, 65, 0.5);
+            transform: scale(1.1);
+        }
+
+        /* 抽屉内容区域 */
+        .drawer-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .drawer-body::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .drawer-body::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        .drawer-body::-webkit-scrollbar-thumb {
+            background: rgba(0, 255, 65, 0.3);
+            border-radius: 3px;
+        }
+
+        .drawer-body::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 255, 65, 0.5);
+        }
+
+        /* 抽屉内容项样式 */
+        .drawer-item {
+            padding: 15px;
+            margin-bottom: 15px;
+            background: rgba(0, 255, 65, 0.05);
+            border: 1px solid rgba(0, 255, 65, 0.2);
+            border-radius: 4px;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .drawer-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(
+                90deg,
+                transparent,
+                rgba(0, 255, 65, 0.1),
+                transparent
+            );
+            transition: left 0.5s;
+        }
+
+        .drawer-item:hover {
+            border-color: rgba(0, 255, 65, 0.5);
+            background: rgba(0, 255, 65, 0.1);
+            box-shadow: 0 0 20px rgba(0, 255, 65, 0.2);
+        }
+
+        .drawer-item:hover::before {
+            left: 100%;
+        }
+
+        .drawer-item-label {
+            font-size: 11px;
+            color: rgba(0, 255, 65, 0.6);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .drawer-item-value {
+            font-size: 18px;
+            color: #00ff41;
+            font-weight: bold;
+            font-family: 'JetBrains Mono', monospace;
+            text-shadow: 0 0 10px rgba(0, 255, 65, 0.5);
+        }
+
+        .drawer-item-desc {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+            margin-top: 8px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* 响应式调整 */
+        @media (max-width: 768px) {
+            .cyber-drawer {
+                width: 100%;
+            }
         }
 
         .stat-card {
@@ -570,19 +982,36 @@
     </style>
 </head>
 <body class="p-4 md:p-8">
-    <div id="scanLine" class="scan-line" aria-hidden="true"></div>
-    <div class="max-w-[1600px] mx-auto">
-        <!-- Header -->
-        <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-            <div>
-                <h1 class="text-3xl font-black tracking-tighter italic flex items-center gap-2">
+    <!-- 顶部固定 Header -->
+    <div class="top-header">
+        <div class="top-header-left">
+            <div class="top-header-title">
+                <h1>
                     <span class="text-white">GLOBAL</span>
                     <span class="text-[var(--accent-terminal)]">DATA_STATION</span>
                 </h1>
-                <p id="sub-title" class="text-[10px] text-zinc-500 tracking-[0.3em] font-bold uppercase mt-1">Telemetry Uplink: Active // Source: Central_Pacific</p>
+                <p id="sub-title">Telemetry Uplink: Active // Source: Central_Pacific</p>
+            </div>
+        </div>
+        
+        <div class="top-header-right">
+            <!-- 活跃节点卡片 -->
+            <div class="top-header-card">
+                <div class="top-header-card-label lang-key" data-key="active-nodes">活跃节点</div>
+                <div class="top-header-card-value text-emerald-400">
+                    <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full pulse"></span>
+                    <span id="online-count-value">0</span> CONNECTED
+                </div>
             </div>
             
-            <div class="flex gap-3 items-center">
+            <!-- 风险评级卡片 -->
+            <div class="top-header-card">
+                <div class="top-header-card-label lang-key" data-key="threat-level">风险评级</div>
+                <div class="top-header-card-value text-red-500">LEVEL_CRITICAL</div>
+            </div>
+            
+            <!-- 语言切换按钮 -->
+            <div class="flex gap-2 items-center">
                 <button onclick="switchLang('zh')" id="btn-zh" class="lang-flag-btn active" title="中文">
                     <img src="images/zh.png" alt="中文" />
                 </button>
@@ -591,79 +1020,63 @@
                 </button>
             </div>
         </div>
-
-        <!-- Main Dashboard Layout -->
-        <div class="grid grid-cols-1 xl:grid-cols-4 gap-6">
-            
-            <!-- Side Panel: Core Metrics -->
-            <div class="xl:col-span-1 flex flex-col gap-4 order-2 xl:order-1">
-                <!-- ID SETTING 面板 -->
-                <div class="hacker-border p-4 rounded-sm stat-card">
-                    <div class="text-[10px] text-zinc-500 mb-3 uppercase tracking-widest">ID SETTING</div>
-                    
-                    <!-- GitHub ID 输入框 -->
-                    <div class="mb-4">
-                        <div class="flex gap-2">
-                            <input 
-                                type="text" 
-                                id="githubUsername" 
-                                placeholder="输入 GitHub ID"
-                                class="flex-1 bg-zinc-900/50 border border-zinc-800 px-3 py-2 rounded text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[var(--accent-terminal)] transition-colors"
-                                onkeypress="if(event.key === 'Enter') saveGitHubUsername()"
-                            />
-                            <button 
-                                onclick="saveGitHubUsername()"
-                                class="px-3 py-2 bg-[var(--accent-terminal)]/20 border border-[var(--accent-terminal)] text-[var(--accent-terminal)] text-xs font-bold uppercase tracking-wider hover:bg-[var(--accent-terminal)]/30 transition-colors"
-                            >
-                                保存
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <!-- 状态切换按钮 -->
-                    <div class="flex gap-2">
-                        <button 
-                            id="status-idle"
-                            onclick="setUserStatus('idle')"
-                            class="flex-1 px-3 py-2 bg-zinc-900/50 border border-zinc-800 text-xs font-bold uppercase tracking-wider hover:border-[#00ff41] transition-colors status-btn"
-                            data-status="idle"
-                        >
-                            🟢 极速
-                        </button>
-                        <button 
-                            id="status-busy"
-                            onclick="setUserStatus('busy')"
-                            class="flex-1 px-3 py-2 bg-zinc-900/50 border border-zinc-800 text-xs font-bold uppercase tracking-wider hover:border-[#ff8c00] transition-colors status-btn"
-                            data-status="busy"
-                        >
-                            🟠 忙碌
-                        </button>
-                        <button 
-                            id="status-sprint"
-                            onclick="setUserStatus('sprint')"
-                            class="flex-1 px-3 py-2 bg-zinc-900/50 border border-zinc-800 text-xs font-bold uppercase tracking-wider hover:border-[#ff006e] transition-colors status-btn"
-                            data-status="sprint"
-                        >
-                            🚀 冲刺
-                        </button>
-                    </div>
-                    
-                    <div class="mt-3 text-[9px] text-zinc-600 font-mono">USER_IDENTITY_CONFIG</div>
+    </div>
+    
+    <!-- 全屏地图背景 -->
+    <div id="map-container"></div>
+    
+    <!-- 左右赛博朋克抽屉 -->
+    <div id="left-drawer" class="cyber-drawer left-drawer">
+        <div class="drawer-content">
+            <div class="drawer-header">
+                <div class="drawer-title">
+                    <span class="drawer-icon">⚡</span>
+                    <span class="drawer-title-text" id="left-drawer-title">国家数据</span>
                 </div>
-                
-                <div class="hacker-border p-6 rounded-sm stat-card">
+                <div class="drawer-close-btn" onclick="closeDrawers()">✕</div>
+            </div>
+            <div class="drawer-body" id="left-drawer-body">
+                <!-- 内容将通过 JavaScript 动态填充 -->
+            </div>
+        </div>
+    </div>
+    
+    <div id="right-drawer" class="cyber-drawer right-drawer">
+        <div class="drawer-content">
+            <div class="drawer-header">
+                <div class="drawer-title">
+                    <span class="drawer-icon">🔍</span>
+                    <span class="drawer-title-text" id="right-drawer-title">详细信息</span>
+                </div>
+                <div class="drawer-close-btn" onclick="closeDrawers()">✕</div>
+            </div>
+            <div class="drawer-body" id="right-drawer-body">
+                <!-- 内容将通过 JavaScript 动态填充 -->
+            </div>
+        </div>
+    </div>
+    
+    <div id="scanLine" class="scan-line" aria-hidden="true"></div>
+    <div class="max-w-[1600px] mx-auto relative z-10">
+        <!-- Main Dashboard Layout -->
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-6">
+            
+            <!-- Side Panel: Core Metrics (左侧) - 已移至抽屉，隐藏 -->
+            <div class="xl:col-span-3 flex flex-col gap-4 order-2 xl:order-1 items-start" style="display: none;">
+                <!-- 统计卡片已移至右边抽屉，隐藏原容器 -->
+                <div class="hacker-border p-6 rounded-sm stat-card" style="display: none;">
                     <div class="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest lang-key" data-key="total-victims">已诊断开发者</div>
                     <div id="totalUsers" class="text-4xl font-bold text-[var(--accent-terminal)]">0</div>
                     <div class="mt-4 text-[9px] text-zinc-600 font-mono">USERS_RECOGNIZED_SUCCESSFULLY</div>
                 </div>
 
-                <div class="hacker-border p-6 rounded-sm stat-card">
+                <div class="hacker-border p-6 rounded-sm stat-card" style="display: none;">
                     <div class="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest lang-key" data-key="total-analysis">全网扫描次数</div>
                     <div id="totalAnalysis" class="text-4xl font-bold">0</div>
                     <div class="mt-4 text-[9px] text-zinc-600 font-mono">TOTAL_SCAN_COUNT</div>
                 </div>
 
-                <div class="hacker-border p-6 rounded-sm stat-card">
+                <div class="hacker-border p-6 rounded-sm stat-card" style="display: none;">
                     <div class="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest lang-key" data-key="total-roast">累计吐槽字数</div>
                     <div id="totalChars" class="text-4xl font-bold">0</div>
                     <div class="mt-4 h-1 bg-zinc-800 w-full overflow-hidden">
@@ -671,7 +1084,7 @@
                     </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-4 stat-card">
+                <div class="grid grid-cols-2 gap-4 stat-card" style="display: none;">
                     <div class="hacker-border p-4 rounded-sm bg-zinc-900/50">
                         <div class="text-zinc-500 text-[10px] uppercase tracking-tighter mb-1">Avg Words / 人均平均篇幅</div>
                         <div id="avgPerUser" class="text-2xl font-bold font-mono text-[var(--accent-terminal)]">0</div>
@@ -685,7 +1098,7 @@
                     </div>
                 </div>
 
-                <div class="hacker-border p-6 rounded-sm stat-card bg-zinc-900/40">
+                <div class="hacker-border p-6 rounded-sm stat-card bg-zinc-900/40" style="display: none;">
                     <div class="text-[10px] text-zinc-500 mb-4 uppercase tracking-widest lang-key" data-key="radar-title">全网平均开发者画像</div>
                     <div class="aspect-square">
                         <canvas id="radarChart"></canvas>
@@ -693,39 +1106,15 @@
                 </div>
             </div>
 
-            <!-- Central Map Area -->
-            <div class="xl:col-span-3 order-1 xl:order-2">
-                <div class="hacker-border rounded-sm overflow-hidden relative group">
-                    <div id="map-container"></div>
-                    
-                    <!-- Top Overlay Indicators -->
-                    <div class="absolute top-4 left-4 pointer-events-none">
-                        <div class="flex gap-4">
-                            <div class="bg-black/60 border border-zinc-800 px-3 py-2 rounded">
-                                <span class="text-[9px] block text-zinc-500 lang-key" data-key="active-nodes">活跃节点</span>
-                                <span class="text-xs font-bold text-emerald-400 flex items-center gap-1">
-                                    <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full pulse"></span>
-                                    <span id="online-count-value">0</span> CONNECTED
-                                </span>
-                            </div>
-                            <div class="bg-black/60 border border-zinc-800 px-3 py-2 rounded">
-                                <span class="text-[9px] block text-zinc-500 lang-key" data-key="threat-level">风险评级</span>
-                                <span class="text-xs font-bold text-red-500">LEVEL_CRITICAL</span>
-                            </div>
-                        </div>
-                    </div>
-
-                </div>
+            <!-- Central Map Area (中间) - 地图已移至全屏背景，此区域已移除 -->
+            <!-- 维度排名卡片容器：已移至抽屉显示 -->
+            <div id="rank-cards-container" style="display: none;">
+                <!-- 卡片已移至抽屉显示 -->
             </div>
         </div>
 
-        <!-- 维度排名卡片容器 -->
-        <div id="rank-cards-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-10">
-            <!-- 卡片将通过 JavaScript 动态生成 -->
-        </div>
-
-        <!-- Secondary Charts & Logs -->
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mt-6">
+        <!-- Secondary Charts & Logs (右侧) - 已移至抽屉，隐藏原容器 -->
+        <div class="xl:col-span-3 grid grid-cols-1 gap-6 mt-6 items-start" style="display: none;">
             <div class="hacker-border p-6 rounded-sm">
                 <h3 class="text-xs font-bold text-zinc-400 mb-6 uppercase tracking-widest lang-key" data-key="hot-list">地理位置热力排行</h3>
                 <div id="locationList" class="space-y-3">
@@ -777,6 +1166,175 @@
     </div>
 
     <script>
+        // ==========================================
+        // 【v4.0 示例】VibeCodingerAnalyzer 全球各国数据切换示例
+        // ==========================================
+        /**
+         * 示例：如何使用重构后的 VibeCodingerAnalyzer 处理全球260国数据
+         * 
+         * 核心功能：
+         * 1. 元数据驱动：动态维度识别，支持40+维度
+         * 2. 容差对比：影子调用使用±5%容差
+         * 3. 国家上下文：自动计算个人得分与国家平均分的偏离度
+         * 4. 性能优化：并发锁、5秒超时保护
+         * 5. V6 Stats对接：完整解析tech_stack、ketao_count等
+         */
+        
+        // 示例：初始化分析器并切换国家上下文
+        async function exampleGlobalCountrySwitching() {
+            // 1. 导入分析器（假设已通过ES模块导入）
+            // import { VibeCodingerAnalyzer } from './src/VibeCodingerAnalyzer.js';
+            
+            // 2. 创建分析器实例（支持动态维度配置）
+            const analyzer = new VibeCodingerAnalyzer('zh-CN', {
+                // 可选：如果已知维度配置，可以预先传入
+                // keys: ['L', 'P', 'D', 'E', 'F', 'G', 'H', ...], // 40+维度
+                // metadata: { ... }
+            });
+            
+            // 3. 模拟聊天数据
+            const chatData = [
+                { role: 'USER', text: '帮我写一个React组件，使用TypeScript和Tailwind CSS' },
+                { role: 'ASSISTANT', text: '好的，我来帮你...' },
+                { role: 'USER', text: '谢谢，这个实现很棒！' }
+            ];
+            
+            // 4. 全球260国数据切换示例
+            const countries = [
+                { code: 'US', name: 'United States' },
+                { code: 'CN', name: 'China' },
+                { code: 'JP', name: 'Japan' },
+                { code: 'GB', name: 'United Kingdom' },
+                { code: 'DE', name: 'Germany' },
+                // ... 更多国家
+            ];
+            
+            // 遍历各国进行分析
+            for (const country of countries) {
+                try {
+                    console.log(`[Example] 分析 ${country.name} (${country.code}) 的数据...`);
+                    
+                    // 4.1 设置国家上下文（从后端API获取国家平均值）
+                    const countryAverage = await fetchCountryAverage(country.code);
+                    analyzer.setCountryContext(country.code, countryAverage, {
+                        countryName: country.name,
+                        region: getRegionByCountryCode(country.code)
+                    });
+                    
+                    // 4.2 执行分析（自动计算偏离度）
+                    const result = await analyzer.analyze(chatData, 'zh-CN');
+                    
+                    // 4.3 处理分析结果
+                    console.log(`[Example] ${country.name} 分析结果:`, {
+                        dimensions: result.dimensions,
+                        personalityType: result.personalityType,
+                        deviationFromCountry: result.deviationFromCountry, // 【v4.0新增】偏离度
+                        countryAverage: result.countryAverage, // 【v4.0新增】国家平均分
+                        stats: result.statistics, // 【v4.0 V6 Stats】包含tech_stack、ketao_count等
+                        hasRageWord: result.metadata?.hasRageWord // 【v4.0新增】咆哮词检测
+                    });
+                    
+                    // 4.4 上传排名并获取全球排名
+                    const rankData = await analyzer.uploadToSupabase(result, chatData, (progress) => {
+                        console.log(`[Example] ${country.name} 上传进度:`, progress);
+                    });
+                    
+                    console.log(`[Example] ${country.name} 排名数据:`, {
+                        rankPercent: rankData.rankPercent,
+                        totalUsers: rankData.totalUsers,
+                        countryRank: rankData.countryRank // 如果后端返回
+                    });
+                    
+                    // 4.5 更新UI（示例）
+                    updateCountryDashboard(country.code, {
+                        result,
+                        rankData,
+                        deviation: result.deviationFromCountry
+                    });
+                    
+                } catch (error) {
+                    console.error(`[Example] ${country.name} 分析失败:`, error);
+                    // 【v4.0 超时保护】如果超时，会自动降级到本地简单匹配
+                    if (error.message.includes('timeout')) {
+                        console.warn(`[Example] ${country.name} 分析超时，使用降级方案`);
+                    }
+                }
+                
+                // 避免过快切换导致并发冲突（【v4.0 并发锁】会自动处理）
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+        }
+        
+        // 辅助函数：从后端获取国家平均值
+        async function fetchCountryAverage(countryCode) {
+            try {
+                const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content || 
+                                   'https://cursor-clinical-analysis.psterman.workers.dev/';
+                const url = `${apiEndpoint}api/v2/country-average?countryCode=${countryCode}`;
+                
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
+                const data = await response.json();
+                return data.average || null; // 格式：{L: 65, P: 70, D: 60, E: 8, F: 55}
+            } catch (error) {
+                console.warn(`[Example] 获取 ${countryCode} 国家平均值失败:`, error);
+                return null;
+            }
+        }
+        
+        // 辅助函数：根据国家代码获取地区
+        function getRegionByCountryCode(code) {
+            const regionMap = {
+                'US': 'North America',
+                'CN': 'Asia',
+                'JP': 'Asia',
+                'GB': 'Europe',
+                'DE': 'Europe',
+                // ... 更多映射
+            };
+            return regionMap[code] || 'Unknown';
+        }
+        
+        // 辅助函数：更新国家仪表板UI
+        function updateCountryDashboard(countryCode, data) {
+            // 示例：更新UI元素
+            const dashboard = document.getElementById(`country-dashboard-${countryCode}`);
+            if (dashboard) {
+                dashboard.innerHTML = `
+                    <div class="country-stats">
+                        <h3>${countryCode} 分析结果</h3>
+                        <div class="dimensions">
+                            ${Object.entries(data.result.dimensions).map(([key, value]) => 
+                                `<div class="dimension">
+                                    <span>${key}:</span>
+                                    <span>${value}</span>
+                                    ${data.deviation ? `<span class="deviation">${data.deviation.deviations[key]?.deviationPercent || ''}</span>` : ''}
+                                </div>`
+                            ).join('')}
+                        </div>
+                        <div class="deviation-summary">
+                            ${data.deviation ? `
+                                <p>整体偏离度: ${data.deviation.overallDeviation}%</p>
+                                <p>${data.deviation.interpretation}</p>
+                            ` : ''}
+                        </div>
+                        <div class="stats">
+                            <p>技术栈: ${JSON.stringify(data.result.statistics?.tech_stack || {})}</p>
+                            <p>客套词数: ${data.result.statistics?.ketao_count || 0}</p>
+                            <p>加方词数: ${data.result.statistics?.jiafang_count || 0}</p>
+                            <p>工作天数: ${data.result.statistics?.work_days || 0}</p>
+                        </div>
+                        ${data.result.metadata?.hasRageWord ? '<div class="rage-warning">⚠️ 检测到咆哮词</div>' : ''}
+                    </div>
+                `;
+            }
+        }
+        
+        // ==========================================
+        // 原有代码继续...
+        // ==========================================
+        
         // =========================
         // 全局变量声明（确保在全局作用域，不在闭包内）
         // =========================
@@ -915,6 +1473,7 @@
 
         let mapChart, radarChart;
         let selectedCountry = null; // 当前选中的国家
+        let currentChampionInfo = null; // 当前选中的冠军信息（用于地图 tooltip 展示）
         // 🔍 称号与说明映射（完全同步 content.ts 的业务语义）
         const DIMENSION_TITLES = {
             L: { title: '架构师的直觉', description: '在逻辑迷宫中一眼看穿本质' },
@@ -1088,6 +1647,607 @@
         }
 
         /**
+         * 创建单个维度卡片（用于抽屉显示）
+         * @param {string} dimId - 维度ID
+         * @param {Object} config - 维度配置
+         * @param {number} maxValue - 最大值
+         * @param {string} targetUserName - 用户名
+         * @param {string|null} targetIpLocation - IP位置
+         * @param {Object|null} feedback - 反馈信息
+         * @param {boolean} isGlobalTopMode - 是否为全球最强模式
+         * @returns {HTMLElement} 卡片元素
+         */
+        function createDimensionCard(dimId, config, maxValue, targetUserName, targetIpLocation, feedback, isGlobalTopMode) {
+            const displayVal = new Intl.NumberFormat('zh-CN').format(maxValue);
+            const unit = config.suffix || '';
+
+            const card = document.createElement('div');
+            card.className = `drawer-item cursor-pointer`;
+            card.setAttribute('data-dim-id', dimId);
+            if (targetIpLocation) {
+                card.setAttribute('data-ip-location', targetIpLocation);
+            }
+            card.setAttribute('data-champion-name', targetUserName);
+            card.setAttribute('data-champion-value', maxValue);
+            card.setAttribute('data-champion-feedback', feedback ? JSON.stringify(feedback) : '');
+
+            card.innerHTML = `
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">${config.icon}</span>
+                    <span class="text-[8px] leading-none text-[#00ff41] border border-[#00ff41]/40 px-1 py-0.5 tracking-widest uppercase bg-[#00ff41]/5">
+                        ${isGlobalTopMode ? 'TOP' : 'MINE'}
+                    </span>
+                </div>
+                <div class="drawer-item-label">${config.name}</div>
+                <div class="drawer-item-value text-2xl">${displayVal}<span class="text-[10px] ml-1 font-normal opacity-70">${unit}</span></div>
+                <div class="drawer-item-desc mt-2 pt-2 border-t border-[#00ff41]/10">
+                    <div class="text-[10px] text-white font-bold truncate">${feedback ? feedback.label : 'RANKED'}</div>
+                    <div class="text-[8px] text-[#00ff41]/60 truncate italic">@${targetUserName || 'ANONYMOUS'}</div>
+                </div>
+            `;
+
+            // 添加地图联动交互
+            card.addEventListener('click', () => {
+                const ipLocation = card.getAttribute('data-ip-location');
+                if (ipLocation && mapChart && !(typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) {
+                    let countryName = null;
+                    if (countryNameMap && countryNameMap[ipLocation]) {
+                        countryName = countryNameMap[ipLocation].en;
+                    } else {
+                        countryName = ipLocation;
+                    }
+                    
+                    if (countryName) {
+                        const championName = card.getAttribute('data-champion-name');
+                        const championValue = card.getAttribute('data-champion-value');
+                        const championFeedback = card.getAttribute('data-champion-feedback');
+                        const dimId = card.getAttribute('data-dim-id');
+                        
+                        currentChampionInfo = {
+                            countryName: countryName,
+                            championName: championName,
+                            championValue: championValue,
+                            feedback: championFeedback,
+                            dimId: dimId
+                        };
+                        
+                        try {
+                            mapChart.dispatchAction({
+                                type: 'highlight',
+                                name: countryName
+                            });
+                            mapChart.dispatchAction({
+                                type: 'showTip',
+                                name: countryName
+                            });
+                            console.log(`[Drawer] ✅ 点击卡片，高亮国家: ${countryName}`);
+                        } catch (error) {
+                            console.error('[Drawer] ❌ 高亮国家失败:', error);
+                        }
+                    }
+                }
+            });
+
+            return card;
+        }
+
+        // 保存当前打开抽屉的国家信息，用于刷新
+        let currentDrawerCountry = { code: null, name: null };
+
+        /**
+         * 显示抽屉并填充国家数据和维度卡片
+         * @param {string} countryCode - 国家代码
+         * @param {string} countryName - 国家名称
+         */
+        function showDrawersWithCountryData(countryCode, countryName) {
+            // 保存当前国家信息
+            currentDrawerCountry.code = countryCode;
+            currentDrawerCountry.name = countryName;
+            const leftDrawer = document.getElementById('left-drawer');
+            const rightDrawer = document.getElementById('right-drawer');
+            const leftTitle = document.getElementById('left-drawer-title');
+            const rightTitle = document.getElementById('right-drawer-title');
+            const leftBody = document.getElementById('left-drawer-body');
+            const rightBody = document.getElementById('right-drawer-body');
+
+            if (!leftDrawer || !rightDrawer) return;
+
+            // 获取国家显示名称
+            const countryDisplayName = countryNameMap[countryCode] 
+                ? (currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en)
+                : countryName;
+
+            // 更新标题
+            if (leftTitle) leftTitle.textContent = countryDisplayName;
+            if (rightTitle) rightTitle.textContent = countryDisplayName;
+
+            // 清空抽屉内容
+            if (leftBody) leftBody.innerHTML = '';
+            if (rightBody) rightBody.innerHTML = '';
+
+            // 定义维度配置
+            const dimensionConfig = {
+                ai: { name: '对话AI次数', icon: '💬', suffix: '次' },
+                word: { name: '平均长度', icon: '📏', suffix: '字/条' },
+                day: { name: '上岗天数', icon: '📅', suffix: '天' },
+                no: { name: '甲方上身', icon: '🚫', suffix: '次' },
+                say: { name: '废话输出', icon: '💭', suffix: '字' },
+                please: { name: '赛博磕头', icon: '🙏', suffix: '次' }
+            };
+
+            // 定义左右抽屉的维度分配
+            // 左边抽屉：user_identity_config 卡片
+            // 右边抽屉：所有维度卡片（ai, word, day, no, say, please）
+            const leftDrawerDimensions = []; // 左边只显示 user_identity_config
+            const rightDrawerDimensions = ['ai', 'word', 'day', 'no', 'say', 'please']; // 所有维度卡片
+
+            // 获取当前用户数据（用于判断是否为全球最强模式）
+            // 尝试从多个来源获取用户数据
+            let currentUser = null;
+            try {
+                // 方法1: 从全局变量获取
+                if (window.currentUser) {
+                    currentUser = window.currentUser;
+                } else {
+                    // 方法2: 从 localStorage 和 URL 参数获取，与 renderRankCards 逻辑一致
+                    const localGitHubName = localStorage.getItem('github_username');
+                    const currentFingerprint = localStorage.getItem('user_fingerprint');
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const urlFingerprint = urlParams.get('fingerprint');
+                    const urlGitHubName = urlParams.get('github');
+                    
+                    // 查找匹配的用户数据
+                    const allData = window.allData || [];
+                    currentUser = allData.find(item => {
+                        const itemFingerprint = item.fingerprint || item.user_fingerprint;
+                        const itemGitHub = item.github_username || item.user_name || item.name;
+                        return (itemFingerprint && (itemFingerprint === currentFingerprint || itemFingerprint === urlFingerprint)) ||
+                               (itemGitHub && (itemGitHub === localGitHubName || itemGitHub === urlGitHubName));
+                    });
+                }
+            } catch (e) {
+                console.warn('[Drawer] 获取用户数据失败:', e);
+            }
+            
+            const isGlobalTopMode = !currentUser;
+            const userData = currentUser;
+
+            // 填充左侧抽屉 - user_identity_config 卡片
+            if (leftBody) {
+                // 获取 GitHub 用户名和头像
+                const githubUsername = localStorage.getItem('github_username') || '';
+                const githubAvatarUrl = githubUsername && isValidGitHubUsername(githubUsername) 
+                    ? getGitHubAvatarUrl(githubUsername) 
+                    : DEFAULT_AVATAR;
+                
+                // 获取当前状态
+                const currentStatus = localStorage.getItem('user_status') || 'idle';
+                const statusConfig = USER_STATUSES[currentStatus] || USER_STATUSES.idle;
+                
+                // 创建 user_identity_config 卡片
+                const identityCard = document.createElement('div');
+                identityCard.className = 'drawer-item';
+                identityCard.innerHTML = `
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">🕶️</span>
+                        <span class="text-[8px] leading-none text-[#00ff41] border border-[#00ff41]/40 px-1 py-0.5 tracking-widest uppercase bg-[#00ff41]/5">
+                            CONFIG
+                        </span>
+                    </div>
+                    
+                    <div class="drawer-item-label mb-2">用户身份配置</div>
+                    
+                    <!-- GitHub 信息 -->
+                    <div class="mb-3 pb-3 border-b border-[#00ff41]/10">
+                        <div class="flex items-center gap-2 mb-2">
+                            <div class="w-8 h-8 rounded-full overflow-hidden border border-[#00ff41]/30 flex-shrink-0">
+                                <img 
+                                    src="${githubAvatarUrl}" 
+                                    alt="Avatar" 
+                                    class="w-full h-full object-cover"
+                                    onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
+                                />
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <div class="drawer-item-value text-sm truncate">${githubUsername || '未设置'}</div>
+                                <div class="drawer-item-desc text-[8px]">GitHub ID</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 状态信息 -->
+                    <div class="mb-2">
+                        <div class="drawer-item-label mb-1">当前状态</div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-lg">${statusConfig.emoji}</span>
+                            <div>
+                                <div class="drawer-item-value text-sm" style="color: ${statusConfig.color}">${statusConfig.label}</div>
+                                <div class="drawer-item-desc text-[8px]">${currentLang === 'zh' ? '工作状态' : 'Status'}</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 状态切换按钮 -->
+                    <div class="flex gap-1.5 mt-3 pt-3 border-t border-[#00ff41]/10">
+                        <button 
+                            onclick="setUserStatus('idle'); if(currentDrawerCountry.code) showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);"
+                            class="flex-1 px-2 py-1.5 bg-zinc-900/50 border ${currentStatus === 'idle' ? 'border-[#00ff41]' : 'border-zinc-800'} text-[10px] font-bold uppercase tracking-wider hover:border-[#00ff41] transition-colors"
+                            style="color: ${currentStatus === 'idle' ? '#00ff41' : '#71717a'};"
+                        >
+                            🟢 极速
+                        </button>
+                        <button 
+                            onclick="setUserStatus('busy'); if(currentDrawerCountry.code) showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);"
+                            class="flex-1 px-2 py-1.5 bg-zinc-900/50 border ${currentStatus === 'busy' ? 'border-[#ff8c00]' : 'border-zinc-800'} text-[10px] font-bold uppercase tracking-wider hover:border-[#ff8c00] transition-colors"
+                            style="color: ${currentStatus === 'busy' ? '#ff8c00' : '#71717a'};"
+                        >
+                            🟠 忙碌
+                        </button>
+                        <button 
+                            onclick="setUserStatus('sprint'); if(currentDrawerCountry.code) showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);"
+                            class="flex-1 px-2 py-1.5 bg-zinc-900/50 border ${currentStatus === 'sprint' ? 'border-[#ff006e]' : 'border-zinc-800'} text-[10px] font-bold uppercase tracking-wider hover:border-[#ff006e] transition-colors"
+                            style="color: ${currentStatus === 'sprint' ? '#ff006e' : '#71717a'};"
+                        >
+                            🚀 冲刺
+                        </button>
+                    </div>
+                    
+                    <!-- GitHub ID 输入 -->
+                    <div class="mt-3 pt-3 border-t border-[#00ff41]/10">
+                        <div class="drawer-item-label mb-2">设置 GitHub ID</div>
+                        <div class="flex gap-1.5">
+                            <input 
+                                type="text" 
+                                id="drawer-github-username" 
+                                value="${githubUsername}"
+                                placeholder="输入 GitHub ID"
+                                class="flex-1 bg-zinc-900/50 border border-zinc-800 px-2 py-1.5 rounded text-[10px] text-white placeholder-zinc-600 focus:outline-none focus:border-[#00ff41] transition-colors"
+                                onkeypress="if(event.key === 'Enter') { const drawerInput = document.getElementById('drawer-github-username'); const mainInput = document.getElementById('githubUsername'); if(drawerInput && mainInput) { mainInput.value = drawerInput.value; updateGitHubAvatar(); } saveGitHubUsername(); if(currentDrawerCountry.code) showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name); }"
+                            />
+                            <button 
+                                onclick="const drawerInput = document.getElementById('drawer-github-username'); const mainInput = document.getElementById('githubUsername'); if(drawerInput && mainInput) { mainInput.value = drawerInput.value; updateGitHubAvatar(); } saveGitHubUsername(); if(currentDrawerCountry.code) showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);"
+                                class="px-2 py-1.5 bg-[#00ff41]/20 border border-[#00ff41] text-[#00ff41] text-[10px] font-bold uppercase tracking-wider hover:bg-[#00ff41]/30 transition-colors whitespace-nowrap"
+                            >
+                                保存
+                            </button>
+                        </div>
+                    </div>
+                `;
+                
+                leftBody.appendChild(identityCard);
+
+                // 添加实时诊断活动卡片
+                const activityCard = document.createElement('div');
+                activityCard.className = 'drawer-item';
+                activityCard.innerHTML = `
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">📡</span>
+                        <span class="text-[8px] leading-none text-[#00ff41] border border-[#00ff41]/40 px-1 py-0.5 tracking-widest uppercase bg-[#00ff41]/5">
+                            LIVE
+                        </span>
+                    </div>
+                    <div class="drawer-item-label mb-3">实时诊断活动</div>
+                    <div id="drawer-recentActivity" class="flex-1 overflow-y-auto max-h-[400px] text-[10px] font-mono space-y-3 pr-2"></div>
+                `;
+                leftBody.appendChild(activityCard);
+                
+                // 渲染实时诊断活动
+                const data = window.lastData || {};
+                const activityData = data.latestRecords || data.recentVictims || [];
+                const drawerActivityList = document.getElementById('drawer-recentActivity');
+                if (drawerActivityList) {
+                    if (activityData.length === 0) {
+                        drawerActivityList.innerHTML = '<div class="text-zinc-500 text-center py-4 text-[10px]">暂无数据</div>';
+                    } else {
+                        drawerActivityList.innerHTML = activityData.map((v, index) => {
+                            const time = v.time || v.created_at || new Date().toISOString();
+                            const type = v.type || v.personality_type || 'UNKNOWN';
+                            const location = v.location || v.ip_location || '未知';
+                            const name = v.name || `记录${index + 1}`;
+                            
+                            const avatarUrl = v.avatar_url || null;
+                            const githubUsername = v.github_username || null;
+                            
+                            let finalAvatarUrl = avatarUrl;
+                            if (!finalAvatarUrl && githubUsername) {
+                                if (isValidGitHubUsername(githubUsername)) {
+                                    finalAvatarUrl = getGitHubAvatarUrl(githubUsername);
+                                } else {
+                                    finalAvatarUrl = DEFAULT_AVATAR;
+                                }
+                            }
+                            if (!finalAvatarUrl) {
+                                finalAvatarUrl = DEFAULT_AVATAR;
+                            }
+                            
+                            const finalUsername = githubUsername || name;
+                            const avatarHtml = createAvatarHtml(finalAvatarUrl, finalUsername, 24);
+                            
+                            return `
+                                <div class="border-l-2 border-[#00ff41]/20 pl-2 py-1.5 flex items-start gap-2">
+                                    <div class="flex-shrink-0 mt-0.5">
+                                        ${avatarHtml}
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="text-zinc-500 text-[9px]">${new Date(time).toLocaleTimeString()}</div>
+                                        <div class="text-white text-[10px] font-bold">${name.length > 8 ? name.slice(0,8) + '...' : name}</div>
+                                        <div class="text-[#00ff41] text-[9px]">${type} @ ${location}</div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('');
+                    }
+                }
+            }
+
+            // 填充右侧抽屉 - 维度卡片和统计卡片
+            if (rightBody) {
+                // 先添加维度卡片
+                if (RANK_RESOURCES) {
+                    rightDrawerDimensions.forEach((dimId) => {
+                        const config = dimensionConfig[dimId];
+                        if (!config) return;
+
+                        // 获取维度数据
+                        let targetData = null;
+                        let maxValue = 0;
+                        let targetUserName = '';
+                        let targetIpLocation = null;
+
+                        if (isGlobalTopMode) {
+                            const allData = window.allData || [];
+                            if (allData.length > 0) {
+                                targetData = allData.reduce((maxUser, currentUser) => {
+                                    const currentValues = extractDimensionValues(currentUser);
+                                    const maxValues = extractDimensionValues(maxUser);
+                                    const currentValue = currentValues[dimId] || 0;
+                                    const maxValue = maxValues[dimId] || 0;
+                                    return currentValue > maxValue ? currentUser : maxUser;
+                                }, allData[0]);
+                                
+                                const targetValues = extractDimensionValues(targetData);
+                                maxValue = targetValues[dimId] || 0;
+                                targetUserName = targetData.user_name || targetData.name || targetData.github_username || '未知用户';
+                                targetIpLocation = targetData.ip_location || null;
+                            } else {
+                                maxValue = 0;
+                                targetUserName = '暂无数据';
+                                targetIpLocation = null;
+                            }
+                        } else {
+                            targetData = userData;
+                            const values = extractDimensionValues(userData);
+                            maxValue = values[dimId] || 0;
+                            targetUserName = userData.user_name || userData.name || userData.github_username || '我的数据';
+                            targetIpLocation = userData.ip_location || null;
+                        }
+
+                        const feedback = getRankFeedback(dimId, maxValue);
+                        const card = createDimensionCard(dimId, config, maxValue, targetUserName, targetIpLocation, feedback, isGlobalTopMode);
+                        rightBody.appendChild(card);
+                    });
+                }
+
+                // 添加统计卡片（从 window.lastData 获取数据）
+                const data = window.lastData || {};
+                
+                // 已诊断开发者
+                const totalUsersCard = document.createElement('div');
+                totalUsersCard.className = 'drawer-item';
+                const totalUsers = data.totalUsers !== undefined && data.totalUsers !== null ? Number(data.totalUsers) : undefined;
+                totalUsersCard.innerHTML = `
+                    <div class="drawer-item-label">已诊断开发者</div>
+                    <div class="drawer-item-value text-3xl">${totalUsers !== undefined ? new Intl.NumberFormat('zh-CN').format(totalUsers) : 'N/A'}</div>
+                    <div class="drawer-item-desc">USERS_RECOGNIZED_SUCCESSFULLY</div>
+                `;
+                rightBody.appendChild(totalUsersCard);
+
+                // 全网扫描次数
+                const totalAnalysisCard = document.createElement('div');
+                totalAnalysisCard.className = 'drawer-item';
+                const totalAnalysis = data.totalAnalysis !== undefined && data.totalAnalysis !== null ? Number(data.totalAnalysis) : undefined;
+                totalAnalysisCard.innerHTML = `
+                    <div class="drawer-item-label">全网扫描次数</div>
+                    <div class="drawer-item-value text-3xl">${totalAnalysis !== undefined ? new Intl.NumberFormat('zh-CN').format(totalAnalysis) : 'N/A'}</div>
+                    <div class="drawer-item-desc">TOTAL_SCAN_COUNT</div>
+                `;
+                rightBody.appendChild(totalAnalysisCard);
+
+                // 累计吐槽字数：绑定到 json.totalChars (276355)
+                const totalCharsCard = document.createElement('div');
+                totalCharsCard.className = 'drawer-item';
+                const totalChars = data.totalChars !== undefined && data.totalChars !== null ? Number(data.totalChars) : (data.totalRoastWords !== undefined && data.totalRoastWords !== null ? Number(data.totalRoastWords) : undefined);
+                totalCharsCard.innerHTML = `
+                    <div class="drawer-item-label">累计吐槽字数</div>
+                    <div class="drawer-item-value text-3xl">${totalChars !== undefined ? new Intl.NumberFormat('zh-CN').format(totalChars) : 'N/A'}</div>
+                    <div class="drawer-item-desc">累计总字数统计</div>
+                `;
+                rightBody.appendChild(totalCharsCard);
+
+                // 人均平均篇幅和单次平均篇幅（并排显示）
+                const avgCard = document.createElement('div');
+                avgCard.className = 'drawer-item';
+                const avgPerUser = data.avgPerUser !== undefined && data.avgPerUser !== null ? Number(data.avgPerUser) : undefined;
+                // 平均篇幅：绑定到 json.totalChars / json.totalAnalysis
+                let avgPerScan = data.avgPerScan !== undefined && data.avgPerScan !== null ? Number(data.avgPerScan) : undefined;
+                if (avgPerScan === undefined && data.totalChars !== undefined && data.totalAnalysis !== undefined && data.totalAnalysis !== null && data.totalAnalysis > 0) {
+                    avgPerScan = Number(data.totalChars) / Number(data.totalAnalysis);
+                }
+                avgCard.innerHTML = `
+                    <div class="drawer-item-label mb-2">平均篇幅统计</div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <div class="drawer-item-value text-xl">${avgPerUser !== undefined ? avgPerUser.toFixed(1) : 'N/A'}</div>
+                            <div class="drawer-item-desc text-[8px]">人均平均篇幅</div>
+                        </div>
+                        <div>
+                            <div class="drawer-item-value text-xl" style="color: #60a5fa;">${avgPerScan !== undefined ? avgPerScan.toFixed(1) : 'N/A'}</div>
+                            <div class="drawer-item-desc text-[8px]">单次平均篇幅</div>
+                        </div>
+                    </div>
+                `;
+                rightBody.appendChild(avgCard);
+
+                // 全网平均开发者画像（雷达图）
+                const radarCard = document.createElement('div');
+                radarCard.className = 'drawer-item';
+                const radarData = data.globalAverage || data.averages;
+                radarCard.innerHTML = `
+                    <div class="drawer-item-label mb-3">全网平均开发者画像</div>
+                    <div class="aspect-square">
+                        <canvas id="drawer-radarChart"></canvas>
+                    </div>
+                `;
+                rightBody.appendChild(radarCard);
+                
+                // 渲染雷达图
+                setTimeout(() => {
+                    const drawerRadarCanvas = document.getElementById('drawer-radarChart');
+                    if (drawerRadarCanvas && typeof Chart !== 'undefined' && radarData) {
+                        const normalizedRadarData = {
+                            L: radarData.L !== undefined && radarData.L !== null ? Number(radarData.L) : undefined,
+                            P: radarData.P !== undefined && radarData.P !== null ? Number(radarData.P) : undefined,
+                            D: radarData.D !== undefined && radarData.D !== null ? Number(radarData.D) : undefined,
+                            E: radarData.E !== undefined && radarData.E !== null ? Number(radarData.E) : undefined,
+                            F: radarData.F !== undefined && radarData.F !== null ? Number(radarData.F) : undefined,
+                        };
+                        renderRadarChartToCanvas(drawerRadarCanvas, normalizedRadarData);
+                    }
+                }, 100);
+
+                // 地理位置热力排行
+                const locationCard = document.createElement('div');
+                locationCard.className = 'drawer-item';
+                locationCard.innerHTML = `
+                    <div class="drawer-item-label mb-3">地理位置热力排行</div>
+                    <div id="drawer-locationList" class="space-y-2"></div>
+                `;
+                rightBody.appendChild(locationCard);
+                
+                // 渲染地理位置列表
+                if (data.locationRank && Array.isArray(data.locationRank)) {
+                    const drawerLocationList = document.getElementById('drawer-locationList');
+                    if (drawerLocationList) {
+                        drawerLocationList.innerHTML = data.locationRank.slice(0, 5).map((item, i) => {
+                            const name = countryNameMap[item.name] ? countryNameMap[item.name][currentLang] : item.name;
+                            return `
+                                <div class="flex justify-between items-center text-[10px] border-b border-[#00ff41]/10 pb-2">
+                                    <span class="text-zinc-500 font-mono">0${i+1}</span>
+                                    <span class="font-bold uppercase tracking-tighter text-white">${name}</span>
+                                    <span class="text-[#00ff41] font-bold">${item.value}</span>
+                                </div>`;
+                        }).join('');
+                    }
+                }
+
+                // 人格分布排行
+                const personalityCard = document.createElement('div');
+                personalityCard.className = 'drawer-item';
+                personalityCard.innerHTML = `
+                    <div class="drawer-item-label mb-3">人格分布排行</div>
+                    <div id="drawer-personalityDistribution" class="space-y-2"></div>
+                `;
+                rightBody.appendChild(personalityCard);
+                
+                // 渲染人格分布
+                if (data.personalityRank && Array.isArray(data.personalityRank)) {
+                    const drawerPersonalityList = document.getElementById('drawer-personalityDistribution');
+                    if (drawerPersonalityList) {
+                        drawerPersonalityList.innerHTML = data.personalityRank.map((item, i) => {
+                            const type = item.type || 'UNKNOWN';
+                            const count = Number(item.count) || 0;
+                            return `
+                                <div class="flex justify-between items-center text-[10px] border-b border-[#00ff41]/10 pb-2">
+                                    <span class="text-zinc-500 font-mono">0${i+1}</span>
+                                    <span class="font-bold uppercase tracking-tighter text-white">${type}</span>
+                                    <span class="text-[#00ff41] font-bold">${count}</span>
+                                </div>`;
+                        }).join('');
+                    }
+                }
+            }
+
+            // 显示抽屉
+            leftDrawer.classList.add('active');
+            rightDrawer.classList.add('active');
+            console.log('[Drawer] 抽屉已打开:', countryDisplayName);
+        }
+
+        /**
+         * 关闭抽屉
+         * @param {boolean} clearSelection - 是否清除选中状态，默认为 true
+         */
+        function closeDrawers(clearSelection = true) {
+            const leftDrawer = document.getElementById('left-drawer');
+            const rightDrawer = document.getElementById('right-drawer');
+
+            if (leftDrawer) {
+                leftDrawer.classList.remove('active');
+            }
+            if (rightDrawer) {
+                rightDrawer.classList.remove('active');
+            }
+            
+            if (clearSelection) {
+                selectedCountry = null;
+            }
+            console.log('[Drawer] 抽屉已关闭, selectedCountry =', selectedCountry);
+        }
+
+        // 添加 ESC 键关闭抽屉
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeDrawers();
+            }
+        });
+
+        // 点击抽屉外部区域关闭抽屉（简化版）
+        // 只处理点击 UI 元素外部的情况，地图点击事件已经处理了地图区域的点击
+        document.addEventListener('click', (e) => {
+            const leftDrawer = document.getElementById('left-drawer');
+            const rightDrawer = document.getElementById('right-drawer');
+            
+            if (!leftDrawer || !rightDrawer) return;
+            
+            // 如果抽屉是激活状态
+            const isDrawerActive = leftDrawer.classList.contains('active') || rightDrawer.classList.contains('active');
+            
+            if (!isDrawerActive) return;
+            
+            // 检查点击是否在抽屉内部
+            const isClickInsideDrawer = leftDrawer.contains(e.target) || rightDrawer.contains(e.target);
+            
+            // 如果点击在抽屉内部，不处理
+            if (isClickInsideDrawer) return;
+            
+            // 检查是否点击了地图容器（地图点击事件会处理，这里不重复处理）
+            const isMapClick = e.target.id === 'map-container' || e.target.closest('#map-container');
+            if (isMapClick) {
+                // 地图点击事件已经处理，这里不重复处理
+                return;
+            }
+            
+            // 检查是否点击了 UI 交互元素（按钮、输入框等）
+            const isUIClick = e.target.closest('.max-w-\\[1600px\\]') && 
+                             (e.target.tagName === 'BUTTON' || 
+                              e.target.tagName === 'INPUT' || 
+                              e.target.tagName === 'SELECT' ||
+                              e.target.tagName === 'TEXTAREA' ||
+                              e.target.tagName === 'A' ||
+                              e.target.closest('button') ||
+                              e.target.closest('input') ||
+                              e.target.closest('select') ||
+                              e.target.closest('a'));
+            
+            // 如果点击的不是 UI 元素，也不是地图，则关闭抽屉
+            if (!isUIClick) {
+                console.log('[Drawer] 点击外部区域，关闭抽屉');
+                selectedCountry = null;
+                closeDrawers();
+            }
+        });
+
+        /**
          * 等待地图数据加载完成
          */
         async function waitForMapData(maxWait = 10000) {
@@ -1104,11 +2264,16 @@
             return false;
         }
 
+        // 保存全局地图数据，供抽屉使用
+        let globalLocationData = [];
+
         /**
          * 初始化全球 2D 地图（支持缩放与拖动）
          * @param {Array} locationData - 地理位置数据 [{name: string, value: number}]
          */
         async function initGlobalMap(locationData) {
+            // 保存到全局变量
+            globalLocationData = locationData || [];
             const chartDom = document.getElementById('map-container');
             if (!chartDom) {
                 console.warn('[Map] ⚠️ 找不到地图容器元素');
@@ -1185,7 +2350,34 @@
                                 const label = (countryNameMap && countryNameMap[name] && countryNameMap[name].zh) 
                                     ? countryNameMap[name].zh 
                                     : name;
-                                return `<div class="font-mono text-xs">${label}<br/>活跃节点: ${value}</div>`;
+                                
+                                // Proxy 提示：判断 is_proxy 字段，若为 true，在地理位置后增加 [Proxy] 红色警告标签
+                                const dataItem = params.data || {};
+                                const isProxy = dataItem.is_proxy || dataItem.isProxy || false;
+                                const proxyLabel = isProxy ? '<span style="color: #ef4444; font-weight: bold;"> [Proxy]</span>' : '';
+                                
+                                // 数据展示：在地图弹窗（Tooltip）中同步展示该冠军的称号和战绩
+                                let tooltipContent = `<div class="font-mono text-xs">${label}${proxyLabel}<br/>活跃节点: ${value}</div>`;
+                                
+                                // 如果当前有选中的冠军信息，且国家名称匹配，显示冠军信息
+                                if (currentChampionInfo && currentChampionInfo.countryName === name) {
+                                    const feedback = currentChampionInfo.feedback ? JSON.parse(currentChampionInfo.feedback) : null;
+                                    tooltipContent = `
+                                        <div class="font-mono text-xs">
+                                            <div class="text-[#00ff41] font-bold mb-1">🏆 ${currentChampionInfo.championName}</div>
+                                            <div class="text-white mb-1">${label}${proxyLabel}</div>
+                                            <div class="text-zinc-400 text-[10px] mb-1">战绩: ${currentChampionInfo.championValue}</div>
+                                            ${feedback ? `
+                                                <div class="text-zinc-500 text-[9px] mt-2 pt-2 border-t border-zinc-700">
+                                                    <div class="text-[#00ff41]">${feedback.label}</div>
+                                                    <div class="text-white">${feedback.title}</div>
+                                                </div>
+                                            ` : ''}
+                                        </div>
+                                    `;
+                                }
+                                
+                                return tooltipContent;
                             }
                             // 如果是脉冲点（effectScatter），显示用户信息（包含头像预览）
                             if (params.seriesType === 'effectScatter' && params.data) {
@@ -1245,10 +2437,9 @@
                     },
                     geo: {
                         map: 'world',
-                        roam: true,
+                        roam: true, // 启用拖动和缩放
                         scaleLimit: { min: 1, max: 8 },
                         zoom: 1.2,
-                        top: '20%',
                         itemStyle: {
                             areaColor: 'transparent',
                             borderColor: 'transparent',
@@ -1259,14 +2450,13 @@
                     series: [{
                         type: 'map',
                         map: 'world',
-                        // 关键：开启 roam => 支持拖动平移 + 滚轮缩放
+                        // 启用拖动和缩放
                         roam: true,
                         // 限制缩放范围，避免无限放大/缩小
                         scaleLimit: { min: 1, max: 8 },
                         zoom: 1.2,
-                        top: '20%',
                         itemStyle: {
-                            areaColor: 'rgba(39, 39, 42, 0.4)',
+                            areaColor: 'transparent',
                             borderColor: 'rgba(0, 255, 65, 0.2)',
                             borderWidth: 1
                         },
@@ -1281,11 +2471,23 @@
                 // notMerge: true 彻底替换，避免残留旧配置
                 mapChart.setOption(option2D, { notMerge: true, lazyUpdate: false });
                 
-                // 添加地图点击事件处理
+                // 添加地图点击事件处理 - 重新设计逻辑
                 mapChart.off('click'); // 移除旧的事件监听器
                 mapChart.on('click', (params) => {
-                    if (params.seriesType === 'map' && params.name) {
-                        // 获取国家名称（可能是英文，需要转换为国家代码）
+                    // 判断是否点击到了国家
+                    // 条件：seriesType 是 'map' 且 name 存在且不为空字符串
+                    const hasValidName = params.name && typeof params.name === 'string' && params.name.trim() !== '';
+                    const isCountryClick = params.seriesType === 'map' && hasValidName;
+                    
+                    console.log('[Map] 点击事件:', {
+                        seriesType: params.seriesType,
+                        name: params.name,
+                        isCountryClick: isCountryClick,
+                        selectedCountryBefore: selectedCountry
+                    });
+                    
+                    if (isCountryClick) {
+                        // ========== 点击到了国家 ==========
                         const countryName = params.name;
                         let countryCode = null;
                         
@@ -1307,9 +2509,25 @@
                         // 更新选中的国家
                         selectedCountry = countryCode;
                         
-                        // 地图点击后不再需要重新渲染 LPDEF 卡片（已废弃，使用 rank-cards-container）
+                        // 显示抽屉并填充数据
+                        showDrawersWithCountryData(countryCode, countryName);
+                    } else {
+                        // ========== 点击地图空白处（海洋、未定义区域等）==========
+                        console.log('[Map] 🌊 点击空白处，清除选中状态并关闭抽屉', {
+                            seriesType: params.seriesType,
+                            name: params.name,
+                            componentType: params.componentType,
+                            selectedCountryBefore: selectedCountry
+                        });
+                        
+                        // 清除选中状态并关闭抽屉
+                        selectedCountry = null;
+                        closeDrawers(false); // 不重复清除，因为上面已经清除了
+                        
+                        console.log('[Map] 选中状态已清除，selectedCountry =', selectedCountry);
                     }
                 });
+
                 
                 // 添加双击事件，重置为全球视图
                 mapChart.off('dblclick');
@@ -1317,6 +2535,7 @@
                     if (params.seriesType === 'map') {
                         selectedCountry = null;
                         console.log('[Map] 🌍 双击重置为全球视图');
+                        closeDrawers();
                         
                         // 地图双击后不再需要重新渲染 LPDEF 卡片（已废弃，使用 rank-cards-container）
                     }
@@ -1491,6 +2710,77 @@
             }
         }
 
+        /**
+         * 渲染雷达图到指定的 canvas
+         * @param {HTMLCanvasElement} canvas - Canvas 元素
+         * @param {Object} averages - 平均值数据
+         */
+        function renderRadarChartToCanvas(canvas, averages) {
+            if (!canvas) {
+                console.warn('[雷达图] ❌ Canvas 元素不存在');
+                return;
+            }
+            
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                console.warn('[雷达图] ❌ 无法获取 Canvas 上下文');
+                return;
+            }
+            
+            const labels = currentLang === 'zh' ? ['语言', '模式', '深度', '效率', '频率'] : ['Lang', 'Pattern', 'Depth', 'Effi', 'Freq'];
+            const targetData = [
+                averages.L !== undefined && averages.L !== null ? Number(averages.L) : 0,
+                averages.P !== undefined && averages.P !== null ? Number(averages.P) : 0,
+                averages.D !== undefined && averages.D !== null ? Number(averages.D) : 0,
+                averages.E !== undefined && averages.E !== null ? Number(averages.E) : 0,
+                averages.F !== undefined && averages.F !== null ? Number(averages.F) : 0
+            ];
+            const zeroData = [0, 0, 0, 0, 0];
+
+            const chart = new Chart(ctx, {
+                type: 'radar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: zeroData,
+                        borderColor: '#00ff41',
+                        backgroundColor: 'rgba(0, 255, 65, 0.1)',
+                        borderWidth: 1,
+                        pointRadius: 2
+                    }]
+                },
+                options: {
+                    animation: {
+                        duration: 900,
+                        easing: 'easeOutQuart',
+                        animateScale: true,
+                        animateRotate: true
+                    },
+                    scales: {
+                        r: {
+                            angleLines: { color: '#27272a' },
+                            grid: { color: '#27272a' },
+                            pointLabels: { color: '#71717a', font: { size: 9 } },
+                            ticks: { display: false },
+                            suggestedMin: 0,
+                            suggestedMax: 100
+                        }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+
+            // 触发一次 update，让雷达图从中心扩张到真实值
+            try {
+                chart.data.datasets[0].data = targetData;
+                chart.update();
+            } catch (e) {
+                console.warn('[雷达图] ⚠️ update 动画触发失败:', e);
+            }
+            
+            return chart;
+        }
+
         function renderRadarChart(averages) {
             // 【ID 存在性检查】在执行前，必须检查 document.getElementById 是否非空
             const radarCanvas = document.getElementById('radarChart');
@@ -1508,12 +2798,14 @@
             if (radarChart) radarChart.destroy();
 
             const labels = currentLang === 'zh' ? ['语言', '模式', '深度', '效率', '频率'] : ['Lang', 'Pattern', 'Depth', 'Effi', 'Freq'];
+            // 【雷达图数据格式】更新 globalRadarChart 时，传入 [stats.L, stats.P, stats.D, stats.E, stats.F]
+            // 彻底删除硬编码，如果接口有值则必须显示接口的值
             const targetData = [
-                Number(averages.L || 50),
-                Number(averages.P || 50),
-                Number(averages.D || 50),
-                Number(averages.E || 50),
-                Number(averages.F || 50)
+                averages.L !== undefined && averages.L !== null ? Number(averages.L) : 0,
+                averages.P !== undefined && averages.P !== null ? Number(averages.P) : 0,
+                averages.D !== undefined && averages.D !== null ? Number(averages.D) : 0,
+                averages.E !== undefined && averages.E !== null ? Number(averages.E) : 0,
+                averages.F !== undefined && averages.F !== null ? Number(averages.F) : 0
             ];
             const zeroData = [0, 0, 0, 0, 0];
 
@@ -1888,7 +3180,7 @@
         function normalizeData(result) {
             const data = result || {};
             
-            // 【强制映射层】totalAnalysis：依次尝试 result.totalAnalysis, result.data.totalAnalysis, 若都缺失则取 result.recentVictims.length
+            // 【核心指标提取】从 json.totalAnalysis 提取总扫描数，从 json.totalUsers 提取总人数
             let totalAnalysis = data.totalAnalysis;
             if (totalAnalysis === undefined || totalAnalysis === null) {
                 totalAnalysis = data.data?.totalAnalysis;
@@ -1898,13 +3190,21 @@
                 totalAnalysis = recentVictims.length;
             }
             
-            // 【强制映射层】totalRoastWords：依次尝试 result.totalRoastWords, result.totalChars, result.data.total_roast_words
-            let totalRoastWords = data.totalRoastWords;
-            if (totalRoastWords === undefined || totalRoastWords === null) {
-                totalRoastWords = data.totalChars;
+            // 【总人数提取】从 json.totalUsers 提取
+            const totalUsers = data.totalUsers || 0;
+            
+            // 【累计吐槽字数修复】不要读取 json.totalRoastWords（它是 0），请尝试从 json.totalChars 或 json.latestRecords[0].total_chars 获取数据
+            let totalRoastWords = data.totalChars;
+            if (totalRoastWords === undefined || totalRoastWords === null || totalRoastWords === 0) {
+                // 尝试从 latestRecords 中获取
+                const latestRecords = data.latestRecords || data.recentVictims || [];
+                if (latestRecords.length > 0 && latestRecords[0].total_chars) {
+                    totalRoastWords = latestRecords[0].total_chars;
+                }
             }
-            if (totalRoastWords === undefined || totalRoastWords === null) {
-                totalRoastWords = data.data?.total_roast_words;
+            // 最后兜底：如果还是 0 或未定义，尝试其他路径
+            if (totalRoastWords === undefined || totalRoastWords === null || totalRoastWords === 0) {
+                totalRoastWords = data.totalRoastWords || data.data?.total_roast_words || 0;
             }
             
             // 【强制映射层】avgPerUser 和 avgPerScan：依次尝试 result.avgPerUser/avgPerScan, result.data.avgPerUser/avgPerScan
@@ -1922,21 +3222,64 @@
                 avgPerScan = data.data?.avgPerScan;
             }
             
+            // 【五维平均分提取】必须从 json.averages 或 json.globalAverage 对象中提取（例如：json.averages.L）
+            // 彻底删除硬编码，如果接口有值则必须显示接口的值
+            let averages = data.averages || data.globalAverage;
+            if (!averages || typeof averages !== 'object') {
+                averages = {};
+            }
+            // 确保所有维度都有值，但不使用硬编码默认值
+            averages = {
+                L: averages.L !== undefined && averages.L !== null ? Number(averages.L) : undefined,
+                P: averages.P !== undefined && averages.P !== null ? Number(averages.P) : undefined,
+                D: averages.D !== undefined && averages.D !== null ? Number(averages.D) : undefined,
+                E: averages.E !== undefined && averages.E !== null ? Number(averages.E) : undefined,
+                F: averages.F !== undefined && averages.F !== null ? Number(averages.F) : undefined
+            };
+            
+            // 为了兼容性，同时设置 globalAverage
+            const globalAverage = averages;
+            
+            // 【上岗天数修复】从 json.systemDays 或 json.latestRecords[0].work_days 提取，不硬编码
+            let systemDays = data.systemDays;
+            if (systemDays === undefined || systemDays === null) {
+                const latestRecords = data.latestRecords || data.recentVictims || [];
+                if (latestRecords.length > 0 && latestRecords[0].work_days !== undefined && latestRecords[0].work_days !== null) {
+                    systemDays = latestRecords[0].work_days;
+                }
+            }
+            
+            // 【累计吐槽字数修复】绑定到 json.totalChars
+            const totalChars = data.totalChars !== undefined && data.totalChars !== null ? Number(data.totalChars) : (totalRoastWords !== undefined && totalRoastWords !== null ? Number(totalRoastWords) : undefined);
+            
+            // 【平均篇幅修复】绑定到 json.totalChars / json.totalAnalysis
+            let calculatedAvgPerScan = undefined;
+            if (totalChars !== undefined && totalAnalysis !== undefined && totalAnalysis !== null && totalAnalysis > 0) {
+                calculatedAvgPerScan = totalChars / totalAnalysis;
+            }
+            // 如果接口提供了 avgPerScan，优先使用接口值
+            if (avgPerScan === undefined || avgPerScan === null) {
+                avgPerScan = calculatedAvgPerScan;
+            }
+            
             return {
-                totalUsers: data.totalUsers || 0,
-                totalAnalysis: totalAnalysis || 0,
-                totalRoastWords: totalRoastWords || 0,
-                avgPerUser: avgPerUser || 0,
-                avgPerScan: avgPerScan || 0,
-                cityCount: data.cityCount || 0,
-                systemDays: data.systemDays || 1,
+                totalUsers: totalUsers !== undefined && totalUsers !== null ? totalUsers : undefined,
+                totalAnalysis: totalAnalysis !== undefined && totalAnalysis !== null ? totalAnalysis : undefined,
+                totalRoastWords: totalRoastWords !== undefined && totalRoastWords !== null ? totalRoastWords : undefined,
+                totalChars: totalChars,
+                avgPerUser: avgPerUser !== undefined && avgPerUser !== null ? avgPerUser : undefined,
+                avgPerScan: avgPerScan !== undefined && avgPerScan !== null ? avgPerScan : undefined,
+                cityCount: data.cityCount !== undefined && data.cityCount !== null ? data.cityCount : undefined,
+                systemDays: systemDays !== undefined && systemDays !== null ? systemDays : undefined,
                 personalityRank: data.personalityRank || data.personalityDistribution || [],
                 personalityDistribution: data.personalityDistribution || data.personalityRank || [],
-                globalAverage: data.globalAverage || data.averages || { L: 50, P: 50, D: 50, E: 50, F: 50 },
-                averages: data.averages || data.globalAverage || { L: 50, P: 50, D: 50, E: 50, F: 50 },
+                globalAverage: globalAverage,
+                averages: averages,
                 locationRank: data.locationRank || [],
                 recentVictims: data.recentVictims || data.latestRecords || [],
                 latestRecords: data.latestRecords || data.recentVictims || [],
+                // 【新增】保存各维度的最高记录（用于"全球最强模式"）
+                topRecords: data.topRecords || {},
             };
         }
 
@@ -2165,40 +3508,35 @@
                                 // 提取名称（可能是 name, vibe_name, personality_type 等）
                                 const baseName = newRecord.name || newRecord.vibe_name || newRecord.personality_type || '';
 
+                                // VPN 穿透检测判定逻辑（已移除VPN关键字显示）
                                 // =========================
-                                // VPN 穿透检测判定逻辑（监听端）
-                                // =========================
-                                let isVpn = false;
                                 let pulseColor = '#ffffff'; // 默认白色（正常用户）
-                                let pulseLabel = baseName ? `${baseName} [DIRECT]` : '[DIRECT]';
+                                let pulseLabel = baseName ? `${baseName}` : '用户';
 
                                 // 获取判定所需字段
                                 const ipLocation = String(newRecord.ip_location || '').toUpperCase().trim();
                                 const timezone = String(newRecord.timezone || '').trim();
 
-                                // 判定条件：如果 ip_location 不属于 'CN'，但 timezone 是 'Asia/Shanghai'，则标记 isVpn = true
+                                // 判定条件：如果 ip_location 不属于 'CN'，但 timezone 是 'Asia/Shanghai'，则使用特殊颜色
                                 const isNotChina = ipLocation !== 'CN' && ipLocation !== '';
                                 const isShanghaiTimezone = timezone === 'Asia/Shanghai';
 
                                 if (isNotChina && isShanghaiTimezone) {
-                                    // VPN 用户：海外 IP + 上海时区 = VPN 穿透
-                                    isVpn = true;
-                                    pulseColor = '#00ff41'; // VPN 用户：终端绿
-                                    pulseLabel = baseName ? `${baseName} [VPN PROXY]` : '[VPN PROXY]';
-                                    console.log('[Realtime] 🔍 VPN 判定: 检测到 VPN 穿透用户', {
+                                    // 特殊用户：海外 IP + 上海时区
+                                    pulseColor = '#00ff41'; // 终端绿
+                                    pulseLabel = baseName ? `${baseName}` : '用户';
+                                    console.log('[Realtime] 🔍 用户判定: 检测到特殊用户', {
                                         ipLocation,
                                         timezone,
-                                        isVpn: true,
                                         reason: '海外IP但时区为Asia/Shanghai'
                                     });
                                 } else {
                                     // 正常用户：直接连接
                                     pulseColor = '#ffffff'; // 正常用户：纯白色
-                                    pulseLabel = baseName ? `${baseName} [DIRECT]` : '[DIRECT]';
-                                    console.log('[Realtime] 🔍 VPN 判定: 正常用户', {
+                                    pulseLabel = baseName ? `${baseName}` : '用户';
+                                    console.log('[Realtime] 🔍 用户判定: 正常用户', {
                                         ipLocation,
                                         timezone,
-                                        isVpn: false,
                                         reason: isNotChina ? '时区不匹配' : 'IP位置正常'
                                     });
                                 }
@@ -2225,11 +3563,11 @@
                                         avatarUrl = DEFAULT_AVATAR;
                                     }
                                     
-                                    // 获取用户状态颜色（如果存在），否则使用VPN判定颜色
+                                    // 获取用户状态颜色（如果存在），否则使用默认颜色
                                     const statusColor = newRecord.status_color || pulseColor;
                                     
                                     triggerMapPulse(lng, lat, pulseLabel, statusColor, avatarUrl, githubUsername || userName);
-                                    console.log(`[Realtime] ✅ 已触发地图脉冲: [${lng}, ${lat}] ${pulseLabel} (颜色: ${statusColor}, VPN: ${isVpn}, 头像: ${avatarUrl}, 用户名: ${githubUsername || userName})`);
+                                    console.log(`[Realtime] ✅ 已触发地图脉冲: [${lng}, ${lat}] ${pulseLabel} (颜色: ${statusColor}, 头像: ${avatarUrl}, 用户名: ${githubUsername || userName})`);
                                 } else {
                                     console.log('[Realtime] ℹ️ 新数据未包含有效的地理位置信息，跳过地图脉冲');
                                 }
@@ -3085,6 +4423,9 @@
             localStorage.setItem('github_username', username);
             console.log('[GitHub] ✅ 已保存GitHub用户名:', username);
             
+            // 更新头像显示
+            updateGitHubAvatar();
+            
             // 如果Presence频道已连接，立即同步状态
             if (presenceChannel) {
                 syncPresenceState().then(() => {
@@ -3102,6 +4443,33 @@
         /**
          * 从localStorage加载GitHub用户名并填充到输入框
          */
+        /**
+         * 更新GitHub头像显示
+         */
+        function updateGitHubAvatar() {
+            const input = document.getElementById('githubUsername');
+            const avatarContainer = document.getElementById('githubAvatarContainer');
+            const avatarImg = document.getElementById('githubAvatarImg');
+            
+            if (!input || !avatarContainer || !avatarImg) {
+                return;
+            }
+            
+            const username = input.value.trim();
+            
+            if (username && isValidGitHubUsername(username)) {
+                // 显示头像容器
+                avatarContainer.classList.remove('hidden');
+                // 设置头像URL
+                const avatarUrl = getGitHubAvatarUrl(username);
+                avatarImg.src = avatarUrl;
+                console.log('[GitHub] ✅ 已更新头像:', avatarUrl);
+            } else {
+                // 隐藏头像容器
+                avatarContainer.classList.add('hidden');
+            }
+        }
+
         function loadGitHubUsername() {
             const input = document.getElementById('githubUsername');
             if (!input) {
@@ -3112,6 +4480,8 @@
             if (savedUsername) {
                 input.value = savedUsername;
                 console.log('[GitHub] ✅ 已加载保存的GitHub用户名:', savedUsername);
+                // 加载头像
+                updateGitHubAvatar();
             }
         }
 
@@ -3302,14 +4672,14 @@
                 if (lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng)) {
                     // 性能保护：检查 triggerMapPulse 函数是否已定义
                     if (typeof triggerMapPulse === 'function') {
-                        // 根据 VPN 判定结果设置标签
-                        const pulseLabel = is_vpn ? 'YOU [VPN PROXY]' : 'YOU [DIRECT]';
+                        // 设置标签（已移除VPN关键字）
+                        const pulseLabel = 'YOU';
                         
                         // 获取用户状态颜色（优先使用当前状态颜色）
                         const statusConfig = USER_STATUSES[currentUserStatus] || USER_STATUSES.idle;
                         const statusColor = statusConfig.status_color;
-                        // 如果VPN，使用绿色；否则使用状态颜色
-                        const pulseColor = is_vpn ? '#00ff41' : statusColor;
+                        // 使用状态颜色
+                        const pulseColor = statusColor;
 
                         // 获取GitHub用户名和头像URL
                         // 判断逻辑：如果 github_username 为空、或者是默认值，则不要请求 GitHub 图片
@@ -3444,32 +4814,49 @@
                 setLoadingState(false);
 
                 // 1. 已诊断开发者（千分位）
-                const totalUsers = Number(data.totalUsers) || 0;
-                animateValue('totalUsers', totalUsers, 1400, { decimals: 0, useThousands: true });
+                const totalUsers = data.totalUsers !== undefined && data.totalUsers !== null ? Number(data.totalUsers) : undefined;
+                if (totalUsers !== undefined) {
+                    animateValue('totalUsers', totalUsers, 1400, { decimals: 0, useThousands: true });
+                }
 
                 // 2. 扫描次数 (totalAnalysis)
-                const totalAnalysis = Number(data.totalAnalysis) || 0;
-                animateValue('totalAnalysis', totalAnalysis, 1400, { decimals: 0, useThousands: true });
+                const totalAnalysis = data.totalAnalysis !== undefined && data.totalAnalysis !== null ? Number(data.totalAnalysis) : undefined;
+                if (totalAnalysis !== undefined) {
+                    animateValue('totalAnalysis', totalAnalysis, 1400, { decimals: 0, useThousands: true });
+                }
 
-                // 3. 累计字数 (totalRoastWords)
-                const totalRoastWords = Number(data.totalRoastWords) || 0;
-                animateValue('totalChars', totalRoastWords, 1400, { decimals: 0, useThousands: true });
+                // 3. 累计吐槽字数：绑定到 json.totalChars (276355)
+                const totalChars = data.totalChars !== undefined && data.totalChars !== null ? Number(data.totalChars) : (data.totalRoastWords !== undefined && data.totalRoastWords !== null ? Number(data.totalRoastWords) : undefined);
+                if (totalChars !== undefined) {
+                    animateValue('totalChars', totalChars, 1400, { decimals: 0, useThousands: true });
+                }
 
                 // 4. 人均平均篇幅 (avgPerUser)
-                const avgPerUser = Number(data.avgPerUser || 0);
-                animateValue('avgPerUser', avgPerUser, 900, { decimals: 1, useThousands: true });
+                const avgPerUser = data.avgPerUser !== undefined && data.avgPerUser !== null ? Number(data.avgPerUser) : undefined;
+                if (avgPerUser !== undefined) {
+                    animateValue('avgPerUser', avgPerUser, 900, { decimals: 1, useThousands: true });
+                }
 
-                // 5. 单次平均篇幅 (avgPerScan)
-                const avgPerScan = Number(data.avgPerScan || 0);
-                animateValue('avgPerScan', avgPerScan, 900, { decimals: 1, useThousands: true });
+                // 5. 平均篇幅：绑定到 json.totalChars / json.totalAnalysis
+                let avgPerScan = data.avgPerScan !== undefined && data.avgPerScan !== null ? Number(data.avgPerScan) : undefined;
+                if (avgPerScan === undefined && totalChars !== undefined && data.totalAnalysis !== undefined && data.totalAnalysis !== null && data.totalAnalysis > 0) {
+                    avgPerScan = totalChars / Number(data.totalAnalysis);
+                }
+                if (avgPerScan !== undefined) {
+                    animateValue('avgPerScan', avgPerScan, 900, { decimals: 1, useThousands: true });
+                }
 
                 // 6. 运行天数
-                const systemDays = Number(data.systemDays) || 1;
-                animateValue('systemDays', systemDays, 900, { decimals: 0, useThousands: true });
+                const systemDays = data.systemDays !== undefined && data.systemDays !== null ? Number(data.systemDays) : undefined;
+                if (systemDays !== undefined) {
+                    animateValue('systemDays', systemDays, 900, { decimals: 0, useThousands: true });
+                }
 
                 // 7. 覆盖城市
-                const cityCount = Number(data.cityCount) || 0;
-                animateValue('cityCount', cityCount, 900, { decimals: 0, useThousands: true });
+                const cityCount = data.cityCount !== undefined && data.cityCount !== null ? Number(data.cityCount) : undefined;
+                if (cityCount !== undefined) {
+                    animateValue('cityCount', cityCount, 900, { decimals: 0, useThousands: true });
+                }
 
                 // --- 渲染人格分布排行 ---
                 // 【人格排行渲染函数】使用独立的 renderPersonalityRank 函数
@@ -3490,16 +4877,16 @@
                 }
                 
                 // 渲染雷达图（优先使用 globalAverage，否则使用 averages）
-                // 【环境对齐】确保所有的 Number() 转换逻辑在赋值前完成
-                const radarData = data.globalAverage || data.averages || { L: 50, P: 50, D: 50, E: 50, F: 50 };
-                if (typeof radarData === 'object' && typeof Chart !== 'undefined') {
-                    // 确保所有值都是数字类型
+                // 【环境对齐】确保所有的 Number() 转换逻辑在赋值前完成，彻底删除硬编码
+                const radarData = data.globalAverage || data.averages;
+                if (radarData && typeof radarData === 'object' && typeof Chart !== 'undefined') {
+                    // 确保所有值都是数字类型，如果接口有值则必须显示接口的值
                     const normalizedRadarData = {
-                        L: Number(radarData.L || 50),
-                        P: Number(radarData.P || 50),
-                        D: Number(radarData.D || 50),
-                        E: Number(radarData.E || 50),
-                        F: Number(radarData.F || 50),
+                        L: radarData.L !== undefined && radarData.L !== null ? Number(radarData.L) : undefined,
+                        P: radarData.P !== undefined && radarData.P !== null ? Number(radarData.P) : undefined,
+                        D: radarData.D !== undefined && radarData.D !== null ? Number(radarData.D) : undefined,
+                        E: radarData.E !== undefined && radarData.E !== null ? Number(radarData.E) : undefined,
+                        F: radarData.F !== undefined && radarData.F !== null ? Number(radarData.F) : undefined,
                     };
                     console.log(`[雷达图] 数据: L=${normalizedRadarData.L}, P=${normalizedRadarData.P}, D=${normalizedRadarData.D}, E=${normalizedRadarData.E}, F=${normalizedRadarData.F}`);
                     renderRadarChart(normalizedRadarData);
@@ -3528,6 +4915,21 @@
                     : (Array.isArray(data.recentVictims) && data.recentVictims.length > 0
                         ? [...data.recentVictims]
                         : []);
+                
+                // 【全球最强数据提取】遍历 latestRecords 找到第一个 jiafang_count > 0 的记录作为'全球最强'的展示数据
+                let globalChampionRecord = null;
+                if (allDataArray.length > 0) {
+                    globalChampionRecord = allDataArray.find(record => {
+                        const jiafangCount = record.jiafang_count !== undefined && record.jiafang_count !== null ? Number(record.jiafang_count) : 0;
+                        return jiafangCount > 0;
+                    });
+                    if (globalChampionRecord) {
+                        console.log('[Global] ✅ 找到全球最强记录（jiafang_count > 0）:', globalChampionRecord);
+                        // 将全球最强记录存储到全局变量
+                        window.globalChampionRecord = globalChampionRecord;
+                    }
+                }
+                
                 window.allData = allDataArray;
                 console.log(`[LPDEF] 📦 已初始化 window.allData，共 ${allDataArray.length} 条数据（用于选拔最强王者）`);
 
@@ -3746,82 +5148,101 @@
         function extractDimensionValues(userData) {
             if (!userData) {
                 return {
-                    ai: 0,
-                    word: 0,
-                    day: 0,
-                    no: 0,
-                    say: 0,
-                    please: 0
+                    ai: undefined,
+                    word: undefined,
+                    day: undefined,
+                    no: undefined,
+                    say: undefined,
+                    please: undefined
                 };
             }
 
-            // ai (对话次数)：优先取 total_messages，备选 l_score
-            // 字段回退：total_messages -> l_score -> l -> L -> 0
-            const messages = Number(
-                userData.total_messages || 
-                userData.l_score || 
-                userData.l || 
-                userData.L || 
-                0
-            );
+            // ai (对话次数/赛博霸总)：优先取 question_message_count（v_top_records 视图使用），其次 total_messages
+            // 字段回退：question_message_count -> total_messages -> l_score -> l -> L
+            let messages = undefined;
+            if (userData.question_message_count !== undefined && userData.question_message_count !== null) {
+                messages = Number(userData.question_message_count);
+            } else if (userData.total_messages !== undefined && userData.total_messages !== null) {
+                messages = Number(userData.total_messages);
+            } else if (userData.l_score !== undefined && userData.l_score !== null) {
+                messages = Number(userData.l_score);
+            } else if (userData.l !== undefined && userData.l !== null) {
+                messages = Number(userData.l);
+            } else if (userData.L !== undefined && userData.L !== null) {
+                messages = Number(userData.L);
+            }
             
-            // say (总字数)：优先取 total_chars（解决 total_user_chars 为 0 的问题）
-            // 字段回退：total_chars -> (total_user_chars > 0 ? total_user_chars : null) -> totalUserChars -> p_score -> p -> P -> 0
-            // 关键：如果 total_user_chars 为 0 或不存在，必须跳过它，使用 total_chars
-            let chars = 0;
-            if (userData.total_chars && Number(userData.total_chars) > 0) {
-                chars = Number(userData.total_chars);
-            } else if (userData.total_user_chars && Number(userData.total_user_chars) > 0) {
+            // say (总字数/累计字数)：优先取 total_user_chars（v_top_records 视图使用），其次 total_chars
+            // 字段回退：total_user_chars -> total_chars -> totalUserChars -> p_score -> p -> P
+            // 关键：v_top_records 视图使用 total_user_chars 字段
+            let chars = undefined;
+            if (userData.total_user_chars !== undefined && userData.total_user_chars !== null && Number(userData.total_user_chars) > 0) {
                 chars = Number(userData.total_user_chars);
-            } else if (userData.totalUserChars && Number(userData.totalUserChars) > 0) {
+            } else if (userData.total_chars !== undefined && userData.total_chars !== null && Number(userData.total_chars) > 0) {
+                chars = Number(userData.total_chars);
+            } else if (userData.totalUserChars !== undefined && userData.totalUserChars !== null && Number(userData.totalUserChars) > 0) {
                 chars = Number(userData.totalUserChars);
-            } else if (userData.p_score && Number(userData.p_score) > 0) {
+            } else if (userData.p_score !== undefined && userData.p_score !== null && Number(userData.p_score) > 0) {
                 chars = Number(userData.p_score);
-            } else if (userData.p && Number(userData.p) > 0) {
+            } else if (userData.p !== undefined && userData.p !== null && Number(userData.p) > 0) {
                 chars = Number(userData.p);
-            } else if (userData.P && Number(userData.P) > 0) {
+            } else if (userData.P !== undefined && userData.P !== null && Number(userData.P) > 0) {
                 chars = Number(userData.P);
             }
             
             // word (平均长度)：若 avg_user_message_length 为 0，必须执行 Math.round(total_chars / total_messages)
             // 字段回退：avg_user_message_length -> avgMessageLength -> avgUserMessageLength -> 公式计算
-            let word = Number(
-                userData.avg_user_message_length || 
-                userData.avgMessageLength || 
-                userData.avgUserMessageLength || 
-                0
-            );
-            // 如果 word 为 0 且 messages > 0，必须通过公式实时计算
-            if (word === 0 && messages > 0 && chars > 0) {
+            let word = undefined;
+            if (userData.avg_user_message_length !== undefined && userData.avg_user_message_length !== null) {
+                word = Number(userData.avg_user_message_length);
+            } else if (userData.avgMessageLength !== undefined && userData.avgMessageLength !== null) {
+                word = Number(userData.avgMessageLength);
+            } else if (userData.avgUserMessageLength !== undefined && userData.avgUserMessageLength !== null) {
+                word = Number(userData.avgUserMessageLength);
+            }
+            // 如果 word 未定义且 messages > 0 且 chars > 0，必须通过公式实时计算
+            if (word === undefined && messages !== undefined && messages > 0 && chars !== undefined && chars > 0) {
                 word = Math.round(chars / messages);
             }
             
-            // day (上岗天数)：映射 d_score
-            // 字段回退：d_score -> d -> D -> 0
-            const day = Number(
-                userData.d_score || 
-                userData.d || 
-                userData.D || 
-                0
-            );
+            // day (上岗天数)：映射 work_days
+            // 字段回退：work_days -> d_score -> d -> D
+            let day = undefined;
+            if (userData.work_days !== undefined && userData.work_days !== null) {
+                day = Number(userData.work_days);
+            } else if (userData.d_score !== undefined && userData.d_score !== null) {
+                day = Number(userData.d_score);
+            } else if (userData.d !== undefined && userData.d !== null) {
+                day = Number(userData.d);
+            } else if (userData.D !== undefined && userData.D !== null) {
+                day = Number(userData.D);
+            }
             
-            // no (甲方上身/否定)：映射 f_score
-            // 字段回退：f_score -> f -> F -> 0
-            const no = Number(
-                userData.f_score || 
-                userData.f || 
-                userData.F || 
-                0
-            );
+            // no (甲方上身)：映射 jiafang_count
+            // 字段回退：jiafang_count -> f_score -> f -> F
+            let no = undefined;
+            if (userData.jiafang_count !== undefined && userData.jiafang_count !== null) {
+                no = Number(userData.jiafang_count);
+            } else if (userData.f_score !== undefined && userData.f_score !== null) {
+                no = Number(userData.f_score);
+            } else if (userData.f !== undefined && userData.f !== null) {
+                no = Number(userData.f);
+            } else if (userData.F !== undefined && userData.F !== null) {
+                no = Number(userData.F);
+            }
             
-            // please (赛博磕头/礼貌)：映射 e_score
-            // 字段回退：e_score -> e -> E -> 0
-            const please = Number(
-                userData.e_score || 
-                userData.e || 
-                userData.E || 
-                0
-            );
+            // please (赛博磕头)：映射 ketao_count
+            // 字段回退：ketao_count -> e_score -> e -> E
+            let please = undefined;
+            if (userData.ketao_count !== undefined && userData.ketao_count !== null) {
+                please = Number(userData.ketao_count);
+            } else if (userData.e_score !== undefined && userData.e_score !== null) {
+                please = Number(userData.e_score);
+            } else if (userData.e !== undefined && userData.e !== null) {
+                please = Number(userData.e);
+            } else if (userData.E !== undefined && userData.E !== null) {
+                please = Number(userData.E);
+            }
 
             return { 
                 ai: messages, 
@@ -3889,7 +5310,7 @@
                 ai: { name: '对话AI次数', icon: '💬', suffix: '次' },
                 word: { name: '平均长度', icon: '📏', suffix: '字/条' },
                 day: { name: '上岗天数', icon: '📅', suffix: '天' },
-                no: { name: '甲方上身', icon: '❌', suffix: '次' },
+                no: { name: '甲方上身', icon: '🚫', suffix: '次' },
                 say: { name: '废话输出', icon: '💭', suffix: '字' },
                 please: { name: '赛博磕头', icon: '🙏', suffix: '次' }
             };
@@ -3901,50 +5322,140 @@
             container.innerHTML = '';
 
             // 遍历 6 个维度，生成卡片
-            for (const dimId of allDimensions) {
+            allDimensions.forEach((dimId, index) => {
                 const config = dimensionConfig[dimId];
                 if (!config) {
                     console.warn(`[Rank] ⚠️ 维度 ${dimId} 配置不存在`);
-                    continue;
+                    return;
                 }
 
                 // 维度选拔逻辑
                 let targetData = null;
                 let maxValue = 0;
                 let targetUserName = '';
+                let targetIpLocation = null; // 记录冠军用户的 ip_location（国家代码）
 
                 if (isGlobalTopMode) {
-                    // 如果 isGlobalTopMode 为 true，则使用 window.allData.reduce 比较各维度的 extractDimensionValues 结果
-                    // 找出该维度的最大值用户对象作为 targetData
-                    const allData = window.allData || [];
-                    if (allData.length > 0) {
-                        targetData = allData.reduce((maxUser, currentUser) => {
-                            const currentValues = extractDimensionValues(currentUser);
-                            const maxValues = extractDimensionValues(maxUser);
-                            const currentValue = currentValues[dimId] || 0;
-                            const maxValue = maxValues[dimId] || 0;
-                            return currentValue > maxValue ? currentUser : maxUser;
-                        }, allData[0]);
-                        
+                    // 【全球选拔模式】优先使用后端返回的 topRecords（各维度最高记录）
+                    const globalDataForTop = window.lastData || {};
+                    const topRecords = globalDataForTop.topRecords || {};
+                    
+                    // 优先使用 topRecords 中的数据
+                    if (topRecords[dimId]) {
+                        targetData = topRecords[dimId];
                         const targetValues = extractDimensionValues(targetData);
-                        maxValue = targetValues[dimId] || 0;
-                        targetUserName = targetData.user_name || targetData.name || targetData.github_username || '未知用户';
+                        maxValue = targetValues[dimId] !== undefined && targetValues[dimId] !== null ? targetValues[dimId] : undefined;
+                        targetUserName = targetData.user_name || targetData.name || targetData.github_username || '全球最强';
+                        targetIpLocation = targetData.ip_location || null;
+                        console.log(`[Rank] ✅ 使用 topRecords 数据 (${dimId}):`, maxValue, targetUserName);
                     } else {
-                        // 如果没有数据，使用默认值
-                        maxValue = 0;
-                        targetUserName = '暂无数据';
+                        // 降级：使用 window.allData 找出各维度的最大值用户
+                        const allData = window.allData || [];
+                        if (allData.length > 0) {
+                            targetData = allData.reduce((maxUser, currentUser) => {
+                                const currentValues = extractDimensionValues(currentUser);
+                                const maxValues = extractDimensionValues(maxUser);
+                                const currentValue = currentValues[dimId] !== undefined && currentValues[dimId] !== null ? currentValues[dimId] : 0;
+                                const maxValue = maxValues[dimId] !== undefined && maxValues[dimId] !== null ? maxValues[dimId] : 0;
+                                return currentValue > maxValue ? currentUser : maxUser;
+                            }, allData[0]);
+                            
+                            const targetValues = extractDimensionValues(targetData);
+                            maxValue = targetValues[dimId] !== undefined && targetValues[dimId] !== null ? targetValues[dimId] : undefined;
+                            targetUserName = targetData.user_name || targetData.name || targetData.github_username || '未知用户';
+                            // 身份标记：记录该冠军用户的 ip_location（国家代码，如 "US", "CN"）
+                            targetIpLocation = targetData.ip_location || null;
+                        } else {
+                            // 【全局数据兜底】如果没有 allData，使用全局 averages 数据
+                            // 从 window.lastData 或全局变量中获取 averages
+                            const globalDataForAvg = window.lastData || {};
+                            const averages = globalDataForAvg.averages || globalDataForAvg.globalAverage || {};
+                            const totalUsers = Number(globalDataForAvg.totalUsers) || 1;
+                            
+                            // 【修复维度映射】根据最新的 API 结构重新绑定
+                            // 修正卡片 ID 映射：jiafang 对应 jiafang_count，ketao 对应 ketao_count
+                            // 使用全球最强记录（jiafang_count > 0）或全局 averages 数据
+                            let avgValue = undefined;
+                            
+                            // 优先使用全球最强记录
+                            const championRecord = window.globalChampionRecord;
+                            
+                            if (dimId === 'ai') {
+                                // 分析总量：绑定到 json.totalAnalysis
+                                if (globalDataForAvg.totalAnalysis !== undefined && globalDataForAvg.totalAnalysis !== null) {
+                                    avgValue = Number(globalDataForAvg.totalAnalysis);
+                                }
+                            } else if (dimId === 'word') {
+                                // 平均长度需要计算：如果有 totalChars 和 totalMessages，计算平均值
+                                const totalChars = globalDataForAvg.totalChars !== undefined && globalDataForAvg.totalChars !== null ? Number(globalDataForAvg.totalChars) : (globalDataForAvg.totalRoastWords !== undefined && globalDataForAvg.totalRoastWords !== null ? Number(globalDataForAvg.totalRoastWords) : undefined);
+                                const totalMessages = globalDataForAvg.totalAnalysis !== undefined && globalDataForAvg.totalAnalysis !== null ? Number(globalDataForAvg.totalAnalysis) : undefined;
+                                if (totalChars !== undefined && totalMessages !== undefined && totalMessages > 0) {
+                                    avgValue = Math.round(totalChars / totalMessages);
+                                } else if (averages.P !== undefined && averages.P !== null) {
+                                    avgValue = Number(averages.P);
+                                }
+                            } else if (dimId === 'day') {
+                                // 上岗天数：绑定到 json.systemDays
+                                if (globalDataForAvg.systemDays !== undefined && globalDataForAvg.systemDays !== null) {
+                                    avgValue = Number(globalDataForAvg.systemDays);
+                                } else if (championRecord && championRecord.work_days !== undefined && championRecord.work_days !== null) {
+                                    avgValue = Number(championRecord.work_days);
+                                }
+                            } else if (dimId === 'no') {
+                                // 甲方上身：映射 jiafang_count
+                                if (championRecord && championRecord.jiafang_count !== undefined && championRecord.jiafang_count !== null) {
+                                    avgValue = Number(championRecord.jiafang_count);
+                                } else if (averages.L !== undefined && averages.L !== null) {
+                                    avgValue = Number(averages.L);
+                                }
+                            } else if (dimId === 'say') {
+                                // 总字数：使用 totalChars 或 totalRoastWords
+                                if (globalDataForAvg.totalChars !== undefined && globalDataForAvg.totalChars !== null) {
+                                    avgValue = Number(globalDataForAvg.totalChars);
+                                } else if (globalDataForAvg.totalRoastWords !== undefined && globalDataForAvg.totalRoastWords !== null) {
+                                    avgValue = Number(globalDataForAvg.totalRoastWords);
+                                }
+                            } else if (dimId === 'please') {
+                                // 赛博磕头：映射 ketao_count
+                                if (championRecord && championRecord.ketao_count !== undefined && championRecord.ketao_count !== null) {
+                                    avgValue = Number(championRecord.ketao_count);
+                                } else if (averages.P !== undefined && averages.P !== null) {
+                                    avgValue = Number(averages.P);
+                                }
+                            }
+                            
+                            maxValue = avgValue;
+                            // 当 totalUsers 为 1 时，显示 SYSTEM BASE
+                            targetUserName = totalUsers <= 1 ? 'SYSTEM BASE' : 'GLOBAL AVG';
+                            targetIpLocation = null;
+                        }
                     }
                 } else {
                     // 如果 userData 存在，则 targetData 始终为当前用户
                     targetData = userData;
                     const values = extractDimensionValues(userData);
-                    maxValue = values[dimId] || 0;
+                    maxValue = values[dimId] !== undefined && values[dimId] !== null ? values[dimId] : undefined;
                     targetUserName = userData.user_name || userData.name || userData.github_username || '我的数据';
+                    targetIpLocation = userData.ip_location || null;
                 }
 
                 // 调用 getRankFeedback(dimId, maxValue) 获取对应的等级 label 和吐槽 content
                 // 确保即使是全球最强，文案也是从该维度的最高等级区间中随机抽取的
                 const feedback = getRankFeedback(dimId, maxValue);
+
+                // 【状态兜底】当 totalUsers 为 1 时，硬编码显示 TOP 1 或 SYSTEM BASE
+                const globalDataForStatus = window.lastData || {};
+                const totalUsers = Number(globalDataForStatus.totalUsers) || 1;
+                let statusLabel = isGlobalTopMode ? 'TOP' : 'MINE';
+                let feedbackLabel = feedback ? feedback.label : 'RANKED';
+                
+                // 如果 totalUsers 为 1，排名统一显示为 TOP 1
+                if (totalUsers <= 1) {
+                    statusLabel = 'TOP 1';
+                    if (isGlobalTopMode) {
+                        feedbackLabel = 'SYSTEM BASE';
+                    }
+                }
 
                 // 找出最高项（用于个人模式下的 TOP 标识）
                 let isTop = false;
@@ -3954,72 +5465,135 @@
                     isTop = topDim === dimId;
                 }
 
-                // 创建卡片元素
-                const card = document.createElement('div');
-                card.className = `bg-white/10 backdrop-blur-md border ${isTop ? 'border-2 border-[var(--accent-terminal)]' : 'border-zinc-800'} p-4 rounded transition-all relative`;
-                
-                // 动态标签：在卡片右上角增加一个动态标签
-                // 如果是全球最强模式，显示 [全球Top: 用户名]；如果是个人模式，显示 [我的数据]
-                let dynamicLabel = '';
-                if (isGlobalTopMode) {
-                    dynamicLabel = `
-                        <div class="absolute top-2 right-2 bg-blue-500/80 text-white text-[10px] font-bold px-2 py-1 rounded">
-                            [全球Top: ${targetUserName}]
-                        </div>
-                    `;
-                } else {
-                    dynamicLabel = `
-                        <div class="absolute top-2 right-2 bg-[var(--accent-terminal)]/80 text-black text-[10px] font-bold px-2 py-1 rounded">
-                            [我的数据]
-                        </div>
-                    `;
-                }
-
-                // 如果是个人模式的最高项，添加 [TOP] 标识（与动态标签并排显示）
-                let topBadge = '';
-                if (isTop && !isGlobalTopMode) {
-                    topBadge = `
-                        <div class="absolute top-2 right-2 bg-[var(--accent-terminal)] text-black text-[10px] font-bold px-2 py-1 rounded" style="top: 2.5rem;">
-                            [TOP]
-                        </div>
-                    `;
-                }
-
                 // 数值处理：say (总字数) 使用 Intl.NumberFormat('zh-CN').format() 进行千分位格式化
                 // 单位补全：根据 RANK_RESOURCES 自动补全单位（次、字、天等）
-                let formattedValue;
-                if (dimId === 'say') {
-                    formattedValue = new Intl.NumberFormat('zh-CN').format(maxValue) + (config.suffix ? ` ${config.suffix}` : '');
+                // 彻底删除硬编码，如果接口有值则必须显示接口的值
+                let displayVal;
+                let unit = config.suffix || '';
+                if (maxValue !== undefined && maxValue !== null) {
+                    if (dimId === 'say') {
+                        displayVal = new Intl.NumberFormat('zh-CN').format(maxValue);
+                    } else {
+                        displayVal = new Intl.NumberFormat('zh-CN').format(maxValue);
+                    }
                 } else {
-                    formattedValue = new Intl.NumberFormat('zh-CN').format(maxValue) + (config.suffix ? ` ${config.suffix}` : '');
+                    displayVal = 'N/A';
                 }
 
-                // 卡片内容
+                // 获取资源信息（用于显示维度名称）
+                const resource = RANK_RESOURCES && RANK_RESOURCES[dimId] ? RANK_RESOURCES[dimId] : null;
+                
+                // 创建卡片元素
+                // 赛博风格：背景 bg-[#050505]/60 配合 backdrop-blur-xl
+                // 悬浮时上移 hover:-translate-y-2，边框由暗绿变为亮绿，并出现赛博转角扫描线
+                const card = document.createElement('div');
+                card.className = `cursor-pointer flex-1 min-w-0 bg-[#050505]/60 backdrop-blur-xl border border-[#00ff41]/20 p-3 rounded-sm transition-all duration-300 hover:-translate-y-2 hover:border-[#00ff41] hover:shadow-[0_0_20px_rgba(0,255,65,0.4)] relative group pointer-events-auto overflow-visible`;
+                
+                // 存储维度ID和国家代码，用于地图联动
+                card.setAttribute('data-dim-id', dimId);
+                if (targetIpLocation) {
+                    card.setAttribute('data-ip-location', targetIpLocation);
+                }
+                // 存储冠军信息，用于地图弹窗展示
+                card.setAttribute('data-champion-name', targetUserName);
+                card.setAttribute('data-champion-value', maxValue);
+                card.setAttribute('data-champion-feedback', feedback ? JSON.stringify(feedback) : '');
+                
+                // 卡片内容：赛博风格模板
+                // 数字：所有卡片数值文字颜色统一改为纯白色 (text-white)，增加 drop-shadow
                 card.innerHTML = `
-                    ${dynamicLabel}
-                    ${topBadge}
-                    <div class="mb-3">
-                        <div class="flex items-center gap-2 mb-1">
-                            <span class="text-lg">${config.icon}</span>
-                            <span class="text-white text-sm font-bold">${config.name}</span>
-                        </div>
-                        <div class="text-[var(--accent-terminal)] text-2xl font-bold">${formattedValue}</div>
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">${config.icon}</span>
+                        <span class="text-[8px] leading-none text-[#00ff41] border border-[#00ff41]/40 px-1 py-0.5 tracking-widest uppercase bg-[#00ff41]/5 z-10 relative">
+                            ${statusLabel}
+                        </span>
                     </div>
-                    ${feedback ? `
-                        <div class="mt-3 pt-3 border-t border-zinc-700">
-                            <div class="text-zinc-400 text-[10px] mb-1">${feedback.label}</div>
-                            <div class="text-white text-xs font-semibold mb-2">${feedback.title}</div>
-                            <div class="text-zinc-500 text-[11px] leading-relaxed">${feedback.content}</div>
+
+                    <div class="text-[9px] text-[#00ff41]/50 uppercase tracking-widest mb-1 truncate">
+                        ${config.name}
+                    </div>
+
+                    <div class="text-2xl font-bold text-white font-mono truncate leading-none drop-shadow-[0_0_8px_rgba(255,255,255,0.3)]">
+                        ${displayVal}<span class="text-[10px] ml-1 font-normal opacity-70">${unit}</span>
+                    </div>
+
+                    <div class="mt-2 pt-2 border-t border-[#00ff41]/10 flex flex-col gap-0.5">
+                        <div class="text-[10px] text-white font-bold truncate">
+                            ${feedbackLabel}
                         </div>
-                    ` : `
-                        <div class="mt-3 pt-3 border-t border-zinc-700 text-zinc-500 text-[11px]">
-                            暂无评价数据
+                        <div class="text-[8px] text-[#00ff41]/60 truncate italic">
+                            @${targetUserName || 'ANONYMOUS'}
                         </div>
-                    `}
+                    </div>
+
+                    <!-- 赛博转角扫描线 -->
+                    <div class="absolute -top-[1px] -left-[1px] w-2 h-2 border-t border-l border-[#00ff41] scale-0 group-hover:scale-100 transition-transform opacity-0 group-hover:opacity-100"></div>
+                    <div class="absolute -bottom-[1px] -right-[1px] w-2 h-2 border-b border-r border-[#00ff41] scale-0 group-hover:scale-100 transition-transform opacity-0 group-hover:opacity-100"></div>
+                    <div class="absolute -top-[1px] -right-[1px] w-2 h-2 border-t border-r border-[#00ff41] scale-0 group-hover:scale-100 transition-transform opacity-0 group-hover:opacity-100"></div>
+                    <div class="absolute -bottom-[1px] -left-[1px] w-2 h-2 border-b border-l border-[#00ff41] scale-0 group-hover:scale-100 transition-transform opacity-0 group-hover:opacity-100"></div>
                 `;
 
+                // 地图联动交互：为每个卡片绑定点击监听器
+                card.addEventListener('click', () => {
+                    const ipLocation = card.getAttribute('data-ip-location');
+                    if (ipLocation && mapChart && !(typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) {
+                        // 将国家代码转换为地图上的国家名称
+                        let countryName = null;
+                        if (countryNameMap && countryNameMap[ipLocation]) {
+                            // 使用英文名称（地图使用英文名称）
+                            countryName = countryNameMap[ipLocation].en;
+                        } else {
+                            // 如果没有映射，尝试直接使用 ip_location（可能是完整的国家名称）
+                            countryName = ipLocation;
+                        }
+                        
+                        if (countryName) {
+                            // 获取冠军信息，存储到全局变量中，用于地图弹窗展示
+                            const championName = card.getAttribute('data-champion-name');
+                            const championValue = card.getAttribute('data-champion-value');
+                            const championFeedback = card.getAttribute('data-champion-feedback');
+                            const dimId = card.getAttribute('data-dim-id');
+                            
+                            // 存储当前选中的冠军信息
+                            currentChampionInfo = {
+                                countryName: countryName,
+                                championName: championName,
+                                championValue: championValue,
+                                feedback: championFeedback,
+                                dimId: dimId
+                            };
+                            
+                            // 使用 ECharts 实例方法高亮显示地图上对应的国家
+                            try {
+                                // 方法1：使用 dispatchAction 触发 highlight 动作
+                                mapChart.dispatchAction({
+                                    type: 'highlight',
+                                    name: countryName
+                                });
+                                
+                                // 方法2：使用 showTip 显示 tooltip（会触发 formatter，显示冠军信息）
+                                mapChart.dispatchAction({
+                                    type: 'showTip',
+                                    name: countryName
+                                });
+                                
+                                console.log(`[Rank] ✅ 点击卡片，高亮国家: ${countryName} (${ipLocation})`);
+                                console.log(`[Rank] 📊 冠军信息: ${championName}, 数值: ${championValue}, 维度: ${dimId}`);
+                            } catch (error) {
+                                console.error('[Rank] ❌ 高亮国家失败:', error);
+                            }
+                        } else {
+                            console.warn(`[Rank] ⚠️ 无法找到国家名称，ip_location: ${ipLocation}`);
+                        }
+                    } else if (!ipLocation) {
+                        console.warn(`[Rank] ⚠️ 该维度冠军没有 ip_location 信息`);
+                    } else {
+                        console.warn(`[Rank] ⚠️ 地图实例未初始化或已销毁`);
+                    }
+                });
+
                 container.appendChild(card);
-            }
+            });
 
             console.log(`[Rank] ✅ 维度排名卡片渲染完成 (模式: ${isGlobalTopMode ? '全球最强' : '个人数据'})`);
         }

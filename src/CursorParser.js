@@ -1109,6 +1109,167 @@ export class CursorParser {
   }
 
   /**
+   * 获取用于分析的轻量级 Payload
+   * 实现三层过滤机制：体积压缩、内容净化、隐私脱敏
+   * @returns {Object} 标准化的分析素材，包含 meta、messages 和 exportTime
+   */
+  getPayloadForAnalysis() {
+    // 防御性判断：确保 chatData 存在
+    if (!this.chatData || !Array.isArray(this.chatData)) {
+      console.warn('[CursorParser] chatData 不存在或格式错误，返回空数据');
+      return {
+        meta: {
+          total_conversations: 0,
+          top_model: 'unknown',
+          hourly_distribution: new Array(24).fill(0),
+        },
+        messages: [],
+        exportTime: new Date().toISOString(),
+      };
+    }
+
+    // ========================================
+    // 第一层：智能摘要压缩 (Volume Compression)
+    // ========================================
+    
+    // 1. 采样窗口控制：仅保留最近的 80 条对话记录
+    const recentMessages = this.chatData.slice(-80);
+    console.log(`[CursorParser] 采样窗口：从 ${this.chatData.length} 条记录中提取最近 ${recentMessages.length} 条`);
+
+    // 2. 处理每条消息：代码块剥离、长度截断、结构精简
+    const processedMessages = recentMessages.map((item, index) => {
+      // 防御性判断
+      if (!item) {
+        return null;
+      }
+
+      let content = item.text || item.content || '';
+      
+      // 防御性判断：确保 content 是字符串
+      if (typeof content !== 'string') {
+        content = String(content || '');
+      }
+
+      // 代码块剥离：移除所有 Markdown 代码块
+      content = content.replace(/```[\s\S]*?```/g, '');
+      
+      // 单条长度硬截断：限制在 500 字符以内
+      const MAX_LENGTH = 500;
+      let truncated = false;
+      if (content.length > MAX_LENGTH) {
+        content = content.substring(0, MAX_LENGTH);
+        truncated = true;
+      }
+
+      // ========================================
+      // 第二层：安全隐私脱敏 (Privacy Sanitization)
+      // ========================================
+      content = this.sanitizeSensitiveData(content);
+
+      // 如果内容被截断，附加标记
+      if (truncated) {
+        content += '...[TRUNCATED]';
+      }
+
+      // 结构精简：仅保留关键字段
+      return {
+        role: item.role || 'unknown',
+        content: content,
+        timestamp: item.timestamp || new Date().toISOString(),
+      };
+    }).filter(item => item !== null && item.content && item.content.trim().length > 0);
+
+    console.log(`[CursorParser] 压缩后消息数：${processedMessages.length}`);
+
+    // ========================================
+    // 第三层：注入宏观统计元数据 (Metadata Injection)
+    // ========================================
+    
+    // 计算总对话数
+    const total_conversations = this.stats.totalConversations || this.chatData.length;
+
+    // 获取使用频率最高的模型名
+    const topModelInfo = this.getMostUsedModel();
+    const top_model = topModelInfo.model || 'unknown';
+
+    // 24小时活跃度分布快照（复制数组避免引用）
+    const hourly_distribution = [...(this.stats.hourlyActivity || new Array(24).fill(0))];
+
+    // 构建元数据
+    const meta = {
+      total_conversations,
+      top_model,
+      hourly_distribution,
+    };
+
+    // ========================================
+    // 标准返回结构
+    // ========================================
+    return {
+      meta,
+      messages: processedMessages,
+      exportTime: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * 安全隐私脱敏：识别并遮蔽敏感信息
+   * @param {string} content - 原始内容
+   * @returns {string} 脱敏后的内容
+   */
+  sanitizeSensitiveData(content) {
+    if (!content || typeof content !== 'string') {
+      return content || '';
+    }
+
+    let sanitized = content;
+
+    // 1. 邮箱地址脱敏
+    // 匹配常见邮箱格式：user@domain.com, user.name@domain.co.uk 等
+    const emailPattern = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
+    sanitized = sanitized.replace(emailPattern, '[EMAIL]');
+
+    // 2. Authorization Bearer Tokens / API Keys 脱敏
+    // 匹配 Bearer token 格式：Bearer <token>
+    const bearerTokenPattern = /Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi;
+    sanitized = sanitized.replace(bearerTokenPattern, 'Bearer [TOKEN]');
+
+    // 匹配常见的 API Key 格式（通常为长字符串，可能包含字母、数字、连字符、下划线）
+    // 例如：sk-xxx, pk_xxx, AIzaSyxxx, xoxb-xxx 等
+    const apiKeyPatterns = [
+      /\b(sk-[A-Za-z0-9]{20,})\b/gi,           // OpenAI API Key
+      /\b(pk_[A-Za-z0-9]{20,})\b/gi,           // Stripe API Key
+      /\b(AIzaSy[A-Za-z0-9_-]{35})\b/gi,       // Google API Key
+      /\b(xox[baprs]-[A-Za-z0-9-]{10,})\b/gi,  // Slack Token
+      /\b(ghp_[A-Za-z0-9]{36})\b/gi,           // GitHub Personal Access Token
+      /\b([A-Za-z0-9]{32,})\b/g,               // 通用长字符串（可能是密钥）
+    ];
+
+    apiKeyPatterns.forEach(pattern => {
+      sanitized = sanitized.replace(pattern, '[API_KEY]');
+    });
+
+    // 3. IP 地址脱敏
+    // IPv4 地址
+    const ipv4Pattern = /\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b/g;
+    sanitized = sanitized.replace(ipv4Pattern, '[IP_ADDRESS]');
+
+    // IPv6 地址（简化匹配）
+    const ipv6Pattern = /\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b/g;
+    sanitized = sanitized.replace(ipv6Pattern, '[IP_ADDRESS]');
+
+    // 4. 其他敏感模式（可选扩展）
+    // 匹配可能的密码或密钥（连续的长字符串，可能包含特殊字符）
+    // 注意：这个模式可能过于激进，需要谨慎使用
+    // const passwordPattern = /(?:password|pwd|secret|key)\s*[:=]\s*["']?([A-Za-z0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]{10,})["']?/gi;
+    // sanitized = sanitized.replace(passwordPattern, (match, p1) => {
+    //   return match.replace(p1, '[PASSWORD]');
+    // });
+
+    return sanitized;
+  }
+
+  /**
    * 
    */
   close() {
