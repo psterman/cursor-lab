@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claim Token 认领机制示例</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #0a0a0a;
+            color: #00ff41;
+        }
+        .section {
+            background: rgba(24, 24, 27, 0.7);
+            border: 1px solid #27272a;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+        h2 {
+            color: #00ff41;
+            border-bottom: 2px solid #00ff41;
+            padding-bottom: 10px;
+        }
+        button {
+            background: #00ff41;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            border-radius: 4px;
+        }
+        button:hover {
+            background: #00cc33;
+        }
+        .code {
+            background: #1a1a1a;
+            padding: 15px;
+            border-left: 3px solid #00ff41;
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+            overflow-x: auto;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .success {
+            background: rgba(0, 255, 65, 0.1);
+            border: 1px solid #00ff41;
+        }
+        .error {
+            background: rgba(255, 0, 0, 0.1);
+            border: 1px solid #ff0000;
+            color: #ff6b6b;
+        }
+        .info {
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid #3b82f6;
+            color: #60a5fa;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔑 Claim Token 认领机制示例</h1>
+    
+    <div class="section">
+        <h2>步骤 1: 匿名分析 (生成 claim_token)</h2>
+        <p>模拟用户在未登录状态下进行分析,后端会生成并返回 claim_token</p>
+        <button onclick="performAnonymousAnalysis()">执行匿名分析</button>
+        <div id="analysis-result"></div>
+    </div>
+
+    <div class="section">
+        <h2>步骤 2: GitHub 登录</h2>
+        <p>模拟用户登录 GitHub,获取 OAuth token 和 user_id</p>
+        <button onclick="simulateGitHubLogin()">模拟 GitHub 登录</button>
+        <div id="login-result"></div>
+    </div>
+
+    <div class="section">
+        <h2>步骤 3: 认领数据</h2>
+        <p>使用 claim_token 将匿名数据迁移到 GitHub 账号</p>
+        <button onclick="claimData()">认领数据</button>
+        <div id="claim-result"></div>
+    </div>
+
+    <div class="section">
+        <h2>本地存储状态</h2>
+        <button onclick="showLocalStorage()">查看 localStorage</button>
+        <button onclick="clearLocalStorage()">清空 localStorage</button>
+        <div id="storage-status"></div>
+    </div>
+
+    <div class="section">
+        <h2>完整流程代码示例</h2>
+        <div class="code">
+// 【步骤 1】分析完成后,捕获 claim_token
+async function onAnalysisComplete(analysisData) {
+    if (analysisData.claim_token) {
+        // 保存到 localStorage
+        localStorage.setItem('vibe_claim_token', analysisData.claim_token);
+        console.log('🔑 claim_token 已保存:', analysisData.claim_token.substring(0, 8) + '...');
+    }
+}
+
+// 【步骤 2】GitHub 登录后,检查是否需要认领
+async function onGitHubLoginSuccess(user, session) {
+    const claimToken = localStorage.getItem('vibe_claim_token');
+    
+    if (claimToken) {
+        console.log('🔍 检测到待认领的数据,开始认领流程...');
+        
+        try {
+            const response = await fetch('/api/fingerprint/migrate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${session.access_token}`
+                },
+                body: JSON.stringify({
+                    userId: user.id,
+                    claimToken: claimToken
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                console.log('✅ 数据认领成功!');
+                // 清除 claim_token
+                localStorage.removeItem('vibe_claim_token');
+                // 刷新用户统计
+                await refreshUserStats();
+            } else {
+                console.error('❌ 数据认领失败:', result.error);
+            }
+        } catch (error) {
+            console.error('❌ 认领过程出错:', error);
+        }
+    } else {
+        console.log('ℹ️ 无待认领数据,直接加载用户统计');
+        await refreshUserStats();
+    }
+}
+
+// 【步骤 3】刷新用户统计
+async function refreshUserStats() {
+    // 从后端获取最新的用户数据
+    console.log('🔄 刷新用户统计数据...');
+}
+        </div>
+    </div>
+
+    <script>
+        const API_ENDPOINT = 'https://cursor-clinical-analysis.psterman.workers.dev';
+        
+        // 模拟匿名分析
+        async function performAnonymousAnalysis() {
+            const resultDiv = document.getElementById('analysis-result');
+            resultDiv.innerHTML = '<div class="status info">⏳ 正在执行分析...</div>';
+            
+            try {
+                // 模拟分析请求
+                const mockAnalysisData = {
+                    chatData: [
+                        { role: 'USER', text: '帮我写一个React组件' },
+                        { role: 'ASSISTANT', text: '好的,我来帮你...' }
+                    ],
+                    lang: 'zh-CN'
+                };
+                
+                // 注意:这里应该调用真实的 /api/v2/analyze 接口
+                // const response = await fetch(`${API_ENDPOINT}/api/v2/analyze`, {
+                //     method: 'POST',
+                //     headers: { 'Content-Type': 'application/json' },
+                //     body: JSON.stringify(mockAnalysisData)
+                // });
+                // const result = await response.json();
+                
+                // 模拟返回结果
+                const mockResult = {
+                    status: 'success',
+                    claim_token: crypto.randomUUID(),
+                    dimensions: { L: 75, P: 60, D: 80, E: 70, F: 65 }
+                };
+                
+                // 保存 claim_token
+                localStorage.setItem('vibe_claim_token', mockResult.claim_token);
+                
+                resultDiv.innerHTML = `
+                    <div class="status success">
+                        ✅ 分析完成!<br>
+                        <strong>claim_token:</strong> ${mockResult.claim_token.substring(0, 16)}...<br>
+                        <small>已保存到 localStorage</small>
+                    </div>
+                `;
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="status error">❌ 分析失败: ${error.message}</div>`;
+            }
+        }
+        
+        // 模拟 GitHub 登录
+        function simulateGitHubLogin() {
+            const resultDiv = document.getElementById('login-result');
+            
+            // 模拟 GitHub OAuth 返回的数据
+            const mockUser = {
+                id: crypto.randomUUID(),
+                email: 'user@example.com',
+                user_metadata: {
+                    avatar_url: 'https://github.com/identicons/user.png',
+                    user_name: 'testuser'
+                }
+            };
+            
+            const mockSession = {
+                access_token: 'mock_jwt_token_' + Math.random().toString(36).substring(7)
+            };
+            
+            // 保存到 localStorage (模拟)
+            localStorage.setItem('github_user', JSON.stringify(mockUser));
+            localStorage.setItem('github_session', JSON.stringify(mockSession));
+            
+            resultDiv.innerHTML = `
+                <div class="status success">
+                    ✅ GitHub 登录成功!<br>
+                    <strong>User ID:</strong> ${mockUser.id.substring(0, 16)}...<br>
+                    <strong>Username:</strong> ${mockUser.user_metadata.user_name}
+                </div>
+            `;
+        }
+        
+        // 认领数据
+        async function claimData() {
+            const resultDiv = document.getElementById('claim-result');
+            resultDiv.innerHTML = '<div class="status info">⏳ 正在认领数据...</div>';
+            
+            try {
+                const claimToken = localStorage.getItem('vibe_claim_token');
+                const userStr = localStorage.getItem('github_user');
+                const sessionStr = localStorage.getItem('github_session');
+                
+                if (!claimToken) {
+                    throw new Error('未找到 claim_token,请先执行匿名分析');
+                }
+                
+                if (!userStr || !sessionStr) {
+                    throw new Error('未登录 GitHub,请先登录');
+                }
+                
+                const user = JSON.parse(userStr);
+                const session = JSON.parse(sessionStr);
+                
+                // 注意:这里应该调用真实的 /api/fingerprint/migrate 接口
+                // const response = await fetch(`${API_ENDPOINT}/api/fingerprint/migrate`, {
+                //     method: 'POST',
+                //     headers: {
+                //         'Content-Type': 'application/json',
+                //         'Authorization': `Bearer ${session.access_token}`
+                //     },
+                //     body: JSON.stringify({
+                //         userId: user.id,
+                //         claimToken: claimToken
+                //     })
+                // });
+                // const result = await response.json();
+                
+                // 模拟成功响应
+                const mockResult = {
+                    status: 'success',
+                    message: '数据认领成功',
+                    data: {
+                        total_messages: 150,
+                        total_chars: 5000
+                    }
+                };
+                
+                if (mockResult.status === 'success') {
+                    // 清除 claim_token
+                    localStorage.removeItem('vibe_claim_token');
+                    
+                    resultDiv.innerHTML = `
+                        <div class="status success">
+                            ✅ ${mockResult.message}<br>
+                            <strong>总消息数:</strong> ${mockResult.data.total_messages}<br>
+                            <strong>总字符数:</strong> ${mockResult.data.total_chars}<br>
+                            <small>claim_token 已清除</small>
+                        </div>
+                    `;
+                } else {
+                    throw new Error(mockResult.error || '认领失败');
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="status error">❌ 认领失败: ${error.message}</div>`;
+            }
+        }
+        
+        // 显示 localStorage
+        function showLocalStorage() {
+            const statusDiv = document.getElementById('storage-status');
+            const claimToken = localStorage.getItem('vibe_claim_token');
+            const user = localStorage.getItem('github_user');
+            const session = localStorage.getItem('github_session');
+            
+            statusDiv.innerHTML = `
+                <div class="code">
+                    <strong>vibe_claim_token:</strong> ${claimToken ? claimToken.substring(0, 16) + '...' : '(空)'}<br>
+                    <strong>github_user:</strong> ${user ? '已设置' : '(空)'}<br>
+                    <strong>github_session:</strong> ${session ? '已设置' : '(空)'}
+                </div>
+            `;
+        }
+        
+        // 清空 localStorage
+        function clearLocalStorage() {
+            localStorage.removeItem('vibe_claim_token');
+            localStorage.removeItem('github_user');
+            localStorage.removeItem('github_session');
+            
+            const statusDiv = document.getElementById('storage-status');
+            statusDiv.innerHTML = '<div class="status success">✅ localStorage 已清空</div>';
+        }
+        
+        // 页面加载时显示状态
+        window.addEventListener('load', showLocalStorage);
+    </script>
+</body>
+</html>

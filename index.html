@@ -4523,6 +4523,13 @@
                         rankingResult = await analyzer.uploadToSupabase(vibeResult, chatDataForUpload);
                         
                         console.log('[React] uploadToSupabase 返回结果:', rankingResult);
+
+                        // 【关键修复】捕获并保存 claim_token 用于后续认领
+                        if (rankingResult && rankingResult.claim_token) {
+                            localStorage.setItem('vibe_claim_token', rankingResult.claim_token);
+                            console.log('[React] 🔑 影子令牌已保存:', rankingResult.claim_token.substring(0, 8) + '...');
+                        }
+
                         // ✅ 关键调试：检查 ranks 对象是否存在
                         if (rankingResult && rankingResult.ranks) {
                           console.log('[React] ✅ rankingResult.ranks 存在:', rankingResult.ranks);
@@ -4628,6 +4635,13 @@
                             if (response.ok) {
                                 data = await response.json();
                                 console.log('[React] 降级请求成功，返回数据:', data);
+                                
+                                // 【关键修复】降级请求也要捕获 claim_token
+                                if (data && data.claim_token) {
+                                    localStorage.setItem('vibe_claim_token', data.claim_token);
+                                    console.log('[React] 🔑 降级请求捕获到令牌:', data.claim_token.substring(0, 8) + '...');
+                                }
+
                                 newCount = data.totalUsers ?? data.value ?? data.total ?? data.count ?? 0;
                                 
                                 // 如果降级请求成功，也保存排名数据

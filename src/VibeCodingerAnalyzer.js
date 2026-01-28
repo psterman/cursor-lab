@@ -2458,6 +2458,7 @@ export class VibeCodingerAnalyzer {
           semanticFingerprint: result.semanticFingerprint || vibeResult?.semanticFingerprint || this.analysisResult?.semanticFingerprint || null, // 语义指纹对象
           stats: result.stats || result.data?.stats || null, // 完整的 stats 数据
           fingerprint: result.fingerprint || null, // 语义指纹字符串
+          claim_token: result.claim_token || null, // 【关键修复】认领令牌
           
           // 【V6 架构修复】优先从 personality.detailedStats 读取数据
           // 数据流向：后端 scoring.ts → rank-content.ts → matchRankLevel → personality.detailedStats

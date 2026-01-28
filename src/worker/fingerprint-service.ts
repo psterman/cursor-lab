@@ -298,120 +298,168 @@ export async function updateUserByFingerprint(
 }
 
 /**
- * 将指纹数据迁移到 GitHub User ID
- * @param fingerprint - 旧的浏览器指纹
+ * 根据 claim_token 查找待认领的记录
+ * @param claimToken - 影子令牌（Claim Token）
+ * @param env - 环境变量
+ * @returns 用户数据或 null
+ */
+export async function identifyUserByClaimToken(
+  claimToken: string,
+  env: Env
+): Promise<any | null> {
+  if (!claimToken || !env.SUPABASE_URL || !env.SUPABASE_KEY) {
+    return null;
+  }
+
+  try {
+    const queryUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?claim_token=eq.${encodeURIComponent(claimToken)}&select=*`;
+    
+    const response = await fetch(queryUrl, {
+      method: 'GET',
+      headers: {
+        'apikey': env.SUPABASE_KEY,
+        'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation',
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[Fingerprint] ❌ 根据 claim_token 查询失败:', {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorText,
+      });
+      return null;
+    }
+
+    const data = await response.json();
+    
+    if (Array.isArray(data) && data.length > 0) {
+      console.log('[Fingerprint] ✅ 根据 claim_token 找到用户:', {
+        id: data[0].id,
+        user_name: data[0].user_name,
+        claim_token: data[0].claim_token?.substring(0, 8) + '...',
+      });
+      return data[0];
+    }
+
+    console.log('[Fingerprint] ℹ️ 根据 claim_token 未找到匹配的用户');
+    return null;
+  } catch (error: any) {
+    console.error('[Fingerprint] ❌ 根据 claim_token 识别用户时出错:', error);
+    return null;
+  }
+}
+
+/**
+ * 将匿名数据迁移到 GitHub User ID (基于 claim_token 的强制认领机制)
+ * @param fingerprint - 旧的浏览器指纹 (已废弃,仅用于兼容性)
  * @param userId - 新的 GitHub User ID (UUID)
+ * @param claimToken - 影子令牌 (必填,唯一合法的认领凭证)
  * @param env - 环境变量
  * @returns 迁移后的用户数据或 null
  */
 export async function migrateFingerprintToUserId(
   fingerprint: string,
   userId: string,
-  env: Env
+  claimToken?: string,
+  env?: Env
 ): Promise<any | null> {
-  if (!fingerprint || !userId || !env.SUPABASE_URL || !env.SUPABASE_KEY) {
-    console.warn('[Fingerprint] ⚠️ 缺少必要参数或环境变量');
+  if (!userId || !env?.SUPABASE_URL || !env?.SUPABASE_KEY) {
+    console.warn('[Migrate] ⚠️ 缺少必要参数或环境变量');
+    return null;
+  }
+
+  // 【强制令牌校验】必须提供 claimToken
+  if (!claimToken) {
+    console.error('[Migrate] ❌ 缺少 claim_token,迁移被拒绝');
     return null;
   }
 
   try {
-    // 1. 查找指纹对应的用户数据
-    const fingerprintUser = await identifyUserByFingerprint(fingerprint, env);
+    console.log('[Migrate] 🔑 开始基于 claim_token 的强制认领流程...');
     
-    if (!fingerprintUser) {
-      console.log('[Fingerprint] ℹ️ 未找到指纹对应的用户数据，无需迁移');
+    // 【步骤 1: 精准溯源】使用 claim_token 查找源记录
+    const sourceRecord = await identifyUserByClaimToken(claimToken, env);
+    
+    if (!sourceRecord) {
+      console.error('[Migrate] ❌ claim_token 无效或已过期,未找到待认领记录');
       return null;
     }
 
-    console.log('[Fingerprint] 🔄 开始迁移数据:', {
-      fingerprint: fingerprint.substring(0, 8) + '...',
-      userId: userId.substring(0, 8) + '...',
-      fingerprintUserId: fingerprintUser.id,
+    console.log('[Migrate] ✅ 找到待认领记录:', {
+      recordId: sourceRecord.id?.substring(0, 8) + '...',
+      total_messages: sourceRecord.total_messages || 0,
+      total_chars: sourceRecord.total_chars || 0,
     });
 
-    // 2. 检查目标 user_id 是否已存在记录
-    const targetUser = await identifyUserByUserId(userId, env);
+    // 【防止冒领】确保源记录是匿名身份
+    if (sourceRecord.user_identity === 'github') {
+      console.error('[Migrate] ❌ 源记录已被认领,禁止重复认领');
+      return null;
+    }
+
+    // 【步骤 2: 清理目标】删除 GitHub 登录时自动生成的空记录
+    console.log('[Migrate] 🧹 检查并清理目标 GitHub 用户的空记录...');
+    const deleteUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(userId)}&total_messages=is.null`;
     
-    // 3. 准备迁移的数据（排除 id 字段，因为要更新到新的 id）
-    const migrationData: any = {
-      ...fingerprintUser,
-    };
-    delete migrationData.id; // 移除旧的 id
-    delete migrationData.fingerprint; // 移除旧的 fingerprint（可选，保留也可以）
-    migrationData.id = userId; // 设置新的 id
-    migrationData.user_identity = 'github'; // 更新身份标识
-    migrationData.updated_at = new Date().toISOString();
+    const deleteResponse = await fetch(deleteUrl, {
+      method: 'DELETE',
+      headers: {
+        'apikey': env.SUPABASE_KEY,
+        'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+      },
+    });
 
+    if (deleteResponse.ok) {
+      console.log('[Migrate] ✅ 已删除空记录,防止主键冲突');
+    } else {
+      console.log('[Migrate] ℹ️ 未找到空记录或删除失败(可能目标记录不存在)');
+    }
+
+    // 【步骤 3: 检查目标用户是否已有数据】
+    const targetUser = await identifyUserByUserId(userId, env);
+    const targetMessages = targetUser?.total_messages || 0;
+    const targetChars = targetUser?.total_chars || 0;
+    const sourceMessages = sourceRecord.total_messages || 0;
+    const sourceChars = sourceRecord.total_chars || 0;
+
+    console.log('[Migrate] 📊 数据对比:', {
+      target: { messages: targetMessages, chars: targetChars },
+      source: { messages: sourceMessages, chars: sourceChars },
+    });
+
+    // 【步骤 4: 物理过户】使用 UPDATE 语句灌入数据
     if (targetUser) {
-      // 目标用户已存在，合并数据（优先保留数据量更完整的记录）
-      console.log('[Fingerprint] ✅ 目标用户已存在，合并数据');
+      // 目标用户已存在,执行增量累加
+      console.log('[Migrate] 🔄 目标用户已存在,执行增量累加...');
       
-      // 【Task 2】比较数据完整性：优先保留 total_messages 更多的记录
-      const targetMessages = targetUser.total_messages || targetUser.stats?.total_messages || 0;
-      const fingerprintMessages = fingerprintUser.total_messages || fingerprintUser.stats?.total_messages || 0;
-      
-      const useFingerprintAsBase = fingerprintMessages > targetMessages;
-      const baseData = useFingerprintAsBase ? fingerprintUser : targetUser;
-      const supplementData = useFingerprintAsBase ? targetUser : fingerprintUser;
-      
-      console.log('[Fingerprint] 📊 数据完整性比较:', {
-        targetMessages,
-        fingerprintMessages,
-        useFingerprintAsBase,
-        baseSource: useFingerprintAsBase ? 'fingerprint' : 'target'
-      });
-      
-      // 【Task 2】合并 stats 字段（使用 JSONB 合并逻辑）
-      let mergedStats = null;
-      if (baseData.stats || supplementData.stats) {
-        const baseStats = typeof baseData.stats === 'string' ? JSON.parse(baseData.stats) : (baseData.stats || {});
-        const supplementStats = typeof supplementData.stats === 'string' ? JSON.parse(supplementData.stats) : (supplementData.stats || {});
-        
-        // 深度合并 stats 对象（优先使用 baseStats，用 supplementStats 补充缺失字段）
-        mergedStats = {
-          ...supplementStats,
-          ...baseStats,
-          // 对于数值字段，取较大值
-          total_messages: Math.max(baseStats.total_messages || 0, supplementStats.total_messages || 0),
-          total_chars: Math.max(baseStats.total_chars || 0, supplementStats.total_chars || 0),
-          work_days: Math.max(baseStats.work_days || 0, supplementStats.work_days || 0),
-        };
-        
-        // 合并 tech_stack（如果存在）
-        if (baseStats.tech_stack || supplementStats.tech_stack) {
-          mergedStats.tech_stack = {
-            ...(supplementStats.tech_stack || {}),
-            ...(baseStats.tech_stack || {})
-          };
-        }
-        
-        console.log('[Fingerprint] ✅ stats 字段已合并');
-      }
-      
-      const mergedData: any = {
-        ...baseData,
-        ...supplementData,
-        // 保留目标用户的关键字段
-        id: userId,
-        user_name: targetUser.user_name || migrationData.user_name,
-        user_identity: 'github',
-        updated_at: new Date().toISOString(),
-        // 【Task 2】使用合并后的 stats
-        stats: mergedStats || baseData.stats || supplementData.stats,
-        // 优先使用数据量更完整的记录的维度分数
-        l_score: baseData.l_score || supplementData.l_score || 50,
-        p_score: baseData.p_score || supplementData.p_score || 50,
-        d_score: baseData.d_score || supplementData.d_score || 50,
-        e_score: baseData.e_score || supplementData.e_score || 50,
-        f_score: baseData.f_score || supplementData.f_score || 50,
-        // 合并其他重要字段
-        total_messages: Math.max(targetMessages, fingerprintMessages),
-        dimensions: baseData.dimensions || supplementData.dimensions || null,
-        personality: baseData.personality || supplementData.personality || null,
-      };
-
       const updateUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(userId)}`;
       
+      const updateData: any = {
+        // 使用 COALESCE 确保 NULL 值也能正常累加
+        total_messages: (targetMessages || 0) + (sourceMessages || 0),
+        total_chars: (targetChars || 0) + (sourceChars || 0),
+        user_identity: 'github',
+        updated_at: new Date().toISOString(),
+      };
+
+      // 合并其他字段(优先使用有数据的记录)
+      if (sourceMessages > 0) {
+        if (sourceRecord.l_score) updateData.l_score = sourceRecord.l_score;
+        if (sourceRecord.p_score) updateData.p_score = sourceRecord.p_score;
+        if (sourceRecord.d_score) updateData.d_score = sourceRecord.d_score;
+        if (sourceRecord.e_score) updateData.e_score = sourceRecord.e_score;
+        if (sourceRecord.f_score) updateData.f_score = sourceRecord.f_score;
+        if (sourceRecord.stats) updateData.stats = sourceRecord.stats;
+        if (sourceRecord.personality_type) updateData.personality_type = sourceRecord.personality_type;
+        if (sourceRecord.roast_text) updateData.roast_text = sourceRecord.roast_text;
+        if (sourceRecord.personality_data) updateData.personality_data = sourceRecord.personality_data;
+      }
+
       const response = await fetch(updateUrl, {
         method: 'PATCH',
         headers: {
@@ -420,27 +468,55 @@ export async function migrateFingerprintToUserId(
           'Content-Type': 'application/json',
           'Prefer': 'return=representation',
         },
-        body: JSON.stringify(mergedData),
+        body: JSON.stringify(updateData),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('[Fingerprint] ❌ 合并数据失败:', errorText);
-        return null;
+        console.error('[Migrate] ❌ 增量累加失败:', errorText);
+        throw new Error(`增量累加失败: ${errorText}`);
       }
 
       const data = await response.json();
       const result = Array.isArray(data) && data.length > 0 ? data[0] : data;
       
-      // 4. 删除旧的指纹记录（可选，如果不想保留历史记录）
-      // 注意：这里不删除，保留历史记录以便追溯
+      console.log('[Migrate] ✅ 增量累加成功');
       
-      console.log('[Fingerprint] ✅ 数据迁移成功（合并模式）');
+      // 【步骤 5: 销毁令牌】删除源记录
+      await deleteSourceRecord(sourceRecord.id, env);
+      
       return result;
     } else {
-      // 目标用户不存在，直接创建新记录
-      console.log('[Fingerprint] ✅ 目标用户不存在，创建新记录');
+      // 目标用户不存在,直接创建新记录
+      console.log('[Migrate] 🆕 目标用户不存在,创建新记录...');
       
+      const insertData: any = {
+        ...sourceRecord,
+        id: userId,
+        user_identity: 'github',
+        claim_token: null, // 清除 claim_token
+        updated_at: new Date().toISOString(),
+      };
+
+      // 【关键修复】创建新记录前，必须先释放 "unique_analyze_record" 约束
+      // 约束包括 (user_name, roast_text, total_messages) 以及 fingerprint 唯一约束
+      // 如果我们直接插入一条和源记录内容完全一样的数据，会触发唯一性冲突
+      // 解决方案：先临时修改源记录的 roast_text 和 fingerprint，避开所有冲突
+      console.log('[Migrate] 🔓 更新源记录以释放唯一性约束...');
+      const releaseConstraintUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(sourceRecord.id)}`;
+      await fetch(releaseConstraintUrl, {
+        method: 'PATCH',
+        headers: {
+          'apikey': env.SUPABASE_KEY,
+          'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          roast_text: `[MIGRATED] ${sourceRecord.roast_text || ''}`.substring(0, 500),
+          fingerprint: `migrated_${sourceRecord.id}` // 同时释放 fingerprint 唯一约束
+        }),
+      });
+
       const insertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis`;
       
       const response = await fetch(insertUrl, {
@@ -451,23 +527,106 @@ export async function migrateFingerprintToUserId(
           'Content-Type': 'application/json',
           'Prefer': 'return=representation',
         },
-        body: JSON.stringify([migrationData]),
+        body: JSON.stringify([insertData]),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('[Fingerprint] ❌ 创建新记录失败:', errorText);
-        return null;
+        console.error('[Migrate] ❌ 创建新记录失败:', errorText);
+        throw new Error(`创建新记录失败: ${errorText}`);
       }
 
       const data = await response.json();
       const result = Array.isArray(data) && data.length > 0 ? data[0] : data;
       
-      console.log('[Fingerprint] ✅ 数据迁移成功（新建模式）');
+      console.log('[Migrate] ✅ 新记录创建成功');
+      
+      // 【步骤 5: 销毁令牌】删除源记录
+      await deleteSourceRecord(sourceRecord.id, env);
+      
       return result;
     }
   } catch (error: any) {
-    console.error('[Fingerprint] ❌ 迁移数据时出错:', error);
+    console.error('[Migrate] ❌ 迁移失败:', error);
+    // 【事务性】失败时保留原始匿名数据
+    return null;
+  }
+}
+
+/**
+ * 删除源记录(销毁令牌)
+ */
+async function deleteSourceRecord(sourceId: string, env: Env): Promise<void> {
+  try {
+    console.log('[Migrate] 🗑️ 销毁源记录...');
+    const deleteUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(sourceId)}`;
+    
+    const response = await fetch(deleteUrl, {
+      method: 'DELETE',
+      headers: {
+        'apikey': env.SUPABASE_KEY,
+        'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (response.ok) {
+      console.log('[Migrate] ✅ 源记录已删除,令牌已销毁');
+    } else {
+      const errorText = await response.text();
+      console.warn('[Migrate] ⚠️ 源记录删除失败(不影响主流程):', errorText);
+    }
+  } catch (error) {
+    console.error('[Migrate] ❌ 删除源记录时出错:', error);
+  }
+}
+
+/**
+ * 根据用户名识别用户（深度溯源：寻找有数据的匿名记录）
+ * @param username - 用户名
+ * @param env - 环境变量
+ * @returns 用户数据或 null
+ */
+export async function identifyUserByUsername(
+  username: string,
+  env: Env
+): Promise<any | null> {
+  if (!username || !env.SUPABASE_URL || !env.SUPABASE_KEY) {
+    return null;
+  }
+
+  try {
+    const normalizedUsername = username.trim().toLowerCase();
+    // 寻找 user_name 匹配、身份不是 github（即匿名）且 total_messages > 0 的记录
+    const queryUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?user_name=eq.${encodeURIComponent(normalizedUsername)}&user_identity=neq.github&total_messages=gt.0&order=total_messages.desc&limit=1&select=*`;
+    
+    const response = await fetch(queryUrl, {
+      method: 'GET',
+      headers: {
+        'apikey': env.SUPABASE_KEY,
+        'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.error('[Fingerprint] ❌ 根据用户名查询失败:', response.status);
+      return null;
+    }
+
+    const data = await response.json();
+    if (Array.isArray(data) && data.length > 0) {
+      console.log('[Fingerprint] 🔍 深度溯源成功（根据用户名找到有数据的记录）:', {
+        id: data[0].id,
+        user_name: data[0].user_name,
+        total_messages: data[0].total_messages
+      });
+      return data[0];
+    }
+
+    return null;
+  } catch (error) {
+    console.error('[Fingerprint] ❌ 根据用户名溯源时出错:', error);
     return null;
   }
 }

@@ -2556,11 +2556,23 @@
                     mapChart = echarts.init(chartDom, null, { renderer: 'canvas' });
                 }
                 
-                // 地图数据必须已注册，否则直接提示（避免 setOption 继续抛错）
+                // 地图数据必须已注册，否则等待并重试
                 if (!echarts.getMap || !echarts.getMap('world')) {
-                    console.warn('[Map] ⚠️ world 地图数据未注册（world.js 未加载完成）');
-                    chartDom.innerHTML = '<div class="flex items-center justify-center h-full text-zinc-500 text-sm">地图数据未加载完成</div>';
-                    return;
+                    console.warn('[Map] ⚠️ world 地图数据未注册（world.js 未加载完成），等待重试...');
+                    // 等待 world.js 加载，最多等待 5 秒
+                    let retryCount = 0;
+                    const maxRetries = 50; // 50 * 100ms = 5秒
+                    while (retryCount < maxRetries && (!echarts.getMap || !echarts.getMap('world'))) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                        retryCount++;
+                    }
+                    
+                    if (!echarts.getMap || !echarts.getMap('world')) {
+                        console.error('[Map] ❌ world 地图数据加载超时');
+                        chartDom.innerHTML = '<div class="flex items-center justify-center h-full text-zinc-500 text-sm">地图数据加载超时，请刷新页面</div>';
+                        return;
+                    }
+                    console.log('[Map] ✅ world 地图数据已加载');
                 }
 
                 // 处理地理位置数据（2D 世界地图名称需与 world.js 的英文国家名匹配）
@@ -5010,6 +5022,89 @@
                             username: githubUsername
                         });
                         
+                        // 【合并确认弹窗】在迁移前检查是否需要用户确认
+                        const claimToken = localStorage.getItem('vibe_claim_token');
+                        const hasLocalData = claimToken || currentFp;
+                        const localDataExists = localStorage.getItem('last_analysis_data') || claimToken;
+                        
+                        // 【严格校验迁移逻辑】检查是否有影子令牌
+                        // 注意:新的强制认领机制只认 claimToken,不再支持纯指纹迁移
+                        if (!claimToken) {
+                            console.warn('[Auth] ⚠️ 本地无 claim_token，无法执行数据认领。');
+                            // 显示提示弹窗
+                            const noDataDialog = document.createElement('div');
+                            noDataDialog.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50';
+                            noDataDialog.id = 'no-data-dialog';
+                            noDataDialog.innerHTML = `
+                                <div class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+                                    <h3 class="text-lg font-semibold text-gray-900 mb-2">未检测到待认领数据</h3>
+                                    <p class="text-sm text-gray-600 mb-4">未发现本地分析数据，将为您创建新账号数据。</p>
+                                    <div class="flex gap-3 justify-end">
+                                        <button class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors" id="no-data-confirm">确定</button>
+                                    </div>
+                                </div>
+                            `;
+                            document.body.appendChild(noDataDialog);
+                            
+                            await new Promise((resolve) => {
+                                const removeDialog = () => {
+                                    const dialogElement = document.getElementById('no-data-dialog');
+                                    if (dialogElement && dialogElement.parentNode) {
+                                        dialogElement.parentNode.removeChild(dialogElement);
+                                    }
+                                    resolve();
+                                };
+                                
+                                noDataDialog.querySelector('#no-data-confirm')?.addEventListener('click', removeDialog);
+                            });
+                            
+                            // 没有历史数据，跳过迁移，继续正常流程
+                            hideSyncingOverlay();
+                            return;
+                        }
+                        
+                        // 如果需要确认，先显示弹窗
+                        if (hasLocalData && localDataExists) {
+                            const shouldMerge = await new Promise((resolve) => {
+                                const dialog = document.createElement('div');
+                                dialog.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50';
+                                dialog.id = 'merge-confirm-dialog';
+                                dialog.innerHTML = `
+                                    <div class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+                                        <h3 class="text-lg font-semibold text-gray-900 mb-2">数据合并确认</h3>
+                                        <p class="text-sm text-gray-600 mb-4">检测到您有未归档的战绩，是否合并到 GitHub 账号？</p>
+                                        <div class="flex gap-3 justify-end">
+                                            <button class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors" id="merge-cancel">取消</button>
+                                            <button class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors" id="merge-confirm">合并</button>
+                                        </div>
+                                    </div>
+                                `;
+                                document.body.appendChild(dialog);
+                                
+                                const removeDialog = () => {
+                                    const dialogElement = document.getElementById('merge-confirm-dialog');
+                                    if (dialogElement && dialogElement.parentNode) {
+                                        dialogElement.parentNode.removeChild(dialogElement);
+                                    }
+                                };
+                                
+                                dialog.querySelector('#merge-confirm')?.addEventListener('click', () => {
+                                    removeDialog();
+                                    resolve(true);
+                                });
+                                
+                                dialog.querySelector('#merge-cancel')?.addEventListener('click', () => {
+                                    removeDialog();
+                                    resolve(false);
+                                });
+                            });
+                            
+                            if (!shouldMerge) {
+                                console.log('[Auth] ℹ️ 用户取消合并，跳过迁移');
+                                return;
+                            }
+                        }
+                        
                         // 显示同步遮罩
                         showSyncingOverlay();
                         
@@ -5039,18 +5134,30 @@
                             let migrateResponse;
                             try {
                                 // 调用后端接口迁移数据
-                                // 【必须在 Body 中携带：{ userId, fingerprint, username }】
+                                // 【必须在 Body 中携带：{ userId, claimToken }】
+                                const migrateBody = {
+                                    userId: githubUserId
+                                };
+                                
+                                // 【影子令牌优先】如果存在 claimToken，优先使用它
+                                if (claimToken) {
+                                    migrateBody.claimToken = claimToken; // 后端接收 claimToken（驼峰命名）
+                                    console.log('[Auth] 🔑 检测到 vibe_claim_token，执行强行认领:', claimToken.substring(0, 8) + '...');
+                                } else {
+                                    // 【重要】如果没有 claimToken，跳过迁移
+                                    console.warn('[Auth] ⚠️ 无 claimToken，跳过迁移（新的强制认领机制要求必须有 claim_token）');
+                                    hideSyncingOverlay();
+                                    return;
+                                }
+
+                                
                                 migrateResponse = await fetch(migrateUrl, {
                                     method: 'POST',
                                     headers: {
                                         'Content-Type': 'application/json',
                                         'Authorization': `Bearer ${session.access_token}` // 传递认证 token
                                     },
-                                    body: JSON.stringify({
-                                        fingerprint: currentFp,
-                                        userId: githubUserId,
-                                        username: githubUsername
-                                    }),
+                                    body: JSON.stringify(migrateBody),
                                     signal: abortController.signal // 添加 signal 支持取消
                                 });
                                 
@@ -5112,6 +5219,11 @@
                                 if (migrateResponse.status === 404) {
                                     console.log('[Auth] ℹ️ 迁移接口不存在（404），跳过迁移，继续正常流程');
                                     // 不抛出错误，继续执行后续逻辑
+                                } else if (migrateResponse.status === 400 && (errorMsg.includes('claim_token') || errorMsg.includes('无效'))) {
+                                    // 【核心修复】令牌确实无效或已过期,必须清除,否则用户每次登录都会报错
+                                    console.warn('[Auth] ⚠️ 检测到失效的影子令牌,正在强制清除本地缓存...');
+                                    localStorage.removeItem('vibe_claim_token');
+                                    localStorage.removeItem('user_fingerprint'); // 同时清除指纹
                                 } else {
                                     // 其他错误，记录但不中断流程
                                     console.warn('[Auth] ⚠️ 数据迁移失败，继续正常流程:', errorMsg);
@@ -5127,12 +5239,13 @@
                                 console.log('[Auth] ✅ Step A: 数据迁移成功:', migrateResult.data);
                                 migrationSuccess = true;
                                 
-                                // 【Task 1】清除本地的 user_fingerprint 缓存，统一使用 Supabase User ID
+                                // 【场景 A：先分析后登录】清除 claim_token 和 fingerprint 缓存
+                                localStorage.removeItem('vibe_claim_token');
                                 localStorage.removeItem('user_fingerprint');
                                 if (window.fpId) {
                                     delete window.fpId;
                                 }
-                                console.log('[Auth] ✅ 已清除本地 fingerprint 缓存');
+                                console.log('[Auth] ✅ 已清除本地 fingerprint 和 claim_token 缓存');
                                 
                                 // 迁移成功后，更新 window.allData
                                 const allData = window.allData || [];
@@ -5393,6 +5506,12 @@
                                                 const analyzeResult = await analyzeResponse.json();
                                                 console.log('[Auth] ✅ 静默分析同步成功:', analyzeResult);
                                                 
+                                                // 【强制固化存储】保存 claim_token 到 localStorage
+                                                if (analyzeResult.claim_token) {
+                                                    localStorage.setItem('vibe_claim_token', analyzeResult.claim_token);
+                                                    console.log('[Auth] 🔑 影子令牌已保存到本地:', analyzeResult.claim_token.substring(0, 8) + '...');
+                                                }
+                                                
                                                 // 更新 updatedUser 数据
                                                 if (analyzeResult.dimensions) {
                                                     updatedUser = { ...updatedUser, ...analyzeResult };
@@ -5407,6 +5526,16 @@
                                                         allData.push(updatedUser);
                                                     }
                                                     window.allData = allData;
+                                                    
+                                                    // 【静默刷新】触发页面数值刷新
+                                                    if (typeof window.refreshUserStats === 'function') {
+                                                        try {
+                                                            await window.refreshUserStats();
+                                                            console.log('[Auth] ✅ 静默刷新完成');
+                                                        } catch (refreshError) {
+                                                            console.warn('[Auth] ⚠️ 静默刷新失败:', refreshError);
+                                                        }
+                                                    }
                                                 }
                                             } else {
                                                 console.warn('[Auth] ⚠️ 静默分析同步失败:', await analyzeResponse.text());
@@ -6772,7 +6901,22 @@
                 // --- 渲染图表组件 ---
                 // 渲染地理位置热力排行和地图
                 if (data.locationRank && Array.isArray(data.locationRank) && data.locationRank.length > 0) {
-                    if (typeof echarts !== 'undefined') {
+                    // 检查 ECharts 是否已加载
+                    if (typeof echarts === 'undefined') {
+                        console.warn('[fetchData] ⚠️ ECharts 未加载，延迟初始化地图...');
+                        // 延迟重试地图初始化
+                        setTimeout(async () => {
+                            if (typeof echarts !== 'undefined') {
+                                try {
+                                    await initGlobalMap(data.locationRank);
+                                } catch (mapError) {
+                                    console.error('[fetchData] ❌ 延迟地图初始化失败:', mapError);
+                                }
+                            } else {
+                                console.error('[fetchData] ❌ ECharts 仍未加载，无法初始化地图');
+                            }
+                        }, 1000);
+                    } else {
                         try {
                             await initGlobalMap(data.locationRank);
                         } catch (mapError) {
@@ -6789,6 +6933,14 @@
                     const locationListEl = document.getElementById('locationList');
                     if (locationListEl) {
                         locationListEl.innerHTML = '<div class="text-center text-zinc-500 py-4 text-[10px]">暂无数据</div>';
+                    }
+                    // 即使没有数据，也尝试初始化空地图
+                    if (typeof echarts !== 'undefined') {
+                        try {
+                            await initGlobalMap([]);
+                        } catch (mapError) {
+                            console.warn('[fetchData] ⚠️ 空地图初始化失败:', mapError);
+                        }
                     }
                 }
                 
@@ -8329,6 +8481,13 @@
                         
                         if (currentUser) {
                             console.log('[Refresh] ✅ 通过 fingerprint 找到用户:', currentUser.user_name || currentUser.name);
+                            
+                            // 【Master Key】一旦通过指纹找到有数据的用户，将其指纹永久存入本地
+                            const totalMsgs = currentUser.total_messages || currentUser.stats?.total_messages || 0;
+                            if (totalMsgs > 0 && currentUser.fingerprint) {
+                                localStorage.setItem('last_successful_fingerprint', currentUser.fingerprint);
+                                console.log('[Refresh] 🔑 已录入 Master Key:', currentUser.fingerprint.substring(0, 8) + '...');
+                            }
                         }
                     }
                 }
@@ -8336,6 +8495,12 @@
                 if (currentUser) {
                     window.currentUser = currentUser;
                     window.currentUserMatchedByFingerprint = !matchedByGitHub; // 如果通过 GitHub 匹配，则设为 false
+                    
+                    // 【Master Key】如果当前用户有数据且已识别，确保持久化存储其指纹（作为万能钥匙）
+                    const totalMsgs = currentUser.total_messages || currentUser.stats?.total_messages || 0;
+                    if (totalMsgs > 0 && currentUser.fingerprint) {
+                        localStorage.setItem('last_successful_fingerprint', currentUser.fingerprint);
+                    }
                     
                     // 刷新排名卡片
                     renderRankCards(currentUser);

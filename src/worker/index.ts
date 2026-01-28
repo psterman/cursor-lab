@@ -12,7 +12,7 @@ import { getRoastText, getPersonalityName, getVibeIndex, determinePersonalityTyp
 import { getRankResult, RANK_DATA } from './rank';
 // 直接从 rank-content.ts 导入 RANK_RESOURCES（rank.ts 已导入但未导出）
 import { RANK_RESOURCES } from '../rank-content';
-import { identifyUserByFingerprint, identifyUserByUserId, bindFingerprintToUser, updateUserByFingerprint, migrateFingerprintToUserId } from './fingerprint-service';
+import { identifyUserByFingerprint, identifyUserByUserId, identifyUserByUsername, bindFingerprintToUser, updateUserByFingerprint, migrateFingerprintToUserId, identifyUserByClaimToken } from './fingerprint-service';
 
 // Cloudflare Workers 类型定义（兼容性处理）
 type KVNamespace = {
@@ -44,7 +44,7 @@ type ExecutionContext = {
 };
 
 // 定义环境变量类型
-type Env = {
+export type Env = {
   SUPABASE_URL?: string;
   SUPABASE_KEY?: string;
   STATS_STORE?: KVNamespace; // KV 存储（第二阶段使用）
@@ -1458,7 +1458,8 @@ app.post('/api/v2/analyze', async (c) => {
     };
 
     // 【V6 协议】构建返回结果（包含 answer_book、analysis、semanticFingerprint）
-    const result = {
+    // 注意：claimToken 将在后续的数据库写入逻辑中生成，这里先不包含
+    const result: any = {
       status: 'success',
       dimensions: dimensions,
       roastText: roastText,
@@ -1596,6 +1597,17 @@ app.post('/api/v2/analyze', async (c) => {
           // 【V6 协议】使用 v6Stats 或从 finalStats 构建
           const v6StatsForStorage = v6Stats || finalStats;
           
+          // 【场景 A：先分析后登录】如果是匿名用户，生成 claim_token
+          // 注意：claimToken 需要在 result 对象中使用，所以定义在外部作用域
+          let claimToken: string | null = null;
+          if (!useUserIdForUpsert) {
+            claimToken = crypto.randomUUID();
+            console.log('[Worker] 🔑 为匿名用户生成 claim_token:', claimToken.substring(0, 8) + '...');
+            
+            // 【关键修复】立即添加到返回结果中，不要在 waitUntil 异步块中赋值，否则返回时 token 为空
+            result.claim_token = claimToken;
+          }
+          
           const payload: any = {
             // 【GitHub OAuth 优先】如果使用 user_id，则设置 id 字段；否则使用 fingerprint
             ...(useUserIdForUpsert ? { id: authenticatedUserId } : {}),
@@ -1603,6 +1615,8 @@ app.post('/api/v2/analyze', async (c) => {
             user_name: body.userName || '匿名受害者',
             user_identity: useUserIdForUpsert ? 'github' : 'fingerprint',
             personality_type: personalityType,
+            // 【场景 A：先分析后登录】保存 claim_token 到数据库
+            ...(claimToken ? { claim_token: claimToken } : {}),
             
             // 【字段名对齐】使用数据库字段名：l_score, p_score, d_score, e_score, f_score
             l_score: Math.max(0, Math.min(100, Math.round(dimensions.L))),
@@ -1690,13 +1704,13 @@ app.post('/api/v2/analyze', async (c) => {
             lang: payload.lang,
           });
 
-          // 【异步存储】使用 waitUntil 幂等 Upsert
+          // 【同步存储】必须 await 以确保后续认领操作能找到数据
           // 【GitHub OAuth 优先】如果使用 user_id，则按 id 冲突；否则按 fingerprint 冲突
-          // Supabase REST API 的 Upsert 通过 URL 参数 on_conflict 和 Prefer 头实现
           const conflictKey = useUserIdForUpsert ? 'id' : 'fingerprint';
           const supabaseUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=${conflictKey}`;
-          executionCtx.waitUntil(
-            Promise.all([
+          
+          try {
+            await Promise.all([
               // 写入 Supabase（增强错误处理）
               (async () => {
                 try {
@@ -1706,7 +1720,7 @@ app.post('/api/v2/analyze', async (c) => {
                       'apikey': env.SUPABASE_KEY!,
                       'Authorization': `Bearer ${env.SUPABASE_KEY}`,
                       'Content-Type': 'application/json',
-                      'Prefer': 'resolution=merge-duplicates', // 冲突时合并（更新），配合 on_conflict=fingerprint 使用
+                      'Prefer': 'resolution=merge-duplicates',
                     },
                     body: JSON.stringify(payload),
                   });
@@ -1715,45 +1729,16 @@ app.post('/api/v2/analyze', async (c) => {
                     const errorText = await res.text().catch(() => '无法读取错误信息');
                     console.error('[Supabase] ❌ Upsert 失败:', {
                       status: res.status,
-                      statusText: res.statusText,
                       error: errorText,
-                      fingerprint: payload.fingerprint,
-                      payloadKeys: Object.keys(payload),
-                      l_score: payload.l_score,
-                      p_score: payload.p_score,
-                      d_score: payload.d_score,
-                      e_score: payload.e_score,
-                      f_score: payload.f_score,
-                      hasPersonalityData: !!payload.personality_data,
-                      personalityDataLength: payload.personality_data?.length || 0,
                     });
-                    throw new Error(`Supabase Upsert 失败: ${res.status} ${res.statusText} - ${errorText}`);
                   } else {
                     console.log('[Supabase] ✅ 数据已成功写入:', {
                       fingerprint: payload.fingerprint,
-                      work_days: payload.work_days,
-                      jiafang_count: payload.jiafang_count,
-                      ketao_count: payload.ketao_count,
-                      hasStats: !!payload.stats,
-                      hasPersonality: !!payload.personality,
-                      detailedStatsCount: payload.personality?.detailedStats?.length || 0,
-                      hasPersonalityData: !!payload.personality_data,
-                      personalityDataLength: payload.personality_data?.length || 0,
-                      l_score: payload.l_score,
-                      p_score: payload.p_score,
-                      d_score: payload.d_score,
-                      e_score: payload.e_score,
-                      f_score: payload.f_score,
+                      hasClaimToken: !!payload.claim_token,
                     });
                   }
                 } catch (err: any) {
-                  console.error('[Supabase] ❌ Upsert 异常:', {
-                    error: err.message || err,
-                    stack: err.stack,
-                    fingerprint: payload.fingerprint,
-                    payloadPreview: JSON.stringify(payload).substring(0, 500),
-                  });
-                  // 不抛出错误，避免影响主流程
+                  console.error('[Supabase] ❌ Upsert 异常:', err.message);
                 }
               })(),
               // 【V6 协议】增量更新 KV 全局统计
@@ -1761,20 +1746,13 @@ app.post('/api/v2/analyze', async (c) => {
                 try {
                   await updateGlobalStatsV6(env, finalStats, dimensions);
                 } catch (err: any) {
-                  console.warn('[Worker] ⚠️ V6 全局统计更新失败:', {
-                    error: err.message || err,
-                    stack: err.stack,
-                  });
+                  console.warn('[Worker] ⚠️ V6 全局统计更新失败:', err.message);
                 }
               })(),
-            ]).catch(err => {
-              // 全局错误捕获
-              console.error('[Worker] ❌ waitUntil 任务执行失败:', {
-                error: err.message || err,
-                stack: err.stack,
-              });
-            })
-          );
+            ]);
+          } catch (err: any) {
+            console.error('[Worker] ❌ 数据库同步任务失败:', err.message);
+          }
         } else {
           console.warn('[DB] ⚠️ executionCtx.waitUntil 不可用，跳过数据库写入');
         }
@@ -1835,7 +1813,7 @@ app.get('/api/random_prompt', async (c) => {
     
     // 从 D1 数据库查询随机记录
     const result = await env.prompts_library.prepare(
-      'SELECT id, content, note as author FROM answer_book WHERE lang = ? ORDER BY RANDOM() LIMIT 1'
+          'SELECT id, content, note as author FROM answer_book WHERE lang = ? ORDER BY RANDOM() LIMIT 1'
     ).bind(lang).first();
     
     return c.json({
@@ -1965,13 +1943,22 @@ app.post('/api/fingerprint/migrate', async (c) => {
   try {
     const env = c.env;
     const body = await c.req.json();
-    const { fingerprint: oldFingerprint, userId: githubUserId } = body;
+    const { fingerprint: oldFingerprint, sourceFp, userId: githubUserId, username: githubUsername, claimToken } = body;
 
-    if (!oldFingerprint || !githubUserId) {
+    if (!githubUserId) {
       return c.json({
         status: 'error',
-        error: 'fingerprint 和 userId 参数必填',
+        error: 'userId 参数必填',
         errorCode: 'MISSING_PARAMETERS',
+      }, 400);
+    }
+
+    // 【强制令牌校验】必须提供 claimToken
+    if (!claimToken) {
+      return c.json({
+        status: 'error',
+        error: 'claimToken 参数必填 - 必须先进行分析才能认领数据',
+        errorCode: 'MISSING_CLAIM_TOKEN',
       }, 400);
     }
 
@@ -2044,19 +2031,65 @@ app.post('/api/fingerprint/migrate', async (c) => {
       }, 400);
     }
 
-    // 【步骤 2：数据查询】同时查询 id = githubUserId (目标记录) 和 fingerprint = oldFingerprint (源记录)
-    console.log('[Worker] 🔍 开始查询源记录和目标记录...');
+    // 【步骤 2：强制令牌认领】使用 claimToken 执行迁移
+    console.log('[Worker] 🔑 开始基于 claim_token 的强制认领流程...');
     
-    const [sourceRecord, targetRecord] = await Promise.all([
-      identifyUserByFingerprint(oldFingerprint, env),
-      identifyUserByUserId(githubUserId, env),
-    ]);
+    const result = await migrateFingerprintToUserId('', githubUserId, claimToken, env);
+    
+    if (result) {
+      console.log('[Worker] ✅ 数据认领成功');
+      return c.json({
+        status: 'success',
+        data: result,
+        message: '数据认领成功',
+        requiresRefresh: true,
+      });
+    } else {
+      console.log('[Worker] ⚠️ 数据认领失败');
+      return c.json({
+        status: 'error',
+        error: 'claim_token 无效或已过期，或数据已被认领',
+        errorCode: 'CLAIM_FAILED',
+      }, 400);
+    }
+    
+    // 传统迁移流程（保持向后兼容）
+    let sourceRecord = null;
+    let successfulFp = null;
 
-    console.log('[Worker] 📊 查询结果:', {
+    // 1. 尝试使用 sourceFp (Master Key)
+    if (sourceFp) {
+      sourceRecord = await identifyUserByFingerprint(sourceFp, env);
+      if (sourceRecord && (sourceRecord.total_messages || 0) > 0) {
+        successfulFp = sourceFp;
+        console.log('[Worker] 🔑 Master Key (sourceFp) 溯源成功');
+      }
+    }
+
+    // 2. 尝试使用 oldFingerprint (当前设备指纹)
+    if (!successfulFp && oldFingerprint) {
+      sourceRecord = await identifyUserByFingerprint(oldFingerprint, env);
+      if (sourceRecord && (sourceRecord.total_messages || 0) > 0) {
+        successfulFp = oldFingerprint;
+        console.log('[Worker] 🔑 当前设备指纹 (oldFingerprint) 溯源成功');
+      }
+    }
+
+    // 3. 深度溯源：尝试使用 username (githubUsername) 寻找匿名记录
+    if (!successfulFp && githubUsername) {
+      sourceRecord = await identifyUserByUsername(githubUsername, env);
+      if (sourceRecord) {
+        successfulFp = sourceRecord.fingerprint || sourceRecord.user_identity; 
+        console.log('[Worker] 🔍 深度溯源 (username) 成功');
+      }
+    }
+
+    const targetRecord = await identifyUserByUserId(githubUserId, env);
+
+    console.log('[Worker] 📊 溯源结果:', {
       sourceRecordExists: !!sourceRecord,
       targetRecordExists: !!targetRecord,
-      sourceRecordId: sourceRecord?.id?.substring(0, 8) + '...',
-      targetRecordId: targetRecord?.id?.substring(0, 8) + '...',
+      successfulFp: successfulFp ? successfulFp.substring(0, 8) + '...' : 'none',
     });
 
     // 【步骤 3：条件判断】
@@ -2083,7 +2116,7 @@ app.post('/api/fingerprint/migrate', async (c) => {
 
     console.log('[Worker] ✅ 找到有效源记录:', {
       sourceId: sourceRecord.id?.substring(0, 8) + '...',
-      fingerprint: oldFingerprint.substring(0, 8) + '...',
+      successfulFp: successfulFp ? successfulFp.substring(0, 8) + '...' : 'none',
       total_messages: sourceTotalMessages,
       has_scores: !!(sourceRecord.l_score || sourceRecord.p_score),
     });
@@ -2167,10 +2200,10 @@ app.post('/api/fingerprint/migrate', async (c) => {
       console.log('[Worker] ✅ 已包含 personality_data 字段，长度:', Array.isArray(sourcePersonalityData) ? sourcePersonalityData.length : 'N/A');
     }
     
-    // 【更新 fingerprint 字段】同时更新 userId 记录的 fingerprint 字段，确保关联建立
-    if (oldFingerprint) {
-      updateData.fingerprint = oldFingerprint;
-      console.log('[Worker] ✅ 已设置 fingerprint 字段，确保关联建立');
+    // 【物理归一化】更新 GitHub 记录的 fingerprint 字段为溯源成功的指纹，实现物理绑定
+    if (successfulFp) {
+      updateData.fingerprint = successfulFp;
+      console.log('[Worker] 🔗 执行物理归一化：关联指纹已存入数据库');
     }
     
     // 保留目标记录的关键字段（用户名等），如果目标记录不存在则使用源记录
@@ -2293,9 +2326,8 @@ app.post('/api/fingerprint/migrate', async (c) => {
       hasScores: !!(migratedUser?.l_score || migratedUser?.p_score),
     });
 
-    // 【物理同步】在迁移成功后，执行一个明确的 SQL UPDATE，将 user_analysis 表中该 GitHub 记录的 fingerprint 字段更新为迁移过来的指纹值
-    // 这样 v_unified_analysis_v2 视图才能生效（视图依赖 fingerprint 字段进行关联）
-    if (oldFingerprint) {
+    // 【物理同步】在迁移成功后，确保 fingerprint 字段物理更新
+    if (successfulFp) {
       console.log('[Worker] 🔄 执行物理同步：更新 fingerprint 字段...');
       const fingerprintUpdateUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(githubUserId)}`;
       
@@ -2308,7 +2340,7 @@ app.post('/api/fingerprint/migrate', async (c) => {
           'Prefer': 'return=representation',
         },
         body: JSON.stringify({
-          fingerprint: oldFingerprint,
+          fingerprint: successfulFp,
           updated_at: new Date().toISOString(),
         }),
       });
@@ -2323,7 +2355,7 @@ app.post('/api/fingerprint/migrate', async (c) => {
         const fingerprintUpdateResult = await fingerprintUpdateResponse.json();
         console.log('[Worker] ✅ fingerprint 字段物理同步成功:', {
           userId: githubUserId.substring(0, 8) + '...',
-          fingerprint: oldFingerprint.substring(0, 8) + '...',
+          fingerprint: successfulFp.substring(0, 8) + '...',
           updated: fingerprintUpdateResult ? 'yes' : 'no'
         });
         console.log('[Worker] ✅ v_unified_analysis_v2 视图现在可以通过 fingerprint 字段正确关联数据');
@@ -2475,8 +2507,13 @@ app.post('/api/analyze', async (c) => {
     // 【调试日志】在写入前添加调试日志
     console.log('[Debug] 准备写入 user_analysis:', JSON.stringify(body, null, 2));
     
+    // 【新增】影子令牌生成逻辑
+    const claimToken = crypto.randomUUID();
+    console.log('[Worker] 🔑 为匿名用户(v1)生成 claim_token:', claimToken.substring(0, 8) + '...');
+
     const payload = {
       user_identity: userIdentity,
+      claim_token: claimToken, // 保存令牌到数据库
       // 强制写入明确数值（保底 50），并与数据库列名（小写）保持一致
       l: Number(dimensions?.L) || 50,        // 小写字段映射
       p: Number(dimensions?.P) || 50,
@@ -2687,6 +2724,7 @@ app.post('/api/analyze', async (c) => {
       status: 'success',
       success: true,
       totalUsers: totalUsers,
+      claim_token: claimToken, // 【关键修复】向前端返回影子令牌，用于登录后认领数据
       ranking: beatMsg,
       rankPercent: ranks.messageRank,
       defeated: beatMsg,
