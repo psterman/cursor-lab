@@ -1388,7 +1388,35 @@
         // 维度排名数据资源（从 rank-content.ts 加载）
         let RANK_RESOURCES = null;
 
+        // ============================================
+        // 【全局错误捕获】防止单个模块崩溃导致整个页面无法加载
+        // ============================================
+        window.addEventListener('error', (event) => {
+            console.error('[Global Error Handler] ❌ 捕获到全局错误:', {
+                message: event.message,
+                filename: event.filename,
+                lineno: event.lineno,
+                colno: event.colno,
+                error: event.error
+            });
+            
+            // 如果是语法错误，尝试继续执行关键初始化
+            if (event.error && event.error.name === 'SyntaxError') {
+                console.warn('[Global Error Handler] ⚠️ 检测到语法错误，尝试继续初始化关键功能...');
+                // 不阻止默认行为，但记录错误
+            }
+        });
+        
+        // 捕获未处理的 Promise 拒绝
+        window.addEventListener('unhandledrejection', (event) => {
+            console.error('[Global Error Handler] ❌ 捕获到未处理的 Promise 拒绝:', event.reason);
+            // 阻止默认行为（控制台报错），但记录错误
+            event.preventDefault();
+        });
+        
+        // ============================================
         // 初始化 Supabase 客户端（全局作用域直接执行）
+        // ============================================
         // 使用轮询方式等待 SDK 加载完成
         let initAttempts = 0;
         const maxAttempts = 50; // 最多尝试 5 秒（50 * 100ms）
@@ -1782,43 +1810,177 @@
             const rightDrawerDimensions = ['ai', 'word', 'day', 'no', 'say', 'please']; // 所有维度卡片
 
             // 获取当前用户数据（用于判断是否为全球最强模式）
-            // 尝试从多个来源获取用户数据
+            // 尝试从多个来源获取用户数据（与 window.onload 逻辑一致）
             let currentUser = null;
             try {
                 // 方法1: 从全局变量获取
                 if (window.currentUser) {
                     currentUser = window.currentUser;
+                    console.log('[Drawer] ✅ 从全局变量获取到用户数据:', currentUser.user_name || currentUser.name);
                 } else {
                     // 方法2: 从 localStorage 和 URL 参数获取，与 renderRankCards 逻辑一致
-                    const localGitHubName = localStorage.getItem('github_username');
-                    const currentFingerprint = localStorage.getItem('user_fingerprint');
+                    // 辅助函数：规范化指纹字符串（忽略大小写并剔除首尾空格）
+                    const normalizeFingerprint = (fp) => {
+                        if (!fp) return '';
+                        return String(fp).trim().toLowerCase();
+                    };
+                    
+                    let localGitHubName = null;
+                    let currentFingerprint = null;
+                    try {
+                        localGitHubName = localStorage.getItem('github_username');
+                        currentFingerprint = localStorage.getItem('user_fingerprint');
+                        console.log('[Drawer] 🔍 从 localStorage 读取:', {
+                            hasFingerprint: !!currentFingerprint,
+                            fingerprintPrefix: currentFingerprint ? currentFingerprint.substring(0, 8) : null,
+                            hasGitHub: !!localGitHubName
+                        });
+                    } catch (e) {
+                        console.warn('[Drawer] ⚠️ 读取 localStorage 失败:', e);
+                    }
+                    
                     const urlParams = new URLSearchParams(window.location.search);
                     const urlFingerprint = urlParams.get('fingerprint');
                     const urlGitHubName = urlParams.get('github');
                     
-                    // 查找匹配的用户数据
-                    const allData = window.allData || [];
-                    currentUser = allData.find(item => {
-                        const itemFingerprint = item.fingerprint || item.user_fingerprint;
-                        const itemGitHub = item.github_username || item.user_name || item.name;
-                        return (itemFingerprint && (itemFingerprint === currentFingerprint || itemFingerprint === urlFingerprint)) ||
-                               (itemGitHub && (itemGitHub === localGitHubName || itemGitHub === urlGitHubName));
-                    });
+                    // 规范化当前指纹
+                    const normalizedCurrentFingerprint = normalizeFingerprint(currentFingerprint);
+                    const normalizedUrlFingerprint = normalizeFingerprint(urlFingerprint);
+                    
+                    // 查找匹配的用户数据（优先级：指纹优先 > GitHub ID）
+                    let allData = window.allData || [];
+                    console.log('[Drawer] 📊 allData 数据量:', allData.length);
+                    
+                    // 如果 allData 为空或很少，尝试重新获取数据
+                    if (allData.length === 0 && normalizedCurrentFingerprint) {
+                        console.log('[Drawer] ⚠️ allData 为空，尝试重新获取数据...');
+                        // 异步重新获取数据（不阻塞抽屉显示）
+                        fetchData().then(() => {
+                            allData = window.allData || [];
+                            console.log('[Drawer] ✅ 重新获取数据完成，allData 数据量:', allData.length);
+                            
+                            // 重新尝试匹配用户
+                            const matchedUser = allData.find(item => {
+                                const itemFingerprint = normalizeFingerprint(item.fingerprint || item.user_fingerprint);
+                                const itemIdentity = normalizeFingerprint(item.user_identity);
+                                return (itemFingerprint && itemFingerprint === normalizedCurrentFingerprint) ||
+                                       (itemIdentity && itemIdentity === normalizedCurrentFingerprint);
+                            });
+                            
+                            if (matchedUser) {
+                                console.log('[Drawer] ✅ 重新匹配到用户:', matchedUser.user_name || matchedUser.name);
+                                // 更新全局变量
+                                window.currentUser = matchedUser;
+                                // 重新渲染统计卡片
+                                const leftBody = document.getElementById('left-drawer-body');
+                                if (leftBody) {
+                                    renderUserStatsCards(leftBody, matchedUser);
+                                }
+                            }
+                        }).catch(err => {
+                            console.error('[Drawer] ❌ 重新获取数据失败:', err);
+                        });
+                    }
+                    
+                    // 优先通过指纹匹配
+                    if (normalizedCurrentFingerprint || normalizedUrlFingerprint) {
+                        console.log('[Drawer] 🔍 开始指纹匹配，目标指纹:', normalizedCurrentFingerprint || normalizedUrlFingerprint);
+                        currentUser = allData.find(item => {
+                            const itemFingerprint = normalizeFingerprint(item.fingerprint || item.user_fingerprint);
+                            const itemIdentity = normalizeFingerprint(item.user_identity);
+                            
+                            const matchFingerprint = itemFingerprint && (itemFingerprint === normalizedCurrentFingerprint || itemFingerprint === normalizedUrlFingerprint);
+                            const matchIdentity = itemIdentity && (itemIdentity === normalizedCurrentFingerprint || itemIdentity === normalizedUrlFingerprint);
+                            
+                            if (matchFingerprint || matchIdentity) {
+                                console.log('[Drawer] ✅ 指纹匹配成功:', {
+                                    itemFingerprint: itemFingerprint ? itemFingerprint.substring(0, 8) : null,
+                                    itemIdentity: itemIdentity ? itemIdentity.substring(0, 8) : null,
+                                    userName: item.user_name || item.name
+                                });
+                            }
+                            
+                            return matchFingerprint || matchIdentity;
+                        });
+                        
+                        if (!currentUser) {
+                            console.log('[Drawer] ⚠️ 指纹匹配失败，allData 中的指纹样本:', 
+                                allData.slice(0, 3).map(item => ({
+                                    fingerprint: item.fingerprint ? item.fingerprint.substring(0, 8) : null,
+                                    user_identity: item.user_identity ? item.user_identity.substring(0, 8) : null,
+                                    user_name: item.user_name || item.name
+                                }))
+                            );
+                        }
+                    }
+                    
+                    // 如果指纹未匹配，再退而求其次寻找 github_username
+                    if (!currentUser && localGitHubName && isValidGitHubUsername(localGitHubName)) {
+                        console.log('[Drawer] 🔍 开始 GitHub ID 匹配:', localGitHubName);
+                        const normalizedLocalGitHub = normalizeFingerprint(localGitHubName);
+                        const normalizedUrlGitHub = normalizeFingerprint(urlGitHubName);
+                        
+                        currentUser = allData.find(item => {
+                            const itemGitHub = normalizeFingerprint(item.github_username || item.user_name || item.name);
+                            return itemGitHub && (itemGitHub === normalizedLocalGitHub || itemGitHub === normalizedUrlGitHub);
+                        });
+                        
+                        if (currentUser) {
+                            console.log('[Drawer] ✅ 通过 GitHub ID 找到用户:', currentUser.user_name || currentUser.name);
+                        }
+                    }
                 }
             } catch (e) {
-                console.warn('[Drawer] 获取用户数据失败:', e);
+                console.error('[Drawer] ❌ 获取用户数据失败:', e);
             }
             
             const isGlobalTopMode = !currentUser;
             const userData = currentUser;
+            
+            if (!currentUser) {
+                console.log('[Drawer] ⚠️ 未找到当前用户数据，将显示全球最强模式');
+            } else {
+                console.log('[Drawer] ✅ 找到当前用户数据，将显示个人统计:', userData.user_name || userData.name);
+            }
 
             // 填充左侧抽屉 - user_identity_config 卡片
             if (leftBody) {
-                // 获取 GitHub 用户名和头像
-                const githubUsername = localStorage.getItem('github_username') || '';
-                const githubAvatarUrl = githubUsername && isValidGitHubUsername(githubUsername) 
-                    ? getGitHubAvatarUrl(githubUsername) 
-                    : DEFAULT_AVATAR;
+                // 获取 GitHub 用户名和指纹（增加异常处理）
+                let githubUsername = '';
+                let currentFingerprint = null;
+                try {
+                    githubUsername = localStorage.getItem('github_username') || '';
+                    currentFingerprint = localStorage.getItem('user_fingerprint');
+                } catch (e) {
+                    console.warn('[Drawer] ⚠️ 读取 localStorage 失败:', e);
+                }
+                
+                // 判断是否为纯指纹用户（无 GitHub ID）
+                const isFingerprintOnlyUser = !githubUsername || !isValidGitHubUsername(githubUsername);
+                const fingerprintPrefix = currentFingerprint ? currentFingerprint.substring(0, 6).toUpperCase() : '';
+                
+                // 确定显示的用户名和头像
+                let displayName = '';
+                let displayLabel = '';
+                let avatarUrl = DEFAULT_AVATAR;
+                
+                if (isFingerprintOnlyUser && currentFingerprint) {
+                    // 纯指纹用户：显示"匿名专家 [指纹前6位]"
+                    displayName = `匿名专家 ${fingerprintPrefix}`;
+                    displayLabel = '设备指纹';
+                    // 使用基于指纹的 Identicon
+                    avatarUrl = `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(currentFingerprint)}`;
+                } else if (githubUsername && isValidGitHubUsername(githubUsername)) {
+                    // 有 GitHub ID 的用户
+                    displayName = githubUsername;
+                    displayLabel = 'GitHub ID';
+                    avatarUrl = getGitHubAvatarUrl(githubUsername);
+                } else {
+                    // 默认状态
+                    displayName = '未设置';
+                    displayLabel = 'GitHub ID';
+                    avatarUrl = DEFAULT_AVATAR;
+                }
                 
                 // 获取当前状态
                 const currentStatus = localStorage.getItem('user_status') || 'idle';
@@ -1837,20 +1999,20 @@
                     
                     <div class="drawer-item-label mb-2">用户身份配置</div>
                     
-                    <!-- GitHub 信息 -->
+                    <!-- 用户信息（GitHub 或指纹） -->
                     <div class="mb-3 pb-3 border-b border-[#00ff41]/10">
                         <div class="flex items-center gap-2 mb-2">
                             <div class="w-8 h-8 rounded-full overflow-hidden border border-[#00ff41]/30 flex-shrink-0">
                                 <img 
-                                    src="${githubAvatarUrl}" 
+                                    src="${avatarUrl}" 
                                     alt="Avatar" 
                                     class="w-full h-full object-cover"
                                     onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
                                 />
                             </div>
                             <div class="flex-1 min-w-0">
-                                <div class="drawer-item-value text-sm truncate">${githubUsername || '未设置'}</div>
-                                <div class="drawer-item-desc text-[8px]">GitHub ID</div>
+                                <div class="drawer-item-value text-sm truncate">${displayName}</div>
+                                <div class="drawer-item-desc text-[8px]">${displayLabel}</div>
                             </div>
                         </div>
                     </div>
@@ -1892,25 +2054,55 @@
                         </button>
                     </div>
                     
-                    <!-- GitHub ID 输入 -->
-                    <div class="mt-3 pt-3 border-t border-[#00ff41]/10">
-                        <div class="drawer-item-label mb-2">设置 GitHub ID</div>
-                        <div class="flex gap-1.5">
-                            <input 
-                                type="text" 
-                                id="drawer-github-username" 
-                                value="${githubUsername}"
-                                placeholder="输入 GitHub ID"
-                                class="flex-1 bg-zinc-900/50 border border-zinc-800 px-2 py-1.5 rounded text-[10px] text-white placeholder-zinc-600 focus:outline-none focus:border-[#00ff41] transition-colors"
-                                onkeypress="if(event.key === 'Enter') { const drawerInput = document.getElementById('drawer-github-username'); const mainInput = document.getElementById('githubUsername'); if(drawerInput && mainInput) { mainInput.value = drawerInput.value; updateGitHubAvatar(); } saveGitHubUsername(); if(currentDrawerCountry.code) showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name); }"
-                            />
+                    <!-- GitHub OAuth 登录区域 -->
+                    <div class="mt-3 pt-3 border-t border-[#00ff41]/10" id="auth-login-section">
+                        ${githubUsername && isValidGitHubUsername(githubUsername) 
+                            ? `
+                            <!-- 已登录状态：显示用户信息和退出按钮 -->
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <img 
+                                        src="${getGitHubAvatarUrl(githubUsername)}" 
+                                        alt="${githubUsername}"
+                                        class="w-6 h-6 rounded-full border border-[#00ff41]/30"
+                                        onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
+                                    />
+                                    <div>
+                                        <div class="text-[10px] text-white font-bold">${githubUsername}</div>
+                                        <a 
+                                            href="https://github.com/${githubUsername}" 
+                                            target="_blank"
+                                            class="text-[8px] text-[#00ff41]/60 hover:text-[#00ff41] transition-colors"
+                                        >
+                                            查看 GitHub
+                                        </a>
+                                    </div>
+                                </div>
+                                <button 
+                                    onclick="logout()"
+                                    class="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-[8px] text-zinc-400 hover:text-white transition-colors rounded"
+                                >
+                                    退出
+                                </button>
+                            </div>
+                            `
+                            : `
+                            <!-- 未登录状态：显示 GitHub 登录按钮 -->
+                            <div class="drawer-item-label mb-2">GitHub 登录</div>
                             <button 
-                                onclick="const drawerInput = document.getElementById('drawer-github-username'); const mainInput = document.getElementById('githubUsername'); if(drawerInput && mainInput) { mainInput.value = drawerInput.value; updateGitHubAvatar(); } saveGitHubUsername(); if(currentDrawerCountry.code) showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);"
-                                class="px-2 py-1.5 bg-[#00ff41]/20 border border-[#00ff41] text-[#00ff41] text-[10px] font-bold uppercase tracking-wider hover:bg-[#00ff41]/30 transition-colors whitespace-nowrap"
+                                onclick="loginWithGitHub()"
+                                class="w-full px-4 py-3 bg-[#24292e] hover:bg-[#2f363d] border border-[#444d56] rounded-md text-white text-sm font-semibold flex items-center justify-center gap-2 transition-all duration-200 hover:scale-105 active:scale-95 shadow-lg hover:shadow-xl"
                             >
-                                保存
+                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path fill-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clip-rule="evenodd"></path>
+                                </svg>
+                                <span>使用 GitHub 登录</span>
                             </button>
-                        </div>
+                            <div class="text-[8px] text-[#00ff41]/40 mt-2 text-center">
+                                安全、快速、一键登录
+                            </div>
+                            `
+                        }
                     </div>
                 `;
                 
@@ -1976,6 +2168,40 @@
                                 </div>
                             `;
                         }).join('');
+                    }
+                }
+                
+                // 如果检测到当前用户数据，自动加载用户统计卡片
+                if (currentUser) {
+                    console.log('[Drawer] 📊 开始渲染用户统计卡片...');
+                    renderUserStatsCards(leftBody, currentUser);
+                } else {
+                    console.log('[Drawer] ⚠️ 未找到用户数据，跳过统计卡片渲染');
+                    // 即使没有匹配到用户，如果 localStorage 中有 fingerprint，也显示一个提示
+                    try {
+                        const currentFingerprint = localStorage.getItem('user_fingerprint');
+                        if (currentFingerprint) {
+                            const waitingCard = document.createElement('div');
+                            waitingCard.className = 'drawer-item';
+                            waitingCard.innerHTML = `
+                                <div class="flex items-center justify-between mb-3">
+                                    <span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">⏳</span>
+                                    <span class="text-[8px] leading-none text-[#00ff41] border border-[#00ff41]/40 px-1 py-0.5 tracking-widest uppercase bg-[#00ff41]/5">
+                                        WAIT
+                                    </span>
+                                </div>
+                                <div class="drawer-item-label mb-2">数据加载中</div>
+                                <div class="text-[10px] text-[#00ff41]/60">
+                                    您的数据正在处理中，请稍候...
+                                </div>
+                                <div class="text-[8px] text-[#00ff41]/40 mt-2">
+                                    指纹: ${currentFingerprint.substring(0, 8)}...
+                                </div>
+                            `;
+                            leftBody.appendChild(waitingCard);
+                        }
+                    } catch (e) {
+                        console.warn('[Drawer] ⚠️ 显示等待卡片失败:', e);
                     }
                 }
             }
@@ -2272,24 +2498,23 @@
          * @param {Array} locationData - 地理位置数据 [{name: string, value: number}]
          */
         async function initGlobalMap(locationData) {
-            // 保存到全局变量
-            globalLocationData = locationData || [];
-            const chartDom = document.getElementById('map-container');
-            if (!chartDom) {
-                console.warn('[Map] ⚠️ 找不到地图容器元素');
-                return;
-            }
-            
-            // 检查 ECharts 和 ECharts GL 是否已加载
-            if (typeof echarts === 'undefined') {
-                console.warn('[Map] ⚠️ ECharts 未加载，无法渲染地图');
-                return;
-            }
-            
-            // 渲染令牌（只允许最后一次调用继续执行）
-            const seq = ++mapRenderSeq;
-
             try {
+                // 保存到全局变量
+                globalLocationData = locationData || [];
+                const chartDom = document.getElementById('map-container');
+                if (!chartDom) {
+                    console.warn('[Map] ⚠️ 找不到地图容器元素');
+                    return;
+                }
+                
+                // 检查 ECharts 和 ECharts GL 是否已加载
+                if (typeof echarts === 'undefined') {
+                    console.warn('[Map] ⚠️ ECharts 未加载，无法渲染地图');
+                    return;
+                }
+                
+                // 渲染令牌（只允许最后一次调用继续执行）
+                const seq = ++mapRenderSeq;
                 // 如果这次调用已经过期，直接退出（避免 dispose 后还继续 setOption）
                 if (seq !== mapRenderSeq) return;
 
@@ -3623,14 +3848,31 @@
                             // 检查更新的记录是否是当前用户，如果是则刷新排名卡片
                             // 实时更新：确保再次触发 renderRankCards(currentUser)，让卡片数字能够随着数据库实时变动
                             try {
-                                // 获取当前用户的标识信息
-                                const localGitHubName = localStorage.getItem('github_username');
-                                const currentFingerprint = localStorage.getItem('user_fingerprint');
+                                // 辅助函数：规范化指纹字符串（忽略大小写并剔除首尾空格）
+                                const normalizeFingerprint = (fp) => {
+                                    if (!fp) return '';
+                                    return String(fp).trim().toLowerCase();
+                                };
+                                
+                                // 获取当前用户的标识信息（增加异常处理）
+                                let localGitHubName = null;
+                                let currentFingerprint = null;
+                                try {
+                                    localGitHubName = localStorage.getItem('github_username');
+                                    currentFingerprint = localStorage.getItem('user_fingerprint');
+                                } catch (e) {
+                                    console.warn('[Realtime] ⚠️ 读取 localStorage 失败:', e);
+                                }
+                                
                                 const urlParams = new URLSearchParams(window.location.search);
                                 const urlId = urlParams.get('id');
                                 
-                                // 判断是否是当前用户的记录
+                                // 规范化当前指纹
+                                const normalizedCurrentFingerprint = normalizeFingerprint(currentFingerprint);
+                                
+                                // 判断是否是当前用户的记录（优先级匹配策略：指纹优先 > GitHub ID）
                                 let isCurrentUser = false;
+                                let matchedByFingerprint = false;
                                 
                                 // 方式1：通过 URL 参数匹配（最高优先级，用于调试）
                                 if (urlId) {
@@ -3641,25 +3883,58 @@
                                     }
                                 }
                                 
-                                // 方式2：通过 Fingerprint 匹配（优先于GitHub ID）
-                                if (!isCurrentUser && currentFingerprint) {
-                                    const recordFingerprint = (updatedRecord.fingerprint || updatedRecord.user_identity || '').toString();
-                                    if (recordFingerprint === currentFingerprint) {
+                                // 方式2：通过 Fingerprint 匹配（优先于GitHub ID，忽略大小写和空格）
+                                if (!isCurrentUser && normalizedCurrentFingerprint) {
+                                    const recordFingerprint = normalizeFingerprint(updatedRecord.fingerprint || updatedRecord.user_fingerprint);
+                                    const recordIdentity = normalizeFingerprint(updatedRecord.user_identity);
+                                    
+                                    if ((recordFingerprint && recordFingerprint === normalizedCurrentFingerprint) ||
+                                        (recordIdentity && recordIdentity === normalizedCurrentFingerprint)) {
                                         isCurrentUser = true;
+                                        matchedByFingerprint = true;
                                     }
                                 }
                                 
-                                // 方式3：通过 GitHub ID 匹配
+                                // 方式3：通过 GitHub ID 匹配（在指纹匹配失败后尝试）
                                 if (!isCurrentUser && localGitHubName && isValidGitHubUsername(localGitHubName)) {
-                                    const recordGithubId = (updatedRecord.github_username || updatedRecord.github_id || '').toString().toLowerCase().trim();
-                                    if (recordGithubId === localGitHubName.toLowerCase().trim()) {
+                                    // 【修复】统一使用 user_name 字段，不使用 github_username
+                                    const recordGithubId = normalizeFingerprint(updatedRecord.user_name || updatedRecord.github_id || '');
+                                    const normalizedLocalGitHub = normalizeFingerprint(localGitHubName);
+                                    if (recordGithubId && recordGithubId === normalizedLocalGitHub) {
                                         isCurrentUser = true;
                                     }
                                 }
                                 
-                                // 如果是当前用户的记录，刷新排名卡片
+                                // 如果是当前用户的记录，刷新排名卡片和全局变量
                                 if (isCurrentUser) {
                                     console.log('[Realtime] ✅ 检测到当前用户数据更新，刷新排名卡片');
+                                    
+                                    // 更新全局变量
+                                    window.currentUser = updatedRecord;
+                                    window.currentUserMatchedByFingerprint = matchedByFingerprint;
+                                    
+                                    // 更新 window.allData 中的对应记录
+                                    const allData = window.allData || [];
+                                    const updateIndex = allData.findIndex(item => {
+                                        const itemFingerprint = normalizeFingerprint(item.fingerprint || item.user_fingerprint);
+                                        const itemIdentity = normalizeFingerprint(item.user_identity);
+                                        const recordFingerprint = normalizeFingerprint(updatedRecord.fingerprint || updatedRecord.user_fingerprint);
+                                        const recordIdentity = normalizeFingerprint(updatedRecord.user_identity);
+                                        
+                                        return (itemFingerprint && itemFingerprint === recordFingerprint) ||
+                                               (itemIdentity && itemIdentity === recordIdentity) ||
+                                               (item.id && item.id === updatedRecord.id);
+                                    });
+                                    
+                                    if (updateIndex !== -1) {
+                                        allData[updateIndex] = updatedRecord;
+                                        window.allData = allData;
+                                    } else {
+                                        // 如果没找到，添加到数组
+                                        allData.push(updatedRecord);
+                                        window.allData = allData;
+                                    }
+                                    
                                     // 使用更新后的记录直接渲染，确保卡片数字能够实时变动
                                     renderRankCards(updatedRecord);
                                 } else {
@@ -4401,15 +4676,582 @@
         }
         
         /**
-         * 保存GitHub用户名到localStorage
+         * GitHub OAuth 登录
+         * 调用 Supabase Auth 的 signInWithOAuth 方法
          */
-        function saveGitHubUsername() {
-            const input = document.getElementById('githubUsername');
-            if (!input) {
-                console.warn('[GitHub] ⚠️ 找不到输入框元素');
+        async function loginWithGitHub() {
+            if (!supabaseClient) {
+                console.error('[Auth] ❌ Supabase 客户端未初始化');
+                alert('数据库连接未就绪，请稍候再试');
                 return;
             }
             
+            try {
+                console.log('[Auth] 🚀 开始 GitHub OAuth 登录流程...');
+                
+                // 获取当前页面 URL 作为重定向地址
+                const redirectTo = window.location.origin + window.location.pathname;
+                
+                const { data, error } = await supabaseClient.auth.signInWithOAuth({
+                    provider: 'github',
+                    options: {
+                        redirectTo: redirectTo,
+                        scopes: 'read:user user:email', // 请求读取用户信息和邮箱的权限
+                    }
+                });
+                
+                if (error) {
+                    console.error('[Auth] ❌ GitHub OAuth 登录失败:', error);
+                    alert(`登录失败: ${error.message}`);
+                    return;
+                }
+                
+                console.log('[Auth] ✅ GitHub OAuth 登录请求已发送，等待重定向...');
+                // 注意：signInWithOAuth 会触发页面重定向，后续逻辑在 handleAuthStateChange 中处理
+                
+            } catch (error) {
+                console.error('[Auth] ❌ GitHub OAuth 登录异常:', error);
+                alert(`登录失败: ${error.message || '未知错误'}`);
+            }
+        }
+        
+        /**
+         * 退出登录
+         * 清理会话和本地数据
+         */
+        async function logout() {
+            if (!supabaseClient) {
+                console.error('[Auth] ❌ Supabase 客户端未初始化');
+                return;
+            }
+            
+            try {
+                console.log('[Auth] 🚪 开始退出登录...');
+                
+                // 清理 localStorage
+                localStorage.removeItem('github_username');
+                // 保留 fingerprint，以便静默登录
+                
+                // 调用 Supabase Auth 退出
+                const { error } = await supabaseClient.auth.signOut();
+                
+                if (error) {
+                    console.error('[Auth] ❌ 退出登录失败:', error);
+                    alert(`退出失败: ${error.message}`);
+                    return;
+                }
+                
+                // 清理全局变量
+                window.currentUser = null;
+                window.currentUserMatchedByFingerprint = false;
+                
+                // 刷新 UI
+                updateAuthUI(null);
+                
+                // 刷新排名卡片（显示全球最强模式）
+                renderRankCards(null);
+                
+                console.log('[Auth] ✅ 已退出登录');
+                alert('已退出登录');
+                
+            } catch (error) {
+                console.error('[Auth] ❌ 退出登录异常:', error);
+                alert(`退出失败: ${error.message || '未知错误'}`);
+            }
+        }
+        
+        /**
+         * 处理认证状态变化
+         * 当用户登录/退出时自动调用
+         * @param {Object} session - Supabase 会话对象
+         */
+        async function handleAuthStateChange(session) {
+            console.log('[Auth] 🔔 认证状态变化:', session ? '已登录' : '未登录');
+            
+            if (session && session.user) {
+                try {
+                    const user = session.user;
+                    console.log('[Auth] 👤 用户信息:', {
+                        id: user.id,
+                        email: user.email,
+                        user_metadata: user.user_metadata
+                    });
+                    
+                    // 从 user_metadata 中提取 GitHub 信息
+                    // GitHub OAuth 返回的数据通常在 user_metadata 中
+                    const githubUsername = user.user_metadata?.user_name || 
+                                         user.user_metadata?.preferred_username ||
+                                         user.user_metadata?.login ||
+                                         user.email?.split('@')[0] || // 降级：使用邮箱前缀
+                                         null;
+                    
+                    const avatarUrl = user.user_metadata?.avatar_url || 
+                                    user.user_metadata?.picture ||
+                                    (githubUsername ? getGitHubAvatarUrl(githubUsername) : null) ||
+                                    DEFAULT_AVATAR;
+                    
+                    if (!githubUsername) {
+                        console.warn('[Auth] ⚠️ 无法从 user_metadata 中提取 GitHub 用户名');
+                        updateAuthUI(null);
+                        return;
+                    }
+                    
+                    console.log('[Auth] ✅ 提取到 GitHub 信息:', {
+                        username: githubUsername,
+                        avatarUrl: avatarUrl
+                    });
+                    
+                    // 保存到 localStorage（兼容旧代码）
+                    localStorage.setItem('github_username', githubUsername);
+                    
+                    // 关键绑定逻辑：自动获取指纹并同步到数据库
+                    const currentFingerprint = await getCurrentFingerprint();
+                    
+                    if (!currentFingerprint) {
+                        console.warn('[Auth] ⚠️ 无法获取指纹，跳过自动绑定');
+                        updateAuthUI({ username: githubUsername, avatarUrl });
+                        return;
+                    }
+                    
+                    console.log('[Auth] 🔗 开始自动绑定指纹到 GitHub 账户...');
+                    
+                    // 【关键修复】使用 upsert 方法，以 user_name 为冲突键进行更新
+                    // 注意：数据库表中只有 user_name 字段，没有 github_username 字段
+                    // 【修复变量冲突】只声明一次 normalizedUsername
+                    const normalizedUsername = githubUsername.toLowerCase().trim();
+                    
+                    console.log('[Auth] 🔗 执行 upsert 操作，冲突键: user_name =', normalizedUsername);
+                    
+                    // 首先尝试查找现有用户
+                    const { data: existingUser, error: findError } = await supabaseClient
+                        .from('user_analysis')
+                        .select('*')
+                        .eq('user_name', normalizedUsername)
+                        .maybeSingle();
+                    
+                    let updatedUser = null;
+                    
+                    if (existingUser) {
+                        // 用户已存在，更新 fingerprint
+                        console.log('[Auth] ✅ 找到现有用户，更新 fingerprint');
+                        
+                        const { data: updateData, error: updateError } = await supabaseClient
+                            .from('user_analysis')
+                            .update({
+                                fingerprint: currentFingerprint,
+                                updated_at: new Date().toISOString()
+                            })
+                            .eq('user_name', normalizedUsername)
+                            .select()
+                            .single();
+                        
+                        if (updateError) {
+                            console.error('[Auth] ❌ 更新用户失败:', updateError);
+                            // 即使更新失败，也继续使用现有用户数据
+                            updatedUser = { ...existingUser, fingerprint: currentFingerprint };
+                        } else {
+                            updatedUser = updateData;
+                            console.log('[Auth] ✅ 指纹已成功更新到数据库');
+                        }
+                    } else {
+                        // 用户不存在，创建新记录
+                        console.log('[Auth] ✅ 用户不存在，创建新记录');
+                        
+                        const newUserData = {
+                            id: crypto.randomUUID(),
+                            user_name: normalizedUsername,
+                            fingerprint: currentFingerprint,
+                            created_at: new Date().toISOString(),
+                            updated_at: new Date().toISOString()
+                        };
+                        
+                        const { data: insertData, error: insertError } = await supabaseClient
+                            .from('user_analysis')
+                            .insert([newUserData])
+                            .select()
+                            .single();
+                        
+                        if (insertError) {
+                            console.error('[Auth] ❌ 创建用户失败:', insertError);
+                            // 即使创建失败，也继续使用新用户数据
+                            updatedUser = newUserData;
+                        } else {
+                            updatedUser = insertData;
+                            console.log('[Auth] ✅ 新用户已创建，指纹已绑定');
+                        }
+                    }
+                    
+                    // 更新 window.allData（在 window.currentUser 赋值之后）
+                    const allData = window.allData || [];
+                    const index = allData.findIndex(item => 
+                        item.id === updatedUser.id ||
+                        (item.fingerprint && item.fingerprint === currentFingerprint) ||
+                        (item.user_name && item.user_name.toLowerCase() === normalizedUsername)
+                    );
+                    
+                    if (index !== -1) {
+                        allData[index] = { ...allData[index], ...updatedUser };
+                    } else {
+                        allData.push(updatedUser);
+                    }
+                    window.allData = allData;
+                    
+                    // 【关键修复】确保 window.currentUser 在 upsert 成功后立即赋值
+                    window.currentUser = updatedUser;
+                    window.currentUserMatchedByFingerprint = true;
+                    
+                    // 更新 UI（确保在数据加载完成后触发）
+                    try {
+                        updateAuthUI({ username: githubUsername, avatarUrl });
+                        console.log('[Auth] ✅ UI 已更新为已登录状态');
+                    } catch (uiError) {
+                        console.error('[Auth] ❌ UI 更新失败:', uiError);
+                    }
+                    
+                    // 触发地图定位脉冲（等待 window.allData 加载完成）
+                    try {
+                        // 确保 window.allData 已加载
+                        if (!window.allData || window.allData.length === 0) {
+                            console.log('[Auth] ⚠️ allData 未加载，等待数据加载完成...');
+                            // 延迟执行，等待 fetchData 完成
+                            setTimeout(async () => {
+                                try {
+                                    const location = await getUserLocation();
+                                    if (location && location.lat && location.lng && typeof triggerMapPulse === 'function') {
+                                        const statusConfig = USER_STATUSES[currentUserStatus] || USER_STATUSES.idle;
+                                        const pulseColor = statusConfig.status_color || '#00ff41';
+                                        triggerMapPulse(location.lng, location.lat, githubUsername, pulseColor, avatarUrl, githubUsername);
+                                        console.log('[Auth] ✅ 已触发地图脉冲（延迟）');
+                                    }
+                                } catch (pulseError) {
+                                    console.warn('[Auth] ⚠️ 触发地图脉冲失败（延迟）:', pulseError);
+                                }
+                            }, 1000);
+                        } else {
+                            const location = await getUserLocation();
+                            if (location && location.lat && location.lng && typeof triggerMapPulse === 'function') {
+                                const statusConfig = USER_STATUSES[currentUserStatus] || USER_STATUSES.idle;
+                                const pulseColor = statusConfig.status_color || '#00ff41';
+                                triggerMapPulse(location.lng, location.lat, githubUsername, pulseColor, avatarUrl, githubUsername);
+                                console.log('[Auth] ✅ 已触发地图脉冲');
+                            }
+                        }
+                    } catch (pulseError) {
+                        console.warn('[Auth] ⚠️ 触发地图脉冲失败:', pulseError);
+                    }
+                    
+                    // 自动打开抽屉并显示统计卡片（等待 window.allData 加载完成）
+                    try {
+                        // 确保 window.allData 已加载
+                        if (!window.allData || window.allData.length === 0) {
+                            console.log('[Auth] ⚠️ allData 未加载，等待数据加载完成后再打开抽屉...');
+                            // 延迟执行，等待 fetchData 完成
+                            setTimeout(async () => {
+                                try {
+                                    const location = await getUserLocation();
+                                    const countryCode = location?.countryCode || updatedUser?.ip_location || null;
+                                    const countryName = countryCode && countryNameMap[countryCode]
+                                        ? (currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en)
+                                        : (countryCode || '全球');
+                                    
+                                    if (countryCode && countryCode !== '全球') {
+                                        showDrawersWithCountryData(countryCode, countryName);
+                                        console.log('[Auth] ✅ 已打开抽屉并显示用户数据（延迟）');
+                                    } else {
+                                        const leftDrawer = document.getElementById('left-drawer');
+                                        const leftBody = document.getElementById('left-drawer-body');
+                                        if (leftDrawer && leftBody) {
+                                            if (!leftDrawer.classList.contains('active')) {
+                                                leftDrawer.classList.add('active');
+                                                const rightDrawer = document.getElementById('right-drawer');
+                                                if (rightDrawer) {
+                                                    rightDrawer.classList.add('active');
+                                                }
+                                            }
+                                            renderUserStatsCards(leftBody, updatedUser);
+                                            console.log('[Auth] ✅ 已刷新用户统计卡片（延迟）');
+                                        }
+                                    }
+                                } catch (drawerError) {
+                                    console.warn('[Auth] ⚠️ 打开抽屉失败（延迟）:', drawerError);
+                                }
+                            }, 1000);
+                        } else {
+                            const location = await getUserLocation();
+                            const countryCode = location?.countryCode || updatedUser?.ip_location || null;
+                            const countryName = countryCode && countryNameMap[countryCode]
+                                ? (currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en)
+                                : (countryCode || '全球');
+                            
+                            if (countryCode && countryCode !== '全球') {
+                                showDrawersWithCountryData(countryCode, countryName);
+                                console.log('[Auth] ✅ 已打开抽屉并显示用户数据');
+                            } else {
+                                const leftDrawer = document.getElementById('left-drawer');
+                                const leftBody = document.getElementById('left-drawer-body');
+                                if (leftDrawer && leftBody) {
+                                    if (!leftDrawer.classList.contains('active')) {
+                                        leftDrawer.classList.add('active');
+                                        const rightDrawer = document.getElementById('right-drawer');
+                                        if (rightDrawer) {
+                                            rightDrawer.classList.add('active');
+                                        }
+                                    }
+                                    renderUserStatsCards(leftBody, updatedUser);
+                                    console.log('[Auth] ✅ 已刷新用户统计卡片');
+                                }
+                            }
+                        }
+                    } catch (drawerError) {
+                        console.warn('[Auth] ⚠️ 打开抽屉失败:', drawerError);
+                    }
+                    
+                    // 刷新排名卡片（确保在数据加载完成后）
+                    try {
+                        if (window.currentUser) {
+                            renderRankCards(window.currentUser);
+                            console.log('[Auth] ✅ 已刷新排名卡片');
+                        }
+                    } catch (rankError) {
+                        console.warn('[Auth] ⚠️ 刷新排名卡片失败:', rankError);
+                    }
+                    
+                } catch (error) {
+                    console.error('[Auth] ❌ 处理认证状态变化失败:', error);
+                    updateAuthUI(null);
+                }
+            } else {
+                // 未登录状态
+                updateAuthUI(null);
+            }
+        }
+        
+        /**
+         * 更新认证 UI（登录按钮/用户信息显示）
+         * @param {Object|null} userInfo - 用户信息对象 { username, avatarUrl } 或 null
+         */
+        function updateAuthUI(userInfo) {
+            // 查找认证 UI 容器（可能在多个位置）
+            const authContainers = [
+                document.getElementById('auth-container'),
+                document.querySelector('.auth-container'),
+                document.querySelector('[data-auth-container]')
+            ].filter(Boolean);
+            
+            // 如果没有专门的容器，在左侧抽屉中更新
+            const leftBody = document.getElementById('left-drawer-body');
+            const identityCard = leftBody ? leftBody.querySelector('.drawer-item:first-child') : null;
+            
+            if (userInfo) {
+                // 已登录状态：显示用户信息
+                console.log('[Auth] ✅ 更新 UI 为已登录状态:', userInfo.username);
+                
+                    // 更新左侧抽屉中的身份卡片
+                const leftBody = document.getElementById('left-drawer-body');
+                if (leftBody) {
+                    const identityCard = leftBody.querySelector('.drawer-item:first-child');
+                    if (identityCard) {
+                        const userInfoSection = identityCard.querySelector('.mb-3.pb-3.border-b');
+                        const loginSection = identityCard.querySelector('#auth-login-section') || 
+                                            identityCard.querySelector('.mt-3.pt-3.border-t');
+                        
+                        if (userInfoSection) {
+                            userInfoSection.innerHTML = `
+                                <div class="flex items-center gap-2 mb-2">
+                                    <div class="w-8 h-8 rounded-full overflow-hidden border border-[#00ff41]/30 flex-shrink-0">
+                                        <img 
+                                            src="${userInfo.avatarUrl}" 
+                                            alt="Avatar" 
+                                            class="w-full h-full object-cover"
+                                            onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
+                                        />
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="drawer-item-value text-sm truncate">${userInfo.username}</div>
+                                        <div class="drawer-item-desc text-[8px]">GitHub Account</div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        // 更新登录区域
+                        if (loginSection) {
+                            loginSection.innerHTML = `
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-2">
+                                        <img 
+                                            src="${userInfo.avatarUrl}" 
+                                            alt="${userInfo.username}"
+                                            class="w-6 h-6 rounded-full border border-[#00ff41]/30"
+                                            onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
+                                        />
+                                        <div>
+                                            <div class="text-[10px] text-white font-bold">${userInfo.username}</div>
+                                            <a 
+                                                href="https://github.com/${userInfo.username}" 
+                                                target="_blank"
+                                                class="text-[8px] text-[#00ff41]/60 hover:text-[#00ff41] transition-colors"
+                                            >
+                                                查看 GitHub
+                                            </a>
+                                        </div>
+                                    </div>
+                                    <button 
+                                        onclick="logout()"
+                                        class="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-[8px] text-zinc-400 hover:text-white transition-colors rounded"
+                                    >
+                                        退出
+                                    </button>
+                                </div>
+                            `;
+                        }
+                    }
+                }
+            } else {
+                // 未登录状态：显示登录按钮
+                console.log('[Auth] ✅ 更新 UI 为未登录状态');
+                
+                // 更新左侧抽屉中的身份卡片
+                const leftBody = document.getElementById('left-drawer-body');
+                if (leftBody) {
+                    const identityCard = leftBody.querySelector('.drawer-item:first-child');
+                    if (identityCard) {
+                        const userInfoSection = identityCard.querySelector('.mb-3.pb-3.border-b');
+                        const loginSection = identityCard.querySelector('#auth-login-section') || 
+                                            identityCard.querySelector('.mt-3.pt-3.border-t');
+                        
+                        if (userInfoSection) {
+                            userInfoSection.innerHTML = `
+                                <div class="flex items-center gap-2 mb-2">
+                                    <div class="w-8 h-8 rounded-full overflow-hidden border border-zinc-700 flex-shrink-0 bg-zinc-800 flex items-center justify-center">
+                                        <span class="text-lg">👤</span>
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="drawer-item-value text-sm text-zinc-500">未登录</div>
+                                        <div class="drawer-item-desc text-[8px]">请使用 GitHub 登录</div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        // 替换登录输入框为登录按钮
+                        if (loginSection) {
+                            loginSection.innerHTML = `
+                                <div class="drawer-item-label mb-2">GitHub 登录</div>
+                                <button 
+                                    onclick="loginWithGitHub()"
+                                    class="w-full px-4 py-3 bg-[#24292e] hover:bg-[#2f363d] border border-[#444d56] rounded-md text-white text-sm font-semibold flex items-center justify-center gap-2 transition-all duration-200 hover:scale-105 active:scale-95 shadow-lg hover:shadow-xl"
+                                >
+                                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path fill-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clip-rule="evenodd"></path>
+                                    </svg>
+                                    <span>使用 GitHub 登录</span>
+                                </button>
+                                <div class="text-[8px] text-[#00ff41]/40 mt-2 text-center">
+                                    安全、快速、一键登录
+                                </div>
+                            `;
+                        }
+                    }
+                }
+            }
+        }
+        
+        /**
+         * 获取当前浏览器指纹（与页面加载时生成逻辑一致）
+         * @returns {Promise<string>} 指纹字符串
+         */
+        async function getCurrentFingerprint() {
+            try {
+                // 先尝试从 localStorage 读取
+                let fingerprint = localStorage.getItem('user_fingerprint');
+                
+                if (!fingerprint) {
+                    // 如果不存在，生成新的指纹（与 window.onload 中的逻辑一致）
+                    const deviceInfo = {
+                        userAgent: navigator.userAgent || '',
+                        language: navigator.language || '',
+                        platform: navigator.platform || '',
+                        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || ''
+                    };
+                    const deviceString = JSON.stringify(deviceInfo);
+                    const msgUint8 = new TextEncoder().encode(deviceString);
+                    const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+                    fingerprint = Array.from(new Uint8Array(hashBuffer))
+                        .map(b => b.toString(16).padStart(2, '0'))
+                        .join('');
+                    
+                    try {
+                        localStorage.setItem('user_fingerprint', fingerprint);
+                        console.log('[Fingerprint] 🔑 已生成设备 Fingerprint:', fingerprint.substring(0, 8) + '...');
+                    } catch (e) {
+                        console.warn('[Fingerprint] ⚠️ 保存 Fingerprint 到 localStorage 失败:', e);
+                    }
+                }
+                
+                return fingerprint;
+            } catch (error) {
+                console.error('[Fingerprint] ❌ 获取指纹失败:', error);
+                return null;
+            }
+        }
+
+        /**
+         * 保存GitHub用户名到localStorage并绑定指纹
+         * 使用 Supabase 客户端直接更新 fingerprint 字段
+         * 【增强版】包含鲁棒的元素获取、强制指纹绑定、UI状态联动
+         */
+        async function saveGitHubUsername() {
+            // ============================================
+            // 1. 鲁棒的元素获取（多重选择器）
+            // ============================================
+            let input = null;
+            let saveButton = null;
+            
+            // 尝试多种方式获取输入框（支持主输入框和抽屉输入框）
+            input = document.getElementById('githubUsername') ||
+                   document.getElementById('drawer-github-username') ||
+                   document.querySelector('#githubUsername') ||
+                   document.querySelector('#drawer-github-username') ||
+                   document.querySelector('input[id="githubUsername"]') ||
+                   document.querySelector('input[id="drawer-github-username"]') ||
+                   document.querySelector('input[placeholder*="GitHub"]') ||
+                   document.querySelector('input[placeholder*="github"]');
+            
+            // 如果找到抽屉输入框，同步到主输入框
+            if (input && input.id === 'drawer-github-username') {
+                const mainInput = document.getElementById('githubUsername');
+                if (mainInput) {
+                    mainInput.value = input.value;
+                    console.log('[GitHub] ✅ 已同步抽屉输入框到主输入框');
+                }
+            }
+            
+            // 尝试获取保存按钮（用于显示 Loading 状态）
+            saveButton = document.querySelector('button[onclick*="saveGitHubUsername"]') ||
+                        document.querySelector('button:has-text("保存")') ||
+                        document.querySelector('.drawer-item button');
+            
+            // 如果找不到输入框，打印详细的 DOM 结构警告
+            if (!input) {
+                console.error('[GitHub] ❌ 找不到 GitHub 输入框元素');
+                console.warn('[GitHub] 🔍 DOM 结构诊断:', {
+                    hasGetElementById: typeof document.getElementById === 'function',
+                    allInputs: Array.from(document.querySelectorAll('input')).map(el => ({
+                        id: el.id,
+                        name: el.name,
+                        placeholder: el.placeholder,
+                        type: el.type
+                    })),
+                    bodyHTML: document.body ? document.body.innerHTML.substring(0, 500) : 'body 不存在'
+                });
+                alert('无法找到 GitHub 输入框，请刷新页面后重试');
+                return;
+            }
+            
+            // ============================================
+            // 2. 获取用户名并验证
+            // ============================================
             const username = input.value.trim();
             if (username === '') {
                 // 如果输入为空，清除localStorage
@@ -4419,24 +5261,333 @@
                 return;
             }
             
-            // 保存到localStorage
-            localStorage.setItem('github_username', username);
-            console.log('[GitHub] ✅ 已保存GitHub用户名:', username);
+            // 验证 GitHub 用户名格式
+            if (!isValidGitHubUsername(username)) {
+                alert('GitHub 用户名格式不正确，请检查后重试');
+                return;
+            }
             
-            // 更新头像显示
-            updateGitHubAvatar();
+            // ============================================
+            // 3. 显示 Loading 状态
+            // ============================================
+            const originalButtonText = saveButton ? saveButton.textContent : '';
+            if (saveButton) {
+                saveButton.disabled = true;
+                saveButton.textContent = '保存中...';
+                saveButton.style.opacity = '0.6';
+            }
             
-            // 如果Presence频道已连接，立即同步状态
-            if (presenceChannel) {
-                syncPresenceState().then(() => {
-                    console.log('[GitHub] ✅ 已更新在线状态（包含新头像）');
-                    alert('GitHub用户名已保存并更新在线状态');
-                }).catch((err) => {
-                    console.warn('[GitHub] ⚠️ 更新在线状态失败:', err);
-                    alert('GitHub用户名已保存，但更新在线状态失败');
-                });
-            } else {
-                alert('GitHub用户名已保存');
+            try {
+                // ============================================
+                // 4. 强制指纹绑定流（在 localStorage 更新之前完成）
+                // ============================================
+                
+                // 4.1 获取当前指纹（使用统一的指纹生成函数）
+                const currentFingerprint = await getCurrentFingerprint();
+                
+                if (!currentFingerprint) {
+                    console.warn('[GitHub] ⚠️ 未找到指纹，无法绑定');
+                    alert('未找到设备指纹，请刷新页面后重试');
+                    return;
+                }
+                
+                console.log('[GitHub] 🔑 当前指纹:', currentFingerprint.substring(0, 8) + '...');
+                
+                // 4.2 检查 Supabase 客户端
+                if (!supabaseClient) {
+                    console.error('[GitHub] ❌ Supabase 客户端未初始化');
+                    alert('数据库连接未就绪，请稍候再试');
+                    return;
+                }
+                
+                // 4.3 规范化用户名（小写）
+                const normalizedUsername = username.toLowerCase().trim();
+                
+                console.log('[GitHub] 🔗 开始绑定指纹到 user_name:', normalizedUsername);
+                
+                // 4.4 首先尝试根据 user_name 查找现有用户
+                const { data: existingUser, error: findError } = await supabaseClient
+                    .from('user_analysis')
+                    .select('*')
+                    .eq('user_name', normalizedUsername)
+                    .maybeSingle();
+                
+                if (findError && findError.code !== 'PGRST116') { // PGRST116 表示未找到记录，这是正常的
+                    console.error('[GitHub] ❌ 查询用户失败:', findError);
+                    throw new Error(`查询失败: ${findError.message}`);
+                }
+                
+                let updatedUser = null;
+                
+                // 4.5 执行 UPSERT 操作（更新或创建）
+                if (existingUser) {
+                    // 用户已存在，更新 fingerprint 字段
+                    console.log('[GitHub] ✅ 找到现有用户，更新 fingerprint 字段');
+                    
+                    // 【修复】只使用 user_name 字段，不使用 github_username
+                    const { data, error: updateError } = await supabaseClient
+                            .from('user_analysis')
+                            .update({
+                                fingerprint: currentFingerprint,
+                                user_name: normalizedUsername,
+                                updated_at: new Date().toISOString()
+                            })
+                            .eq('user_name', normalizedUsername)
+                            .select()
+                            .single();
+                    
+                    if (updateError) {
+                        console.error('[GitHub] ❌ 更新用户失败:', updateError);
+                        throw new Error(`更新失败: ${updateError.message}`);
+                    }
+                    
+                    updatedUser = data;
+                    console.log('[GitHub] ✅ 指纹已成功更新到数据库');
+                } else {
+                    // 用户不存在，创建新记录
+                    console.log('[GitHub] ✅ 用户不存在，创建新记录');
+                    
+                    // 【修复】只使用 user_name 字段，不使用 github_username
+                    const newUserData = {
+                        id: crypto.randomUUID(),
+                        user_name: normalizedUsername,
+                        fingerprint: currentFingerprint,
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString()
+                    };
+                    
+                    const { data, error: insertError } = await supabaseClient
+                        .from('user_analysis')
+                        .insert([newUserData])
+                        .select()
+                        .single();
+                    
+                    if (insertError) {
+                        console.error('[GitHub] ❌ 创建用户失败:', insertError);
+                        throw new Error(`创建失败: ${insertError.message}`);
+                    }
+                    
+                    updatedUser = data;
+                    console.log('[GitHub] ✅ 新用户已创建，指纹已绑定');
+                }
+                
+                // ============================================
+                // 5. 更新 localStorage（在数据库更新成功后）
+                // ============================================
+                localStorage.setItem('github_username', username);
+                console.log('[GitHub] ✅ 已保存GitHub用户名到 localStorage:', username);
+                
+                // ============================================
+                // 6. UI 状态联动（地图与卡片）
+                // ============================================
+                console.log('[GitHub] 🔄 开始刷新全局数据和 UI...');
+                
+                // 6.1 更新全局用户数据
+                window.currentUser = updatedUser;
+                window.currentUserMatchedByFingerprint = true;
+                
+                // 6.2 更新 window.allData 中的对应记录
+                const allData = window.allData || [];
+                const index = allData.findIndex(item => 
+                    item.id === updatedUser.id ||
+                    (item.fingerprint && item.fingerprint === currentFingerprint) ||
+                    (item.user_name && item.user_name.toLowerCase() === normalizedUsername)
+                );
+                
+                if (index !== -1) {
+                    allData[index] = { ...allData[index], ...updatedUser };
+                    console.log('[GitHub] ✅ 已更新 allData 中的记录，索引:', index);
+                } else {
+                    allData.push(updatedUser);
+                    console.log('[GitHub] ✅ 已添加新记录到 allData');
+                }
+                window.allData = allData;
+                
+                // 6.3 刷新排名卡片
+                if (window.currentUser) {
+                    renderRankCards(window.currentUser);
+                    console.log('[GitHub] ✅ 已刷新排名卡片');
+                }
+                
+                // 6.4 触发地图脉冲（如果用户有地理位置信息）
+                try {
+                    // 获取用户地理位置（无论数据库中是否有，都尝试获取当前位置）
+                    const location = await getUserLocation();
+                    if (location && location.lat && location.lng && typeof triggerMapPulse === 'function') {
+                        const statusConfig = USER_STATUSES[currentUserStatus] || USER_STATUSES.idle;
+                        const pulseColor = statusConfig.status_color || '#00ff41';
+                        const pulseLabel = normalizedUsername;
+                        const avatarUrl = getGitHubAvatarUrl(normalizedUsername);
+                        
+                        triggerMapPulse(location.lng, location.lat, pulseLabel, pulseColor, avatarUrl, normalizedUsername);
+                        console.log('[GitHub] ✅ 已触发地图脉冲:', {
+                            lng: location.lng,
+                            lat: location.lat,
+                            label: pulseLabel,
+                            color: pulseColor
+                        });
+                    } else if (!location || !location.lat || !location.lng) {
+                        console.log('[GitHub] ℹ️ 无法获取地理位置，跳过地图脉冲');
+                    }
+                } catch (pulseError) {
+                    console.warn('[GitHub] ⚠️ 触发地图脉冲失败:', pulseError);
+                }
+                
+                // 6.5 自动打开抽屉并显示用户统计卡片
+                try {
+                    // 获取用户的国家代码（从 ip_location 或 location，或从地理位置获取）
+                    let userCountryCode = updatedUser.ip_location || updatedUser.location || null;
+                    
+                    // 如果没有国家代码，尝试从地理位置获取
+                    if (!userCountryCode) {
+                        try {
+                            const location = await getUserLocation();
+                            if (location && location.countryCode) {
+                                userCountryCode = location.countryCode;
+                                console.log('[GitHub] ✅ 从地理位置获取国家代码:', userCountryCode);
+                            }
+                        } catch (geoError) {
+                            console.warn('[GitHub] ⚠️ 获取地理位置失败:', geoError);
+                        }
+                    }
+                    
+                    const userCountryName = userCountryCode && countryNameMap[userCountryCode]
+                        ? (currentLang === 'zh' ? countryNameMap[userCountryCode].zh : countryNameMap[userCountryCode].en)
+                        : (userCountryCode || '全球');
+                    
+                    // 获取抽屉元素
+                    const leftDrawer = document.getElementById('left-drawer');
+                    const leftBody = document.getElementById('left-drawer-body');
+                    const rightDrawer = document.getElementById('right-drawer');
+                    
+                    if (userCountryCode && userCountryCode !== '全球') {
+                        // 如果有国家代码，打开抽屉并显示用户数据
+                        showDrawersWithCountryData(userCountryCode, userCountryName);
+                        console.log('[GitHub] ✅ 已打开抽屉并显示用户数据:', userCountryCode);
+                    } else {
+                        // 如果没有国家代码，直接刷新左侧抽屉的统计卡片
+                        // 如果抽屉未打开，先打开它
+                        if (leftDrawer && !leftDrawer.classList.contains('active')) {
+                            leftDrawer.classList.add('active');
+                            if (rightDrawer) {
+                                rightDrawer.classList.add('active');
+                            }
+                            console.log('[GitHub] ✅ 已打开抽屉');
+                        }
+                        
+                        // 刷新统计卡片
+                        if (leftBody) {
+                            // 移除等待卡片（如果存在）
+                            const waitingCards = leftBody.querySelectorAll('.drawer-item');
+                            waitingCards.forEach(card => {
+                                const label = card.querySelector('.drawer-item-label');
+                                if (label && (label.textContent === '数据加载中' || label.textContent.includes('WAIT'))) {
+                                    card.remove();
+                                    console.log('[GitHub] ✅ 已移除等待卡片');
+                                }
+                            });
+                            
+                            // 渲染用户统计卡片
+                            renderUserStatsCards(leftBody, updatedUser);
+                            console.log('[GitHub] ✅ 已刷新用户统计卡片');
+                        }
+                    }
+                } catch (drawerError) {
+                    console.warn('[GitHub] ⚠️ 打开抽屉失败:', drawerError);
+                }
+                
+                // 6.6 修复"匿名专家"显示问题：更新所有显示用户名的 UI 元素
+                try {
+                    // 更新左侧抽屉中的显示名称
+                    const leftTitle = document.getElementById('left-drawer-title');
+                    if (leftTitle) {
+                        const currentTitle = leftTitle.textContent || '';
+                        if (!currentTitle.includes(normalizedUsername)) {
+                            // 移除"（当前设备）"标识（如果存在），然后添加新的
+                            const cleanTitle = currentTitle.replace(/\s*（当前设备）\s*$/, '');
+                            leftTitle.textContent = normalizedUsername + '（当前设备）';
+                            console.log('[GitHub] ✅ 已更新抽屉标题:', leftTitle.textContent);
+                        }
+                    }
+                    
+                    // 更新所有显示"匿名专家"的元素（更精确的匹配）
+                    const fingerprintPrefix = currentFingerprint.substring(0, 6).toUpperCase();
+                    const anonymousPattern = new RegExp(`匿名专家\\s+${fingerprintPrefix}`, 'i');
+                    
+                    // 查找所有可能包含"匿名专家"的元素
+                    const allElements = document.querySelectorAll('*');
+                    let updateCount = 0;
+                    
+                    allElements.forEach(el => {
+                        // 跳过 script 和 style 标签
+                        if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE') {
+                            return;
+                        }
+                        
+                        // 检查文本内容
+                        if (el.textContent && anonymousPattern.test(el.textContent)) {
+                            el.textContent = el.textContent.replace(anonymousPattern, normalizedUsername);
+                            updateCount++;
+                        }
+                        
+                        // 检查属性值（如 placeholder, title 等）
+                        Array.from(el.attributes || []).forEach(attr => {
+                            if (attr.value && anonymousPattern.test(attr.value)) {
+                                el.setAttribute(attr.name, attr.value.replace(anonymousPattern, normalizedUsername));
+                                updateCount++;
+                            }
+                        });
+                    });
+                    
+                    if (updateCount > 0) {
+                        console.log('[GitHub] ✅ 已更新', updateCount, '个"匿名专家"显示');
+                    }
+                    
+                    // 强制刷新排名卡片中的用户名显示
+                    setTimeout(() => {
+                        if (window.currentUser) {
+                            renderRankCards(window.currentUser);
+                            console.log('[GitHub] ✅ 已强制刷新排名卡片（修复匿名专家显示）');
+                        }
+                    }, 100);
+                    
+                } catch (updateError) {
+                    console.warn('[GitHub] ⚠️ 更新匿名专家显示失败:', updateError);
+                }
+                
+                // 6.7 更新头像显示
+                updateGitHubAvatar();
+                
+                // 6.8 如果Presence频道已连接，立即同步状态
+                if (presenceChannel) {
+                    syncPresenceState().then(() => {
+                        console.log('[GitHub] ✅ 已更新在线状态（包含新头像）');
+                    }).catch((err) => {
+                        console.warn('[GitHub] ⚠️ 更新在线状态失败:', err);
+                    });
+                }
+                
+                // 6.9 显示成功提示（清理旧的指纹匹配报错）
+                console.log('[GitHub] 🎉 绑定流程全部完成！');
+                alert('✅ GitHub用户名已保存并绑定成功！\n\n' +
+                      '• 指纹已更新到数据库\n' +
+                      '• 地图脉冲已触发\n' +
+                      '• 统计卡片已刷新\n' +
+                      '• 用户名已更新');
+                
+            } catch (error) {
+                const errorMessage = error && typeof error === 'object' && 'message' in error 
+                    ? error.message 
+                    : (typeof error === 'string' ? error : '未知错误');
+                console.error('[GitHub] ❌ 绑定指纹失败:', error);
+                alert(`绑定失败: ${errorMessage}\n\n请检查：\n1. Supabase RLS 策略是否允许更新\n2. 网络连接是否正常\n3. 浏览器控制台查看详细错误`);
+            } finally {
+                // 恢复按钮状态
+                if (saveButton) {
+                    saveButton.disabled = false;
+                    saveButton.textContent = originalButtonText || '保存';
+                    saveButton.style.opacity = '1';
+                }
             }
         }
 
@@ -4784,10 +5935,9 @@
          * 基于 index.ts 的接口返回格式（数据直接返回，不包裹在 data 字段中）
          */
         async function fetchData() {
-            const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content;
-            console.group('%c 🚀 Dashboard Data Sync Starting ', 'background: #222; color: #bada55; font-size: 12px;');
-            
             try {
+                const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content;
+                console.group('%c 🚀 Dashboard Data Sync Starting ', 'background: #222; color: #bada55; font-size: 12px;');
                 // 加载过场：骨架屏 + 扫描线
                 setLoadingState(true);
 
@@ -4866,9 +6016,18 @@
                 // 渲染地理位置热力排行和地图
                 if (data.locationRank && Array.isArray(data.locationRank) && data.locationRank.length > 0) {
                     if (typeof echarts !== 'undefined') {
-                        await initGlobalMap(data.locationRank);
+                        try {
+                            await initGlobalMap(data.locationRank);
+                        } catch (mapError) {
+                            console.error('[fetchData] ❌ 地图初始化失败:', mapError);
+                            // 即使地图初始化失败，也继续渲染位置列表
+                        }
                     }
-                    renderLocationList(data.locationRank);
+                    try {
+                        renderLocationList(data.locationRank);
+                    } catch (listError) {
+                        console.error('[fetchData] ❌ 位置列表渲染失败:', listError);
+                    }
                 } else {
                     const locationListEl = document.getElementById('locationList');
                     if (locationListEl) {
@@ -5141,6 +6300,181 @@
         }
 
         /**
+         * 渲染用户统计卡片到左侧抽屉
+         * @param {HTMLElement} leftBody - 左侧抽屉容器
+         * @param {Object} userData - 当前用户数据对象
+         */
+        function renderUserStatsCards(leftBody, userData) {
+            console.log('[UserStats] 🚀 开始渲染用户统计卡片，userData:', {
+                hasUserData: !!userData,
+                userName: userData?.user_name || userData?.name,
+                fingerprint: userData?.fingerprint ? userData.fingerprint.substring(0, 8) : null,
+                hasLeftBody: !!leftBody
+            });
+            
+            if (!leftBody) {
+                console.error('[UserStats] ❌ leftBody 不存在');
+                return;
+            }
+            
+            if (!userData) {
+                console.warn('[UserStats] ⚠️ userData 不存在，跳过渲染');
+                return;
+            }
+            
+            try {
+                // 提取维度值
+                const dimensionValues = extractDimensionValues(userData);
+                console.log('[UserStats] 📊 提取的维度值:', dimensionValues);
+                
+                // 1. 技术排名（使用平均排名或综合排名）
+                const avgRank = userData.avg_rank || userData.avgRank || userData.ranks?.avgRank || null;
+                const totalUsers = window.lastData?.totalUsers || 1;
+                let techRankText = 'N/A';
+                if (avgRank !== null && avgRank !== undefined && totalUsers > 0) {
+                    const rankPercent = Math.round((1 - avgRank / 100) * totalUsers);
+                    techRankText = `第 ${rankPercent} 名 / ${totalUsers} 人`;
+                }
+                console.log('[UserStats] 🏆 技术排名:', { avgRank, totalUsers, techRankText });
+                
+                // 2. 调戏AI次数（ai维度）
+                const aiCount = dimensionValues.ai !== undefined && dimensionValues.ai !== null 
+                    ? new Intl.NumberFormat('zh-CN').format(dimensionValues.ai) 
+                    : 'N/A';
+                
+                // 3. 甲方爸爸上身次数（no维度）
+                const noCount = dimensionValues.no !== undefined && dimensionValues.no !== null 
+                    ? new Intl.NumberFormat('zh-CN').format(dimensionValues.no) 
+                    : 'N/A';
+                
+                // 4. 赛博磕头次数（please维度）
+                const pleaseCount = dimensionValues.please !== undefined && dimensionValues.please !== null 
+                    ? new Intl.NumberFormat('zh-CN').format(dimensionValues.please) 
+                    : 'N/A';
+                
+                // 5. 废话输出总数（say维度）
+                const sayTotal = dimensionValues.say !== undefined && dimensionValues.say !== null 
+                    ? new Intl.NumberFormat('zh-CN').format(dimensionValues.say) 
+                    : 'N/A';
+                
+                // 6. 平均吹水长度（word维度）
+                const avgLength = dimensionValues.word !== undefined && dimensionValues.word !== null 
+                    ? new Intl.NumberFormat('zh-CN').format(Math.round(dimensionValues.word)) 
+                    : 'N/A';
+                
+                // 7. 人格称号
+                const personalityType = userData.personality_type || userData.personalityType || userData.type || 'UNKNOWN';
+                const personalityName = userData.personality_name || userData.personalityName || userData.name || '未知人格';
+                
+                // 8. 答案之书说明（answer_book 对象）
+                let answerBookTitle = '暂无';
+                let answerBookContent = '暂无说明';
+                let answerBookVibeLevel = '';
+                
+                try {
+                    // 尝试解析 answer_book 字段（可能是 JSON 字符串或对象）
+                    let answerBook = userData.answer_book || userData.answerBook;
+                    if (typeof answerBook === 'string') {
+                        try {
+                            answerBook = JSON.parse(answerBook);
+                        } catch (e) {
+                            console.warn('[UserStats] ⚠️ 解析 answer_book JSON 失败:', e);
+                        }
+                    }
+                    
+                    if (answerBook && typeof answerBook === 'object') {
+                        answerBookTitle = answerBook.title || answerBookTitle;
+                        answerBookContent = answerBook.content || answerBookContent;
+                        answerBookVibeLevel = answerBook.vibe_level || answerBook.vibeLevel || '';
+                    }
+                } catch (e) {
+                    console.warn('[UserStats] ⚠️ 处理 answer_book 失败:', e);
+                }
+                
+                // 创建用户统计卡片容器
+                const statsCard = document.createElement('div');
+                statsCard.className = 'drawer-item';
+                statsCard.innerHTML = `
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">📊</span>
+                        <span class="text-[8px] leading-none text-[#00ff41] border border-[#00ff41]/40 px-1 py-0.5 tracking-widest uppercase bg-[#00ff41]/5">
+                            STATS
+                        </span>
+                    </div>
+                    
+                    <div class="drawer-item-label mb-3">我的数据统计</div>
+                    
+                    <!-- 技术排名 -->
+                    <div class="mb-3 pb-3 border-b border-[#00ff41]/10">
+                        <div class="drawer-item-label mb-1">技术排名</div>
+                        <div class="drawer-item-value text-lg">${techRankText}</div>
+                        <div class="drawer-item-desc text-[8px]">TECH_RANK</div>
+                    </div>
+                    
+                    <!-- 维度统计 -->
+                    <div class="space-y-2 mb-3">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] text-[#00ff41]/70">💬 调戏AI次数</span>
+                            <span class="text-[10px] text-white font-bold">${aiCount}</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] text-[#00ff41]/70">🚫 甲方上身次数</span>
+                            <span class="text-[10px] text-white font-bold">${noCount}</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] text-[#00ff41]/70">🙏 赛博磕头次数</span>
+                            <span class="text-[10px] text-white font-bold">${pleaseCount}</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] text-[#00ff41]/70">💭 废话输出总数</span>
+                            <span class="text-[10px] text-white font-bold">${sayTotal}</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] text-[#00ff41]/70">📏 平均吹水长度</span>
+                            <span class="text-[10px] text-white font-bold">${avgLength} 字/条</span>
+                        </div>
+                    </div>
+                    
+                    <!-- 人格称号 -->
+                    <div class="mb-3 pb-3 border-b border-[#00ff41]/10">
+                        <div class="drawer-item-label mb-1">人格称号</div>
+                        <div class="drawer-item-value text-sm">${personalityName}</div>
+                        <div class="drawer-item-desc text-[8px]">${personalityType}</div>
+                    </div>
+                    
+                    <!-- 答案之书 -->
+                    <div class="mb-2">
+                        <div class="drawer-item-label mb-1">答案之书</div>
+                        ${answerBookVibeLevel ? `<div class="text-[9px] text-[#00ff41]/80 mb-1">${answerBookVibeLevel}</div>` : ''}
+                        <div class="text-[10px] text-white font-bold mb-1">${answerBookTitle}</div>
+                        <div class="text-[9px] text-[#00ff41]/60 leading-relaxed">${answerBookContent}</div>
+                    </div>
+                `;
+                
+                // 先移除旧的统计卡片（如果存在）
+                const existingStatsCards = leftBody.querySelectorAll('.drawer-item');
+                existingStatsCards.forEach(card => {
+                    const label = card.querySelector('.drawer-item-label');
+                    if (label && label.textContent === '我的数据统计') {
+                        card.remove();
+                    }
+                });
+                
+                // 将统计卡片插入到身份配置卡片之后
+                const identityCard = leftBody.querySelector('.drawer-item');
+                if (identityCard && identityCard.nextSibling) {
+                    leftBody.insertBefore(statsCard, identityCard.nextSibling);
+                } else {
+                    leftBody.appendChild(statsCard);
+                }
+                
+                console.log('[UserStats] ✅ 用户统计卡片已渲染');
+            } catch (error) {
+                console.error('[UserStats] ❌ 渲染用户统计卡片失败:', error);
+            }
+        }
+
+        /**
          * 从用户数据中提取维度值
          * @param {Object} userData - 用户数据对象
          * @returns {Object} 包含 6 个维度值的对象
@@ -5304,6 +6638,23 @@
 
             // 数据判别：定义变量 const isGlobalTopMode = !userData
             const isGlobalTopMode = !userData;
+            
+            // UI 反馈优化：如果识别到是本地指纹匹配的用户，在抽屉标题增加"（当前设备）"标识
+            if (userData && window.currentUserMatchedByFingerprint) {
+                try {
+                    const leftTitle = document.getElementById('left-drawer-title');
+                    if (leftTitle) {
+                        // 检查标题是否已经包含"（当前设备）"，避免重复添加
+                        const currentText = leftTitle.textContent || '';
+                        if (!currentText.includes('（当前设备）') && !currentText.includes('(当前设备)')) {
+                            leftTitle.textContent = currentText + '（当前设备）';
+                            console.log('[Rank] ✅ 已更新左侧抽屉标题，添加"（当前设备）"标识');
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[Rank] ⚠️ 更新抽屉标题失败:', e);
+                }
+            }
 
             // 维度配置（名称映射和数值后缀）
             const dimensionConfig = {
@@ -5435,7 +6786,21 @@
                     targetData = userData;
                     const values = extractDimensionValues(userData);
                     maxValue = values[dimId] !== undefined && values[dimId] !== null ? values[dimId] : undefined;
-                    targetUserName = userData.user_name || userData.name || userData.github_username || '我的数据';
+                    
+                    // 确定显示的用户名：如果是纯指纹用户（无 GitHub ID），显示"匿名专家 [指纹前6位]"
+                    const userFingerprint = userData.fingerprint || userData.user_fingerprint || userData.user_identity;
+                    const userGithubId = userData.github_username || userData.github_id;
+                    const userName = userData.user_name || userData.name;
+                    
+                    if (!userGithubId && !userName && userFingerprint) {
+                        // 纯指纹用户：显示"匿名专家 [指纹前6位]"
+                        const fingerprintPrefix = String(userFingerprint).substring(0, 6).toUpperCase();
+                        targetUserName = `匿名专家 ${fingerprintPrefix}`;
+                    } else {
+                        // 有 GitHub ID 或用户名的用户
+                        targetUserName = userName || userGithubId || '我的数据';
+                    }
+                    
                     targetIpLocation = userData.ip_location || null;
                 }
 
@@ -5596,11 +6961,32 @@
             });
 
             console.log(`[Rank] ✅ 维度排名卡片渲染完成 (模式: ${isGlobalTopMode ? '全球最强' : '个人数据'})`);
+            
+            // 如果检测到用户数据且左侧抽屉已打开，自动刷新用户统计卡片
+            if (userData && !isGlobalTopMode) {
+                try {
+                    const leftDrawer = document.getElementById('left-drawer');
+                    const leftBody = document.getElementById('left-drawer-body');
+                    
+                    // 检查左侧抽屉是否打开（通过检查 active class）
+                    if (leftDrawer && leftBody) {
+                        const isDrawerOpen = leftDrawer.classList.contains('active');
+                        
+                        if (isDrawerOpen) {
+                            // 重新渲染用户统计卡片（函数内部会处理移除旧卡片）
+                            renderUserStatsCards(leftBody, userData);
+                            console.log('[Rank] ✅ 已自动刷新左侧抽屉的用户统计卡片');
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[Rank] ⚠️ 刷新左侧抽屉统计卡片失败:', e);
+                }
+            }
         }
 
 
         window.onload = async () => {
-            // 加载保存的GitHub用户名
+            // 加载保存的GitHub用户名（兼容旧代码）
             loadGitHubUsername();
             
             // 初始化状态按钮
@@ -5612,106 +6998,219 @@
             // 加载维度排名数据资源
             await loadRankResources();
             
-            // 先执行初始数据加载
-            await fetchData();
+            // 先执行初始数据加载（增强错误处理）
+            try {
+                await fetchData();
+            } catch (fetchError) {
+                console.error('[Window.onload] ❌ fetchData 失败:', fetchError);
+                // 即使数据加载失败，也继续执行后续初始化
+            }
+            
+            // ============================================
+            // 【新增】初始化 GitHub OAuth 认证监听
+            // ============================================
+            if (supabaseClient) {
+                // 检查当前会话
+                try {
+                    const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+                    
+                    if (sessionError) {
+                        console.warn('[Auth] ⚠️ 获取会话失败:', sessionError);
+                    } else if (session) {
+                        console.log('[Auth] ✅ 检测到现有会话，自动处理认证状态');
+                        await handleAuthStateChange(session);
+                    } else {
+                        console.log('[Auth] ℹ️ 未检测到会话，显示登录按钮');
+                        updateAuthUI(null);
+                    }
+                } catch (error) {
+                    console.error('[Auth] ❌ 初始化认证监听失败:', error);
+                }
+                
+                // 监听认证状态变化
+                supabaseClient.auth.onAuthStateChange(async (event, session) => {
+                    console.log('[Auth] 🔔 认证状态变化事件:', event, session ? '有会话' : '无会话');
+                    
+                    if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+                        await handleAuthStateChange(session);
+                    } else if (event === 'SIGNED_OUT') {
+                        await handleAuthStateChange(null);
+                    }
+                });
+                
+                console.log('[Auth] ✅ 认证状态监听已启动');
+            } else {
+                console.warn('[Auth] ⚠️ Supabase 客户端未初始化，无法启动认证监听');
+                // 延迟重试
+                setTimeout(async () => {
+                    if (supabaseClient) {
+                        const { data: { session } } = await supabaseClient.auth.getSession();
+                        if (session) {
+                            await handleAuthStateChange(session);
+                        } else {
+                            updateAuthUI(null);
+                        }
+                    }
+                }, 1000);
+            }
             
             // 页面加载后立即显示 LPDEF 分值：执行身份检查（增强身份识别逻辑）
             try {
-                // 1. 生成或获取当前设备的 Fingerprint
-                let currentFingerprint = localStorage.getItem('user_fingerprint');
+                // 辅助函数：规范化指纹字符串（忽略大小写并剔除首尾空格）
+                const normalizeFingerprint = (fp) => {
+                    if (!fp) return '';
+                    return String(fp).trim().toLowerCase();
+                };
+                
+                // 1. 生成或获取当前设备的 Fingerprint（增加异常处理）
+                // 【优化】使用统一的指纹获取函数，确保一致性
+                let currentFingerprint = await getCurrentFingerprint();
+                
                 if (!currentFingerprint) {
-                    try {
-                        const deviceInfo = {
-                            userAgent: navigator.userAgent || '',
-                            language: navigator.language || '',
-                            platform: navigator.platform || '',
-                            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || ''
-                        };
-                        const deviceString = JSON.stringify(deviceInfo);
-                        const msgUint8 = new TextEncoder().encode(deviceString);
-                        const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
-                        currentFingerprint = Array.from(new Uint8Array(hashBuffer))
-                            .map(b => b.toString(16).padStart(2, '0'))
-                            .join('');
-                        localStorage.setItem('user_fingerprint', currentFingerprint);
-                        console.log('[LPDEF] 🔑 已生成设备 Fingerprint:', currentFingerprint);
-                    } catch (error) {
-                        console.warn('[LPDEF] ⚠️ 生成 Fingerprint 失败:', error);
+                    console.warn('[LPDEF] ⚠️ 无法获取或生成指纹');
+                } else {
+                    console.log('[LPDEF] 🔑 当前设备 Fingerprint:', currentFingerprint.substring(0, 8) + '...');
+                }
+                
+                // 规范化当前指纹
+                const normalizedCurrentFingerprint = normalizeFingerprint(currentFingerprint);
+                
+                // 2. 从 localStorage 获取 github_username（增加异常处理）
+                let localGitHubName = null;
+                try {
+                    localGitHubName = localStorage.getItem('github_username');
+                } catch (e) {
+                    console.warn('[LPDEF] ⚠️ 读取 localStorage github_username 失败:', e);
+                }
+                
+                // 3. 【优化】优先从已加载的 allData 数组中查找匹配项（避免额外的 API 调用）
+                const allData = window.allData || [];
+                console.log('[LPDEF] 📊 allData 数据量:', allData.length);
+                
+                let currentUser = null;
+                let matchedByFingerprint = false;
+                
+                // 【优先级1】首先从 allData 中查找 fingerprint 匹配的记录
+                if (normalizedCurrentFingerprint && allData.length > 0) {
+                    console.log('[LPDEF] 🔍 开始从 allData 中查找指纹匹配...');
+                    
+                    currentUser = allData.find(user => {
+                        const userFingerprint = normalizeFingerprint(user.fingerprint || user.user_fingerprint);
+                        const userIdentity = normalizeFingerprint(user.user_identity);
+                        
+                        const matchFingerprint = userFingerprint && userFingerprint === normalizedCurrentFingerprint;
+                        const matchIdentity = userIdentity && userIdentity === normalizedCurrentFingerprint;
+                        
+                        if (matchFingerprint || matchIdentity) {
+                            console.log('[LPDEF] ✅ 在 allData 中找到指纹匹配:', {
+                                id: user.id,
+                                user_name: user.user_name || user.name,
+                                fingerprint: user.fingerprint ? user.fingerprint.substring(0, 8) + '...' : null
+                            });
+                            matchedByFingerprint = true;
+                            return true;
+                        }
+                        return false;
+                    });
+                    
+                    if (currentUser) {
+                        console.log('[LPDEF] ✅ 通过本地 allData 匹配到用户:', currentUser.user_name || currentUser.name);
+                    } else {
+                        console.log('[LPDEF] ℹ️ 在 allData 中未找到指纹匹配');
                     }
                 }
                 
-                // 2. 从 localStorage 获取 github_username
-                const localGitHubName = localStorage.getItem('github_username');
-                const allData = window.allData || [];
+                // 【优先级2】如果 allData 中未找到，且 Supabase 客户端已初始化，尝试直接查询数据库
+                if (!currentUser && normalizedCurrentFingerprint && supabaseClient) {
+                    try {
+                        console.log('[LPDEF] 🔍 allData 中未找到，尝试从 Supabase 直接查询...');
+                        
+                        const { data: dbUser, error: queryError } = await supabaseClient
+                            .from('user_analysis')
+                            .select('*')
+                            .eq('fingerprint', currentFingerprint)
+                            .maybeSingle();
+                        
+                        if (queryError && queryError.code !== 'PGRST116') {
+                            console.warn('[LPDEF] ⚠️ Supabase 查询失败:', queryError);
+                        } else if (dbUser) {
+                            console.log('[LPDEF] ✅ 从 Supabase 查询到用户:', dbUser.user_name || dbUser.name);
+                            
+                            // 将查询到的用户添加到 allData
+                            const existingIndex = allData.findIndex(item => item.id === dbUser.id);
+                            if (existingIndex !== -1) {
+                                allData[existingIndex] = { ...allData[existingIndex], ...dbUser };
+                            } else {
+                                allData.push(dbUser);
+                            }
+                            window.allData = allData;
+                            
+                            currentUser = dbUser;
+                            matchedByFingerprint = true;
+                        } else {
+                            console.log('[LPDEF] ℹ️ Supabase 中未找到匹配的用户');
+                        }
+                    } catch (error) {
+                        console.warn('[LPDEF] ⚠️ Supabase 查询出错:', error);
+                    }
+                }
                 
-                // 2.5. URL 参数支持：如果 URL 中带了 id 参数，强制使用该 ID 进行匹配（用于测试）
+                // 4. URL 参数支持：如果 URL 中带了 id 参数，强制使用该 ID 进行匹配（用于测试）
                 const urlParams = new URLSearchParams(window.location.search);
                 const urlId = urlParams.get('id');
                 if (urlId) {
                     console.log('[Rank] 🔍 检测到 URL 参数 id:', urlId, '，将强制使用该 ID 进行匹配');
+                    const urlMatchedUser = allData.find(user => {
+                        const userId = (user.id || '').toString();
+                        const userFingerprint = (user.fingerprint || user.user_identity || '').toString();
+                        return userId === urlId || userFingerprint === urlId;
+                    });
+                    if (urlMatchedUser) {
+                        currentUser = urlMatchedUser;
+                        console.log('[Rank] ✅ 通过 URL 参数 id 找到用户:', currentUser.user_name || currentUser.name);
+                    }
                 }
                 
-                // 3. 多维匹配：通过 github_id、fingerprint、id 或 user_name 找人
-                let currentUser = null;
-                if (allData.length > 0) {
-                    // 如果 URL 中有 id 参数，优先通过 id 匹配
-                    if (urlId) {
-                        currentUser = allData.find(user => {
-                            const userId = (user.id || '').toString();
-                            const userFingerprint = (user.fingerprint || user.user_identity || '').toString();
-                            return userId === urlId || userFingerprint === urlId;
-                        });
-                        if (currentUser) {
-                            console.log('[Rank] ✅ 通过 URL 参数 id 找到用户:', currentUser.user_name || currentUser.name);
-                        }
-                    }
+                // 5. 如果指纹未匹配，再退而求其次寻找 github_username
+                if (!currentUser && localGitHubName && isValidGitHubUsername(localGitHubName)) {
+                    const normalizedLocalGitHub = normalizeFingerprint(localGitHubName);
+                    currentUser = allData.find(user => {
+                        const userGithubId = normalizeFingerprint(user.github_username || user.github_id || '');
+                        return userGithubId && userGithubId === normalizedLocalGitHub;
+                    });
                     
-                    // 如果 URL 参数匹配失败或没有 URL 参数，使用常规匹配逻辑
-                    // 匹配优先级：URL参数 > 指纹匹配 > GitHub ID匹配 > 兜底匹配
-                    if (!currentUser) {
-                        currentUser = allData.find(user => {
-                            // 方式1：通过 Fingerprint（指纹）匹配 - 优先匹配（解决"未找到当前用户数据"问题）
-                            // 如果 GitHub ID 匹配失败，优先尝试使用 fingerprint 匹配
-                            if (currentFingerprint) {
-                                // 优先匹配 fingerprint 字段
-                                if (user.fingerprint && user.fingerprint.toString() === currentFingerprint) {
-                                    return true;
-                                }
-                                // 备选：匹配 user_identity 字段
-                                if (user.user_identity && user.user_identity.toString() === currentFingerprint) {
-                                    return true;
-                                }
-                                // 最后尝试：匹配 id 字段（如果 fingerprint 和 user_identity 都不存在）
-                                if (!user.fingerprint && !user.user_identity && user.id && user.id.toString() === currentFingerprint) {
-                                    return true;
-                                }
-                            }
-                            
-                            // 方式2：通过 github_id 匹配（在指纹匹配失败后尝试）
-                            if (localGitHubName && isValidGitHubUsername(localGitHubName)) {
-                                const userGithubId = (user.github_username || user.github_id || '').toString().toLowerCase().trim();
-                                if (userGithubId === localGitHubName.toLowerCase().trim()) {
-                                    return true;
-                                }
-                            }
-                            
-                            // 方式3：兜底匹配 - 如果 fingerprint 为空，尝试通过 id 或 user_name 匹配
-                            // 注意：这种方式仅作为兜底，因为 id 和 user_name 可能不唯一
-                            if (!currentFingerprint) {
-                                // 尝试通过 localStorage 中保存的 user_id 匹配
-                                const savedUserId = localStorage.getItem('user_id');
-                                if (savedUserId && user.id && user.id.toString() === savedUserId.toString()) {
-                                    return true;
-                                }
-                                // 尝试通过 user_name 匹配（如果 localStorage 中有保存）
-                                const savedUserName = localStorage.getItem('user_name');
-                                if (savedUserName && user.user_name && user.user_name.toString() === savedUserName.toString()) {
-                                    return true;
-                                }
-                            }
-                            return false;
-                        });
+                    if (currentUser) {
+                        console.log('[Rank] ✅ 通过 GitHub ID 找到用户:', currentUser.user_name || currentUser.name);
                     }
+                }
+                
+                // 6. 兜底匹配 - 如果 fingerprint 为空，尝试通过 id 或 user_name 匹配
+                if (!currentUser && !normalizedCurrentFingerprint) {
+                    try {
+                        const savedUserId = localStorage.getItem('user_id');
+                        if (savedUserId) {
+                            currentUser = allData.find(user => {
+                                return user.id && user.id.toString() === savedUserId.toString();
+                            });
+                        }
+                        
+                        if (!currentUser) {
+                            const savedUserName = localStorage.getItem('user_name');
+                            if (savedUserName) {
+                                currentUser = allData.find(user => {
+                                    return user.user_name && user.user_name.toString() === savedUserName.toString();
+                                });
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('[Rank] ⚠️ 兜底匹配时读取 localStorage 失败:', e);
+                    }
+                }
+                
+                // 保存匹配方式到全局变量，供 renderRankCards 使用
+                if (currentUser) {
+                    window.currentUser = currentUser;
+                    window.currentUserMatchedByFingerprint = matchedByFingerprint;
                 }
                 
                 // 4. 自动补齐逻辑：如果在库里找到了当前设备的 Fingerprint，但该记录的 user_name 是 "Guest" 且 github_id 为空
@@ -5736,7 +7235,6 @@
                                         .from('user_analysis')
                                         .update({
                                             github_username: localGitHubName,
-                                            github_id: localGitHubName,
                                             user_name: localGitHubName, // 更新用户名
                                             updated_at: new Date().toISOString()
                                         })
@@ -5749,7 +7247,6 @@
                                         console.log('[LPDEF] ✅ GitHub ID 绑定成功:', data[0]);
                                         // 更新 currentUser 对象
                                         currentUser.github_username = localGitHubName;
-                                        currentUser.github_id = localGitHubName;
                                         currentUser.user_name = localGitHubName;
                                         // 更新 window.allData 中的对应记录
                                         const index = allData.findIndex(u => 
@@ -5768,12 +7265,40 @@
                     }
                 }
                 
-                // 5. 统一调用 renderRankCards 渲染 6 维度排名卡片
+                // 7. 保存匹配结果到全局变量
+                if (currentUser) {
+                    window.currentUser = currentUser;
+                    window.currentUserMatchedByFingerprint = matchedByFingerprint;
+                    console.log('[Rank] ✅ 用户匹配成功，已设置全局变量');
+                }
+                
+                // 8. 统一调用 renderRankCards 渲染 6 维度排名卡片
                 // 身份识别兜底：如果最终 currentUser 依然为 null，显式调用 renderRankCards(null)
                 // 这将触发"全球选拔"逻辑，显示每个维度的全球最强用户
                 if (currentUser) {
                     console.log('[Rank] ✅ 找到当前用户数据，渲染排名卡片:', currentUser.user_name || currentUser.name);
                     renderRankCards(currentUser);
+                    
+                    // 【优化】如果找到匹配用户，立即检查并加载抽屉（取消 WAIT 状态）
+                    setTimeout(() => {
+                        const leftDrawer = document.getElementById('left-drawer');
+                        const leftBody = document.getElementById('left-drawer-body');
+                        
+                        if (leftDrawer && leftBody) {
+                            // 检查是否有等待卡片
+                            const waitingCards = leftBody.querySelectorAll('.drawer-item');
+                            waitingCards.forEach(card => {
+                                const label = card.querySelector('.drawer-item-label');
+                                if (label && label.textContent === '数据加载中') {
+                                    console.log('[Rank] ✅ 找到匹配用户，移除等待卡片并加载统计卡片');
+                                    card.remove();
+                                    
+                                    // 立即渲染用户统计卡片
+                                    renderUserStatsCards(leftBody, currentUser);
+                                }
+                            });
+                        }
+                    }, 100); // 延迟一小段时间，确保 DOM 已更新
                 } else {
                     console.log('[Rank] ⚠️ 未找到当前用户数据，触发全球最强模式（全球选拔）');
                     // 显式调用 renderRankCards(null) 触发全球选拔逻辑
@@ -5791,6 +7316,79 @@
                 startRealtimeListener();
             }, 500);
         };
+        
+        /**
+         * 全局函数：刷新用户数据（供 index.html 调用）
+         * 当 index.html 提交聊天记录后，可以调用此函数刷新 stats2.html 的数据
+         */
+        window.refreshUserStats = async function() {
+            console.log('[Refresh] 🔄 收到刷新请求，重新加载数据...');
+            try {
+                // 重新获取数据
+                await fetchData();
+                
+                // 重新执行身份检查
+                const normalizeFingerprint = (fp) => {
+                    if (!fp) return '';
+                    return String(fp).trim().toLowerCase();
+                };
+                
+                let currentFingerprint = null;
+                try {
+                    currentFingerprint = localStorage.getItem('user_fingerprint');
+                } catch (e) {
+                    console.warn('[Refresh] ⚠️ 读取 localStorage 失败:', e);
+                }
+                
+                const normalizedCurrentFingerprint = normalizeFingerprint(currentFingerprint);
+                const allData = window.allData || [];
+                
+                let currentUser = null;
+                if (normalizedCurrentFingerprint && allData.length > 0) {
+                    currentUser = allData.find(user => {
+                        const userFingerprint = normalizeFingerprint(user.fingerprint || user.user_fingerprint);
+                        const userIdentity = normalizeFingerprint(user.user_identity);
+                        return (userFingerprint && userFingerprint === normalizedCurrentFingerprint) ||
+                               (userIdentity && userIdentity === normalizedCurrentFingerprint);
+                    });
+                }
+                
+                if (currentUser) {
+                    window.currentUser = currentUser;
+                    window.currentUserMatchedByFingerprint = true;
+                    
+                    // 刷新排名卡片
+                    renderRankCards(currentUser);
+                    
+                    // 如果左侧抽屉已打开，刷新用户统计卡片
+                    const leftDrawer = document.getElementById('left-drawer');
+                    const leftBody = document.getElementById('left-drawer-body');
+                    if (leftDrawer && leftBody) {
+                        const isDrawerOpen = leftDrawer.classList.contains('active');
+                        if (isDrawerOpen && currentDrawerCountry.code) {
+                            // 重新显示抽屉以刷新内容
+                            showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);
+                        }
+                    }
+                    
+                    console.log('[Refresh] ✅ 用户数据已刷新');
+                } else {
+                    console.log('[Refresh] ⚠️ 未找到当前用户数据');
+                }
+            } catch (error) {
+                console.error('[Refresh] ❌ 刷新失败:', error);
+            }
+        };
+        
+        // 监听 storage 事件，当其他页面更新 localStorage 时自动刷新
+        window.addEventListener('storage', (e) => {
+            if (e.key === 'user_fingerprint' || e.key === 'github_username') {
+                console.log('[Storage] 🔔 检测到 localStorage 变化，触发数据刷新');
+                setTimeout(() => {
+                    window.refreshUserStats();
+                }, 500);
+            }
+        });
 
         // 页面卸载时清理 Realtime 监听
         window.addEventListener('beforeunload', () => {

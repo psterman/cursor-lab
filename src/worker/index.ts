@@ -12,6 +12,7 @@ import { getRoastText, getPersonalityName, getVibeIndex, determinePersonalityTyp
 import { getRankResult, RANK_DATA } from './rank';
 // 直接从 rank-content.ts 导入 RANK_RESOURCES（rank.ts 已导入但未导出）
 import { RANK_RESOURCES } from '../rank-content';
+import { identifyUserByFingerprint, bindFingerprintToUser, updateUserByFingerprint } from './fingerprint-service';
 
 // Cloudflare Workers 类型定义（兼容性处理）
 type KVNamespace = {
@@ -559,33 +560,28 @@ async function generateFingerprint(userId: string, _totalChars?: number): Promis
 // 创建 Hono 应用
 const app = new Hono<{ Bindings: Env }>();
 
-// CORS 配置（V6 协议：仅允许指定域访问）
+// CORS 配置（V6 协议：允许所有来源访问）
+// 注意：这是一个公开的 API，允许所有域名访问以支持跨域请求
+// 如果需要限制访问，可以取消注释下面的 ALLOWED_ORIGINS 配置
 const ALLOWED_ORIGINS = [
   'http://localhost:3000',
   'http://localhost:5173',
+  'http://localhost:5174',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:5174',
   'https://vibecodinger.com',
   'https://*.vibecodinger.com',
+  'https://*.github.io', // 允许 GitHub Pages
+  'https://*.github.com', // 允许 GitHub
   // 可以根据需要添加更多允许的域名
 ];
 
 app.use('/*', cors({
-  origin: (origin) => {
-    // 开发环境允许所有来源，生产环境仅允许指定域名
-    if (!origin || process.env.NODE_ENV === 'development') {
-      return '*';
-    }
-    // 检查是否在允许列表中
-    const isAllowed = ALLOWED_ORIGINS.some(allowed => {
-      if (allowed.includes('*')) {
-        const pattern = allowed.replace('*', '.*');
-        return new RegExp(pattern).test(origin);
-      }
-      return origin === allowed;
-    });
-    return isAllowed ? origin : ALLOWED_ORIGINS[0];
-  },
-  allowMethods: ['GET', 'POST', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization'],
+  origin: '*', // 允许所有来源（公开 API）
+  allowMethods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'],
+  allowHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposeHeaders: ['Content-Length', 'Content-Type'],
+  credentials: false, // 不允许携带凭证（因为允许所有来源）
   maxAge: 86400, // Access-Control-Max-Age: 86400
 }));
 
@@ -1656,6 +1652,8 @@ app.post('/api/v2/analyze', async (c) => {
 
           // 【异步存储】使用 waitUntil 幂等 Upsert（按 fingerprint 冲突则更新）
           // 执行写入
+          // 【修复重复登记】使用 Upsert 模式，显式指定 onConflict
+          // Supabase REST API 的 Upsert 通过 URL 参数 on_conflict 和 Prefer 头实现
           const supabaseUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=fingerprint`;
           executionCtx.waitUntil(
             Promise.all([
@@ -1668,7 +1666,7 @@ app.post('/api/v2/analyze', async (c) => {
                       'apikey': env.SUPABASE_KEY!,
                       'Authorization': `Bearer ${env.SUPABASE_KEY}`,
                       'Content-Type': 'application/json',
-                      'Prefer': 'resolution=merge-duplicates',
+                      'Prefer': 'resolution=merge-duplicates', // 冲突时合并（更新），配合 on_conflict=fingerprint 使用
                     },
                     body: JSON.stringify(payload),
                   });
@@ -1810,6 +1808,110 @@ app.get('/api/random_prompt', async (c) => {
       data: null,
       status: 'error',
       error: error.message || '未知错误',
+    }, 500);
+  }
+});
+
+/**
+ * 路由：/api/fingerprint/identify
+ * 功能：根据指纹识别用户（On Load）
+ * 当页面加载时，前端调用此接口查询用户信息
+ */
+app.post('/api/fingerprint/identify', async (c) => {
+  try {
+    const env = c.env;
+    const body = await c.req.json();
+    const { fingerprint } = body;
+
+    if (!fingerprint) {
+      return c.json({
+        status: 'error',
+        error: 'fingerprint 参数必填',
+        errorCode: 'MISSING_FINGERPRINT',
+      }, 400);
+    }
+
+    if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+      return c.json({
+        status: 'error',
+        error: 'Supabase 配置缺失',
+        errorCode: 'SUPABASE_NOT_CONFIGURED',
+      }, 500);
+    }
+
+    const userData = await identifyUserByFingerprint(fingerprint, env);
+
+    if (userData) {
+      return c.json({
+        status: 'success',
+        data: userData,
+        message: '用户识别成功',
+      });
+    } else {
+      return c.json({
+        status: 'not_found',
+        data: null,
+        message: '未找到匹配的用户',
+      });
+    }
+  } catch (error: any) {
+    console.error('[Worker] /api/fingerprint/identify 错误:', error);
+    return c.json({
+      status: 'error',
+      error: error.message || '未知错误',
+      errorCode: 'INTERNAL_ERROR',
+    }, 500);
+  }
+});
+
+/**
+ * 路由：/api/fingerprint/bind
+ * 功能：绑定 GitHub ID 和指纹（On Save）
+ * 当用户输入 GitHub ID 并保存时，前端调用此接口执行 UPSERT 操作
+ */
+app.post('/api/fingerprint/bind', async (c) => {
+  try {
+    const env = c.env;
+    const body = await c.req.json();
+    const { githubUsername, fingerprint } = body;
+
+    if (!githubUsername || !fingerprint) {
+      return c.json({
+        status: 'error',
+        error: 'githubUsername 和 fingerprint 参数必填',
+        errorCode: 'MISSING_PARAMETERS',
+      }, 400);
+    }
+
+    if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+      return c.json({
+        status: 'error',
+        error: 'Supabase 配置缺失',
+        errorCode: 'SUPABASE_NOT_CONFIGURED',
+      }, 500);
+    }
+
+    const userData = await bindFingerprintToUser(githubUsername, fingerprint, env);
+
+    if (userData) {
+      return c.json({
+        status: 'success',
+        data: userData,
+        message: '身份绑定成功',
+      });
+    } else {
+      return c.json({
+        status: 'error',
+        error: '身份绑定失败',
+        errorCode: 'BIND_FAILED',
+      }, 500);
+    }
+  } catch (error: any) {
+    console.error('[Worker] /api/fingerprint/bind 错误:', error);
+    return c.json({
+      status: 'error',
+      error: error.message || '未知错误',
+      errorCode: 'INTERNAL_ERROR',
     }, 500);
   }
 });

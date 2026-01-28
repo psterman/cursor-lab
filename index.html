@@ -2507,7 +2507,20 @@
                         stack: err.stack,
                         name: err.name,
                     });
-                    setError(err.message || (isEn ? 'Failed to load prompt' : '加载提示失败'));
+                    
+                    // 检查是否是 CORS 错误
+                    const isCorsError = err.message?.includes('CORS') || 
+                                       err.message?.includes('cors') ||
+                                       err.message?.includes('cross-origin') ||
+                                       err.name === 'TypeError' && err.message?.includes('fetch');
+                    
+                    if (isCorsError) {
+                        setError(isEn 
+                            ? 'CORS error: Please check API server CORS settings' 
+                            : '跨域错误：请检查 API 服务器的 CORS 设置');
+                    } else {
+                        setError(err.message || (isEn ? 'Failed to load prompt' : '加载提示失败'));
+                    }
                 } finally {
                     setLoading(false);
                 }

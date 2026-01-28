@@ -257,26 +257,39 @@ class VibeCodingApp {
   }
 
   /**
+   * 【优化后的数据上传函数】
+   * 注意：实际上传逻辑在 worker/index.ts 中，已使用 Upsert 模式
+   * 此函数仅作为辅助说明，实际数据通过 uploadToSupabase 方法上传
+   * 
+   * 上传逻辑说明：
+   * 1. 使用 fingerprint 作为唯一标识
+   * 2. 后端已实现 Upsert（通过 'Prefer': 'resolution=merge-duplicates'）
+   * 3. 如果 fingerprint 重复，则执行更新而非插入
+   * 
+   * @param {Object} context - 上下文对象，包含 fingerprint
+   * @param {Object} result - 分析结果对象
+   * @private
+   */
+  async uploadUserStats(context, result) {
+    // 实际上传在 VibeCodingerAnalyzer.uploadToSupabase 中完成
+    // 该方法会调用 /api/v2/analyze 接口，后端使用 Upsert 模式
+    // 这里仅作为文档说明，不需要实际实现
+    console.log('[VibeCodingApp] uploadUserStats: 实际上传由 uploadToSupabase 方法处理');
+  }
+
+  /**
    * 【V6 环境感知】生成环境上下文
+   * 【修复】使用 getStableFingerprint() 确保指纹唯一且持久（32位哈希）
    * @returns {Object} 包含 fingerprint, timezone, lang, isVpn 等环境信息
    */
-  generateContext() {
-    // 1. 获取或生成 fingerprint
-    let fingerprint = null;
+  async generateContext() {
+    // 1. 获取或生成 fingerprint（使用稳定指纹函数，32位哈希）
+    let fingerprint;
     try {
-      fingerprint = localStorage.getItem('vibe_fp');
-      if (!fingerprint) {
-        // 生成随机 16 位 ID
-        fingerprint = Array.from(crypto.getRandomValues(new Uint8Array(8)))
-          .map(b => b.toString(16).padStart(2, '0'))
-          .join('')
-          .substring(0, 16);
-        localStorage.setItem('vibe_fp', fingerprint);
-        console.log('[VibeCodingApp] ✅ 已生成并持久化 fingerprint:', fingerprint);
-      }
+      fingerprint = await getStableFingerprint();
     } catch (error) {
-      console.warn('[VibeCodingApp] fingerprint 生成失败，使用降级方案:', error);
-      fingerprint = `fp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`.substring(0, 16);
+      console.warn('[VibeCodingApp] 异步指纹生成失败，使用同步降级:', error);
+      fingerprint = getStableFingerprintSync();
     }
 
     // 2. 获取 timezone
@@ -692,12 +705,6 @@ class VibeCodingApp {
         feedback_density: { label: lang === 'en' ? 'Feedback Density' : '反馈密度', value: stats.feedback_density || 0, max: 50 },
         diversity_score: { label: lang === 'en' ? 'Tech Diversity' : '技术多样性', value: stats.diversity_score || 0, max: 20 }
       },
-      // global-insights: 全网宏观数据
-      globalInsights: {
-        total_count: { label: lang === 'en' ? 'Total Scans' : '全网扫描次数', value: globalStats?.total_count || 0 },
-        geo_hotmap_summary: { label: lang === 'en' ? 'Geographic Distribution' : '地理位置分布', value: globalStats?.geo_hotmap_summary || '' },
-        answer_text: { label: lang === 'en' ? "Today's Answer Book" : '今日答案之书', value: globalStats?.answer_text || '' }
-      }
     };
 
     // 更新 badge-grid 容器
@@ -735,19 +742,6 @@ class VibeCodingApp {
       fingerprintBars.innerHTML = bars;
     }
 
-    // 更新 global-insights 容器
-    const globalInsights = document.getElementById('global-insights') || document.querySelector('.global-insights');
-    if (globalInsights) {
-      const insights = Object.entries(dimensionRegistry.globalInsights)
-        .map(([key, item]) => `
-          <div class="insight-item">
-            <span class="insight-label">${item.label}:</span>
-            <span class="insight-value">${typeof item.value === 'number' ? item.value.toLocaleString() : escapeHtml(item.value)}</span>
-          </div>
-        `).join('');
-      globalInsights.innerHTML = insights;
-    }
-
     // 【V6 自动化渲染引擎】调用 renderBehaviorTags 自动生成行为标签
     this.renderBehaviorTags(stats, 'behavior-tags-container');
 
@@ -775,7 +769,7 @@ class VibeCodingApp {
     this.analyzer.setLanguage(currentLang);
 
     // 【V6 环境感知】生成环境上下文
-    const context = this.generateContext();
+    const context = await this.generateContext();
 
     // 步骤1: 调用 analyze 进行本地分析（传入 context 对象）
     const result = await this.analyzer.analyze(chatData, context, null, onProgress);
@@ -1009,7 +1003,7 @@ class VibeCodingApp {
     this.analyzer.setLanguage(currentLang);
 
     // 【V6 环境感知】生成环境上下文
-    const context = this.generateContext();
+    const context = await this.generateContext();
 
     // 步骤1: 调用 analyzeSync 进行本地分析（同步方法，传入 context）
     // 注意：analyzeSync 可能需要适配 context 参数，这里先传入 lang 作为兼容
@@ -1325,7 +1319,7 @@ export const reanalyzeWithLanguage = async (lang) => {
     }
     
     // 【修复】生成 context 对象，而不是直接传递 lang 字符串
-    const context = vibeCodingApp ? vibeCodingApp.generateContext() : {
+    const context = vibeCodingApp ? await vibeCodingApp.generateContext() : {
       ip: '0.0.0.0',
       lang: lang,
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
@@ -1448,7 +1442,7 @@ export const reanalyzeWithLanguage = async (lang) => {
     }
     
     // 【修复】生成 context 对象，而不是直接传递 lang 字符串
-    const contextSync = vibeCodingApp ? vibeCodingApp.generateContext() : {
+    const contextSync = vibeCodingApp ? await vibeCodingApp.generateContext() : {
       ip: '0.0.0.0',
       lang: lang,
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
@@ -1777,6 +1771,179 @@ let currentPage = 1;
 let itemsPerPage = 20; // 每页显示20条
 let filteredChatData = []; // 当前过滤后的数据
 
+// 【防抖处理】防止重复点击造成的重复登记
+let isProcessing = false;
+
+// 【上传状态锁】防止分析过程中的并发请求
+let isAnalyzing = false;
+
+/**
+ * 【稳定指纹生成】确保 fingerprint 始终唯一且持久
+ * 使用固定的 localStorage key，结合 crypto.getRandomValues 和 UserAgent 特征
+ * 生成32位唯一哈希，实现"先读后写"的单例模式
+ * 
+ * 特性：
+ * 1. 使用固定的 key: 'cursor_clinical_fingerprint'
+ * 2. 32位哈希：结合随机值和浏览器特征，确保唯一性
+ * 3. 向后兼容：如果存在旧的 'vibe_fp'，会迁移到新 key
+ * 4. 单例模式：确保同一浏览器环境始终返回相同的指纹
+ * 
+ * @returns {string} 持久化的指纹字符串（32位十六进制）
+ */
+async function getStableFingerprint() {
+  const FINGERPRINT_KEY = 'cursor_clinical_fingerprint';
+  const OLD_FINGERPRINT_KEY = 'vibe_fp'; // 旧 key，用于迁移
+  
+  try {
+    // 先读：尝试从 localStorage 获取已存在的指纹（新 key）
+    let fp = localStorage.getItem(FINGERPRINT_KEY);
+    
+    // 【向后兼容】如果新 key 不存在，尝试从旧 key 迁移
+    if (!fp || fp.length < 16) {
+      const oldFp = localStorage.getItem(OLD_FINGERPRINT_KEY);
+      if (oldFp && oldFp.length >= 8) {
+        // 迁移旧指纹到新 key（如果是16位，扩展为32位）
+        if (oldFp.length === 16) {
+          // 扩展16位为32位：重复并添加随机后缀
+          const randomBytes = new Uint8Array(8);
+          crypto.getRandomValues(randomBytes);
+          const suffix = Array.from(randomBytes)
+            .map(b => b.toString(16).padStart(2, '0'))
+            .join('');
+          fp = oldFp + suffix;
+        } else {
+          fp = oldFp;
+        }
+        try {
+          localStorage.setItem(FINGERPRINT_KEY, fp);
+          console.log('[Main] ✅ 已从旧 key 迁移 fingerprint:', fp);
+        } catch (migrationError) {
+          console.warn('[Main] ⚠️ 指纹迁移失败，但继续使用旧指纹:', migrationError);
+        }
+      }
+    }
+    
+    // 如果仍然没有有效的指纹，生成一个新的32位哈希
+    if (!fp || fp.length < 16) {
+      // 1. 生成随机值
+      const randomBytes = new Uint8Array(16);
+      crypto.getRandomValues(randomBytes);
+      const randomHex = Array.from(randomBytes)
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+      
+      // 2. 获取浏览器特征（UserAgent + 语言 + 平台）
+      const browserFeatures = {
+        userAgent: navigator.userAgent || '',
+        language: navigator.language || '',
+        platform: navigator.platform || '',
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+      };
+      const featuresString = JSON.stringify(browserFeatures);
+      
+      // 3. 结合随机值和浏览器特征生成32位哈希
+      const combinedString = randomHex + featuresString;
+      const encoder = new TextEncoder();
+      const data = encoder.encode(combinedString);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      fp = Array.from(new Uint8Array(hashBuffer))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('')
+        .substring(0, 32); // 取前32位
+      
+      // 后写：保存到 localStorage
+      try {
+        localStorage.setItem(FINGERPRINT_KEY, fp);
+        console.log('[Main] ✅ 已生成并持久化32位 fingerprint:', fp);
+      } catch (storageError) {
+        console.warn('[Main] ⚠️ localStorage 写入失败，但继续使用生成的指纹:', storageError);
+      }
+    } else {
+      console.log('[Main] ✅ 从 localStorage 读取已存在的 fingerprint:', fp);
+    }
+    
+    return fp;
+  } catch (error) {
+    // 降级方案：如果所有方法都失败，使用时间戳+随机数+UserAgent
+    console.warn('[Main] ⚠️ fingerprint 生成失败，使用降级方案:', error);
+    const userAgent = navigator.userAgent || '';
+    const fallbackString = `fp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${userAgent.substring(0, 20)}`;
+    const encoder = new TextEncoder();
+    const data = encoder.encode(fallbackString);
+    
+    try {
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const fallbackFp = Array.from(new Uint8Array(hashBuffer))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('')
+        .substring(0, 32);
+      
+      // 尝试保存降级指纹
+      try {
+        localStorage.setItem(FINGERPRINT_KEY, fallbackFp);
+      } catch (e) {
+        // 忽略保存错误
+      }
+      
+      return fallbackFp;
+    } catch (hashError) {
+      // 最终降级：纯字符串哈希
+      const simpleFp = btoa(fallbackString).replace(/[^a-zA-Z0-9]/g, '').substring(0, 32);
+      try {
+        localStorage.setItem(FINGERPRINT_KEY, simpleFp);
+      } catch (e) {
+        // 忽略保存错误
+      }
+      return simpleFp;
+    }
+  }
+}
+
+/**
+ * 【同步版本】获取稳定指纹（用于同步场景）
+ * 如果异步版本不可用，使用同步降级方案
+ */
+function getStableFingerprintSync() {
+  const FINGERPRINT_KEY = 'cursor_clinical_fingerprint';
+  const OLD_FINGERPRINT_KEY = 'vibe_fp';
+  
+  try {
+    let fp = localStorage.getItem(FINGERPRINT_KEY);
+    
+    if (!fp || fp.length < 16) {
+      const oldFp = localStorage.getItem(OLD_FINGERPRINT_KEY);
+      if (oldFp && oldFp.length >= 8) {
+        fp = oldFp.length === 16 ? (oldFp + oldFp) : oldFp;
+        try {
+          localStorage.setItem(FINGERPRINT_KEY, fp);
+        } catch (e) {}
+      }
+    }
+    
+    if (!fp || fp.length < 16) {
+      const randomBytes = new Uint8Array(16);
+      crypto.getRandomValues(randomBytes);
+      const randomHex = Array.from(randomBytes)
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+      const browserString = (navigator.userAgent || '') + (navigator.language || '') + (navigator.platform || '');
+      const combined = randomHex + browserString;
+      fp = btoa(combined).replace(/[^a-zA-Z0-9]/g, '').substring(0, 32);
+      try {
+        localStorage.setItem(FINGERPRINT_KEY, fp);
+      } catch (e) {}
+    }
+    
+    return fp;
+  } catch (error) {
+    const fallback = `fp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`.substring(0, 32);
+    try {
+      localStorage.setItem(FINGERPRINT_KEY, fallback);
+    } catch (e) {}
+    return fallback;
+  }
+}
+
 // DOM 元素
 const elements = {
   uploadSection: document.getElementById('uploadSection'),
@@ -1946,6 +2113,12 @@ function bindEvents() {
   } else {
     console.log('[Main] ✅ folderInput 元素已找到');
     elements.folderInput.addEventListener('change', (event) => {
+      // 【上传状态锁】检查是否正在分析
+      if (isAnalyzing || isProcessing) {
+        console.warn('[Main] ⚠️ 正在分析中，忽略重复请求');
+        event.target.value = ''; // 清空选择
+        return;
+      }
       console.log('[Main] 文件夹选择事件触发');
       handleFileUpload(event, 'folder');
     });
@@ -1956,10 +2129,43 @@ function bindEvents() {
   } else {
     console.log('[Main] ✅ fileInput 元素已找到');
     elements.fileInput.addEventListener('change', (event) => {
+      // 【上传状态锁】检查是否正在分析
+      if (isAnalyzing || isProcessing) {
+        console.warn('[Main] ⚠️ 正在分析中，忽略重复请求');
+        event.target.value = ''; // 清空选择
+        return;
+      }
       console.log('[Main] 文件选择事件触发');
       handleFileUpload(event, 'file');
     });
   }
+  
+  // 【上传状态锁】禁用/启用按钮的辅助函数
+  function updateUploadButtonsState(disabled) {
+    if (elements.selectFolderBtn) {
+      elements.selectFolderBtn.disabled = disabled;
+      if (disabled) {
+        elements.selectFolderBtn.style.opacity = '0.5';
+        elements.selectFolderBtn.style.cursor = 'not-allowed';
+      } else {
+        elements.selectFolderBtn.style.opacity = '1';
+        elements.selectFolderBtn.style.cursor = 'pointer';
+      }
+    }
+    if (elements.uploadBtn) {
+      elements.uploadBtn.disabled = disabled;
+      if (disabled) {
+        elements.uploadBtn.style.opacity = '0.5';
+        elements.uploadBtn.style.cursor = 'not-allowed';
+      } else {
+        elements.uploadBtn.style.opacity = '1';
+        elements.uploadBtn.style.cursor = 'pointer';
+      }
+    }
+  }
+  
+  // 将更新函数暴露到全局，供 handleFileUpload 使用
+  window.updateUploadButtonsState = updateUploadButtonsState;
 
   // 搜索
   if (elements.searchInput) {
@@ -2035,6 +2241,20 @@ function triggerFileInput(inputElement) {
 
 // 处理文件上传（支持回调函数）
 async function handleFileUpload(event, type, callbacks = {}) {
+  // 【防抖处理 + 上传状态锁】防止重复点击和并发请求
+  if (isProcessing || isAnalyzing) {
+    console.warn('[Main] ⚠️ 正在处理中，忽略重复请求', { isProcessing, isAnalyzing });
+    if (event && event.target) {
+      event.target.value = ''; // 清空选择
+    }
+    return;
+  }
+  
+  // 【上传状态锁】禁用上传按钮
+  if (window.updateUploadButtonsState) {
+    window.updateUploadButtonsState(true);
+  }
+
   const { onProgress, onLog, onComplete, onError } = callbacks;
   console.log(`[Main] 处理文件上传，类型: ${type}`);
   console.log(`[Main] event.files.length: ${event.target.files?.length}`);
@@ -2221,6 +2441,7 @@ async function handleFileUpload(event, type, callbacks = {}) {
     console.log(`[Main] 总共提取 ${allChatData.length} 条对话记录`);
 
     if (allChatData.length === 0) {
+      isProcessing = false; // 重置处理状态
       throw new Error('未找到任何对话数据，请检查数据库文件是否正确');
     }
 
@@ -2282,10 +2503,21 @@ async function handleFileUpload(event, type, callbacks = {}) {
           }
         };
         
+        // 设置处理状态
+        isProcessing = true;
+        
+        // 【上传状态锁】设置分析状态
+        isAnalyzing = true;
+        isProcessing = true;
+        
         // 使用 VibeCodingApp 的 analyzeFile 方法
         // 该方法内部会：1) 调用 analyze 2) 立即 await uploadToSupabase 3) 更新 statistics 4) 调用 renderReport
         vibeResult = await vibeCodingApp.analyzeFile(allChatData, extraStats, onProgress);
         console.log('[Main] Vibe Codinger 分析完成（使用 VibeCodingApp）:', vibeResult);
+        
+        // 重置处理状态
+        isAnalyzing = false;
+        isProcessing = false;
         
         // 隐藏加载状态
         if (!callbacks || !callbacks.onLog) {
@@ -2305,8 +2537,15 @@ async function handleFileUpload(event, type, callbacks = {}) {
           onLog(`> ${logText}`);
         }
         
+        // 重置处理状态（允许重试）
+        isAnalyzing = false;
+        isProcessing = false;
+        
         // 降级到同步方法（使用 VibeCodingApp 类）
         try {
+          // 设置处理状态
+          isAnalyzing = true;
+          isProcessing = true;
           // 确保 VibeCodingApp 已初始化
           if (!vibeCodingApp) {
             vibeCodingApp = new VibeCodingApp();
@@ -2348,6 +2587,10 @@ async function handleFileUpload(event, type, callbacks = {}) {
           vibeResult = await vibeCodingApp.analyzeFileSync(allChatData, extraStats, onProgress);
           console.log('[Main] Vibe Codinger 分析完成（使用 VibeCodingApp 同步方法）:', vibeResult);
           
+          // 重置处理状态
+          isAnalyzing = false;
+          isProcessing = false;
+          
           // 隐藏加载状态
           if (!callbacks || !callbacks.onLog) {
             hideLoading();
@@ -2360,6 +2603,9 @@ async function handleFileUpload(event, type, callbacks = {}) {
           }
         } catch (syncError) {
           console.error('[Main] 同步方法也失败:', syncError);
+          // 重置处理状态
+          isAnalyzing = false;
+          isProcessing = false;
           if (onLog) {
             const currentLang = getCurrentLang();
             const errorText = window.i18n?.getText('upload.logs.analysisFailed', currentLang) || '分析失败';
@@ -2393,6 +2639,9 @@ async function handleFileUpload(event, type, callbacks = {}) {
     }
   } catch (error) {
     console.error('[Main] 处理失败:', error);
+    // 重置处理状态
+    isAnalyzing = false;
+    isProcessing = false;
     if (onError) {
       onError(error);
     } else {
@@ -2401,6 +2650,15 @@ async function handleFileUpload(event, type, callbacks = {}) {
       hideLoading();
     }
   } finally {
+    // 确保处理状态被重置（防止异常情况下状态卡住）
+    isAnalyzing = false;
+    isProcessing = false;
+    
+    // 【上传状态锁】重新启用上传按钮
+    if (window.updateUploadButtonsState) {
+      window.updateUploadButtonsState(false);
+    }
+    
     // 清空文件选择，允许重新选择（如果 event.target 存在）
     if (event && event.target) {
       event.target.value = '';
@@ -3741,25 +3999,6 @@ function displayVibeCodingerAnalysis() {
         <canvas id="vibeRadarChart"></canvas>
       </div>
     </div>
-
-    <!-- 【V6 全网数据仪式感模块】（使用 data-v6-key 自动填空） -->
-    <div class="global-stats-ceremony" id="global-stats-ceremony" style="scroll-margin-top: 80px; margin-top: 30px; padding: 20px; background: rgba(0, 212, 255, 0.1); border-radius: 10px; border: 1px solid rgba(0, 212, 255, 0.3);">
-      <h3 class="ceremony-title" style="margin-bottom: 15px; color: var(--accent-terminal);">${getCurrentLang() === 'en' ? 'Global Statistics' : '全网数据'}</h3>
-      <div class="ceremony-content" style="display: flex; flex-direction: column; gap: 10px;">
-        <div class="ceremony-item">
-          <span class="ceremony-label">${getCurrentLang() === 'en' ? 'Total Scans' : '全网扫描次数'}:</span>
-          <span class="ceremony-value" data-v6-key="total_users">0</span>
-        </div>
-        <div class="ceremony-item">
-          <span class="ceremony-label">${getCurrentLang() === 'en' ? 'Geographic Distribution' : '地理位置分布'}:</span>
-          <span class="ceremony-value" data-v6-key="geo_hotmap_summary">${getCurrentLang() === 'en' ? 'Loading...' : '加载中...'}</span>
-        </div>
-        <div class="ceremony-item">
-          <span class="ceremony-label">${getCurrentLang() === 'en' ? "Today's Answer Book" : '今日答案之书'}:</span>
-          <span class="ceremony-value" data-v6-key="answer_text" style="font-style: italic; color: var(--accent-terminal);">${getCurrentLang() === 'en' ? 'Loading...' : '加载中...'}</span>
-        </div>
-      </div>
-    </div>
   `;
   
   // 【V6 自动化渲染引擎】在 DOM 渲染完成后调用 renderBehaviorTags
@@ -3773,10 +4012,6 @@ function displayVibeCodingerAnalysis() {
   setTimeout(() => {
     if (vibeCodingApp && typeof vibeCodingApp.renderBehaviorTags === 'function') {
       vibeCodingApp.renderBehaviorTags(safeStats, 'behavior-tags-container');
-    }
-    // 同步全网数据（如果已加载）
-    if (vibeCodingApp && typeof vibeCodingApp.syncGlobalStats === 'function' && vibeCodingApp.globalStatsCache) {
-      vibeCodingApp.syncGlobalStats(vibeCodingApp.globalStatsCache);
     }
   }, 100);
 
@@ -4545,6 +4780,7 @@ async function displayRealtimeStats(vibeResult) {
       techRank: estimatedRank,
       unlockProgress: `${unlockProgress}%`
     });
+    
   } catch (error) {
     // 全局异常捕获：确保即使 displayRealtimeStats 内部出错，也不影响后续的图表渲染和词云生成逻辑
     console.error('[Main] displayRealtimeStats 执行失败，但不影响后续逻辑:', error);
