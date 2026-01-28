@@ -1,0 +1,131 @@
+PS C:\Users\pster\Desktop\backup> npx wrangler tail
+
+ ⛅️ wrangler 4.60.0 (update available 4.61.0)
+─────────────────────────────────────────────
+Successfully created tail, expires at 2026-01-28T12:54:42Z
+Connected to cursor-clinical-analysis, waiting for logs...
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/global-average - Ok @ 2026/1/28 16:28:07
+  (log) [Worker] ✅ 获取人格排行成功: 2 条
+  (log) [Worker] ✅ 获取地理位置排行成功: 1 条
+  (log) [Worker] ✅ 获取最近受害者成功: 3 条
+  (log) [Worker] ✅ 获取王者池数据成功: 3 条（已从 3 条中过滤）
+  (log) [Worker] ✅ 从 v_top_records 视图获取各维度最高记录完成: 0 个维度
+  (log) [Worker] ✅ 从视图直接返回数据: {
+  totalUsers: 3,
+  totalAnalysis: 1924,
+  totalRoastWords: 0,
+  avgPerUser: 0,
+  avgPerScan: 0,
+  avgCharsPerUser: 0,
+  cityCount: 0,
+  personalityRankCount: 2,
+  locationRankCount: 1,
+  recentVictimsCount: 3,
+  latestRecordsCount: 3,
+  source: 'live_database_v7'
+}
+  (log) [Worker] ✅ 已写入 KV 缓存（source: live_database, TTL: 60秒）
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/fingerprint/migrate - Ok @ 2026/1/28 16:28:11
+  (log) [Worker] ✅ 用户身份验证成功，user_id: 132c47c6...
+  (log) [Worker] 🔍 开始查询源记录和目标记录...
+  (log) [Fingerprint] ✅ 找到用户: {
+  id: '132c47c6-911d-405c-8aa6-9d2ce89f90b1',
+  user_name: 'psterman',
+  fingerprint: '3aaee760...'
+}
+  (log) [Fingerprint] ✅ 根据 User ID 找到用户: {
+  id: '132c47c6-911d-405c-8aa6-9d2ce89f90b1',
+  user_name: 'psterman',
+  user_identity: 'github'
+}
+  (log) [Worker] 📊 查询结果: {
+  sourceRecordExists: true,
+  targetRecordExists: true,
+  sourceRecordId: '132c47c6...',
+  targetRecordId: '132c47c6...'
+}
+  (log) [Worker] ℹ️ 源记录无有效数据（total_messages = 0），无需迁移
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/global-average - Ok @ 2026/1/28 16:28:12
+  (log) [Worker] ✅ 获取人格排行成功: 2 条
+  (log) [Worker] ✅ 获取地理位置排行成功: 1 条
+  (log) [Worker] ✅ 获取最近受害者成功: 3 条
+  (log) [Worker] ✅ 获取王者池数据成功: 3 条（已从 3 条中过滤）
+  (log) [Worker] ✅ 从 v_top_records 视图获取各维度最高记录完成: 0 个维度
+  (log) [Worker] ✅ 从视图直接返回数据: {
+  totalUsers: 3,
+  totalAnalysis: 1924,
+  totalRoastWords: 0,
+  avgPerUser: 0,
+  avgPerScan: 0,
+  avgCharsPerUser: 0,
+  cityCount: 0,
+  personalityRankCount: 2,
+  locationRankCount: 1,
+  recentVictimsCount: 3,
+  latestRecordsCount: 3,
+  source: 'live_database_v7'
+}
+  (log) [Worker] ✅ 已写入 KV 缓存（source: live_database, TTL: 60秒）
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/global-average - Ok @ 2026/1/28 16:28:15
+  (log) [Worker] ✅ 获取人格排行成功: 2 条
+  (log) [Worker] ✅ 获取地理位置排行成功: 1 条
+  (log) [Worker] ✅ 获取最近受害者成功: 3 条
+  (log) [Worker] ✅ 获取王者池数据成功: 3 条（已从 3 条中过滤）
+  (log) [Worker] ✅ 从 v_top_records 视图获取各维度最高记录完成: 0 个维度
+  (log) [Worker] ✅ 从视图直接返回数据: {
+  totalUsers: 3,
+  totalAnalysis: 1924,
+  totalRoastWords: 0,
+  avgPerUser: 0,
+  avgPerScan: 0,
+  avgCharsPerUser: 0,
+  cityCount: 0,
+  personalityRankCount: 2,
+  locationRankCount: 1,
+  recentVictimsCount: 3,
+  latestRecordsCount: 3,
+  source: 'live_database_v7'
+}
+  (log) [Worker] ✅ 已写入 KV 缓存（source: live_database, TTL: 60秒）
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/global-average - Ok @ 2026/1/28 16:28:17
+  (log) [Worker] ✅ 获取人格排行成功: 2 条
+  (log) [Worker] ✅ 获取地理位置排行成功: 1 条
+  (log) [Worker] ✅ 获取最近受害者成功: 3 条
+  (log) [Worker] ✅ 获取王者池数据成功: 3 条（已从 3 条中过滤）
+  (log) [Worker] ✅ 从 v_top_records 视图获取各维度最高记录完成: 0 个维度
+  (log) [Worker] ✅ 从视图直接返回数据: {
+  totalUsers: 3,
+  totalAnalysis: 1924,
+  totalRoastWords: 0,
+  avgPerUser: 0,
+  avgPerScan: 0,
+  avgCharsPerUser: 0,
+  cityCount: 0,
+  personalityRankCount: 2,
+  locationRankCount: 1,
+  recentVictimsCount: 3,
+  latestRecordsCount: 3,
+  source: 'live_database_v7'
+}
+  (log) [Worker] ✅ 已写入 KV 缓存（source: live_database, TTL: 60秒）
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/global-average - Ok @ 2026/1/28 16:28:20
+  (log) [Worker] ✅ 获取人格排行成功: 2 条
+  (log) [Worker] ✅ 获取地理位置排行成功: 1 条
+  (log) [Worker] ✅ 获取最近受害者成功: 3 条
+  (log) [Worker] ✅ 获取王者池数据成功: 3 条（已从 3 条中过滤）
+  (log) [Worker] ✅ 从 v_top_records 视图获取各维度最高记录完成: 0 个维度
+  (log) [Worker] ✅ 从视图直接返回数据: {
+  totalUsers: 3,
+  totalAnalysis: 1924,
+  totalRoastWords: 0,
+  avgPerUser: 0,
+  avgPerScan: 0,
+  avgCharsPerUser: 0,
+  cityCount: 0,
+  personalityRankCount: 2,
+  locationRankCount: 1,
+  recentVictimsCount: 3,
+  latestRecordsCount: 3,
+  source: 'live_database_v7'
+}
+  (log) [Worker] ✅ 已写入 KV 缓存（source: live_database, TTL: 60秒）

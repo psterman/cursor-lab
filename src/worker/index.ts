@@ -12,7 +12,7 @@ import { getRoastText, getPersonalityName, getVibeIndex, determinePersonalityTyp
 import { getRankResult, RANK_DATA } from './rank';
 // 直接从 rank-content.ts 导入 RANK_RESOURCES（rank.ts 已导入但未导出）
 import { RANK_RESOURCES } from '../rank-content';
-import { identifyUserByFingerprint, bindFingerprintToUser, updateUserByFingerprint } from './fingerprint-service';
+import { identifyUserByFingerprint, identifyUserByUserId, bindFingerprintToUser, updateUserByFingerprint, migrateFingerprintToUserId } from './fingerprint-service';
 
 // Cloudflare Workers 类型定义（兼容性处理）
 type KVNamespace = {
@@ -1525,6 +1525,42 @@ app.post('/api/v2/analyze', async (c) => {
       try {
         const executionCtx = c.executionCtx;
         if (executionCtx && typeof executionCtx.waitUntil === 'function') {
+          // 【GitHub OAuth 优先】检查请求头中是否包含 Authorization token
+          const authHeader = c.req.header('Authorization');
+          let authenticatedUserId: string | null = null;
+          let useUserIdForUpsert = false;
+          
+          if (authHeader && authHeader.startsWith('Bearer ')) {
+            try {
+              const token = authHeader.substring(7);
+              // 从 JWT token 中提取 user_id（sub 字段）
+              // JWT 格式：header.payload.signature，payload 是 base64url 编码的 JSON
+              const parts = token.split('.');
+              if (parts.length === 3) {
+                // 解码 payload（base64url）
+                const payload = JSON.parse(
+                  atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'))
+                );
+                authenticatedUserId = payload.sub || null;
+                
+                if (authenticatedUserId) {
+                  console.log('[Worker] ✅ 检测到 GitHub OAuth token，user_id:', authenticatedUserId.substring(0, 8) + '...');
+                  // 验证用户是否存在于 user_analysis 表中
+                  const existingUser = await identifyUserByUserId(authenticatedUserId, env);
+                  if (existingUser) {
+                    useUserIdForUpsert = true;
+                    console.log('[Worker] ✅ 找到已认证用户，将使用 user_id 进行 Upsert');
+                  } else {
+                    console.log('[Worker] ℹ️ 已认证用户尚未在 user_analysis 表中，将创建新记录');
+                    useUserIdForUpsert = true; // 即使不存在，也使用 user_id 创建新记录
+                  }
+                }
+              }
+            } catch (error: any) {
+              console.warn('[Worker] ⚠️ 解析 Authorization token 失败，将使用 fingerprint:', error.message);
+            }
+          }
+          
           // 【幂等 Upsert】生成稳定 userId + 基于 userId 的固定 fingerprint
           // 只根据前 10 条消息的内容生成指纹，忽略由于后续对话增加导致的字符总数变化
           // 使用静态特征（消息内容）而非统计结果（total_chars, total_messages）
@@ -1541,13 +1577,14 @@ app.post('/api/v2/analyze', async (c) => {
             .map(b => b.toString(16).padStart(2, '0'))
             .join('');
           
-          // 当前 V2 接口请求体仅包含 chatData/lang，因此将稳定内容指纹作为 userId（幂等身份）
-          const userId = stableFingerprint;
-          const fingerprint = await generateFingerprint(userId, totalChars);
+          // 如果已认证，使用 user_id；否则使用 fingerprint 作为 userId
+          const userId = useUserIdForUpsert ? authenticatedUserId! : stableFingerprint;
+          const fingerprint = useUserIdForUpsert ? authenticatedUserId! : await generateFingerprint(userId, totalChars);
           
-          console.log('[Worker] 🔑 生成指纹（基于前10条消息内容）:', {
-            fingerprint,
-            stableFingerprint,
+          console.log('[Worker] 🔑 生成用户标识:', {
+            method: useUserIdForUpsert ? 'GitHub OAuth (user_id)' : 'Fingerprint',
+            userId: userId.substring(0, 8) + '...',
+            fingerprint: fingerprint.substring(0, 8) + '...',
             messagesUsed: stableMessages.length,
             contentLength: stableContent.length,
             fallbackUsed: !stableContent,
@@ -1560,8 +1597,11 @@ app.post('/api/v2/analyze', async (c) => {
           const v6StatsForStorage = v6Stats || finalStats;
           
           const payload: any = {
+            // 【GitHub OAuth 优先】如果使用 user_id，则设置 id 字段；否则使用 fingerprint
+            ...(useUserIdForUpsert ? { id: authenticatedUserId } : {}),
             fingerprint: v6Dimensions ? (body.fingerprint || fingerprint) : fingerprint,
             user_name: body.userName || '匿名受害者',
+            user_identity: useUserIdForUpsert ? 'github' : 'fingerprint',
             personality_type: personalityType,
             
             // 【字段名对齐】使用数据库字段名：l_score, p_score, d_score, e_score, f_score
@@ -1650,11 +1690,11 @@ app.post('/api/v2/analyze', async (c) => {
             lang: payload.lang,
           });
 
-          // 【异步存储】使用 waitUntil 幂等 Upsert（按 fingerprint 冲突则更新）
-          // 执行写入
-          // 【修复重复登记】使用 Upsert 模式，显式指定 onConflict
+          // 【异步存储】使用 waitUntil 幂等 Upsert
+          // 【GitHub OAuth 优先】如果使用 user_id，则按 id 冲突；否则按 fingerprint 冲突
           // Supabase REST API 的 Upsert 通过 URL 参数 on_conflict 和 Prefer 头实现
-          const supabaseUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=fingerprint`;
+          const conflictKey = useUserIdForUpsert ? 'id' : 'fingerprint';
+          const supabaseUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=${conflictKey}`;
           executionCtx.waitUntil(
             Promise.all([
               // 写入 Supabase（增强错误处理）
@@ -1912,6 +1952,460 @@ app.post('/api/fingerprint/bind', async (c) => {
       status: 'error',
       error: error.message || '未知错误',
       errorCode: 'INTERNAL_ERROR',
+    }, 500);
+  }
+});
+
+/**
+ * 路由：/api/fingerprint/migrate
+ * 功能：将指纹数据迁移到 GitHub User ID
+ * 当用户通过 GitHub OAuth 登录时，前端调用此接口将旧的 fingerprint 数据迁移到新的 user_id
+ */
+app.post('/api/fingerprint/migrate', async (c) => {
+  try {
+    const env = c.env;
+    const body = await c.req.json();
+    const { fingerprint: oldFingerprint, userId: githubUserId } = body;
+
+    if (!oldFingerprint || !githubUserId) {
+      return c.json({
+        status: 'error',
+        error: 'fingerprint 和 userId 参数必填',
+        errorCode: 'MISSING_PARAMETERS',
+      }, 400);
+    }
+
+    if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+      return c.json({
+        status: 'error',
+        error: 'Supabase 配置缺失',
+        errorCode: 'SUPABASE_NOT_CONFIGURED',
+      }, 500);
+    }
+
+    // 【步骤 1：检查与锁定】验证 GitHub 用户是否已登录（必须通过认证）
+    const authHeader = c.req.header('Authorization');
+    let authenticatedUserId: string | null = null;
+    let isAuthenticated = false;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return c.json({
+        status: 'error',
+        error: '必须提供有效的 GitHub OAuth token',
+        errorCode: 'AUTHENTICATION_REQUIRED',
+      }, 401);
+    }
+
+    try {
+      const token = authHeader.substring(7);
+      // 从 JWT token 中提取 user_id（sub 字段）
+      const parts = token.split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(
+          atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'))
+        );
+        authenticatedUserId = payload.sub || null;
+        
+        if (authenticatedUserId && authenticatedUserId === githubUserId) {
+          isAuthenticated = true;
+          console.log('[Worker] ✅ 用户身份验证成功，user_id:', authenticatedUserId.substring(0, 8) + '...');
+        } else {
+          return c.json({
+            status: 'error',
+            error: 'token 中的 user_id 与请求的 userId 不匹配',
+            errorCode: 'USER_ID_MISMATCH',
+          }, 403);
+        }
+      }
+    } catch (error: any) {
+      return c.json({
+        status: 'error',
+        error: '解析 Authorization token 失败',
+        errorCode: 'INVALID_TOKEN',
+        details: error.message,
+      }, 401);
+    }
+
+    if (!isAuthenticated) {
+      return c.json({
+        status: 'error',
+        error: '用户身份验证失败',
+        errorCode: 'AUTHENTICATION_FAILED',
+      }, 401);
+    }
+
+    // 验证 userId 格式（UUID）
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(githubUserId)) {
+      return c.json({
+        status: 'error',
+        error: '无效的 userId 格式',
+        errorCode: 'INVALID_USER_ID',
+      }, 400);
+    }
+
+    // 【步骤 2：数据查询】同时查询 id = githubUserId (目标记录) 和 fingerprint = oldFingerprint (源记录)
+    console.log('[Worker] 🔍 开始查询源记录和目标记录...');
+    
+    const [sourceRecord, targetRecord] = await Promise.all([
+      identifyUserByFingerprint(oldFingerprint, env),
+      identifyUserByUserId(githubUserId, env),
+    ]);
+
+    console.log('[Worker] 📊 查询结果:', {
+      sourceRecordExists: !!sourceRecord,
+      targetRecordExists: !!targetRecord,
+      sourceRecordId: sourceRecord?.id?.substring(0, 8) + '...',
+      targetRecordId: targetRecord?.id?.substring(0, 8) + '...',
+    });
+
+    // 【步骤 3：条件判断】
+    // 找到 fingerprint = oldFingerprint 且 total_messages > 0 的那条旧记录
+    if (!sourceRecord) {
+      console.log('[Worker] ℹ️ 源记录不存在，无需迁移');
+      return c.json({
+        status: 'not_found',
+        error: '未找到对应的指纹数据',
+        errorCode: 'FINGERPRINT_NOT_FOUND',
+      }, 404);
+    }
+
+    // 【完善】确保找到 total_messages > 0 的旧记录
+    const sourceTotalMessages = sourceRecord.total_messages || sourceRecord.stats?.total_messages || 0;
+    if (sourceTotalMessages === 0) {
+      console.log('[Worker] ℹ️ 源记录无有效数据（total_messages = 0），无需迁移');
+      return c.json({
+        status: 'no_data',
+        error: '源记录无有效数据（total_messages = 0），无需迁移',
+        errorCode: 'NO_DATA_TO_MIGRATE',
+      }, 200);
+    }
+
+    console.log('[Worker] ✅ 找到有效源记录:', {
+      sourceId: sourceRecord.id?.substring(0, 8) + '...',
+      fingerprint: oldFingerprint.substring(0, 8) + '...',
+      total_messages: sourceTotalMessages,
+      has_scores: !!(sourceRecord.l_score || sourceRecord.p_score),
+    });
+
+    console.log('[Worker] ✅ 源记录包含有效数据，开始执行字段级覆盖迁移');
+    console.log('[Worker] 📊 源记录数据摘要:', {
+      total_messages: sourceTotalMessages,
+      has_stats: !!sourceRecord.stats,
+      has_scores: !!(sourceRecord.l_score || sourceRecord.p_score),
+      has_personality: !!sourceRecord.personality_type,
+    });
+
+    // 【处理占位冲突】即使目标记录已存在（例如身份为 github 且类型为 AUTO_REPORT 的空记录），也要执行迁移
+    if (targetRecord) {
+      console.log('[Worker] ✅ 目标记录已存在（可能是占位记录），执行字段合并迁移');
+      console.log('[Worker] 📋 目标记录状态:', {
+        id: targetRecord.id?.substring(0, 8) + '...',
+        user_identity: targetRecord.user_identity,
+        total_messages: targetRecord.total_messages || 0,
+        has_data: !!(targetRecord.total_messages && targetRecord.total_messages > 0),
+      });
+    } else {
+      console.log('[Worker] ✅ 目标记录不存在，将创建新记录并继承源记录数据');
+    }
+
+    // 【执行字段合并】将旧记录的关键字段 UPDATE 到当前的 userId 记录中
+    // 关键字段：total_messages, stats, l_score, p_score, d_score, e_score, f_score, personality_type, roast_text
+    const updateData: any = {
+      id: githubUserId,
+      user_identity: 'github',
+      updated_at: new Date().toISOString(),
+    };
+
+    // 【字段合并】如果旧记录有数据（total_messages > 0），将其关键字段全部 UPDATE 到 userId 记录中
+    // 1. total_messages - 使用源记录的值
+    if (sourceRecord.total_messages !== null && sourceRecord.total_messages !== undefined) {
+      updateData.total_messages = sourceRecord.total_messages;
+    }
+    
+    // 2. stats - 直接覆盖（源记录的分析结果更完整）
+    if (sourceRecord.stats) {
+      const sourceStats = typeof sourceRecord.stats === 'string' 
+        ? JSON.parse(sourceRecord.stats) 
+        : sourceRecord.stats;
+      updateData.stats = sourceStats;
+    }
+    
+    // 3. 维度分数 - 直接覆盖
+    if (sourceRecord.l_score !== null && sourceRecord.l_score !== undefined) {
+      updateData.l_score = sourceRecord.l_score;
+    }
+    if (sourceRecord.p_score !== null && sourceRecord.p_score !== undefined) {
+      updateData.p_score = sourceRecord.p_score;
+    }
+    if (sourceRecord.d_score !== null && sourceRecord.d_score !== undefined) {
+      updateData.d_score = sourceRecord.d_score;
+    }
+    if (sourceRecord.e_score !== null && sourceRecord.e_score !== undefined) {
+      updateData.e_score = sourceRecord.e_score;
+    }
+    if (sourceRecord.f_score !== null && sourceRecord.f_score !== undefined) {
+      updateData.f_score = sourceRecord.f_score;
+    }
+    
+    // 4. personality_type - 直接覆盖
+    if (sourceRecord.personality_type) {
+      updateData.personality_type = sourceRecord.personality_type;
+    }
+    
+    // 5. roast_text - 直接覆盖
+    if (sourceRecord.roast_text) {
+      updateData.roast_text = sourceRecord.roast_text;
+    }
+    
+    // 6. personality_data - 直接覆盖（如果存在）
+    if (sourceRecord.personality_data) {
+      const sourcePersonalityData = typeof sourceRecord.personality_data === 'string' 
+        ? JSON.parse(sourceRecord.personality_data) 
+        : sourceRecord.personality_data;
+      updateData.personality_data = sourcePersonalityData;
+      console.log('[Worker] ✅ 已包含 personality_data 字段，长度:', Array.isArray(sourcePersonalityData) ? sourcePersonalityData.length : 'N/A');
+    }
+    
+    // 【更新 fingerprint 字段】同时更新 userId 记录的 fingerprint 字段，确保关联建立
+    if (oldFingerprint) {
+      updateData.fingerprint = oldFingerprint;
+      console.log('[Worker] ✅ 已设置 fingerprint 字段，确保关联建立');
+    }
+    
+    // 保留目标记录的关键字段（用户名等），如果目标记录不存在则使用源记录
+    updateData.user_name = targetRecord?.user_name || sourceRecord?.user_name || 'github_user';
+    
+    // 其他可选字段的覆盖（如果源记录有值）
+    const optionalFields = [
+      'total_chars', 'work_days', 'dimensions', 'personality',
+      'ketao_count', 'jiafang_count', 'tease_count', 'nonsense_count',
+      'ip_location', 'lat', 'lng', 'timezone', 'browser_lang',
+      'personality_name', 'answer_book', 'metadata', 'hourly_activity', 'risk_level'
+    ];
+    
+    optionalFields.forEach(field => {
+      if (sourceRecord[field] !== null && sourceRecord[field] !== undefined) {
+        // 对于 JSONB 字段，确保是对象格式
+        if ((field === 'dimensions' || field === 'personality' || field === 'metadata' || field === 'hourly_activity') 
+            && typeof sourceRecord[field] === 'string') {
+          try {
+            updateData[field] = JSON.parse(sourceRecord[field]);
+          } catch (e) {
+            console.warn(`[Worker] ⚠️ 字段 ${field} JSON 解析失败，跳过`);
+          }
+        } else {
+          updateData[field] = sourceRecord[field];
+        }
+      }
+    });
+
+    // 清理 updateData，移除 null/undefined 值和无效字段
+    const cleanedUpdateData: any = {
+      id: githubUserId,
+      user_identity: 'github',
+      updated_at: new Date().toISOString(),
+    };
+    
+    // 只添加有效字段
+    Object.keys(updateData).forEach(key => {
+      const value = updateData[key];
+      // 跳过 null、undefined 和空字符串（但保留 0 和 false）
+      if (value !== null && value !== undefined && value !== '') {
+        cleanedUpdateData[key] = value;
+      }
+    });
+    
+    // 确保 user_name 存在
+    if (!cleanedUpdateData.user_name) {
+      cleanedUpdateData.user_name = targetRecord?.user_name || sourceRecord?.user_name || 'github_user';
+    }
+    
+    console.log('[Worker] 📋 准备更新的字段:', Object.keys(cleanedUpdateData));
+    console.log('[Worker] 📊 更新数据摘要:', {
+      total_messages: cleanedUpdateData.total_messages,
+      has_stats: !!cleanedUpdateData.stats,
+      has_scores: !!(cleanedUpdateData.l_score || cleanedUpdateData.p_score),
+      has_personality: !!cleanedUpdateData.personality_type,
+      has_roast_text: !!cleanedUpdateData.roast_text,
+    });
+    
+    // 【步骤 4：字段搬运】使用 supabase.update() 更新目标记录
+    const updateUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(githubUserId)}`;
+    
+    let updateResponse = await fetch(updateUrl, {
+      method: 'PATCH',
+      headers: {
+        'apikey': env.SUPABASE_KEY,
+        'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation',
+      },
+      body: JSON.stringify(cleanedUpdateData),
+    });
+
+    // 如果 PATCH 失败（404），尝试使用 upsert 创建新记录
+    if (!updateResponse.ok) {
+      const errorText = await updateResponse.text();
+      console.warn('[Worker] ⚠️ PATCH 更新失败，尝试使用 upsert 创建新记录:', {
+        status: updateResponse.status,
+        error: errorText.substring(0, 200)
+      });
+      
+      // 使用 upsert（POST with onConflict）
+      const upsertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis`;
+      updateResponse = await fetch(upsertUrl, {
+        method: 'POST',
+        headers: {
+          'apikey': env.SUPABASE_KEY,
+          'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation,resolution=merge-duplicates',
+        },
+        body: JSON.stringify([cleanedUpdateData]),
+      });
+      
+      if (!updateResponse.ok) {
+        const upsertErrorText = await updateResponse.text();
+        console.error('[Worker] ❌ Upsert 也失败:', {
+          status: updateResponse.status,
+          error: upsertErrorText.substring(0, 500)
+        });
+        return c.json({
+          status: 'error',
+          error: '更新用户数据失败',
+          errorCode: 'UPDATE_FAILED',
+          details: upsertErrorText.substring(0, 500),
+          attemptedMethods: ['PATCH', 'POST upsert'],
+        }, 500);
+      }
+    }
+
+    const updatedUser = await updateResponse.json();
+    const migratedUser = Array.isArray(updatedUser) && updatedUser.length > 0 ? updatedUser[0] : updatedUser;
+    
+    console.log('[Worker] ✅ 用户数据 UPDATE 成功:', {
+      userId: githubUserId.substring(0, 8) + '...',
+      userName: migratedUser?.user_name || 'N/A',
+      method: updateResponse.status === 200 ? 'PATCH' : 'POST upsert',
+      migratedFields: Object.keys(cleanedUpdateData).length,
+      totalMessages: migratedUser?.total_messages || 0,
+      hasScores: !!(migratedUser?.l_score || migratedUser?.p_score),
+    });
+
+    // 【物理同步】在迁移成功后，执行一个明确的 SQL UPDATE，将 user_analysis 表中该 GitHub 记录的 fingerprint 字段更新为迁移过来的指纹值
+    // 这样 v_unified_analysis_v2 视图才能生效（视图依赖 fingerprint 字段进行关联）
+    if (oldFingerprint) {
+      console.log('[Worker] 🔄 执行物理同步：更新 fingerprint 字段...');
+      const fingerprintUpdateUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(githubUserId)}`;
+      
+      const fingerprintUpdateResponse = await fetch(fingerprintUpdateUrl, {
+        method: 'PATCH',
+        headers: {
+          'apikey': env.SUPABASE_KEY,
+          'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation',
+        },
+        body: JSON.stringify({
+          fingerprint: oldFingerprint,
+          updated_at: new Date().toISOString(),
+        }),
+      });
+
+      if (!fingerprintUpdateResponse.ok) {
+        const errorText = await fingerprintUpdateResponse.text();
+        console.warn('[Worker] ⚠️ fingerprint 字段更新失败（不影响主流程）:', {
+          status: fingerprintUpdateResponse.status,
+          error: errorText.substring(0, 200)
+        });
+      } else {
+        const fingerprintUpdateResult = await fingerprintUpdateResponse.json();
+        console.log('[Worker] ✅ fingerprint 字段物理同步成功:', {
+          userId: githubUserId.substring(0, 8) + '...',
+          fingerprint: oldFingerprint.substring(0, 8) + '...',
+          updated: fingerprintUpdateResult ? 'yes' : 'no'
+        });
+        console.log('[Worker] ✅ v_unified_analysis_v2 视图现在可以通过 fingerprint 字段正确关联数据');
+      }
+    }
+
+    // 【物理清理】搬运完成后，务必 DELETE 掉原来的匿名记录，防止数据库膨胀和逻辑干扰
+    // 注意：只有在 UPDATE 成功后才执行 DELETE 操作
+    if (sourceRecord.id !== githubUserId) {
+      console.log('[Worker] 🗑️ 开始物理清理：删除原有的匿名指纹记录...');
+      console.log('[Worker] 📋 源记录信息:', {
+        sourceId: sourceRecord.id.substring(0, 8) + '...',
+        targetId: githubUserId.substring(0, 8) + '...',
+        fingerprint: oldFingerprint.substring(0, 8) + '...',
+        sourceTotalMessages: sourceTotalMessages,
+      });
+      
+      const deleteUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(sourceRecord.id)}`;
+      
+      const deleteResponse = await fetch(deleteUrl, {
+        method: 'DELETE',
+        headers: {
+          'apikey': env.SUPABASE_KEY,
+          'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation',
+        },
+      });
+
+      if (!deleteResponse.ok) {
+        const errorText = await deleteResponse.text();
+        console.error('[Worker] ❌ 物理清理失败：删除匿名指纹记录失败:', {
+          status: deleteResponse.status,
+          error: errorText.substring(0, 500)
+        });
+        // 删除失败不影响主流程，但记录错误并返回警告
+        return c.json({
+          status: 'partial_success',
+          data: migratedUser,
+          message: '数据物理过户成功，但删除旧记录失败',
+          warning: '旧指纹记录可能仍存在，可能影响 v_unified_analysis_v2 视图统计和数据库性能',
+          errorCode: 'DELETE_FAILED',
+          details: errorText.substring(0, 500),
+        }, 200);
+      } else {
+        console.log('[Worker] ✅ 物理清理完成：原有的匿名指纹记录已成功删除');
+        console.log('[Worker] ✅ 数据库已清理，v_unified_analysis_v2 视图统计将不会出现重复');
+      }
+    } else {
+      console.log('[Worker] ℹ️ 源记录 ID 与目标 ID 相同，无需物理清理');
+    }
+
+    console.log('[Worker] ✅ 数据物理过户完成，所有分析字段已成功迁移');
+    console.log('[Worker] 📊 迁移摘要:', {
+      sourceId: sourceRecord.id?.substring(0, 8) + '...',
+      targetId: githubUserId.substring(0, 8) + '...',
+      migratedFields: Object.keys(cleanedUpdateData).length,
+      hasScores: !!(cleanedUpdateData.l_score || cleanedUpdateData.p_score),
+      hasStats: !!cleanedUpdateData.stats,
+      hasPersonality: !!cleanedUpdateData.personality_type,
+      hasPersonalityData: !!cleanedUpdateData.personality_data,
+      hasRoastText: !!cleanedUpdateData.roast_text,
+      totalMessages: cleanedUpdateData.total_messages,
+    });
+
+    return c.json({
+      status: 'success',
+      data: migratedUser,
+      message: '数据物理过户成功，所有分析字段已迁移完成',
+      migratedFields: Object.keys(cleanedUpdateData).length,
+      requiresRefresh: true, // 提示前端需要刷新视图
+    });
+  } catch (error: any) {
+    console.error('[Worker] /api/fingerprint/migrate 错误:', error);
+    const errorMessage = error?.message || error?.toString() || '未知错误';
+    const errorStack = error?.stack ? error.stack.substring(0, 500) : null;
+    
+    return c.json({
+      status: 'error',
+      error: errorMessage,
+      errorCode: 'INTERNAL_ERROR',
+      details: errorStack,
     }, 500);
   }
 });
