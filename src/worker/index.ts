@@ -497,6 +497,14 @@ interface V6AnalyzePayload {
   fingerprint?: string; // LPDEF 指纹
   lang?: string; // 语言代码
   userName?: string; // 用户名（可选）
+  /** 用户校准的国家/地区代码（地图校准后上报，如 CN、US） */
+  manual_location?: string;
+  /** 用户校准的经纬度 [lng, lat]（地图校准后上报） */
+  manual_coordinates?: [number, number];
+  /** 用户校准纬度（可与 manual_location 一起单独上报） */
+  manual_lat?: number;
+  /** 用户校准经度（可与 manual_location 一起单独上报） */
+  manual_lng?: number;
   // 兼容旧版接口的字段
   usageDays?: number;
   days?: number;
@@ -813,19 +821,86 @@ app.post('/api/v2/analyze', async (c) => {
       }, 400);
     }
 
-    // 验证 chatData 格式
+    // 验证 chatData 格式（仅校准：有 manual_lat 时允许 chatData 为空）
+    const hasManualLocation = body.manual_lat != null || body.manual_lng != null ||
+      (body.manual_location != null && String(body.manual_location).trim() !== '');
     if (!chatData || !Array.isArray(chatData)) {
-      return c.json({
-        status: 'error',
-        error: 'chatData 必须是数组',
-        errorCode: 'INVALID_CHATDATA',
-      }, 400);
+      if (!hasManualLocation) {
+        return c.json({
+          status: 'error',
+          error: 'chatData 必须是数组',
+          errorCode: 'INVALID_CHATDATA',
+        }, 400);
+      }
+      // 仅校准：chatData 可为空，下面走校准分支
     }
 
-    // 提取用户消息
-    const userMessages = chatData.filter((item: any) => item.role === 'USER');
+    const safeChatData = Array.isArray(chatData) ? chatData : [];
+    const userMessages = safeChatData.filter((item: any) => item.role === 'USER');
 
     if (userMessages.length === 0) {
+      // 即使 chatData 为空，只要有 manual_lat 且能识别用户（fingerprint 或 auth），也执行数据库更新（仅校准）
+      const canIdentifyUser = !!(
+        body.fingerprint && String(body.fingerprint).trim() !== ''
+      );
+      let authUserId: string | null = null;
+      const authHeader = c.req.header('Authorization');
+      if (authHeader?.startsWith('Bearer ')) {
+        try {
+          const parts = authHeader.substring(7).split('.');
+          if (parts.length === 3) {
+            const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+            authUserId = payload.sub || null;
+          }
+        } catch (_) {}
+      }
+      if (hasManualLocation && (authUserId || canIdentifyUser)) {
+        const env = c.env;
+        if (env.SUPABASE_URL && env.SUPABASE_KEY) {
+          const patchPayload: Record<string, unknown> = {
+            updated_at: new Date().toISOString(),
+          };
+          if (body.manual_lat != null && typeof body.manual_lat === 'number' && !isNaN(body.manual_lat)) {
+            patchPayload.manual_lat = body.manual_lat;
+          }
+          if (body.manual_lng != null && typeof body.manual_lng === 'number' && !isNaN(body.manual_lng)) {
+            patchPayload.manual_lng = body.manual_lng;
+          }
+          if (body.manual_location != null && String(body.manual_location).trim() !== '') {
+            patchPayload.manual_location = String(body.manual_location).trim();
+          }
+          const conflictKey = authUserId ? 'id' : 'fingerprint';
+          const conflictVal = authUserId ?? (body.fingerprint || '').trim();
+          if (conflictVal && Object.keys(patchPayload).length > 1) {
+            const patchUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?${conflictKey}=eq.${encodeURIComponent(String(conflictVal))}`;
+            try {
+              const patchRes = await fetch(patchUrl, {
+                method: 'PATCH',
+                headers: {
+                  'apikey': env.SUPABASE_KEY,
+                  'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(patchPayload),
+              });
+              if (patchRes.ok) {
+                console.log('[Worker] ✅ 仅校准写入成功:', { manual_lat: patchPayload.manual_lat, manual_lng: patchPayload.manual_lng, manual_location: patchPayload.manual_location });
+              } else {
+                console.warn('[Worker] ⚠️ 仅校准 PATCH 非 2xx:', patchRes.status);
+              }
+            } catch (err: any) {
+              console.warn('[Worker] ⚠️ 仅校准 PATCH 异常:', err?.message);
+            }
+          }
+        }
+        return c.json({
+          status: 'success',
+          message: '位置已校准',
+          dimensions: { L: 50, P: 50, D: 50, E: 50, F: 50 },
+          ranks: { messageRank: 50, charRank: 50, daysRank: 50, jiafangRank: 50, ketaoRank: 50, avgRank: 50, L_rank: 50, P_rank: 50, D_rank: 50, E_rank: 50, F_rank: 50 },
+          totalUsers: 1,
+        });
+      }
       const defaultRoast = lang === 'en' ? 'No roast available' : '暂无吐槽';
       const defaultPersonalityName = lang === 'en' ? 'Unknown Personality' : '未知人格';
       const defaultDimensions = { L: 0, P: 0, D: 0, E: 0, F: 0 };
@@ -1661,6 +1736,24 @@ app.post('/api/v2/analyze', async (c) => {
             // 格式：Array<{ dimension, score, label, roast }>
             personality_data: detailedStats, // 直接使用 detailedStats 数组
           };
+
+          // 【用户校准】若前端上报 manual_location（国家代码）、manual_lat/manual_lng 或 manual_coordinates，写入数据库
+          if (body.manual_location != null && typeof body.manual_location === 'string' && body.manual_location.trim() !== '') {
+            payload.manual_location = body.manual_location.trim();
+          }
+          if (body.manual_lat != null && typeof body.manual_lat === 'number' && !isNaN(body.manual_lat)) {
+            payload.manual_lat = body.manual_lat;
+          }
+          if (body.manual_lng != null && typeof body.manual_lng === 'number' && !isNaN(body.manual_lng)) {
+            payload.manual_lng = body.manual_lng;
+          }
+          if (body.manual_coordinates && Array.isArray(body.manual_coordinates) && body.manual_coordinates.length >= 2) {
+            const [lngVal, latVal] = body.manual_coordinates;
+            if (typeof lngVal === 'number' && !isNaN(lngVal) && typeof latVal === 'number' && !isNaN(latVal)) {
+              payload.manual_lng = lngVal;
+              payload.manual_lat = latVal;
+            }
+          }
           
           // 【调试日志】验证 payload 中的数据
           console.log('[Worker] 🔍 Payload 数据验证:', {
@@ -3974,6 +4067,94 @@ app.get('/api/global-average', async (c) => {
     });
 
     return c.json(responseData, 500);
+  }
+});
+
+/**
+ * 【国家摘要】GET /api/country-summary?country=CN（get_country_summary_v3）
+ * 功能：按国家代码拉取该国家的 10 项核心指标（Vibe 指数、对话总数等），供校准后右侧抽屉渲染
+ */
+app.get('/api/country-summary', async (c) => {
+  try {
+    const country = (c.req.query('country') || '').trim().toUpperCase();
+    if (!country || country.length !== 2) {
+      return c.json({ success: false, error: 'country 必填且为 2 位国家代码' }, 400);
+    }
+    const env = c.env;
+    if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+      return c.json({ success: false, error: 'Supabase 未配置' }, 500);
+    }
+    const url = `${env.SUPABASE_URL}/rest/v1/user_analysis?select=id,total_messages,total_chars,l_score,p_score,d_score,e_score,f_score,personality_type,ip_location,manual_location&or=(ip_location.eq.${country},manual_location.eq.${country})`;
+    const res = await fetch(url, {
+      headers: { 'apikey': env.SUPABASE_KEY, 'Authorization': `Bearer ${env.SUPABASE_KEY}` },
+    });
+    if (!res.ok) {
+      const err = await res.text().catch(() => '');
+      console.warn('[Worker] /api/country-summary 查询失败:', res.status, err);
+      return c.json({ success: false, error: '查询失败' }, 502);
+    }
+    const rows: any[] = await res.json();
+    const n = rows.length;
+    if (n === 0) {
+      const empty = {
+        success: true,
+        totalUsers: 0,
+        totalAnalysis: 0,
+        totalChars: 0,
+        avgPerUser: 0,
+        avgPerScan: 0,
+        globalAverage: { L: 50, P: 50, D: 50, E: 50, F: 50 },
+        averages: { L: 50, P: 50, D: 50, E: 50, F: 50 },
+        locationRank: [],
+        personalityRank: [],
+        personalityDistribution: [],
+        latestRecords: [],
+      };
+      return c.json(empty);
+    }
+    const totalMessages = rows.reduce((s, r) => s + (Number(r.total_messages) || 0), 0);
+    const totalChars = rows.reduce((s, r) => s + (Number(r.total_chars) || 0), 0);
+    const sumL = rows.reduce((s, r) => s + (Number(r.l_score) ?? Number(r.l) ?? 50), 0);
+    const sumP = rows.reduce((s, r) => s + (Number(r.p_score) ?? Number(r.p) ?? 50), 0);
+    const sumD = rows.reduce((s, r) => s + (Number(r.d_score) ?? Number(r.d) ?? 50), 0);
+    const sumE = rows.reduce((s, r) => s + (Number(r.e_score) ?? Number(r.e) ?? 50), 0);
+    const sumF = rows.reduce((s, r) => s + (Number(r.f_score) ?? Number(r.f) ?? 50), 0);
+    const avgL = Math.round(sumL / n);
+    const avgP = Math.round(sumP / n);
+    const avgD = Math.round(sumD / n);
+    const avgE = Math.round(sumE / n);
+    const avgF = Math.round(sumF / n);
+    const typeCount = new Map<string, number>();
+    rows.forEach((r) => {
+      const t = r.personality_type || 'UNKNOWN';
+      typeCount.set(t, (typeCount.get(t) || 0) + 1);
+    });
+    const personalityRank = Array.from(typeCount.entries())
+      .map(([type, count]) => ({ type, count, percentage: Math.round((count / n) * 100) }))
+      .sort((a, b) => b.count - a.count);
+    const out = {
+      success: true,
+      totalUsers: n,
+      totalAnalysis: totalMessages,
+      totalChars,
+      avgPerUser: n > 0 ? Math.round(totalChars / n) : 0,
+      avgPerScan: n > 0 ? Math.round(totalChars / Math.max(1, totalMessages)) : 0,
+      globalAverage: { L: avgL, P: avgP, D: avgD, E: avgE, F: avgF },
+      averages: { L: avgL, P: avgP, D: avgD, E: avgE, F: avgF },
+      locationRank: [{ name: country, value: n }],
+      personalityRank,
+      personalityDistribution: personalityRank,
+      latestRecords: rows.slice(0, 5).map((r: any) => ({
+        name: r.user_name || '未知',
+        type: r.personality_type || 'UNKNOWN',
+        location: r.manual_location || r.ip_location || country,
+        time: r.updated_at || r.created_at || '',
+      })),
+    };
+    return c.json(out);
+  } catch (e: any) {
+    console.error('[Worker] /api/country-summary 错误:', e);
+    return c.json({ success: false, error: e.message || '服务器错误' }, 500);
   }
 });
 

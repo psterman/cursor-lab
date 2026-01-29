@@ -1338,6 +1338,7 @@
         // =========================
         // 全局变量声明（确保在全局作用域，不在闭包内）
         // =========================
+        let calibrationDebounceTimer = null; // 全局锁：彻底拦截定位漂移，避免 ReferenceError
         const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content;
         let currentLang = 'zh';
         
@@ -1502,6 +1503,23 @@
         let mapChart, radarChart;
         let selectedCountry = null; // 当前选中的国家
         let currentChampionInfo = null; // 当前选中的冠军信息（用于地图 tooltip 展示）
+        /** 校准模式：点击「Current Location」光标后为 true，停止操作 1.5 秒后恢复 false */
+        let isCalibrating = false;
+        /** 待确认的校准数据（lng, lat, countryCode, countryName） */
+        let pendingCalibration = { lng: null, lat: null, countryCode: null, countryName: null };
+        /** 国家英文名 -> 近似中心 [lng, lat]（用于校准时光标移动） */
+        const countryCenterMap = {
+            'China': [105, 35], 'United States': [-95, 38], 'United States of America': [-95, 38],
+            'Japan': [138, 36], 'United Kingdom': [-2, 54], 'Germany': [10, 51], 'France': [2, 46],
+            'Singapore': [104, 1.3], 'Hong Kong': [114, 22.3], 'Taiwan': [121, 24],
+            'Canada': [-106, 56], 'Australia': [134, -25], 'India': [78, 21], 'Brazil': [-55, -10],
+            'South Korea': [128, 36], 'Russia': [100, 60], 'Italy': [12, 43], 'Spain': [-3, 40],
+            'Netherlands': [5, 52], 'Sweden': [15, 62], 'Poland': [20, 52], 'Indonesia': [118, -5],
+            'Mexico': [-102, 23], 'South Africa': [25, -29], 'Turkey': [35, 39], 'Vietnam': [108, 16],
+            'Thailand': [100, 15], 'Malaysia': [112, 4], 'Philippines': [122, 13], 'Pakistan': [68, 30],
+            'Egypt': [30, 27], 'Nigeria': [8, 10], 'Argentina': [-64, -34], 'Colombia': [-72, 4],
+            'USA': [-95, 38], 'UK': [-2, 54], 'Korea': [128, 36]
+        };
         // 🔍 称号与说明映射（完全同步 content.ts 的业务语义）
         const DIMENSION_TITLES = {
             L: { title: '架构师的直觉', description: '在逻辑迷宫中一眼看穿本质' },
@@ -1766,8 +1784,9 @@
          * 显示抽屉并填充国家数据和维度卡片
          * @param {string} countryCode - 国家代码
          * @param {string} countryName - 国家名称
+         * @param {Object} [overrideRightData] - 可选，校准后拉取的国家摘要，用于右侧抽屉 10 项核心指标
          */
-        function showDrawersWithCountryData(countryCode, countryName) {
+        function showDrawersWithCountryData(countryCode, countryName, overrideRightData) {
             // 保存当前国家信息
             currentDrawerCountry.code = countryCode;
             currentDrawerCountry.name = countryName;
@@ -1792,6 +1811,9 @@
             // 清空抽屉内容
             if (leftBody) leftBody.innerHTML = '';
             if (rightBody) rightBody.innerHTML = '';
+
+            // 右侧抽屉数据源：校准后传入的国家摘要优先，否则用全局 lastData
+            const rightDrawerData = overrideRightData != null ? overrideRightData : (window.lastData || {});
 
             // 定义维度配置
             const dimensionConfig = {
@@ -2017,6 +2039,8 @@
                                 <div class="drawer-item-desc text-[8px]">${displayLabel}</div>
                             </div>
                         </div>
+                        <!-- 用户国家/地区：国旗 + 自动识别 / 用户校准 -->
+                        <div id="user-country-flag" class="flex items-center gap-2 mt-2 text-[10px]"></div>
                     </div>
                     
                     <!-- 状态信息 -->
@@ -2109,6 +2133,14 @@
                 `;
                 
                 leftBody.appendChild(identityCard);
+
+                // 填充用户国家/地区：使用 v_unified_analysis_v2 的 country_code，转国旗 Emoji
+                if (typeof updateUserCountryFlag === 'function' && currentUser) {
+                    const countryCode = currentUser.country_code || currentUser.manual_location || currentUser.ip_location || '';
+                    const countryName = (countryNameMap[countryCode] ? countryNameMap[countryCode].en : countryCode) || '';
+                    const isManual = !!(currentUser.manual_location || currentUser.manual_lat != null);
+                    updateUserCountryFlag(countryCode, countryName, isManual);
+                }
 
                 // 添加实时诊断活动卡片
                 const activityCard = document.createElement('div');
@@ -2265,8 +2297,8 @@
                     });
                 }
 
-                // 添加统计卡片（从 window.lastData 获取数据）
-                const data = window.lastData || {};
+                // 添加统计卡片（使用 rightDrawerData：校准后国家摘要或全局 lastData）
+                const data = rightDrawerData;
                 
                 // 已诊断开发者
                 const totalUsersCard = document.createElement('div');
@@ -2304,11 +2336,17 @@
                 // 人均平均篇幅和单次平均篇幅（并排显示）
                 const avgCard = document.createElement('div');
                 avgCard.className = 'drawer-item';
-                const avgPerUser = data.avgPerUser !== undefined && data.avgPerUser !== null ? Number(data.avgPerUser) : undefined;
-                // 平均篇幅：绑定到 json.totalChars / json.totalAnalysis
+                
+                // 人均平均篇幅：totalChars / totalUsers
+                let avgPerUser = data.avgPerUser !== undefined && data.avgPerUser !== null ? Number(data.avgPerUser) : undefined;
+                if ((avgPerUser === undefined || avgPerUser === 0) && totalChars !== undefined && totalUsers !== undefined && totalUsers > 0) {
+                    avgPerUser = Number(totalChars) / Number(totalUsers);
+                }
+                
+                // 单次平均篇幅：totalChars / totalAnalysis
                 let avgPerScan = data.avgPerScan !== undefined && data.avgPerScan !== null ? Number(data.avgPerScan) : undefined;
-                if (avgPerScan === undefined && data.totalChars !== undefined && data.totalAnalysis !== undefined && data.totalAnalysis !== null && data.totalAnalysis > 0) {
-                    avgPerScan = Number(data.totalChars) / Number(data.totalAnalysis);
+                if ((avgPerScan === undefined || avgPerScan === 0) && totalChars !== undefined && data.totalAnalysis !== undefined && data.totalAnalysis !== null && data.totalAnalysis > 0) {
+                    avgPerScan = Number(totalChars) / Number(data.totalAnalysis);
                 }
                 avgCard.innerHTML = `
                     <div class="drawer-item-label mb-2">平均篇幅统计</div>
@@ -2729,64 +2767,94 @@
                 // notMerge: true 彻底替换，避免残留旧配置
                 mapChart.setOption(option2D, { notMerge: true, lazyUpdate: false });
                 
-                // 添加地图点击事件处理 - 重新设计逻辑
+                // 添加地图点击事件处理 - 重新设计逻辑（含校准模式）
                 mapChart.off('click'); // 移除旧的事件监听器
                 mapChart.on('click', (params) => {
                     console.log('[Map] ✅ 地图点击事件已触发:', params);
                     
+                    // ========== 点击「Current Location」光标：进入校准模式 ==========
+                    const isCurrentLocationClick = params.seriesType === 'effectScatter' && params.seriesName === 'Current Location';
+                    if (isCurrentLocationClick) {
+                        if (!isCalibrating) {
+                            isCalibrating = true;
+                            updateCurrentLocationCursorColor('#3b82f6');
+                            console.log('[Map] 📍 进入校准模式，光标已变蓝');
+                        }
+                        return;
+                    }
+                    
+                    // ========== 校准模式下点击地图任意位置：convertFromPixel 捕获经纬度并移动光标 ==========
+                    if (isCalibrating) {
+                        try {
+                            const dom = mapChart.getDom();
+                            if (dom && params.event) {
+                                const rect = dom.getBoundingClientRect();
+                                const x = (params.event.clientX != null ? params.event.clientX : params.event.offsetX) - rect.left;
+                                const y = (params.event.clientY != null ? params.event.clientY : params.event.offsetY) - rect.top;
+                                const point = mapChart.convertFromPixel('geo', [x, y]);
+                                if (point && Array.isArray(point) && point.length >= 2) {
+                                    const lng = Number(point[0]), lat = Number(point[1]);
+                                    if (!isNaN(lng) && !isNaN(lat)) {
+                                        pendingCalibration.lng = lng;
+                                        pendingCalibration.lat = lat;
+                                        const hasValidName = params.name && typeof params.name === 'string' && params.name.trim() !== '';
+                                        if (params.seriesType === 'map' && hasValidName) {
+                                            const countryName = params.name;
+                                            let countryCode = null;
+                                            for (const [code, names] of Object.entries(countryNameMap)) {
+                                                if (names.en === countryName || names.zh === countryName || code === countryName) {
+                                                    countryCode = code;
+                                                    break;
+                                                }
+                                            }
+                                            pendingCalibration.countryCode = countryCode || countryName;
+                                            pendingCalibration.countryName = countryName;
+                                        }
+                                        moveCurrentLocationCursor(lng, lat);
+                                        if (calibrationDebounceTimer) {
+                                            clearTimeout(calibrationDebounceTimer);
+                                            calibrationDebounceTimer = null;
+                                        }
+                                        calibrationDebounceTimer = setTimeout(() => {
+                                            calibrationDebounceTimer = null;
+                                            confirmCalibrationAndLock(
+                                                pendingCalibration.countryCode,
+                                                pendingCalibration.countryName,
+                                                pendingCalibration.lng,
+                                                pendingCalibration.lat
+                                            );
+                                        }, 1500);
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            console.warn('[Map] convertFromPixel 失败:', e);
+                        }
+                        return;
+                    }
+                    
                     // 判断是否点击到了国家
-                    // 条件：seriesType 是 'map' 且 name 存在且不为空字符串
                     const hasValidName = params.name && typeof params.name === 'string' && params.name.trim() !== '';
                     const isCountryClick = params.seriesType === 'map' && hasValidName;
-                    
-                    console.log('[Map] 点击事件详情:', {
-                        seriesType: params.seriesType,
-                        name: params.name,
-                        componentType: params.componentType,
-                        hasValidName: hasValidName,
-                        isCountryClick: isCountryClick,
-                        selectedCountryBefore: selectedCountry
-                    });
+                    console.log('[Map] 点击事件详情:', { seriesType: params.seriesType, name: params.name, isCountryClick, selectedCountryBefore: selectedCountry });
                     
                     if (isCountryClick) {
-                        // ========== 点击到了国家 ==========
                         const countryName = params.name;
                         let countryCode = null;
-                        
-                        // 查找对应的国家代码
                         for (const [code, names] of Object.entries(countryNameMap)) {
                             if (names.en === countryName || names.zh === countryName || code === countryName) {
                                 countryCode = code;
                                 break;
                             }
                         }
-                        
-                        // 如果没找到，尝试直接使用名称
-                        if (!countryCode) {
-                            countryCode = countryName;
-                        }
-                        
+                        if (!countryCode) countryCode = countryName;
                         console.log(`[Map] 🗺️ 点击国家: ${countryName} (${countryCode})`);
-                        
-                        // 更新选中的国家
                         selectedCountry = countryCode;
-                        
-                        // 显示抽屉并填充数据
                         showDrawersWithCountryData(countryCode, countryName);
                     } else {
-                        // ========== 点击地图空白处（海洋、未定义区域等）==========
-                        console.log('[Map] 🌊 点击空白处，清除选中状态并关闭抽屉', {
-                            seriesType: params.seriesType,
-                            name: params.name,
-                            componentType: params.componentType,
-                            selectedCountryBefore: selectedCountry
-                        });
-                        
-                        // 清除选中状态并关闭抽屉
+                        console.log('[Map] 🌊 点击空白处，清除选中状态并关闭抽屉');
                         selectedCountry = null;
-                        closeDrawers(false); // 不重复清除，因为上面已经清除了
-                        
-                        console.log('[Map] 选中状态已清除，selectedCountry =', selectedCountry);
+                        closeDrawers(false);
                     }
                 });
 
@@ -2843,130 +2911,260 @@
          * @param {string} color - 颜色值（十六进制，如 '#00ff41' 或 '#ffffff'）
          */
         /**
-         * 地图脉冲特效：在地图上动态添加涟漪特效点（支持动态颜色和头像）
-         * @param {number} lng - 经度
-         * @param {number} lat - 纬度
-         * @param {string} label - 显示的标签文字
-         * @param {string} color - 颜色值（十六进制，如 '#00ff41' 或 '#ffffff'）
-         * @param {string} avatarUrl - 头像URL（可选）
-         * @param {string} username - GitHub用户名（用于头像和identicon兜底）
+         * 设置或更新「当前用户」持久光标（seriesName: 'Current Location'），不自动移除
          */
-        function triggerMapPulse(lng, lat, label = '', color = '#00ff41', avatarUrl = null, username = null) {
-            // 健壮性检查：确保 ECharts 实例已初始化且未销毁
-            if (!mapChart || (typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) {
-                console.warn('[MapPulse] ⚠️ 地图实例未初始化，跳过脉冲特效');
-                return;
-            }
-
-            // 数据格式验证
-            if (typeof lng !== 'number' || typeof lat !== 'number' || isNaN(lng) || isNaN(lat)) {
-                console.warn('[MapPulse] ⚠️ 经纬度数据格式无效，跳过脉冲特效');
-                return;
-            }
-
-            // 颜色验证和默认值
-            if (!color || typeof color !== 'string') {
-                color = '#00ff41'; // 默认终端绿
-            }
-
+        function setOrUpdateCurrentLocationCursor(lng, lat, color = '#00ff41', avatarUrl = null, username = null) {
+            if (!mapChart || (typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) return;
+            if (typeof lng !== 'number' || typeof lat !== 'number' || isNaN(lng) || isNaN(lat)) return;
+            if (!color || typeof color !== 'string') color = '#00ff41';
             try {
-                // 获取当前地图配置
                 const currentOption = mapChart.getOption();
-                if (!currentOption || !currentOption.series || !Array.isArray(currentOption.series)) {
-                    console.warn('[MapPulse] ⚠️ 无法获取地图配置，跳过脉冲特效');
-                    return;
-                }
-
-                // 创建临时涟漪特效系列（所有颜色绑定到 color 参数）
-                // 将头像信息存储到系列的自定义属性中，供tooltip使用
+                if (!currentOption || !currentOption.series || !Array.isArray(currentOption.series)) return;
+                const otherSeries = currentOption.series.filter(s => s.name !== 'Current Location');
                 const pulseSeries = {
+                    name: 'Current Location',
                     type: 'effectScatter',
                     coordinateSystem: 'geo',
-                    data: [{
-                        value: [lng, lat],
-                        name: label || '用户',
-                        avatarUrl: avatarUrl || null,
-                        username: username || null
-                    }],
+                    data: [{ value: [lng, lat], name: 'YOU', avatarUrl: avatarUrl || null, username: username || null }],
                     symbolSize: 20,
                     showEffectOn: 'render',
-                    rippleEffect: {
-                        brushType: 'stroke',
-                        scale: 5, // 增强视觉扩散感
-                        period: 4, // 优化涟漪周期
-                        color: color // 涟漪颜色绑定到 color 参数
-                    },
-                    itemStyle: {
-                        color: color, // 点颜色绑定到 color 参数
-                        shadowBlur: 20,
-                        shadowColor: color // 阴影颜色绑定到 color 参数
-                    },
-                    label: {
-                        show: !!label,
-                        formatter: label || '',
-                        position: 'top',
-                        color: color, // 标签颜色绑定到 color 参数
-                        fontSize: 10,
-                        fontFamily: 'JetBrains Mono'
-                    },
-                    // 将头像信息存储到系列级别，供tooltip formatter使用
+                    rippleEffect: { brushType: 'stroke', scale: 5, period: 4, color: color },
+                    itemStyle: { color: color, shadowBlur: 20, shadowColor: color },
+                    label: { show: true, formatter: 'YOU', position: 'top', color: color, fontSize: 10, fontFamily: 'JetBrains Mono' },
                     avatarUrl: avatarUrl || null,
                     username: username || null,
                     zlevel: 10,
                     z: 10
                 };
+                mapChart.setOption({ series: [...otherSeries, pulseSeries] }, { notMerge: false, lazyUpdate: false });
+            } catch (e) { console.warn('[MapPulse] setOrUpdateCurrentLocationCursor:', e); }
+        }
 
-                // 将脉冲系列添加到现有系列数组中
+        /** 仅更新「Current Location」系列颜色（校准模式蓝 / 正常绿） */
+        function updateCurrentLocationCursorColor(color) {
+            if (!mapChart || (typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) return;
+            try {
+                const opt = mapChart.getOption();
+                if (!opt || !opt.series) return;
+                const series = opt.series.map(s => {
+                    if (s.name === 'Current Location') {
+                        return {
+                            ...s,
+                            rippleEffect: { ...(s.rippleEffect || {}), color },
+                            itemStyle: { ...(s.itemStyle || {}), color, shadowColor: color },
+                            label: { ...(s.label || {}), color }
+                        };
+                    }
+                    return s;
+                });
+                mapChart.setOption({ series }, { notMerge: false, lazyUpdate: false });
+            } catch (e) { console.warn('[MapPulse] updateCurrentLocationCursorColor:', e); }
+        }
+
+        /** 将「Current Location」光标移动到 [lng, lat]（ECharts 动画） */
+        function moveCurrentLocationCursor(lng, lat) {
+            if (!mapChart || (typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) return;
+            try {
+                const opt = mapChart.getOption();
+                if (!opt || !opt.series) return;
+                const series = opt.series.map(s => {
+                    if (s.name === 'Current Location' && s.data && s.data.length > 0) {
+                        return { ...s, data: [{ ...s.data[0], value: [lng, lat] }] };
+                    }
+                    return s;
+                });
+                mapChart.setOption({ series }, { notMerge: false, lazyUpdate: false });
+            } catch (e) { console.warn('[MapPulse] moveCurrentLocationCursor:', e); }
+        }
+
+        /**
+         * 校准确认：调用 /api/v2/analyze 持久化 manual_location（国家代码）、manual_lat、manual_lng，退出校准并更新 UI
+         * @param {string} countryCode - 国家代码（如 CN、US），用于 manual_location
+         * @param {string} countryName - 国家名称（用于展示）
+         * @param {number} lng - 经度
+         * @param {number} lat - 纬度
+         */
+        async function confirmCalibrationAndLock(countryCode, countryName, lng, lat) {
+            if (calibrationDebounceTimer) {
+                clearTimeout(calibrationDebounceTimer);
+                calibrationDebounceTimer = null;
+            }
+            isCalibrating = false;
+            updateCurrentLocationCursorColor('#00ff41');
+
+            const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content || '';
+            const base = apiEndpoint.endsWith('/') ? apiEndpoint.slice(0, -1) : apiEndpoint;
+            const analyzeUrl = base ? `${base}/api/v2/analyze` : '/api/v2/analyze';
+            let fingerprint = null;
+            try {
+                fingerprint = localStorage.getItem('user_fingerprint') || window.fpId || null;
+            } catch (e) {}
+            const payload = {
+                chatData: [{ role: 'USER', text: '.' }],
+                manual_location: countryCode || null,
+                manual_lat: lat,
+                manual_lng: lng,
+                fingerprint: fingerprint
+            };
+            try {
+                const res = await fetch(analyzeUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) {
+                    console.warn('[Calibration] ⚠️ 校准接口返回非 2xx:', res.status);
+                } else {
+                    const data = await res.json().catch(() => ({}));
+                    localStorage.setItem('loc_fixed', 'true');
+                    localStorage.setItem('manual_lat', String(lat));
+                    localStorage.setItem('manual_lng', String(lng));
+                    if (countryCode && String(countryCode).trim() !== '') localStorage.setItem('manual_location', String(countryCode).trim());
+                    // 视觉锁定：立即更新本地变量，防止刷新前延迟导致跳动
+                    if (window.currentUser) {
+                        window.currentUser.manual_location = countryCode;
+                        window.currentUser.country_code = countryCode;
+                        window.currentUser.manual_lat = lat;
+                        window.currentUser.manual_lng = lng;
+                    }
+                    if (window.currentUserData) {
+                        window.currentUserData.manual_lat = lat;
+                        window.currentUserData.manual_lng = lng;
+                        window.currentUserData.manual_location = countryCode;
+                    } else {
+                        window.currentUserData = window.currentUser || {};
+                        window.currentUserData.manual_lat = lat;
+                        window.currentUserData.manual_lng = lng;
+                        window.currentUserData.manual_location = countryCode;
+                    }
+                    updateUserCountryFlag(countryCode, countryName, true);
+                    if (typeof renderRankCards === 'function' && window.currentUser) renderRankCards(window.currentUser);
+                    if (typeof window.refreshUserStats === 'function') {
+                        setTimeout(() => window.refreshUserStats(), 300);
+                    }
+                    if (countryCode && typeof fetchCountrySummaryV3 === 'function') {
+                        fetchCountrySummaryV3(countryCode).then((summary) => {
+                            if (summary) showDrawersWithCountryData(countryCode, countryName || countryCode, summary);
+                        }).catch(() => {});
+                    } else if (countryCode) {
+                        showDrawersWithCountryData(countryCode, countryName || countryCode);
+                    }
+                    console.log('[Calibration] ✅ 校准已确认并持久化:', { countryCode, countryName, lng, lat });
+                }
+            } catch (err) {
+                console.warn('[Calibration] ⚠️ 校准请求失败:', err);
+            }
+        }
+
+        /**
+         * 拉取某国家的 10 项核心指标（get_country_summary_v3），用于校准后右侧抽屉渲染
+         * @param {string} countryCode - 2 位国家代码（如 CN、US）
+         * @returns {Promise<Object|null>} 与 lastData 结构兼容的摘要对象
+         */
+        async function fetchCountrySummaryV3(countryCode) {
+            if (!countryCode || String(countryCode).trim().length !== 2) return null;
+            const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content || '';
+            const base = apiEndpoint.endsWith('/') ? apiEndpoint.slice(0, -1) : apiEndpoint;
+            const url = base ? `${base}/api/country-summary?country=${encodeURIComponent(String(countryCode).toUpperCase())}` : `/api/country-summary?country=${encodeURIComponent(String(countryCode).toUpperCase())}`;
+            try {
+                const res = await fetch(url);
+                if (!res.ok) return null;
+                const data = await res.json();
+                return data && data.success ? data : null;
+            } catch (e) {
+                console.warn('[CountrySummary] 拉取失败:', e);
+                return null;
+            }
+        }
+
+        /** 国家代码转国旗 Emoji（如 CN -> 🇨🇳） */
+        function countryCodeToFlagEmoji(code) {
+            if (!code || typeof code !== 'string') return '';
+            const s = code.toUpperCase().trim();
+            if (s.length !== 2) return '';
+            const a = s.charCodeAt(0), b = s.charCodeAt(1);
+            if (a < 65 || a > 90 || b < 65 || b > 90) return '';
+            return String.fromCodePoint(0x1F1E6 + a - 65, 0x1F1E6 + b - 65);
+        }
+
+        /**
+         * 更新左侧抽屉中的用户国家/地区展示：国旗 Emoji + 文案（自动识别 / 用户校准）
+         * 利用 v_unified_analysis_v2 的 country_code，用 JS 转为国旗 Emoji
+         */
+        function updateUserCountryFlag(countryCode, countryName, isManual) {
+            const el = document.getElementById('user-country-flag');
+            if (!el) return;
+            const code = (countryCode || '').toUpperCase();
+            const flagEmoji = countryCodeToFlagEmoji(code);
+            const desc = isManual ? (currentLang === 'zh' ? '用户校准' : 'User calibrated') : (currentLang === 'zh' ? '自动识别' : 'Auto detected');
+            if (flagEmoji) {
+                el.innerHTML = `<span class="text-lg" aria-hidden="true">${flagEmoji}</span> <span class="text-[10px] text-zinc-400">${desc}</span>`;
+            } else {
+                el.innerHTML = `<span class="text-[10px] text-zinc-400">${countryName || code || ''} · ${desc}</span>`;
+            }
+        }
+
+        /**
+         * 地图脉冲特效：在地图上动态添加涟漪特效点（支持动态颜色和头像）
+         * 当 label 为 'YOU' 时，改为更新持久「Current Location」光标，不自动移除
+         */
+        function triggerMapPulse(lng, lat, label = '', color = '#00ff41', avatarUrl = null, username = null) {
+            if (!mapChart || (typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) {
+                console.warn('[MapPulse] ⚠️ 地图实例未初始化，跳过脉冲特效');
+                return;
+            }
+            if (typeof lng !== 'number' || typeof lat !== 'number' || isNaN(lng) || isNaN(lat)) {
+                console.warn('[MapPulse] ⚠️ 经纬度数据格式无效，跳过脉冲特效');
+                return;
+            }
+            if (!color || typeof color !== 'string') color = '#00ff41';
+
+            // 当前用户位置：使用持久「Current Location」系列，不 5 秒移除
+            if (label === 'YOU' || label === '用户') {
+                setOrUpdateCurrentLocationCursor(lng, lat, color, avatarUrl, username);
+                console.log(`[MapPulse] ✅ 当前用户光标已更新: [${lng}, ${lat}] (颜色: ${color})`);
+                return;
+            }
+
+            try {
+                const currentOption = mapChart.getOption();
+                if (!currentOption || !currentOption.series || !Array.isArray(currentOption.series)) return;
+
+                const pulseSeries = {
+                    type: 'effectScatter',
+                    coordinateSystem: 'geo',
+                    data: [{ value: [lng, lat], name: label || '用户', avatarUrl: avatarUrl || null, username: username || null }],
+                    symbolSize: 20,
+                    showEffectOn: 'render',
+                    rippleEffect: { brushType: 'stroke', scale: 5, period: 4, color: color },
+                    itemStyle: { color: color, shadowBlur: 20, shadowColor: color },
+                    label: { show: !!label, formatter: label || '', position: 'top', color: color, fontSize: 10, fontFamily: 'JetBrains Mono' },
+                    avatarUrl: avatarUrl || null,
+                    username: username || null,
+                    zlevel: 10,
+                    z: 10
+                };
                 const updatedSeries = [...currentOption.series, pulseSeries];
-                
-                // 更新地图配置（使用 merge 模式，保留原有配置）
-                mapChart.setOption({
-                    series: updatedSeries
-                }, { notMerge: false, lazyUpdate: false });
-
+                mapChart.setOption({ series: updatedSeries }, { notMerge: false, lazyUpdate: false });
                 console.log(`[MapPulse] ✅ 脉冲特效已添加: [${lng}, ${lat}] ${label || ''} (颜色: ${color})`);
 
-                // 5 秒后自动移除脉冲特效（保证性能，避免 Canvas 堆积过多点）
                 setTimeout(() => {
                     try {
-                        // 再次检查地图实例有效性
-                        if (!mapChart || (typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) {
-                            return;
-                        }
-
-                        // 获取当前配置并移除脉冲系列
+                        if (!mapChart || (typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) return;
                         const currentOpt = mapChart.getOption();
-                        if (currentOpt && currentOpt.series && Array.isArray(currentOpt.series)) {
-                            // 找到并移除我们刚添加的 effectScatter 系列
-                            // 通过比较数据点来识别（更精确的匹配）
-                            const filteredSeries = currentOpt.series.filter((s) => {
-                                // 保留原始系列，移除我们添加的 effectScatter 系列
-                                if (s.type === 'effectScatter' && s.data && s.data.length > 0) {
-                                    const point = s.data[0];
-                                    // 如果数据点匹配，说明是我们刚添加的，需要移除
-                                    if (Array.isArray(point) && point.length >= 2) {
-                                        const pointLng = point[0];
-                                        const pointLat = point[1];
-                                        // 允许小的浮点数误差
-                                        if (Math.abs(pointLng - lng) < 0.0001 && Math.abs(pointLat - lat) < 0.0001) {
-                                            return false; // 移除这个系列
-                                        }
-                                    }
+                        if (!currentOpt || !currentOpt.series || !Array.isArray(currentOpt.series)) return;
+                        const filteredSeries = currentOpt.series.filter((s) => {
+                            if (s.type === 'effectScatter' && s.name !== 'Current Location' && s.data && s.data.length > 0) {
+                                const point = s.data[0];
+                                if (point && Array.isArray(point.value) && point.value.length >= 2) {
+                                    if (Math.abs(point.value[0] - lng) < 0.0001 && Math.abs(point.value[1] - lat) < 0.0001) return false;
                                 }
-                                return true; // 保留其他系列
-                            });
-                            
-                            mapChart.setOption({
-                                series: filteredSeries
-                            }, { notMerge: false, lazyUpdate: false });
-                            
-                            console.log('[MapPulse] ✅ 脉冲特效已自动移除');
-                        }
-                    } catch (error) {
-                        console.warn('[MapPulse] ⚠️ 移除脉冲特效时出错:', error);
-                    }
+                            }
+                            return true;
+                        });
+                        mapChart.setOption({ series: filteredSeries }, { notMerge: false, lazyUpdate: false });
+                    } catch (err) { console.warn('[MapPulse] ⚠️ 移除脉冲特效时出错:', err); }
                 }, 5000);
-
             } catch (error) {
                 console.error('[MapPulse] ❌ 添加脉冲特效失败:', error);
             }
@@ -3513,6 +3711,9 @@
                 totalRoastWords = data.totalRoastWords || data.data?.total_roast_words || 0;
             }
             
+            // 【累计吐槽字数修复】绑定到 json.totalChars
+            const totalChars = data.totalChars !== undefined && data.totalChars !== null ? Number(data.totalChars) : (totalRoastWords !== undefined && totalRoastWords !== null ? Number(totalRoastWords) : undefined);
+            
             // 【强制映射层】avgPerUser 和 avgPerScan：依次尝试 result.avgPerUser/avgPerScan, result.data.avgPerUser/avgPerScan
             let avgPerUser = data.avgPerUser;
             if (avgPerUser === undefined || avgPerUser === null) {
@@ -3522,10 +3723,18 @@
             if (avgPerUser === undefined || avgPerUser === null) {
                 avgPerUser = data.avgChars;
             }
+            // 如果 avgPerUser 为 0 或无效，且 totalChars 和 totalUsers 都存在，则计算：totalChars / totalUsers
+            if ((avgPerUser === undefined || avgPerUser === null || avgPerUser === 0) && totalChars !== undefined && totalUsers !== undefined && totalUsers > 0) {
+                avgPerUser = totalChars / totalUsers;
+            }
             
             let avgPerScan = data.avgPerScan;
             if (avgPerScan === undefined || avgPerScan === null) {
                 avgPerScan = data.data?.avgPerScan;
+            }
+            // 如果 avgPerScan 为 0 或无效，且 totalChars 和 totalAnalysis 都存在，则计算：totalChars / totalAnalysis
+            if ((avgPerScan === undefined || avgPerScan === null || avgPerScan === 0) && totalChars !== undefined && totalAnalysis !== undefined && totalAnalysis !== null && totalAnalysis > 0) {
+                avgPerScan = totalChars / totalAnalysis;
             }
             
             // 【五维平均分提取】必须从 json.averages 或 json.globalAverage 对象中提取（例如：json.averages.L）
@@ -3553,19 +3762,6 @@
                 if (latestRecords.length > 0 && latestRecords[0].work_days !== undefined && latestRecords[0].work_days !== null) {
                     systemDays = latestRecords[0].work_days;
                 }
-            }
-            
-            // 【累计吐槽字数修复】绑定到 json.totalChars
-            const totalChars = data.totalChars !== undefined && data.totalChars !== null ? Number(data.totalChars) : (totalRoastWords !== undefined && totalRoastWords !== null ? Number(totalRoastWords) : undefined);
-            
-            // 【平均篇幅修复】绑定到 json.totalChars / json.totalAnalysis
-            let calculatedAvgPerScan = undefined;
-            if (totalChars !== undefined && totalAnalysis !== undefined && totalAnalysis !== null && totalAnalysis > 0) {
-                calculatedAvgPerScan = totalChars / totalAnalysis;
-            }
-            // 如果接口提供了 avgPerScan，优先使用接口值
-            if (avgPerScan === undefined || avgPerScan === null) {
-                avgPerScan = calculatedAvgPerScan;
             }
             
             return {
@@ -6517,6 +6713,30 @@
          * @returns {Promise<Object>} 上报结果
          */
         async function autoReportSelf() {
+            // 彻底拦截：既然后端视图已锁定坐标，前端必须停止发送 VPN 漂移导致的错误 IP 坐标
+            if (window.currentUserData?.manual_lat || localStorage.getItem('loc_fixed')) {
+                console.log('[AutoReport] 🔒 检测到手动锁定位置，尝试恢复持久光标');
+                
+                const lat = window.currentUserData?.manual_lat || window.currentUser?.manual_lat || parseFloat(localStorage.getItem('manual_lat'));
+                const lng = window.currentUserData?.manual_lng || window.currentUser?.manual_lng || parseFloat(localStorage.getItem('manual_lng'));
+                
+                if (lat != null && lng != null && !isNaN(lat) && !isNaN(lng)) {
+                    if (typeof setOrUpdateCurrentLocationCursor === 'function') {
+                        const statusConfig = USER_STATUSES[currentUserStatus] || USER_STATUSES.idle;
+                        const githubUsername = localStorage.getItem('github_username') || null;
+                        let avatarUrl = isValidGitHubUsername(githubUsername) ? getGitHubAvatarUrl(githubUsername) : DEFAULT_AVATAR;
+                        
+                        setOrUpdateCurrentLocationCursor(lng, lat, statusConfig.status_color, avatarUrl, githubUsername);
+                        console.log('[AutoReport] 📍 已恢复锁定位置的持久光标:', { lng, lat });
+                        window.currentUserLocation = { lng, lat, color: statusConfig.status_color };
+                    }
+                } else {
+                    console.log('[AutoReport] ⚠️ 虽然标记了锁定，但未找到有效坐标。将继续尝试自动定位。');
+                }
+                
+                // 如果已成功显示光标且没有异常，则跳过后续上报流程
+                if (window.currentUserLocation) return { success: true, skipped: true, reason: 'loc_fixed_restored' };
+            }
             // 健壮性检查：确保 Supabase 客户端已初始化
             if (!supabaseClient) {
                 console.warn('[AutoReport] ⚠️ Supabase 客户端未初始化，跳过自动上报');
@@ -6705,21 +6925,18 @@
 
                 console.log('[AutoReport] ✅ 自动上报成功:', data);
 
-                // 6. 立即反馈：上报成功后立即在地图上显示自己的位置（不等待 Realtime 监听）
+                // 6. 立即反馈:上报成功后立即在地图上显示自己的位置(不等待 Realtime 监听)
                 if (lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng)) {
-                    // 性能保护：检查 triggerMapPulse 函数是否已定义
-                    if (typeof triggerMapPulse === 'function') {
-                        // 设置标签（已移除VPN关键字）
-                        const pulseLabel = 'YOU';
-                        
-                        // 获取用户状态颜色（优先使用当前状态颜色）
+                    // 性能保护:检查 setOrUpdateCurrentLocationCursor 函数是否已定义
+                    if (typeof setOrUpdateCurrentLocationCursor === 'function') {
+                        // 获取用户状态颜色(优先使用当前状态颜色)
                         const statusConfig = USER_STATUSES[currentUserStatus] || USER_STATUSES.idle;
                         const statusColor = statusConfig.status_color;
                         // 使用状态颜色
                         const pulseColor = statusColor;
 
                         // 获取GitHub用户名和头像URL
-                        // 判断逻辑：如果 github_username 为空、或者是默认值，则不要请求 GitHub 图片
+                        // 判断逻辑:如果 github_username 为空、或者是默认值,则不要请求 GitHub 图片
                         const githubUsername = localStorage.getItem('github_username') || null;
                         let avatarUrl = null;
                         
@@ -6727,17 +6944,17 @@
                             // 只有有效的GitHub用户名才生成头像URL
                             avatarUrl = getGitHubAvatarUrl(githubUsername);
                         } else {
-                            // 无效用户名时，使用默认头像
+                            // 无效用户名时,使用默认头像
                             avatarUrl = DEFAULT_AVATAR;
                         }
                         
-                        // 立即调用 triggerMapPulse 显示自己的位置
+                        // 【修复】使用持久化光标函数 setOrUpdateCurrentLocationCursor 代替 triggerMapPulse
+                        // 这样光标会一直显示,不会5秒后消失,并且支持手动定位和缩放拖动
                         try {
-                            triggerMapPulse(lng, lat, pulseLabel, pulseColor, avatarUrl, githubUsername);
-                            console.log('[AutoReport] 🗺️ 已在地图上显示自己的位置:', {
+                            setOrUpdateCurrentLocationCursor(lng, lat, pulseColor, avatarUrl, githubUsername);
+                            console.log('[AutoReport] 🗺️ 已在地图上显示持久化光标:', {
                                 lng,
                                 lat,
-                                label: pulseLabel,
                                 color: pulseColor,
                                 status: currentUserStatus,
                                 is_vpn,
@@ -6745,14 +6962,17 @@
                                 githubUsername,
                                 isValid: isValidGitHubUsername(githubUsername)
                             });
+                            
+                            // 保存光标位置到全局变量,供后续使用
+                            window.currentUserLocation = { lng, lat, color: pulseColor };
                         } catch (pulseError) {
-                            console.warn('[AutoReport] ⚠️ 调用 triggerMapPulse 失败:', pulseError);
+                            console.warn('[AutoReport] ⚠️ 调用 setOrUpdateCurrentLocationCursor 失败:', pulseError);
                         }
                     } else {
-                        console.warn('[AutoReport] ⚠️ triggerMapPulse 函数未定义，跳过地图显示');
+                        console.warn('[AutoReport] ⚠️ setOrUpdateCurrentLocationCursor 函数未定义,跳过地图显示');
                     }
                 } else {
-                    console.log('[AutoReport] ℹ️ 经纬度信息不完整，跳过地图显示');
+                    console.log('[AutoReport] ℹ️ 经纬度信息不完整,跳过地图显示');
                 }
 
                 return { success: true, data };
@@ -6867,18 +7087,21 @@
                     animateValue('totalChars', totalChars, 1400, { decimals: 0, useThousands: true });
                 }
 
-                // 4. 人均平均篇幅 (avgPerUser)
-                const avgPerUser = data.avgPerUser !== undefined && data.avgPerUser !== null ? Number(data.avgPerUser) : undefined;
-                if (avgPerUser !== undefined) {
+                // 4. 人均平均篇幅 (avgPerUser)：totalChars / totalUsers
+                let avgPerUser = data.avgPerUser !== undefined && data.avgPerUser !== null ? Number(data.avgPerUser) : undefined;
+                if ((avgPerUser === undefined || avgPerUser === 0) && totalChars !== undefined && data.totalUsers !== undefined && data.totalUsers > 0) {
+                    avgPerUser = totalChars / Number(data.totalUsers);
+                }
+                if (avgPerUser !== undefined && avgPerUser > 0) {
                     animateValue('avgPerUser', avgPerUser, 900, { decimals: 1, useThousands: true });
                 }
 
-                // 5. 平均篇幅：绑定到 json.totalChars / json.totalAnalysis
+                // 5. 单次平均篇幅 (avgPerScan)：totalChars / totalAnalysis
                 let avgPerScan = data.avgPerScan !== undefined && data.avgPerScan !== null ? Number(data.avgPerScan) : undefined;
-                if (avgPerScan === undefined && totalChars !== undefined && data.totalAnalysis !== undefined && data.totalAnalysis !== null && data.totalAnalysis > 0) {
+                if ((avgPerScan === undefined || avgPerScan === 0) && totalChars !== undefined && data.totalAnalysis !== undefined && data.totalAnalysis !== null && data.totalAnalysis > 0) {
                     avgPerScan = totalChars / Number(data.totalAnalysis);
                 }
-                if (avgPerScan !== undefined) {
+                if (avgPerScan !== undefined && avgPerScan > 0) {
                     animateValue('avgPerScan', avgPerScan, 900, { decimals: 1, useThousands: true });
                 }
 
@@ -7218,7 +7441,12 @@
                 hasUserData: !!userData,
                 userName: userData?.user_name || userData?.name,
                 fingerprint: userData?.fingerprint ? userData.fingerprint.substring(0, 8) : null,
-                hasLeftBody: !!leftBody
+                hasLeftBody: !!leftBody,
+                hasVibeRank: !!(userData?.vibe_rank || userData?.vibeRank),
+                hasPersonalityName: !!(userData?.personality_name || userData?.personalityName),
+                hasAnswerBook: !!(userData?.answer_book || userData?.answerBook),
+                hasPersonality: !!userData?.personality,
+                hasPersonalityData: !!userData?.personality_data
             });
             
             if (!leftBody) {
@@ -7303,9 +7531,37 @@
                 
                 // 1. 技术排名（使用平均排名或综合排名）
                 // 【Task 2】优先使用视图返回的 vibe_rank 和 vibe_percentile
-                const vibeRank = userData.vibe_rank || null;
-                const vibePercentile = userData.vibe_percentile || null;
-                const avgRank = userData.avg_rank || userData.avgRank || userData.ranks?.avgRank || vibePercentile || null;
+                const vibeRank = userData.vibe_rank || userData.vibeRank || null;
+                const vibePercentile = userData.vibe_percentile || userData.vibePercentile || null;
+                // 尝试从多个来源获取排名：ranks 对象、avg_rank、或从 personality_data 中计算
+                let avgRank = userData.avg_rank || userData.avgRank || userData.ranks?.avgRank || vibePercentile || null;
+                
+                // 如果还没有排名，尝试从 personality_data 或 personality JSONB 字段中获取
+                if (avgRank === null || avgRank === undefined) {
+                    try {
+                        const personalityData = userData.personality_data || userData.personalityData;
+                        const personality = userData.personality;
+                        if (personalityData && Array.isArray(personalityData)) {
+                            // 计算平均排名：从五个维度的排名中取平均值
+                            const ranks = personalityData.map(d => d.rank || d.rankPercent || 50).filter(r => r !== null && r !== undefined);
+                            if (ranks.length > 0) {
+                                avgRank = ranks.reduce((sum, r) => sum + r, 0) / ranks.length;
+                            }
+                        } else if (personality && typeof personality === 'object') {
+                            // 尝试从 personality.detailedStats 中获取
+                            const detailedStats = personality.detailedStats || personality.detailed_stats;
+                            if (detailedStats && Array.isArray(detailedStats)) {
+                                const ranks = detailedStats.map(d => d.rank || d.rankPercent || 50).filter(r => r !== null && r !== undefined);
+                                if (ranks.length > 0) {
+                                    avgRank = ranks.reduce((sum, r) => sum + r, 0) / ranks.length;
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('[UserStats] ⚠️ 从 personality 数据提取排名失败:', e);
+                    }
+                }
+                
                 const totalUsers = window.lastData?.totalUsers || 1;
                 let techRankText = 'N/A';
                 
@@ -7313,6 +7569,7 @@
                 if (vibeRank !== null && vibeRank !== undefined && totalUsers > 0) {
                     techRankText = `第 ${vibeRank} 名 / ${totalUsers} 人`;
                 } else if (avgRank !== null && avgRank !== undefined && totalUsers > 0) {
+                    // avgRank 是百分比（0-100），需要转换为排名
                     const rankPercent = Math.round((1 - avgRank / 100) * totalUsers);
                     techRankText = `第 ${rankPercent} 名 / ${totalUsers} 人`;
                 }
@@ -7343,9 +7600,78 @@
                     ? new Intl.NumberFormat('zh-CN').format(Math.round(dimensionValues.word)) 
                     : 'N/A';
                 
-                // 7. 人格称号
+                // 7. 人格称号（参考 index.html 的获取方式：根据 vibeIndex 从 personalityNames.json 获取）
                 const personalityType = userData.personality_type || userData.personalityType || userData.type || 'UNKNOWN';
-                const personalityName = userData.personality_name || userData.personalityName || userData.name || '未知人格';
+                let personalityName = userData.personality_name || userData.personalityName || null;
+                
+                // 如果还没有人格称号，尝试根据 vibeIndex 从 personalityNames.json 获取（参考 index.html）
+                // 使用 Promise 方式加载，避免阻塞渲染
+                const loadPersonalityName = (vibeIndex) => {
+                    return new Promise((resolve) => {
+                        if (!vibeIndex || typeof vibeIndex !== 'string' || vibeIndex.length !== 5) {
+                            resolve(null);
+                            return;
+                        }
+                        
+                        fetch('src/personalityNames.json')
+                            .then(response => {
+                                if (response.ok) {
+                                    return response.json();
+                                }
+                                throw new Error('Failed to load personalityNames.json');
+                            })
+                            .then(namesData => {
+                                if (namesData && namesData[vibeIndex]) {
+                                    console.log('[UserStats] ✅ 从 personalityNames.json 获取人格称号:', namesData[vibeIndex]);
+                                    resolve(namesData[vibeIndex]);
+                                } else {
+                                    resolve(null);
+                                }
+                            })
+                            .catch(error => {
+                                console.warn('[UserStats] ⚠️ 加载 personalityNames.json 失败:', error);
+                                resolve(null);
+                            });
+                    });
+                };
+                
+                // 如果还没有人格称号，尝试从多个来源获取
+                if (!personalityName || personalityName === '未知人格' || personalityName === '未知') {
+                    try {
+                        // 方法1: 从 personality JSONB 字段中获取（同步方式，立即显示）
+                        const personality = userData.personality;
+                        if (personality && typeof personality === 'object') {
+                            personalityName = personality.name || personality.personalityName || personality.personality_name || null;
+                            
+                            // 如果还没有，尝试从 personality_data 或 detailedStats 中获取
+                            if (!personalityName) {
+                                const personalityData = userData.personality_data || userData.personalityData || personality.detailedStats || personality.detailed_stats;
+                                if (personalityData && Array.isArray(personalityData) && personalityData.length > 0) {
+                                    const firstDim = personalityData[0];
+                                    personalityName = firstDim.personalityName || firstDim.personality_name || null;
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('[UserStats] ⚠️ 获取人格称号失败:', e);
+                    }
+                }
+                
+                // 调试日志：输出所有可能包含人格称号的字段
+                console.log('[UserStats] 🎭 人格称号获取调试:', {
+                    personality_name: userData.personality_name,
+                    personalityName: userData.personalityName,
+                    personality: userData.personality,
+                    personality_data: userData.personality_data,
+                    personalityType: personalityType,
+                    vibe_index: userData.vibe_index || userData.vibeIndex,
+                    finalPersonalityName: personalityName
+                });
+                
+                // 最终回退：如果仍然没有，显示"未知人格"但保留 personalityType 信息
+                if (!personalityName || personalityName === '未知人格' || personalityName === '未知') {
+                    personalityName = personalityType && personalityType !== 'UNKNOWN' ? `人格 ${personalityType}` : '未知人格';
+                }
                 
                 // 8. 答案之书说明（answer_book 对象）
                 let answerBookTitle = '暂无';
@@ -7355,6 +7681,20 @@
                 try {
                     // 尝试解析 answer_book 字段（可能是 JSON 字符串或对象）
                     let answerBook = userData.answer_book || userData.answerBook;
+                    
+                    // 如果 answer_book 不存在，尝试从 personality JSONB 字段中获取
+                    if (!answerBook) {
+                        try {
+                            const personality = userData.personality;
+                            if (personality && typeof personality === 'object') {
+                                answerBook = personality.answer_book || personality.answerBook;
+                            }
+                        } catch (e) {
+                            console.warn('[UserStats] ⚠️ 从 personality 提取 answer_book 失败:', e);
+                        }
+                    }
+                    
+                    // 如果 answer_book 是字符串，尝试解析为 JSON
                     if (typeof answerBook === 'string') {
                         try {
                             answerBook = JSON.parse(answerBook);
@@ -7363,10 +7703,21 @@
                         }
                     }
                     
+                    // 处理 answer_book 对象
                     if (answerBook && typeof answerBook === 'object') {
                         answerBookTitle = answerBook.title || answerBookTitle;
-                        answerBookContent = answerBook.content || answerBookContent;
-                        answerBookVibeLevel = answerBook.vibe_level || answerBook.vibeLevel || '';
+                        answerBookContent = answerBook.content || answerBookContent || answerBook.desc || answerBook.description || answerBookContent;
+                        answerBookVibeLevel = answerBook.vibe_level || answerBook.vibeLevel || answerBook.level || '';
+                    }
+                    
+                    // 如果答案之书仍然为空，尝试从 roast_text 字段获取（可能是合并的吐槽文案）
+                    if ((!answerBookTitle || answerBookTitle === '暂无') && (!answerBookContent || answerBookContent === '暂无说明')) {
+                        const roastText = userData.roast_text || userData.roastText || userData.roast;
+                        if (roastText && typeof roastText === 'string' && roastText.trim().length > 0) {
+                            // 将 roast_text 作为答案之书内容
+                            answerBookContent = roastText;
+                            answerBookTitle = '今日箴言';
+                        }
                     }
                 } catch (e) {
                     console.warn('[UserStats] ⚠️ 处理 answer_book 失败:', e);
@@ -7395,24 +7746,24 @@
                     <!-- 维度统计 -->
                     <div class="space-y-2 mb-3">
                         <div class="flex items-center justify-between">
-                            <span class="text-[10px] text-[#00ff41]/70">💬 调戏AI次数</span>
-                            <span class="text-[10px] text-white font-bold">${aiCount}</span>
+                            <span class="text-[12px] text-[#00ff41]/70">💬 调戏AI次数</span>
+                            <span class="text-[12px] text-white font-bold">${aiCount}</span>
                         </div>
                         <div class="flex items-center justify-between">
-                            <span class="text-[10px] text-[#00ff41]/70">🚫 甲方上身次数</span>
-                            <span class="text-[10px] text-white font-bold">${noCount}</span>
+                            <span class="text-[12px] text-[#00ff41]/70">🚫 甲方上身次数</span>
+                            <span class="text-[12px] text-white font-bold">${noCount}</span>
                         </div>
                         <div class="flex items-center justify-between">
-                            <span class="text-[10px] text-[#00ff41]/70">🙏 赛博磕头次数</span>
-                            <span class="text-[10px] text-white font-bold">${pleaseCount}</span>
+                            <span class="text-[12px] text-[#00ff41]/70">🙏 赛博磕头次数</span>
+                            <span class="text-[12px] text-white font-bold">${pleaseCount}</span>
                         </div>
                         <div class="flex items-center justify-between">
-                            <span class="text-[10px] text-[#00ff41]/70">💭 废话输出总数</span>
-                            <span class="text-[10px] text-white font-bold">${sayTotal}</span>
+                            <span class="text-[12px] text-[#00ff41]/70">💭 废话输出总数</span>
+                            <span class="text-[12px] text-white font-bold">${sayTotal}</span>
                         </div>
                         <div class="flex items-center justify-between">
-                            <span class="text-[10px] text-[#00ff41]/70">📏 平均吹水长度</span>
-                            <span class="text-[10px] text-white font-bold">${avgLength} 字/条</span>
+                            <span class="text-[12px] text-[#00ff41]/70">📏 平均吹水长度</span>
+                            <span class="text-[12px] text-white font-bold">${avgLength} 字/条</span>
                         </div>
                     </div>
                     
@@ -7423,13 +7774,13 @@
                         <div class="drawer-item-desc text-[8px]">${personalityType}</div>
                     </div>
                     
-                    <!-- 答案之书 -->
+                    <!-- 答案之书（参考 index.html：去掉"答案之书"标题，只显示 title 和 content，增大正文字体） -->
+                    ${(answerBookTitle && answerBookTitle !== '暂无') || (answerBookContent && answerBookContent !== '暂无说明') ? `
                     <div class="mb-2">
-                        <div class="drawer-item-label mb-1">答案之书</div>
-                        ${answerBookVibeLevel ? `<div class="text-[9px] text-[#00ff41]/80 mb-1">${answerBookVibeLevel}</div>` : ''}
-                        <div class="text-[10px] text-white font-bold mb-1">${answerBookTitle}</div>
-                        <div class="text-[9px] text-[#00ff41]/60 leading-relaxed">${answerBookContent}</div>
+                        ${answerBookTitle && answerBookTitle !== '暂无' ? `<div class="text-[13px] text-white font-bold mb-2">${answerBookTitle}</div>` : ''}
+                        <div class="text-[13px] text-[#00ff41]/80 leading-relaxed">${answerBookContent && answerBookContent !== '暂无说明' ? answerBookContent : ''}</div>
                     </div>
+                    ` : ''}
                 `;
                 
                 // 先移除旧的统计卡片（如果存在）
@@ -7447,6 +7798,21 @@
                     leftBody.insertBefore(statsCard, identityCard.nextSibling);
                 } else {
                     leftBody.appendChild(statsCard);
+                }
+                
+                // 如果人格称号还没有获取到，尝试从 personalityNames.json 异步加载（参考 index.html）
+                const vibeIndex = userData.vibe_index || userData.vibeIndex;
+                if ((!personalityName || personalityName === '未知人格' || personalityName === '未知人格' || personalityName.startsWith('人格 ')) && vibeIndex && typeof vibeIndex === 'string' && vibeIndex.length === 5) {
+                    loadPersonalityName(vibeIndex).then(name => {
+                        if (name) {
+                            // 更新人格称号显示
+                            const personalityNameElement = statsCard.querySelector('.drawer-item-value');
+                            if (personalityNameElement) {
+                                personalityNameElement.textContent = name;
+                                console.log('[UserStats] ✅ 已更新人格称号:', name);
+                            }
+                        }
+                    });
                 }
                 
                 console.log('[UserStats] ✅ 用户统计卡片已渲染');
@@ -7505,32 +7871,30 @@
                 chars = Number(userData.P);
             }
             
-            // word (平均长度)：若 avg_user_message_length 为 0，必须执行 Math.round(total_chars / total_messages)
+            // word (平均长度)：若 avg_user_message_length 为 0 或无效，必须执行 Math.round(total_chars / total_messages)
             // 字段回退：avg_user_message_length -> avgMessageLength -> avgUserMessageLength -> 公式计算
             let word = undefined;
-            if (userData.avg_user_message_length !== undefined && userData.avg_user_message_length !== null) {
+            if (userData.avg_user_message_length !== undefined && userData.avg_user_message_length !== null && Number(userData.avg_user_message_length) > 0) {
                 word = Number(userData.avg_user_message_length);
-            } else if (userData.avgMessageLength !== undefined && userData.avgMessageLength !== null) {
+            } else if (userData.avgMessageLength !== undefined && userData.avgMessageLength !== null && Number(userData.avgMessageLength) > 0) {
                 word = Number(userData.avgMessageLength);
-            } else if (userData.avgUserMessageLength !== undefined && userData.avgUserMessageLength !== null) {
+            } else if (userData.avgUserMessageLength !== undefined && userData.avgUserMessageLength !== null && Number(userData.avgUserMessageLength) > 0) {
                 word = Number(userData.avgUserMessageLength);
             }
-            // 如果 word 未定义且 messages > 0 且 chars > 0，必须通过公式实时计算
-            if (word === undefined && messages !== undefined && messages > 0 && chars !== undefined && chars > 0) {
+            // 如果 word 未定义或为 0，且 messages > 0 且 chars > 0，必须通过公式实时计算
+            if ((word === undefined || word === 0) && messages !== undefined && messages > 0 && chars !== undefined && chars > 0) {
                 word = Math.round(chars / messages);
             }
             
-            // day (上岗天数)：映射 work_days
-            // 字段回退：work_days -> d_score -> d -> D
+            // day (上岗天数)：只映射 work_days，不使用维度得分（d_score 是 0-100 的得分，不是天数）
+            // 字段回退：work_days -> usage_days -> days
             let day = undefined;
-            if (userData.work_days !== undefined && userData.work_days !== null) {
+            if (userData.work_days !== undefined && userData.work_days !== null && Number(userData.work_days) > 0) {
                 day = Number(userData.work_days);
-            } else if (userData.d_score !== undefined && userData.d_score !== null) {
-                day = Number(userData.d_score);
-            } else if (userData.d !== undefined && userData.d !== null) {
-                day = Number(userData.d);
-            } else if (userData.D !== undefined && userData.D !== null) {
-                day = Number(userData.D);
+            } else if (userData.usage_days !== undefined && userData.usage_days !== null && Number(userData.usage_days) > 0) {
+                day = Number(userData.usage_days);
+            } else if (userData.days !== undefined && userData.days !== null && Number(userData.days) > 0) {
+                day = Number(userData.days);
             }
             
             // no (甲方上身)：映射 jiafang_count
@@ -8493,7 +8857,19 @@
                 }
                 
                 if (currentUser) {
+                    // 【竟态修复】若本地已锁定校准，优先用本地 manual_* 覆盖 API 返回，避免抽屉被 IP 定位覆盖（localStorage 兜底，防止 currentUserData 被并发刷新覆盖）
+                    if (localStorage.getItem('loc_fixed') === 'true') {
+                        const data = window.currentUserData;
+                        const mlat = data?.manual_lat ?? (localStorage.getItem('manual_lat') ? Number(localStorage.getItem('manual_lat')) : undefined);
+                        const mlng = data?.manual_lng ?? (localStorage.getItem('manual_lng') ? Number(localStorage.getItem('manual_lng')) : undefined);
+                        const mloc = (data?.manual_location ?? currentUser.manual_location ?? (localStorage.getItem('manual_location') || '').trim()) || '';
+                        if (mlat != null && !isNaN(mlat)) currentUser.manual_lat = mlat;
+                        if (mlng != null && !isNaN(mlng)) currentUser.manual_lng = mlng;
+                        if (mloc && String(mloc).trim() !== '') currentUser.manual_location = String(mloc).trim();
+                        currentUser.country_code = currentUser.manual_location || currentUser.ip_location;
+                    }
                     window.currentUser = currentUser;
+                    window.currentUserData = currentUser;
                     window.currentUserMatchedByFingerprint = !matchedByGitHub; // 如果通过 GitHub 匹配，则设为 false
                     
                     // 【Master Key】如果当前用户有数据且已识别，确保持久化存储其指纹（作为万能钥匙）
@@ -8505,63 +8881,52 @@
                     // 刷新排名卡片
                     renderRankCards(currentUser);
                     
-                    // 如果左侧抽屉已打开，刷新用户统计卡片
+                    // 如果左侧抽屉已打开，用当前用户（已合并校准）刷新；若已锁定校准则强制显示校准国家，避免竟态导致切回 IP 定位
                     const leftDrawer = document.getElementById('left-drawer');
                     const leftBody = document.getElementById('left-drawer-body');
                     if (leftDrawer && leftBody) {
                         const isDrawerOpen = leftDrawer.classList.contains('active');
-                        if (isDrawerOpen && currentDrawerCountry.code) {
-                            // 重新显示抽屉以刷新内容
-                            showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);
+                        if (isDrawerOpen) {
+                            const drawerCode = (localStorage.getItem('loc_fixed') === 'true' && (currentUser.manual_location || currentUser.country_code))
+                                ? (currentUser.manual_location || currentUser.country_code)
+                                : currentDrawerCountry.code;
+                            const drawerName = drawerCode && (typeof countryNameMap !== 'undefined' && countryNameMap[drawerCode])
+                                ? (currentLang === 'zh' ? countryNameMap[drawerCode].zh : countryNameMap[drawerCode].en)
+                                : (currentDrawerCountry.name || drawerCode);
+                            if (drawerCode) showDrawersWithCountryData(drawerCode, drawerName || drawerCode);
                         }
                     }
                     
-                    // 【地图联动】如果 window.currentUser 有了坐标，立即调用地图联动
-                    if (currentUser.lat !== null && currentUser.lat !== undefined && 
-                        currentUser.lng !== null && currentUser.lng !== undefined &&
-                        !isNaN(currentUser.lat) && !isNaN(currentUser.lng)) {
-                        console.log('[Refresh] 🗺️ 检测到用户坐标，触发地图联动:', {
-                            lat: currentUser.lat,
-                            lng: currentUser.lng
-                        });
-                        
+                    // 【地图联动】优先使用 manual 坐标，否则用 lat/lng；有坐标则更新地图与持久光标
+                    const lat = (currentUser.manual_lat != null && !isNaN(currentUser.manual_lat))
+                        ? Number(currentUser.manual_lat)
+                        : (currentUser.lat != null && !isNaN(currentUser.lat) ? Number(currentUser.lat) : null);
+                    const lng = (currentUser.manual_lng != null && !isNaN(currentUser.manual_lng))
+                        ? Number(currentUser.manual_lng)
+                        : (currentUser.lng != null && !isNaN(currentUser.lng) ? Number(currentUser.lng) : null);
+                    if (lat !== null && lng !== null) {
+                        console.log('[Refresh] 🗺️ 检测到用户坐标（优先 manual），触发地图联动:', { lat, lng });
                         try {
-                            // 检查地图实例是否存在
                             if (mapChart && typeof mapChart.setOption === 'function') {
-                                // ECharts 地图使用 setOption 更新 geo 配置来改变中心点和缩放
                                 const currentOption = mapChart.getOption();
                                 if (currentOption && currentOption.geo && Array.isArray(currentOption.geo) && currentOption.geo.length > 0) {
-                                    // ECharts geo 配置数组
                                     const updatedGeo = currentOption.geo.map(geo => ({
                                         ...geo,
-                                        center: [currentUser.lng, currentUser.lat],
-                                        zoom: 3 // 设置合适的缩放级别
+                                        center: [lng, lat],
+                                        zoom: 3
                                     }));
-                                    
-                                    mapChart.setOption({
-                                        geo: updatedGeo
-                                    }, { notMerge: false, lazyUpdate: false });
+                                    mapChart.setOption({ geo: updatedGeo }, { notMerge: false, lazyUpdate: false });
                                     console.log('[Refresh] ✅ 地图中心已更新到用户位置');
-                                } else {
-                                    console.warn('[Refresh] ⚠️ 地图配置中未找到 geo 配置');
                                 }
-                            } else {
-                                console.warn('[Refresh] ⚠️ 地图实例不存在或 setOption 方法不可用');
                             }
-                            
-                            // 触发地图脉冲效果（addPulseEffect）
                             if (typeof triggerMapPulse === 'function') {
                                 const githubUsername = currentUser.user_name || currentUser.name || 'YOU';
-                                const avatarUrl = currentUser.user_metadata?.avatar_url || 
-                                                (githubUsername ? getGitHubAvatarUrl(githubUsername) : null) ||
-                                                DEFAULT_AVATAR;
+                                const avatarUrl = currentUser.user_metadata?.avatar_url ||
+                                    (githubUsername ? getGitHubAvatarUrl(githubUsername) : null) || DEFAULT_AVATAR;
                                 const statusConfig = USER_STATUSES[currentUserStatus] || USER_STATUSES.idle;
                                 const pulseColor = statusConfig.status_color || '#00ff41';
-                                
-                                triggerMapPulse(currentUser.lng, currentUser.lat, 'YOU', pulseColor, avatarUrl, githubUsername);
+                                triggerMapPulse(lng, lat, 'YOU', pulseColor, avatarUrl, githubUsername);
                                 console.log('[Refresh] ✅ 地图脉冲效果已触发');
-                            } else {
-                                console.warn('[Refresh] ⚠️ triggerMapPulse 函数不存在');
                             }
                         } catch (mapError) {
                             console.warn('[Refresh] ⚠️ 地图联动失败:', mapError);
