@@ -10,6 +10,7 @@
     <script src="https://cdn.jsdelivr.net/npm/echarts/map/js/world.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
@@ -979,6 +980,189 @@
             pointer-events: none;
             z-index: 1;
         }
+        /* =========================
+           Right Drawer Template (right.html) - namespaced
+           ========================= */
+        .country-panel-template {
+            color: #ffffff;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .country-panel-template .report-container {
+            width: 100%;
+            max-width: 100%;
+            padding: 0 2px;
+            position: relative;
+        }
+
+        .country-panel-template .clinic-card {
+            border: 1px solid rgba(0, 255, 65, 0.22);
+            background: rgba(5, 5, 5, 0.92);
+            padding: 16px;
+            margin-bottom: 16px;
+            position: relative;
+            box-shadow: 0 0 20px rgba(0, 255, 65, 0.03);
+        }
+
+        .country-panel-template .clinic-card::before {
+            content: ">>";
+            position: absolute;
+            top: -2px;
+            left: 12px;
+            background: var(--bg-color);
+            padding: 0 6px;
+            color: #00ff41;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .country-panel-template .card-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-bottom: 1px solid rgba(0, 255, 65, 0.22);
+            padding-bottom: 10px;
+            margin-bottom: 14px;
+        }
+
+        .country-panel-template .card-header i {
+            width: 18px;
+            height: 18px;
+            color: #00ff41;
+        }
+
+        .country-panel-template .card-title {
+            font-size: 13px;
+            color: #00ff41;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            font-weight: 700;
+        }
+
+        .country-panel-template .metric-label {
+            font-size: 11px;
+            color: rgba(0, 255, 65, 0.8);
+            text-transform: uppercase;
+            opacity: 0.9;
+        }
+
+        .country-panel-template .metric-value {
+            font-size: 18px;
+            font-weight: 800;
+            color: #ffffff;
+            letter-spacing: -0.5px;
+        }
+
+        .country-panel-template .stat-bar-container {
+            height: 6px;
+            background: #111;
+            margin-top: 6px;
+            position: relative;
+            border: 1px solid rgba(0, 255, 65, 0.18);
+        }
+
+        .country-panel-template .stat-bar-fill {
+            height: 100%;
+            background: #00ff41;
+            box-shadow: 0 0 10px rgba(0, 255, 65, 0.55);
+        }
+
+        .country-panel-template .pk-track {
+            height: 14px;
+            background: #111;
+            display: flex;
+            position: relative;
+            border: 1px solid rgba(0, 255, 65, 0.22);
+        }
+
+        .country-panel-template .pk-left {
+            background: #ffffff;
+            height: 100%;
+        }
+
+        .country-panel-template .pk-right {
+            background: #00ff41;
+            height: 100%;
+        }
+
+        .country-panel-template .pk-divider {
+            position: absolute;
+            left: 50%;
+            top: -4px;
+            bottom: -4px;
+            width: 2px;
+            background: #ffffff;
+            z-index: 10;
+        }
+
+        .country-panel-template .scrolling-wrapper {
+            display: flex;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            gap: 12px;
+            padding-bottom: 10px;
+            scrollbar-width: none;
+        }
+
+        .country-panel-template .scrolling-wrapper::-webkit-scrollbar {
+            display: none;
+        }
+
+        .country-panel-template .user-avatar-card {
+            flex: 0 0 108px;
+            text-align: center;
+            background: rgba(13, 13, 13, 0.95);
+            border: 1px solid rgba(0, 255, 65, 0.18);
+            padding: 10px;
+        }
+
+        .country-panel-template .avatar-circle {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            margin: 0 auto 8px;
+            border: 2px solid #00ff41;
+            background: #111;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            color: #00ff41;
+            font-size: 12px;
+        }
+
+        .country-panel-template .cloud-tag {
+            display: inline-block;
+            margin: 4px;
+            padding: 2px 8px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            transition: all 0.2s;
+        }
+
+        .country-panel-template .cloud-tag:hover {
+            border-color: #00ff41;
+            color: #00ff41;
+        }
+
+        .country-panel-template .chart-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 16px 0;
+        }
+
+        .country-panel-template .status-tag {
+            font-size: 10px;
+            padding: 3px 8px;
+            border: 1px solid #00ff41;
+            color: #00ff41;
+            font-weight: 800;
+        }
+
+        .country-panel-template .status-tag.invert {
+            background: #00ff41;
+            color: #050505;
+        }
     </style>
 </head>
 <body class="p-4 md:p-8">
@@ -1051,12 +1235,168 @@
                 <div class="drawer-close-btn" onclick="closeDrawers()">✕</div>
             </div>
             <div class="drawer-body" id="right-drawer-body">
-                <!-- 内容将通过 JavaScript 动态填充 -->
+                <div id="globalFlowPanel">
+                    <!-- 实时动态流：内容将通过 JavaScript 动态填充 -->
+                </div>
+                <div id="countryPanel" style="display: none;">
+                    <div class="flex items-center gap-2 mb-3">
+                        <button type="button" id="backToGlobalBtn" onclick="switchBackToGlobalView()" class="px-3 py-1.5 text-xs border border-[#00ff41]/50 text-[#00ff41] hover:bg-[#00ff41]/10 transition-colors">[Back to Global]</button>
+                        <button type="button" id="refreshDiagnosticsBtn" onclick="refreshCountryRightPanel()" class="px-3 py-1.5 text-xs border border-sky-300/50 text-sky-300 hover:bg-sky-300/10 transition-colors">[REFRESH]</button>
+                    </div>
+                    <div id="countryTemplateMount" style="font-family: 'JetBrains Mono', monospace;"></div>
+                </div>
             </div>
         </div>
     </div>
     
     <div id="scanLine" class="scan-line" aria-hidden="true"></div>
+    <!-- right.html 模板：用于国家透视右侧抽屉（美国） -->
+    <template id="rightDrawerTemplate">
+        <div class="country-panel-template">
+            <div class="report-container">
+                <!-- HEADER -->
+                <div class="mb-8 border-b-2 border-white pb-4">
+                    <div class="flex justify-between items-start">
+                        <h1 class="text-2xl font-black italic tracking-tighter">NAT_CLINIC <span class="text-green-500">v2.6</span></h1>
+                        <div class="status-tag invert" id="rtStatusTag">LIVE_FEED</div>
+                    </div>
+                    <div class="text-[11px] mt-3 text-zinc-500 flex justify-between uppercase">
+                        <span id="rtCoord">COORD: --</span>
+                        <span id="rtDataStatus">DATA: STABLE</span>
+                    </div>
+                </div>
+
+                <!-- [01] MACRO SCALE -->
+                <div class="clinic-card">
+                    <div class="card-header">
+                        <i data-lucide="globe"></i>
+                        <span class="card-title">宏观体量 / Macro Scale</span>
+                    </div>
+                    <div class="flex justify-between items-center mb-8">
+                        <div class="text-5xl" id="rtFlag">🏳️</div>
+                        <div class="text-right">
+                            <div class="metric-value" id="rtNodeName">REGION_NODE</div>
+                            <div class="metric-label">国家识别码</div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-6">
+                        <div>
+                            <div class="metric-label">已诊断总数</div>
+                            <div class="metric-value" id="rtDiagnosedTotal">--</div>
+                        </div>
+                        <div>
+                            <div class="metric-label">全网扫描</div>
+                            <div class="metric-value" id="rtScanTotal">--</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- [02] POWER STRUGGLE (PK) -->
+                <div class="clinic-card">
+                    <div class="card-header">
+                        <i data-lucide="swords"></i>
+                        <span class="card-title">权力博弈 / Power Struggle</span>
+                    </div>
+                    <div class="space-y-5">
+                        <div class="flex justify-between text-[11px] font-bold uppercase">
+                            <span class="text-white" id="rtPkLeftLabel">甲方 Dominance</span>
+                            <span class="text-green-500" id="rtPkRightLabel">磕头 Kowtow</span>
+                        </div>
+                        <div class="pk-track">
+                            <div class="pk-divider"></div>
+                            <div class="pk-left" id="rtPkLeftFill" style="width: 50%;"></div>
+                            <div class="pk-right" id="rtPkRightFill" style="width: 50%;"></div>
+                        </div>
+                        <div class="flex justify-between text-[16px] font-bold">
+                            <span id="rtPkLeftPct">50.0%</span>
+                            <span class="text-green-500" id="rtPkRightPct">50.0%</span>
+                        </div>
+                        <div class="p-3 bg-zinc-900 border-l-2 border-white text-xs leading-relaxed italic text-zinc-300" id="rtPkQuote">
+                            "..."
+                        </div>
+                    </div>
+                </div>
+
+                <!-- [03] EMOTIONAL AUDIT -->
+                <div class="clinic-card">
+                    <div class="card-header">
+                        <i data-lucide="activity"></i>
+                        <span class="card-title">破防监测 / Meltdown Audit</span>
+                    </div>
+                    <div class="space-y-5">
+                        <div>
+                            <div class="flex justify-between items-end">
+                                <div class="metric-label">集体吐槽字数</div>
+                                <div class="text-sm font-bold" id="rtMeltdownWords">-- WORDS</div>
+                            </div>
+                            <div class="stat-bar-container">
+                                <div class="stat-bar-fill" id="rtMeltdownFill" style="width: 0%;"></div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 mt-6">
+                            <div class="bg-zinc-900 p-3 border border-zinc-800">
+                                <div class="metric-label">破防等级</div>
+                                <div class="text-white font-bold text-lg" id="rtMeltdownLevel">--</div>
+                            </div>
+                            <div class="bg-zinc-900 p-3 border border-zinc-800">
+                                <div class="metric-label">受虐人数</div>
+                                <div class="text-green-500 font-bold text-lg" id="rtMeltdownVictims">--</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- [04] SEMANTIC BURST -->
+                <div class="clinic-card">
+                    <div class="card-header">
+                        <i data-lucide="cloud"></i>
+                        <span class="card-title">语义爆发 / Semantic Burst</span>
+                    </div>
+                    <div class="p-2 text-center" id="rtSemanticTags"></div>
+                    <div class="mt-4 pt-3 border-t border-zinc-800 flex justify-between text-[11px]">
+                        <span class="text-zinc-500" id="rtSemanticMostUsed">MOST_USED: --</span>
+                        <span class="text-green-500" id="rtSemanticFreq">FREQ: --</span>
+                    </div>
+                </div>
+
+                <!-- [05] ELITE RANKING -->
+                <div class="clinic-card">
+                    <div class="card-header">
+                        <i data-lucide="users"></i>
+                        <span class="card-title">高分图谱 / LPDEF Ranking</span>
+                    </div>
+                    <div class="scrolling-wrapper" id="rtEliteList"></div>
+                    <div class="text-[10px] text-zinc-500 mt-2 text-center uppercase tracking-tighter" id="rtEliteHint">
+                        &lt;--- Swipe to view Top Agents ---&gt;
+                    </div>
+                </div>
+
+                <!-- [06] GLOBAL SHARE -->
+                <div class="clinic-card">
+                    <div class="card-header">
+                        <i data-lucide="pie-chart"></i>
+                        <span class="card-title">全球占比 / Global Ratio</span>
+                    </div>
+                    <div class="chart-container">
+                        <svg width="150" height="150" viewBox="0 0 32 32">
+                            <circle r="16" cx="16" cy="16" fill="#111" />
+                            <circle r="16" cx="16" cy="16" fill="transparent"
+                                    stroke="#00ff41" stroke-width="32"
+                                    stroke-dasharray="45 100" transform="rotate(-90 16 16)" />
+                            <circle r="16" cx="16" cy="16" fill="transparent"
+                                    stroke="#ffffff" stroke-width="32"
+                                    stroke-dasharray="25 100" transform="rotate(72 16 16)" />
+                            <circle r="16" cx="16" cy="16" fill="transparent"
+                                    stroke="#008f11" stroke-width="32"
+                                    stroke-dasharray="15 100" transform="rotate(162 16 16)" />
+                            <circle r="8" cx="16" cy="16" fill="#050505" />
+                        </svg>
+                    </div>
+                    <div class="space-y-2 mt-2" id="rtRatioList"></div>
+                </div>
+            </div>
+        </div>
+    </template>
     <div class="max-w-[1600px] mx-auto relative z-10">
         <!-- Main Dashboard Layout -->
         <div class="grid grid-cols-1 xl:grid-cols-12 gap-6">
@@ -1501,6 +1841,7 @@
         };
 
         let mapChart, radarChart;
+        let currentViewState = 'GLOBAL'; // GLOBAL 或 COUNTRY（右侧抽屉：实时动态流 / 国家透视）
         let selectedCountry = null; // 当前选中的国家
         let currentChampionInfo = null; // 当前选中的冠军信息（用于地图 tooltip 展示）
         /** 校准模式：点击「Current Location」光标后为 true，停止操作 1.5 秒后恢复 false */
@@ -1790,14 +2131,19 @@
             // 保存当前国家信息
             currentDrawerCountry.code = countryCode;
             currentDrawerCountry.name = countryName;
+            currentViewState = 'GLOBAL';
             const leftDrawer = document.getElementById('left-drawer');
             const rightDrawer = document.getElementById('right-drawer');
             const leftTitle = document.getElementById('left-drawer-title');
             const rightTitle = document.getElementById('right-drawer-title');
             const leftBody = document.getElementById('left-drawer-body');
-            const rightBody = document.getElementById('right-drawer-body');
+            const globalFlowPanel = document.getElementById('globalFlowPanel');
+            const countryPanelEl = document.getElementById('countryPanel');
+            const rightBody = globalFlowPanel || document.getElementById('right-drawer-body');
 
             if (!leftDrawer || !rightDrawer) return;
+            if (globalFlowPanel) globalFlowPanel.style.display = '';
+            if (countryPanelEl) countryPanelEl.style.display = 'none';
 
             // 获取国家显示名称
             const countryDisplayName = countryNameMap[countryCode] 
@@ -2450,6 +2796,212 @@
         }
 
         /**
+         * 切换到「国家数据透视」模式（右侧抽屉显示该国雷达图 + 战神榜）
+         * 先调用 showDrawersWithCountryData 填充左侧个人数据，再把右侧切为国家透视。
+         * @param {string} code - 国家代码，如 'US'
+         * @param {string} name - 国家名称，如 'United States'
+         */
+        function switchToCountryView(code, name) {
+            showDrawersWithCountryData(code, name);
+            currentViewState = 'COUNTRY';
+            const rightDrawer = document.getElementById('right-drawer');
+            const globalFlowPanel = document.getElementById('globalFlowPanel');
+            const countryPanelEl = document.getElementById('countryPanel');
+            if (!rightDrawer || !countryPanelEl) return;
+            if (globalFlowPanel) globalFlowPanel.style.display = 'none';
+            countryPanelEl.style.display = '';
+
+            const leftTitle = document.getElementById('left-drawer-title');
+            const rightTitle = document.getElementById('right-drawer-title');
+            if (leftTitle) leftTitle.textContent = name;
+            if (rightTitle) rightTitle.textContent = name;
+
+            renderCountryRightPanel(code, name);
+
+            selectedCountry = code === 'US' ? 'US' : code;
+            currentDrawerCountry.code = code;
+            currentDrawerCountry.name = name;
+            console.log('[Drawer] 国家透视已打开:', name);
+        }
+
+        // ============================
+        // 国家透视（right.html 模板渲染，无打字机）
+        // ============================
+        function clamp(n, min, max) {
+            const x = Number(n);
+            if (isNaN(x)) return min;
+            return Math.max(min, Math.min(max, x));
+        }
+
+        function pct(n) {
+            const x = clamp(n, 0, 100);
+            return `${x.toFixed(1)}%`;
+        }
+
+        function renderCountryRightPanel(code, name) {
+            const mount = document.getElementById('countryTemplateMount');
+            const tpl = document.getElementById('rightDrawerTemplate');
+            if (!mount || !tpl) return;
+
+            mount.innerHTML = '';
+            const node = tpl.content.cloneNode(true);
+            mount.appendChild(node);
+
+            // 仅美国：硬编码模板数据（后续可接入 API）
+            const isUS = (code === 'US' || name === 'United States');
+            const model = isUS ? {
+                coord: 'COORD: 37.0902° N, 95.7129° W',
+                dataStatus: 'DATA: STABLE',
+                flag: '🇺🇸',
+                nodeName: 'UNITED_STATES_NODE',
+                diagnosedTotal: '1.284K',
+                scanTotal: '3.91B',
+                pk: {
+                    leftLabel: 'Dominance',
+                    rightLabel: 'Kowtow',
+                    leftPct: 58.2,
+                    rightPct: 41.8,
+                    quote: '"样本显示：该地区开发者以结果为王，低耐心高效率。夜间时段依旧保持强势指令密度，偏好短句直给。"' 
+                },
+                meltdown: {
+                    words: '1.12B WORDS',
+                    fillPct: 76,
+                    level: 'ELEVATED',
+                    victims: '128K+'
+                },
+                semantic: {
+                    tags: [
+                        { text: 'Efficiency', className: 'cloud-tag text-xl font-black text-green-500' },
+                        { text: 'Refactor', className: 'cloud-tag text-sm text-white' },
+                        { text: 'Idempotent', className: 'cloud-tag text-xs text-zinc-500' },
+                        { text: 'Ship it', className: 'cloud-tag text-lg font-bold text-white' },
+                        { text: 'Latency', className: 'cloud-tag text-sm text-green-400' },
+                        { text: 'No excuses', className: 'cloud-tag text-xs text-zinc-400' },
+                        { text: 'Over-optimize', className: 'cloud-tag text-sm text-green-300' },
+                        { text: 'Benchmark', className: 'cloud-tag text-xs text-zinc-600' },
+                        { text: 'Design', className: 'cloud-tag text-md text-white' }
+                    ],
+                    mostUsed: 'MOST_USED: Efficiency',
+                    freq: 'FREQ: 3.2M/H'
+                },
+                elite: [
+                    { id: 'SG', name: 'SiliconGhost', lpdef: 99 },
+                    { id: 'BS', name: 'ByteSlayer', lpdef: 97 },
+                    { id: 'LW', name: 'LogicWitch', lpdef: 96 },
+                    { id: 'CP', name: 'CursorPro', lpdef: 95 },
+                    { id: 'AC', name: 'AICoder', lpdef: 94 },
+                    { id: 'SV', name: 'SiliconValley', lpdef: 93 },
+                    { id: 'RX', name: 'RefactorX', lpdef: 92 },
+                    { id: 'DD', name: 'DeepDebug', lpdef: 91 },
+                    { id: 'FP', name: 'FastPatch', lpdef: 90 },
+                    { id: 'QE', name: 'QuickEagle', lpdef: 89 }
+                ],
+                ratio: [
+                    { label: 'USA', pct: 25.0, dotClass: 'bg-white' },
+                    { label: 'CHINA', pct: 45.0, dotClass: 'bg-green-500' },
+                    { label: 'INDIA', pct: 15.0, dotClass: 'bg-green-800' },
+                    { label: 'OTHERS', pct: 15.0, dotClass: 'bg-zinc-800', dim: true }
+                ]
+            } : {
+                coord: 'COORD: --',
+                dataStatus: 'DATA: LOADING',
+                flag: countryCodeToFlagEmoji(code) || '🏳️',
+                nodeName: `${String(name || 'REGION').toUpperCase()}_NODE`,
+                diagnosedTotal: '--',
+                scanTotal: '--',
+                pk: { leftLabel: 'Dominance', rightLabel: 'Kowtow', leftPct: 50, rightPct: 50, quote: '"Coming soon..."' },
+                meltdown: { words: '-- WORDS', fillPct: 0, level: 'PENDING', victims: '--' },
+                semantic: { tags: [], mostUsed: 'MOST_USED: --', freq: 'FREQ: --' },
+                elite: [],
+                ratio: []
+            };
+
+            const q = (sel) => mount.querySelector(sel);
+            const setText = (sel, v) => { const el = q(sel); if (el) el.textContent = String(v); };
+
+            setText('#rtCoord', model.coord);
+            setText('#rtDataStatus', model.dataStatus);
+            setText('#rtFlag', model.flag);
+            setText('#rtNodeName', model.nodeName);
+            setText('#rtDiagnosedTotal', model.diagnosedTotal);
+            setText('#rtScanTotal', model.scanTotal);
+
+            setText('#rtPkLeftLabel', `${model.pk.leftLabel}`);
+            setText('#rtPkRightLabel', `${model.pk.rightLabel}`);
+            setText('#rtPkLeftPct', pct(model.pk.leftPct));
+            setText('#rtPkRightPct', pct(model.pk.rightPct));
+            setText('#rtPkQuote', model.pk.quote);
+            const pkLeftFill = q('#rtPkLeftFill');
+            const pkRightFill = q('#rtPkRightFill');
+            if (pkLeftFill) pkLeftFill.style.width = `${clamp(model.pk.leftPct, 0, 100)}%`;
+            if (pkRightFill) pkRightFill.style.width = `${clamp(model.pk.rightPct, 0, 100)}%`;
+
+            setText('#rtMeltdownWords', model.meltdown.words);
+            setText('#rtMeltdownLevel', model.meltdown.level);
+            setText('#rtMeltdownVictims', model.meltdown.victims);
+            const meltdownFill = q('#rtMeltdownFill');
+            if (meltdownFill) meltdownFill.style.width = `${clamp(model.meltdown.fillPct, 0, 100)}%`;
+
+            const tagsEl = q('#rtSemanticTags');
+            if (tagsEl) {
+                tagsEl.innerHTML = (model.semantic.tags || []).map(t => `<span class="${t.className}">${String(t.text)}</span>`).join('');
+            }
+            setText('#rtSemanticMostUsed', model.semantic.mostUsed);
+            setText('#rtSemanticFreq', model.semantic.freq);
+
+            const eliteEl = q('#rtEliteList');
+            if (eliteEl) {
+                eliteEl.innerHTML = (model.elite || []).map((u) => `
+                    <div class="user-avatar-card">
+                        <div class="avatar-circle">${String(u.id || '').slice(0, 3).toUpperCase()}</div>
+                        <div class="text-[10px] font-bold text-white truncate">${String(u.name || '')}</div>
+                        <div class="text-[9px] text-green-500 mt-1">LPDEF: ${Number(u.lpdef) || 0}</div>
+                    </div>
+                `).join('');
+            }
+
+            const ratioEl = q('#rtRatioList');
+            if (ratioEl) {
+                ratioEl.innerHTML = (model.ratio || []).map((r) => `
+                    <div class="flex justify-between text-xs ${r.dim ? 'text-zinc-500' : ''}">
+                        <span class="flex items-center gap-2"><div class="w-2 h-2 ${r.dotClass}"></div> ${String(r.label)}</span>
+                        <span class="font-bold">${Number(r.pct).toFixed(1)}%</span>
+                    </div>
+                `).join('');
+            }
+
+            // 初始化 Lucide 图标（只要库加载完成即可）
+            try {
+                if (typeof lucide !== 'undefined' && lucide && typeof lucide.createIcons === 'function') {
+                    lucide.createIcons();
+                }
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        function refreshCountryRightPanel() {
+            if (currentViewState !== 'COUNTRY') return;
+            if (!currentDrawerCountry || !currentDrawerCountry.code) return;
+            renderCountryRightPanel(currentDrawerCountry.code, currentDrawerCountry.name);
+        }
+
+        /**
+         * 从国家透视切回「实时动态流」视图
+         */
+        function switchBackToGlobalView() {
+            currentViewState = 'GLOBAL';
+            const globalFlowPanel = document.getElementById('globalFlowPanel');
+            const countryPanelEl = document.getElementById('countryPanel');
+            if (globalFlowPanel) globalFlowPanel.style.display = '';
+            if (countryPanelEl) countryPanelEl.style.display = 'none';
+            if (currentDrawerCountry.code && currentDrawerCountry.name) {
+                showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);
+            }
+            console.log('[Drawer] 已切回全球/实时动态流');
+        }
+
+        /**
          * 关闭抽屉
          * @param {boolean} clearSelection - 是否清除选中状态，默认为 true
          */
@@ -2838,6 +3390,12 @@
                     const hasValidName = params.name && typeof params.name === 'string' && params.name.trim() !== '';
                     const isCountryClick = params.seriesType === 'map' && hasValidName;
                     console.log('[Map] 点击事件详情:', { seriesType: params.seriesType, name: params.name, isCountryClick, selectedCountryBefore: selectedCountry });
+                    
+                    // ========== 美国：进入国家数据透视模式 ==========
+                    if (isCountryClick && params.name === 'United States') {
+                        switchToCountryView('US', 'United States');
+                        return;
+                    }
                     
                     if (isCountryClick) {
                         const countryName = params.name;

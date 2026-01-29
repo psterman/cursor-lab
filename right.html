@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>National Cyber-Clinic | 国家级赛博诊断</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <!-- 引入 Lucide 图标库 -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        :root {
+            --terminal-green: #00ff41;
+            --terminal-dark: #050505;
+            --terminal-dim: #0a1a0c;
+            --border-color: #1a3a1f;
+            --text-main: #ffffff;
+            --text-dim: #00ff41;
+            --bg-dark: #050505;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            font-family: 'JetBrains Mono', monospace;
+            display: flex;
+            justify-content: center;
+            padding: 20px 0;
+        }
+
+        /* 赛博扫描线 */
+        .scanline {
+            width: 100%;
+            height: 100px;
+            z-index: 100;
+            background: linear-gradient(0deg, rgba(0, 255, 65, 0) 0%, rgba(0, 255, 65, 0.05) 50%, rgba(0, 255, 65, 0) 100%);
+            position: fixed;
+            top: 0;
+            left: 0;
+            animation: scan 8s linear infinite;
+            pointer-events: none;
+        }
+
+        @keyframes scan {
+            0% { transform: translateY(-100vh); }
+            100% { transform: translateY(100vh); }
+        }
+
+        .report-container {
+            width: 100%;
+            max-width: 380px;
+            padding: 0 10px;
+            position: relative;
+        }
+
+        /* 赛博卡片升级 */
+        .clinic-card {
+            border: 1px solid var(--border-color);
+            background: var(--terminal-dark);
+            padding: 18px;
+            margin-bottom: 20px;
+            position: relative;
+            box-shadow: 0 0 20px rgba(0, 255, 65, 0.03);
+        }
+
+        .clinic-card::before {
+            content: ">>";
+            position: absolute;
+            top: -2px;
+            left: 12px;
+            background: var(--bg-dark);
+            padding: 0 6px;
+            color: var(--terminal-green);
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 10px;
+            margin-bottom: 14px;
+        }
+
+        .card-header i {
+            width: 18px;
+            height: 18px;
+            color: var(--terminal-green);
+        }
+
+        /* 标题字号提升 */
+        .card-title {
+            font-size: 14px;
+            color: var(--terminal-green);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            font-weight: bold;
+        }
+
+        /* 正文字号提升 */
+        .metric-label { font-size: 12px; color: var(--text-dim); text-transform: uppercase; opacity: 0.8; }
+        .metric-value { font-size: 20px; font-weight: bold; color: #fff; letter-spacing: -0.5px; }
+
+        .stat-bar-container {
+            height: 6px;
+            background: #111;
+            margin-top: 6px;
+            position: relative;
+        }
+
+        .stat-bar-fill {
+            height: 100%;
+            background: var(--terminal-green);
+            box-shadow: 0 0 10px var(--terminal-green);
+        }
+
+        /* PK 拉锯条 */
+        .pk-track {
+            height: 14px;
+            background: #111;
+            display: flex;
+            position: relative;
+            border: 1px solid var(--border-color);
+        }
+
+        .pk-left { background: #fff; height: 100%; }
+        .pk-right { background: var(--terminal-green); height: 100%; }
+        
+        .pk-divider {
+            position: absolute;
+            left: 50%;
+            top: -4px;
+            bottom: -4px;
+            width: 2px;
+            background: #fff;
+            z-index: 10;
+        }
+
+        /* 人员滑动列表 */
+        .scrolling-wrapper {
+            display: flex;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            gap: 12px;
+            padding-bottom: 10px;
+            scrollbar-width: none; /* Firefox */
+        }
+        .scrolling-wrapper::-webkit-scrollbar { display: none; }
+
+        .user-avatar-card {
+            flex: 0 0 100px;
+            text-align: center;
+            background: #0d0d0d;
+            border: 1px solid #1a1a1a;
+            padding: 10px;
+        }
+
+        .avatar-circle {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            margin: 0 auto 8px;
+            border: 2px solid var(--terminal-green);
+            background: #222;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: var(--terminal-green);
+            font-size: 14px;
+        }
+
+        /* 词云样式 */
+        .cloud-tag {
+            display: inline-block;
+            margin: 4px;
+            padding: 2px 8px;
+            border: 1px solid #333;
+            transition: all 0.2s;
+        }
+        .cloud-tag:hover {
+            border-color: var(--terminal-green);
+            color: var(--terminal-green);
+        }
+
+        /* 饼图容器 */
+        .chart-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px 0;
+        }
+
+        .status-tag {
+            font-size: 10px;
+            padding: 3px 8px;
+            border: 1px solid var(--terminal-green);
+            color: var(--terminal-green);
+            font-weight: bold;
+        }
+
+        .status-tag.invert {
+            background: var(--terminal-green);
+            color: var(--terminal-dark);
+        }
+
+        .cursor {
+            display: inline-block;
+            width: 8px;
+            height: 14px;
+            background: var(--terminal-green);
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink { 50% { opacity: 0; } }
+
+    </style>
+</head>
+<body>
+    <div class="scanline"></div>
+
+    <div class="report-container">
+        <!-- HEADER -->
+        <div class="mb-10 border-b-2 border-white pb-6">
+            <div class="flex justify-between items-start">
+                <h1 class="text-3xl font-black italic tracking-tighter">NAT_CLINIC <span class="text-green-500">v2.6</span></h1>
+                <div class="status-tag invert">LIVE_FEED</div>
+            </div>
+            <div class="text-[11px] mt-3 text-zinc-500 flex justify-between uppercase">
+                <span>COORD: 35.8617° N, 104.1954° E</span>
+                <span>DATA: STABLE</span>
+            </div>
+        </div>
+
+        <!-- [01] MACRO SCALE -->
+        <div class="clinic-card">
+            <div class="card-header">
+                <i data-lucide="globe"></i>
+                <span class="card-title">宏观体量 / Macro Scale</span>
+            </div>
+            <div class="flex justify-between items-center mb-8">
+                <div class="text-5xl">🇨🇳</div>
+                <div class="text-right">
+                    <div class="metric-value">CHINA_NODE</div>
+                    <div class="metric-label">国家识别码</div>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-6">
+                <div>
+                    <div class="metric-label">已诊断总数</div>
+                    <div class="metric-value">1.42M</div>
+                </div>
+                <div>
+                    <div class="metric-label">全网扫描</div>
+                    <div class="metric-value">52.8B</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- [02] POWER STRUGGLE (PK) -->
+        <div class="clinic-card">
+            <div class="card-header">
+                <i data-lucide="swords"></i>
+                <span class="card-title">权力博弈 / Power Struggle</span>
+            </div>
+            <div class="space-y-5">
+                <div class="flex justify-between text-[11px] font-bold uppercase">
+                    <span class="text-white">甲方 Dominance</span>
+                    <span class="text-green-500">磕头 Kowtow</span>
+                </div>
+                <div class="pk-track">
+                    <div class="pk-divider"></div>
+                    <div class="pk-left" style="width: 62%;"></div>
+                    <div class="pk-right" style="width: 38%;"></div>
+                </div>
+                <div class="flex justify-between text-[16px] font-bold">
+                    <span>62.4%</span>
+                    <span class="text-green-500">37.6%</span>
+                </div>
+                <div class="p-3 bg-zinc-900 border-l-2 border-white text-xs leading-relaxed italic text-zinc-300">
+                    "样本显示：该国开发者倾向于直接支配 AI。即便在深夜时段，其祈使句密度依然保持在全球高位。"
+                </div>
+            </div>
+        </div>
+
+        <!-- [03] EMOTIONAL AUDIT -->
+        <div class="clinic-card">
+            <div class="card-header">
+                <i data-lucide="activity"></i>
+                <span class="card-title">破防监测 / Meltdown Audit</span>
+            </div>
+            <div class="space-y-5">
+                <div>
+                    <div class="flex justify-between items-end">
+                        <div class="metric-label">集体吐槽字数</div>
+                        <div class="text-sm font-bold">9.42B WORDS</div>
+                    </div>
+                    <div class="stat-bar-container">
+                        <div class="stat-bar-fill" style="width: 82%;"></div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-4 mt-6">
+                    <div class="bg-zinc-900 p-3 border border-zinc-800">
+                        <div class="metric-label">破防等级</div>
+                        <div class="text-white font-bold text-lg">CRITICAL</div>
+                    </div>
+                    <div class="bg-zinc-900 p-3 border border-zinc-800">
+                        <div class="metric-label">受虐人数</div>
+                        <div class="text-green-500 font-bold text-lg">242K+</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- [04] NEW: SEMANTIC BURST (词云) -->
+        <div class="clinic-card">
+            <div class="card-header">
+                <i data-lucide="cloud"></i>
+                <span class="card-title">语义爆发 / Semantic Burst</span>
+            </div>
+            <div class="p-2 text-center">
+                <div class="cloud-tag text-lg font-bold text-white">底层逻辑</div>
+                <div class="cloud-tag text-xs text-zinc-500">Idempotent</div>
+                <div class="cloud-tag text-sm text-green-400">赋能</div>
+                <div class="cloud-tag text-xl font-black text-green-500">破防了</div>
+                <div class="cloud-tag text-xs text-zinc-400">闭环</div>
+                <div class="cloud-tag text-sm text-white">Refactor</div>
+                <div class="cloud-tag text-lg text-green-300">对齐</div>
+                <div class="cloud-tag text-xs text-zinc-600">打法</div>
+                <div class="cloud-tag text-md text-white">996.icu</div>
+                <div class="cloud-tag text-sm text-green-600">赛博功德</div>
+            </div>
+            <div class="mt-4 pt-3 border-t border-zinc-800 flex justify-between text-[11px]">
+                <span class="text-zinc-500">MOST_USED: 破防了</span>
+                <span class="text-green-500">FREQ: 14.2M/H</span>
+            </div>
+        </div>
+
+        <!-- [05] NEW: ELITE RANKING (人员列表) -->
+        <div class="clinic-card">
+            <div class="card-header">
+                <i data-lucide="users"></i>
+                <span class="card-title">高分图谱 / LPDEF Ranking</span>
+            </div>
+            <div class="scrolling-wrapper">
+                <!-- 模拟 10 个（可滚动至 50 个） -->
+                <script>
+                    for(let i=1; i<=10; i++) {
+                        document.write(`
+                            <div class="user-avatar-card">
+                                <div class="avatar-circle">ID_${i}</div>
+                                <div class="text-[10px] font-bold text-white truncate">User_${i}99</div>
+                                <div class="text-[9px] text-green-500 mt-1">LPDEF: ${(99-i*2)}</div>
+                            </div>
+                        `);
+                    }
+                </script>
+            </div>
+            <div class="text-[10px] text-zinc-500 mt-2 text-center uppercase tracking-tighter">
+                <--- Swipe to view Top 50 Agents --->
+            </div>
+        </div>
+
+        <!-- [06] NEW: GLOBAL SHARE (饼图) -->
+        <div class="clinic-card">
+            <div class="card-header">
+                <i data-lucide="pie-chart"></i>
+                <span class="card-title">全球占比 / Global Ratio</span>
+            </div>
+            <div class="chart-container">
+                <!-- SVG 极简赛博饼图 -->
+                <svg width="150" height="150" viewBox="0 0 32 32">
+                    <circle r="16" cx="16" cy="16" fill="#111" />
+                    <circle r="16" cx="16" cy="16" fill="transparent"
+                            stroke="#00ff41" stroke-width="32"
+                            stroke-dasharray="45 100" transform="rotate(-90 16 16)" />
+                    <circle r="16" cx="16" cy="16" fill="transparent"
+                            stroke="#ffffff" stroke-width="32"
+                            stroke-dasharray="25 100" transform="rotate(72 16 16)" />
+                    <circle r="16" cx="16" cy="16" fill="transparent"
+                            stroke="#008f11" stroke-width="32"
+                            stroke-dasharray="15 100" transform="rotate(162 16 16)" />
+                    <circle r="8" cx="16" cy="16" fill="#050505" />
+                </svg>
+            </div>
+            <div class="space-y-2 mt-2">
+                <div class="flex justify-between text-xs">
+                    <span class="flex items-center gap-2"><div class="w-2 h-2 bg-green-500"></div> CHINA</span>
+                    <span class="font-bold">45.0%</span>
+                </div>
+                <div class="flex justify-between text-xs">
+                    <span class="flex items-center gap-2"><div class="w-2 h-2 bg-white"></div> USA</span>
+                    <span class="font-bold">25.0%</span>
+                </div>
+                <div class="flex justify-between text-xs">
+                    <span class="flex items-center gap-2"><div class="w-2 h-2 bg-green-800"></div> INDIA</span>
+                    <span class="font-bold">15.0%</span>
+                </div>
+                <div class="flex justify-between text-xs text-zinc-500">
+                    <span class="flex items-center gap-2"><div class="w-2 h-2 bg-zinc-800"></div> OTHERS</span>
+                    <span class="font-bold">15.0%</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- FOOTER -->
+        <div class="mt-8 mb-20 text-center">
+            <div class="text-xs text-zinc-600 mb-6 tracking-widest uppercase">
+                End of National Diagnostic Feed <span class="cursor"></span>
+            </div>
+            <button class="w-full py-5 bg-green-500 text-black font-black text-base uppercase italic hover:bg-white transition-all shadow-[0_0_20px_rgba(0,255,65,0.4)]">
+                Generate Full Report (.PDF)
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // 初始化 Lucide 图标
+        lucide.createIcons();
+        
+        // 模拟随机刷新动效
+        setInterval(() => {
+            const tags = document.querySelectorAll('.status-tag');
+            tags.forEach(t => {
+                t.style.opacity = Math.random() > 0.9 ? '0.4' : '1';
+            });
+        }, 150);
+    </script>
+</body>
+</html>
