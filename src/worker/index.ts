@@ -1725,11 +1725,12 @@ app.post('/api/v2/analyze', async (c) => {
             // 【V6 协议】将完整的 stats 存入 jsonb 字段（确保未来维度增加到 100 个时也不需要改数据库 Schema）
             stats: v6StatsForStorage, // 完整的 V6Stats 对象，包含所有 40 个维度
             
-            // 【关键修复】添加 personality 对象，包含 detailedStats 数组（五维语义指纹数据）
-            // 数据格式：{ type: string, detailedStats: Array<{ dimension, score, label, roast }> }
+            // 【关键修复】添加 personality 对象，包含 detailedStats 与 answer_book（与 dimensions 等一并同步给 GitHub 用户/视图）
+            // 数据格式：{ type, detailedStats, answer_book: { title, content, vibe_level } }
             personality: {
               type: personalityType,
               detailedStats: detailedStats, // 包含 L, P, D, E, F 五个维度的详细统计数据
+              answer_book: answerBook ?? null, // 答案之书，供 stats2 左侧抽屉「今日箴言」与 index 同步
             },
             
             // 【新增】personality_data 字段：包含称号和随机吐槽的五个维度数组（JSONB）
@@ -2972,31 +2973,38 @@ app.get('/api/global-average', async (c) => {
             console.warn('[Worker] ⚠️ 获取最近受害者失败，使用空数组:', recentError);
           }
 
-          // 4.5. 获取王者池数据（用于前端选拔各维度最强王者）
-          // 关键：只选取 l_score > 0 或 total_messages > 0 的记录（剔除无意义的自动上报空数据）
+          // 4.5. 获取王者池数据（用于前端选拔各维度最强王者 + 左侧抽屉技术排名/甲方上身/赛博磕头）
+          // 使用 v_unified_analysis_v2 视图，确保返回 vibe_rank、vibe_percentile、jiafang_count、ketao_count
           let allUsersData: any[] = [];
           try {
-            // 方案1：先获取最近 100 条记录，然后在客户端过滤
-            // 因为 Supabase PostgREST 的 or 查询语法较复杂，我们采用客户端过滤
-            const userAnalysisRes = await fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=*&order=created_at.desc&limit=100`, {
-              headers: { 
-                'apikey': env.SUPABASE_KEY, 
-                'Authorization': `Bearer ${env.SUPABASE_KEY}` 
-              }
+            const viewRes = await fetch(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2?select=*&order=created_at.desc&limit=100`, {
+              headers: {
+                'apikey': env.SUPABASE_KEY,
+                'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+              },
             });
-            
-            if (userAnalysisRes.ok) {
-              const rawData = await userAnalysisRes.json();
-              // 客户端过滤：只保留 l_score > 0 或 total_messages > 0 的记录
+            if (viewRes.ok) {
+              const rawData = await viewRes.json();
               allUsersData = rawData.filter((user: any) => {
                 const lScore = Number(user.l_score ?? user.l ?? 0);
                 const totalMessages = Number(user.total_messages ?? 0);
                 return lScore > 0 || totalMessages > 0;
               });
-              console.log('[Worker] ✅ 获取王者池数据成功:', allUsersData.length, '条（已从', rawData.length, '条中过滤）');
+              console.log('[Worker] ✅ 从 v_unified_analysis_v2 获取王者池成功:', allUsersData.length, '条（含 vibe_rank/jiafang_count/ketao_count）');
             } else {
-              const errorText = await userAnalysisRes.text().catch(() => '无法读取错误信息');
-              console.warn('[Worker] ⚠️ 获取王者池数据失败，HTTP 状态:', userAnalysisRes.status, errorText);
+              const errorText = await viewRes.text().catch(() => '无法读取错误信息');
+              console.warn('[Worker] ⚠️ v_unified_analysis_v2 查询失败，回退到 user_analysis:', viewRes.status, errorText);
+              const fallbackRes = await fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=*&order=created_at.desc&limit=100`, {
+                headers: { 'apikey': env.SUPABASE_KEY, 'Authorization': `Bearer ${env.SUPABASE_KEY}` },
+              });
+              if (fallbackRes.ok) {
+                const rawData = await fallbackRes.json();
+                allUsersData = rawData.filter((user: any) => {
+                  const lScore = Number(user.l_score ?? user.l ?? 0);
+                  const totalMessages = Number(user.total_messages ?? 0);
+                  return lScore > 0 || totalMessages > 0;
+                });
+              }
             }
           } catch (allUsersError) {
             console.warn('[Worker] ⚠️ 获取王者池数据失败，使用空数组:', allUsersError);

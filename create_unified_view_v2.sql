@@ -16,6 +16,9 @@ WITH base_data AS (
         l_score, p_score, d_score, e_score, f_score,
         stats, dimensions, personality,
         total_messages, total_chars, work_days,
+        jiafang_count, ketao_count,
+        vibe_index AS vibe_index_str,
+        lpdef,
         ip_location,
         lat AS raw_lat,
         lng AS raw_lng,
@@ -30,6 +33,8 @@ unified AS (
         l_score, p_score, d_score, e_score, f_score,
         stats, dimensions, personality,
         total_messages, total_chars, work_days,
+        jiafang_count, ketao_count,
+        vibe_index_str, lpdef,
         ip_location,
         COALESCE(manual_lat, raw_lat) AS lat,
         COALESCE(manual_lng, raw_lng) AS lng,
@@ -44,6 +49,8 @@ SELECT
     l_score, p_score, d_score, e_score, f_score,
     stats, dimensions, personality,
     total_messages, total_chars, work_days,
+    jiafang_count, ketao_count,
+    vibe_index_str, lpdef,
     ip_location, lat, lng,
     manual_location, manual_lat, manual_lng,
     country_code, created_at, updated_at,
@@ -64,7 +71,7 @@ COMMENT ON VIEW public.v_unified_analysis_v2 IS
 1. 去重：DISTINCT ON (fingerprint/id)，GitHub 身份优先，再按 created_at DESC
 2. 光标位置：lat/lng 对外统一为 COALESCE(manual_lat, raw_lat)、COALESCE(manual_lng, raw_lng)，手动校准与自动定位和谐相处
 3. country_code：COALESCE(manual_location, ip_location)
-4. vibe_index / vibe_rank / vibe_percentile 供前端排名展示';
+4. vibe_index / vibe_rank / vibe_percentile 供技术排名；jiafang_count / ketao_count 供甲方上身、赛博磕头展示';
 
 -- 步骤 3: 创建索引（提升查询性能）
 -- 注意：视图本身不能创建索引，但可以在基础表上创建索引

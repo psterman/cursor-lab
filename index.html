@@ -2388,8 +2388,15 @@
             );
         }
 
-        // 答案之书卡片组件（用于替换人格解锁库卡片）
-        function AnswerBookCard({ lang = 'zh-CN' }) {
+        // 从 lpdef 提取 vibe_index（5 位数字），与 worker 的 generateLPDEF 一致：L0P1D2E1F0 -> 01210
+        function lpdefToVibeIndex(lpdef) {
+            if (!lpdef || typeof lpdef !== 'string') return null;
+            const digits = lpdef.replace(/\D/g, '');
+            return digits.length === 5 ? digits : null;
+        }
+
+        // 答案之书卡片组件（与 stats2 同步：优先用分析结果的 answer_book，否则按 vibe_index/lpdef 从 answerBookByVibeIndex.json 取）
+        function AnswerBookCard({ lang = 'zh-CN', vibeResult = null }) {
             const [prompt, setPrompt] = useState(null);
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState(null);
@@ -2553,11 +2560,62 @@
                 }
             };
 
-            // 组件加载时或语言变化时获取数据
+            // 根据 vibe_index/lpdef 从共享 JSON 加载答案之书（与 stats2 同步）
+            const loadAnswerBookByVibeIndex = async (vibeIndex) => {
+                if (!vibeIndex || typeof vibeIndex !== 'string' || vibeIndex.length !== 5) return null;
+                try {
+                    const response = await fetch('src/answerBookByVibeIndex.json');
+                    if (!response.ok) return null;
+                    const data = await response.json();
+                    const entry = data[vibeIndex]; // 仅用该用户 vibe_index 的条目，不用 default 占位
+                    if (!entry) return null;
+                    return {
+                        author: isEn ? entry.title_en : entry.title_zh,
+                        content: isEn ? entry.content_en : entry.content_zh,
+                    };
+                } catch (e) {
+                    console.warn('[AnswerBookCard] 加载 answerBookByVibeIndex.json 失败:', e);
+                    return null;
+                }
+            };
+
+            // 组件加载或 lang/vibeResult 变化时：优先用分析结果的 answer_book，否则按 vibe_index/lpdef 从 JSON 取，最后 random_prompt
             useEffect(() => {
-                console.log('[AnswerBookCard] useEffect 触发，准备获取数据，当前语言:', lang);
+                const source = vibeResult || (typeof window !== 'undefined' ? window.vibeResult : null);
+                const answerBook = source?.answer_book || source?.answerBook;
+                const vibeIndex = source?.vibeIndex || source?.vibe_index || (source?.lpdef ? lpdefToVibeIndex(source.lpdef) : null);
+
+                if (answerBook && (answerBook.title || answerBook.content)) {
+                    setLoading(true);
+                    setError(null);
+                    setLiked(false);
+                    setPrompt({
+                        author: answerBook.title || (isEn ? 'Today\'s Maxim' : '今日箴言'),
+                        content: answerBook.content || answerBook.desc || answerBook.description || '',
+                    });
+                    setLoading(false);
+                    return;
+                }
+                if (vibeIndex) {
+                    setLoading(true);
+                    setError(null);
+                    setLiked(false);
+                    loadAnswerBookByVibeIndex(vibeIndex).then((p) => {
+                        if (p) {
+                            setPrompt(p);
+                        } else {
+                            fetchRandomPrompt();
+                        }
+                        setLoading(false);
+                    }).catch(() => {
+                        fetchRandomPrompt();
+                        setLoading(false);
+                    });
+                    return;
+                }
+                console.log('[AnswerBookCard] useEffect 触发，无 vibe_index/lpdef，使用 random_prompt');
                 fetchRandomPrompt();
-            }, [lang]); // 监听 lang 变化，自动重新获取数据
+            }, [lang, vibeResult?.vibeIndex, vibeResult?.vibe_index, vibeResult?.lpdef]); // 监听 lang 与 vibe 变化
 
             return (
                 <div 
@@ -3253,13 +3311,13 @@
                     if (answerBookContainer && window.React && window.ReactDOM) {
                         console.log('[recreateDashboardDOM] 使用 window.React 渲染');
                         const root = window.ReactDOM.createRoot(answerBookContainer);
-                        root.render(window.React.createElement(AnswerBookCard, { lang: currentLang }));
+                        root.render(window.React.createElement(AnswerBookCard, { lang: currentLang, vibeResult: window.vibeResult || null }));
                         console.log('[recreateDashboardDOM] AnswerBookCard 已渲染');
                     } else if (answerBookContainer && React && ReactDOM) {
                         // 备用方案：如果 React 在局部作用域中
                         console.log('[recreateDashboardDOM] 使用局部 React 渲染');
                         const root = ReactDOM.createRoot(answerBookContainer);
-                        root.render(React.createElement(AnswerBookCard, { lang: currentLang }));
+                        root.render(React.createElement(AnswerBookCard, { lang: currentLang, vibeResult: window.vibeResult || null }));
                         console.log('[recreateDashboardDOM] AnswerBookCard 已渲染（备用方案）');
                     } else {
                         console.warn('[recreateDashboardDOM] 无法渲染 AnswerBookCard:', {
@@ -3500,6 +3558,18 @@
                                 window.analysisModule.setVibeResult(history.analysisData.vibeResult);
                             }
                             window.vibeResult = history.analysisData.vibeResult;
+                            // 将答案之书写入 localStorage，供 stats2 左侧抽屉「今日箴言」读取
+                            try {
+                                const ab = history.analysisData.vibeResult.answer_book || history.analysisData.vibeResult.answerBook;
+                                if (ab && (ab.title || ab.content)) {
+                                    localStorage.setItem('user_answer_book', JSON.stringify(ab));
+                                }
+                                if (history.analysisData.vibeResult.vibeIndex || history.analysisData.vibeResult.vibe_index) {
+                                    localStorage.setItem('user_vibe_index', history.analysisData.vibeResult.vibeIndex || history.analysisData.vibeResult.vibe_index);
+                                }
+                            } catch (e) {
+                                console.warn('[History] 保存答案之书到 localStorage 失败:', e);
+                            }
                         }
                         if (history.analysisData.chatData) {
                             if (window.analysisModule.setAllChatData) {
@@ -4861,6 +4931,19 @@
                     }
                     if (analysisData.vibeResult && window.analysisModule.setVibeResult) {
                         window.analysisModule.setVibeResult(analysisData.vibeResult);
+                        // 将答案之书写入 localStorage，供 stats2 左侧抽屉「今日箴言」读取
+                        try {
+                            const ab = analysisData.vibeResult.answer_book || analysisData.vibeResult.answerBook;
+                            if (ab && (ab.title || ab.content)) {
+                                localStorage.setItem('user_answer_book', JSON.stringify(ab));
+                                console.log('[React] ✅ 已保存答案之书到 localStorage，供左侧抽屉使用');
+                            }
+                            if (analysisData.vibeResult.vibeIndex || analysisData.vibeResult.vibe_index) {
+                                localStorage.setItem('user_vibe_index', analysisData.vibeResult.vibeIndex || analysisData.vibeResult.vibe_index);
+                            }
+                        } catch (e) {
+                            console.warn('[React] 保存答案之书到 localStorage 失败:', e);
+                        }
                         console.log('[React] ✅ 已保存 vibeResult 到全局变量:', {
                             hasPersonalityName: !!analysisData.vibeResult.personalityName,
                             hasRoastText: !!analysisData.vibeResult.roastText,
@@ -4924,7 +5007,7 @@
                                     if (answerBookContainer && !answerBookContainer.hasChildNodes() && window.React && window.ReactDOM) {
                                         console.log('[renderFullDashboard后] 重新渲染 AnswerBookCard');
                                         const root = window.ReactDOM.createRoot(answerBookContainer);
-                                        root.render(window.React.createElement(AnswerBookCard, { lang: lang }));
+                                        root.render(window.React.createElement(AnswerBookCard, { lang: lang, vibeResult: window.vibeResult || vibeResult || null }));
                                     }
                                 }, 200);
                                 

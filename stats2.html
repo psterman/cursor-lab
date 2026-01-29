@@ -1166,6 +1166,7 @@
     </div>
 
     <script>
+        let calibrationDebounceTimer = null; // 脚本最顶部声明，彻底拦截定位漂移，避免 ReferenceError
         // ==========================================
         // 【v4.0 示例】VibeCodingerAnalyzer 全球各国数据切换示例
         // ==========================================
@@ -1338,7 +1339,6 @@
         // =========================
         // 全局变量声明（确保在全局作用域，不在闭包内）
         // =========================
-        let calibrationDebounceTimer = null; // 全局锁：彻底拦截定位漂移，避免 ReferenceError
         const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content;
         let currentLang = 'zh';
         
@@ -2214,10 +2214,11 @@
                     }
                 }
                 
-                // 如果检测到当前用户数据，自动加载用户统计卡片
+                // 如果检测到当前用户数据，自动加载用户统计卡片（优先使用 allData 中同人的完整记录，以显示提交聊天记录对应的数值）
                 if (currentUser) {
-                    console.log('[Drawer] 📊 开始渲染用户统计卡片...');
-                    renderUserStatsCards(leftBody, currentUser);
+                    const userForStats = getBestUserRecordForStats(currentUser);
+                    console.log('[Drawer] 📊 开始渲染用户统计卡片，使用', userForStats !== currentUser ? 'allData 中的完整记录' : '当前用户记录');
+                    renderUserStatsCards(leftBody, userForStats);
                 } else {
                     console.log('[Drawer] ⚠️ 未找到用户数据，跳过统计卡片渲染');
                     // 即使没有匹配到用户，如果 localStorage 中有 fingerprint，也显示一个提示
@@ -3016,26 +3017,22 @@
                     console.warn('[Calibration] ⚠️ 校准接口返回非 2xx:', res.status);
                 } else {
                     const data = await res.json().catch(() => ({}));
+                    // 状态持久化：确认定居后立即写入锁定标记与坐标，并重绘地图光标为绿色
                     localStorage.setItem('loc_fixed', 'true');
+                    if (!window.currentUserData) window.currentUserData = window.currentUser || {};
+                    window.currentUserData.manual_lat = lat;
+                    window.currentUserData.manual_lng = lng;
+                    window.currentUserData.manual_location = countryCode;
                     localStorage.setItem('manual_lat', String(lat));
                     localStorage.setItem('manual_lng', String(lng));
                     if (countryCode && String(countryCode).trim() !== '') localStorage.setItem('manual_location', String(countryCode).trim());
-                    // 视觉锁定：立即更新本地变量，防止刷新前延迟导致跳动
+                    updateCurrentLocationCursorColor('#00ff41'); // 立即重绘地图光标为绿色
+                    // 视觉锁定：同步 currentUser，防止刷新前延迟导致跳动
                     if (window.currentUser) {
                         window.currentUser.manual_location = countryCode;
                         window.currentUser.country_code = countryCode;
                         window.currentUser.manual_lat = lat;
                         window.currentUser.manual_lng = lng;
-                    }
-                    if (window.currentUserData) {
-                        window.currentUserData.manual_lat = lat;
-                        window.currentUserData.manual_lng = lng;
-                        window.currentUserData.manual_location = countryCode;
-                    } else {
-                        window.currentUserData = window.currentUser || {};
-                        window.currentUserData.manual_lat = lat;
-                        window.currentUserData.manual_lng = lng;
-                        window.currentUserData.manual_location = countryCode;
                     }
                     updateUserCountryFlag(countryCode, countryName, true);
                     if (typeof renderRankCards === 'function' && window.currentUser) renderRankCards(window.currentUser);
@@ -5119,9 +5116,9 @@
                     console.log('[Auth] ✅ 已移除同步遮罩');
                 }
                 
-                // 如果有当前用户数据，重新渲染统计卡片
+                // 如果有当前用户数据，重新渲染统计卡片（优先使用 allData 中的完整记录）
                 if (window.currentUser) {
-                    renderUserStatsCards(leftBody, window.currentUser);
+                    renderUserStatsCards(leftBody, getBestUserRecordForStats(window.currentUser));
                 }
             } catch (error) {
                 console.error('[Auth] ❌ 隐藏同步遮罩失败:', error);
@@ -5648,8 +5645,8 @@
                         }
                         window.allData = allData;
                         
-                        // 【关键修复】确保 window.currentUser 在 upsert 成功后立即赋值
-                        window.currentUser = updatedUser;
+                        // 【关键修复】使用合并后的记录作为 currentUser，确保左侧抽屉能显示 allData 中已有的维度/人格/箴言等完整数据（而非仅 upsert 返回的简略字段）
+                        window.currentUser = (index !== -1) ? allData[index] : updatedUser;
                         window.currentUserMatchedByFingerprint = true;
                         
                         // 【Task 1】清除本地的 user_fingerprint 缓存，统一使用 Supabase User ID
@@ -5818,8 +5815,8 @@
                                                 card.remove();
                                             }
                                         });
-                                        // 重新渲染用户统计卡片
-                                        renderUserStatsCards(leftBody, window.currentUser);
+                                        // 重新渲染用户统计卡片（优先使用 allData 中的完整记录）
+                                        renderUserStatsCards(leftBody, getBestUserRecordForStats(window.currentUser));
                                         console.log('[Auth] ✅ 已强制刷新统计卡片');
                                     }
                                 }
@@ -5901,7 +5898,7 @@
                                                         rightDrawer.classList.add('active');
                                                     }
                                                 }
-                                                renderUserStatsCards(leftBody, updatedUser);
+                                                renderUserStatsCards(leftBody, getBestUserRecordForStats(updatedUser));
                                                 console.log('[Auth] ✅ 已刷新用户统计卡片（延迟）');
                                             }
                                         }
@@ -5930,7 +5927,7 @@
                                                 rightDrawer.classList.add('active');
                                             }
                                         }
-                                        renderUserStatsCards(leftBody, updatedUser);
+                                        renderUserStatsCards(leftBody, getBestUserRecordForStats(updatedUser));
                                         console.log('[Auth] ✅ 已刷新用户统计卡片');
                                     }
                                 }
@@ -6516,8 +6513,8 @@
                                 }
                             });
                             
-                            // 渲染用户统计卡片
-                            renderUserStatsCards(leftBody, updatedUser);
+                            // 渲染用户统计卡片（优先使用 allData 中的完整记录）
+                            renderUserStatsCards(leftBody, getBestUserRecordForStats(updatedUser));
                             console.log('[GitHub] ✅ 已刷新用户统计卡片');
                         }
                     }
@@ -6713,29 +6710,10 @@
          * @returns {Promise<Object>} 上报结果
          */
         async function autoReportSelf() {
-            // 彻底拦截：既然后端视图已锁定坐标，前端必须停止发送 VPN 漂移导致的错误 IP 坐标
-            if (window.currentUserData?.manual_lat || localStorage.getItem('loc_fixed')) {
-                console.log('[AutoReport] 🔒 检测到手动锁定位置，尝试恢复持久光标');
-                
-                const lat = window.currentUserData?.manual_lat || window.currentUser?.manual_lat || parseFloat(localStorage.getItem('manual_lat'));
-                const lng = window.currentUserData?.manual_lng || window.currentUser?.manual_lng || parseFloat(localStorage.getItem('manual_lng'));
-                
-                if (lat != null && lng != null && !isNaN(lat) && !isNaN(lng)) {
-                    if (typeof setOrUpdateCurrentLocationCursor === 'function') {
-                        const statusConfig = USER_STATUSES[currentUserStatus] || USER_STATUSES.idle;
-                        const githubUsername = localStorage.getItem('github_username') || null;
-                        let avatarUrl = isValidGitHubUsername(githubUsername) ? getGitHubAvatarUrl(githubUsername) : DEFAULT_AVATAR;
-                        
-                        setOrUpdateCurrentLocationCursor(lng, lat, statusConfig.status_color, avatarUrl, githubUsername);
-                        console.log('[AutoReport] 📍 已恢复锁定位置的持久光标:', { lng, lat });
-                        window.currentUserLocation = { lng, lat, color: statusConfig.status_color };
-                    }
-                } else {
-                    console.log('[AutoReport] ⚠️ 虽然标记了锁定，但未找到有效坐标。将继续尝试自动定位。');
-                }
-                
-                // 如果已成功显示光标且没有异常，则跳过后续上报流程
-                if (window.currentUserLocation) return { success: true, skipped: true, reason: 'loc_fixed_restored' };
+            // 核心拦截：如果后端已存手动坐标，或者本地存有锁定标记，禁止执行 IP 定位
+            if (window.currentUserData?.manual_lat || localStorage.getItem('loc_fixed') === 'true') {
+                console.log('[Lock] 🔒 位置已手动锁定，跳过自动上报');
+                return;
             }
             // 健壮性检查：确保 Supabase 客户端已初始化
             if (!supabaseClient) {
@@ -7432,11 +7410,92 @@
         }
 
         /**
-         * 渲染用户统计卡片到左侧抽屉
+         * 从 lpdef 提取 vibe_index（5 位数字），与 worker 的 generateLPDEF 一致：L0P1D2E1F0 -> 01210
+         * 与 index.html 的 lpdefToVibeIndex 保持同步，用于答案之书按 lpdef 查 answerBookByVibeIndex.json
+         */
+        function lpdefToVibeIndex(lpdef) {
+            if (!lpdef || typeof lpdef !== 'string') return null;
+            const digits = String(lpdef).replace(/\D/g, '');
+            return digits.length === 5 ? digits : null;
+        }
+
+        /**
+         * 从 personality.detailedStats 或 l_score/p_score/... 计算 5 位 vibe_index 字符串（与 worker content.ts getVibeIndex 一致）
+         * 当视图未返回 vibe_index_str/lpdef 时，用此结果加载人格称号与答案之书
+         */
+        function scoresToVibeIndexStr(userData) {
+            if (!userData) return null;
+            let L = userData.l_score ?? userData.l ?? null;
+            let P = userData.p_score ?? userData.p ?? null;
+            let D = userData.d_score ?? userData.d ?? null;
+            let E = userData.e_score ?? userData.e ?? null;
+            let F = userData.f_score ?? userData.f ?? null;
+            const stats = userData.personality?.detailedStats || userData.personality_data || userData.personalityData;
+            if (Array.isArray(stats) && stats.length > 0) {
+                stats.forEach(s => {
+                    const dim = (s.dimension || '').toUpperCase();
+                    const score = Number(s.score);
+                    if (dim === 'L') L = score;
+                    else if (dim === 'P') P = score;
+                    else if (dim === 'D') D = score;
+                    else if (dim === 'E') E = score;
+                    else if (dim === 'F') F = score;
+                });
+            }
+            if (L == null && P == null && D == null && E == null && F == null) return null;
+            const indexMap = (v) => {
+                if (v == null || isNaN(v)) return '1';
+                if (Number(v) < 40) return '0';
+                if (Number(v) < 70) return '1';
+                return '2';
+            };
+            const eIndex = (v) => {
+                if (v == null || isNaN(v)) return '1';
+                const n = Number(v);
+                if (n < 5) return '0';
+                if (n < 10) return '1';
+                return '2';
+            };
+            return [
+                indexMap(L),
+                indexMap(P),
+                indexMap(D),
+                eIndex(E),
+                indexMap(F)
+            ].join('');
+        }
+
+        /**
+         * 从 allData 中解析出同一用户的最完整记录，用于左侧抽屉统计展示
+         * 确保显示的是「提交聊天记录对应的数据和数值」（来自 latestRecords/接口），而非仅 upsert 返回的简略字段
+         * @param {Object} user - 当前用户对象（可能来自 window.currentUser 或 upsert 响应）
+         * @returns {Object} 同一用户在 allData 中的记录（更完整）或原 user
+         */
+        function getBestUserRecordForStats(user) {
+            if (!user) return null;
+            const allData = window.allData || [];
+            const normalize = (v) => (v == null ? '' : String(v).trim().toLowerCase());
+            const same = allData.find(item => {
+                if (item.id != null && user.id != null && item.id === user.id) return true;
+                const itemFp = normalize(item.fingerprint || item.user_fingerprint);
+                const userFp = normalize(user.fingerprint || user.user_fingerprint);
+                if (itemFp && userFp && itemFp === userFp) return true;
+                const itemIdentity = normalize(item.user_identity);
+                const userIdentity = normalize(user.user_identity);
+                if (itemIdentity && userIdentity && itemIdentity === userIdentity) return true;
+                const itemName = normalize(item.user_name || item.name || item.github_username);
+                const userName = normalize(user.user_name || user.name || user.github_username);
+                return itemName && userName && itemName === userName;
+            });
+            return same || user;
+        }
+
+        /**
+         * 渲染用户统计卡片到左侧抽屉（与 index 同步：无 answer_book 时按 vibe_index/lpdef 从 answerBookByVibeIndex.json 取今日箴言）
          * @param {HTMLElement} leftBody - 左侧抽屉容器
          * @param {Object} userData - 当前用户数据对象
          */
-        function renderUserStatsCards(leftBody, userData) {
+        async function renderUserStatsCards(leftBody, userData) {
             console.log('[UserStats] 🚀 开始渲染用户统计卡片，userData:', {
                 hasUserData: !!userData,
                 userName: userData?.user_name || userData?.name,
@@ -7600,19 +7659,25 @@
                     ? new Intl.NumberFormat('zh-CN').format(Math.round(dimensionValues.word)) 
                     : 'N/A';
                 
-                // 7. 人格称号（参考 index.html 的获取方式：根据 vibeIndex 从 personalityNames.json 获取）
+                // 7. 人格称号（参考 index.html 的获取方式：根据 5 位 vibe_index 从 personalityNames.json 获取）
                 const personalityType = userData.personality_type || userData.personalityType || userData.type || 'UNKNOWN';
                 let personalityName = userData.personality_name || userData.personalityName || null;
+                // 视图返回的 vibe_index 为数值（综合分），人格/答案之书需 5 位字符串：优先 vibe_index_str / vibeIndex / lpdef，否则从 detailedStats 或 l_score 等计算
+                const vibeIndexStr = (typeof userData.vibe_index_str === 'string' && userData.vibe_index_str.length === 5)
+                    ? userData.vibe_index_str
+                    : (typeof userData.vibe_index === 'string' && userData.vibe_index.length === 5 ? userData.vibe_index : null)
+                    || (typeof userData.vibeIndex === 'string' && userData.vibeIndex.length === 5 ? userData.vibeIndex : null)
+                    || lpdefToVibeIndex(userData.lpdef)
+                    || scoresToVibeIndexStr(userData);
                 
-                // 如果还没有人格称号，尝试根据 vibeIndex 从 personalityNames.json 获取（参考 index.html）
-                // 使用 Promise 方式加载，避免阻塞渲染
+                // 如果还没有人格称号，尝试根据 5 位 vibe_index 从 personalityNames.json 获取（参考 index.html）
                 const loadPersonalityName = (vibeIndex) => {
                     return new Promise((resolve) => {
-                        if (!vibeIndex || typeof vibeIndex !== 'string' || vibeIndex.length !== 5) {
+                        const idx = (vibeIndex != null && typeof vibeIndex === 'string') ? vibeIndex : String(vibeIndex || '');
+                        if (!idx || idx.length !== 5) {
                             resolve(null);
                             return;
                         }
-                        
                         fetch('src/personalityNames.json')
                             .then(response => {
                                 if (response.ok) {
@@ -7621,9 +7686,9 @@
                                 throw new Error('Failed to load personalityNames.json');
                             })
                             .then(namesData => {
-                                if (namesData && namesData[vibeIndex]) {
-                                    console.log('[UserStats] ✅ 从 personalityNames.json 获取人格称号:', namesData[vibeIndex]);
-                                    resolve(namesData[vibeIndex]);
+                                if (namesData && namesData[idx]) {
+                                    console.log('[UserStats] ✅ 从 personalityNames.json 获取人格称号:', namesData[idx]);
+                                    resolve(namesData[idx]);
                                 } else {
                                     resolve(null);
                                 }
@@ -7664,13 +7729,22 @@
                     personality: userData.personality,
                     personality_data: userData.personality_data,
                     personalityType: personalityType,
-                    vibe_index: userData.vibe_index || userData.vibeIndex,
+                    vibe_index_str: userData.vibe_index_str,
+                    vibe_index: userData.vibe_index,
+                    vibeIndex: userData.vibeIndex,
+                    lpdef: userData.lpdef,
+                    vibeIndexStr: vibeIndexStr,
                     finalPersonalityName: personalityName
                 });
                 
-                // 最终回退：如果仍然没有，显示"未知人格"但保留 personalityType 信息
+                // 最终回退：若仍无人格称号，仅当 personalityType 为有意义类型时显示「人格 xxx」；AUTO_REPORT 为占位类型，不展示
                 if (!personalityName || personalityName === '未知人格' || personalityName === '未知') {
-                    personalityName = personalityType && personalityType !== 'UNKNOWN' ? `人格 ${personalityType}` : '未知人格';
+                    const typeUpper = (personalityType && String(personalityType).toUpperCase()) || '';
+                    if (personalityType && personalityType !== 'UNKNOWN' && typeUpper !== 'AUTO_REPORT') {
+                        personalityName = `人格 ${personalityType}`;
+                    } else {
+                        personalityName = '未知人格';
+                    }
                 }
                 
                 // 8. 答案之书说明（answer_book 对象）
@@ -7703,22 +7777,54 @@
                         }
                     }
                     
-                    // 处理 answer_book 对象
+                    // 处理 answer_book 对象：今日箴言仅使用答案之书的 title 与 content，与 index 中答案之书一致
                     if (answerBook && typeof answerBook === 'object') {
                         answerBookTitle = answerBook.title || answerBookTitle;
                         answerBookContent = answerBook.content || answerBookContent || answerBook.desc || answerBook.description || answerBookContent;
                         answerBookVibeLevel = answerBook.vibe_level || answerBook.vibeLevel || answerBook.level || '';
                     }
                     
-                    // 如果答案之书仍然为空，尝试从 roast_text 字段获取（可能是合并的吐槽文案）
+                    // 与 index 同步：若无 answer_book，优先使用 index 分析完成后写入的「答案之书」（供左侧抽屉用户）
                     if ((!answerBookTitle || answerBookTitle === '暂无') && (!answerBookContent || answerBookContent === '暂无说明')) {
-                        const roastText = userData.roast_text || userData.roastText || userData.roast;
-                        if (roastText && typeof roastText === 'string' && roastText.trim().length > 0) {
-                            // 将 roast_text 作为答案之书内容
-                            answerBookContent = roastText;
-                            answerBookTitle = '今日箴言';
+                        try {
+                            const saved = localStorage.getItem('user_answer_book');
+                            if (saved) {
+                                const ab = JSON.parse(saved);
+                                if (ab && typeof ab === 'object' && (ab.title || ab.content)) {
+                                    answerBookTitle = ab.title || answerBookTitle;
+                                    answerBookContent = ab.content || answerBookContent || ab.desc || ab.description || answerBookContent;
+                                    answerBookVibeLevel = ab.vibe_level || ab.vibeLevel || ab.level || '';
+                                    console.log('[UserStats] ✅ 已从 index 传入的答案之书（localStorage）加载今日箴言:', answerBookTitle);
+                                }
+                            }
+                        } catch (e) {
+                            console.warn('[UserStats] 读取 user_answer_book 失败:', e);
                         }
                     }
+                    
+                    // 与 index 同步：若无 answer_book 且无 localStorage，用 5 位 vibe_index（vibe_index_str/lpdef）查 JSON
+                    if ((!answerBookTitle || answerBookTitle === '暂无') && (!answerBookContent || answerBookContent === '暂无说明')) {
+                        const vibeIndexForBook = vibeIndexStr;
+                        if (vibeIndexForBook && typeof vibeIndexForBook === 'string' && vibeIndexForBook.length === 5) {
+                            try {
+                                const resp = await fetch('src/answerBookByVibeIndex.json');
+                                if (resp.ok) {
+                                    const data = await resp.json();
+                                    const entry = data[vibeIndexForBook]; // 仅用该用户 5 位 vibe_index 的条目，不用 data['default']
+                                    if (entry) {
+                                        answerBookTitle = (currentLang === 'zh' || currentLang === 'zh-CN') ? entry.title_zh : entry.title_en;
+                                        answerBookContent = (currentLang === 'zh' || currentLang === 'zh-CN') ? entry.content_zh : entry.content_en;
+                                        console.log('[UserStats] ✅ 已按 vibe_index 从 answerBookByVibeIndex.json 加载今日箴言:', answerBookTitle);
+                                    }
+                                    // 无对应条目时保持「暂无」/「暂无说明」，不显示硬编码 default
+                                }
+                            } catch (e) {
+                                console.warn('[UserStats] ⚠️ 加载 answerBookByVibeIndex.json 失败:', e);
+                            }
+                        }
+                    }
+                    
+                    // 不再用 roast_text 作为今日箴言：roast_text 是各维度吐槽拼接（如「【L维度】…【P维度】…」），并非答案之书对应文本
                 } catch (e) {
                     console.warn('[UserStats] ⚠️ 处理 answer_book 失败:', e);
                 }
@@ -7767,11 +7873,11 @@
                         </div>
                     </div>
                     
-                    <!-- 人格称号 -->
+                    <!-- 人格称号（与 index 一致：优先由 vibe_index 从 personalityNames.json 解析） -->
                     <div class="mb-3 pb-3 border-b border-[#00ff41]/10">
                         <div class="drawer-item-label mb-1">人格称号</div>
-                        <div class="drawer-item-value text-sm">${personalityName}</div>
-                        <div class="drawer-item-desc text-[8px]">${personalityType}</div>
+                        <div class="drawer-item-value text-sm" data-stat="personality-name">${personalityName}</div>
+                        <div class="drawer-item-desc text-[8px]">${personalityType === 'AUTO_REPORT' ? '' : (personalityType || '')}</div>
                     </div>
                     
                     <!-- 答案之书（参考 index.html：去掉"答案之书"标题，只显示 title 和 content，增大正文字体） -->
@@ -7800,16 +7906,14 @@
                     leftBody.appendChild(statsCard);
                 }
                 
-                // 如果人格称号还没有获取到，尝试从 personalityNames.json 异步加载（参考 index.html）
-                const vibeIndex = userData.vibe_index || userData.vibeIndex;
-                if ((!personalityName || personalityName === '未知人格' || personalityName === '未知人格' || personalityName.startsWith('人格 ')) && vibeIndex && typeof vibeIndex === 'string' && vibeIndex.length === 5) {
-                    loadPersonalityName(vibeIndex).then(name => {
+                // 人格称号与 index 一致：有 5 位 vibe_index（vibe_index_str/lpdef）时从 personalityNames.json 解析并更新
+                if (vibeIndexStr && typeof vibeIndexStr === 'string' && vibeIndexStr.length === 5) {
+                    loadPersonalityName(vibeIndexStr).then(name => {
                         if (name) {
-                            // 更新人格称号显示
-                            const personalityNameElement = statsCard.querySelector('.drawer-item-value');
+                            const personalityNameElement = statsCard.querySelector('[data-stat="personality-name"]');
                             if (personalityNameElement) {
                                 personalityNameElement.textContent = name;
-                                console.log('[UserStats] ✅ 已更新人格称号:', name);
+                                console.log('[UserStats] ✅ 已从 personalityNames.json 更新人格称号:', name);
                             }
                         }
                     });
@@ -8318,8 +8422,8 @@
                         const isDrawerOpen = leftDrawer.classList.contains('active');
                         
                         if (isDrawerOpen) {
-                            // 重新渲染用户统计卡片（函数内部会处理移除旧卡片）
-                            renderUserStatsCards(leftBody, userData);
+                            // 重新渲染用户统计卡片（优先使用 allData 中的完整记录）
+                            renderUserStatsCards(leftBody, getBestUserRecordForStats(userData));
                             console.log('[Rank] ✅ 已自动刷新左侧抽屉的用户统计卡片');
                         }
                     }
@@ -8697,8 +8801,8 @@
                                     console.log('[Rank] ✅ 找到匹配用户，移除等待卡片并加载统计卡片');
                                     card.remove();
                                     
-                                    // 立即渲染用户统计卡片
-                                    renderUserStatsCards(leftBody, currentUser);
+                                    // 立即渲染用户统计卡片（优先使用 allData 中的完整记录）
+                                    renderUserStatsCards(leftBody, getBestUserRecordForStats(currentUser));
                                 }
                             });
                         }

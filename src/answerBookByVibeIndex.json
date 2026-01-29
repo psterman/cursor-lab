@@ -1,0 +1,56 @@
+{
+  "default": {
+    "title_zh": "今日箴言",
+    "content_zh": "你的交互风格指数已记录，保持与 AI 的平衡沟通，既不过于详细也不过于简洁。",
+    "title_en": "Today's Maxim",
+    "content_en": "Your style index is recorded. Keep a balanced communication with AI—neither too detailed nor too concise."
+  },
+  "00000": {
+    "title_zh": "极简工业扳手",
+    "content_zh": "逻辑、耐心、细节、探索、反馈皆偏克制——你像一把只做一件事的扳手，精准而寡言。",
+    "title_en": "Minimal Industrial Wrench",
+    "content_en": "Low on logic, patience, detail, exploration and feedback—you're like a wrench that does one thing well, precise and quiet."
+  },
+  "10111": {
+    "title_zh": "负载均衡平庸师",
+    "content_zh": "各维度均衡，不偏不倚。在赛博世界里，平庸有时是最稳的生存策略。",
+    "title_en": "Load-Balanced Mediocrity",
+    "content_en": "All dimensions in balance. In the cyber world, mediocrity is sometimes the steadiest survival strategy."
+  },
+  "11111": {
+    "title_zh": "逻辑平衡大师",
+    "content_zh": "LPDEF 五维皆中位，你是那种让产品与代码都能接受的「逻辑平衡大师」。",
+    "title_en": "Logic Balance Master",
+    "content_en": "All five LPDEF dimensions in the middle—you're the 'logic balance master' that both product and code can accept."
+  },
+  "22222": {
+    "title_zh": "赛博逻辑大祭司",
+    "content_zh": "逻辑、耐心、细节、探索、反馈全拉满——你已接近赛博世界的秩序顶端。",
+    "title_en": "Cyber Logic High Priest",
+    "content_en": "Logic, patience, detail, exploration and feedback all maxed—you're near the top of order in the cyber world."
+  },
+  "10000": {
+    "title_zh": "极简工业扳手",
+    "content_zh": "逻辑偏高、其余偏冷，像车间里只拧一种螺丝的扳手，高效且不废话。",
+    "title_en": "Minimal Industrial Wrench",
+    "content_en": "High logic, rest low—like a wrench in the workshop that only tightens one kind of screw, efficient and no small talk."
+  },
+  "01210": {
+    "title_zh": "冷静技术开荒人",
+    "content_zh": "逻辑中、耐心低、细节中、探索高、反馈低——你在荒地上开垦，冷静且有条理。",
+    "title_en": "Calm Tech Pioneer",
+    "content_en": "Mid logic, low patience, mid detail, high exploration, low feedback—you pioneer the wasteland with calm and order."
+  },
+  "21112": {
+    "title_zh": "逻辑基准站暖男",
+    "content_zh": "逻辑与细节双高，探索与反馈温和，你是团队里那个既靠谱又有人情味的基准站。",
+    "title_en": "Logic Baseline Warm Guy",
+    "content_en": "High logic and detail, gentle exploration and feedback—you're the reliable yet warm baseline in the team."
+  },
+  "12111": {
+    "title_zh": "重写宇宙架构师",
+    "content_zh": "耐心高、逻辑与细节均衡、探索中位——你相信「重写」是为了更好的宇宙。",
+    "title_en": "Rewrite Universe Architect",
+    "content_en": "High patience, balanced logic and detail, mid exploration—you believe 'rewrite' is for a better universe."
+  }
+}
