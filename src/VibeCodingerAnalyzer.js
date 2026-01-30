@@ -32,23 +32,37 @@ const SLANG_KEYWORDS = new Set(['闭环', '颗粒度', '对齐', '抓手', '落�
 function categorizeKeyword(phrase) {
   const normalized = String(phrase || '').trim();
   if (!normalized) return 'slang';
-  
-  // 英文词归为 sv_slang
-  if (/^[a-zA-Z]+$/.test(normalized)) {
-    return 'sv_slang';
+
+  const lower = normalized.toLowerCase();
+
+  // 0) 美区适配：若包含 >=3 个英文单词（含空格），且不包含明显中文，则一律归为 sv_slang
+  // 例："ship it today" / "fix the bug quickly"
+  if (!/[\u4e00-\u9fff]/.test(normalized)) {
+    const words = lower.split(/\s+/g).filter(Boolean);
+    const englishWords = words.filter(w => /^[a-z]+(?:'[a-z]+)?$/.test(w));
+    if (englishWords.length >= 3) return 'sv_slang';
   }
-  
-  // 匹配"重构/优化/修复"归为 merit
-  if (MERIT_KEYWORDS.has(normalized)) {
+
+  // 1) 指令/修复类：优先归为 merit（即使是长句）
+  // 例：TODO: 优化逻辑 / 修复一下链路 / fix the bug
+  if (/\btodo\b/i.test(lower) || /\bfix(?:me|ing|ed)?\b/i.test(lower) || /修复|优化|重构|改进|完善|提升|增强|调整|更新|升级/.test(normalized)) {
     return 'merit';
   }
-  
-  // 匹配"闭环/颗粒度/对齐"归为 slang
-  if (SLANG_KEYWORDS.has(normalized)) {
+
+  // 2) 黑话/计划类：包含即可归为 slang（支持长句）
+  if (/对齐|闭环|链路|抓手|落地|复盘|兜底|赋能|降维|护城河|赛道|颗粒度/.test(normalized)) {
     return 'slang';
   }
-  
-  // 默认归为 slang
+
+  // 3) 纯英文词/短语：归为 sv_slang（与旧逻辑对齐）
+  if (/^[a-zA-Z][a-zA-Z\s-]{1,}$/.test(normalized)) {
+    return 'sv_slang';
+  }
+
+  // 4) 兼容旧 seed：完整命中仍有效
+  if (MERIT_KEYWORDS.has(normalized)) return 'merit';
+  if (SLANG_KEYWORDS.has(normalized)) return 'slang';
+
   return 'slang';
 }
 
@@ -56,34 +70,156 @@ export function extractVibeKeywords(text, { max = 5 } = {}) {
   const raw = String(text || '');
   if (!raw.trim()) return [];
 
-  // 2-4 个中文字符或 3-15 个英文字符
-  const matches = raw.match(/[\u4e00-\u9fa5]{2,4}|[a-zA-Z]{3,15}/g) || [];
+  // 原生句式捕获（彻底激活版本）：
+  // - 英文（美区）：捕获所有连续 3-6 个单词短语
+  // - 中文（国区）：捕获所有 4-10 个连续汉字（并对更长 run 做 4-10 滑窗覆盖）
+  // - 权重：出现次数（count >= 1 即进入待上传列表）
+  // - 分类：统一交给 categorizeKeyword（其内部包含美区 3+ 词规则）
+  // 复用已有降噪：去代码块/HTML/路径/部分对象片段，避免被日志/代码污染
+  const cleaned = maskNoiseForVibes(raw);
+  if (!cleaned) return [];
 
-  // 微型停用词（按需可继续扩展）
+  // 微型停用词（用于“片段”过滤）
   const stopWords = new Set([
     '这个', '可以', '实现', '结果', '然后', '因为', '但是', '所以', '我们', '你们', '他们', '现在',
     '如何', '怎么', '请问', '谢谢', '好的', '需要', '进行', '完成', '问题', '功能', '数据', '接口',
-    'the', 'and', 'that', 'this', 'with', 'from', 'into', 'just', 'like', 'very',
+    // 英文噪点：常见冠词/系动词/功能词（用于“全是冠词/助词”的短语过滤）
+    'the', 'a', 'an', 'is', 'are', 'am', 'was', 'were', 'be', 'been', 'being',
+    'and', 'that', 'this', 'with', 'from', 'into', 'just', 'like', 'very',
   ]);
 
-  const freq = new Map();
-  for (const token of matches) {
-    const t = String(token).trim();
-    if (!t) continue;
-    const normalized = /^[a-zA-Z]+$/.test(t) ? t.toLowerCase() : t;
-    if (stopWords.has(normalized)) continue;
-    if (normalized.length < 2) continue;
-    freq.set(normalized, (freq.get(normalized) || 0) + 1);
+  // 分句：中英标点 + 换行（不按 ':' 切，以保留 TODO:xx 的句式形态）
+  const sentences = cleaned
+    .split(/[。\.！!？\?\n\r；;，,]+/g)
+    .map(s => String(s || '').trim())
+    .filter(s => s.length >= 3);
+
+  const freq = new Map(); // phrase -> count
+
+  // 保护：避免极长文本导致 O(n^2) 爆炸
+  const MAX_SENTENCE_CHARS = 220;
+  const MAX_TOTAL_WINDOWS = 90000;
+  let totalWindows = 0;
+
+  const COMMON_SINGLE_ZH = new Set([
+    '的','一','是','在','不','了','有','和','人','我','你','他','她','它','们','这','那','就','也','都','很',
+    '与','及','而','或','但','又','被','把','给','对','为','从','到','来','去','上','下','中','里','外','前','后','其','之',
+  ]);
+
+  const isSkippableFragment = (frag) => {
+    const f = String(frag || '').trim();
+    if (!f) return true;
+    // 单词级停用（仅对单词/短 token 生效）
+    if (stopWords.has(f.toLowerCase())) return true;
+    // 过滤纯数字/纯符号
+    if (/^[0-9]+$/.test(f)) return true;
+    if (/^[\s\-_/#:+.]+$/.test(f)) return true;
+    // 过滤“全标点符号”
+    if (/^[\p{P}\p{S}]+$/u.test(f)) return true;
+    // 过滤“全是相同字符”这种噪音（比如 '----'、'。。'）
+    if (/^(.)\1+$/.test(f)) return true;
+    // 过滤“全是常见单字”的无意义片段（如：的一是在）
+    if (!/[A-Za-z]/.test(f) && f.length >= 4) {
+      const chars = Array.from(f);
+      if (chars.length >= 4 && chars.every((ch) => COMMON_SINGLE_ZH.has(ch))) return true;
+    }
+    // 过滤“全是常见冠词/系动词”的英文短语（如 "the a is"）
+    if (!/[\u4e00-\u9fff]/.test(f) && /[A-Za-z]/.test(f)) {
+      const parts = f.toLowerCase().split(/\s+/g).filter(Boolean);
+      if (parts.length > 0 && parts.every((w) => stopWords.has(w))) return true;
+    }
+    return false;
+  };
+
+  for (const s of sentences) {
+    // 统一空白；滑窗时按“字符序列”取片段（保留中英文混合句）
+    let sentence = String(s).replace(/\s+/g, ' ').trim();
+    if (!sentence) continue;
+    if (sentence.length > MAX_SENTENCE_CHARS) sentence = sentence.slice(0, MAX_SENTENCE_CHARS);
+
+    // 中文（国区）：4-10 个连续汉字（对更长 run 做滑窗覆盖，避免漏掉）
+    const zhRuns = sentence.match(/[\u4e00-\u9fff]{4,}/g) || [];
+    for (const run of zhRuns) {
+      const r = String(run);
+      const len = r.length;
+      for (let n = 4; n <= 10; n++) {
+        if (len < n) continue;
+        for (let i = 0; i <= len - n; i++) {
+          if (totalWindows++ > MAX_TOTAL_WINDOWS) break;
+          const frag = r.slice(i, i + n);
+          if (isSkippableFragment(frag)) continue;
+          freq.set(frag, (freq.get(frag) || 0) + 1);
+        }
+        if (totalWindows > MAX_TOTAL_WINDOWS) break;
+      }
+      if (totalWindows > MAX_TOTAL_WINDOWS) break;
+    }
+    if (totalWindows > MAX_TOTAL_WINDOWS) break;
+
+    // 英文（美区）：3-6 个单词短语
+    const enWords = (sentence.match(/[A-Za-z]+(?:'[A-Za-z]+)?/g) || [])
+      .map(w => w.toLowerCase())
+      .filter(Boolean);
+    if (enWords.length >= 3) {
+      for (let n = 3; n <= 6; n++) {
+        if (enWords.length < n) continue;
+        for (let i = 0; i <= enWords.length - n; i++) {
+          if (totalWindows++ > MAX_TOTAL_WINDOWS) break;
+          const phrase = enWords.slice(i, i + n).join(' ');
+          if (isSkippableFragment(phrase)) continue;
+          freq.set(phrase, (freq.get(phrase) || 0) + 1);
+        }
+        if (totalWindows > MAX_TOTAL_WINDOWS) break;
+      }
+    }
   }
 
-  // 返回带分类的对象数组
-  return Array.from(freq.entries())
-    .sort((a, b) => (b[1] - a[1]) || (a[0] > b[0] ? 1 : -1))
-    .slice(0, Math.max(3, Math.min(5, Number(max) || 5)))
+  // 彻底激活：出现次数 >= 1 即计入待上传列表
+  let entries = Array.from(freq.entries()).filter(([, c]) => (Number(c) || 0) >= 1);
+  if (entries.length === 0) return [];
+
+  // 去重映射：短片段被长片段包含且频次相近 => 保留长片段
+  // 策略：先按“长度降序、频次降序”遍历，建立可保留集合；再剔除被更长候选覆盖的短候选
+  entries.sort((a, b) => (b[0].length - a[0].length) || (b[1] - a[1]) || (a[0] > b[0] ? 1 : -1));
+
+  const kept = [];
+  for (const [phrase, count] of entries) {
+    kept.push({ phrase, count: Number(count) || 0 });
+  }
+
+  const shouldDropShort = (shortPhrase, shortCount, longPhrase, longCount) => {
+    if (!longPhrase || !shortPhrase) return false;
+    if (longPhrase.length <= shortPhrase.length) return false;
+    if (!longPhrase.includes(shortPhrase)) return false;
+    // “频次相近”：允许 20% 浮动，至少允许差 1
+    const tol = Math.max(1, Math.ceil(shortCount * 0.2));
+    return Math.abs(longCount - shortCount) <= tol;
+  };
+
+  const final = [];
+  for (let i = 0; i < kept.length; i++) {
+    const { phrase: p, count: c } = kept[i];
+    let covered = false;
+    for (let j = 0; j < kept.length; j++) {
+      if (i === j) continue;
+      const { phrase: lp, count: lc } = kept[j];
+      if (lp.length <= p.length) continue;
+      if (shouldDropShort(p, c, lp, lc)) {
+        covered = true;
+        break;
+      }
+    }
+    if (!covered) final.push([p, c]);
+  }
+
+  // 返回 TopN（保持原 max 语义），weight 为原始出现频次（不再截断）
+  return final
+    .sort((a, b) => (b[1] - a[1]) || (b[0].length - a[0].length) || (a[0] > b[0] ? 1 : -1))
+    .slice(0, Math.max(1, Math.min(50, Number(max) || 5)))
     .map(([phrase, count]) => ({
       phrase,
       category: categorizeKeyword(phrase),
-      weight: Math.max(1, Math.min(5, count)) // 权重：频次上限 5
+      weight: Number(count) || 0,
     }));
 }
 
@@ -236,6 +372,281 @@ export function extractNationalVibes(text, region) {
   });
 
   return { region: String(region || 'Global'), items };
+}
+
+/**
+ * ==========================================
+ * 本地“个人句式指纹”提取（Top 15 口癖）
+ * - 分句与清洗：按标点切分，去噪与统一空白
+ * - N-Gram：中文 3-10 字符；英文 3-7 单词；并对“指令/调试/情绪”句保留整句候选
+ * - 相似度归一化：Levenshtein Distance < 2（即 <=1）合并近似句式
+ * - 频率加权：合并后总次数作为“核心口癖”权重
+ * - 特征打标：debugging / vibe_emotional / vibe_productive
+ * ==========================================
+ */
+const VIBE_FINGERPRINT_TAG_PATTERNS = {
+  debugging: [
+    /\bconsole\.log\b/i,
+    /\bprint(?:ln|f)?\s*\(/i,
+  ],
+  vibe_emotional: [
+    /卧槽|我靠/i,
+    /\b(shit|damn)\b/i,
+  ],
+  vibe_productive: [
+    /对齐/,
+    /\bTODO\b/i,
+    /\bfix(?:me|ing|ed)?\b/i,
+  ],
+};
+
+function _fingerprintHasZh(s) {
+  return /[\u4e00-\u9fff]/.test(String(s || ''));
+}
+
+function _normalizeSentenceForFingerprint(input) {
+  let t = String(input || '');
+  if (!t) return '';
+
+  // 复用已有降噪（代码块/HTML/路径/部分对象片段）
+  t = maskNoiseForVibes(t);
+  if (!t) return '';
+
+  // 去掉 URL（避免把链接当句式）
+  t = t.replace(/\bhttps?:\/\/[^\s]+/gi, ' ');
+
+  // 统一中英文空白与常见分隔噪音
+  t = t.replace(/[\u0000-\u001f\u007f]/g, ' ');
+  t = t.replace(/[“”"']/g, '"');
+  t = t.replace(/[‘’]/g, "'");
+
+  // 保留：中文、英文数字、常用标点（不切分 ':'，以保留 TODO:xx 形态）
+  t = t.replace(/[^0-9A-Za-z\u4e00-\u9fff\s，,。\.！!？\?\n\r；;\-_/+#:]/g, ' ');
+
+  // 统一空白
+  t = t.replace(/\s+/g, ' ').trim();
+  if (!t) return '';
+
+  // 去掉常见列表前缀
+  t = t.replace(/^[-*•]+\s*/g, '').trim();
+  return t;
+}
+
+function _splitSentencesForFingerprint(text) {
+  const cleaned = _normalizeSentenceForFingerprint(text);
+  if (!cleaned) return [];
+
+  // 按标点分句：句末符 + 分号 + 逗号 + 换行（不切分 ':'）
+  const parts = cleaned
+    .split(/[。\.！!？\?\n\r；;，,]+/g)
+    .map(s => String(s || '').trim())
+    .filter(s => s.length > 0);
+
+  // 去掉过短碎片（<3 的很难形成有效 n-gram）
+  return parts.filter(s => s.length >= 3);
+}
+
+function _extractChineseCharNGrams(sentence, { minN = 3, maxN = 10 } = {}) {
+  const out = [];
+  const runs = String(sentence || '').match(/[\u4e00-\u9fff]{3,}/g) || [];
+  for (const run of runs) {
+    const s = String(run);
+    const len = s.length;
+    for (let n = minN; n <= maxN; n++) {
+      if (len < n) continue;
+      for (let i = 0; i <= len - n; i++) {
+        out.push(s.slice(i, i + n));
+      }
+    }
+  }
+  return out;
+}
+
+function _extractEnglishWordNGrams(sentence, { minN = 3, maxN = 7 } = {}) {
+  const out = [];
+  const words = (String(sentence || '').match(/[A-Za-z]+(?:'[A-Za-z]+)?/g) || [])
+    .map(w => w.toLowerCase())
+    .filter(Boolean);
+  const len = words.length;
+  if (len < minN) return out;
+  for (let n = minN; n <= maxN; n++) {
+    if (len < n) continue;
+    for (let i = 0; i <= len - n; i++) {
+      out.push(words.slice(i, i + n).join(' '));
+    }
+  }
+  return out;
+}
+
+function _fingerprintTagsForText(text) {
+  const tags = [];
+  const t = String(text || '');
+  if (!t) return tags;
+  for (const [tag, patterns] of Object.entries(VIBE_FINGERPRINT_TAG_PATTERNS)) {
+    if ((patterns || []).some((re) => re.test(t))) tags.push(tag);
+  }
+  return tags;
+}
+
+// Levenshtein（带阈值提前退出）；当 maxDistance=1 时非常快
+function _levenshteinWithin(a, b, maxDistance = 1) {
+  const s = String(a || '');
+  const t = String(b || '');
+  if (s === t) return true;
+  const n = s.length;
+  const m = t.length;
+  if (Math.abs(n - m) > maxDistance) return false;
+  if (n === 0) return m <= maxDistance;
+  if (m === 0) return n <= maxDistance;
+
+  // 短字符串 DP（滚动数组）
+  let prev = new Array(m + 1);
+  let curr = new Array(m + 1);
+  for (let j = 0; j <= m; j++) prev[j] = j;
+
+  for (let i = 1; i <= n; i++) {
+    curr[0] = i;
+    let rowMin = curr[0];
+    const si = s.charCodeAt(i - 1);
+    for (let j = 1; j <= m; j++) {
+      const cost = si === t.charCodeAt(j - 1) ? 0 : 1;
+      const del = prev[j] + 1;
+      const ins = curr[j - 1] + 1;
+      const sub = prev[j - 1] + cost;
+      const val = Math.min(del, ins, sub);
+      curr[j] = val;
+      if (val < rowMin) rowMin = val;
+    }
+    if (rowMin > maxDistance) return false; // 提前剪枝
+    const tmp = prev; prev = curr; curr = tmp;
+  }
+  return prev[m] <= maxDistance;
+}
+
+function _normalizePatternForCompare(p) {
+  // 比对用：去空白、小写（英文），保留冒号等符号以支持 TODO:xxx 模式
+  const raw = String(p || '').trim();
+  if (!raw) return '';
+  return raw.replace(/\s+/g, '').toLowerCase();
+}
+
+function _bucketKeysForPattern(norm, { lang }) {
+  const keys = [];
+  const n = String(norm || '');
+  const len = n.length;
+  const prefix = lang === 'en' ? n.slice(0, 6) : n.slice(0, 2);
+  // 主桶 + 相邻长度桶（用于 len±1 合并）
+  for (const dl of [0, -1, 1]) {
+    const l = len + dl;
+    if (l <= 0) continue;
+    keys.push(`${lang}:${l}:${prefix}`);
+  }
+  return keys;
+}
+
+/**
+ * 提取个人句式指纹（Top K）
+ * @param {string} text
+ * @param {Object} [opts]
+ * @param {number} [opts.topK=15]
+ * @param {number} [opts.maxTextLength=20000] - 防止极端长文本导致爆炸
+ * @returns {Array<{pattern: string, count: number, tags: string[]}>}
+ */
+export function extractPersonalSentenceFingerprint(text, { topK = 15, maxTextLength = 20000 } = {}) {
+  const raw = String(text || '');
+  const clipped = raw.length > maxTextLength ? raw.slice(0, maxTextLength) : raw;
+  const sentences = _splitSentencesForFingerprint(clipped);
+  if (sentences.length === 0) return [];
+
+  // 1) 生成候选（n-gram + 关键句整句）
+  const freq = new Map(); // candidate -> count
+  const bump = (cand) => {
+    const c = String(cand || '').trim();
+    if (!c) return;
+    freq.set(c, (freq.get(c) || 0) + 1);
+  };
+
+  for (const s of sentences) {
+    const sentence = String(s);
+
+    // 关键句整句保留：包含“调试/情绪/指令”或明显的任务符号
+    const tags = _fingerprintTagsForText(sentence);
+    if (tags.length > 0) bump(sentence);
+
+    // 中文 3-10 字符 n-gram
+    _extractChineseCharNGrams(sentence, { minN: 3, maxN: 10 }).forEach(bump);
+
+    // 英文 3-7 单词 n-gram
+    _extractEnglishWordNGrams(sentence, { minN: 3, maxN: 7 }).forEach(bump);
+  }
+
+  if (freq.size === 0) return [];
+
+  // 2) 相似度归一化（Levenshtein <=1 合并）
+  const entries = Array.from(freq.entries()).sort((a, b) => (b[1] - a[1]) || (a[0] > b[0] ? 1 : -1));
+
+  const clusters = []; // { canonical, norm, count, tags:Set<string>, lang }
+  const bucketIndex = new Map(); // bucketKey -> number[] (cluster indices)
+
+  const addToBucket = (idx) => {
+    const c = clusters[idx];
+    const keys = _bucketKeysForPattern(c.norm, { lang: c.lang });
+    for (const k of keys) {
+      if (!bucketIndex.has(k)) bucketIndex.set(k, []);
+      bucketIndex.get(k).push(idx);
+    }
+  };
+
+  for (const [cand, count] of entries) {
+    const norm = _normalizePatternForCompare(cand);
+    if (!norm) continue;
+    const lang = _fingerprintHasZh(cand) ? 'zh' : 'en';
+
+    const keys = _bucketKeysForPattern(norm, { lang });
+    let mergedTo = -1;
+
+    for (const key of keys) {
+      const list = bucketIndex.get(key);
+      if (!list || list.length === 0) continue;
+      for (const idx of list) {
+        const c = clusters[idx];
+        if (c.lang !== lang) continue;
+        if (_levenshteinWithin(norm, c.norm, 1)) {
+          mergedTo = idx;
+          break;
+        }
+      }
+      if (mergedTo !== -1) break;
+    }
+
+    if (mergedTo === -1) {
+      const tagSet = new Set(_fingerprintTagsForText(cand));
+      clusters.push({ canonical: cand, norm, count: Number(count) || 0, tags: tagSet, lang });
+      addToBucket(clusters.length - 1);
+    } else {
+      const c = clusters[mergedTo];
+      c.count += Number(count) || 0;
+      _fingerprintTagsForText(cand).forEach(t => c.tags.add(t));
+      // canonical 保持“更具代表性”：优先更高频；同频时更短
+      const candLen = String(cand).length;
+      const canonLen = String(c.canonical).length;
+      if ((Number(count) || 0) > 0 && (candLen < canonLen) && (c.count > 0)) {
+        // 仅在“更短”时替换，减少把口癖越合并越长的问题
+        c.canonical = cand;
+        c.norm = norm;
+      }
+    }
+  }
+
+  // 3) TopK 输出
+  return clusters
+    .sort((a, b) => (b.count - a.count) || (a.canonical > b.canonical ? 1 : -1))
+    .slice(0, Math.max(1, Math.min(50, Number(topK) || 15)))
+    .map(c => ({
+      pattern: c.canonical,
+      count: c.count,
+      tags: Array.from(c.tags.values()),
+    }));
 }
 
 function getApiEndpointForClient() {
@@ -1625,6 +2036,23 @@ export class VibeCodingerAnalyzer {
         // 统计数据
         statistics: safeStats
       };
+
+      // 【新增】本地“个人句式指纹”（Top 15 核心口癖）
+      // 只吃用户消息，避免把助手/模板文案混入
+      try {
+        const userTextForFingerprint = (Array.isArray(sanitizedChatData) ? sanitizedChatData : [])
+          .filter((m) => {
+            const role = String(m?.role || '').toUpperCase();
+            return role === 'USER' || role === 'HUMAN' || role === 'U' || role === '';
+          })
+          .map((m) => String(m?.text || m?.content || '').trim())
+          .filter(t => t.length > 0)
+          .join(' ');
+
+        fullResult.personalSentenceFingerprint = extractPersonalSentenceFingerprint(userTextForFingerprint, { topK: 15 });
+      } catch (e) {
+        fullResult.personalSentenceFingerprint = [];
+      }
       
       // 保存分析结果（兼容旧版本）
       this.analysisResult = fullResult;
@@ -1665,7 +2093,9 @@ export class VibeCodingerAnalyzer {
 
             if (!userText || userText.length === 0) return;
 
-            const keywords = extractCountryWordcloudItemsFromText(userText, { maxItems: 12 });
+            // 句式/长短语：使用 extractVibeKeywords（已升级为原生句式捕获）
+            // 输出：[{ phrase, category, weight }]
+            const keywords = extractVibeKeywords(userText, { max: 20 });
 
             // 补充：代码片段中的功德/黑话（避免“只在代码块里出现”的词漏掉）
             const codeHits = this.#detectWordsFromCode(sanitizedChatData);
@@ -1674,9 +2104,11 @@ export class VibeCodingerAnalyzer {
             const merged = new Map();
             const push = (it) => {
               const phrase = String(it?.phrase || '').trim();
-              if (!phrase || phrase.length < 2 || phrase.length > 24) return;
+              // 句式可能较长（英文 3-6 词 / 中文 4-10 字），放宽上限
+              if (!phrase || phrase.length < 2 || phrase.length > 120) return;
               const category = String(it?.category || 'slang').trim() || 'slang';
-              const weight = Math.max(1, Math.min(10, Number(it?.weight) || 1));
+              // 前端权重可较大；真正写入国家池时后端会统一 delta<=5
+              const weight = Math.max(1, Math.min(50, Number(it?.weight) || 1));
               const key = `${category}:${phrase}`;
               merged.set(key, {
                 phrase,

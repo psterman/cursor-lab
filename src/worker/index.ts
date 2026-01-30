@@ -3549,20 +3549,18 @@ app.get('/api/global-average', async (c) => {
   // 5) 地理过滤：US 平替（us 为 null/0 时回退到 global，避免 ECharts 报错）
   const finalRow = wantsUS ? applyUsStatsToGlobalRow(baseRow) : baseRow;
 
-  // 6) monthly_vibes：返回该国当月 Top 词云（slang / merit / sv_slang）
-  // 说明：time_bucket 与 upsert_slang_hits_v2 保持一致（date_trunc('month', CURRENT_DATE)）
+  // 6) monthly_vibes：返回该国 Top 词云（slang / merit / sv_slang）
+  // 重构：数据源改为 slang_trends_pool（不分月桶），按 hit_count desc 取前 20
   try {
-    const bucket = getMonthBucketUtc(new Date()); // YYYY-MM-01
     const region = normalizeRegion(countryCode);
 
     const fetchTop = async (category: 'slang' | 'merit' | 'sv_slang') => {
-      const url = new URL(`${env.SUPABASE_URL}/rest/v1/slang_trends`);
+      const url = new URL(`${env.SUPABASE_URL}/rest/v1/slang_trends_pool`);
       url.searchParams.set('select', 'phrase,hit_count');
       url.searchParams.set('region', `eq.${region}`);
       url.searchParams.set('category', `eq.${category}`);
-      url.searchParams.set('time_bucket', `eq.${bucket}`);
       url.searchParams.set('order', 'hit_count.desc');
-      url.searchParams.set('limit', '10');
+      url.searchParams.set('limit', '20');
       const rows = await fetchSupabaseJson<any[]>(env, url.toString(), {
         headers: buildSupabaseHeaders(env),
       });
@@ -3587,7 +3585,8 @@ app.get('/api/global-average', async (c) => {
     // 兼容旧字段：monthly_vibes（snake_case）
     (finalRow as any).monthly_vibes = {
       region,
-      time_bucket: bucket,
+      // pool 口径不带 time_bucket：保留字段但置为 null，避免前端依赖字段不存在
+      time_bucket: null,
       slang,
       merit,
       sv_slang: svSlang,
@@ -3595,6 +3594,26 @@ app.get('/api/global-average', async (c) => {
 
     // 兼容旧字段：monthly_slang 仅保留 slang 的 phrase 列表
     (finalRow as any).monthly_slang = slang.map((x: any) => x.phrase);
+
+    // Debug：帮助定位“country_code=US 但返回 Global/空数组”的问题
+    try {
+      const debug = String(c.req.query('debug') || c.req.query('debugSemanticBurst') || '').trim();
+      if (debug === '1' || debug.toLowerCase() === 'true') {
+        (finalRow as any)._debugSemanticBurst = {
+          countryCodeRaw: String(countryCode || ''),
+          regionComputed: region,
+          sourceTable: 'slang_trends_pool',
+          topLimit: 20,
+          counts: {
+            slang: Array.isArray(slang) ? slang.length : 0,
+            merit: Array.isArray(merit) ? merit.length : 0,
+            sv_slang: Array.isArray(svSlang) ? svSlang.length : 0,
+          },
+        };
+      }
+    } catch {
+      // ignore
+    }
   } catch (e) {
     (finalRow as any).monthly_slang = [];
     // ✅ 契约字段：失败也要返回空数组，不返回 null/undefined
@@ -3647,6 +3666,20 @@ function toSafeDelta(weight: any, isSeedHit: boolean): number {
   const baseWeight = Number.isFinite(base) && base > 0 ? Math.floor(base) : 1;
   const mult = isSeedHit ? 10 : 1;
   return Math.max(1, Math.min(500, baseWeight * mult));
+}
+
+function toSafeCount(input: any): number {
+  // 句式热度池：count 可能比 weight 大得多，但仍需限制以防滥用
+  const n = Number(input);
+  const v = Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
+  return Math.max(1, Math.min(5000, v));
+}
+
+function toSafePoolDelta(weight: any): number {
+  // /api/v2/report-vibe：国家大盘聚合增量，严格限制最大 5，防止异常权重污染
+  const n = Number(weight);
+  const v = Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
+  return Math.max(1, Math.min(5, v));
 }
 
 app.post('/api/report-slang', async (c) => {
@@ -3736,7 +3769,8 @@ app.post('/api/report-slang', async (c) => {
  * POST /api/v2/report-vibe
  * 前端分析器上报：关键词 + 指纹 + 时间戳（非阻塞）
  * 兼容 payload:
- * { keywords: [{phrase,category,weight}], fingerprint, timestamp, region }
+ * - v2 keyword: { keywords: [{ phrase, category, weight }], fingerprint, timestamp, region }
+ * - v2 phrase pool: { phrases: [{ phrase, count, category }], fingerprint, timestamp, region }
  *
  * 后端：异步写入 slang_trends（通过 upsert_slang_hits_v2）
  */
@@ -3753,8 +3787,11 @@ app.post('/api/v2/report-vibe', async (c) => {
     return c.json({ status: 'error', error: 'Invalid JSON' }, 400);
   }
 
-  let region = normalizeRegion(body?.region ?? body?.country_code ?? body?.location);
-  // 后端兜底：若前端未正确上报地区，则使用 Cloudflare 的 cf.country
+  // region 解析：
+  // - 优先使用 payload.region（如显式传 US）
+  // - 兼容 country_code/location
+  // - 兜底：若仍为 Global，则使用 Cloudflare 的 cf.country（修复美区用户没显式传 region 导致写入 Global）
+  let region = normalizeRegion(body?.region ?? body?.country_code ?? body?.location ?? 'Global');
   try {
     const rawReq: any = c.req?.raw;
     const cfCountry = String(rawReq?.cf?.country || '').trim().toUpperCase();
@@ -3765,57 +3802,28 @@ app.post('/api/v2/report-vibe', async (c) => {
     // ignore
   }
   const keywords = Array.isArray(body?.keywords) ? body.keywords : [];
-  const fingerprint: string | null = body?.fingerprint ? String(body.fingerprint) : null;
-  const timestamp: string = body?.timestamp ? String(body.timestamp) : new Date().toISOString();
 
   const items: Array<{ phrase: string; category: 'slang' | 'merit' | 'sv_slang'; delta: number }> = [];
-  for (const k of keywords) {
-    const phrase = String(k?.phrase || k || '').trim();
-    if (!phrase || phrase.length < 2 || phrase.length > 24) continue;
-    const category = normalizeCategory(k?.category);
-    const isSeedHit = SEED_DICTIONARY[category]?.has(phrase) || false;
-    const delta = toSafeDelta(k?.weight ?? 1, isSeedHit);
+  for (const it of keywords) {
+    const phrase = String(it?.phrase || '').trim();
+    if (!phrase || phrase.length < 2 || phrase.length > 120) continue;
+    const category = normalizeCategory(it?.category);
+    const delta = toSafePoolDelta(it?.weight ?? 1);
     items.push({ phrase, category, delta });
-    if (items.length >= 15) break;
+    if (items.length >= 25) break;
   }
 
   if (items.length === 0) {
     return c.json({ status: 'success', queued: false });
   }
 
-  const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/upsert_slang_hits_v2`;
-  const keywordLogsUrl = `${env.SUPABASE_URL}/rest/v1/keyword_logs`;
+  const poolRpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/upsert_slang_pool_hits_v1`;
 
   c.executionCtx.waitUntil((async () => {
-    // 1) 写 keyword_logs（批量插入；表不存在也不阻塞主流程）
-    try {
-      const rows = items.map((it) => ({
-        phrase: it.phrase,
-        category: it.category,
-        fingerprint: fingerprint,
-        created_at: timestamp,
-      }));
-      const res = await fetchSupabase(env, keywordLogsUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal',
-        },
-        body: JSON.stringify(rows),
-      });
-      // 忽略非 2xx：可能表未创建
-      if (!res.ok) {
-        const t = await res.text().catch(() => '');
-        console.warn('[Worker] ⚠️ keyword_logs 插入失败（将忽略，不影响主流程）:', res.status, t);
-      }
-    } catch (e: any) {
-      console.warn('[Worker] ⚠️ keyword_logs 插入异常（将忽略）:', e?.message || String(e));
-    }
-
-    // 2) 同步更新 slang_trends（保持国别/分类词云可用）
+    // 高性能聚合上报：每个 keyword 直接 upsert 到 slang_trends_pool（原子累加）
     for (const it of items) {
       try {
-        await fetchSupabaseJson(env, rpcUrl, {
+        await fetchSupabaseJson(env, poolRpcUrl, {
           method: 'POST',
           headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
           body: JSON.stringify({
@@ -3826,7 +3834,7 @@ app.post('/api/v2/report-vibe', async (c) => {
           }),
         });
       } catch (err: any) {
-        console.warn('[Worker] ⚠️ /api/v2/report-vibe upsert_slang_hits_v2 失败:', err?.message || String(err));
+        console.warn('[Worker] ⚠️ /api/v2/report-vibe upsert_slang_pool_hits_v1 失败:', err?.message || String(err));
       }
     }
   })());
@@ -3883,6 +3891,79 @@ const handleWordCloudRequest = async (c: any) => {
   // 0) 若指定 region，则优先返回该地区 slang_trends 的聚合结果（避免国家透视仍显示全局词云）
   if (regionRaw && /^[A-Z]{2}$/.test(regionRaw)) {
     try {
+      // 【v2.1 新增】优先使用“句式热度池”（slang_trends_pool），用于国家特色倍率计算
+      // - 若池表/函数未部署：自动回退到旧 slang_trends（月桶）逻辑
+      const poolUrl = new URL(`${env.SUPABASE_URL}/rest/v1/slang_trends_pool`);
+      poolUrl.searchParams.set('select', 'phrase,hit_count,category');
+      poolUrl.searchParams.set('region', `eq.${regionRaw}`);
+      poolUrl.searchParams.set('order', 'hit_count.desc');
+      poolUrl.searchParams.set('limit', '50');
+
+      try {
+        const poolRows = await fetchSupabaseJson<any[]>(env, poolUrl.toString(), {
+          headers: buildSupabaseHeaders(env),
+        });
+
+        const poolData = (Array.isArray(poolRows) ? poolRows : [])
+          .map((r: any) => ({
+            name: String(r?.phrase ?? r?.name ?? '').trim(),
+            value: Number(r?.hit_count ?? r?.value ?? r?.count ?? 0) || 0,
+            category: String(r?.category ?? 'slang').trim() || 'slang',
+          }))
+          .filter((x) => x.name && x.value > 0)
+          .slice(0, 50);
+
+        if (poolData.length > 0) {
+          // 国家特色倍率：对比该国占比 vs 全球占比（基于当前 Top50 子集，避免全表扫描）
+          const phrases = Array.from(new Set(poolData.map(x => x.name))).slice(0, 50);
+          const globalCountsRpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_slang_pool_global_counts_v1`;
+
+          let globalCounts: Record<string, number> = {};
+          try {
+            const rows = await fetchSupabaseJson<any[]>(env, globalCountsRpcUrl, {
+              method: 'POST',
+              headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+              body: JSON.stringify({ p_phrases: phrases }),
+            });
+            globalCounts = Object.fromEntries(
+              (Array.isArray(rows) ? rows : []).map((it: any) => [
+                String(it?.phrase ?? '').trim(),
+                Number(it?.global_count ?? 0) || 0,
+              ]).filter(([p]) => p)
+            );
+          } catch {
+            // RPC 可能未部署，忽略 signature 计算
+          }
+
+          const regionTotal = poolData.reduce((s, x) => s + (Number(x.value) || 0), 0) || 0;
+          const globalTotal = phrases.reduce((s, p) => s + (Number(globalCounts[p]) || 0), 0) || 0;
+
+          const SIGNATURE_MULTIPLIER_THRESHOLD = 3; // “远高于全球平均”的阈值
+          const SIGNATURE_MIN_REGION_COUNT = 5;     // 低频噪音过滤
+
+          const data = poolData.map((x) => {
+            const regionCount = Number(x.value) || 0;
+            const globalCount = Number(globalCounts[x.name]) || 0;
+            const regionRatio = regionTotal > 0 ? (regionCount / regionTotal) : 0;
+            const globalRatio = globalTotal > 0 ? (globalCount / globalTotal) : 0;
+            const multiplier = (globalRatio > 0) ? (regionRatio / globalRatio) : 0;
+            const isNationalSignature = (
+              regionCount >= SIGNATURE_MIN_REGION_COUNT &&
+              multiplier >= SIGNATURE_MULTIPLIER_THRESHOLD
+            );
+            return {
+              ...x,
+              signature: isNationalSignature ? 'National Signature' : null,
+              signatureMultiplier: Number.isFinite(multiplier) ? Number(multiplier.toFixed(2)) : 0,
+            };
+          });
+
+          return c.json({ status: 'success', data });
+        }
+      } catch {
+        // ignore pool fallback
+      }
+
       // slang_trends 为按月桶（time_bucket=当月1号），这里优先查当月；无数据则退化为不带 time_bucket 的最近聚合
       const now = new Date();
       const bucket = `${now.toISOString().slice(0, 7)}-01`; // YYYY-MM-01

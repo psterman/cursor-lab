@@ -18,6 +18,13 @@ alter table if exists public.slang_trends
 alter table if exists public.slang_trends
   add primary key (phrase, region, category, time_bucket);
 
+-- 2.1) 查询加速索引（可选）
+-- 说明：
+-- - “唯一约束”已由主键 (phrase, region, category, time_bucket) 覆盖
+-- - 若你需要按国家维度快速查词云/热度，建议增加 region+phrase 的普通索引
+create index if not exists idx_slang_trends_region_phrase
+on public.slang_trends (region, phrase);
+
 -- 3) 加权 upsert RPC（推荐 Worker 使用）
 create or replace function public.upsert_slang_hits_v2(
   p_phrase text,
