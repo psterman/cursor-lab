@@ -1322,9 +1322,17 @@ function scanAndMatch(chatData, patterns) {
     workDays, // 【2026-01-27 新增】工作天数
     codeRatio, // 【2026-01-27 新增】代码行占比
     feedbackDensity, // 【2026-01-27 新增】消息反馈密度
+    balanceScore, // 【2026-01-27 新增】维度平衡度
     diversityScore, // 【2026-01-27 新增】技术多样性
     totalSlangCount, // 【2026-01-27 新增】黑话命中总数
     styleIndex, // 【2026-01-27 新增】交互风格指数
+    tag_cloud_data: flattenBlackwordHits( // 【V6.0 新增】扁平化词云数据
+      {
+        chinese_slang: chineseSlangHits || {},
+        english_slang: englishSlangHits || {},
+      },
+      totalSlangCount || 1
+    ),
   };
 }
 
@@ -1731,7 +1739,15 @@ self.onmessage = function(e) {
             english_slang: englishSlangHits || {}, // 英文黑话（硅谷黑话）
             // 兼容旧格式
             ...(blackwordHits || {})
-          }
+          },
+          // 【V6.0 新增】扁平化词云数据（用于前端词云展示）
+          tag_cloud_data: flattenBlackwordHits(
+            {
+              chinese_slang: chineseSlangHits || {},
+              english_slang: englishSlangHits || {},
+            },
+            totalSlangCount || 1
+          ),
         };
 
         // 返回结果
@@ -1761,6 +1777,147 @@ self.onmessage = function(e) {
       default:
         throw new Error(`未知类型: ${type}`);
     }
+// ==========================================
+// 【V6.0 新增】词云爆发力因子计算
+// ==========================================
+
+/**
+ * 计算连击数（sequence_combo）
+ * 检测连续出现同一类别的黑话
+ * 
+ * @param {Array} categoryWords - 词汇历史 [{word, hits}]
+ * @param {string} currentWord - 当前词汇
+ * @param {number} windowSize - 滑动窗口大小（默认 3）
+ * @returns {number} 连击数
+ */
+function calculateSequenceCombo(
+  categoryWords: Array<{word: string, hits: number}>,
+  currentWord: string,
+  windowSize: number = 3
+): number {
+  // 获取当前窗口内的词汇
+  const recent = categoryWords.slice(-windowSize);
+  
+  // 检测同类别词汇的连续出现
+  const sameTypeMatches = recent.filter(w => 
+    w.word === currentWord || 
+    Math.abs(w.word.length - currentWord.length) <= 1
+  );
+  
+  return sameTypeMatches.length;
+}
+
+/**
+ * 计算 IDF 权重（基于词汇稀有度）
+ * 稀有词获得更高权重
+ * 
+ * @param {number} hits - 该词的命中次数
+ * @param {number} totalHits - 总命中次数（用于归一化）
+ * @returns {number} IDF 权重 (1-5)
+ */
+function calculateIDFWeight(hits: number, totalHits: number): number {
+  if (hits <= 0) return 1;
+  
+  // 简单的稀有度模型：命中次数越少，权重越高
+  const maxHits = Math.max(hits, totalHits);
+  const ratio = hits / maxHits;
+  
+  // 权重范围：1（高频） 到 5（稀有）
+  return Math.max(1, Math.min(5, 1 / Math.sqrt(ratio)));
+}
+
+/**
+ * 【V6.0 新增】计算词云权重（爆发力因子）
+ * weight = (hits * IDF_weight) * log(1 + sequence_combo)
+ * 
+ * @param {number} hits - 该词的命中次数
+ * @param {number} idfWeight - IDF 权重
+ * @param {number} sequenceCombo - 连击数
+ * @returns {number} 词云权重（整数）
+ */
+function calculateWordCloudWeight(
+  hits: number,
+  idfWeight: number,
+  sequenceCombo: number
+): number {
+  const comboFactor = Math.log(1 + sequenceCombo);
+  return Math.round((hits * idfWeight) * comboFactor);
+}
+
+/**
+ * 【V6.0 新增】将 blackword_hits 转化为扁平化的 tag_cloud_data 数组
+ * 格式：{name: string, value: number, category: string}
+ * 
+ * @param {Object} blackwordHits - {chinese_slang, english_slang}
+ * @param {number} totalHits - 总命中次数（用于 IDF 计算）
+ * @returns {Array} 扁平化的词云数据
+ */
+function flattenBlackwordHits(
+  blackwordHits: {
+    chinese_slang: Record<string, number>;
+    english_slang: Record<string, number>;
+  },
+  totalHits: number = 1
+): Array<{name: string; value: number; category: string}> {
+  const result: Array<{name: string; value: number; category: string}> = [];
+  
+  // 词汇历史（用于连击检测）
+  const wordHistory: Array<{word: string, hits: number}> = [];
+  
+  // 计算各类别的总命中次数（用于归一化）
+  const sumChinese = Object.values(blackwordHits.chinese_slang || {}).reduce((a, b) => a + b, 0);
+  const sumEnglish = Object.values(blackwordHits.english_slang || {}).reduce((a, b) => a + b, 0);
+  const totalCategoryHits = sumChinese + sumEnglish || 1;
+  
+  // 处理中文黑话（功德簿） -> category: 'merit'
+  if (blackwordHits.chinese_slang) {
+    const sortedWords = Object.entries(blackwordHits.chinese_slang)
+      .sort((a, b) => b[1] - a[1]); // 按频次排序
+    
+    for (const [word, hits] of sortedWords) {
+      const idfWeight = calculateIDFWeight(hits, sumChinese || totalHits);
+      const combo = calculateSequenceCombo(wordHistory, word);
+      const weight = calculateWordCloudWeight(hits, idfWeight, combo);
+      
+      result.push({
+        name: word,
+        value: weight,
+        category: 'merit'
+      });
+      
+      // 添加到历史（用于后续的连击检测）
+      wordHistory.push({word, hits});
+    }
+  }
+  
+  // 处理英文黑话（硅谷黑话） -> category: 'slang'
+  if (blackwordHits.english_slang) {
+    const sortedWords = Object.entries(blackwordHits.english_slang)
+      .sort((a, b) => b[1] - a[1]); // 按频次排序
+    
+    for (const [word, hits] of sortedWords) {
+      const idfWeight = calculateIDFWeight(hits, sumEnglish || totalHits);
+      const combo = calculateSequenceCombo(wordHistory, word);
+      const weight = calculateWordCloudWeight(hits, idfWeight, combo);
+      
+      result.push({
+        name: word,
+        value: weight,
+        category: 'slang'
+      });
+      
+      // 添加到历史（用于后续的连击检测）
+      wordHistory.push({word, hits});
+    }
+  }
+  
+  return result;
+}
+
+// ==========================================
+// 原有代码结束
+// ==========================================
+
   } catch (error) {
     self.postMessage({ type: 'ERROR', payload: { message: error.message } });
   }

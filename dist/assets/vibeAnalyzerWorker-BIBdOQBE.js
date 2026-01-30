@@ -35,9 +35,9 @@ let bm25Scorer = null;
  * - E/F: 维持原有难度
  */
 const SCORING_CONFIG = {
-  L: { midpoint: 35, steepness: 0.15 }, // 逻辑：极其严苛，顶级难度
-  P: { midpoint: 18, steepness: 0.3 },  // 耐心：大幅提升门槛
-  D: { midpoint: 28, steepness: 0.2 },  // 细节：极高要求
+  L: { midpoint: 15, steepness: 0.15 }, // 逻辑：降低门槛（从35降到15），更易识别代码特征
+  P: { midpoint: 12, steepness: 0.3 },  // 耐心：降低门槛（从18降到12）
+  D: { midpoint: 18, steepness: 0.2 },  // 细节：降低门槛（从28降到18）
   E: { midpoint: 8,  steepness: 0.25 }, // 探索：维持原有难度
   F: { midpoint: 10, steepness: 0.2 },  // 反馈：维持原有难度
 };
@@ -1040,18 +1040,22 @@ function scanAndMatch(chatData, patterns) {
     });
 
     // 【2026-01-27 新增】代码行占比计算（检测代码块）
-    // 检测代码块标记：```代码块```、`行内代码`、代码关键字等
+    // 修复：确保只统计实际代码内容，不包括标记符号，并考虑代码关键字密度
     const codeBlockPattern = /```[\s\S]*?```/g; // 多行代码块
     const inlineCodePattern = /`[^`\n]+`/g; // 行内代码
-    const codeKeywordPattern = /\b(function|class|const|let|var|import|export|return|if|else|for|while|switch|case|try|catch|async|await|=>)\b/gi;
+    const codeKeywordPattern = /\b(function|class|const|let|var|import|export|return|if|else|for|while|switch|case|try|catch|async|await|=>|def|from|with|as|lambda|public|private|protected|static|interface|extends|implements)\b/gi;
     
-    // 统计代码块字符数
+    // 统计代码块字符数（移除标记符号，只统计实际代码内容）
     const codeBlocks = text.match(codeBlockPattern) || [];
     codeBlocks.forEach(block => {
-      totalCodeChars += block.length;
+      // 移除 ``` 标记，只计算实际代码内容
+      const codeContent = block.replace(/```[\w]*\n?/g, '').replace(/```/g, '').trim();
+      if (codeContent.length > 0) {
+        totalCodeChars += codeContent.length;
+      }
     });
     
-    // 统计行内代码字符数（避免重复计算）
+    // 统计行内代码字符数（移除标记符号，避免重复计算）
     const inlineCodes = text.match(inlineCodePattern) || [];
     inlineCodes.forEach(code => {
       // 检查是否已在代码块中
@@ -1063,14 +1067,20 @@ function scanAndMatch(chatData, patterns) {
         }
       }
       if (!isInBlock) {
-        totalCodeChars += code.length;
+        // 移除 ` 标记，只计算实际代码内容
+        const codeContent = code.replace(/`/g, '').trim();
+        if (codeContent.length > 0) {
+          totalCodeChars += codeContent.length;
+        }
       }
     });
     
-    // 统计代码关键字（仅统计不在代码块中的关键字）
+    // 统计代码关键字密度（作为补充，但需要排除已在代码块中的关键字）
+    // 关键字密度最多贡献总文本长度的 30%（避免过度估计）
+    let codeKeywordCount = 0;
     const keywords = text.match(codeKeywordPattern) || [];
     keywords.forEach(keyword => {
-      const keywordIndex = text.indexOf(keyword);
+      const keywordIndex = text.indexOf(keyword, 0);
       let isInCode = false;
       // 检查是否在代码块或行内代码中
       for (const block of codeBlocks) {
@@ -1089,9 +1099,16 @@ function scanAndMatch(chatData, patterns) {
           }
         }
       }
-      // 如果不在代码中，则可能是自然语言提及，不计入代码字符
-      // 这里简化处理：只统计代码块和行内代码
+      // 如果不在代码块中，可能是自然语言提及，但也要考虑可能是代码片段
+      // 这里采用保守策略：不在代码块中的关键字，按平均长度 8 字符估算
+      if (!isInCode) {
+        codeKeywordCount += 1;
+      }
     });
+    
+    // 关键字密度贡献：每 10 个关键字贡献约 80 字符（平均关键字长度 8），最多贡献总文本的 30%
+    const keywordCharEstimate = Math.min(codeKeywordCount * 8, text.length * 0.3);
+    totalCodeChars += keywordCharEstimate;
 
     // 【2026-01-27 新增】时间维度计算
     if (msg.timestamp) {
@@ -1232,7 +1249,40 @@ function scanAndMatch(chatData, patterns) {
 
   // 【2026-01-27 新增】语义指纹计算
   // 代码行占比：代码字符数 / 总字符数
-  const codeRatio = totalTextLength > 0 ? (totalCodeChars / totalTextLength) : 0;
+  let codeRatio = totalTextLength > 0 ? (totalCodeChars / totalTextLength) : 0;
+  
+  // 【修复代码占比为0的问题】降级处理：当总字符数 > 5000 且 codeRatio 为 0 时，给出保底分数
+  if (totalTextLength > 5000 && codeRatio === 0) {
+    // 重新扫描所有消息，统计代码关键词密度
+    let totalKeywordCount = 0;
+    const codeKeywordPattern = /\b(function|class|const|let|var|import|export|return|if|else|for|while|switch|case|try|catch|async|await|=>|def|from|with|as|lambda|public|private|protected|static|interface|extends|implements|type|interface|enum|namespace|module|require|export|default)\b/gi;
+    
+    userMessages.forEach(msg => {
+      const text = msg.text || '';
+      if (text && text.length > 0) {
+        const matches = text.match(codeKeywordPattern);
+        if (matches) {
+          totalKeywordCount += matches.length;
+        }
+      }
+    });
+    
+    // 基于关键词密度计算保底分数（每1000字至少1个关键词 = 1%保底）
+    const keywordDensity = totalKeywordCount / (totalTextLength / 1000);
+    const fallbackRatio = Math.min(keywordDensity / 100, 0.15); // 最多15%保底
+    
+    if (fallbackRatio > 0) {
+      codeRatio = fallbackRatio;
+      console.log('[Worker] ⚠️ 代码占比为0，应用保底分数:', {
+        totalTextLength,
+        totalCodeChars,
+        totalKeywordCount,
+        keywordDensity,
+        fallbackRatio,
+        finalCodeRatio: codeRatio
+      });
+    }
+  }
   
   // 消息反馈密度：总消息数 / 工作天数
   const feedbackDensity = workDays > 0 ? (userMessages.length / workDays) : userMessages.length;
@@ -1272,9 +1322,17 @@ function scanAndMatch(chatData, patterns) {
     workDays, // 【2026-01-27 新增】工作天数
     codeRatio, // 【2026-01-27 新增】代码行占比
     feedbackDensity, // 【2026-01-27 新增】消息反馈密度
+    balanceScore, // 【2026-01-27 新增】维度平衡度
     diversityScore, // 【2026-01-27 新增】技术多样性
     totalSlangCount, // 【2026-01-27 新增】黑话命中总数
     styleIndex, // 【2026-01-27 新增】交互风格指数
+    tag_cloud_data: flattenBlackwordHits( // 【V6.0 新增】扁平化词云数据
+      {
+        chinese_slang: chineseSlangHits || {},
+        english_slang: englishSlangHits || {},
+      },
+      totalSlangCount || 1
+    ),
   };
 }
 
@@ -1681,7 +1739,15 @@ self.onmessage = function(e) {
             english_slang: englishSlangHits || {}, // 英文黑话（硅谷黑话）
             // 兼容旧格式
             ...(blackwordHits || {})
-          }
+          },
+          // 【V6.0 新增】扁平化词云数据（用于前端词云展示）
+          tag_cloud_data: flattenBlackwordHits(
+            {
+              chinese_slang: chineseSlangHits || {},
+              english_slang: englishSlangHits || {},
+            },
+            totalSlangCount || 1
+          ),
         };
 
         // 返回结果
@@ -1711,6 +1777,147 @@ self.onmessage = function(e) {
       default:
         throw new Error(`未知类型: ${type}`);
     }
+// ==========================================
+// 【V6.0 新增】词云爆发力因子计算
+// ==========================================
+
+/**
+ * 计算连击数（sequence_combo）
+ * 检测连续出现同一类别的黑话
+ * 
+ * @param {Array} categoryWords - 词汇历史 [{word, hits}]
+ * @param {string} currentWord - 当前词汇
+ * @param {number} windowSize - 滑动窗口大小（默认 3）
+ * @returns {number} 连击数
+ */
+function calculateSequenceCombo(
+  categoryWords: Array<{word: string, hits: number}>,
+  currentWord: string,
+  windowSize: number = 3
+): number {
+  // 获取当前窗口内的词汇
+  const recent = categoryWords.slice(-windowSize);
+  
+  // 检测同类别词汇的连续出现
+  const sameTypeMatches = recent.filter(w => 
+    w.word === currentWord || 
+    Math.abs(w.word.length - currentWord.length) <= 1
+  );
+  
+  return sameTypeMatches.length;
+}
+
+/**
+ * 计算 IDF 权重（基于词汇稀有度）
+ * 稀有词获得更高权重
+ * 
+ * @param {number} hits - 该词的命中次数
+ * @param {number} totalHits - 总命中次数（用于归一化）
+ * @returns {number} IDF 权重 (1-5)
+ */
+function calculateIDFWeight(hits: number, totalHits: number): number {
+  if (hits <= 0) return 1;
+  
+  // 简单的稀有度模型：命中次数越少，权重越高
+  const maxHits = Math.max(hits, totalHits);
+  const ratio = hits / maxHits;
+  
+  // 权重范围：1（高频） 到 5（稀有）
+  return Math.max(1, Math.min(5, 1 / Math.sqrt(ratio)));
+}
+
+/**
+ * 【V6.0 新增】计算词云权重（爆发力因子）
+ * weight = (hits * IDF_weight) * log(1 + sequence_combo)
+ * 
+ * @param {number} hits - 该词的命中次数
+ * @param {number} idfWeight - IDF 权重
+ * @param {number} sequenceCombo - 连击数
+ * @returns {number} 词云权重（整数）
+ */
+function calculateWordCloudWeight(
+  hits: number,
+  idfWeight: number,
+  sequenceCombo: number
+): number {
+  const comboFactor = Math.log(1 + sequenceCombo);
+  return Math.round((hits * idfWeight) * comboFactor);
+}
+
+/**
+ * 【V6.0 新增】将 blackword_hits 转化为扁平化的 tag_cloud_data 数组
+ * 格式：{name: string, value: number, category: string}
+ * 
+ * @param {Object} blackwordHits - {chinese_slang, english_slang}
+ * @param {number} totalHits - 总命中次数（用于 IDF 计算）
+ * @returns {Array} 扁平化的词云数据
+ */
+function flattenBlackwordHits(
+  blackwordHits: {
+    chinese_slang: Record<string, number>;
+    english_slang: Record<string, number>;
+  },
+  totalHits: number = 1
+): Array<{name: string; value: number; category: string}> {
+  const result: Array<{name: string; value: number; category: string}> = [];
+  
+  // 词汇历史（用于连击检测）
+  const wordHistory: Array<{word: string, hits: number}> = [];
+  
+  // 计算各类别的总命中次数（用于归一化）
+  const sumChinese = Object.values(blackwordHits.chinese_slang || {}).reduce((a, b) => a + b, 0);
+  const sumEnglish = Object.values(blackwordHits.english_slang || {}).reduce((a, b) => a + b, 0);
+  const totalCategoryHits = sumChinese + sumEnglish || 1;
+  
+  // 处理中文黑话（功德簿） -> category: 'merit'
+  if (blackwordHits.chinese_slang) {
+    const sortedWords = Object.entries(blackwordHits.chinese_slang)
+      .sort((a, b) => b[1] - a[1]); // 按频次排序
+    
+    for (const [word, hits] of sortedWords) {
+      const idfWeight = calculateIDFWeight(hits, sumChinese || totalHits);
+      const combo = calculateSequenceCombo(wordHistory, word);
+      const weight = calculateWordCloudWeight(hits, idfWeight, combo);
+      
+      result.push({
+        name: word,
+        value: weight,
+        category: 'merit'
+      });
+      
+      // 添加到历史（用于后续的连击检测）
+      wordHistory.push({word, hits});
+    }
+  }
+  
+  // 处理英文黑话（硅谷黑话） -> category: 'slang'
+  if (blackwordHits.english_slang) {
+    const sortedWords = Object.entries(blackwordHits.english_slang)
+      .sort((a, b) => b[1] - a[1]); // 按频次排序
+    
+    for (const [word, hits] of sortedWords) {
+      const idfWeight = calculateIDFWeight(hits, sumEnglish || totalHits);
+      const combo = calculateSequenceCombo(wordHistory, word);
+      const weight = calculateWordCloudWeight(hits, idfWeight, combo);
+      
+      result.push({
+        name: word,
+        value: weight,
+        category: 'slang'
+      });
+      
+      // 添加到历史（用于后续的连击检测）
+      wordHistory.push({word, hits});
+    }
+  }
+  
+  return result;
+}
+
+// ==========================================
+// 原有代码结束
+// ==========================================
+
   } catch (error) {
     self.postMessage({ type: 'ERROR', payload: { message: error.message } });
   }

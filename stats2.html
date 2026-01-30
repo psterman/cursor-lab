@@ -7,6 +7,8 @@
     <!-- API Endpoint -->
     <meta name="api-endpoint" content="https://cursor-clinical-analysis.psterman.workers.dev/">
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <!-- ECharts WordCloud plugin (required for wordCloud series) -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts-wordcloud@2/dist/echarts-wordcloud.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts/map/js/world.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -22,6 +24,74 @@
             --text-main: #ffffff;
             --text-dim: #71717a;
             --accent-terminal: #00ff41;
+        }
+
+        /* 数据刷新提示：短暂“呼吸闪烁” */
+        @keyframes breathe-flash {
+            0% {
+                transform: translateZ(0) scale(1);
+                box-shadow: 0 0 0 rgba(0, 255, 65, 0);
+                background-color: rgba(0, 255, 65, 0.02);
+            }
+            50% {
+                transform: translateZ(0) scale(1.01);
+                box-shadow: 0 0 18px rgba(0, 255, 65, 0.35);
+                background-color: rgba(0, 255, 65, 0.06);
+            }
+            100% {
+                transform: translateZ(0) scale(1);
+                box-shadow: 0 0 0 rgba(0, 255, 65, 0);
+                background-color: rgba(0, 255, 65, 0.02);
+            }
+        }
+        .breathe-flash {
+            animation: breathe-flash 0.9s ease-in-out 1;
+        }
+
+        /* 语义爆发 Tag 动画：fade-in-up */
+        @keyframes fade-in-up {
+            0% { opacity: 0; transform: translateY(8px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+        .semantic-burst-tag {
+            animation-name: fade-in-up;
+            animation-duration: 520ms;
+            animation-timing-function: ease-out;
+            animation-fill-mode: both;
+            will-change: transform, opacity;
+        }
+
+        /* WordCloud loader (pulse) */
+        @keyframes wc-pulse {
+            0%, 100% { opacity: 0.35; transform: scale(0.98); }
+            50% { opacity: 1; transform: scale(1); }
+        }
+        .vibe-cloud-loader {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            min-height: 220px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.02);
+        }
+        .vibe-cloud-loader .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            background: rgba(168, 85, 247, 0.85);
+            animation: wc-pulse 900ms ease-in-out infinite;
+            margin: 0 6px;
+        }
+        .vibe-cloud-loader .dot:nth-child(2) { animation-delay: 120ms; opacity: 0.7; }
+        .vibe-cloud-loader .dot:nth-child(3) { animation-delay: 240ms; opacity: 0.55; }
+        .vibe-cloud-loader .label {
+            margin-left: 12px;
+            font-size: 12px;
+            color: rgba(148, 163, 184, 0.9);
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            font-family: 'JetBrains Mono', monospace;
         }
 
         body {
@@ -1144,6 +1214,33 @@
             color: #00ff41;
         }
 
+        /* 语义爆发词云：按类别上色（slang/merit/sv_slang） */
+        .country-panel-template .cloud-tag.slang {
+            border-color: rgba(168, 85, 247, 0.65); /* #A855F7 */
+            background: rgba(168, 85, 247, 0.12);
+            color: #d8b4fe;
+            box-shadow: 0 0 10px rgba(168, 85, 247, 0.16);
+        }
+        .country-panel-template .cloud-tag.merit {
+            border-color: rgba(16, 185, 129, 0.65); /* #10B981 */
+            background: rgba(16, 185, 129, 0.12);
+            color: #6ee7b7;
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.14);
+        }
+        .country-panel-template .cloud-tag.sv_slang {
+            border-color: rgba(249, 115, 22, 0.65); /* #F97316 */
+            background: rgba(249, 115, 22, 0.12);
+            color: #fdba74;
+            box-shadow: 0 0 10px rgba(249, 115, 22, 0.14);
+        }
+        .country-panel-template .cloud-tag.slang:hover,
+        .country-panel-template .cloud-tag.merit:hover,
+        .country-panel-template .cloud-tag.sv_slang:hover {
+            filter: brightness(1.08);
+        }
+
+        /* 语义爆发词云：无额外切换控件 */
+
         .country-panel-template .chart-container {
             display: flex;
             justify-content: center;
@@ -1260,6 +1357,11 @@
                         <h1 class="text-2xl font-black italic tracking-tighter">NAT_CLINIC <span class="text-green-500">v2.6</span></h1>
                         <div class="status-tag invert" id="rtStatusTag">LIVE_FEED</div>
                     </div>
+                    <div class="mt-3">
+                        <span id="rtMeritBoard" class="inline-block text-[11px] text-indigo-200 border border-indigo-400/40 bg-indigo-500/5 px-2 py-1">
+                            已累计分析 -- 万字
+                        </span>
+                    </div>
                     <div class="text-[11px] mt-3 text-zinc-500 flex justify-between uppercase">
                         <span id="rtCoord">COORD: --</span>
                         <span id="rtDataStatus">DATA: STABLE</span>
@@ -1280,15 +1382,33 @@
                         </div>
                     </div>
                     <div class="grid grid-cols-2 gap-6">
-                        <div>
-                            <div class="metric-label">已诊断总数</div>
+                        <div id="rtUsersCard">
+                            <div class="metric-label">开发者规模</div>
                             <div class="metric-value" id="rtDiagnosedTotal">--</div>
                         </div>
-                        <div>
-                            <div class="metric-label">全网扫描</div>
+                        <div id="rtAnalysisCard">
+                            <div class="metric-label">诊断次数</div>
                             <div class="metric-value" id="rtScanTotal">--</div>
                         </div>
                     </div>
+                </div>
+
+                <!-- [01.5] RADAR -->
+                <div class="clinic-card">
+                    <div class="card-header">
+                        <i data-lucide="target"></i>
+                        <span class="card-title">开发者画像 / Radar</span>
+                    </div>
+                    <div id="rtRadar" style="height: 260px; width: 100%;"></div>
+                </div>
+
+                <!-- [01.6] LIVE FEED -->
+                <div class="clinic-card">
+                    <div class="card-header">
+                        <i data-lucide="radio"></i>
+                        <span class="card-title">实时动态 / Live Feed</span>
+                    </div>
+                    <div id="rtRealtimeList" class="space-y-3 text-[11px] leading-snug"></div>
                 </div>
 
                 <!-- [02] POWER STRUGGLE (PK) -->
@@ -1311,6 +1431,15 @@
                             <span id="rtPkLeftPct">50.0%</span>
                             <span class="text-green-500" id="rtPkRightPct">50.0%</span>
                         </div>
+                        <div>
+                            <div class="flex justify-between items-center text-[11px]">
+                                <span class="text-zinc-500 uppercase tracking-widest">POWER</span>
+                                <span class="text-white font-bold" id="rtPowerScore">--</span>
+                            </div>
+                            <div class="mt-2 h-1 bg-zinc-800 w-full overflow-hidden">
+                                <div id="power-bar" class="h-full bg-white" style="width: 0%;"></div>
+                            </div>
+                        </div>
                         <div class="p-3 bg-zinc-900 border-l-2 border-white text-xs leading-relaxed italic text-zinc-300" id="rtPkQuote">
                             "..."
                         </div>
@@ -1326,11 +1455,11 @@
                     <div class="space-y-5">
                         <div>
                             <div class="flex justify-between items-end">
-                                <div class="metric-label">集体吐槽字数</div>
-                                <div class="text-sm font-bold" id="rtMeltdownWords">-- WORDS</div>
+                                <div class="metric-label">破防指数</div>
+                                <div class="text-sm font-bold" id="rtBreakdownRate">--</div>
                             </div>
                             <div class="stat-bar-container">
-                                <div class="stat-bar-fill" id="rtMeltdownFill" style="width: 0%;"></div>
+                                <div class="stat-bar-fill" id="breakdown-bar" style="width: 0%;"></div>
                             </div>
                         </div>
                         <div class="grid grid-cols-2 gap-4 mt-6">
@@ -1352,7 +1481,17 @@
                         <i data-lucide="cloud"></i>
                         <span class="card-title">语义爆发 / Semantic Burst</span>
                     </div>
-                    <div class="p-2 text-center" id="rtSemanticTags"></div>
+                    <div class="p-2" id="rtSemanticTags">
+                        <div id="wordcloud-container" style="height: 400px; width: 100%;" class="mb-4"></div>
+                        <div class="text-xs text-zinc-300 mb-3" id="rtCoreTrait">该地区核心特质：--</div>
+                        <div class="flex justify-between items-center text-[11px]">
+                            <span class="text-zinc-500 uppercase tracking-widest">SEMANTIC</span>
+                            <span class="text-green-500 font-bold" id="rtSemanticScore">--</span>
+                        </div>
+                        <div class="mt-2 h-1 bg-zinc-800 w-full overflow-hidden">
+                            <div id="semantic-bar" class="h-full bg-[#00ff41]" style="width: 0%;"></div>
+                        </div>
+                    </div>
                     <div class="mt-4 pt-3 border-t border-zinc-800 flex justify-between text-[11px]">
                         <span class="text-zinc-500" id="rtSemanticMostUsed">MOST_USED: --</span>
                         <span class="text-green-500" id="rtSemanticFreq">FREQ: --</span>
@@ -1365,7 +1504,9 @@
                         <i data-lucide="users"></i>
                         <span class="card-title">高分图谱 / LPDEF Ranking</span>
                     </div>
-                    <div class="scrolling-wrapper" id="rtEliteList"></div>
+                    <div class="scrolling-wrapper" id="rtEliteList">
+                        <div id="rtTopTalentsList" class="space-y-2"></div>
+                    </div>
                     <div class="text-[10px] text-zinc-500 mt-2 text-center uppercase tracking-tighter" id="rtEliteHint">
                         &lt;--- Swipe to view Top Agents ---&gt;
                     </div>
@@ -1391,6 +1532,19 @@
                                     stroke-dasharray="15 100" transform="rotate(162 16 16)" />
                             <circle r="8" cx="16" cy="16" fill="#050505" />
                         </svg>
+                    </div>
+                    <div class="mt-3">
+                        <div class="flex justify-between items-center text-[11px]">
+                            <span class="text-zinc-500 uppercase tracking-widest">RATIO</span>
+                            <span class="text-green-500 font-bold" id="rtRatioPct">--</span>
+                        </div>
+                        <div class="mt-2 h-1 bg-zinc-800 w-full overflow-hidden">
+                            <div id="ratio-bar" class="h-full bg-white" style="width: 0%;"></div>
+                        </div>
+                    </div>
+                    <div class="mt-2 text-[11px] text-zinc-400">
+                        <span class="text-zinc-500">GLOBAL_RATIO:</span>
+                        <span id="rtGlobalRatio" class="text-green-500 font-bold">--</span>
                     </div>
                     <div class="space-y-2 mt-2" id="rtRatioList"></div>
                 </div>
@@ -1507,6 +1661,8 @@
 
     <script>
         let calibrationDebounceTimer = null; // 脚本最顶部声明，彻底拦截定位漂移，避免 ReferenceError
+
+        // ==========================================
         // ==========================================
         // 【v4.0 示例】VibeCodingerAnalyzer 全球各国数据切换示例
         // ==========================================
@@ -1638,37 +1794,547 @@
         }
         
         // 辅助函数：更新国家仪表板UI
-        function updateCountryDashboard(countryCode, data) {
-            // 示例：更新UI元素
-            const dashboard = document.getElementById(`country-dashboard-${countryCode}`);
-            if (dashboard) {
-                dashboard.innerHTML = `
-                    <div class="country-stats">
-                        <h3>${countryCode} 分析结果</h3>
-                        <div class="dimensions">
-                            ${Object.entries(data.result.dimensions).map(([key, value]) => 
-                                `<div class="dimension">
-                                    <span>${key}:</span>
-                                    <span>${value}</span>
-                                    ${data.deviation ? `<span class="deviation">${data.deviation.deviations[key]?.deviationPercent || ''}</span>` : ''}
-                                </div>`
-                            ).join('')}
+        async function updateCountryDashboard(countryNameOrCode, maybeData) {
+            // 兼容旧示例调用：updateCountryDashboard(countryCode, { result, ... })
+            if (maybeData && typeof maybeData === 'object' && maybeData.result) {
+                const countryCode = countryNameOrCode;
+                const data = maybeData;
+                const dashboard = document.getElementById(`country-dashboard-${countryCode}`);
+                if (dashboard) {
+                    dashboard.innerHTML = `
+                        <div class="country-stats">
+                            <h3>${countryCode} 分析结果</h3>
+                            <div class="dimensions">
+                                ${Object.entries(data.result.dimensions).map(([key, value]) =>
+                                    `<div class="dimension">
+                                        <span>${key}:</span>
+                                        <span>${value}</span>
+                                        ${data.deviation ? `<span class="deviation">${data.deviation.deviations[key]?.deviationPercent || ''}</span>` : ''}
+                                    </div>`
+                                ).join('')}
+                            </div>
+                            <div class="deviation-summary">
+                                ${data.deviation ? `
+                                    <p>整体偏离度: ${data.deviation.overallDeviation}%</p>
+                                    <p>${data.deviation.interpretation}</p>
+                                ` : ''}
+                            </div>
+                            <div class="stats">
+                                <p>技术栈: ${JSON.stringify(data.result.statistics?.tech_stack || {})}</p>
+                                <p>客套词数: ${data.result.statistics?.ketao_count || 0}</p>
+                                <p>加方词数: ${data.result.statistics?.jiafang_count || 0}</p>
+                                <p>工作天数: ${data.result.statistics?.work_days || 0}</p>
+                            </div>
+                            ${data.result.metadata?.hasRageWord ? '<div class="rage-warning">⚠️ 检测到咆哮词</div>' : ''}
                         </div>
-                        <div class="deviation-summary">
-                            ${data.deviation ? `
-                                <p>整体偏离度: ${data.deviation.overallDeviation}%</p>
-                                <p>${data.deviation.interpretation}</p>
-                            ` : ''}
-                        </div>
-                        <div class="stats">
-                            <p>技术栈: ${JSON.stringify(data.result.statistics?.tech_stack || {})}</p>
-                            <p>客套词数: ${data.result.statistics?.ketao_count || 0}</p>
-                            <p>加方词数: ${data.result.statistics?.jiafang_count || 0}</p>
-                            <p>工作天数: ${data.result.statistics?.work_days || 0}</p>
-                        </div>
-                        ${data.result.metadata?.hasRageWord ? '<div class="rage-warning">⚠️ 检测到咆哮词</div>' : ''}
+                    `;
+                }
+                return;
+            }
+
+            // 新逻辑：用于右侧抽屉国家透视（支持任意国家代码）
+            const rawCountry = String(countryNameOrCode || '').trim();
+            const isGlobal =
+                !rawCountry ||
+                rawCountry.toUpperCase() === 'GLOBAL' ||
+                rawCountry === '全网' ||
+                rawCountry === '世界' ||
+                rawCountry.toUpperCase() === 'WORLD';
+
+            let countryCode = '';
+            if (!isGlobal) {
+                if (rawCountry.length === 2) {
+                    countryCode = rawCountry.toUpperCase();
+                } else if (rawCountry === 'United States' || rawCountry === '美国') {
+                    countryCode = 'US';
+                } else if (rawCountry.toUpperCase() === 'US') {
+                    countryCode = 'US';
+                } else {
+                    // 无法从名称可靠推断国家代码时，退回 Global（避免错误写入/查询）
+                    countryCode = 'Global';
+                }
+            }
+            const isUS = countryCode === 'US';
+
+            const base = (document.querySelector('meta[name="api-endpoint"]')?.content || '').trim();
+            const API_ENDPOINT = base.endsWith('/') ? base : `${base}/`;
+            const url = isGlobal
+                ? `${API_ENDPOINT}api/global-average`
+                : `${API_ENDPOINT}api/global-average?country_code=${encodeURIComponent(countryCode)}`;
+
+            // DOM 绑定点
+            const usersValEl = document.getElementById('rtDiagnosedTotal');
+            const analysisValEl = document.getElementById('rtScanTotal');
+            const usersCardEl = document.getElementById('rtUsersCard');
+            const analysisCardEl = document.getElementById('rtAnalysisCard');
+            const statusEl = document.getElementById('rtDataStatus');
+            const radarDom = document.getElementById('rtRadar');
+            const realtimeDom = document.getElementById('rtRealtimeList');
+
+            const flash = (el) => {
+                if (!el) return;
+                el.classList.remove('breathe-flash');
+                // 强制重排以重启动画
+                void el.offsetWidth; // eslint-disable-line no-unused-expressions
+                el.classList.add('breathe-flash');
+                window.setTimeout(() => el.classList.remove('breathe-flash'), 950);
+            };
+
+            const stopFlash = (el) => {
+                if (!el) return;
+                el.classList.remove('breathe-flash');
+            };
+
+            const escapeHtml = (s) =>
+                String(s ?? '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+
+            const setValueOrNA = (el, rawValue) => {
+                if (!el) return;
+                const n = Number(rawValue);
+                // UI 降级：0 / null / undefined / NaN 都视为缺失，不闪烁
+                if (rawValue === null || rawValue === undefined || !Number.isFinite(n) || n === 0) {
+                    el.textContent = 'N/A';
+                    stopFlash(el);
+                    return;
+                }
+                el.textContent = new Intl.NumberFormat('zh-CN').format(n);
+            };
+
+            // 雷达图（ECharts）
+            if (!window.__countryRadarChart) window.__countryRadarChart = null;
+            const disposeRadar = () => {
+                try {
+                    if (window.__countryRadarChart && typeof window.__countryRadarChart.dispose === 'function') {
+                        window.__countryRadarChart.dispose();
+                    }
+                } catch (e) {
+                    // ignore
+                } finally {
+                    window.__countryRadarChart = null;
+                }
+            };
+
+            const renderRadarMessage = (msg) => {
+                if (!radarDom) return;
+                disposeRadar();
+                radarDom.innerHTML = `
+                    <div class="flex items-center justify-center h-full w-full text-center text-zinc-500 text-sm border border-white/10 bg-zinc-950/30">
+                        ${escapeHtml(msg)}
                     </div>
                 `;
+            };
+
+            const renderRadar = (values) => {
+                const dom = document.getElementById('rtRadar');
+                if (!dom || typeof echarts === 'undefined') return;
+                try {
+                    if (window.__countryRadarChart && typeof window.__countryRadarChart.dispose === 'function') {
+                        window.__countryRadarChart.dispose();
+                    }
+                } catch (e) {
+                    // ignore
+                }
+                dom.innerHTML = '';
+                window.__countryRadarChart = echarts.init(dom, null, { renderer: 'canvas' });
+                const option = {
+                    backgroundColor: 'transparent',
+                    radar: {
+                        indicator: [
+                            { name: 'L', max: 100 },
+                            { name: 'P', max: 100 },
+                            { name: 'D', max: 100 },
+                            { name: 'E', max: 100 },
+                            { name: 'F', max: 100 },
+                        ],
+                        axisName: { color: '#e5e7eb', fontFamily: 'JetBrains Mono', fontSize: 11 },
+                        splitLine: { lineStyle: { color: 'rgba(0,255,65,0.18)' } },
+                        splitArea: { areaStyle: { color: ['rgba(0,255,65,0.02)', 'rgba(0,255,65,0.01)'] } },
+                        axisLine: { lineStyle: { color: 'rgba(0,255,65,0.22)' } },
+                    },
+                    series: [
+                        {
+                            type: 'radar',
+                            data: [
+                                {
+                                    value: values,
+                                    name: 'US_AVG',
+                                    areaStyle: { color: 'rgba(0,255,65,0.15)' },
+                                    backgroundStyle: { color: 'transparent' },
+                                    lineStyle: { color: '#00ff41', width: 2 },
+                                    itemStyle: { color: '#00ff41' },
+                                },
+                            ],
+                        },
+                    ],
+                    tooltip: { show: true },
+                };
+                window.__countryRadarChart.setOption(option, true);
+                try {
+                    window.__countryRadarChart.resize();
+                } catch (e) {
+                    // ignore
+                }
+            };
+
+            // 实时动态
+            const renderRealtime = (records) => {
+                const box = document.getElementById('rtRealtimeList');
+                if (!box) return;
+                if (!Array.isArray(records) || records.length === 0) {
+                    box.innerHTML = '<div class="text-zinc-500 text-xs">暂无实时动态</div>';
+                    return;
+                }
+                box.innerHTML = records
+                    .map((r) => {
+                        const user = r.user_name ?? r.userName ?? r.username ?? 'Anonymous';
+                        const type =
+                            r.personality_type ??
+                            r.p_type ??
+                            r.type ??
+                            (r.personality && (r.personality.type || r.personality['type'])) ??
+                            'UNKNOWN';
+                        const loc = r.ip_location ?? r.location ?? r.ipLocation ?? '未知';
+                        return `
+                            <div class="border border-white/10 bg-zinc-950/40 p-3">
+                                <div class="flex justify-between gap-3">
+                                    <div class="text-white font-bold truncate">${escapeHtml(String(type).toUpperCase())}</div>
+                                    <div class="text-[10px] text-zinc-500 truncate">${escapeHtml(loc)}</div>
+                                </div>
+                                <div class="text-[10px] text-green-400/90 mt-1 truncate">@${escapeHtml(user)}</div>
+                            </div>
+                        `;
+                    })
+                    .join('');
+            };
+
+            const renderErrorState = (message) => {
+                if (statusEl) statusEl.textContent = 'DATA: ERROR';
+                if (usersValEl) usersValEl.textContent = 'N/A';
+                if (analysisValEl) analysisValEl.textContent = 'N/A';
+                stopFlash(usersCardEl || usersValEl);
+                stopFlash(analysisCardEl || analysisValEl);
+
+                renderRadarMessage(message);
+                const topTalentsEl = document.getElementById('rtTopTalentsList');
+                if (topTalentsEl) topTalentsEl.innerHTML = '';
+                const globalRatioEl = document.getElementById('rtGlobalRatio');
+                if (globalRatioEl) globalRatioEl.textContent = 'N/A';
+                const meritEl = document.getElementById('rtMeritBoard');
+                if (meritEl) meritEl.textContent = '已累计分析 -- 万字';
+                if (realtimeDom) {
+                    const retryArg = escapeHtml(JSON.stringify(countryName));
+                    realtimeDom.innerHTML = `
+                        <div class="border border-red-500/30 bg-red-950/20 p-4">
+                            <div class="text-red-300 text-sm font-bold mb-2">数据加载失败，请检查网络连接</div>
+                            <div class="text-zinc-400 text-xs mb-3">${escapeHtml(message || '')}</div>
+                            <button
+                                type="button"
+                                class="px-3 py-1.5 text-xs border border-red-400/60 text-red-200 hover:bg-red-400/10 transition-colors"
+                                onclick="updateCountryDashboard(${retryArg})"
+                            >[RETRY]</button>
+                        </div>
+                    `;
+                }
+            };
+
+            // 非全网：仅更新状态（词云由 loadWordCloud() 负责渲染）
+            if (!isGlobal) {
+                if (statusEl) statusEl.textContent = 'DATA: FETCHING';
+            }
+
+            try {
+                if (statusEl) statusEl.textContent = 'DATA: FETCHING';
+                // 请求发起前先给出加载态，避免旧数据误导
+                renderRadarMessage('数据加载中...');
+                if (realtimeDom) realtimeDom.innerHTML = '<div class="text-zinc-500 text-xs">加载中...</div>';
+
+                const resp = await fetch(url);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const payload = await resp.json();
+                const data = payload?.data ?? payload ?? {};
+
+                // 字段映射（兼容 total_users/totalUsers 等）
+                const globalTotalUsersRaw =
+                    data.totalUsers ??
+                    data.total_users ??
+                    data.us_stats?.totalUsers ??
+                    data.us_stats?.total_users ??
+                    null;
+                const globalTotalAnalysisRaw =
+                    data.totalAnalysis ??
+                    data.total_analysis ??
+                    data.us_stats?.totalAnalysis ??
+                    data.us_stats?.total_analysis ??
+                    null;
+
+                const avg_l = data.avg_l ?? data.avgL ?? data.us_stats?.avg_l ?? null;
+                const avg_p = data.avg_p ?? data.avgP ?? data.us_stats?.avg_p ?? null;
+                const avg_d = data.avg_d ?? data.avgD ?? data.us_stats?.avg_d ?? null;
+                const avg_e = data.avg_e ?? data.avgE ?? data.us_stats?.avg_e ?? null;
+                const avg_f = data.avg_f ?? data.avgF ?? data.us_stats?.avg_f ?? null;
+
+                // 雷达图数据强制转换：避免 "55.0" 这类字符串导致 ECharts 异常
+                const radarData = [
+                    Number(avg_l || 0),
+                    Number(avg_p || 0),
+                    Number(avg_d || 0),
+                    Number(avg_e || 0),
+                    Number(avg_f || 0),
+                ];
+
+                // AI 功德簿：累计字数（万字）
+                const meritEl = document.getElementById('rtMeritBoard');
+                const totalCharsSumRaw =
+                    data.totalCharsSum ??
+                    data.total_chars_sum ??
+                    data.totalChars ??
+                    data.total_chars ??
+                    data.us_stats?.totalCharsSum ??
+                    data.us_stats?.total_chars_sum ??
+                    null;
+                const totalCharsSum = Number(totalCharsSumRaw);
+                if (meritEl) {
+                    if (Number.isFinite(totalCharsSum) && totalCharsSum > 0) {
+                        meritEl.textContent = `已累计分析 ${(totalCharsSum / 10000).toFixed(1)} 万字`;
+                    } else {
+                        meritEl.textContent = '已累计分析 -- 万字';
+                    }
+                }
+
+                // 如果是美国，需要同时拿到：本地区 totalUsers / totalAnalysis 和全球 totalUsers（用于 Ratio）
+                let globalTotalUsers = Number(
+                    data.totalUsers ?? data.total_users ?? null
+                );
+                let globalTotalAnalysis = Number(
+                    data.totalAnalysis ?? data.total_analysis ?? null
+                );
+                let localTotalUsers = Number(
+                    data.us_stats?.totalUsers ??
+                    data.us_stats?.total_users ??
+                    (isGlobal ? (data.totalUsers ?? data.total_users ?? null) : null) ??
+                    (isUS ? (data.totalUsers ?? data.total_users ?? null) : null) ??
+                    null
+                );
+                let localTotalAnalysis = Number(
+                    data.us_stats?.totalAnalysis ??
+                    data.us_stats?.total_analysis ??
+                    (isGlobal ? (data.totalAnalysis ?? data.total_analysis ?? null) : null) ??
+                    (isUS ? (data.totalAnalysis ?? data.total_analysis ?? null) : null) ??
+                    null
+                );
+
+                // 某些接口可能只返回地区口径，这里兜底再拉一次全网 totalUsers
+                if (isUS && (!Number.isFinite(globalTotalUsers) || globalTotalUsers <= 0)) {
+                    try {
+                        const gResp = await fetch(`${API_ENDPOINT}api/global-average`);
+                        if (gResp.ok) {
+                            const gPayload = await gResp.json();
+                            const gData = gPayload?.data ?? gPayload ?? {};
+                            globalTotalUsers = Number(gData.totalUsers ?? gData.total_users ?? 0);
+                            globalTotalAnalysis = Number(gData.totalAnalysis ?? gData.total_analysis ?? 0);
+                        }
+                    } catch (e) {
+                        // ignore
+                    }
+                }
+
+                // 兜底：确保 finite number
+                if (!Number.isFinite(globalTotalUsers)) globalTotalUsers = 0;
+                if (!Number.isFinite(globalTotalAnalysis)) globalTotalAnalysis = 0;
+                if (!Number.isFinite(localTotalUsers)) localTotalUsers = 0;
+                if (!Number.isFinite(localTotalAnalysis)) localTotalAnalysis = 0;
+
+                const latest =
+                    data.latest_records ??
+                    data.latestRecords ??
+                    data.latest_records_v6 ??
+                    data.latest ??
+                    data.latestRecordsV6 ??
+                    [];
+
+                // 数值填充 + UI 降级：0/空不闪烁
+                // 规则：地区卡片展示“当前地区”口径；全网模式展示全网
+                setValueOrNA(usersValEl, isUS ? localTotalUsers : (isGlobal ? globalTotalUsers : localTotalUsers));
+                setValueOrNA(analysisValEl, isUS ? localTotalAnalysis : (isGlobal ? globalTotalAnalysis : localTotalAnalysis));
+                if (usersValEl && usersValEl.textContent !== 'N/A') flash(usersCardEl || usersValEl);
+                if (analysisValEl && analysisValEl.textContent !== 'N/A') flash(analysisCardEl || analysisValEl);
+
+                // 雷达图空状态：全部为 0 时显示提示而不是渲染空图
+                if (radarData.every((v) => Number(v) === 0)) {
+                    renderRadarMessage('该地区画像数据不足，正在汇总中...');
+                } else {
+                    renderRadar(radarData);
+                }
+
+                // =========================
+                // 派生指标计算与渲染
+                // =========================
+                const clampPct = (n) => {
+                    const x = Number(n);
+                    if (!Number.isFinite(x)) return 0;
+                    return Math.max(0, Math.min(100, x));
+                };
+                const avgL = radarData[0];
+                const avgP = radarData[1];
+                const avgD = radarData[2];
+                const avgE = radarData[3];
+                const avgF = radarData[4];
+
+                const metrics = {
+                    power: clampPct(avgD * 0.7 + avgP * 0.3),
+                    breakdown: clampPct((100 - avgE) * 0.8),
+                    semantic: clampPct(avgL * 0.6 + avgF * 0.4),
+                    ratio: clampPct(globalTotalUsers > 0 ? (localTotalUsers / globalTotalUsers) * 100 : 0),
+                };
+                if (isGlobal) metrics.ratio = 100;
+
+                // 数值填充
+                const powerScoreEl = document.getElementById('rtPowerScore');
+                const breakdownRateEl = document.getElementById('rtBreakdownRate');
+                const semanticScoreEl = document.getElementById('rtSemanticScore');
+                const ratioPctEl = document.getElementById('rtRatioPct');
+                if (powerScoreEl) powerScoreEl.textContent = metrics.power > 0 ? metrics.power.toFixed(1) : 'N/A';
+                if (breakdownRateEl) breakdownRateEl.textContent = metrics.breakdown > 0 ? `${metrics.breakdown.toFixed(1)}%` : 'N/A';
+                if (semanticScoreEl) semanticScoreEl.textContent = metrics.semantic > 0 ? metrics.semantic.toFixed(1) : 'N/A';
+                if (ratioPctEl) ratioPctEl.textContent = `${metrics.ratio.toFixed(2)}%`;
+
+                // 进度条联动
+                const setBar = (id, v) => {
+                    const el = document.getElementById(id);
+                    if (!el) return;
+                    const pct = clampPct(v);
+                    el.style.width = `${pct.toFixed(1)}%`;
+                };
+                setBar('power-bar', metrics.power);
+                setBar('breakdown-bar', metrics.breakdown);
+                setBar('semantic-bar', metrics.semantic);
+                setBar('ratio-bar', metrics.ratio);
+
+                // =========================
+                // 需求：高分图谱 (#rtTopTalentsList)
+                // 数据源：data.top_talents [{dim,user_name,score}]
+                // =========================
+                const topTalentsEl = document.getElementById('rtTopTalentsList');
+                const topTalents = Array.isArray(data.top_talents) ? data.top_talents : [];
+                const dimTitleMap = {
+                    L: '逻辑之神',
+                    P: '执行机器',
+                    D: '统治领主',
+                    E: '定海神针',
+                    F: '细节狂魔',
+                };
+                if (topTalentsEl) {
+                    const dims = ['L', 'P', 'D', 'E', 'F'];
+                    topTalentsEl.innerHTML = dims.map((dim) => {
+                        const found = topTalents.find((t) => String(t?.dim || '').toUpperCase() === dim) || null;
+                        const userName = found?.user_name ?? found?.userName ?? '--';
+                        const scoreNum = Number(found?.score);
+                        const scoreText = Number.isFinite(scoreNum) ? scoreNum.toFixed(1) : '--';
+                        return `
+                            <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
+                                <div class="flex items-center gap-2 min-w-0">
+                                    <span class="text-[10px] px-2 py-0.5 border border-[#00ff41]/30 text-[#00ff41] bg-[#00ff41]/5">${dim}</span>
+                                    <span class="text-xs text-white font-bold">${escapeHtml(dimTitleMap[dim] || dim)}</span>
+                                </div>
+                                <div class="flex items-center gap-3 min-w-0">
+                                    <span class="text-[10px] text-zinc-400 truncate">@${escapeHtml(userName)}</span>
+                                    <span class="text-xs text-green-500 font-bold tabular-nums">${escapeHtml(scoreText)}</span>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+
+                // 语义爆发词云卡片：仅保留词云形态（ECharts wordCloud），不再渲染 slang/merit/sv_slang 文本区
+                // 词云数据由 loadWordCloud() 通过 /api/v2/wordcloud-data 动态拉取
+
+                // =========================
+                // 需求：全球占比 (#rtGlobalRatio)
+                // 公式：(data.totalUsers / data.globalTotalUsers * 100).toFixed(1) + '%'
+                // 同步更新文字与进度条
+                // =========================
+                const globalRatioEl = document.getElementById('rtGlobalRatio');
+                const totalUsersForRatio = Number(data.totalUsers ?? data.total_users ?? 0);
+                const globalTotalUsersForRatio = Number(data.globalTotalUsers ?? data.global_total_users ?? globalTotalUsers ?? 0);
+                const ratioPct = (globalTotalUsersForRatio > 0)
+                    ? (totalUsersForRatio / globalTotalUsersForRatio) * 100
+                    : (isGlobal ? 100 : metrics.ratio);
+                const ratioText = `${(Number.isFinite(ratioPct) ? ratioPct : 0).toFixed(1)}%`;
+                if (globalRatioEl) globalRatioEl.textContent = ratioText;
+                if (ratioPctEl) ratioPctEl.textContent = ratioText;
+                setBar('ratio-bar', Number.isFinite(ratioPct) ? ratioPct : 0);
+
+                // 复用现有 PK 条（左=Power，右=100-Power）
+                const pkLeftFill = document.getElementById('rtPkLeftFill');
+                const pkRightFill = document.getElementById('rtPkRightFill');
+                const pkLeftPct = document.getElementById('rtPkLeftPct');
+                const pkRightPct = document.getElementById('rtPkRightPct');
+                if (pkLeftFill) pkLeftFill.style.width = `${metrics.power.toFixed(1)}%`;
+                if (pkRightFill) pkRightFill.style.width = `${(100 - metrics.power).toFixed(1)}%`;
+                if (pkLeftPct) pkLeftPct.textContent = `${metrics.power.toFixed(1)}%`;
+                if (pkRightPct) pkRightPct.textContent = `${(100 - metrics.power).toFixed(1)}%`;
+
+                // 破防等级 / 受虐人数（派生展示）
+                const meltdownLevelEl = document.getElementById('rtMeltdownLevel');
+                const meltdownVictimsEl = document.getElementById('rtMeltdownVictims');
+                if (meltdownLevelEl) {
+                    meltdownLevelEl.textContent =
+                        metrics.breakdown >= 70 ? 'ELEVATED' :
+                        metrics.breakdown >= 40 ? 'WARNING' :
+                        'STABLE';
+                }
+                if (meltdownVictimsEl) {
+                    meltdownVictimsEl.textContent = localTotalUsers > 0
+                        ? new Intl.NumberFormat('zh-CN').format(localTotalUsers)
+                        : 'N/A';
+                }
+
+                // 语义爆发补充文案：核心特质 + 指标
+                const dimKeys = ['L', 'P', 'D', 'E', 'F'];
+                let maxIdx = 0;
+                for (let i = 1; i < radarData.length; i++) {
+                    if (Number(radarData[i]) > Number(radarData[maxIdx])) maxIdx = i;
+                }
+                const coreTrait = dimKeys[maxIdx] || 'L';
+                const coreTraitEl = document.getElementById('rtCoreTrait');
+                if (coreTraitEl) coreTraitEl.textContent = `该地区核心特质：${coreTrait}`;
+
+                const semanticMostUsedEl = document.getElementById('rtSemanticMostUsed');
+                const semanticFreqEl = document.getElementById('rtSemanticFreq');
+                if (semanticMostUsedEl) semanticMostUsedEl.textContent = `CORE_TRAIT: ${coreTrait}`;
+                if (semanticFreqEl) semanticFreqEl.textContent = `SEMANTIC: ${metrics.semantic.toFixed(1)}`;
+
+                // 全球占比列表（简单两项）
+                const ratioListEl = document.getElementById('rtRatioList');
+                if (ratioListEl) {
+                    const label = isGlobal ? 'GLOBAL' : (isUS ? 'US' : 'REGION');
+                    const rest = clampPct(100 - metrics.ratio);
+                    ratioListEl.innerHTML = `
+                        <div class="flex justify-between text-xs">
+                            <span class="flex items-center gap-2"><div class="w-2 h-2 bg-[#00ff41]"></div> ${label}</span>
+                            <span class="font-bold">${metrics.ratio.toFixed(2)}%</span>
+                        </div>
+                        <div class="flex justify-between text-xs text-zinc-500">
+                            <span class="flex items-center gap-2"><div class="w-2 h-2 bg-zinc-700"></div> OTHERS</span>
+                            <span class="font-bold">${rest.toFixed(2)}%</span>
+                        </div>
+                    `;
+                }
+
+                // NOTE: 已在上方“派生指标计算与渲染 / 语义爆发（真实动态化）”完成渲染，
+                // 这里不再重复覆盖 powerScore / semanticBurst，避免 UI 抖动与逻辑分叉。
+
+                renderRealtime(latest);
+
+                if (statusEl) statusEl.textContent = 'DATA: STABLE';
+            } catch (err) {
+                console.error('[CountryDashboard] ❌ 更新失败:', err);
+                renderErrorState(err && err.message ? String(err.message) : '网络异常或服务器错误');
             }
         }
         
@@ -1831,7 +2497,9 @@
 
         const countryNameMap = {
             'CN': { zh: '中国', en: 'China' },
-            'US': { zh: '美国', en: 'USA' },
+            // 注意：ECharts world 地图对美国的标准名称通常是 'United States' / 'United States of America'
+            // 这里用 'United States' 作为 en，便于地图 name 匹配与点击解析
+            'US': { zh: '美国', en: 'United States' },
             'JP': { zh: '日本', en: 'Japan' },
             'GB': { zh: '英国', en: 'UK' },
             'DE': { zh: '德国', en: 'Germany' },
@@ -1839,6 +2507,37 @@
             'HK': { zh: '中国香港', en: 'Hong Kong' },
             'TW': { zh: '中国台湾', en: 'Taiwan' }
         };
+
+        /**
+         * 将 ECharts world 地图的国家名称解析为 ISO2 国家码（如 'United States of America' -> 'US'）
+         * 仅做 UI 层路由用（抽屉/国家透视），失败时返回 null。
+         */
+        function resolveCountryCodeFromMapName(name) {
+            const raw = String(name || '').trim();
+            if (!raw) return null;
+            // 直接是 ISO2
+            if (/^[A-Za-z]{2}$/.test(raw)) return raw.toUpperCase();
+
+            const n = raw.toLowerCase();
+
+            // 高优先级别名：美国/英国（ECharts world 常见命名差异）
+            if (n === 'usa' || n === 'u.s.a' || n === 'u.s.' || n.includes('united states')) return 'US';
+            if (n === 'uk' || n.includes('united kingdom')) return 'GB';
+
+            // 从 countryNameMap 反查（en/zh 都支持）
+            try {
+                for (const [code, names] of Object.entries(countryNameMap || {})) {
+                    if (!names) continue;
+                    const en = String(names.en || '').trim().toLowerCase();
+                    const zh = String(names.zh || '').trim().toLowerCase();
+                    if (en && en === n) return String(code).toUpperCase();
+                    if (zh && zh === n) return String(code).toUpperCase();
+                }
+            } catch (e) {
+                // ignore
+            }
+            return null;
+        }
 
         let mapChart, radarChart;
         let currentViewState = 'GLOBAL'; // GLOBAL 或 COUNTRY（右侧抽屉：实时动态流 / 国家透视）
@@ -2131,7 +2830,6 @@
             // 保存当前国家信息
             currentDrawerCountry.code = countryCode;
             currentDrawerCountry.name = countryName;
-            currentViewState = 'GLOBAL';
             const leftDrawer = document.getElementById('left-drawer');
             const rightDrawer = document.getElementById('right-drawer');
             const leftTitle = document.getElementById('left-drawer-title');
@@ -2151,7 +2849,6 @@
                 : countryName;
 
             // 更新标题
-            if (leftTitle) leftTitle.textContent = countryDisplayName;
             if (rightTitle) rightTitle.textContent = countryDisplayName;
 
             // 清空抽屉内容
@@ -2160,6 +2857,31 @@
 
             // 右侧抽屉数据源：校准后传入的国家摘要优先，否则用全局 lastData
             const rightDrawerData = overrideRightData != null ? overrideRightData : (window.lastData || {});
+            
+            // 若没有传入国家摘要，则异步拉取“国家汇总(10项核心指标)”用于右侧抽屉汇总卡片
+            // 不阻塞当前抽屉渲染：先用全局 lastData 兜底展示，拉取完成后自动刷新为国家口径
+            try {
+                const cc = String(countryCode || '').trim().toUpperCase();
+                const shouldFetchSummary =
+                    overrideRightData == null &&
+                    cc.length === 2 &&
+                    typeof fetchCountrySummaryV3 === 'function';
+                if (shouldFetchSummary) {
+                    fetchCountrySummaryV3(cc)
+                        .then((summary) => {
+                            // 避免竞态：只在用户仍停留在同一国家时刷新
+                            if (!summary) return;
+                            if (!currentDrawerCountry || String(currentDrawerCountry.code || '').toUpperCase() !== cc) return;
+                            // 关键保护：若当前处于国家透视（COUNTRY）模式，不允许这条“全球流面板”的刷新覆盖右抽屉
+                            // 否则会出现“美区统计闪一下又被切回全球”的现象
+                            if (typeof currentViewState === 'string' && currentViewState === 'COUNTRY') return;
+                            showDrawersWithCountryData(cc, countryName, summary);
+                        })
+                        .catch(() => {});
+                }
+            } catch (e) {
+                // ignore
+            }
 
             // 定义维度配置
             const dimensionConfig = {
@@ -2249,6 +2971,56 @@
                             console.error('[Drawer] ❌ 重新获取数据失败:', err);
                         });
                     }
+
+                    // ✅ GitHub 兜底：如果 allData 为空但本机有 GitHub ID，也应尝试 fetchData() 再匹配
+                    if (allData.length === 0 && !currentUser && localGitHubName && isValidGitHubUsername(localGitHubName)) {
+                        console.log('[Drawer] ⚠️ allData 为空（GitHub 用户），尝试重新获取数据...');
+                        fetchData().then(() => {
+                            allData = window.allData || [];
+                            console.log('[Drawer] ✅ 重新获取数据完成（GitHub 兜底），allData 数据量:', allData.length);
+
+                            const normalizedLocalGitHub = normalizeFingerprint(localGitHubName);
+                            const normalizedUrlGitHub = normalizeFingerprint(urlGitHubName);
+                            const matchedUser = allData.find(item => {
+                                const itemGitHub = normalizeFingerprint(item.github_username || item.github_id || item.user_name || item.name);
+                                return itemGitHub && (itemGitHub === normalizedLocalGitHub || itemGitHub === normalizedUrlGitHub);
+                            });
+
+                            if (matchedUser) {
+                                console.log('[Drawer] ✅ 重新匹配到 GitHub 用户:', matchedUser.user_name || matchedUser.name);
+                                window.currentUser = matchedUser;
+                                const leftBody = document.getElementById('left-drawer-body');
+                                if (leftBody) {
+                                    renderUserStatsCards(leftBody, getBestUserRecordForStats(matchedUser));
+                                }
+                                return;
+                            }
+
+                            // 二级兜底：直接从 Supabase 查询 GitHub 用户（避免不在 latestRecords 时一直 WAIT）
+                            try {
+                                if (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.from === 'function') {
+                                    supabaseClient
+                                        .from('v_unified_analysis_v2')
+                                        .select('*')
+                                        // GitHub 用户名大小写不敏感：避免 user_name 大小写不一致导致查不到
+                                        .ilike('user_name', String(localGitHubName).trim())
+                                        .maybeSingle()
+                                        .then(({ data: dbUser }) => {
+                                            if (!dbUser) return;
+                                            console.log('[Drawer] ✅ Supabase 兜底找到 GitHub 用户:', dbUser.user_name || dbUser.name);
+                                            window.currentUser = dbUser;
+                                            const leftBody2 = document.getElementById('left-drawer-body');
+                                            if (leftBody2) {
+                                                renderUserStatsCards(leftBody2, getBestUserRecordForStats(dbUser));
+                                            }
+                                        })
+                                        .catch(() => {});
+                                }
+                            } catch (e) { /* ignore */ }
+                        }).catch(err => {
+                            console.error('[Drawer] ❌ 重新获取数据失败（GitHub 兜底）:', err);
+                        });
+                    }
                     
                     // 优先通过指纹匹配
                     if (normalizedCurrentFingerprint || normalizedUrlFingerprint) {
@@ -2296,6 +3068,30 @@
                         if (currentUser) {
                             console.log('[Drawer] ✅ 通过 GitHub ID 找到用户:', currentUser.user_name || currentUser.name);
                         }
+                    }
+
+                    // ✅ 最终兜底：allData 里没有但本机有 GitHub ID 时，直接查统一视图
+                    if (!currentUser && localGitHubName && isValidGitHubUsername(localGitHubName)) {
+                        try {
+                            if (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.from === 'function') {
+                                supabaseClient
+                                    .from('v_unified_analysis_v2')
+                                    .select('*')
+                                    // GitHub 用户名大小写不敏感：避免 user_name 大小写不一致导致查不到
+                                    .ilike('user_name', String(localGitHubName).trim())
+                                    .maybeSingle()
+                                    .then(({ data: dbUser }) => {
+                                        if (!dbUser) return;
+                                        console.log('[Drawer] ✅ Supabase 最终兜底找到 GitHub 用户:', dbUser.user_name || dbUser.name);
+                                        window.currentUser = dbUser;
+                                        const leftBody = document.getElementById('left-drawer-body');
+                                        if (leftBody) {
+                                            renderUserStatsCards(leftBody, getBestUserRecordForStats(dbUser));
+                                        }
+                                    })
+                                    .catch(() => {});
+                            }
+                        } catch (e) { /* ignore */ }
                     }
                 }
             } catch (e) {
@@ -2351,6 +3147,11 @@
                     displayLabel = 'GitHub ID';
                     avatarUrl = DEFAULT_AVATAR;
                 }
+
+                // 左侧抽屉标题：始终显示“当前用户”，避免地图点击后左侧看起来像丢了个人数据
+                try {
+                    if (leftTitle) leftTitle.textContent = displayName || '我的数据';
+                } catch (e) { /* ignore */ }
                 
                 // 获取当前状态
                 const currentStatus = localStorage.getItem('user_status') || 'idle';
@@ -2817,6 +3618,8 @@
             if (rightTitle) rightTitle.textContent = name;
 
             renderCountryRightPanel(code, name);
+            // 触发国家抽屉数据拉取（按需求：updateCountryDashboard(countryName)）
+            try { updateCountryDashboard(code); } catch (e) { /* ignore */ }
 
             selectedCountry = code === 'US' ? 'US' : code;
             currentDrawerCountry.code = code;
@@ -2847,65 +3650,11 @@
             const node = tpl.content.cloneNode(true);
             mount.appendChild(node);
 
-            // 仅美国：硬编码模板数据（后续可接入 API）
-            const isUS = (code === 'US' || name === 'United States');
-            const model = isUS ? {
-                coord: 'COORD: 37.0902° N, 95.7129° W',
-                dataStatus: 'DATA: STABLE',
-                flag: '🇺🇸',
-                nodeName: 'UNITED_STATES_NODE',
-                diagnosedTotal: '1.284K',
-                scanTotal: '3.91B',
-                pk: {
-                    leftLabel: 'Dominance',
-                    rightLabel: 'Kowtow',
-                    leftPct: 58.2,
-                    rightPct: 41.8,
-                    quote: '"样本显示：该地区开发者以结果为王，低耐心高效率。夜间时段依旧保持强势指令密度，偏好短句直给。"' 
-                },
-                meltdown: {
-                    words: '1.12B WORDS',
-                    fillPct: 76,
-                    level: 'ELEVATED',
-                    victims: '128K+'
-                },
-                semantic: {
-                    tags: [
-                        { text: 'Efficiency', className: 'cloud-tag text-xl font-black text-green-500' },
-                        { text: 'Refactor', className: 'cloud-tag text-sm text-white' },
-                        { text: 'Idempotent', className: 'cloud-tag text-xs text-zinc-500' },
-                        { text: 'Ship it', className: 'cloud-tag text-lg font-bold text-white' },
-                        { text: 'Latency', className: 'cloud-tag text-sm text-green-400' },
-                        { text: 'No excuses', className: 'cloud-tag text-xs text-zinc-400' },
-                        { text: 'Over-optimize', className: 'cloud-tag text-sm text-green-300' },
-                        { text: 'Benchmark', className: 'cloud-tag text-xs text-zinc-600' },
-                        { text: 'Design', className: 'cloud-tag text-md text-white' }
-                    ],
-                    mostUsed: 'MOST_USED: Efficiency',
-                    freq: 'FREQ: 3.2M/H'
-                },
-                elite: [
-                    { id: 'SG', name: 'SiliconGhost', lpdef: 99 },
-                    { id: 'BS', name: 'ByteSlayer', lpdef: 97 },
-                    { id: 'LW', name: 'LogicWitch', lpdef: 96 },
-                    { id: 'CP', name: 'CursorPro', lpdef: 95 },
-                    { id: 'AC', name: 'AICoder', lpdef: 94 },
-                    { id: 'SV', name: 'SiliconValley', lpdef: 93 },
-                    { id: 'RX', name: 'RefactorX', lpdef: 92 },
-                    { id: 'DD', name: 'DeepDebug', lpdef: 91 },
-                    { id: 'FP', name: 'FastPatch', lpdef: 90 },
-                    { id: 'QE', name: 'QuickEagle', lpdef: 89 }
-                ],
-                ratio: [
-                    { label: 'USA', pct: 25.0, dotClass: 'bg-white' },
-                    { label: 'CHINA', pct: 45.0, dotClass: 'bg-green-500' },
-                    { label: 'INDIA', pct: 15.0, dotClass: 'bg-green-800' },
-                    { label: 'OTHERS', pct: 15.0, dotClass: 'bg-zinc-800', dim: true }
-                ]
-            } : {
-                coord: 'COORD: --',
-                dataStatus: 'DATA: LOADING',
-                flag: countryCodeToFlagEmoji(code) || '🏳️',
+            // 先渲染基础骨架（不再硬编码美国数据；数据由 updateCountryDashboard(countryName) 拉取）
+            const model = {
+                coord: (code === 'US' || name === 'United States') ? 'COORD: 37.0902° N, 95.7129° W' : 'COORD: --',
+                dataStatus: 'DATA: READY',
+                flag: (code === 'US' || name === 'United States') ? '🇺🇸' : (countryCodeToFlagEmoji(code) || '🏳️'),
                 nodeName: `${String(name || 'REGION').toUpperCase()}_NODE`,
                 diagnosedTotal: '--',
                 scanTotal: '--',
@@ -2942,10 +3691,7 @@
             const meltdownFill = q('#rtMeltdownFill');
             if (meltdownFill) meltdownFill.style.width = `${clamp(model.meltdown.fillPct, 0, 100)}%`;
 
-            const tagsEl = q('#rtSemanticTags');
-            if (tagsEl) {
-                tagsEl.innerHTML = (model.semantic.tags || []).map(t => `<span class="${t.className}">${String(t.text)}</span>`).join('');
-            }
+            // 注意：#rtSemanticTags 现在包含完整的“语义爆发”模板（含词云容器），不要在这里覆盖 innerHTML
             setText('#rtSemanticMostUsed', model.semantic.mostUsed);
             setText('#rtSemanticFreq', model.semantic.freq);
 
@@ -2978,12 +3724,27 @@
             } catch (e) {
                 // ignore
             }
+
+            // 初始化词云：非核心图表使用 requestIdleCallback，避免滚动卡顿
+            try {
+                const ric = window.requestIdleCallback || ((cb) => setTimeout(() => cb({ timeRemaining: () => 0 }), 0));
+                ric(() => { try { loadWordCloud(); } catch (e) { /* ignore */ } }, { timeout: 1500 });
+            } catch (e) {
+                try { setTimeout(() => { loadWordCloud(); }, 50); } catch (e2) { /* ignore */ }
+            }
+
+            // 将“暂无数据”的占位渲染出来，避免空白
+            const realtimeBox = q('#rtRealtimeList');
+            if (realtimeBox && !realtimeBox.innerHTML.trim()) {
+                realtimeBox.innerHTML = '<div class="text-zinc-500 text-xs">暂无实时动态</div>';
+            }
         }
 
         function refreshCountryRightPanel() {
             if (currentViewState !== 'COUNTRY') return;
             if (!currentDrawerCountry || !currentDrawerCountry.code) return;
             renderCountryRightPanel(currentDrawerCountry.code, currentDrawerCountry.name);
+            try { updateCountryDashboard(currentDrawerCountry.code); } catch (e) { /* ignore */ }
         }
 
         /**
@@ -3194,9 +3955,13 @@
                                 const name = params.name || params.data?.name || '未知区域';
                                 const value = params.value || 0;
                                 // 安全获取中文名称
-                                const label = (countryNameMap && countryNameMap[name] && countryNameMap[name].zh) 
-                                    ? countryNameMap[name].zh 
-                                    : name;
+                                const code = typeof resolveCountryCodeFromMapName === 'function'
+                                    ? resolveCountryCodeFromMapName(name)
+                                    : null;
+                                const label =
+                                    (code && countryNameMap && countryNameMap[code] && countryNameMap[code].zh)
+                                        ? countryNameMap[code].zh
+                                        : name;
                                 
                                 // Proxy 提示：判断 is_proxy 字段，若为 true，在地理位置后增加 [Proxy] 红色警告标签
                                 const dataItem = params.data || {};
@@ -3390,25 +4155,35 @@
                     const hasValidName = params.name && typeof params.name === 'string' && params.name.trim() !== '';
                     const isCountryClick = params.seriesType === 'map' && hasValidName;
                     console.log('[Map] 点击事件详情:', { seriesType: params.seriesType, name: params.name, isCountryClick, selectedCountryBefore: selectedCountry });
-                    
-                    // ========== 美国：进入国家数据透视模式 ==========
-                    if (isCountryClick && params.name === 'United States') {
-                        switchToCountryView('US', 'United States');
-                        return;
-                    }
-                    
+
                     if (isCountryClick) {
                         const countryName = params.name;
-                        let countryCode = null;
-                        for (const [code, names] of Object.entries(countryNameMap)) {
-                            if (names.en === countryName || names.zh === countryName || code === countryName) {
-                                countryCode = code;
-                                break;
-                            }
+                        // 优先用统一解析函数：适配 world 地图的英文全称/别名（尤其是美国）
+                        let countryCode = typeof resolveCountryCodeFromMapName === 'function'
+                            ? resolveCountryCodeFromMapName(countryName)
+                            : null;
+                        if (!countryCode) {
+                            // 兜底：旧逻辑（ISO2 映射表 en/zh）
+                            try {
+                                for (const [code, names] of Object.entries(countryNameMap || {})) {
+                                    if (names.en === countryName || names.zh === countryName || code === countryName) {
+                                        countryCode = code;
+                                        break;
+                                    }
+                                }
+                            } catch (e) {}
                         }
                         if (!countryCode) countryCode = countryName;
                         console.log(`[Map] 🗺️ 点击国家: ${countryName} (${countryCode})`);
                         selectedCountry = countryCode;
+                        
+                        // ========== 美国：进入国家数据透视模式（加载美国区域数据） ==========
+                        // 不依赖 params.name 的具体字符串，统一以解析后的国家代码判断
+                        if (String(countryCode).toUpperCase() === 'US') {
+                            switchToCountryView('US', countryName);
+                            return;
+                        }
+                        
                         showDrawersWithCountryData(countryCode, countryName);
                     } else {
                         console.log('[Map] 🌊 点击空白处，清除选中状态并关闭抽屉');
@@ -3624,8 +4399,28 @@
             try {
                 const res = await fetch(url);
                 if (!res.ok) return null;
-                const data = await res.json();
-                return data && data.success ? data : null;
+                const payload = await res.json();
+                // 保持旧语义：明确失败时不刷新抽屉（避免把有效的全局数据覆盖成 N/A）
+                if (payload && typeof payload === 'object' && 'success' in payload && payload.success !== true) {
+                    return null;
+                }
+                // 兼容后端多种包装格式：{success, data/result/summary/...}
+                // 目标：返回与 window.lastData 兼容的“扁平结构”，供右侧抽屉直接渲染
+                const raw =
+                    payload?.data ??
+                    payload?.result ??
+                    payload?.summary ??
+                    payload?.payload ??
+                    payload;
+
+                // 某些接口会返回 { success: true, ...fields }（字段直接在根上）
+                // 这种情况下 raw 可能仍带 success 标记，但 normalizeData 对此是安全的
+                const normalized = typeof normalizeData === 'function' ? normalizeData(raw) : raw;
+                // 附带国家码，方便调试/下游使用（不影响渲染）
+                if (normalized && typeof normalized === 'object') {
+                    normalized.countryCode = String(countryCode).toUpperCase();
+                }
+                return normalized && typeof normalized === 'object' ? normalized : null;
             } catch (e) {
                 console.warn('[CountrySummary] 拉取失败:', e);
                 return null;
@@ -4237,66 +5032,134 @@
          * @returns {Object} 标准化后的数据对象
          */
         function normalizeData(result) {
-            const data = result || {};
+            // 兼容：某些接口把真实数据包在 {success, data/result/...} 中
+            const unwrap = (v) => {
+                if (!v || typeof v !== 'object') return v;
+                // 仅在出现 success 标记时尝试解包，避免误把普通 data 字段当成包裹层
+                if ('success' in v) {
+                    return v.data ?? v.result ?? v.summary ?? v.payload ?? v;
+                }
+                return v;
+            };
+            const data = unwrap(result) || {};
             
             // 【核心指标提取】从 json.totalAnalysis 提取总扫描数，从 json.totalUsers 提取总人数
-            let totalAnalysis = data.totalAnalysis;
+            let totalAnalysis =
+                data.totalAnalysis ??
+                data.total_analysis ??
+                data.data?.totalAnalysis ??
+                data.data?.total_analysis ??
+                undefined;
             if (totalAnalysis === undefined || totalAnalysis === null) {
-                totalAnalysis = data.data?.totalAnalysis;
+                const recentVictims = data.recentVictims || data.latestRecords || data.latest_records || [];
+                if (Array.isArray(recentVictims)) totalAnalysis = recentVictims.length;
             }
-            if (totalAnalysis === undefined || totalAnalysis === null) {
-                const recentVictims = data.recentVictims || data.latestRecords || [];
-                totalAnalysis = recentVictims.length;
-            }
+            const totalAnalysisNum = Number(totalAnalysis);
+            totalAnalysis = Number.isFinite(totalAnalysisNum) ? totalAnalysisNum : undefined;
             
             // 【总人数提取】从 json.totalUsers 提取
-            const totalUsers = data.totalUsers || 0;
+            const totalUsersRaw =
+                data.totalUsers ??
+                data.total_users ??
+                data.data?.totalUsers ??
+                data.data?.total_users ??
+                data.us_stats?.totalUsers ??
+                data.us_stats?.total_users ??
+                undefined;
+            const totalUsersNum = Number(totalUsersRaw);
+            const totalUsers = Number.isFinite(totalUsersNum) ? totalUsersNum : undefined;
             
             // 【累计吐槽字数修复】不要读取 json.totalRoastWords（它是 0），请尝试从 json.totalChars 或 json.latestRecords[0].total_chars 获取数据
-            let totalRoastWords = data.totalChars;
+            let totalRoastWords =
+                data.totalChars ??
+                data.total_chars ??
+                data.totalCharsSum ??
+                data.total_chars_sum ??
+                data.totalCharsTotal ??
+                data.total_chars_total ??
+                undefined;
             if (totalRoastWords === undefined || totalRoastWords === null || totalRoastWords === 0) {
                 // 尝试从 latestRecords 中获取
-                const latestRecords = data.latestRecords || data.recentVictims || [];
-                if (latestRecords.length > 0 && latestRecords[0].total_chars) {
-                    totalRoastWords = latestRecords[0].total_chars;
+                const latestRecords =
+                    data.latestRecords ||
+                    data.latest_records ||
+                    data.recentVictims ||
+                    data.recent_victims ||
+                    [];
+                if (Array.isArray(latestRecords) && latestRecords.length > 0) {
+                    const first = latestRecords[0] || {};
+                    if (first.total_chars !== undefined && first.total_chars !== null) {
+                        totalRoastWords = first.total_chars;
+                    } else if (first.totalChars !== undefined && first.totalChars !== null) {
+                        totalRoastWords = first.totalChars;
+                    }
                 }
             }
             // 最后兜底：如果还是 0 或未定义，尝试其他路径
             if (totalRoastWords === undefined || totalRoastWords === null || totalRoastWords === 0) {
-                totalRoastWords = data.totalRoastWords || data.data?.total_roast_words || 0;
+                totalRoastWords =
+                    data.totalRoastWords ??
+                    data.total_roast_words ??
+                    data.data?.totalRoastWords ??
+                    data.data?.total_roast_words ??
+                    undefined;
             }
             
             // 【累计吐槽字数修复】绑定到 json.totalChars
-            const totalChars = data.totalChars !== undefined && data.totalChars !== null ? Number(data.totalChars) : (totalRoastWords !== undefined && totalRoastWords !== null ? Number(totalRoastWords) : undefined);
+            const totalCharsRaw =
+                data.totalChars ??
+                data.total_chars ??
+                data.totalCharsSum ??
+                data.total_chars_sum ??
+                totalRoastWords;
+            const totalCharsNum = Number(totalCharsRaw);
+            const totalChars = Number.isFinite(totalCharsNum) ? totalCharsNum : undefined;
             
             // 【强制映射层】avgPerUser 和 avgPerScan：依次尝试 result.avgPerUser/avgPerScan, result.data.avgPerUser/avgPerScan
-            let avgPerUser = data.avgPerUser;
-            if (avgPerUser === undefined || avgPerUser === null) {
-                avgPerUser = data.data?.avgPerUser;
-            }
+            let avgPerUser =
+                data.avgPerUser ??
+                data.avg_per_user ??
+                data.data?.avgPerUser ??
+                data.data?.avg_per_user ??
+                undefined;
             // 兼容旧字段名
             if (avgPerUser === undefined || avgPerUser === null) {
-                avgPerUser = data.avgChars;
+                avgPerUser = data.avgChars ?? data.avg_chars ?? undefined;
             }
             // 如果 avgPerUser 为 0 或无效，且 totalChars 和 totalUsers 都存在，则计算：totalChars / totalUsers
-            if ((avgPerUser === undefined || avgPerUser === null || avgPerUser === 0) && totalChars !== undefined && totalUsers !== undefined && totalUsers > 0) {
+            const avgPerUserNum = Number(avgPerUser);
+            if ((!Number.isFinite(avgPerUserNum) || avgPerUserNum === 0) && totalChars !== undefined && totalUsers !== undefined && totalUsers > 0) {
                 avgPerUser = totalChars / totalUsers;
+            } else {
+                avgPerUser = Number.isFinite(avgPerUserNum) ? avgPerUserNum : undefined;
             }
             
-            let avgPerScan = data.avgPerScan;
-            if (avgPerScan === undefined || avgPerScan === null) {
-                avgPerScan = data.data?.avgPerScan;
-            }
+            let avgPerScan =
+                data.avgPerScan ??
+                data.avg_per_scan ??
+                data.data?.avgPerScan ??
+                data.data?.avg_per_scan ??
+                undefined;
             // 如果 avgPerScan 为 0 或无效，且 totalChars 和 totalAnalysis 都存在，则计算：totalChars / totalAnalysis
-            if ((avgPerScan === undefined || avgPerScan === null || avgPerScan === 0) && totalChars !== undefined && totalAnalysis !== undefined && totalAnalysis !== null && totalAnalysis > 0) {
+            const avgPerScanNum = Number(avgPerScan);
+            if ((!Number.isFinite(avgPerScanNum) || avgPerScanNum === 0) && totalChars !== undefined && totalAnalysis !== undefined && totalAnalysis !== null && totalAnalysis > 0) {
                 avgPerScan = totalChars / totalAnalysis;
+            } else {
+                avgPerScan = Number.isFinite(avgPerScanNum) ? avgPerScanNum : undefined;
             }
             
             // 【五维平均分提取】必须从 json.averages 或 json.globalAverage 对象中提取（例如：json.averages.L）
             // 彻底删除硬编码，如果接口有值则必须显示接口的值
-            let averages = data.averages || data.globalAverage;
+            let averages = data.averages || data.globalAverage || data.global_average;
             if (!averages || typeof averages !== 'object') {
-                averages = {};
+                // 兼容：有些接口返回 avg_l/avg_p/... 而不是对象
+                const avgL = data.avg_l ?? data.avgL ?? data.data?.avg_l ?? data.data?.avgL ?? undefined;
+                const avgP = data.avg_p ?? data.avgP ?? data.data?.avg_p ?? data.data?.avgP ?? undefined;
+                const avgD = data.avg_d ?? data.avgD ?? data.data?.avg_d ?? data.data?.avgD ?? undefined;
+                const avgE = data.avg_e ?? data.avgE ?? data.data?.avg_e ?? data.data?.avgE ?? undefined;
+                const avgF = data.avg_f ?? data.avgF ?? data.data?.avg_f ?? data.data?.avgF ?? undefined;
+                const hasAny = [avgL, avgP, avgD, avgE, avgF].some((v) => v !== undefined && v !== null && v !== '');
+                averages = hasAny ? { L: avgL, P: avgP, D: avgD, E: avgE, F: avgF } : {};
             }
             // 确保所有维度都有值，但不使用硬编码默认值
             averages = {
@@ -4313,9 +5176,16 @@
             // 【上岗天数修复】从 json.systemDays 或 json.latestRecords[0].work_days 提取，不硬编码
             let systemDays = data.systemDays;
             if (systemDays === undefined || systemDays === null) {
-                const latestRecords = data.latestRecords || data.recentVictims || [];
-                if (latestRecords.length > 0 && latestRecords[0].work_days !== undefined && latestRecords[0].work_days !== null) {
-                    systemDays = latestRecords[0].work_days;
+                const latestRecords =
+                    data.latestRecords ||
+                    data.latest_records ||
+                    data.recentVictims ||
+                    data.recent_victims ||
+                    [];
+                if (Array.isArray(latestRecords) && latestRecords.length > 0) {
+                    const first = latestRecords[0] || {};
+                    if (first.work_days !== undefined && first.work_days !== null) systemDays = first.work_days;
+                    else if (first.workDays !== undefined && first.workDays !== null) systemDays = first.workDays;
                 }
             }
             
@@ -4328,13 +5198,33 @@
                 avgPerScan: avgPerScan !== undefined && avgPerScan !== null ? avgPerScan : undefined,
                 cityCount: data.cityCount !== undefined && data.cityCount !== null ? data.cityCount : undefined,
                 systemDays: systemDays !== undefined && systemDays !== null ? systemDays : undefined,
-                personalityRank: data.personalityRank || data.personalityDistribution || [],
-                personalityDistribution: data.personalityDistribution || data.personalityRank || [],
+                personalityRank:
+                    data.personalityRank ||
+                    data.personality_rank ||
+                    data.personalityDistribution ||
+                    data.personality_distribution ||
+                    [],
+                personalityDistribution:
+                    data.personalityDistribution ||
+                    data.personality_distribution ||
+                    data.personalityRank ||
+                    data.personality_rank ||
+                    [],
                 globalAverage: globalAverage,
                 averages: averages,
-                locationRank: data.locationRank || [],
-                recentVictims: data.recentVictims || data.latestRecords || [],
-                latestRecords: data.latestRecords || data.recentVictims || [],
+                locationRank: data.locationRank || data.location_rank || [],
+                recentVictims:
+                    data.recentVictims ||
+                    data.recent_victims ||
+                    data.latestRecords ||
+                    data.latest_records ||
+                    [],
+                latestRecords:
+                    data.latestRecords ||
+                    data.latest_records ||
+                    data.recentVictims ||
+                    data.recent_victims ||
+                    [],
                 // 【新增】保存各维度的最高记录（用于"全球最强模式"）
                 topRecords: data.topRecords || {},
             };
@@ -6894,7 +7784,8 @@
                     const { data: existingUser, error: findError } = await supabaseClient
                         .from('v_unified_analysis_v2')
                         .select('*')
-                        .eq('user_name', normalizedUsername)
+                        // GitHub 用户名大小写不敏感：避免 user_name 大小写不一致导致查不到
+                        .ilike('user_name', normalizedUsername)
                         .maybeSingle();
                     
                     if (findError && findError.code !== 'PGRST116') { // PGRST116 表示未找到记录，这是正常的
@@ -6915,7 +7806,8 @@
                                     user_name: normalizedUsername,
                                     updated_at: new Date().toISOString()
                                 })
-                                .eq('user_name', normalizedUsername)
+                                // GitHub 用户名大小写不敏感：避免 user_name 大小写不一致导致更新不到
+                                .ilike('user_name', normalizedUsername)
                                 .select()
                                 .single();
                         
@@ -8033,7 +8925,8 @@
             if (!user) return null;
             const allData = window.allData || [];
             const normalize = (v) => (v == null ? '' : String(v).trim().toLowerCase());
-            const same = allData.find(item => {
+            const isSameUser = (item) => {
+                if (!item) return false;
                 if (item.id != null && user.id != null && item.id === user.id) return true;
                 const itemFp = normalize(item.fingerprint || item.user_fingerprint);
                 const userFp = normalize(user.fingerprint || user.user_fingerprint);
@@ -8044,8 +8937,59 @@
                 const itemName = normalize(item.user_name || item.name || item.github_username);
                 const userName = normalize(user.user_name || user.name || user.github_username);
                 return itemName && userName && itemName === userName;
-            });
-            return same || user;
+            };
+
+            // 关键修复：不要用 allData 里“第一条命中”覆盖更完整的记录（例如 Supabase 刚拉到的 dbUser）
+            // 改为：在 [user + allData 的同人记录] 里按“字段完整度”打分择优
+            const candidates = [user, ...allData.filter(isSameUser)];
+            const score = (u) => {
+                if (!u) return -1;
+                let s = 0;
+
+                // 身份/主键字段
+                if (u.id != null) s += 3;
+                if (u.user_id != null) s += 2;
+                if (u.github_id != null) s += 2;
+                if (u.fingerprint || u.user_fingerprint) s += 2;
+                if (u.user_identity) s += 1;
+
+                // 维度/统计字段（覆盖 renderUserStatsCards 与 extractDimensionValues 的实际用法）
+                const statKeys = [
+                    'dimensions',
+                    'l_score','p_score','d_score','e_score','f_score',
+                    'l','p','d','e','f',
+                    'L','P','D','E','F',
+                    'question_message_count','total_messages',
+                    'total_user_chars','total_chars','totalUserChars',
+                    'avg_user_message_length','avgMessageLength','avgUserMessageLength',
+                    'work_days','usage_days','days',
+                    'jiafang_count','ketao_count',
+                    'vibe_rank','vibe_percentile','avg_rank'
+                ];
+                statKeys.forEach((k) => {
+                    const v = u[k];
+                    if (v !== undefined && v !== null && v !== '' && !(typeof v === 'number' && Number.isNaN(v))) s += 1;
+                });
+
+                // JSON/结构化字段
+                if (u.personality || u.personality_data || u.personalityData) s += 2;
+                if (u.answer_book || u.answerBook) s += 1;
+                if (u.personality_name || u.personalityName) s += 1;
+
+                return s;
+            };
+
+            let best = candidates[0] || null;
+            let bestScore = score(best);
+            for (let i = 1; i < candidates.length; i++) {
+                const c = candidates[i];
+                const cs = score(c);
+                if (cs > bestScore) {
+                    best = c;
+                    bestScore = cs;
+                }
+            }
+            return best || user;
         }
 
         /**
@@ -8077,22 +9021,70 @@
             }
             
             try {
-                // 【Task 4】检查是否为新用户（dimensions 为空或为默认值）
-                const hasDimensions = userData.dimensions || 
-                                    (userData.l_score !== null && userData.l_score !== undefined) ||
-                                    (userData.p_score !== null && userData.p_score !== undefined) ||
-                                    (userData.d_score !== null && userData.d_score !== undefined) ||
-                                    (userData.e_score !== null && userData.e_score !== undefined) ||
-                                    (userData.f_score !== null && userData.f_score !== undefined);
+                // 【Task 4】检查是否为新用户（维度/统计为空或为默认值）
+                // 修复：统一视图/隐私裁剪可能不返回 l_score..f_score，但仍可能返回其它统计字段（total_messages 等）
+                const quickScoreKeys = ['l_score','p_score','d_score','e_score','f_score','l','p','d','e','f','L','P','D','E','F'];
+                const hasAnyScore = quickScoreKeys.some(k => userData[k] !== null && userData[k] !== undefined);
+
+                const extracted = extractDimensionValues(userData);
+                const hasAnyMetric =
+                    (extracted.ai !== undefined && extracted.ai !== null && extracted.ai > 0) ||
+                    (extracted.say !== undefined && extracted.say !== null && extracted.say > 0) ||
+                    (extracted.word !== undefined && extracted.word !== null && extracted.word > 0) ||
+                    (extracted.no !== undefined && extracted.no !== null && extracted.no > 0) ||
+                    (extracted.please !== undefined && extracted.please !== null && extracted.please > 0) ||
+                    (extracted.day !== undefined && extracted.day !== null && extracted.day > 0);
+
+                const hasDimensions = !!userData.dimensions || hasAnyScore || hasAnyMetric;
+
+                // 默认分只在“五维分都存在且都等于 50”时成立
+                const isDefaultScores =
+                    userData.l_score === 50 &&
+                    userData.p_score === 50 &&
+                    userData.d_score === 50 &&
+                    userData.e_score === 50 &&
+                    userData.f_score === 50;
                 
-                const isDefaultScores = userData.l_score === 50 && 
-                                       userData.p_score === 50 && 
-                                       userData.d_score === 50 && 
-                                       userData.e_score === 50 && 
-                                       userData.f_score === 50;
-                
-                // 【修复】只有在确定是完全没有数据的用户时才显示同步中，且排除已登录的 GitHub 用户
-                const isNewUser = (!hasDimensions || isDefaultScores) && !userData.id;
+                // 【修复】GitHub 用户：即使 latestRecords 里字段不全，也不应一直卡在“同步中”
+                // 典型场景：/api/global-average 返回的 latestRecords 会做隐私裁剪，可能缺少 id/fingerprint/维度字段
+                const candidateUserName = String(userData?.user_name || userData?.name || '').trim();
+                const candidateIdentity = userData?.user_identity || null;
+                const isGitHubUser = !!(candidateUserName && typeof isValidGitHubUsername === 'function' && isValidGitHubUsername(candidateUserName, candidateIdentity));
+                const canQuerySupabase = (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.from === 'function');
+
+                // 若是 GitHub 用户但数据不全：自动从统一视图拉完整记录后再渲染，避免无限 loading
+                if ((!hasDimensions || isDefaultScores) && !userData.id && isGitHubUser && canQuerySupabase && !userData.__unifiedFetchAttempted) {
+                    try {
+                        userData.__unifiedFetchAttempted = true; // 标记：避免递归死循环
+                        console.log('[UserStats] 🔄 GitHub 用户数据不全，尝试从 v_unified_analysis_v2 拉取完整记录:', candidateUserName);
+                        supabaseClient
+                            .from('v_unified_analysis_v2')
+                            .select('*')
+                            // GitHub 用户名大小写不敏感：避免 user_name 大小写不一致导致查不到
+                            .ilike('user_name', candidateUserName)
+                            .maybeSingle()
+                            .then(({ data: dbUser }) => {
+                                if (!dbUser) {
+                                    console.warn('[UserStats] ⚠️ v_unified_analysis_v2 未找到用户记录:', candidateUserName);
+                                    // 继续走后续渲染（会显示“暂无云端数据”卡片）
+                                    renderUserStatsCards(leftBody, { ...userData, __unifiedFetchAttempted: true });
+                                    return;
+                                }
+                                console.log('[UserStats] ✅ 已获取完整用户记录，刷新统计卡片:', dbUser.user_name || dbUser.name);
+                                renderUserStatsCards(leftBody, getBestUserRecordForStats(dbUser));
+                            })
+                            .catch((e) => {
+                                console.warn('[UserStats] ⚠️ v_unified_analysis_v2 查询失败:', e);
+                                renderUserStatsCards(leftBody, { ...userData, __unifiedFetchAttempted: true });
+                            });
+                        return; // 异步拉取后会重渲染，这里先退出
+                    } catch (e) {
+                        console.warn('[UserStats] ⚠️ 触发 GitHub 用户补全流程失败:', e);
+                    }
+                }
+
+                // 只有在确定是“完全没有数据的匿名用户/占位记录”时才显示同步中
+                const isNewUser = (!hasDimensions || isDefaultScores) && !userData.id && !isGitHubUser;
                 
                 if (isNewUser) {
                     console.log('[UserStats] ⏳ 检测到新用户（数据同步中），显示加载占位符');
@@ -8140,6 +9132,95 @@
                     
                     console.log('[UserStats] ✅ 已显示数据同步中占位符');
                     return; // 提前返回，不渲染完整统计卡片
+                }
+
+                // GitHub 用户但 Supabase 客户端尚未就绪：先显示“连接中”，并稍后自动重试
+                if ((!hasDimensions || isDefaultScores) && isGitHubUser && !userData.id && !canQuerySupabase && !userData.__unifiedFetchAttempted) {
+                    try {
+                        const attempts = Number(userData.__supabaseWaitAttempts || 0);
+                        if (attempts < 6) {
+                            userData.__supabaseWaitAttempts = attempts + 1;
+                            const delayMs = 800 + attempts * 400;
+                            setTimeout(() => {
+                                const lb = document.getElementById('left-drawer-body');
+                                if (lb) renderUserStatsCards(lb, userData);
+                            }, delayMs);
+                        }
+                    } catch (e) { /* ignore */ }
+
+                    const connectingCard = document.createElement('div');
+                    connectingCard.className = 'drawer-item';
+                    connectingCard.innerHTML = `
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">🔌</span>
+                            <span class="text-[8px] leading-none text-[#00ff41] border border-[#00ff41]/40 px-1 py-0.5 tracking-widest uppercase bg-[#00ff41]/5">
+                                CONNECT
+                            </span>
+                        </div>
+                        <div class="drawer-item-label mb-2">我的数据统计</div>
+                        <div class="text-[10px] text-[#00ff41]/60 mb-2">
+                            正在连接云端数据源，请稍候…
+                        </div>
+                        <div class="text-[8px] text-[#00ff41]/40">
+                            GitHub 用户：${candidateUserName || '未知'}
+                        </div>
+                    `;
+
+                    const existingStatsCards = leftBody.querySelectorAll('.drawer-item');
+                    existingStatsCards.forEach(card => {
+                        const label = card.querySelector('.drawer-item-label');
+                        if (label && (label.textContent === '我的数据统计' || label.textContent === '数据同步中')) {
+                            card.remove();
+                        }
+                    });
+
+                    const identityCard = leftBody.querySelector('.drawer-item');
+                    if (identityCard && identityCard.nextSibling) {
+                        leftBody.insertBefore(connectingCard, identityCard.nextSibling);
+                    } else {
+                        leftBody.appendChild(connectingCard);
+                    }
+                    return;
+                }
+
+                // GitHub 用户仍无维度且已尝试补全：不要显示“同步中”，改为“暂无云端汇总数据”（提示用户先跑一次分析）
+                if ((!hasDimensions || isDefaultScores) && isGitHubUser && !userData.id && userData.__unifiedFetchAttempted) {
+                    console.warn('[UserStats] ⚠️ GitHub 用户暂无云端汇总数据（可能尚未跑过分析或数据仍未入库）:', candidateUserName);
+
+                    const emptyCard = document.createElement('div');
+                    emptyCard.className = 'drawer-item';
+                    emptyCard.innerHTML = `
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">🧾</span>
+                            <span class="text-[8px] leading-none text-[#00ff41] border border-[#00ff41]/40 px-1 py-0.5 tracking-widest uppercase bg-[#00ff41]/5">
+                                NO DATA
+                            </span>
+                        </div>
+                        <div class="drawer-item-label mb-2">我的数据统计</div>
+                        <div class="text-[10px] text-[#00ff41]/60 mb-2">
+                            暂未获取到云端汇总数据（GitHub 用户：${candidateUserName || '未知'}）。
+                        </div>
+                        <div class="text-[8px] text-[#00ff41]/40">
+                            建议：先在主页面完成一次分析/上报，然后刷新此页面。
+                        </div>
+                    `;
+
+                    // 清理旧卡片并插入
+                    const existingStatsCards = leftBody.querySelectorAll('.drawer-item');
+                    existingStatsCards.forEach(card => {
+                        const label = card.querySelector('.drawer-item-label');
+                        if (label && (label.textContent === '我的数据统计' || label.textContent === '数据同步中')) {
+                            card.remove();
+                        }
+                    });
+
+                    const identityCard = leftBody.querySelector('.drawer-item');
+                    if (identityCard && identityCard.nextSibling) {
+                        leftBody.insertBefore(emptyCard, identityCard.nextSibling);
+                    } else {
+                        leftBody.appendChild(emptyCard);
+                    }
+                    return;
                 }
                 
                 // 提取维度值
@@ -9382,6 +10463,512 @@
                 startRealtimeListener();
             }, 500);
         };
+
+        // ==========================================
+        // WordCloud: /api/v2/wordcloud-data -> ECharts wordCloud
+        // ==========================================
+        let vibeWordCloudChart = null;
+        let vibeWordCloudAbort = null;
+
+        async function loadWordCloud() {
+            const container = document.getElementById('wordcloud-container');
+            if (!container) return;
+
+            // Loader
+            container.innerHTML = `
+                <div class="vibe-cloud-loader">
+                    <div class="dot" aria-hidden="true"></div>
+                    <div class="dot" aria-hidden="true"></div>
+                    <div class="dot" aria-hidden="true"></div>
+                    <div class="label">LOADING VIBES</div>
+                </div>
+            `;
+
+            // Dependency checks
+            if (typeof echarts === 'undefined') {
+                container.innerHTML = '<div class="text-zinc-500 text-sm p-4">ECharts 未加载</div>';
+                return;
+            }
+
+            const apiEndpoint = (document.querySelector('meta[name="api-endpoint"]')?.content || '').trim();
+            const API_ENDPOINT = apiEndpoint.endsWith('/') ? apiEndpoint : `${apiEndpoint}/`;
+
+            try {
+                // 非阻塞/防抖：如果上一次还没结束，直接取消
+                try { vibeWordCloudAbort && vibeWordCloudAbort.abort(); } catch (e) { /* ignore */ }
+                vibeWordCloudAbort = new AbortController();
+
+                // 国家透视（COUNTRY）时：词云应使用该地区/国家口径，而不是全局口径
+                let region = null;
+                try {
+                    if (typeof currentViewState === 'string' && currentViewState === 'COUNTRY') {
+                        const cc = String(currentDrawerCountry?.code || '').trim().toUpperCase();
+                        if (cc.length === 2) region = cc;
+                    }
+                } catch (e) { /* ignore */ }
+
+                const wcUrl = region
+                    ? `${API_ENDPOINT}api/v2/wordcloud-data?region=${encodeURIComponent(region)}`
+                    : `${API_ENDPOINT}api/v2/wordcloud-data`;
+
+                const resp = await fetch(wcUrl, {
+                    signal: vibeWordCloudAbort.signal,
+                    // COUNTRY 视图不要用 force-cache，避免浏览器缓存住 fallback（硬编码）词云
+                    cache: region ? 'no-store' : 'force-cache',
+                });
+                const json = await resp.json().catch(() => null);
+
+                const rows = Array.isArray(json?.data) ? json.data : [];
+                const words = rows
+                    .map((x) => ({
+                        name: String(x?.name || '').trim(),
+                        value: Number(x?.value) || 0,
+                        // 【V6.0 新增】支持 category 字段
+                        category: x?.category || 'slang', // 默认 slang
+                    }))
+                    .filter((x) => x.name && x.value > 0)
+                    .sort((a, b) => b.value - a.value) // 按权重排序
+                    .slice(0, 50); // 动态阈值：只取前 50
+
+                if (words.length === 0) {
+                    container.innerHTML = '<div class="text-zinc-500 text-sm p-4">暂无词云数据</div>';
+                    return;
+                }
+
+                // Clear loader and (re)create chart
+                container.innerHTML = '';
+                try {
+                    if (vibeWordCloudChart && typeof vibeWordCloudChart.dispose === 'function') {
+                        vibeWordCloudChart.dispose();
+                    }
+                } catch (e) {
+                    // ignore
+                }
+                // 深色风格：使用 ECharts 内置 dark theme（如不可用也不会报错）
+                vibeWordCloudChart = echarts.init(container, 'dark', { renderer: 'canvas' });
+
+                const maxVal = Math.max(...words.map((w) => w.value));
+                const minVal = Math.min(...words.map((w) => w.value));
+                const width = Math.max(320, container.clientWidth || 640);
+                const maxFont = Math.max(22, Math.floor(width * 0.2)); // 最大不超过容器宽度的20%
+
+                // 【V6.0 新增】基于 category 的颜色映射
+                const getCategoryStyle = (category, value) => {
+                    // 归一化 value 到 0-1 范围，用于动态发光
+                    const intensity = Math.min(1, value / maxVal);
+
+                    switch (category) {
+                        case 'merit': // 功德词：绿色系
+                            return {
+                                color: `rgba(16, 185, 129, ${0.7 + intensity * 0.3})`, // #10B981
+                                shadowBlur: 8 + intensity * 12,
+                                shadowColor: `rgba(16, 185, 129, ${0.4 + intensity * 0.4})`,
+                            };
+                        case 'sv_slang': // 硅谷黑话：橙色系
+                            return {
+                                color: `rgba(249, 115, 22, ${0.7 + intensity * 0.3})`, // #F97316
+                                shadowBlur: 8 + intensity * 12,
+                                shadowColor: `rgba(249, 115, 22, ${0.4 + intensity * 0.4})`,
+                            };
+                        case 'slang': // 黑话词：紫色系（默认）
+                        default:
+                            return {
+                                color: `rgba(168, 85, 247, ${0.7 + intensity * 0.3})`, // #A855F7
+                                shadowBlur: 8 + intensity * 12,
+                                shadowColor: `rgba(168, 85, 247, ${0.4 + intensity * 0.4})`,
+                            };
+                    }
+                };
+
+                // 【V6.0 新增】tooltip formatter 显示 category 信息
+                const categoryLabels = {
+                    'merit': '功德',
+                    'slang': '黑话',
+                    'sv_slang': '硅谷黑话',
+                };
+
+                const option = {
+                    backgroundColor: 'transparent',
+                    tooltip: {
+                        show: true,
+                        backgroundColor: 'rgba(9,10,15,0.92)',
+                        borderColor: 'rgba(148,163,184,0.22)',
+                        borderWidth: 1,
+                        padding: [8, 10],
+                        textStyle: { color: '#e5e7eb', fontFamily: 'JetBrains Mono, monospace' },
+                        // 【V6.0 新增】显示 category 信息
+                        formatter: (p) => {
+                            const catLabel = categoryLabels[p.data.category] || '未知';
+                            return `${p.name}: ${p.value} (${catLabel})`;
+                        },
+                    },
+                    series: [
+                        {
+                            type: 'wordCloud',
+                            shape: 'circle',
+                            left: 'center',
+                            top: 'center',
+                            width: '100%',
+                            height: '100%',
+                            gridSize: 6,
+                            // value -> font size
+                            sizeRange: [12, maxFont],
+                            rotationRange: [0, 0], // 设置为 0 以提高中文字符的阅读性
+                            rotationStep: 0,
+                            drawOutOfBound: false,
+                            textStyle: {
+                                fontFamily: 'JetBrains Mono, monospace',
+                                // 【V6.0 新增】基于 category 动态颜色
+                                color: (p) => getCategoryStyle(p.data.category, p.data.value).color,
+                                shadowBlur: (p) => getCategoryStyle(p.data.category, p.data.value).shadowBlur,
+                                shadowColor: (p) => getCategoryStyle(p.data.category, p.data.value).shadowColor,
+                            },
+                            emphasis: {
+                                focus: 'self',
+                                textStyle: {
+                                    // 【V6.0 新增】hover 时增强发光效果
+                                    shadowBlur: (p) => {
+                                        return getCategoryStyle(p.data.category, p.data.value).shadowBlur * 1.5;
+                                    },
+                                    shadowColor: (p) => {
+                                        return getCategoryStyle(p.data.category, p.data.value).shadowColor;
+                                    },
+                                },
+                            },
+                            // 【V6.0 新增】点击事件：触发地图联动
+                            onclick: (p) => {
+                                handleWordCloudClick(p.data.name, p.data.category);
+                            },
+                            data: words,
+                        },
+                    ],
+                };
+
+                // Some environments load plugin late; wrap setOption for friendly fallback
+                try {
+                    vibeWordCloudChart.setOption(option, true);
+                } catch (e) {
+                    container.innerHTML = '<div class="text-zinc-500 text-sm p-4">WordCloud 插件未加载或渲染失败</div>';
+                    try { vibeWordCloudChart.dispose(); } catch {}
+                    vibeWordCloudChart = null;
+                    return;
+                }
+
+                // Responsive
+                window.setTimeout(() => {
+                    try { vibeWordCloudChart && vibeWordCloudChart.resize(); } catch {}
+                }, 0);
+
+                // Re-render on resize (lightweight)
+                if (!window.__vibeCloudResizeBound) {
+                    window.__vibeCloudResizeBound = true;
+                    window.addEventListener('resize', () => {
+                        try { vibeWordCloudChart && vibeWordCloudChart.resize(); } catch {}
+                    });
+                }
+            } catch (err) {
+                // fallback_keywords：确保 UI 不崩溃
+                const fallback_keywords = [
+                    { name: '颗粒度', value: 180 },
+                    { name: '闭环', value: 165 },
+                    { name: '方法论', value: 142 },
+                    { name: '对齐', value: 130 },
+                    { name: '落地', value: 118 },
+                    { name: '抓手', value: 110 },
+                ];
+                try {
+                    container.innerHTML = '';
+                    if (vibeWordCloudChart && typeof vibeWordCloudChart.dispose === 'function') {
+                        vibeWordCloudChart.dispose();
+                    }
+                    vibeWordCloudChart = echarts.init(container, 'dark', { renderer: 'canvas' });
+                    vibeWordCloudChart.setOption({
+                        backgroundColor: 'transparent',
+                        series: [{
+                            type: 'wordCloud',
+                            shape: 'circle',
+                            width: '100%',
+                            height: '100%',
+                            gridSize: 6,
+                            sizeRange: [12, Math.max(22, Math.floor((container.clientWidth || 640) * 0.2))],
+                            rotationRange: [0, 0], // 设置为 0 以提高中文字符的阅读性
+                            rotationStep: 0,
+                            drawOutOfBound: false,
+                            textStyle: { fontFamily: 'JetBrains Mono, monospace', color: '#A855F7' },
+                            emphasis: { textStyle: { shadowBlur: 18, shadowColor: 'rgba(168,85,247,0.35)' } },
+                            data: fallback_keywords,
+                        }],
+                    }, true);
+                } catch (e) {
+                    container.innerHTML = '<div class="text-zinc-500 text-sm p-4">词云加载失败</div>';
+                }
+            }
+        }
+        
+        // initWordCloud 别名（兼容旧代码）
+        const initWordCloud = loadWordCloud;
+        window.initWordCloud = initWordCloud;
+        window.loadWordCloud = loadWordCloud;
+
+        // ==========================================
+        // 【V6.0 新增】词云点击事件处理
+        // ==========================================
+
+        /**
+         * 处理词云点击，触发地图联动
+         * @param {string} keyword - 点击的关键词
+         * @param {string} category - 关键词分类
+         */
+        window.handleWordCloudClick = async function(keyword, category) {
+            console.log('[WordCloud] 点击词云:', { keyword, category });
+
+            const apiEndpoint = (document.querySelector('meta[name="api-endpoint"]')?.content || '').trim();
+            const API_ENDPOINT = apiEndpoint.endsWith('/') ? apiEndpoint : `${apiEndpoint}/`;
+
+            try {
+                // 查询该关键词的地理分布
+                const resp = await fetch(`${API_ENDPOINT}api/v2/keyword-location?keyword=${encodeURIComponent(keyword)}`, {
+                    cache: 'no-cache'
+                });
+                const json = await resp.json().catch(() => null);
+
+                if (json && json.status === 'success' && json.data) {
+                    // 显示关键词地理分布详情
+                    showKeywordDetails(keyword, category, json.data);
+                } else {
+                    // 没有地理数据时显示简单提示
+                    showKeywordSimple(keyword, category);
+                }
+            } catch (error) {
+                console.warn('[Frontend] ⚠️ 词云点击事件处理失败:', error);
+                showKeywordSimple(keyword, category);
+            }
+        };
+
+        /**
+         * 显示关键词详细信息（无地理数据时的简化版本）
+         */
+        function showKeywordSimple(keyword, category) {
+            const categoryLabels = {
+                'merit': '功德',
+                'slang': '黑话',
+                'sv_slang': '硅谷黑话',
+            };
+
+            const catLabel = categoryLabels[category] || '未知';
+
+            // 使用 existingAlert 或创建临时提示
+            if (typeof existingAlert === 'function') {
+                existingAlert(`关键词 "${keyword}" (${catLabel})\n地理分布数据暂不可用`, 'info');
+            } else {
+                alert(`关键词: ${keyword}\n分类: ${catLabel}\n\n地理分布功能开发中...`);
+            }
+        }
+
+        /**
+         * 显示关键词详细信息面板
+         */
+        function showKeywordDetails(keyword, category, locationData) {
+            const countryPanel = document.getElementById('countryPanel');
+            if (!countryPanel) return;
+
+            // 按出现频率排序
+            const sortedLocations = (locationData || [])
+                .sort((a, b) => (b.count || 0) - (a.count || 0))
+                .slice(0, 10);
+
+            const categoryLabels = {
+                'merit': '功德',
+                'slang': '黑话',
+                'sv_slang': '硅谷黑话',
+            };
+
+            const catLabel = categoryLabels[category] || '未知';
+
+            const html = `
+                <div class="clinic-card">
+                    <div class="card-header">
+                        <i data-lucide="map-pin"></i>
+                        <span class="card-title">关键词地理分布</span>
+                    </div>
+                    <div class="mb-4">
+                        <div class="text-sm text-zinc-400 mb-2">关键词</div>
+                        <div class="text-2xl font-bold ${category === 'merit' ? 'text-green-500' : 'text-purple-500'}">
+                            ${keyword}
+                        </div>
+                        <div class="text-xs text-zinc-500 mt-1">
+                            分类：${catLabel}
+                        </div>
+                    </div>
+                    <div>
+                        <div class="text-sm text-zinc-400 mb-2">Top 10 地区</div>
+                        ${sortedLocations.length > 0 ? `
+                            <div class="space-y-2">
+                                ${sortedLocations.map(item => `
+                                    <div class="flex justify-between items-center bg-zinc-900 p-2 border border-zinc-800">
+                                        <span class="text-sm">${item.location || '未知'}</span>
+                                        <span class="text-sm font-bold text-emerald-400">${item.count || 0} 次</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : '<div class="text-zinc-500 text-sm">暂无地理分布数据</div>'}
+                    </div>
+                </div>
+            `;
+
+            countryPanel.innerHTML = html;
+            countryPanel.style.display = 'block';
+
+            // 刷新 Lucide 图标
+            if (typeof lucide !== 'undefined' && lucide.createIcons) {
+                lucide.createIcons();
+            }
+        }
+
+        // ==========================================
+        // 语义爆发：静默上报（Dashboard/父页面可触发）
+        // ==========================================
+        
+        // 关键词词典（用于分类）
+        const MERIT_KEYWORDS = new Set(['重构', '优化', '修复', '改进', '完善', '提升', '增强', '调整', '更新', '升级', '功德', '福报', '积德', '善业']);
+        const SLANG_KEYWORDS = new Set(['闭环', '颗粒度', '对齐', '抓手', '落地', '复盘', '链路', '兜底', '赋能', '降维', '护城河', '赛道', '方法论', '底层逻辑', '架构解耦']);
+        
+        /**
+         * 自动分类关键词
+         * @param {string} phrase - 关键词
+         * @returns {'merit' | 'slang'}
+         */
+        function categorizeKeyword(phrase) {
+            const normalized = String(phrase || '').trim();
+            if (!normalized) return 'slang';
+            
+            // 匹配"重构/优化/修复"归为 merit
+            if (MERIT_KEYWORDS.has(normalized)) {
+                return 'merit';
+            }
+            
+            // 匹配"闭环/颗粒度/对齐"归为 slang
+            if (SLANG_KEYWORDS.has(normalized)) {
+                return 'slang';
+            }
+            
+            // 默认归为 slang
+            return 'slang';
+        }
+        
+        /**
+         * 提取 Vibe 关键词（带分类和权重）
+         * @param {string} text - 文本内容
+         * @param {Object} options - 选项 { max: number }
+         * @returns {Array} - [{ phrase, category, weight }]
+         */
+        function extractVibeKeywords(text, { max = 5 } = {}) {
+            const raw = String(text || '');
+            if (!raw.trim()) return [];
+
+            // 2-4 个中文字符或 3-15 个英文字符
+            const matches = raw.match(/[\u4e00-\u9fa5]{2,4}|[a-zA-Z]{3,15}/g) || [];
+
+            // 停用词（按需可继续扩展）
+            const stopWords = new Set([
+                '这个', '可以', '实现', '逻辑', '分析', '代码', '接口', '报错', '异常', '错误', '返回', '请求', '数据',
+                '函数', '变量', '对象', '数组', '字符串', '数字', '类型', '组件', '页面', '前端', '后端',
+                'the', 'and', 'that', 'this', 'with', 'from', 'into', 'just', 'like', 'very',
+            ]);
+
+            const freq = new Map();
+            for (const token of matches) {
+                const t = String(token).trim();
+                if (!t) continue;
+                const normalized = /^[a-zA-Z]+$/.test(t) ? t.toLowerCase() : t;
+                if (stopWords.has(normalized)) continue;
+                if (normalized.length < 2) continue;
+                freq.set(normalized, (freq.get(normalized) || 0) + 1);
+            }
+
+            // 返回带分类的对象数组
+            return Array.from(freq.entries())
+                .sort((a, b) => (b[1] - a[1]) || (a[0] > b[0] ? 1 : -1))
+                .slice(0, Math.max(3, Math.min(5, Number(max) || 5)))
+                .map(([phrase, count]) => ({
+                    phrase,
+                    category: categorizeKeyword(phrase),
+                    weight: Math.max(1, Math.min(5, count)) // 权重：频次上限 5
+                }));
+        }
+
+        async function reportSlangFromText(text, location) {
+            try {
+                const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content || '';
+                const API_ENDPOINT = apiEndpoint.trim().endsWith('/') ? apiEndpoint.trim() : `${apiEndpoint.trim()}/`;
+                
+                // 获取用户指纹
+                const fingerprint = (() => {
+                    try {
+                        return localStorage.getItem('user_fingerprint') || null;
+                    } catch (e) {
+                        return null;
+                    }
+                })();
+                
+                const keywords = extractVibeKeywords(text, { max: 5 });
+                if (!keywords || keywords.length === 0) return;
+                
+                // 使用新版接口 /api/v2/report-vibe
+                const payload = {
+                    keywords: keywords,
+                    fingerprint: fingerprint || null,
+                    timestamp: new Date().toISOString(),
+                    region: location || 'Global',
+                };
+                
+                // sendBeacon 最不打扰主线程/页面卸载
+                if (typeof navigator !== 'undefined' && navigator && typeof navigator.sendBeacon === 'function') {
+                    try {
+                        const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+                        navigator.sendBeacon(`${API_ENDPOINT}api/v2/report-vibe`, blob);
+                        return;
+                    } catch {
+                        // fallthrough
+                    }
+                }
+                
+                // fetch keepalive 兜底
+                await fetch(`${API_ENDPOINT}api/v2/report-vibe`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    keepalive: true,
+                    body: JSON.stringify(payload),
+                });
+            } catch (e) {
+                // 静默失败
+            }
+        }
+
+        // 触发入口1：父页面 postMessage 传入分析结果
+        // 约定消息格式：{ type: 'VIBE_ANALYSIS_RESULT', text: string, location?: string }
+        window.addEventListener('message', (event) => {
+            try {
+                const data = event?.data;
+                if (!data || data.type !== 'VIBE_ANALYSIS_RESULT') return;
+                const text = data.text || '';
+                const location = data.location || 'GLOBAL';
+                void reportSlangFromText(text, location);
+            } catch (e) {
+                // ignore
+            }
+        });
+
+        // 触发入口2：当前页面若存在 window.lastAnalysisText / window.lastAnalysisLocation，可直接调用
+        window.reportSlangFromLastAnalysis = function () {
+            try {
+                const text = window.lastAnalysisText || '';
+                const location = window.lastAnalysisLocation || 'GLOBAL';
+                return reportSlangFromText(text, location);
+            } catch (e) {
+                return Promise.resolve();
+            }
+        };
         
         /**
          * 全局函数：刷新用户数据（供 index.html 调用）
@@ -9400,6 +10987,8 @@
                 if (refreshUserStatsAbortController) {
                     refreshUserStatsAbortController.abort();
                 }
+                // 取消后直接返回，避免重复执行
+                return;
             }
             
             // 创建新的 AbortController

@@ -17,6 +17,303 @@ import { getText } from './i18n.js';
 
 /**
  * ==========================================
+ * 语义爆发：本地关键词提取 + 异步上报（减轻 Supabase 压力）
+ * ==========================================
+ */
+// 分类关键词词典
+const MERIT_KEYWORDS = new Set(['重构', '优化', '修复', '改进', '完善', '提升', '增强', '调整', '更新', '升级']);
+const SLANG_KEYWORDS = new Set(['闭环', '颗粒度', '对齐', '抓手', '落地', '复盘', '链路', '兜底', '赋能', '降维', '护城河', '赛道']);
+
+/**
+ * 自动分类关键词
+ * @param {string} phrase - 关键词
+ * @returns {'merit' | 'slang' | 'sv_slang'}
+ */
+function categorizeKeyword(phrase) {
+  const normalized = String(phrase || '').trim();
+  if (!normalized) return 'slang';
+  
+  // 英文词归为 sv_slang
+  if (/^[a-zA-Z]+$/.test(normalized)) {
+    return 'sv_slang';
+  }
+  
+  // 匹配"重构/优化/修复"归为 merit
+  if (MERIT_KEYWORDS.has(normalized)) {
+    return 'merit';
+  }
+  
+  // 匹配"闭环/颗粒度/对齐"归为 slang
+  if (SLANG_KEYWORDS.has(normalized)) {
+    return 'slang';
+  }
+  
+  // 默认归为 slang
+  return 'slang';
+}
+
+export function extractVibeKeywords(text, { max = 5 } = {}) {
+  const raw = String(text || '');
+  if (!raw.trim()) return [];
+
+  // 2-4 个中文字符或 3-15 个英文字符
+  const matches = raw.match(/[\u4e00-\u9fa5]{2,4}|[a-zA-Z]{3,15}/g) || [];
+
+  // 微型停用词（按需可继续扩展）
+  const stopWords = new Set([
+    '这个', '可以', '实现', '结果', '然后', '因为', '但是', '所以', '我们', '你们', '他们', '现在',
+    '如何', '怎么', '请问', '谢谢', '好的', '需要', '进行', '完成', '问题', '功能', '数据', '接口',
+    'the', 'and', 'that', 'this', 'with', 'from', 'into', 'just', 'like', 'very',
+  ]);
+
+  const freq = new Map();
+  for (const token of matches) {
+    const t = String(token).trim();
+    if (!t) continue;
+    const normalized = /^[a-zA-Z]+$/.test(t) ? t.toLowerCase() : t;
+    if (stopWords.has(normalized)) continue;
+    if (normalized.length < 2) continue;
+    freq.set(normalized, (freq.get(normalized) || 0) + 1);
+  }
+
+  // 返回带分类的对象数组
+  return Array.from(freq.entries())
+    .sort((a, b) => (b[1] - a[1]) || (a[0] > b[0] ? 1 : -1))
+    .slice(0, Math.max(3, Math.min(5, Number(max) || 5)))
+    .map(([phrase, count]) => ({
+      phrase,
+      category: categorizeKeyword(phrase),
+      weight: Math.max(1, Math.min(5, count)) // 权重：频次上限 5
+    }));
+}
+
+// ==========================================
+// v2：国别热词提取（slang / merit / sv_slang）
+// ==========================================
+function maskNoiseForVibes(input) {
+  let t = String(input || '');
+  if (!t) return '';
+  // 1) 移除 fenced code / inline code
+  t = t.replace(/```[\s\S]*?```/g, ' ');
+  t = t.replace(/`[^`]*`/g, ' ');
+  // 2) 移除 HTML / script / style
+  t = t.replace(/<script[\s\S]*?<\/script>/gi, ' ');
+  t = t.replace(/<style[\s\S]*?<\/style>/gi, ' ');
+  t = t.replace(/<[^>]+>/g, ' ');
+  // 3) 移除常见 JSON/对象片段（保守）
+  t = t.replace(/\{[^{}]{0,800}\}/g, ' ');
+  // 4) 移除文件路径/堆栈噪音
+  t = t.replace(/[A-Za-z]:\\[^\s]+/g, ' ');
+  t = t.replace(/\/[^\s]+\/[^\s]+/g, ' ');
+  // 5) 统一空白
+  return t.replace(/\s+/g, ' ').trim();
+}
+
+const VIBE_STOPWORDS_ZH = new Set([
+  '这个', '可以', '实现', '逻辑', '分析', '代码', '接口', '报错', '异常', '错误', '返回', '请求', '数据',
+  '函数', '变量', '对象', '数组', '字符串', '数字', '类型', '组件', '页面', '前端', '后端',
+]);
+
+const CATEGORY_SEEDS = {
+  slang: new Set(['颗粒度', '闭环', '方法论', '架构解耦', '底层逻辑', '降维打击', '赛道赋能', '头部效应', '护城河', '对齐', '抓手', '落地', '复盘', '链路', '兜底']),
+  merit: new Set(['功德', '福报', '积德', '善业', '救火', '背锅', '加班', '熬夜']),
+  sv_slang: new Set(['硅谷', '护城河', '增长', '融资', '赛道', '估值', '现金流', '天使轮', 'A轮']),
+};
+
+// 用于“国家级词云/语义爆发”的停用词（只用于提词，不影响维度分析）
+const WORDCLOUD_STOPWORDS_ZH = new Set([
+  ...Array.from(VIBE_STOPWORDS_ZH || []),
+  // 过于通用的抽象词（避免把“技术/交流/一场”这类泛词刷到榜上）
+  '技术', '交流', '一场', '这种', '那个', '这个', '我们', '你们', '他们', '今天', '现在',
+  '可以', '需要', '问题', '为什么', '怎么', '如何', '请问', '谢谢', '帮忙', '麻烦',
+]);
+
+const WORDCLOUD_STOPWORDS_EN = new Set([
+  'the','and','that','this','with','from','into','just','like','very','have','has','had','will','would','could','should',
+  // 常见路径/噪音片段（避免堆栈/包路径把词云刷爆）
+  'com','org','net','src','main','app','test','build','dist','node','modules','users','desktop','windows','cursor',
+]);
+
+function categorizeWordcloudPhrase(phrase) {
+  const p = String(phrase || '').trim();
+  if (!p) return 'slang';
+  if (CATEGORY_SEEDS.merit.has(p)) return 'merit';
+  if (CATEGORY_SEEDS.sv_slang.has(p) || /^[a-zA-Z]+$/.test(p)) return 'sv_slang';
+  if (CATEGORY_SEEDS.slang.has(p)) return 'slang';
+  // 默认：当作“程序员黑话/技术词组”归到 slang
+  return 'slang';
+}
+
+/**
+ * 从“用户聊天文本”提取国家级词云候选词组：
+ * - 中文：连续汉字片段做 2-4 字 n-gram（要求重复出现，或命中 seed）
+ * - 英文：字母/数字/+-#/. 的 token（要求重复出现，或命中 seed）
+ * 输出用于 /api/v2/report-vibe，让后端按 region 聚合成国家级词汇
+ */
+function extractCountryWordcloudItemsFromText(text, { maxItems = 12 } = {}) {
+  const cleaned = maskNoiseForVibes(text);
+  if (!cleaned) return [];
+
+  const freq = new Map(); // phrase -> count
+
+  // 1) 中文 2-4gram
+  const runs = cleaned.match(/[\u4e00-\u9fa5]{2,}/g) || [];
+  for (const run of runs) {
+    const s = String(run);
+    const len = s.length;
+    for (let n = 2; n <= 4; n++) {
+      for (let i = 0; i <= len - n; i++) {
+        const gram = s.slice(i, i + n);
+        if (WORDCLOUD_STOPWORDS_ZH.has(gram)) continue;
+        freq.set(gram, (freq.get(gram) || 0) + 1);
+      }
+    }
+  }
+
+  // 2) 英文 token（保留常见技术 token 形式）
+  const enTokens = cleaned.match(/[A-Za-z][A-Za-z0-9+.#-]{2,24}/g) || [];
+  for (const tok of enTokens) {
+    const t = String(tok).trim();
+    if (!t) continue;
+    const lower = t.toLowerCase();
+    if (WORDCLOUD_STOPWORDS_EN.has(lower)) continue;
+    // 英文统一用 lower 以便聚合
+    freq.set(lower, (freq.get(lower) || 0) + 1);
+  }
+
+  // 3) 过滤：要求“重复出现”或“命中 seed”
+  const entries = Array.from(freq.entries())
+    .filter(([phrase, count]) => {
+      if (!phrase) return false;
+      const isSeed = CATEGORY_SEEDS.slang.has(phrase) || CATEGORY_SEEDS.merit.has(phrase) || CATEGORY_SEEDS.sv_slang.has(phrase);
+      return count >= 2 || isSeed;
+    })
+    .sort((a, b) => (b[1] - a[1]) || (a[0] > b[0] ? 1 : -1))
+    .slice(0, Math.max(5, Math.min(20, Number(maxItems) || 12)));
+
+  return entries.map(([phrase, count]) => ({
+    phrase,
+    category: categorizeWordcloudPhrase(phrase),
+    // weight 体现“该用户内重复度”，后端再按 region 累加形成国家级热词
+    weight: Math.max(1, Math.min(8, Number(count) || 1)),
+  }));
+}
+
+export function extractNationalVibes(text, region) {
+  const cleaned = maskNoiseForVibes(text);
+  if (!cleaned) {
+    return { region: String(region || 'Global'), items: [] };
+  }
+
+  // 提取中文连续片段，然后做 2-4 字 N-Gram
+  const runs = cleaned.match(/[\u4e00-\u9fa5]{2,}/g) || [];
+  const freq = new Map();
+  for (const run of runs) {
+    const s = String(run);
+    const len = s.length;
+    for (let n = 2; n <= 4; n++) {
+      for (let i = 0; i <= len - n; i++) {
+        const gram = s.slice(i, i + n);
+        if (VIBE_STOPWORDS_ZH.has(gram)) continue;
+        freq.set(gram, (freq.get(gram) || 0) + 1);
+      }
+    }
+  }
+
+  const top = Array.from(freq.entries())
+    .sort((a, b) => (b[1] - a[1]) || (a[0] > b[0] ? 1 : -1))
+    .slice(0, 5); // 3-5 个
+
+  const items = top.map(([phrase, count]) => {
+    const p = String(phrase);
+    let category = 'slang';
+    if (CATEGORY_SEEDS.merit.has(p)) category = 'merit';
+    else if (CATEGORY_SEEDS.sv_slang.has(p)) category = 'sv_slang';
+    else if (CATEGORY_SEEDS.slang.has(p)) category = 'slang';
+    // 权重：频次上限 5（防止单条刷爆）
+    const weight = Math.max(1, Math.min(5, Number(count) || 1));
+    return { phrase: p, category, weight };
+  });
+
+  return { region: String(region || 'Global'), items };
+}
+
+function getApiEndpointForClient() {
+  if (typeof window !== 'undefined') {
+    const envApiUrl = window.__API_ENDPOINT__ || window.API_ENDPOINT;
+    if (envApiUrl) return String(envApiUrl).trim().replace(/\/?$/, '/');
+    const metaApi = document.querySelector('meta[name="api-endpoint"]');
+    if (metaApi && metaApi.content) {
+      const apiUrl = metaApi.content.trim();
+      return apiUrl.endsWith('/') ? apiUrl : apiUrl + '/';
+    }
+  }
+  return 'https://cursor-clinical-analysis.psterman.workers.dev/';
+}
+
+async function reportNationalVibes(payload) {
+  try {
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    if (items.length === 0) return;
+    const apiEndpoint = getApiEndpointForClient();
+    const url = `${apiEndpoint}api/report-slang`;
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // 静默上报：不阻塞用户体验
+      keepalive: true,
+      body: JSON.stringify(payload),
+    });
+  } catch (e) {
+    // 静默失败：不影响主流程
+  }
+}
+
+/**
+ * 上报关键词到 /api/v2/report-vibe
+ * 约束：必须非阻塞，不影响用户实时反馈
+ * 优先：navigator.sendBeacon
+ * 兜底：fetch(keepalive)
+ */
+async function reportKeywords(keywords, { fingerprint = null, timestamp = null, region = null } = {}) {
+  try {
+    const list = Array.isArray(keywords) ? keywords : [];
+    if (list.length === 0) return;
+
+    const apiEndpoint = getApiEndpointForClient();
+    const url = `${apiEndpoint}api/v2/report-vibe`;
+    const payload = {
+      keywords: list,
+      fingerprint: fingerprint || null,
+      timestamp: timestamp || new Date().toISOString(),
+      region: region || 'Global',
+    };
+
+    // sendBeacon 最不打扰主线程/页面卸载
+    if (typeof navigator !== 'undefined' && navigator && typeof navigator.sendBeacon === 'function') {
+      try {
+        const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+        navigator.sendBeacon(url, blob);
+        return;
+      } catch {
+        // fallthrough
+      }
+    }
+
+    // fetch keepalive 兜底
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      keepalive: true,
+      body: JSON.stringify(payload),
+    });
+  } catch (e) {
+    // 静默失败
+  }
+}
+
+/**
+ * ==========================================
  * AC 自动机优化：词库预处理模块
  * ==========================================
  */
@@ -752,6 +1049,61 @@ export class VibeCodingerAnalyzer {
   }
 
   /**
+   * 云端上报（非阻塞）
+   * - 使用 /api/v2/report-vibe
+   * - sendBeacon / fetch keepalive 由 reportKeywords 负责兜底
+   */
+  #reportToCloud(detectedWords, safeContext, meta, region) {
+    try {
+      const list = Array.isArray(detectedWords) ? detectedWords : [];
+      if (list.length === 0) return;
+      
+      // 确保 region 是字符串类型
+      const safeRegion = String(region || safeContext?.countryCode || 'Global').trim() || 'Global';
+      const safeFingerprint = safeContext?.fingerprint || meta?.fingerprint || null;
+      const safeTimestamp = meta?.timestamp || new Date().toISOString();
+      
+      void reportKeywords(list, {
+        fingerprint: safeFingerprint,
+        timestamp: safeTimestamp,
+        region: safeRegion,
+      });
+    } catch (e) {
+      // 静默失败，避免影响主流程
+      console.warn('[VibeAnalyzer] 上报关键词失败:', e?.message || String(e));
+    }
+  }
+
+  /**
+   * 遍历“用户代码片段”识别 MERIT/SLANG 关键词
+   * 返回：[{ phrase, category, weight }]
+   */
+  #detectWordsFromCode(chatData) {
+    const text = (Array.isArray(chatData) ? chatData : [])
+      .map((m) => String(m?.text || m?.content || ''))
+      .join('\n');
+    if (!text) return [];
+
+    const blocks = [];
+    const fenced = text.match(/```[\s\S]*?```/g) || [];
+    for (const b of fenced) blocks.push(b.replace(/```/g, ' '));
+    const inline = text.match(/`[^`]{6,200}`/g) || [];
+    for (const b of inline) blocks.push(b.replace(/`/g, ' '));
+
+    const hay = blocks.join('\n');
+    if (!hay.trim()) return [];
+
+    const found = new Map();
+    for (const kw of MERIT_KEYWORDS) {
+      if (hay.includes(kw)) found.set(kw, { phrase: kw, category: 'merit', weight: 1 });
+    }
+    for (const kw of SLANG_KEYWORDS) {
+      if (hay.includes(kw)) found.set(kw, { phrase: kw, category: 'slang', weight: 1 });
+    }
+    return Array.from(found.values());
+  }
+
+  /**
    * 设置语言
    * @param {string} lang - 语言代码
    */
@@ -1276,6 +1628,80 @@ export class VibeCodingerAnalyzer {
       
       // 保存分析结果（兼容旧版本）
       this.analysisResult = fullResult;
+
+      // 【新增】提取 MERIT 和 SLANG 关键词并异步上报
+      try {
+        // 非阻塞：把 CPU 开销（提词/合并）与网络请求延后到 idle/下一轮事件循环
+        const schedule = (fn) => {
+          try {
+            if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+              window.requestIdleCallback(() => {
+                try { fn(); } catch (e) { /* silent */ }
+              }, { timeout: 1200 });
+              return;
+            }
+          } catch (e) { /* silent */ }
+          try {
+            setTimeout(() => {
+              try { fn(); } catch (e2) { /* silent */ }
+            }, 0);
+          } catch (e3) { /* silent */ }
+        };
+
+        schedule(() => {
+          try {
+            const region = String(this.countryCode || safeContext?.countryCode || 'Global').trim();
+            
+            // 【核心逻辑】从“用户消息”提取高频词组（国家级词云候选）+ 代码片段命中词（补充功德/黑话）
+            const userText = (Array.isArray(sanitizedChatData) ? sanitizedChatData : [])
+              .filter((m) => {
+                const role = String(m?.role || '').toUpperCase();
+                // 只吃用户消息，避免把助手/模板文案混进国别词云
+                return role === 'USER' || role === 'HUMAN' || role === 'U' || role === '';
+              })
+              .map((m) => String(m?.text || m?.content || '').trim())
+              .filter(t => t.length > 0)
+              .join(' ');
+
+            if (!userText || userText.length === 0) return;
+
+            const keywords = extractCountryWordcloudItemsFromText(userText, { maxItems: 12 });
+
+            // 补充：代码片段中的功德/黑话（避免“只在代码块里出现”的词漏掉）
+            const codeHits = this.#detectWordsFromCode(sanitizedChatData);
+
+            // 合并（同 phrase+category 累加权重），并限制总量
+            const merged = new Map();
+            const push = (it) => {
+              const phrase = String(it?.phrase || '').trim();
+              if (!phrase || phrase.length < 2 || phrase.length > 24) return;
+              const category = String(it?.category || 'slang').trim() || 'slang';
+              const weight = Math.max(1, Math.min(10, Number(it?.weight) || 1));
+              const key = `${category}:${phrase}`;
+              merged.set(key, {
+                phrase,
+                category,
+                weight: Math.max(1, Math.min(50, (merged.get(key)?.weight || 0) + weight)),
+              });
+            };
+            (Array.isArray(keywords) ? keywords : []).forEach(push);
+            (Array.isArray(codeHits) ? codeHits : []).forEach(push);
+            const finalList = Array.from(merged.values())
+              .sort((a, b) => (b.weight - a.weight) || (a.phrase > b.phrase ? 1 : -1))
+              .slice(0, 15);
+
+            // 通过 /api/v2/report-vibe 上报（使用 navigator.sendBeacon 或异步 fetch）
+            if (finalList.length > 0) {
+              this.#reportToCloud(finalList, safeContext, fullResult?.meta, region);
+            }
+          } catch (e) {
+            // 静默失败，避免影响主流程
+            console.warn('[VibeAnalyzer] 关键词提取失败:', e?.message || String(e));
+          }
+        });
+      } catch (e) {
+        // 静默失败
+      }
 
       return fullResult;
     } catch (error) {
@@ -2487,6 +2913,10 @@ export class VibeCodingerAnalyzer {
           returnData.globalAverage = globalAverage;
         }
         
+        // 语义爆发（国别热词）：
+        // 修复：不要用 roastText（吐槽文案库）作为提词语料，否则会把“技术/一场交流”等文案词上报并污染词云。
+        // 当前国别热词已由上方“从 chatData 提取 MERIT/SLANG 并上报 /api/v2/report-vibe”覆盖，无需重复上报 /api/report-slang。
+
         return returnData;
       } else {
         // 处理错误情况
