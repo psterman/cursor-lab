@@ -3486,12 +3486,42 @@
                 
                 leftBody.appendChild(identityCard);
 
-                // 填充用户国家/地区：使用 v_unified_analysis_v2 的 country_code，转国旗 Emoji
-                if (typeof updateUserCountryFlag === 'function' && currentUser) {
-                    const countryCode = currentUser.country_code || currentUser.manual_location || currentUser.ip_location || '';
-                    const countryName = (countryNameMap[countryCode] ? countryNameMap[countryCode].en : countryCode) || '';
-                    const isManual = !!(currentUser.manual_location || currentUser.manual_lat != null);
-                    updateUserCountryFlag(countryCode, countryName, isManual);
+                // 填充用户国家/地区：优先使用 localStorage 中的手动校准信息
+                if (typeof updateUserCountryFlag === 'function') {
+                    let countryCode = '';
+                    let countryName = '';
+                    let isManual = false;
+
+                    // 优先级 1: localStorage 中的手动校准信息
+                    if (localStorage.getItem('loc_fixed') === 'true' && localStorage.getItem('loc_locked') === 'true') {
+                        countryCode = localStorage.getItem('manual_location') || '';
+                        if (countryCode) {
+                            countryName = (countryNameMap[countryCode] ? countryNameMap[countryCode].en : countryCode) || '';
+                            isManual = true;
+                        }
+                    }
+
+                    // 优先级 2: currentUser 中的手动校准信息
+                    if (!countryCode && currentUser) {
+                        countryCode = currentUser.manual_location || '';
+                        if (countryCode) {
+                            countryName = (countryNameMap[countryCode] ? countryNameMap[countryCode].en : countryCode) || '';
+                            isManual = true;
+                        }
+                    }
+
+                    // 优先级 3: currentUser 中的国家代码
+                    if (!countryCode && currentUser) {
+                        countryCode = currentUser.country_code || currentUser.ip_location || '';
+                        if (countryCode) {
+                            countryName = (countryNameMap[countryCode] ? countryNameMap[countryCode].en : countryCode) || '';
+                            isManual = !!(currentUser.manual_location || currentUser.manual_lat != null);
+                        }
+                    }
+
+                    if (countryCode) {
+                        updateUserCountryFlag(countryCode, countryName, isManual);
+                    }
                 }
 
                 // 添加实时诊断活动卡片
@@ -3798,6 +3828,11 @@
             // 显示抽屉
             leftDrawer.classList.add('active');
             rightDrawer.classList.add('active');
+
+            // 【修复】保存抽屉打开状态和选中国家到 localStorage
+            localStorage.setItem('left_drawer_open', 'true');
+            localStorage.setItem('right_drawer_open', 'true');
+            localStorage.setItem('selected_country', countryCode);
             console.log('[Drawer] 抽屉已打开:', countryDisplayName);
         }
 
@@ -3991,13 +4026,16 @@
 
             if (leftDrawer) {
                 leftDrawer.classList.remove('active');
+                localStorage.setItem('left_drawer_open', 'false');
             }
             if (rightDrawer) {
                 rightDrawer.classList.remove('active');
+                localStorage.setItem('right_drawer_open', 'false');
             }
-            
+
             if (clearSelection) {
                 selectedCountry = null;
+                localStorage.removeItem('selected_country');
             }
             console.log('[Drawer] 抽屉已关闭, selectedCountry =', selectedCountry);
         }
@@ -4576,7 +4614,19 @@
         // 地图光标自愈 + 可拖拽校准（解决光标/脉冲随机消失 & 提升可用性）
         // ==========================================================
         function _getBestKnownUserCoords() {
-            // 优先：本地已锁定校准坐标（loc_fixed + manual_lat/manual_lng）
+            // 【修复】最高优先级：本地已锁定校准坐标（loc_fixed + loc_locked 双重保护）
+            try {
+                if (localStorage.getItem('loc_fixed') === 'true' && localStorage.getItem('loc_locked') === 'true') {
+                    const lat = localStorage.getItem('manual_lat') ? Number(localStorage.getItem('manual_lat')) : null;
+                    const lng = localStorage.getItem('manual_lng') ? Number(localStorage.getItem('manual_lng')) : null;
+                    if (lat != null && lng != null && !isNaN(lat) && !isNaN(lng)) {
+                        console.log('[MapCursor] 🔒 使用锁定的校准坐标:', { lat, lng, source: 'localStorage.manual_locked' });
+                        return { lng, lat, source: 'localStorage.manual_locked' };
+                    }
+                }
+            } catch { /* ignore */ }
+
+            // 次优：本地已锁定校准坐标（loc_fixed + manual_lat/manual_lng，兼容旧逻辑）
             try {
                 if (localStorage.getItem('loc_fixed') === 'true') {
                     const lat = localStorage.getItem('manual_lat') ? Number(localStorage.getItem('manual_lat')) : null;
@@ -4585,7 +4635,7 @@
                 }
             } catch { /* ignore */ }
 
-            // 次优：全局用户数据（manual 优先）
+            // 第三优：全局用户数据（manual 优先）
             try {
                 const u = window.currentUserData || window.currentUser || null;
                 if (u) {
@@ -4882,6 +4932,8 @@
                     console.warn('[Calibration] ⚠️ 校准接口返回非 2xx:', res.status);
                 } else {
                     const data = await res.json().catch(() => ({}));
+                    // 【新增】锁定标志：防止后续异步操作覆盖
+                    localStorage.setItem('loc_locked', 'true');
                     // 状态持久化：确认定居后立即写入锁定标记与坐标，并重绘地图光标为绿色
                     localStorage.setItem('loc_fixed', 'true');
                     if (!window.currentUserData) window.currentUserData = window.currentUser || {};
@@ -4915,7 +4967,7 @@
                     } else if (countryCode) {
                         showDrawersWithCountryData(countryCode, countryName || countryCode);
                     }
-                    console.log('[Calibration] ✅ 校准已确认并持久化:', { countryCode, countryName, lng, lat });
+                    console.log('[Calibration] ✅ 校准已确认并持久化（已锁定）:', { countryCode, countryName, lng, lat });
                 }
             } catch (err) {
                 console.warn('[Calibration] ⚠️ 校准请求失败:', err);
@@ -6552,13 +6604,76 @@
         function initDrawerState() {
             const drawer = document.getElementById('live-nodes-drawer');
             if (!drawer) return;
-            
+
             if (drawerExpanded) {
                 drawer.classList.remove('collapsed');
                 drawer.classList.add('expanded');
             } else {
                 drawer.classList.remove('expanded');
                 drawer.classList.add('collapsed');
+            }
+
+            // 【修复】恢复左侧/右侧抽屉状态
+            const leftDrawerOpen = localStorage.getItem('left_drawer_open') === 'true';
+            const rightDrawerOpen = localStorage.getItem('right_drawer_open') === 'true';
+
+            const leftDrawer = document.getElementById('left-drawer');
+            const rightDrawer = document.getElementById('right-drawer');
+
+            if (leftDrawer && leftDrawerOpen) {
+                leftDrawer.classList.add('active');
+                // 【修复】优先使用手动校准的国家/地区，否则使用保存的选中国家
+                let countryCode = null;
+                let countryName = '';
+
+                // 优先级 1: 手动校准的国家 (manual_location)
+                if (localStorage.getItem('loc_fixed') === 'true') {
+                    countryCode = localStorage.getItem('manual_location') || null;
+                    if (countryCode && countryNameMap[countryCode]) {
+                        countryName = currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en;
+                    }
+                }
+
+                // 优先级 2: 保存的选中国家 (selected_country)
+                if (!countryCode) {
+                    countryCode = localStorage.getItem('selected_country') || null;
+                    if (countryCode && countryNameMap[countryCode]) {
+                        countryName = currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en;
+                    }
+                }
+
+                // 如果有国家代码，更新抽屉标题和内容
+                if (countryCode) {
+                    // 延迟执行，确保其他初始化完成
+                    setTimeout(() => {
+                        if (typeof showDrawersWithCountryData === 'function') {
+                            showDrawersWithCountryData(countryCode, countryName || countryCode);
+                        }
+                    }, 100);
+                }
+
+                // 【新增】恢复用户国家/地区显示（从 localStorage 读取手动校准的信息）
+                if (localStorage.getItem('loc_fixed') === 'true') {
+                    const manualLocation = localStorage.getItem('manual_location') || '';
+                    const manualLat = localStorage.getItem('manual_lat');
+                    const manualLng = localStorage.getItem('manual_lng');
+                    if (manualLocation || (manualLat && manualLng)) {
+                        setTimeout(() => {
+                            if (typeof updateUserCountryFlag === 'function') {
+                                const isManual = true;
+                                const savedCountryName = countryNameMap[manualLocation]
+                                    ? (currentLang === 'zh' ? countryNameMap[manualLocation].zh : countryNameMap[manualLocation].en)
+                                    : manualLocation;
+                                updateUserCountryFlag(manualLocation, savedCountryName || manualLocation, isManual);
+                                console.log('[Drawer] ✅ 已恢复手动校准的国家/地区信息:', { manualLocation, manualLat, manualLng });
+                            }
+                        }, 200);
+                    }
+                }
+            }
+
+            if (rightDrawer && rightDrawerOpen) {
+                rightDrawer.classList.add('active');
             }
         }
         
@@ -10996,12 +11111,45 @@
                 renderRankCards(null);
             }
             
-            // 初始加载完成后，启动 Realtime 监听
-            // 延迟一小段时间，确保所有渲染已完成
-            setTimeout(() => {
-                startRealtimeListener();
-            }, 500);
-        };
+             // 初始加载完成后，启动 Realtime 监听
+             // 延迟一小段时间，确保所有渲染已完成
+             setTimeout(() => {
+                 startRealtimeListener();
+             }, 500);
+
+             // 【新增】强制恢复手动校准的光标位置（解决页面刷新后光标漂移问题）
+             setTimeout(() => {
+                 try {
+                     // 检查是否有锁定的手动校准位置
+                     if (localStorage.getItem('loc_locked') === 'true' && localStorage.getItem('loc_fixed') === 'true') {
+                         const manualLat = localStorage.getItem('manual_lat');
+                         const manualLng = localStorage.getItem('manual_lng');
+                        if (manualLat && manualLng && !isNaN(Number(manualLat)) && !isNaN(Number(manualLng))) {
+                             const lat = Number(manualLat);
+                             const lng = Number(manualLng);
+                             // 读取用户信息（头像、用户名）
+                             let githubUsername = 'YOU';
+                             let avatarUrl = DEFAULT_AVATAR;
+                             try {
+                                 githubUsername = localStorage.getItem('github_username') || 'YOU';
+                                 if (githubUsername && isValidGitHubUsername(githubUsername)) {
+                                     avatarUrl = getGitHubAvatarUrl(githubUsername);
+                                 }
+                             } catch (e) { /* ignore */ }
+                             // 强制恢复光标位置
+                             if (typeof setOrUpdateCurrentLocationCursor === 'function') {
+                                 const statusConfig = USER_STATUSES[currentUserStatus] || USER_STATUSES.idle;
+                                 const pulseColor = statusConfig.status_color || '#00ff41';
+                                 setOrUpdateCurrentLocationCursor(lng, lat, pulseColor, avatarUrl, githubUsername);
+                                 console.log('[Drawer] ✅ 已强制恢复手动校准的光标位置:', { lat, lng });
+                             }
+                         }
+                     }
+                 } catch (e) {
+                     console.warn('[Drawer] ⚠️ 强制恢复光标位置失败:', e);
+                 }
+             }, 800);
+         };
 
         // ==========================================
         // Semantic Burst Sentence Board (Personal + National)
@@ -12700,7 +12848,7 @@
                             if (drawerCode) showDrawersWithCountryData(drawerCode, drawerName || drawerCode);
                         }
                     }
-                    
+
                     // 【地图联动】优先使用 manual 坐标，否则用 lat/lng；有坐标则更新地图与持久光标
                     const lat = (currentUser.manual_lat != null && !isNaN(currentUser.manual_lat))
                         ? Number(currentUser.manual_lat)
@@ -12709,7 +12857,12 @@
                         ? Number(currentUser.manual_lng)
                         : (currentUser.lng != null && !isNaN(currentUser.lng) ? Number(currentUser.lng) : null);
                     if (lat !== null && lng !== null) {
-                        console.log('[Refresh] 🗺️ 检测到用户坐标（优先 manual），触发地图联动:', { lat, lng });
+                        // 【修复】检查锁定状态，防止覆盖用户手动校准的位置
+                        const isLocked = localStorage.getItem('loc_locked') === 'true';
+                        if (isLocked) {
+                            console.log('[Refresh] 🔒 检测到坐标已锁定，跳过自动更新');
+                        } else {
+                            console.log('[Refresh] 🗺️ 检测到用户坐标（优先 manual），触发地图联动:', { lat, lng });
                         try {
                             if (mapChart && typeof mapChart.setOption === 'function') {
                                 const currentOption = mapChart.getOption();
@@ -12730,15 +12883,15 @@
                                 const statusConfig = USER_STATUSES[currentUserStatus] || USER_STATUSES.idle;
                                 const pulseColor = statusConfig.status_color || '#00ff41';
                                 triggerMapPulse(lng, lat, 'YOU', pulseColor, avatarUrl, githubUsername);
-                                console.log('[Refresh] ✅ 地图脉冲效果已触发');
-                            }
-                        } catch (mapError) {
-                            console.warn('[Refresh] ⚠️ 地图联动失败:', mapError);
+                            console.log('[Refresh] ✅ 地图脉冲效果已触发');
                         }
+                    } catch (mapError) {
+                        console.warn('[Refresh] ⚠️ 地图联动失败:', mapError);
+                    }
+                        } // isLocked 块结束
                     } else {
                         console.log('[Refresh] ℹ️ 用户坐标不完整，跳过地图联动');
                     }
-                    
                     console.log('[Refresh] ✅ 用户数据已刷新', matchedByGitHub ? '(GitHub OAuth)' : '(Fingerprint)');
                 } else {
                     console.log('[Refresh] ⚠️ 未找到当前用户数据');
