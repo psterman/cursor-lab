@@ -217,6 +217,45 @@
             background: transparent;
         }
 
+        /* 地图光标工具（校准/拖拽提示） */
+        #map-cursor-tools {
+            position: fixed;
+            left: 14px;
+            bottom: 14px;
+            z-index: 50;
+            pointer-events: auto;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        #map-cursor-tools .tool-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            border: 1px solid rgba(0, 255, 65, 0.45);
+            background: rgba(0, 0, 0, 0.55);
+            color: #00ff41;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            backdrop-filter: blur(8px);
+        }
+        #map-cursor-tools .tool-btn:hover {
+            background: rgba(0, 255, 65, 0.08);
+        }
+        #map-cursor-tools .hint {
+            margin-top: 8px;
+            max-width: 320px;
+            padding: 10px 10px;
+            border: 1px solid rgba(59, 130, 246, 0.45);
+            background: rgba(0, 0, 0, 0.55);
+            color: #93c5fd;
+            font-size: 11px;
+            line-height: 1.35;
+            backdrop-filter: blur(8px);
+            display: none;
+        }
+        #map-cursor-tools .hint b { color: #ffffff; }
+
         /* 确保主容器允许穿透，但交互元素可点击 */
         .max-w-\[1600px\] {
             pointer-events: none;
@@ -1358,6 +1397,18 @@
     
     <!-- 全屏地图背景 -->
     <div id="map-container"></div>
+    <!-- 地图光标工具：用于手动校准（避免光标消失时无法进入校准） -->
+    <div id="map-cursor-tools" aria-live="polite">
+        <button type="button" id="btn-calibrate-location" class="tool-btn">
+            <span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:#00ff41;"></span>
+            <span id="btn-calibrate-location-text">校准位置</span>
+        </button>
+        <div id="map-cursor-hint" class="hint">
+            <div><b>校准模式</b>：拖动地图上的 <b>YOU</b> 光标，或点击地图任意位置设置坐标。</div>
+            <div style="margin-top:6px;">完成后会自动保存到本机与后端（`manual_lat/manual_lng/manual_location`）。</div>
+            <div style="margin-top:6px; opacity:0.9;">提示：你也可以先点击国家来设置“锚定国家”，再校准坐标。</div>
+        </div>
+    </div>
     
     <!-- 左右赛博朋克抽屉 -->
     <div id="left-drawer" class="cyber-drawer left-drawer">
@@ -2430,7 +2481,7 @@
                 // 全球占比列表（简单两项）
                 const ratioListEl = document.getElementById('rtRatioList');
                 if (ratioListEl) {
-                    const label = isGlobal ? 'GLOBAL' : (isUS ? 'US' : 'REGION');
+                    const label = isGlobal ? 'GLOBAL' : (countryCode && countryCode !== 'Global' ? countryCode : 'REGION');
                     const rest = clampPct(100 - metrics.ratio);
                     ratioListEl.innerHTML = `
                         <div class="flex justify-between text-xs">
@@ -3768,16 +3819,21 @@
 
             const leftTitle = document.getElementById('left-drawer-title');
             const rightTitle = document.getElementById('right-drawer-title');
-            if (leftTitle) leftTitle.textContent = name;
-            if (rightTitle) rightTitle.textContent = name;
+            const displayName = countryNameMap[String(code || '').toUpperCase()]
+                ? (currentLang === 'zh'
+                    ? countryNameMap[String(code || '').toUpperCase()].zh
+                    : countryNameMap[String(code || '').toUpperCase()].en)
+                : name;
+            if (leftTitle) leftTitle.textContent = displayName;
+            if (rightTitle) rightTitle.textContent = displayName;
 
-            renderCountryRightPanel(code, name);
+            renderCountryRightPanel(code, displayName);
             // 触发国家抽屉数据拉取（按需求：updateCountryDashboard(countryName)）
             try { updateCountryDashboard(code); } catch (e) { /* ignore */ }
 
             selectedCountry = code === 'US' ? 'US' : code;
             currentDrawerCountry.code = code;
-            currentDrawerCountry.name = name;
+            currentDrawerCountry.name = displayName;
             console.log('[Drawer] 国家透视已打开:', name);
         }
 
@@ -3805,10 +3861,19 @@
             mount.appendChild(node);
 
             // 先渲染基础骨架（不再硬编码美国数据；数据由 updateCountryDashboard(countryName) 拉取）
+            const cc = String(code || '').trim().toUpperCase();
             const model = {
-                coord: (code === 'US' || name === 'United States') ? 'COORD: 37.0902° N, 95.7129° W' : 'COORD: --',
+                coord: (cc === 'US' || name === 'United States')
+                    ? 'COORD: 37.0902° N, 95.7129° W'
+                    : (cc === 'CN' || name === 'China' || name === '中国')
+                        ? 'COORD: 35.8617° N, 104.1954° E'
+                        : 'COORD: --',
                 dataStatus: 'DATA: READY',
-                flag: (code === 'US' || name === 'United States') ? '🇺🇸' : (countryCodeToFlagEmoji(code) || '🏳️'),
+                flag: (cc === 'US' || name === 'United States')
+                    ? '🇺🇸'
+                    : (cc === 'CN' || name === 'China' || name === '中国')
+                        ? '🇨🇳'
+                        : (countryCodeToFlagEmoji(code) || '🏳️'),
                 nodeName: `${String(name || 'REGION').toUpperCase()}_NODE`,
                 diagnosedTotal: '--',
                 scanTotal: '--',
@@ -4238,6 +4303,17 @@
 
                 // notMerge: true 彻底替换，避免残留旧配置
                 mapChart.setOption(option2D, { notMerge: true, lazyUpdate: false });
+
+                // ====== 自愈：地图重绘后，确保「Current Location」光标不会被 notMerge:true 清掉 ======
+                try {
+                    bindMapCursorSelfHeal();
+                    // 如果本地/全局已有坐标，渲染后立即恢复光标（解决“随机消失且刷新无效”）
+                    ensureCurrentLocationCursorIfMissing('initGlobalMap-after-setOption');
+                    // 绑定校准拖拽交互（仅校准模式下生效）
+                    bindCurrentLocationDragHandlers();
+                } catch (e) {
+                    console.warn('[Map] ⚠️ 绑定光标自愈/拖拽失败:', e);
+                }
                 
                 // 添加地图点击事件处理 - 重新设计逻辑（含校准模式）
                 mapChart.off('click'); // 移除旧的事件监听器
@@ -4339,8 +4415,10 @@
                         
                         // ========== 美国：进入国家数据透视模式（加载美国区域数据） ==========
                         // 不依赖 params.name 的具体字符串，统一以解析后的国家代码判断
-                        if (String(countryCode).toUpperCase() === 'US') {
-                            switchToCountryView('US', countryName);
+                        // 目前：美国 + 中国 进入同一套“国家透视（右侧模板）”布局
+                        const ccUpper = String(countryCode).toUpperCase();
+                        if (ccUpper === 'US' || ccUpper === 'CN') {
+                            switchToCountryView(ccUpper, countryName);
                             return;
                         }
                         
@@ -4431,6 +4509,18 @@
                     z: 10
                 };
                 mapChart.setOption({ series: [...otherSeries, pulseSeries] }, { notMerge: false, lazyUpdate: false });
+                // 记录当前光标状态，供地图重绘自愈（避免“刷新也不回来”）
+                try {
+                    window.__currentLocationCursorState = {
+                        lng,
+                        lat,
+                        color,
+                        avatarUrl: avatarUrl || null,
+                        username: username || null,
+                        updatedAt: Date.now()
+                    };
+                    window.currentUserLocation = { lng, lat, color: color };
+                } catch { /* ignore */ }
             } catch (e) { console.warn('[MapPulse] setOrUpdateCurrentLocationCursor:', e); }
         }
 
@@ -4468,7 +4558,289 @@
                     return s;
                 });
                 mapChart.setOption({ series }, { notMerge: false, lazyUpdate: false });
+                try {
+                    // 同步记录，保证拖拽/点击移动后依旧可被自愈逻辑恢复
+                    const prev = window.__currentLocationCursorState || {};
+                    window.__currentLocationCursorState = {
+                        ...prev,
+                        lng,
+                        lat,
+                        updatedAt: Date.now()
+                    };
+                    window.currentUserLocation = { lng, lat, color: prev.color || '#00ff41' };
+                } catch { /* ignore */ }
             } catch (e) { console.warn('[MapPulse] moveCurrentLocationCursor:', e); }
+        }
+
+        // ==========================================================
+        // 地图光标自愈 + 可拖拽校准（解决光标/脉冲随机消失 & 提升可用性）
+        // ==========================================================
+        function _getBestKnownUserCoords() {
+            // 优先：本地已锁定校准坐标（loc_fixed + manual_lat/manual_lng）
+            try {
+                if (localStorage.getItem('loc_fixed') === 'true') {
+                    const lat = localStorage.getItem('manual_lat') ? Number(localStorage.getItem('manual_lat')) : null;
+                    const lng = localStorage.getItem('manual_lng') ? Number(localStorage.getItem('manual_lng')) : null;
+                    if (lat != null && lng != null && !isNaN(lat) && !isNaN(lng)) return { lng, lat, source: 'localStorage.manual' };
+                }
+            } catch { /* ignore */ }
+
+            // 次优：全局用户数据（manual 优先）
+            try {
+                const u = window.currentUserData || window.currentUser || null;
+                if (u) {
+                    const lat = (u.manual_lat != null && !isNaN(Number(u.manual_lat))) ? Number(u.manual_lat)
+                        : (u.lat != null && !isNaN(Number(u.lat)) ? Number(u.lat) : null);
+                    const lng = (u.manual_lng != null && !isNaN(Number(u.manual_lng))) ? Number(u.manual_lng)
+                        : (u.lng != null && !isNaN(Number(u.lng)) ? Number(u.lng) : null);
+                    if (lat != null && lng != null) return { lng, lat, source: 'currentUser' };
+                }
+            } catch { /* ignore */ }
+
+            // 兜底：最近一次在页面内绘制过的光标
+            try {
+                const s = window.__currentLocationCursorState;
+                if (s && typeof s.lng === 'number' && typeof s.lat === 'number' && !isNaN(s.lng) && !isNaN(s.lat)) {
+                    return { lng: s.lng, lat: s.lat, source: 'window.__currentLocationCursorState' };
+                }
+            } catch { /* ignore */ }
+            return null;
+        }
+
+        function _getBestKnownCursorMeta() {
+            // 颜色：跟随当前用户状态
+            let color = '#00ff41';
+            try {
+                const statusConfig = USER_STATUSES[currentUserStatus] || USER_STATUSES.idle;
+                if (statusConfig && statusConfig.status_color) color = statusConfig.status_color;
+            } catch { /* ignore */ }
+
+            // 用户名 + 头像：优先使用本地 GitHub 用户名
+            let username = 'YOU';
+            let avatarUrl = DEFAULT_AVATAR;
+            try {
+                const gh = localStorage.getItem('github_username') || null;
+                if (gh) username = gh;
+                avatarUrl = isValidGitHubUsername(gh) ? getGitHubAvatarUrl(gh) : DEFAULT_AVATAR;
+            } catch { /* ignore */ }
+
+            // 如果已有缓存状态，优先保留（避免颜色/头像抖动）
+            try {
+                const s = window.__currentLocationCursorState || null;
+                if (s) {
+                    if (s.color) color = s.color;
+                    if (s.username) username = s.username;
+                    if (s.avatarUrl) avatarUrl = s.avatarUrl;
+                }
+            } catch { /* ignore */ }
+
+            return { color, avatarUrl, username };
+        }
+
+        function ensureCurrentLocationCursor(reason = '') {
+            const coords = _getBestKnownUserCoords();
+            if (!coords) return false;
+            const meta = _getBestKnownCursorMeta();
+            try {
+                setOrUpdateCurrentLocationCursor(coords.lng, coords.lat, meta.color, meta.avatarUrl, meta.username);
+                if (reason) console.log('[MapCursor] ✅ 已确保光标存在:', reason, coords.source);
+                return true;
+            } catch (e) {
+                console.warn('[MapCursor] ⚠️ ensureCurrentLocationCursor 失败:', e);
+                return false;
+            }
+        }
+
+        function ensureCurrentLocationCursorIfMissing(reason = '') {
+            if (!mapChart || (typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) return false;
+            try {
+                const opt = mapChart.getOption();
+                const has = !!(opt && Array.isArray(opt.series) && opt.series.some(s => s && s.name === 'Current Location'));
+                if (!has) return ensureCurrentLocationCursor(reason || 'missing');
+                return true;
+            } catch (e) {
+                console.warn('[MapCursor] ⚠️ ensureCurrentLocationCursorIfMissing 失败:', e);
+                return false;
+            }
+        }
+
+        function bindMapCursorSelfHeal() {
+            if (!mapChart || (typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) return;
+            try {
+                if (window.__mapCursorSelfHealHandler) {
+                    try { mapChart.off('finished', window.__mapCursorSelfHealHandler); } catch { /* ignore */ }
+                }
+                window.__mapCursorSelfHealHandler = () => {
+                    try {
+                        if (!mapChart || (typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) return;
+                        ensureCurrentLocationCursorIfMissing('echarts.finished-self-heal');
+                    } catch { /* ignore */ }
+                };
+                mapChart.on('finished', window.__mapCursorSelfHealHandler);
+            } catch (e) {
+                console.warn('[MapCursor] ⚠️ bindMapCursorSelfHeal 失败:', e);
+            }
+        }
+
+        function _setMapRoamEnabled(enabled) {
+            if (!mapChart || (typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) return;
+            try {
+                const opt = mapChart.getOption();
+                if (!opt) return;
+                const nextGeo = Array.isArray(opt.geo) ? opt.geo.map(g => ({ ...g, roam: !!enabled })) : opt.geo;
+                const nextSeries = Array.isArray(opt.series) ? opt.series.map(s => {
+                    if (s && s.type === 'map') return { ...s, roam: !!enabled };
+                    return s;
+                }) : opt.series;
+                mapChart.setOption({ geo: nextGeo, series: nextSeries }, { notMerge: false, lazyUpdate: false });
+            } catch { /* ignore */ }
+        }
+
+        // 校准拖拽状态
+        let __isDraggingCurrentLocation = false;
+
+        function bindCurrentLocationDragHandlers() {
+            if (!mapChart || (typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) return;
+            const zr = typeof mapChart.getZr === 'function' ? mapChart.getZr() : null;
+            if (!zr) return;
+
+            // 解绑旧 handler，避免重复绑定导致“概率性失效”
+            try {
+                const prev = window.__currentLocationDragHandlers;
+                if (prev) {
+                    zr.off('mousedown', prev.mousedown);
+                    zr.off('mousemove', prev.mousemove);
+                    zr.off('mouseup', prev.mouseup);
+                    zr.off('globalout', prev.mouseup);
+                }
+            } catch { /* ignore */ }
+
+            const getXY = (evt) => {
+                const x = (evt && (evt.offsetX ?? evt.zrX ?? evt.event?.offsetX ?? evt.event?.clientX)) ?? null;
+                const y = (evt && (evt.offsetY ?? evt.zrY ?? evt.event?.offsetY ?? evt.event?.clientY)) ?? null;
+                if (x == null || y == null) return null;
+                // 如果是 clientX/clientY，需要减去 canvas 的 bounding rect
+                if (evt && evt.event && evt.event.clientX != null && evt.event.clientY != null) {
+                    try {
+                        const dom = mapChart.getDom();
+                        const rect = dom ? dom.getBoundingClientRect() : null;
+                        if (rect) return { x: evt.event.clientX - rect.left, y: evt.event.clientY - rect.top };
+                    } catch { /* ignore */ }
+                }
+                return { x, y };
+            };
+
+            const getCurrentCursorPixel = () => {
+                try {
+                    const opt = mapChart.getOption();
+                    const s = Array.isArray(opt?.series) ? opt.series.find(ss => ss && ss.name === 'Current Location') : null;
+                    const v = s?.data?.[0]?.value;
+                    if (!v || !Array.isArray(v) || v.length < 2) return null;
+                    const lng = Number(v[0]), lat = Number(v[1]);
+                    if (isNaN(lng) || isNaN(lat)) return null;
+                    const px = mapChart.convertToPixel('geo', [lng, lat]);
+                    if (!px || !Array.isArray(px) || px.length < 2) return null;
+                    return { x: Number(px[0]), y: Number(px[1]), lng, lat };
+                } catch {
+                    return null;
+                }
+            };
+
+            const mousedown = (evt) => {
+                if (!isCalibrating) return;
+                const xy = getXY(evt);
+                if (!xy) return;
+                const cur = getCurrentCursorPixel();
+                if (!cur) return;
+                const dx = xy.x - cur.x, dy = xy.y - cur.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                // 命中阈值：略大于 symbolSize（20），方便拖拽
+                if (dist <= 26) {
+                    __isDraggingCurrentLocation = true;
+                    _setMapRoamEnabled(false); // 拖拽时暂时禁用漫游，避免地图跟着跑
+                    try { evt.event && evt.event.preventDefault && evt.event.preventDefault(); } catch { /* ignore */ }
+                }
+            };
+
+            const mousemove = (evt) => {
+                if (!isCalibrating || !__isDraggingCurrentLocation) return;
+                const xy = getXY(evt);
+                if (!xy) return;
+                try {
+                    const point = mapChart.convertFromPixel('geo', [xy.x, xy.y]);
+                    if (!point || !Array.isArray(point) || point.length < 2) return;
+                    const lng = Number(point[0]), lat = Number(point[1]);
+                    if (isNaN(lng) || isNaN(lat)) return;
+                    pendingCalibration.lng = lng;
+                    pendingCalibration.lat = lat;
+                    // 国家优先沿用锚定国家（可先点国家，再拖光标）
+                    if (!pendingCalibration.countryCode) {
+                        const anchored = _getAnchoredCountryFromStorage();
+                        if (anchored) {
+                            pendingCalibration.countryCode = anchored;
+                            pendingCalibration.countryName = (countryNameMap[anchored]?.en || anchored);
+                        }
+                    }
+                    moveCurrentLocationCursor(lng, lat);
+                } catch { /* ignore */ }
+            };
+
+            const mouseup = () => {
+                if (!__isDraggingCurrentLocation) return;
+                __isDraggingCurrentLocation = false;
+                _setMapRoamEnabled(true);
+                // 松手后快速确认一次（避免频繁请求）
+                try {
+                    if (pendingCalibration && pendingCalibration.lng != null && pendingCalibration.lat != null) {
+                        const anchored = _getAnchoredCountryFromStorage();
+                        const cc = pendingCalibration.countryCode || anchored || (window.currentUser?.manual_location || window.currentUser?.country_code) || null;
+                        const cn = pendingCalibration.countryName ||
+                            (cc && countryNameMap[String(cc).toUpperCase()] ? countryNameMap[String(cc).toUpperCase()].en : null) ||
+                            cc;
+                        confirmCalibrationAndLock(cc, cn, pendingCalibration.lng, pendingCalibration.lat);
+                    }
+                } catch (e) {
+                    console.warn('[MapCursor] ⚠️ 拖拽确认失败:', e);
+                }
+            };
+
+            zr.on('mousedown', mousedown);
+            zr.on('mousemove', mousemove);
+            zr.on('mouseup', mouseup);
+            zr.on('globalout', mouseup);
+            window.__currentLocationDragHandlers = { mousedown, mousemove, mouseup };
+        }
+
+        function setCalibrationMode(enabled) {
+            isCalibrating = !!enabled;
+            try {
+                const hintEl = document.getElementById('map-cursor-hint');
+                if (hintEl) hintEl.style.display = isCalibrating ? '' : 'none';
+                const dot = document.querySelector('#btn-calibrate-location span');
+                if (dot) dot.style.background = isCalibrating ? '#3b82f6' : '#00ff41';
+                const t = document.getElementById('btn-calibrate-location-text');
+                if (t) t.textContent = isCalibrating ? '退出校准' : '校准位置';
+            } catch { /* ignore */ }
+
+            // 进入校准模式：确保光标存在并变蓝；退出则恢复绿色
+            try {
+                ensureCurrentLocationCursorIfMissing('toggle-calibration');
+                updateCurrentLocationCursorColor(isCalibrating ? '#3b82f6' : '#00ff41');
+            } catch { /* ignore */ }
+        }
+
+        function initMapCursorTools() {
+            try {
+                const btn = document.getElementById('btn-calibrate-location');
+                if (!btn) return;
+                btn.addEventListener('click', () => setCalibrationMode(!isCalibrating));
+                // 页面首次加载：如果本地已锁定校准，则默认显示绿色光标（即使地图重绘也能自愈）
+                setTimeout(() => {
+                    try { ensureCurrentLocationCursorIfMissing('init-tools'); } catch { /* ignore */ }
+                }, 0);
+            } catch (e) {
+                console.warn('[MapCursor] ⚠️ initMapCursorTools 失败:', e);
+            }
         }
 
         /**
@@ -10240,6 +10612,9 @@
         window.onload = async () => {
             // 加载保存的GitHub用户名（兼容旧代码）
             loadGitHubUsername();
+
+            // 初始化地图光标工具（校准入口 + 提示）
+            initMapCursorTools();
             
             // 初始化状态按钮
             initStatusButtons();
