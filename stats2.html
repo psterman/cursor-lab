@@ -94,6 +94,16 @@
             font-family: 'JetBrains Mono', monospace;
         }
 
+        /* 语义爆发卡片刷新动效（淡入/闪烁） */
+        @keyframes vibe-refresh {
+            0% { opacity: 0.55; filter: saturate(0.9) brightness(0.92); }
+            50% { opacity: 1; filter: saturate(1.05) brightness(1.05); }
+            100% { opacity: 0.85; filter: saturate(1) brightness(1); }
+        }
+        .vibe-refreshing {
+            animation: vibe-refresh 650ms ease-in-out 1;
+        }
+
         /* Personal sentence chips (pulse outline) */
         .sentence-chip {
             position: relative;
@@ -885,6 +895,18 @@
             align-items: center;
             justify-content: center;
         }
+
+        /* UserText Debug Modal（用于检查 userText/提词/上报列表） */
+        .usertext-debug-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.75);
+            z-index: 1200;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
         
         .message-input-box {
             background: var(--card-bg);
@@ -1507,11 +1529,17 @@
                 </div>
 
                 <!-- [04] SEMANTIC BURST -->
-                <div class="clinic-card">
+                <div class="clinic-card" id="vibe-explosion-card">
                     <div class="card-header">
                         <i data-lucide="cloud"></i>
                         <span class="card-title">语义爆发 / Semantic Burst</span>
                         <div class="ml-auto flex items-center gap-3">
+                            <div id="anchor-country-badge" class="px-2 py-1 text-[10px] font-mono border border-[#00ff41]/30 text-[#00ff41] bg-[#00ff41]/5 uppercase tracking-widest select-none">
+                                锚定: --
+                            </div>
+                            <button id="sb-usertext-btn" type="button" onclick="window.openUserTextDebug && window.openUserTextDebug()" class="px-2 py-1 text-[10px] border border-white/10 text-zinc-300 hover:bg-white/5 transition-colors font-mono">
+                                USER_TEXT
+                            </button>
                             <label class="text-[10px] text-zinc-500 uppercase tracking-widest select-none flex items-center gap-2">
                                 <input id="sb-debug-toggle" type="checkbox" class="accent-[#00ff41]" />
                                 DEBUG
@@ -1519,17 +1547,37 @@
                         </div>
                     </div>
                     <div class="p-2" id="rtSemanticTags">
-                        <!-- 句式看板：国家池（该国所有用户累计） -->
-                        <div class="bg-zinc-950/60 border border-zinc-800 p-2 mb-4">
+                        <!-- 黑话榜：按国家聚合（Top10 + Cloud50） -->
+                        <div class="bg-zinc-950/60 border border-zinc-800 p-2 mb-4" id="vibe-burst-root">
                             <div class="flex items-center justify-between mb-2">
-                                <div class="text-[11px] text-zinc-400 uppercase tracking-widest">国家语义爆发 / National Pool</div>
-                                <div class="text-[10px] text-zinc-500" id="national-sentence-hint">TOP 10 雷同句子</div>
+                                <div class="text-[11px] text-zinc-400 uppercase tracking-widest">黑话榜 / Vibe Hotlist</div>
+                                <div class="text-[10px] text-zinc-500" id="vibe-country-hint">COUNTRY: --</div>
                             </div>
-                            <div id="national-wordcloud-container" style="height: 380px; width: 100%;"></div>
-                            <div id="national-sentence-empty" class="hidden text-zinc-500 text-sm p-3 italic">
-                                正在建立该地区开发者语义指纹...
+
+                            <!-- 上方：该国 Top50 词云形态（综合） -->
+                            <div class="border border-white/10 bg-zinc-950/30 p-2 mb-3">
+                                <div class="flex items-center justify-between mb-2">
+                                    <div class="text-[10px] text-zinc-500 uppercase tracking-widest">NATIONAL CLOUD 50</div>
+                                    <div class="text-[10px] text-zinc-600 font-mono" id="vibe-cloud50-meta">--</div>
+                                </div>
+                                <div id="vibe-cloud50-container" style="height: 260px; width: 100%;"></div>
+                                <div id="vibe-cloud50-empty" class="hidden text-zinc-500 text-sm p-3 italic">
+                                    正在建立该地区黑话榜...
+                                </div>
                             </div>
-                            <div id="national-sentence-fallback" class="hidden mt-2 text-xs text-zinc-400 font-mono"></div>
+
+                            <!-- 下方：文字榜单（国家Top10） -->
+                            <div class="border border-white/10 bg-zinc-950/30 p-2">
+                                <div class="flex items-center justify-between mb-2">
+                                    <div class="text-[10px] text-zinc-500 uppercase tracking-widest">COUNTRY TOP 10</div>
+                                    <div class="text-[10px] text-zinc-600 font-mono" id="vibe-country-top10-meta">--</div>
+                                </div>
+                                <ol id="vibe-top10-list" class="space-y-1"></ol>
+                                <div id="vibe-top10-empty" class="hidden text-zinc-500 text-sm p-3 italic">
+                                    暂无数据（正在收录中...）
+                                </div>
+                            </div>
+
                             <div id="sb-debug-panel" class="hidden mt-3 border border-white/10 bg-zinc-950/30 p-3">
                                 <div class="flex items-center justify-between gap-3">
                                     <div class="text-[10px] text-zinc-500 uppercase tracking-widest">Semantic Burst Debug</div>
@@ -2116,15 +2164,13 @@
                 const data = payload?.data ?? payload ?? {};
                 
                 // =========================
-                // 语义爆发词云数据源（彻底废除硬编码 fallback）
-                // 约定：后端返回 monthly_vibes / monthlyVibes（分类数组：[{ phrase, hit_count }]）
+                // 语义爆发（黑话榜）数据源：top10 + cloud50（按国家过滤）
                 // =========================
                 try {
-                    window.__latestMonthlyVibes = data.monthly_vibes || data.monthlyVibes || null;
-                    // 【V6.1 新增】保存高频句子数据
-                    window.__latestTopSentences = data.top_sentences || null;
-                    // 若分类为空：由词云渲染层插入提示语
-                    try { window.loadWordCloud && window.loadWordCloud(); } catch (e2) { /* ignore */ }
+                    window.__latestTop10 = Array.isArray(data.top10) ? data.top10 : null;
+                    window.__latestCloud50 = Array.isArray(data.cloud50) ? data.cloud50 : null;
+                    // 直接用本次响应渲染（避免重复请求）
+                    try { window.renderVibeCardFromData && window.renderVibeCardFromData(countryNameOrCode, data); } catch (e2) { /* ignore */ }
                 } catch (e1) { /* ignore */ }
 
                 // 字段映射（兼容 total_users/totalUsers 等）
@@ -2632,6 +2678,42 @@
             'Egypt': [30, 27], 'Nigeria': [8, 10], 'Argentina': [-64, -34], 'Colombia': [-72, 4],
             'USA': [-95, 38], 'UK': [-2, 54], 'Korea': [128, 36]
         };
+
+        // ==========================================
+        // 地域锚定（手动地域修正）：selected_country
+        // - 用于：下一次扫描上报时 Analyzer 读取并作为 manual_region
+        // - 用于：右侧抽屉提示“你正在为哪个国家贡献”
+        // ==========================================
+        function _getAnchoredCountryFromStorage() {
+            try {
+                const v = String(localStorage.getItem('selected_country') || '').trim().toUpperCase();
+                return /^[A-Z]{2}$/.test(v) ? v : null;
+            } catch {
+                return null;
+            }
+        }
+
+        function _setAnchoredCountry(countryCode) {
+            const cc = String(countryCode || '').trim().toUpperCase();
+            if (!/^[A-Z]{2}$/.test(cc)) return null;
+            try { localStorage.setItem('selected_country', cc); } catch { /* ignore */ }
+            try { window.__anchoredCountry = cc; } catch { /* ignore */ }
+            _renderAnchoredCountryBadge(cc);
+            return cc;
+        }
+
+        function _renderAnchoredCountryBadge(countryCode) {
+            try {
+                const cc = String(countryCode || '').trim().toUpperCase();
+                const badge = document.getElementById('anchor-country-badge');
+                if (!badge) return;
+                badge.textContent = `锚定: ${/^[A-Z]{2}$/.test(cc) ? cc : '--'}`;
+                badge.classList.toggle('border-[#00ff41]/30', true);
+            } catch { /* ignore */ }
+        }
+
+        // 页面加载时回填一次
+        try { _renderAnchoredCountryBadge(_getAnchoredCountryFromStorage()); } catch { /* ignore */ }
         // 🔍 称号与说明映射（完全同步 content.ts 的业务语义）
         const DIMENSION_TITLES = {
             L: { title: '架构师的直觉', description: '在逻辑迷宫中一眼看穿本质' },
@@ -4248,6 +4330,12 @@
                         if (!countryCode) countryCode = countryName;
                         console.log(`[Map] 🗺️ 点击国家: ${countryName} (${countryCode})`);
                         selectedCountry = countryCode;
+
+                        // ========== 两步走：地域修正 + 黑话榜重载 ==========
+                        // Step A：持久化“当前锚定国家”，供下次扫描上报读取
+                        try { _setAnchoredCountry(countryCode); } catch { /* ignore */ }
+                        // Step B：立即重载黑话榜（不等待抽屉异步数据）
+                        try { window.refreshVibeCard && window.refreshVibeCard(String(countryCode).toUpperCase()); } catch { /* ignore */ }
                         
                         // ========== 美国：进入国家数据透视模式（加载美国区域数据） ==========
                         // 不依赖 params.name 的具体字符串，统一以解析后的国家代码判断
@@ -4431,6 +4519,8 @@
                     localStorage.setItem('manual_lat', String(lat));
                     localStorage.setItem('manual_lng', String(lng));
                     if (countryCode && String(countryCode).trim() !== '') localStorage.setItem('manual_location', String(countryCode).trim());
+                    // 同步“锚定国家”：用于 report-vibe manual_region
+                    try { _setAnchoredCountry(countryCode); } catch { /* ignore */ }
                     updateCurrentLocationCursorColor('#00ff41'); // 立即重绘地图光标为绿色
                     // 视觉锁定：同步 currentUser，防止刷新前延迟导致跳动
                     if (window.currentUser) {
@@ -4444,6 +4534,8 @@
                     if (typeof window.refreshUserStats === 'function') {
                         setTimeout(() => window.refreshUserStats(), 300);
                     }
+                    // 校准确认后立即重载黑话榜（右侧抽屉）
+                    try { window.refreshVibeCard && window.refreshVibeCard(String(countryCode).toUpperCase()); } catch { /* ignore */ }
                     if (countryCode && typeof fetchCountrySummaryV3 === 'function') {
                         fetchCountrySummaryV3(countryCode).then((summary) => {
                             if (summary) showDrawersWithCountryData(countryCode, countryName || countryCode, summary);
@@ -10822,7 +10914,253 @@
             });
         }
 
+        // ==========================================
+        // Vibe Hotlist Card (Top10 + Cloud50)
+        // ==========================================
+        let vibeCloudChart = null;
+        let vibeCloudAbort = null;
+
+        function _setVibeRefreshing(on) {
+            try {
+                const root = document.getElementById('vibe-burst-root') || document.getElementById('vibe-explosion-card');
+                if (root) root.classList.toggle('vibe-refreshing', !!on);
+            } catch { /* ignore */ }
+        }
+
+        function _renderTop10List(list) {
+            const ol = document.getElementById('vibe-top10-list');
+            const empty = document.getElementById('vibe-top10-empty');
+            const meta = document.getElementById('vibe-country-top10-meta');
+            if (!ol) return;
+
+            const items = (Array.isArray(list) ? list : [])
+                .map((x) => ({ phrase: String(x?.phrase || '').trim(), hit: Number(x?.hit_count ?? x?.hitCount ?? 0) || 0 }))
+                .filter((x) => x.phrase && x.hit > 0)
+                .slice(0, 10);
+
+            if (items.length === 0) {
+                ol.innerHTML = '';
+                if (empty) empty.classList.remove('hidden');
+                if (meta) meta.textContent = '--';
+                return;
+            }
+            if (empty) empty.classList.add('hidden');
+            if (meta) meta.textContent = `N=${items.length}`;
+
+            ol.innerHTML = items.map((it, idx) => {
+                const rank = idx + 1;
+                const name = _escapeHtml(it.phrase);
+                const count = it.hit;
+                const countColor = count >= 30 ? '#00ff41' : count >= 10 ? '#a855f7' : '#9ca3af';
+                return `
+                    <li class="flex items-center gap-3 p-2 border-b border-white/5 hover:bg-white/5 transition-colors">
+                        <div class="flex-shrink-0 w-6 h-6 rounded-full bg-gradient-to-br from-[#00ff41]/10 to-purple-500/20 flex items-center justify-center text-[10px] font-bold text-white/70">
+                            ${rank}
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-[12px] text-zinc-200 font-mono truncate">${name}</div>
+                        </div>
+                        <div class="flex-shrink-0 flex items-center gap-1">
+                            <span class="text-[10px] text-zinc-500">×</span>
+                            <span class="text-[12px] font-bold tabular-nums" style="color: ${countColor}">${count}</span>
+                        </div>
+                    </li>
+                `;
+            }).join('');
+        }
+
+        function _renderCloud50(region, list) {
+            const container = document.getElementById('vibe-cloud50-container');
+            const empty = document.getElementById('vibe-cloud50-empty');
+            const meta = document.getElementById('vibe-cloud50-meta');
+            if (!container) return;
+            if (typeof echarts === 'undefined') {
+                if (meta) meta.textContent = 'ECharts missing';
+                if (empty) {
+                    empty.textContent = 'ECharts 未加载，无法渲染词云。';
+                    empty.classList.remove('hidden');
+                }
+                return;
+            }
+
+            const raw = (Array.isArray(list) ? list : [])
+                .map((x) => ({ name: String(x?.phrase || '').trim(), value: Number(x?.hit_count ?? x?.hitCount ?? 0) || 0 }))
+                .filter((x) => x.name && x.value > 0)
+                .slice(0, 50);
+
+            if (raw.length === 0) {
+                try { container.innerHTML = ''; } catch { /* ignore */ }
+                try { _disposeChart(vibeCloudChart); } catch { /* ignore */ }
+                vibeCloudChart = null;
+                if (meta) meta.textContent = '--';
+                if (empty) empty.classList.remove('hidden');
+                return;
+            }
+
+            if (empty) empty.classList.add('hidden');
+            if (meta) meta.textContent = `N=${raw.length}`;
+
+            let words = applyLogFontSize(raw, (w) => w?.value ?? 0);
+            try { container.innerHTML = ''; } catch { /* ignore */ }
+            _disposeChart(vibeCloudChart);
+            // 不指定主题：避免 theme 未注册导致渲染失败
+            vibeCloudChart = echarts.init(container, null, { renderer: 'canvas' });
+
+            const maxVal = Math.max(...words.map((w) => Number(w.value) || 0), 1);
+            const getColor = (value) => {
+                const intensity = Math.min(1, (Number(value) || 0) / (maxVal || 1));
+                const a = 0.65 + intensity * 0.35;
+                return {
+                    // 提高对比度：避免黑底“糊成一坨”
+                    color: `rgba(192, 132, 252, ${a})`,           // #C084FC
+                    glow: `rgba(192, 132, 252, ${0.35 + intensity * 0.35})`,
+                };
+            };
+
+            // 关键修复：给每个词条写死颜色/阴影（不要依赖 callback）
+            words = (Array.isArray(words) ? words : []).map((w) => {
+                const v = Number(w?.value) || 0;
+                const { color, glow } = getColor(v);
+                return {
+                    ...w,
+                    textStyle: {
+                        ...(w.textStyle || {}),
+                        color,
+                        shadowBlur: 14,
+                        shadowColor: glow,
+                    },
+                };
+            });
+
+            try {
+                vibeCloudChart.setOption(_buildWordCloudOption({
+                    words,
+                    maxFont: 34,
+                    tooltipFormatter: (p) => `${p.name}<br/>热度: <b>${p.value}</b><br/>国家: ${_escapeHtml(region || '--')}`,
+                    // per-item 已写死颜色/阴影，这里只保留字体
+                    textStyle: {
+                        fontFamily: 'JetBrains Mono, monospace',
+                    },
+                    emphasisTextStyle: { shadowBlur: 22 },
+                    onClick: (p) => { try { handleWordCloudClick && handleWordCloudClick(p?.data?.name, 'slang'); } catch {} },
+                }), true);
+            } catch (e) {
+                try { _disposeChart(vibeCloudChart); } catch { /* ignore */ }
+                vibeCloudChart = null;
+                // 回退：用“文字云列表”保证至少可见
+                try {
+                    const top = (Array.isArray(words) ? words : []).slice(0, 50);
+                    container.innerHTML = `
+                        <div class="max-h-[260px] overflow-y-auto">
+                            ${top.map((w, i) => {
+                                const name = _escapeHtml(String(w?.name || ''));
+                                const value = Number(w?.value) || 0;
+                                return `<div class="flex justify-between gap-3 border-b border-white/10 py-1">
+                                    <span class="text-zinc-200 font-mono truncate">${i + 1}. ${name}</span>
+                                    <span class="text-zinc-400 tabular-nums">×${value}</span>
+                                </div>`;
+                            }).join('')}
+                        </div>
+                    `;
+                    if (meta) meta.textContent = `N=${raw.length} (fallback)`;
+                } catch { /* ignore */ }
+            }
+        }
+
+        function _formatVibeHotlistDebug(data, region, url) {
+            try {
+                const top10 = Array.isArray(data?.top10) ? data.top10 : [];
+                const cloud50 = Array.isArray(data?.cloud50) ? data.cloud50 : [];
+                return [
+                    `url: ${url}`,
+                    `region: ${region}`,
+                    `top10: ${top10.length}`,
+                    `cloud50: ${cloud50.length}`,
+                    '',
+                    `top10(sample): ${top10.slice(0, 3).map((x) => `${x.phrase}:${x.hit_count}`).join(', ')}`,
+                ].join('\n');
+            } catch {
+                return '--';
+            }
+        }
+
+        window.renderVibeCardFromData = function renderVibeCardFromData(countryCodeRaw, data) {
+            try {
+                const region = String(countryCodeRaw || currentDrawerCountry?.code || '').trim().toUpperCase();
+                const hint = document.getElementById('vibe-country-hint');
+                if (hint) hint.textContent = `COUNTRY: ${region || '--'}`;
+
+                const top10 = Array.isArray(data?.top10) ? data.top10 : (Array.isArray(window.__latestTop10) ? window.__latestTop10 : []);
+                const cloud50 = Array.isArray(data?.cloud50) ? data.cloud50 : (Array.isArray(window.__latestCloud50) ? window.__latestCloud50 : []);
+
+                _renderTop10List(top10);
+                _renderCloud50(region, cloud50);
+
+                try {
+                    const enabled = _isSemanticBurstDebugEnabled();
+                    const panel = document.getElementById('sb-debug-panel');
+                    const textEl = document.getElementById('sb-debug-text');
+                    if (panel) panel.classList.toggle('hidden', !enabled);
+                    if (enabled && textEl) {
+                        const API_ENDPOINT = _getApiEndpoint();
+                        const url = `${API_ENDPOINT}api/global-average?country_code=${encodeURIComponent(region)}`;
+                        textEl.textContent = _formatVibeHotlistDebug(data, region, url);
+                    }
+                } catch { /* ignore */ }
+            } catch { /* ignore */ }
+        };
+
+        window.refreshVibeCard = async function refreshVibeCard(countryCode) {
+            const region = String(countryCode || currentDrawerCountry?.code || '').trim().toUpperCase();
+            const empty = document.getElementById('vibe-cloud50-empty');
+
+            if (!region || region.length !== 2) {
+                _renderTop10List([]);
+                try { if (empty) empty.classList.remove('hidden'); } catch { /* ignore */ }
+                return;
+            }
+
+            _setVibeRefreshing(true);
+            try { setTimeout(() => _setVibeRefreshing(false), 700); } catch { /* ignore */ }
+
+            try { vibeCloudAbort && vibeCloudAbort.abort && vibeCloudAbort.abort(); } catch { /* ignore */ }
+            vibeCloudAbort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+
+            try {
+                const API_ENDPOINT = _getApiEndpoint();
+                // cache-busting：避免浏览器/中间层对 GET 做意外缓存
+                const url = `${API_ENDPOINT}api/global-average?country_code=${encodeURIComponent(region)}&_t=${Date.now()}`;
+                const resp = await fetch(url, { cache: 'no-store', signal: vibeCloudAbort ? vibeCloudAbort.signal : undefined });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const payload = await resp.json().catch(() => null);
+                const data = payload?.data ?? payload ?? {};
+
+                window.__latestTop10 = Array.isArray(data.top10) ? data.top10 : null;
+                window.__latestCloud50 = Array.isArray(data.cloud50) ? data.cloud50 : null;
+                window.renderVibeCardFromData(region, data);
+            } catch (e) {
+                try { _renderTop10List([]); } catch { /* ignore */ }
+                try { _renderCloud50(region, []); } catch { /* ignore */ }
+            }
+
+            if (!window.__vibeCloudResizeBound) {
+                window.__vibeCloudResizeBound = true;
+                window.addEventListener('resize', () => {
+                    try { vibeCloudChart && vibeCloudChart.resize(); } catch {}
+                });
+            }
+        };
+
         async function loadWordCloud() {
+            // 新版：语义爆发卡片（Top10 + Cloud50）
+            try {
+                const cc = String(currentDrawerCountry?.code || '').trim().toUpperCase();
+                if (typeof window.refreshVibeCard === 'function') {
+                    await window.refreshVibeCard(cc);
+                    return;
+                }
+            } catch { /* ignore */ }
+
             const nationalContainer = document.getElementById('national-wordcloud-container');
             const nationalEmpty = document.getElementById('national-sentence-empty');
 
@@ -11095,10 +11433,235 @@
             }
             if (refreshBtn) {
                 refreshBtn.addEventListener('click', async () => {
-                    try { window.__latestMonthlyVibes = null; } catch { /* ignore */ }
-                    try { window.loadWordCloud && window.loadWordCloud(); } catch { /* ignore */ }
+                    try { window.__latestTop10 = null; } catch { /* ignore */ }
+                    try { window.__latestCloud50 = null; } catch { /* ignore */ }
+                    try { window.refreshVibeCard && window.refreshVibeCard(currentDrawerCountry?.code); } catch { /* ignore */ }
                 });
             }
+        } catch { /* ignore */ }
+
+        // UserText Debug Popup
+        try {
+            const openUserTextDebug = () => {
+                try {
+                    const existing = document.getElementById('usertext-debug-overlay');
+                    if (existing) existing.remove();
+                } catch { /* ignore */ }
+
+                const overlay = document.createElement('div');
+                overlay.id = 'usertext-debug-overlay';
+                overlay.className = 'usertext-debug-overlay';
+                overlay.addEventListener('click', (e) => {
+                    if (e.target === overlay) overlay.remove();
+                });
+
+                // 优先读 window（同页面），否则从 localStorage 读取（跨页面）
+                let userText = String(window.__vibe_debug_userText || '').trim();
+                let extracted = Array.isArray(window.__vibe_debug_extracted_keywords) ? window.__vibe_debug_extracted_keywords : [];
+                let finalList = Array.isArray(window.__vibe_debug_final_report_list) ? window.__vibe_debug_final_report_list : [];
+                let regionHint = String(window.__vibe_debug_region_hint || '').trim();
+                let updatedAt = String(window.__vibe_debug_updated_at || '').trim();
+                let sourceHint = userText || extracted.length || finalList.length || regionHint || updatedAt ? 'window' : '';
+                try {
+                    if (!sourceHint) {
+                        const t = String(localStorage.getItem('vibe_debug_userText') || '').trim();
+                        const ek = String(localStorage.getItem('vibe_debug_extracted_keywords') || '[]');
+                        const fl = String(localStorage.getItem('vibe_debug_final_report_list') || '[]');
+                        const rh = String(localStorage.getItem('vibe_debug_region_hint') || '').trim();
+                        const ua = String(localStorage.getItem('vibe_debug_updated_at') || '').trim();
+                        userText = t;
+                        try { extracted = JSON.parse(ek); } catch { extracted = []; }
+                        try { finalList = JSON.parse(fl); } catch { finalList = []; }
+                        regionHint = rh;
+                        updatedAt = ua;
+                        sourceHint = (t || rh || ua || (Array.isArray(extracted) && extracted.length) || (Array.isArray(finalList) && finalList.length)) ? 'localStorage' : '';
+                    }
+                } catch { /* ignore */ }
+                let anchored = '';
+                try { anchored = String(localStorage.getItem('selected_country') || '').trim().toUpperCase(); } catch { anchored = ''; }
+
+                const esc = (s) => { try { return _escapeHtml(String(s ?? '')); } catch { return String(s ?? ''); } };
+                const asList = (arr) => (Array.isArray(arr) ? arr : [])
+                    .map((x) => ({
+                        phrase: String(x?.phrase || '').trim(),
+                        category: String(x?.category || '').trim(),
+                        weight: Number(x?.weight ?? x?.hit_count ?? x?.hitCount ?? 0) || 0,
+                    }))
+                    .filter((x) => x.phrase);
+
+                const extractedList = asList(extracted);
+                const finalReportList = asList(finalList);
+
+                const extractedHtml = extractedList.length
+                    ? extractedList.slice(0, 100).map((it, idx) => `
+                        <div class="flex justify-between gap-3 border-b border-white/10 py-1">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <span class="text-zinc-500 tabular-nums w-6">${idx + 1}</span>
+                                <span class="truncate font-mono text-zinc-200">${esc(it.phrase)}</span>
+                            </div>
+                            <div class="flex items-center gap-2 flex-shrink-0">
+                                <span class="text-[10px] text-zinc-500">${esc(it.category || 'slang')}</span>
+                                <span class="text-zinc-400 tabular-nums">${it.weight}</span>
+                            </div>
+                        </div>
+                    `).join('')
+                    : '<div class="text-zinc-500 text-sm italic">暂无（可能尚未触发分析 / userText 为空 / 提词失败）</div>';
+
+                const finalHtml = finalReportList.length
+                    ? finalReportList.slice(0, 100).map((it, idx) => `
+                        <div class="flex justify-between gap-3 border-b border-white/10 py-1">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <span class="text-zinc-500 tabular-nums w-6">${idx + 1}</span>
+                                <span class="truncate font-mono text-zinc-200">${esc(it.phrase)}</span>
+                            </div>
+                            <div class="flex items-center gap-2 flex-shrink-0">
+                                <span class="text-[10px] text-zinc-500">${esc(it.category || 'slang')}</span>
+                                <span class="text-zinc-400 tabular-nums">${it.weight}</span>
+                            </div>
+                        </div>
+                    `).join('')
+                    : '<div class="text-zinc-500 text-sm italic">暂无（finalList 为空则不会上报 /api/v2/report-vibe）</div>';
+
+                const header = `
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="text-xs uppercase tracking-widest text-zinc-400">UserText Debug</div>
+                        <div class="flex items-center gap-2">
+                            <button id="usertext-debug-copy" class="px-2 py-1 text-[10px] border border-white/10 text-zinc-200 hover:bg-white/5 transition-colors font-mono">COPY</button>
+                            <button id="usertext-debug-reportvibe" class="px-2 py-1 text-[10px] border border-[#00ff41]/30 text-[#00ff41] hover:bg-[#00ff41]/10 transition-colors font-mono">REPORT_VIBE_DEBUG</button>
+                            <button id="usertext-debug-close" class="px-2 py-1 text-[10px] border border-[#00ff41]/30 text-[#00ff41] hover:bg-[#00ff41]/10 transition-colors font-mono">CLOSE</button>
+                        </div>
+                    </div>
+                    <div class="text-[11px] text-zinc-500 font-mono">
+                        anchored(selected_country): <span class="text-zinc-200">${esc(anchored || '--')}</span>
+                        &nbsp;|&nbsp; regionHint: <span class="text-zinc-200">${esc(regionHint || '--')}</span>
+                        &nbsp;|&nbsp; updated_at: <span class="text-zinc-200">${esc(updatedAt || '--')}</span>
+                        &nbsp;|&nbsp; source: <span class="text-zinc-200">${esc(sourceHint || 'none')}</span>
+                    </div>
+                `;
+
+                const body = `
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3">
+                        <div class="border border-white/10 bg-zinc-950/30 p-3">
+                            <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">USER_TEXT (raw)</div>
+                            <textarea id="usertext-debug-textarea" class="w-full h-[240px] bg-black/40 border border-white/10 text-zinc-200 text-[11px] font-mono p-2 outline-none" readonly>${esc(userText)}</textarea>
+                            <div class="text-[10px] text-zinc-600 mt-2">len=${userText.length}</div>
+                        </div>
+                        <div class="border border-white/10 bg-zinc-950/30 p-3">
+                            <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">EXTRACTED (extractVibeKeywords)</div>
+                            <div class="max-h-[240px] overflow-y-auto">${extractedHtml}</div>
+                        </div>
+                    </div>
+                    <div class="border border-white/10 bg-zinc-950/30 p-3 mt-3">
+                        <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">FINAL_REPORT_LIST (will report)</div>
+                        <div class="max-h-[240px] overflow-y-auto">${finalHtml}</div>
+                    </div>
+                    <div class="border border-white/10 bg-zinc-950/30 p-3 mt-3">
+                        <div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">WORKER DEBUG RESULT (/api/v2/report-vibe?debug=1)</div>
+                        <textarea id="usertext-debug-worker-result" class="w-full h-[180px] bg-black/40 border border-white/10 text-zinc-200 text-[11px] font-mono p-2 outline-none" readonly>点击 REPORT_VIBE_DEBUG 发送 finalList 到 Worker（debug=1）并显示逐条 RPC 结果</textarea>
+                    </div>
+                `;
+
+                overlay.innerHTML = `
+                    <div class="w-full max-w-5xl bg-zinc-950/95 border border-[#00ff41]/25 p-4">
+                        ${header}
+                        ${body}
+                    </div>
+                `;
+                document.body.appendChild(overlay);
+
+                const closeBtn = document.getElementById('usertext-debug-close');
+                if (closeBtn) closeBtn.addEventListener('click', () => overlay.remove());
+                const copyBtn = document.getElementById('usertext-debug-copy');
+                if (copyBtn) copyBtn.addEventListener('click', async () => {
+                    try {
+                        const ta = document.getElementById('usertext-debug-textarea');
+                        const text = (ta && ta.value != null) ? ta.value : userText;
+                        await navigator.clipboard.writeText(String(text || ''));
+                    } catch { /* ignore */ }
+                });
+
+                const reportBtn = document.getElementById('usertext-debug-reportvibe');
+                if (reportBtn) reportBtn.addEventListener('click', async () => {
+                    const out = document.getElementById('usertext-debug-worker-result');
+                    try {
+                        if (out) out.value = '发送中...';
+                        const listFinal = Array.isArray(finalList) ? finalList : [];
+                        const listExtracted = Array.isArray(extracted) ? extracted : [];
+                        // 并不强依赖 finalList：为空时回退用 extracted（帮助定位“为什么 finalList 为空”）
+                        const list = listFinal.length > 0 ? listFinal : listExtracted;
+                        const listSource = listFinal.length > 0 ? 'finalList' : (listExtracted.length > 0 ? 'extracted' : 'empty');
+                        if (list.length === 0) {
+                            if (out) out.value = 'finalList 与 extracted 均为空：当前无法触发 /api/v2/report-vibe 写库。请先触发一次分析生成提词结果。';
+                            return;
+                        }
+
+                        const API_ENDPOINT = _getApiEndpoint();
+                        const url = `${API_ENDPOINT}api/v2/report-vibe?debug=1`;
+                        let fingerprint = null;
+                        try { fingerprint = localStorage.getItem('user_fingerprint') || window.fpId || null; } catch { fingerprint = null; }
+
+                        // 将 finalList 转为 Worker 接口要求：[{phrase, category, weight}]
+                        const keywords = list.map((x) => ({
+                            phrase: String(x?.phrase || '').trim(),
+                            category: String(x?.category || 'slang').trim() || 'slang',
+                            weight: Number(x?.weight ?? 1) || 1,
+                        })).filter((x) => x.phrase);
+
+                        const payload = {
+                            debug: 1,
+                            keywords,
+                            fingerprint: fingerprint || null,
+                            // 强制携带锚定国家（Worker 会优先 manual_region）
+                            manual_region: anchored && /^[A-Z]{2}$/.test(anchored) ? anchored : null,
+                            region: anchored && /^[A-Z]{2}$/.test(anchored) ? anchored : null,
+                            timestamp: new Date().toISOString(),
+                        };
+
+                        const resp = await fetch(url, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload),
+                        });
+
+                        const text = await resp.text().catch(() => '');
+                        if (out) {
+                            let note = '';
+                            try {
+                                const parsed = JSON.parse(text || '{}');
+                                if (parsed && typeof parsed === 'object' && parsed.status !== 'debug') {
+                                    note = '\n\n[NOTE] Worker 未返回 debug 结构（status!=debug）。这通常表示：线上 Worker 尚未部署到包含 debug=1 的版本。';
+                                }
+                            } catch { /* ignore */ }
+                            const header =
+                                `HTTP ${resp.status}\n` +
+                                `sent_source=${listSource}, sent_keywords=${keywords.length}, anchored=${anchored || '--'}\n\n`;
+                            out.value = header + (text || '(empty)') + note;
+                        }
+
+                // debug 成功后：立即刷新右侧黑话榜（让最新入库数据“马上可见”）
+                try {
+                    const parsed = JSON.parse(text || '{}');
+                    if (parsed && typeof parsed === 'object' && parsed.status === 'debug') {
+                        try { window.refreshVibeCard && window.refreshVibeCard(anchored); } catch { /* ignore */ }
+                    }
+                } catch { /* ignore */ }
+                    } catch (e) {
+                        if (out) out.value = `发送失败: ${String(e?.message || e)}`;
+                    }
+                });
+            };
+
+            window.openUserTextDebug = openUserTextDebug;
+
+            // 事件委托兜底：避免 DOM 被重绘后监听失效
+            document.addEventListener('click', (e) => {
+                try {
+                    const t = e && e.target;
+                    if (t && t.id === 'sb-usertext-btn') {
+                        openUserTextDebug();
+                    }
+                } catch { /* ignore */ }
+            }, true);
         } catch { /* ignore */ }
 
         // ==========================================

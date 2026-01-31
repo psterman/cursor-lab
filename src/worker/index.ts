@@ -3664,6 +3664,58 @@ app.get('/api/global-average', async (c) => {
       sv_slang: [],
     };
   }
+
+  // 7) 黑话榜聚合（按需）：slang_trends_pool + 时间衰减
+  // - country_code: 从 slang_trends_pool 过滤 region
+  // - top10: hit_count desc 前 10
+  // - cloud50: hit_count * 时间衰减因子 desc 前 50
+  try {
+    const region = normalizeRegion(countryCode);
+    const nowMs = Date.now();
+    const HALF_LIFE_DAYS = 14; // 可按产品需要调整：越小越“追新”
+
+    const poolUrl = new URL(`${env.SUPABASE_URL}/rest/v1/slang_trends_pool`);
+    poolUrl.searchParams.set('select', 'phrase,hit_count,updated_at,created_at');
+    poolUrl.searchParams.set('region', `eq.${region}`);
+    poolUrl.searchParams.set('order', 'hit_count.desc');
+    // 为了更准确挑出“近期爆发但 hit_count 不高”的词：取更大的候选集再做衰减排序
+    poolUrl.searchParams.set('limit', '500');
+
+    const rows = await fetchSupabaseJson<any[]>(env, poolUrl.toString(), {
+      headers: buildSupabaseHeaders(env),
+    });
+
+    const items = (Array.isArray(rows) ? rows : [])
+      .map((r: any) => {
+        const phrase = String(r?.phrase ?? '').trim();
+        const hitCount = Number(r?.hit_count ?? 0) || 0;
+        const tsStr = String(r?.updated_at || r?.created_at || '');
+        const ts = Date.parse(tsStr);
+        const ageDays = Number.isFinite(ts) ? Math.max(0, (nowMs - ts) / 86400000) : 0;
+        const decay = Math.pow(0.5, ageDays / HALF_LIFE_DAYS);
+        const activity = hitCount * decay;
+        return { phrase, hit_count: hitCount, activity };
+      })
+      .filter((x) => x.phrase && x.phrase.length >= 2 && x.phrase.length <= 120 && x.hit_count > 0);
+
+    const top10 = items
+      .slice()
+      .sort((a, b) => (b.hit_count - a.hit_count) || (b.activity - a.activity) || (a.phrase > b.phrase ? 1 : -1))
+      .slice(0, 10)
+      .map(({ phrase, hit_count }) => ({ phrase, hit_count }));
+
+    const cloud50 = items
+      .slice()
+      .sort((a, b) => (b.activity - a.activity) || (b.hit_count - a.hit_count) || (a.phrase > b.phrase ? 1 : -1))
+      .slice(0, 50)
+      .map(({ phrase, hit_count }) => ({ phrase, hit_count }));
+
+    (finalRow as any).top10 = top10;
+    (finalRow as any).cloud50 = cloud50;
+  } catch {
+    (finalRow as any).top10 = [];
+    (finalRow as any).cloud50 = [];
+  }
   return c.json(finalRow);
 });
 
@@ -3955,20 +4007,31 @@ app.post('/api/v2/report-vibe', async (c) => {
     return c.json({ status: 'error', error: 'Invalid JSON' }, 400);
   }
 
-  // region 解析：
-  // - 优先使用 payload.region（如显式传 US）
-  // - 兼容 country_code/location
-  // - 兜底：若仍为 Global，则使用 Cloudflare 的 cf.country（修复美区用户没显式传 region 导致写入 Global）
-  let region = normalizeRegion(body?.region ?? body?.country_code ?? body?.location ?? 'Global');
+  // debug 开关：debug=1（query 或 body）
+  const debugFlag = String((c.req.query?.('debug') ?? '') || (body?.debug ?? '') || '').trim().toLowerCase();
+  const isDebug = debugFlag === '1' || debugFlag === 'true';
+
+  // region 判定（支持“手动地域修正”）：
+  // - 优先：manual_region（前端用户选择）
+  // - 次优：cf-ipcountry / cf.country（物理 IP）
+  // - 兼容：payload.region / country_code / location
+  const manualRegionRaw = normalizeRegion(body?.manual_region ?? body?.manualRegion ?? '');
+  const manualRegion = /^[A-Za-z]{2}$/.test(manualRegionRaw) ? manualRegionRaw.toUpperCase() : manualRegionRaw;
+
+  const payloadRegionRaw = normalizeRegion(body?.region ?? body?.country_code ?? body?.location ?? 'Global');
+  const payloadRegion = /^[A-Za-z]{2}$/.test(payloadRegionRaw) ? payloadRegionRaw.toUpperCase() : payloadRegionRaw;
+
+  let cfCountry = '';
   try {
     const rawReq: any = c.req?.raw;
-    const cfCountry = String(rawReq?.cf?.country || '').trim().toUpperCase();
-    if (region === 'Global' && /^[A-Z]{2}$/.test(cfCountry)) {
-      region = cfCountry;
-    }
+    cfCountry = String(rawReq?.cf?.country || c.req.header('cf-ipcountry') || '').trim().toUpperCase();
   } catch {
     // ignore
   }
+
+  let region = payloadRegion;
+  if (/^[A-Z]{2}$/.test(manualRegion)) region = manualRegion;
+  else if (/^[A-Z]{2}$/.test(cfCountry)) region = cfCountry;
   const keywords = Array.isArray(body?.keywords) ? body.keywords : [];
 
   const items: Array<{ phrase: string; category: VibeCategory; delta: number }> = [];
@@ -3986,6 +4049,105 @@ app.post('/api/v2/report-vibe', async (c) => {
   }
 
   const poolRpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/upsert_slang_pool_hits_v1`;
+
+  // Debug 模式：同步执行并返回每条 RPC 结果（便于排查写库失败原因）
+  if (isDebug) {
+    const results: Array<{
+      idx: number;
+      phrase: string;
+      category: VibeCategory;
+      delta: number;
+      ok: boolean;
+      status?: number;
+      error?: string;
+    }> = [];
+
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      try {
+        const res = await fetchSupabase(env, poolRpcUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            p_phrase: it.phrase,
+            p_region: region,
+            p_category: it.category,
+            p_delta: it.delta,
+          }),
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          results.push({
+            idx: i,
+            phrase: it.phrase,
+            category: it.category,
+            delta: it.delta,
+            ok: false,
+            status: res.status,
+            error: text || `Supabase HTTP ${res.status}`,
+          });
+        } else {
+          results.push({
+            idx: i,
+            phrase: it.phrase,
+            category: it.category,
+            delta: it.delta,
+            ok: true,
+            status: res.status,
+          });
+        }
+      } catch (e: any) {
+        results.push({
+          idx: i,
+          phrase: it.phrase,
+          category: it.category,
+          delta: it.delta,
+          ok: false,
+          error: e?.message || String(e),
+        });
+      }
+    }
+
+    const okCount = results.filter(r => r.ok).length;
+    // debug: 写入后立刻读回（验证 SELECT/RLS 是否正常）
+    let postWriteReadback: any = null;
+    try {
+      const readUrl = new URL(`${env.SUPABASE_URL}/rest/v1/slang_trends_pool`);
+      readUrl.searchParams.set('select', 'phrase,hit_count,category,updated_at');
+      readUrl.searchParams.set('region', `eq.${region}`);
+      readUrl.searchParams.set('order', 'hit_count.desc');
+      readUrl.searchParams.set('limit', '20');
+      const rows = await fetchSupabaseJson<any[]>(env, readUrl.toString(), {
+        headers: buildSupabaseHeaders(env),
+      });
+      postWriteReadback = {
+        ok: true,
+        count: Array.isArray(rows) ? rows.length : 0,
+        top: (Array.isArray(rows) ? rows : []).slice(0, 20),
+      };
+    } catch (e: any) {
+      postWriteReadback = {
+        ok: false,
+        error: e?.message || String(e),
+      };
+    }
+
+    return c.json({
+      status: 'debug',
+      regionResolved: region,
+      regionCandidates: {
+        manual_region: manualRegion || null,
+        payload_region: payloadRegion || null,
+        cf_country: cfCountry || null,
+      },
+      receivedKeywords: Array.isArray(body?.keywords) ? body.keywords.length : 0,
+      acceptedItems: items.length,
+      okCount,
+      failCount: results.length - okCount,
+      results,
+      postWriteReadback,
+    });
+  }
 
   c.executionCtx.waitUntil((async () => {
     // 高性能聚合上报：每个 keyword 直接 upsert 到 slang_trends_pool（原子累加）

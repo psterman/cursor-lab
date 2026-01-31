@@ -66,6 +66,11 @@ begin
 end;
 $$;
 
+-- 允许前端经由 Worker（anon/authenticated）调用 RPC
+-- 注意：如果你仅允许 service_role 调用，也可以不授予；但那要求 Worker 必须使用 service_role key。
+grant execute on function public.upsert_slang_pool_hits_v1(text, text, text, bigint) to anon;
+grant execute on function public.upsert_slang_pool_hits_v1(text, text, text, bigint) to authenticated;
+
 -- 国家特色筛选：获取某批 phrase 的“全球总频次”（跨所有 region 聚合）
 create or replace function public.get_slang_pool_global_counts_v1(
   p_phrases text[]

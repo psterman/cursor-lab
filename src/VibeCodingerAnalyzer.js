@@ -693,12 +693,25 @@ async function reportKeywords(keywords, { fingerprint = null, timestamp = null, 
 
     const apiEndpoint = getApiEndpointForClient();
     const url = `${apiEndpoint}api/v2/report-vibe`;
+    // 手动地域修正：从 localStorage.selected_country 读取（由地图点击写入）
+    let anchored = null;
+    try {
+      const v = String(localStorage.getItem('selected_country') || '').trim().toUpperCase();
+      if (/^[A-Z]{2}$/.test(v)) anchored = v;
+    } catch (e) {}
+
+    // 优先锚定国家：避免调用方传入 Global 覆盖用户选择
+    const finalRegion = anchored || region || 'Global';
     const payload = {
       keywords: list,
       fingerprint: fingerprint || null,
       timestamp: timestamp || new Date().toISOString(),
-      region: region || 'Global',
+      region: finalRegion,
     };
+    if (anchored) {
+      // 后端优先级：manual_region > cf-ipcountry；确保数据“搬迁”到用户选择国家
+      payload.manual_region = anchored;
+    }
 
     // sendBeacon 最不打扰主线程/页面卸载
     if (typeof navigator !== 'undefined' && navigator && typeof navigator.sendBeacon === 'function') {
@@ -2091,6 +2104,25 @@ export class VibeCodingerAnalyzer {
               .filter(t => t.length > 0)
               .join(' ');
 
+            // Debug：即使 userText 为空也要记录，避免“黑盒”
+            try {
+              if (typeof window !== 'undefined') {
+                window.__vibe_debug_userText = String(userText || '');
+                window.__vibe_debug_extracted_keywords = [];
+                window.__vibe_debug_final_report_list = [];
+                window.__vibe_debug_region_hint = region;
+                window.__vibe_debug_updated_at = new Date().toISOString();
+              }
+              // 跨页面可见：写入 localStorage（stats2.html 也能读到）
+              try {
+                localStorage.setItem('vibe_debug_userText', String(userText || ''));
+                localStorage.setItem('vibe_debug_extracted_keywords', '[]');
+                localStorage.setItem('vibe_debug_final_report_list', '[]');
+                localStorage.setItem('vibe_debug_region_hint', String(region || ''));
+                localStorage.setItem('vibe_debug_updated_at', new Date().toISOString());
+              } catch (e2) {}
+            } catch (e) {}
+
             if (!userText || userText.length === 0) return;
 
             // 句式/长短语：使用 extractVibeKeywords（已升级为原生句式捕获）
@@ -2121,6 +2153,25 @@ export class VibeCodingerAnalyzer {
             const finalList = Array.from(merged.values())
               .sort((a, b) => (b.weight - a.weight) || (a.phrase > b.phrase ? 1 : -1))
               .slice(0, 15);
+
+            // Debug：暴露本次 userText/提词/最终上报列表，便于排查“黑盒筛选”
+            try {
+              if (typeof window !== 'undefined') {
+                window.__vibe_debug_userText = userText;
+                window.__vibe_debug_extracted_keywords = Array.isArray(keywords) ? keywords : [];
+                window.__vibe_debug_final_report_list = Array.isArray(finalList) ? finalList : [];
+                window.__vibe_debug_region_hint = region;
+                window.__vibe_debug_updated_at = new Date().toISOString();
+              }
+              // 跨页面可见：写入 localStorage（stats2.html 也能读到）
+              try {
+                localStorage.setItem('vibe_debug_userText', String(userText || ''));
+                localStorage.setItem('vibe_debug_extracted_keywords', JSON.stringify(Array.isArray(keywords) ? keywords : []));
+                localStorage.setItem('vibe_debug_final_report_list', JSON.stringify(Array.isArray(finalList) ? finalList : []));
+                localStorage.setItem('vibe_debug_region_hint', String(region || ''));
+                localStorage.setItem('vibe_debug_updated_at', new Date().toISOString());
+              } catch (e2) {}
+            } catch (e) {}
 
             // 通过 /api/v2/report-vibe 上报（使用 navigator.sendBeacon 或异步 fetch）
             if (finalList.length > 0) {
