@@ -1523,7 +1523,7 @@
                         <div class="bg-zinc-950/60 border border-zinc-800 p-2 mb-4">
                             <div class="flex items-center justify-between mb-2">
                                 <div class="text-[11px] text-zinc-400 uppercase tracking-widest">国家语义爆发 / National Pool</div>
-                                <div class="text-[10px] text-zinc-500" id="national-sentence-hint">TOP 20</div>
+                                <div class="text-[10px] text-zinc-500" id="national-sentence-hint">TOP 10 雷同句子</div>
                             </div>
                             <div id="national-wordcloud-container" style="height: 380px; width: 100%;"></div>
                             <div id="national-sentence-empty" class="hidden text-zinc-500 text-sm p-3 italic">
@@ -2121,6 +2121,8 @@
                 // =========================
                 try {
                     window.__latestMonthlyVibes = data.monthly_vibes || data.monthlyVibes || null;
+                    // 【V6.1 新增】保存高频句子数据
+                    window.__latestTopSentences = data.top_sentences || null;
                     // 若分类为空：由词云渲染层插入提示语
                     try { window.loadWordCloud && window.loadWordCloud(); } catch (e2) { /* ignore */ }
                 } catch (e1) { /* ignore */ }
@@ -10850,6 +10852,7 @@
                             const payload = await resp.json().catch(() => null);
                             const data = payload?.data ?? payload ?? {};
                             window.__latestMonthlyVibes = data.monthly_vibes || data.monthlyVibes || null;
+                            window.__latestTopSentences = data.top_sentences || null;
                         }
                     } catch { /* ignore */ }
                 }
@@ -10858,14 +10861,39 @@
                 const slang = Array.isArray(mv?.slang) ? mv.slang : [];
                 const merit = Array.isArray(mv?.merit) ? mv.merit : [];
                 const sv = Array.isArray(mv?.sv_slang) ? mv.sv_slang : [];
+                const natPhrases = Array.isArray(mv?.phrase) ? mv.phrase : [];
 
-                const combined0 = []
-                    .concat(slang.map((x) => ({ name: String(x?.phrase || '').trim(), value: Number(x?.hit_count) || 0, category: 'slang' })))
-                    .concat(merit.map((x) => ({ name: String(x?.phrase || '').trim(), value: Number(x?.hit_count) || 0, category: 'merit' })))
-                    .concat(sv.map((x) => ({ name: String(x?.phrase || '').trim(), value: Number(x?.hit_count) || 0, category: 'sv_slang' })))
-                    .filter((x) => x.name && x.value > 0)
-                    .sort((a, b) => b.value - a.value)
-                    .slice(0, 20);
+                // 展示优先级（按你的新需求）：
+                // 1) 国民级词组（monthly_vibes.phrase）→ 列表
+                // 2) 真实雷同句子（top_sentences）→ 列表
+                // 3) 其他关键词（slang/merit/sv_slang）→ 词云
+                const topSentences = window.__latestTopSentences || null;
+                let combined0 = [];
+
+                if (Array.isArray(natPhrases) && natPhrases.length > 0) {
+                    combined0 = natPhrases
+                        .map((x) => ({ name: String(x?.phrase || '').trim(), value: Number(x?.hit_count) || 0, category: 'phrase' }))
+                        .filter((x) => x.name && x.value > 0)
+                        .sort((a, b) => b.value - a.value)
+                        .slice(0, 10);
+                } else if (Array.isArray(topSentences) && topSentences.length > 0) {
+                    combined0 = topSentences
+                        .map((x) => ({
+                            name: String(x?.sentence || '').trim(),
+                            value: Number(x?.hit_count) || 0,
+                            category: 'sentence',
+                        }))
+                        .filter((x) => x.name && x.value > 0)
+                        .slice(0, 10);
+                } else {
+                    combined0 = []
+                        .concat(slang.map((x) => ({ name: String(x?.phrase || '').trim(), value: Number(x?.hit_count) || 0, category: 'slang' })))
+                        .concat(merit.map((x) => ({ name: String(x?.phrase || '').trim(), value: Number(x?.hit_count) || 0, category: 'merit' })))
+                        .concat(sv.map((x) => ({ name: String(x?.phrase || '').trim(), value: Number(x?.hit_count) || 0, category: 'sv_slang' })))
+                        .filter((x) => x.name && x.value > 0)
+                        .sort((a, b) => b.value - a.value)
+                        .slice(0, 10);
+                }
 
                 if (combined0.length === 0) {
                     // 空态：分类为空时提示“正在收录…”
@@ -10891,11 +10919,83 @@
                 }
 
                 _showEmpty(nationalContainer, nationalEmpty, false);
-                const words = applyLogFontSize(combined0, (w) => w?.value ?? 0);
+                
+                // 展示策略：
+                // - sentence：真实句子（>=2 次雷同）→ 列表
+                // - phrase：国民级词组（3-5字/词）→ 列表
+                // - 其他关键词 → 词云
+                const category0 = combined0.length > 0 ? String(combined0[0].category || '') : '';
+                const useSentenceList = category0 === 'sentence' || category0 === 'phrase';
+                
+                if (useSentenceList) {
+                    // 稳定方案：句子列表渲染到 fallback 容器（避免被词云/ECharts/empty-state 影响）
+                    const fallbackEl = document.getElementById('national-sentence-fallback');
+                    const hintEl = document.getElementById('national-sentence-hint');
 
-                nationalContainer.innerHTML = '';
-                _disposeChart(nationalSentenceChart);
-                nationalSentenceChart = echarts.init(nationalContainer, 'dark', { renderer: 'canvas' });
+                    const ranked = (Array.isArray(combined0) ? combined0 : [])
+                        .map((x) => ({ name: String(x?.name || '').trim(), value: Number(x?.value) || 0 }))
+                        .filter((x) => x.name && x.value > 0)
+                        .sort((a, b) => b.value - a.value);
+                    const list = (category0 === 'sentence')
+                        ? ranked.filter((x) => x.value >= 2).slice(0, 10)     // 真实句子：必须 >=2
+                        : ranked.slice(0, 10);                                // 国民词组：只要 >0 就展示排行
+
+                    // 清空词云容器（避免叠层/占位影响）
+                    try { nationalContainer.innerHTML = ''; } catch { /* ignore */ }
+                    try { _disposeChart(nationalSentenceChart); } catch { /* ignore */ }
+
+                    // 同步提示
+                    try {
+                        if (hintEl) {
+                            hintEl.textContent = category0 === 'phrase'
+                                ? `TOP ${list.length} 国民词组`
+                                : `TOP ${list.length} 雷同句子`;
+                        }
+                    } catch { /* ignore */ }
+
+                    // 空态：sentence 必须 >=2；phrase 若为空则提示收录中
+                    if (list.length === 0) {
+                        if (fallbackEl) {
+                            fallbackEl.innerHTML = category0 === 'phrase'
+                                ? '<div class="text-zinc-500 text-sm p-3 italic">暂无国民级词组（正在收录中...）</div>'
+                                : '<div class="text-zinc-500 text-sm p-3 italic">暂无 ≥2 次雷同的真实句式（正在收录中...）</div>';
+                            fallbackEl.classList.remove('hidden');
+                        }
+                        try { if (nationalEmpty) nationalEmpty.classList.remove('hidden'); } catch { /* ignore */ }
+                        return;
+                    }
+
+                    const listHtml = list.map((item, index) => {
+                        const escName = _escapeHtml(item.name || '');
+                        const count = item.value || 0;
+                        const countColor = count >= 10 ? '#00ff41' : count >= 5 ? '#3b82f6' : '#9ca3af';
+                        return `
+                            <div class="flex items-start gap-3 p-3 border-b border-white/5 hover:bg-white/5 transition-colors">
+                                <div class="flex-shrink-0 w-6 h-6 rounded-full bg-gradient-to-br from-purple-500/20 to-blue-500/20 flex items-center justify-center text-[10px] font-bold text-white/60">
+                                    ${index + 1}
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <div class="text-sm text-zinc-200 leading-relaxed break-words">${escName}</div>
+                                </div>
+                                <div class="flex-shrink-0 flex items-center gap-1">
+                                    <span class="text-[10px] text-zinc-500">×</span>
+                                    <span class="text-sm font-bold tabular-nums" style="color: ${countColor}">${count}</span>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+
+                    if (fallbackEl) {
+                        fallbackEl.innerHTML = `<div class="w-full max-h-[380px] overflow-y-auto">${listHtml}</div>`;
+                        fallbackEl.classList.remove('hidden');
+                    }
+                    try { if (nationalEmpty) nationalEmpty.classList.add('hidden'); } catch { /* ignore */ }
+                } else {
+                    // 回退：使用词云展示关键词
+                    const words = applyLogFontSize(combined0, (w) => w?.value ?? 0);
+                    nationalContainer.innerHTML = '';
+                    _disposeChart(nationalSentenceChart);
+                    nationalSentenceChart = echarts.init(nationalContainer, 'dark', { renderer: 'canvas' });
 
                 const maxVal = Math.max(...words.map((w) => w.value));
                 const getColor = (category, value) => {
@@ -10943,19 +11043,20 @@
                         fallbackEl.classList.remove('hidden');
                     }
                 }
-
-                // debug panel update (success)
-                try {
-                    const enabled = _isSemanticBurstDebugEnabled();
-                    const panel = document.getElementById('sb-debug-panel');
-                    const textEl = document.getElementById('sb-debug-text');
-                    if (panel) panel.classList.toggle('hidden', !enabled);
-                    if (enabled && textEl) {
-                        const API_ENDPOINT = _getApiEndpoint();
-                        const url = `${API_ENDPOINT}api/global-average?country_code=${encodeURIComponent(region)}`;
-                        textEl.textContent = _formatMonthlyVibesDebug(mv, region, url);
-                    }
-                } catch { /* ignore */ }
+                
+                    // debug panel update (success)
+                    try {
+                        const enabled = _isSemanticBurstDebugEnabled();
+                        const panel = document.getElementById('sb-debug-panel');
+                        const textEl = document.getElementById('sb-debug-text');
+                        if (panel) panel.classList.toggle('hidden', !enabled);
+                        if (enabled && textEl) {
+                            const API_ENDPOINT = _getApiEndpoint();
+                            const url = `${API_ENDPOINT}api/global-average?country_code=${encodeURIComponent(region)}`;
+                            textEl.textContent = _formatMonthlyVibesDebug(mv, region, url);
+                        }
+                    } catch { /* ignore */ }
+                } // 结束 else (词云渲染分支)
             } catch (e) {
                 try {
                     if (nationalEmpty) nationalEmpty.textContent = '正在建立该地区开发者语义指纹...';
@@ -11229,6 +11330,64 @@
                 }));
         }
 
+        // ==========================================
+        // 国民级词组（3-5字/词）：本地统计后上报到 Supabase 汇总
+        // - 中文：连续汉字 run 内 3-5 字窗口
+        // - 英文：3-5 个单词 n-gram
+        // - 只取本次文本内 topN，避免给后端造成压力
+        // ==========================================
+        function extractNationalPhrases(text, opts = {}) {
+            const max = Math.max(1, Math.min(25, Number(opts.max) || 12));
+            const cleaned = String(text || '').replace(/\s+/g, ' ').trim();
+            if (!cleaned) return [];
+
+            const freq = new Map();
+            const bump = (p) => {
+                const s = String(p || '').trim();
+                if (!s) return;
+                if (s.length < 3) return;
+                if (s.length > 64) return;
+                if (/^[0-9]+$/.test(s)) return;
+                if (/^[\p{P}\p{S}]+$/u.test(s)) return;
+                // 过滤 url/代码味
+                const low = s.toLowerCase();
+                if (low.includes('http://') || low.includes('https://') || low.includes('```')) return;
+                freq.set(s, (freq.get(s) || 0) + 1);
+            };
+
+            const segments = cleaned.split(/[。\.！!？\?\n\r；;，,]+/g).map(s => String(s || '').trim()).filter(Boolean);
+
+            for (const seg of segments) {
+                // 中文：3-5 字
+                const zhRuns = seg.match(/[\u4e00-\u9fff]{3,}/g) || [];
+                for (const run of zhRuns) {
+                    const r = String(run);
+                    for (let n = 3; n <= 5; n++) {
+                        if (r.length < n) continue;
+                        for (let i = 0; i <= r.length - n; i++) bump(r.slice(i, i + n));
+                    }
+                }
+
+                // 英文：3-5 词
+                const enWords = (seg.match(/[A-Za-z]+(?:'[A-Za-z]+)?/g) || [])
+                    .map(w => w.toLowerCase())
+                    .filter(Boolean);
+                for (let n = 3; n <= 5; n++) {
+                    if (enWords.length < n) continue;
+                    for (let i = 0; i <= enWords.length - n; i++) bump(enWords.slice(i, i + n).join(' '));
+                }
+            }
+
+            return Array.from(freq.entries())
+                .sort((a, b) => (b[1] - a[1]) || (b[0].length - a[0].length))
+                .slice(0, max)
+                .map(([phrase, count]) => ({
+                    phrase,
+                    category: 'phrase',
+                    weight: Math.max(1, Math.min(5, Number(count) || 1)),
+                }));
+        }
+
         async function reportSlangFromText(text, location) {
             try {
                 const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content || '';
@@ -11243,12 +11402,33 @@
                     }
                 })();
                 
-                const keywords = extractVibeKeywords(text, { max: 15 });
-                if (!keywords || keywords.length === 0) return;
+                const keywords = extractVibeKeywords(text, { max: 15 }) || [];
+                const phrases = extractNationalPhrases(text, { max: 12 }) || [];
+
+                // 合并去重（同 phrase 取更大 weight；category 优先保留 phrase）
+                const merged = new Map();
+                const put = (it) => {
+                    const k = String(it?.phrase || '').trim();
+                    if (!k) return;
+                    const prev = merged.get(k);
+                    if (!prev) {
+                        merged.set(k, it);
+                        return;
+                    }
+                    const w0 = Number(prev?.weight) || 1;
+                    const w1 = Number(it?.weight) || 1;
+                    const cat = (prev?.category === 'phrase' || it?.category === 'phrase') ? 'phrase' : (prev?.category || it?.category);
+                    merged.set(k, { phrase: k, category: cat, weight: Math.max(w0, w1) });
+                };
+                keywords.forEach(put);
+                phrases.forEach(put);
+
+                const finalKeywords = Array.from(merged.values()).slice(0, 25);
+                if (finalKeywords.length === 0) return;
                 
                 // 使用新版接口 /api/v2/report-vibe
                 const payload = {
-                    keywords: keywords,
+                    keywords: finalKeywords,
                     fingerprint: fingerprint || null,
                     timestamp: new Date().toISOString(),
                     region: location || 'Global',
@@ -11277,6 +11457,90 @@
             }
         }
 
+        // ==========================================
+        // 句式上报：只收集“真实用户输入”里的短句
+        // - 不要太长：6-120 字符（后端再次过滤到 140）
+        // - 不凑 10：只上报实际出现过的句子（按本次文本内频次 top）
+        // ==========================================
+        function extractRealSentences(text, opts = {}) {
+            const maxItems = Math.max(1, Math.min(25, Number(opts.maxItems) || 12));
+            const minLen = Math.max(4, Math.min(20, Number(opts.minLen) || 6));
+            const maxLen = Math.max(40, Math.min(160, Number(opts.maxLen) || 120));
+
+            const normalize = (s) => {
+                const raw = String(s ?? '').replace(/\s+/g, ' ').trim();
+                return raw
+                    .replace(/^[\s"'“”‘’`~!！?？。.,，;；:：()\[\]{}<>-]+/g, '')
+                    .replace(/[\s"'“”‘’`~!！?？。.,，;；:：()\[\]{}<>-]+$/g, '')
+                    .trim();
+            };
+
+            const isBad = (s) => {
+                if (!s) return true;
+                if (s.length < minLen) return true;
+                if (s.length > maxLen) return true;
+                const low = s.toLowerCase();
+                if (low.includes('http://') || low.includes('https://')) return true;
+                if (low.includes('```')) return true;
+                const sym = (s.match(/[{}[\]<>$=_*\\|]/g) || []).length;
+                if (sym >= 6) return true;
+                return false;
+            };
+
+            const parts = String(text || '')
+                .split(/[\n\r]+|[。！？!?；;]+/g)
+                .map((x) => normalize(x))
+                .filter((x) => !isBad(x));
+
+            const freq = new Map();
+            for (const p of parts) freq.set(p, (freq.get(p) || 0) + 1);
+
+            // 只取本次文本内最常出现的短句；若完全无重复，也允许 count=1 的 top1-3（不强行凑 10）
+            const ranked = Array.from(freq.entries())
+                .map(([sentence, count]) => ({ sentence, count: Number(count) || 1 }))
+                .sort((a, b) => (b.count - a.count) || (a.sentence.length - b.sentence.length));
+
+            const repeated = ranked.filter((x) => x.count >= 2);
+            const list = (repeated.length > 0 ? repeated : ranked.slice(0, 3)).slice(0, maxItems);
+            return list;
+        }
+
+        async function reportSentencesFromText(text, location) {
+            try {
+                const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content || '';
+                const API_ENDPOINT = apiEndpoint.trim().endsWith('/') ? apiEndpoint.trim() : `${apiEndpoint.trim()}/`;
+
+                const items = extractRealSentences(text, { maxItems: 12, minLen: 6, maxLen: 120 });
+                if (!items || items.length === 0) return;
+
+                const payload = {
+                    region: location || 'Global',
+                    items: items, // [{sentence,count}]
+                    timestamp: new Date().toISOString(),
+                };
+
+                // sendBeacon 优先（不打扰主线程/页面卸载）
+                if (typeof navigator !== 'undefined' && navigator && typeof navigator.sendBeacon === 'function') {
+                    try {
+                        const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+                        navigator.sendBeacon(`${API_ENDPOINT}api/report-sentences`, blob);
+                        return;
+                    } catch {
+                        // fallthrough
+                    }
+                }
+
+                await fetch(`${API_ENDPOINT}api/report-sentences`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    keepalive: true,
+                    body: JSON.stringify(payload),
+                });
+            } catch {
+                // 静默失败
+            }
+        }
+
         // 触发入口1：父页面 postMessage 传入分析结果
         // 约定消息格式：{ type: 'VIBE_ANALYSIS_RESULT', text: string, location?: string }
         window.addEventListener('message', (event) => {
@@ -11293,6 +11557,7 @@
                     try { window.loadWordCloud && window.loadWordCloud(); } catch (e2) { /* ignore */ }
                 } catch (e1) { /* ignore */ }
                 void reportSlangFromText(text, location);
+                void reportSentencesFromText(text, location);
             } catch (e) {
                 // ignore
             }
@@ -11304,6 +11569,17 @@
                 const text = window.lastAnalysisText || '';
                 const location = window.lastAnalysisLocation || 'GLOBAL';
                 return reportSlangFromText(text, location);
+            } catch (e) {
+                return Promise.resolve();
+            }
+        };
+
+        // 句式上报入口（可选）：供外部直接触发
+        window.reportSentencesFromLastAnalysis = function () {
+            try {
+                const text = window.lastAnalysisText || '';
+                const location = window.lastAnalysisLocation || 'GLOBAL';
+                return reportSentencesFromText(text, location);
             } catch (e) {
                 return Promise.resolve();
             }

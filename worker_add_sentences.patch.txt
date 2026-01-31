@@ -1,0 +1,58 @@
+// ========================================
+// 在 src/worker/index.ts 第 3597 行之后插入以下代码
+// 位置: (finalRow as any).monthly_slang = slang.map... 之后
+// ========================================
+
+    // 【V6.1 新增】高频句子：从 sentence_pool 表查询该地区TOP句子
+    // 如果表不存在或无数据，则回退到使用 slang_trends_pool 的 phrase 作为展示
+    try {
+      const sentenceUrl = new URL(`${env.SUPABASE_URL}/rest/v1/sentence_pool`);
+      sentenceUrl.searchParams.set('select', 'sentence,hit_count,last_seen_at');
+      sentenceUrl.searchParams.set('region', `eq.${region}`);
+      sentenceUrl.searchParams.set('order', 'hit_count.desc,last_seen_at.desc');
+      sentenceUrl.searchParams.set('limit', '10');
+      
+      const sentenceRows = await fetchSupabaseJson<any[]>(env, sentenceUrl.toString(), {
+        headers: buildSupabaseHeaders(env),
+      }).catch(() => []);
+      
+      const topSentences = (Array.isArray(sentenceRows) ? sentenceRows : [])
+        .map((r: any) => ({
+          sentence: String(r?.sentence || '').trim(),
+          hit_count: Number(r?.hit_count) || 0,
+          last_seen_at: r?.last_seen_at || null,
+        }))
+        .filter((x) => x.sentence);
+      
+      // 如果有数据，返回句子；否则回退到关键词
+      if (topSentences.length > 0) {
+        (finalRow as any).top_sentences = topSentences;
+      } else {
+        // 回退：使用所有类别的phrase作为"句子"展示（临时方案）
+        const allPhrases = [...slang, ...merit, ...svSlang]
+          .sort((a, b) => b.hit_count - a.hit_count)
+          .slice(0, 10)
+          .map((x: any) => ({
+            sentence: x.phrase,
+            hit_count: x.hit_count,
+            last_seen_at: null,
+          }));
+        (finalRow as any).top_sentences = allPhrases;
+      }
+    } catch (e) {
+      // 失败时使用关键词回退
+      const allPhrases = [...slang, ...merit, ...svSlang]
+        .sort((a, b) => b.hit_count - a.hit_count)
+        .slice(0, 10)
+        .map((x: any) => ({
+          sentence: x.phrase,
+          hit_count: x.hit_count,
+          last_seen_at: null,
+        }));
+      (finalRow as any).top_sentences = allPhrases.length > 0 ? allPhrases : [];
+    }
+
+// ========================================
+// 插入完成后,保存文件并部署:
+// cd src/worker && npm run deploy
+// ========================================

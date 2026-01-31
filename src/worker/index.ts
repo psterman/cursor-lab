@@ -3554,7 +3554,7 @@ app.get('/api/global-average', async (c) => {
   try {
     const region = normalizeRegion(countryCode);
 
-    const fetchTop = async (category: 'slang' | 'merit' | 'sv_slang') => {
+    const fetchTop = async (category: 'slang' | 'merit' | 'sv_slang' | 'phrase') => {
       const url = new URL(`${env.SUPABASE_URL}/rest/v1/slang_trends_pool`);
       url.searchParams.set('select', 'phrase,hit_count');
       url.searchParams.set('region', `eq.${region}`);
@@ -3569,10 +3569,11 @@ app.get('/api/global-average', async (c) => {
         .filter((x) => x.phrase);
     };
 
-    const [slang, merit, svSlang] = await Promise.all([
+    const [slang, merit, svSlang, phrases] = await Promise.all([
       fetchTop('slang').catch(() => []),
       fetchTop('merit').catch(() => []),
       fetchTop('sv_slang').catch(() => []),
+      fetchTop('phrase').catch(() => []),
     ]);
 
     // ✅ 契约字段：monthlyVibes（camelCase），并确保三类都存在且为数组
@@ -3580,6 +3581,7 @@ app.get('/api/global-average', async (c) => {
       slang: Array.isArray(slang) ? slang : [],
       merit: Array.isArray(merit) ? merit : [],
       sv_slang: Array.isArray(svSlang) ? svSlang : [],
+      phrase: Array.isArray(phrases) ? phrases : [],
     };
 
     // 兼容旧字段：monthly_vibes（snake_case）
@@ -3590,16 +3592,51 @@ app.get('/api/global-average', async (c) => {
       slang,
       merit,
       sv_slang: svSlang,
+      phrase: phrases,
     };
 
     // 兼容旧字段：monthly_slang 仅保留 slang 的 phrase 列表
     (finalRow as any).monthly_slang = slang.map((x: any) => x.phrase);
 
+    // 【V6.3 约束】top_sentences 必须来自用户真实句子池 sentence_pool
+    // 且必须是“雷同”（hit_count >= 2）。句子归一化在数据库层完成（normalized_sentence）。
+    // 不允许回退到关键词/短语。
+    try {
+      const MIN_HIT_FOR_TOP_SENTENCES = 2;
+      const sentenceUrl = new URL(`${env.SUPABASE_URL}/rest/v1/sentence_pool`);
+      sentenceUrl.searchParams.set('select', 'sentence,hit_count,last_seen_at');
+      sentenceUrl.searchParams.set('region', `eq.${region}`);
+      sentenceUrl.searchParams.set('hit_count', `gte.${MIN_HIT_FOR_TOP_SENTENCES}`);
+      sentenceUrl.searchParams.set('order', 'hit_count.desc,last_seen_at.desc');
+      sentenceUrl.searchParams.set('limit', '10');
+
+      const sentenceRows = await fetchSupabaseJson<any[]>(env, sentenceUrl.toString(), {
+        headers: buildSupabaseHeaders(env),
+      }).catch(() => []);
+
+      const topSentences = (Array.isArray(sentenceRows) ? sentenceRows : [])
+        .map((r: any) => ({
+          sentence: String(r?.sentence || '').trim(),
+          hit_count: Number(r?.hit_count) || 0,
+          last_seen_at: r?.last_seen_at || null,
+        }))
+        .filter((x) => x.sentence && x.hit_count >= MIN_HIT_FOR_TOP_SENTENCES);
+
+      (finalRow as any).top_sentences = topSentences;
+      (finalRow as any).top_sentences_min_hit = MIN_HIT_FOR_TOP_SENTENCES;
+      (finalRow as any).top_sentences_source = 'sentence_pool';
+    } catch (e) {
+      // 失败/无表：严格返回空数组，避免“非真实句子”混入
+      (finalRow as any).top_sentences = [];
+      (finalRow as any).top_sentences_min_hit = 2;
+      (finalRow as any).top_sentences_source = 'sentence_pool';
+    }
+
     // Debug：帮助定位“country_code=US 但返回 Global/空数组”的问题
     try {
       const debug = String(c.req.query('debug') || c.req.query('debugSemanticBurst') || '').trim();
       if (debug === '1' || debug.toLowerCase() === 'true') {
-        (finalRow as any)._debugSemanticBurst = {
+    (finalRow as any)._debugSemanticBurst = {
           countryCodeRaw: String(countryCode || ''),
           regionComputed: region,
           sourceTable: 'slang_trends_pool',
@@ -3608,6 +3645,7 @@ app.get('/api/global-average', async (c) => {
             slang: Array.isArray(slang) ? slang.length : 0,
             merit: Array.isArray(merit) ? merit.length : 0,
             sv_slang: Array.isArray(svSlang) ? svSlang.length : 0,
+        phrase: Array.isArray(phrases) ? phrases.length : 0,
           },
         };
       }
@@ -3641,7 +3679,9 @@ app.get('/api/global-average', async (c) => {
  * - 若命中种子词：delta = baseWeight * 10，否则 delta = baseWeight * 1
  * - 异步入库：c.executionCtx.waitUntil(...) 调用 Supabase RPC upsert_slang_hits_v2
  */
-const SEED_DICTIONARY: Record<string, Set<string>> = {
+type VibeCategory = 'slang' | 'merit' | 'sv_slang' | 'phrase';
+
+const SEED_DICTIONARY: Record<VibeCategory, Set<string>> = {
   slang: new Set([
     '颗粒度', '闭环', '方法论', '架构', '解耦', '底层逻辑', '降维打击', '赋能', '护城河',
     '赛道', '对齐', '抓手', '落地', '复盘', '链路', '范式', '心智', '质检', '兜底',
@@ -3652,12 +3692,15 @@ const SEED_DICTIONARY: Record<string, Set<string>> = {
   sv_slang: new Set([
     '护城河', '增长', '融资', '赛道', '头部效应', '估值', '现金流', '天使轮', 'A轮',
   ]),
+  // 国民级词组：不做种子放大，保持自然计数
+  phrase: new Set([]),
 };
 
-function normalizeCategory(input: any): 'slang' | 'merit' | 'sv_slang' {
+function normalizeCategory(input: any): VibeCategory {
   const raw = String(input || '').trim().toLowerCase();
   if (raw === 'merit') return 'merit';
   if (raw === 'sv_slang' || raw === 'svslang' || raw === 'siliconvalley') return 'sv_slang';
+  if (raw === 'phrase' || raw === 'ngram' || raw === 'idiom') return 'phrase';
   return 'slang';
 }
 
@@ -3713,11 +3756,12 @@ app.post('/api/report-slang', async (c) => {
   // v1 phrases
   const phrasesRaw: any[] = Array.isArray(body?.phrases) ? body.phrases : [];
 
-  const items: Array<{ phrase: string; category: 'slang' | 'merit' | 'sv_slang'; delta: number }> = [];
+  const items: Array<{ phrase: string; category: 'slang' | 'merit' | 'sv_slang' | 'phrase'; delta: number }> = [];
 
   for (const it of itemsRaw) {
     const phrase = String(it?.phrase || '').trim();
-    if (!phrase || phrase.length < 2 || phrase.length > 24) continue;
+    // phrase 类别允许更长一点（最多 64），用于 3-5 词组/短句
+    if (!phrase || phrase.length < 2 || phrase.length > 64) continue;
     const category = normalizeCategory(it?.category);
     const isSeedHit = SEED_DICTIONARY[category]?.has(phrase) || false;
     const delta = toSafeDelta(it?.weight ?? 1, isSeedHit);
@@ -3766,6 +3810,130 @@ app.post('/api/report-slang', async (c) => {
 });
 
 /**
+ * POST /api/report-sentences
+ * 句式热度池（国家维度）上报：
+ * - v1: { location?: string, country_code?: string, region?: string, text?: string, sentences?: string[] }
+ * - v1b: { region, items: [{ sentence: string, count?: number }] }
+ *
+ * 要求：
+ * - 必须来自用户真实文本（前端从用户输入/分析文本中提取）
+ * - 句子不要太长（后端二次过滤）
+ * - 不强行凑 10：只累计真实出现过的句子
+ */
+app.post('/api/report-sentences', async (c) => {
+  const env = c.env;
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+    return c.json({ success: false, error: 'Supabase 未配置' }, 500);
+  }
+
+  let body: any = null;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: 'Invalid JSON' }, 400);
+  }
+
+  const regionInput = body?.region ?? body?.country_code ?? body?.location;
+  let region = normalizeRegion(regionInput);
+  // 兜底：若未上报地区，尽量使用 Cloudflare cf.country
+  try {
+    const rawReq: any = c.req?.raw;
+    const cfCountry = String(rawReq?.cf?.country || '').trim().toUpperCase();
+    if (region === 'Global' && /^[A-Z]{2}$/.test(cfCountry)) region = cfCountry;
+  } catch {
+    // ignore
+  }
+
+  // 后端保底过滤（与前端一致，避免污染）
+  const normalizeSentence = (s: any): string => {
+    const raw = String(s ?? '').replace(/\s+/g, ' ').trim();
+    // 去掉首尾成串标点
+    return raw.replace(/^[\s"'“”‘’`~!！?？。.,，;；:：()\[\]{}<>-]+/g, '').replace(/[\s"'“”‘’`~!！?？。.,，;；:：()\[\]{}<>-]+$/g, '').trim();
+  };
+
+  const isBadSentence = (s: string): boolean => {
+    if (!s) return true;
+    if (s.length < 6) return true; // 太短没意义
+    if (s.length > 140) return true; // 不要太长
+    const low = s.toLowerCase();
+    if (low.includes('http://') || low.includes('https://')) return true;
+    if (low.includes('```')) return true;
+    // 过多符号/代码味
+    const sym = (s.match(/[{}[\]<>$=_*\\|]/g) || []).length;
+    if (sym >= 6) return true;
+    return false;
+  };
+
+  const items: Array<{ sentence: string; count: number }> = [];
+
+  // items [{sentence,count}]
+  if (Array.isArray(body?.items)) {
+    for (const it of body.items) {
+      const sent = normalizeSentence(it?.sentence);
+      if (isBadSentence(sent)) continue;
+      const cnt = toSafeCount(it?.count ?? 1);
+      items.push({ sentence: sent, count: cnt });
+      if (items.length >= 25) break;
+    }
+  }
+
+  // sentences: string[]
+  if (items.length === 0 && Array.isArray(body?.sentences)) {
+    for (const s of body.sentences) {
+      const sent = normalizeSentence(s);
+      if (isBadSentence(sent)) continue;
+      items.push({ sentence: sent, count: 1 });
+      if (items.length >= 25) break;
+    }
+  }
+
+  // text: server-side split (兜底)
+  if (items.length === 0 && body?.text) {
+    const rawText = String(body.text || '');
+    const parts = rawText
+      .split(/[\n\r]+|[。！？!?；;]+/g)
+      .map((x) => normalizeSentence(x))
+      .filter((x) => !isBadSentence(x));
+    // 本次文本内部去重计数
+    const freq = new Map<string, number>();
+    for (const p of parts) freq.set(p, (freq.get(p) || 0) + 1);
+    const ranked = Array.from(freq.entries())
+      .map(([sentence, count]) => ({ sentence, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 25);
+    items.push(...ranked);
+  }
+
+  if (items.length === 0) {
+    return c.json({ success: true, region, accepted: 0 });
+  }
+
+  const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/upsert_sentence_pool_v1`;
+  const headers = buildSupabaseHeaders(env, { 'Content-Type': 'application/json' });
+
+  // 异步写入，不阻塞响应
+  c.executionCtx.waitUntil((async () => {
+    for (const it of items) {
+      try {
+        await fetchSupabaseJson(env, rpcUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            p_sentence: it.sentence,
+            p_region: region,
+            p_delta: Math.max(1, Math.min(50, it.count)),
+          }),
+        });
+      } catch (e) {
+        // ignore per-item
+      }
+    }
+  })());
+
+  return c.json({ success: true, region, accepted: items.length });
+});
+
+/**
  * POST /api/v2/report-vibe
  * 前端分析器上报：关键词 + 指纹 + 时间戳（非阻塞）
  * 兼容 payload:
@@ -3803,7 +3971,7 @@ app.post('/api/v2/report-vibe', async (c) => {
   }
   const keywords = Array.isArray(body?.keywords) ? body.keywords : [];
 
-  const items: Array<{ phrase: string; category: 'slang' | 'merit' | 'sv_slang'; delta: number }> = [];
+  const items: Array<{ phrase: string; category: VibeCategory; delta: number }> = [];
   for (const it of keywords) {
     const phrase = String(it?.phrase || '').trim();
     if (!phrase || phrase.length < 2 || phrase.length > 120) continue;

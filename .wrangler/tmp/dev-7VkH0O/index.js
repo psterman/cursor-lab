@@ -10868,15 +10868,17 @@ app.get("/api/global-average", async (c) => {
       });
       return (Array.isArray(rows) ? rows : []).map((r) => ({ phrase: String(r?.phrase || ""), hit_count: Number(r?.hit_count) || 0 })).filter((x) => x.phrase);
     }, "fetchTop");
-    const [slang, merit, svSlang] = await Promise.all([
+    const [slang, merit, svSlang, phrases] = await Promise.all([
       fetchTop("slang").catch(() => []),
       fetchTop("merit").catch(() => []),
-      fetchTop("sv_slang").catch(() => [])
+      fetchTop("sv_slang").catch(() => []),
+      fetchTop("phrase").catch(() => [])
     ]);
     finalRow.monthlyVibes = {
       slang: Array.isArray(slang) ? slang : [],
       merit: Array.isArray(merit) ? merit : [],
-      sv_slang: Array.isArray(svSlang) ? svSlang : []
+      sv_slang: Array.isArray(svSlang) ? svSlang : [],
+      phrase: Array.isArray(phrases) ? phrases : []
     };
     finalRow.monthly_vibes = {
       region,
@@ -10884,9 +10886,34 @@ app.get("/api/global-average", async (c) => {
       time_bucket: null,
       slang,
       merit,
-      sv_slang: svSlang
+      sv_slang: svSlang,
+      phrase: phrases
     };
     finalRow.monthly_slang = slang.map((x) => x.phrase);
+    try {
+      const MIN_HIT_FOR_TOP_SENTENCES = 2;
+      const sentenceUrl = new URL(`${env.SUPABASE_URL}/rest/v1/sentence_pool`);
+      sentenceUrl.searchParams.set("select", "sentence,hit_count,last_seen_at");
+      sentenceUrl.searchParams.set("region", `eq.${region}`);
+      sentenceUrl.searchParams.set("hit_count", `gte.${MIN_HIT_FOR_TOP_SENTENCES}`);
+      sentenceUrl.searchParams.set("order", "hit_count.desc,last_seen_at.desc");
+      sentenceUrl.searchParams.set("limit", "10");
+      const sentenceRows = await fetchSupabaseJson(env, sentenceUrl.toString(), {
+        headers: buildSupabaseHeaders(env)
+      }).catch(() => []);
+      const topSentences = (Array.isArray(sentenceRows) ? sentenceRows : []).map((r) => ({
+        sentence: String(r?.sentence || "").trim(),
+        hit_count: Number(r?.hit_count) || 0,
+        last_seen_at: r?.last_seen_at || null
+      })).filter((x) => x.sentence && x.hit_count >= MIN_HIT_FOR_TOP_SENTENCES);
+      finalRow.top_sentences = topSentences;
+      finalRow.top_sentences_min_hit = MIN_HIT_FOR_TOP_SENTENCES;
+      finalRow.top_sentences_source = "sentence_pool";
+    } catch (e) {
+      finalRow.top_sentences = [];
+      finalRow.top_sentences_min_hit = 2;
+      finalRow.top_sentences_source = "sentence_pool";
+    }
     try {
       const debug = String(c.req.query("debug") || c.req.query("debugSemanticBurst") || "").trim();
       if (debug === "1" || debug.toLowerCase() === "true") {
@@ -10898,7 +10925,8 @@ app.get("/api/global-average", async (c) => {
           counts: {
             slang: Array.isArray(slang) ? slang.length : 0,
             merit: Array.isArray(merit) ? merit.length : 0,
-            sv_slang: Array.isArray(svSlang) ? svSlang.length : 0
+            sv_slang: Array.isArray(svSlang) ? svSlang.length : 0,
+            phrase: Array.isArray(phrases) ? phrases.length : 0
           }
         };
       }
@@ -10960,12 +10988,15 @@ var SEED_DICTIONARY = {
     "\u73B0\u91D1\u6D41",
     "\u5929\u4F7F\u8F6E",
     "A\u8F6E"
-  ])
+  ]),
+  // 国民级词组：不做种子放大，保持自然计数
+  phrase: /* @__PURE__ */ new Set([])
 };
 function normalizeCategory(input) {
   const raw2 = String(input || "").trim().toLowerCase();
   if (raw2 === "merit") return "merit";
   if (raw2 === "sv_slang" || raw2 === "svslang" || raw2 === "siliconvalley") return "sv_slang";
+  if (raw2 === "phrase" || raw2 === "ngram" || raw2 === "idiom") return "phrase";
   return "slang";
 }
 __name(normalizeCategory, "normalizeCategory");
@@ -10976,6 +11007,12 @@ function toSafeDelta(weight, isSeedHit) {
   return Math.max(1, Math.min(500, baseWeight * mult));
 }
 __name(toSafeDelta, "toSafeDelta");
+function toSafeCount(input) {
+  const n = Number(input);
+  const v = Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
+  return Math.max(1, Math.min(5e3, v));
+}
+__name(toSafeCount, "toSafeCount");
 function toSafePoolDelta(weight) {
   const n = Number(weight);
   const v = Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
@@ -11008,7 +11045,7 @@ app.post("/api/report-slang", async (c) => {
   const items = [];
   for (const it of itemsRaw) {
     const phrase = String(it?.phrase || "").trim();
-    if (!phrase || phrase.length < 2 || phrase.length > 24) continue;
+    if (!phrase || phrase.length < 2 || phrase.length > 64) continue;
     const category = normalizeCategory(it?.category);
     const isSeedHit = SEED_DICTIONARY[category]?.has(phrase) || false;
     const delta = toSafeDelta(it?.weight ?? 1, isSeedHit);
@@ -11048,6 +11085,89 @@ app.post("/api/report-slang", async (c) => {
     }
   })());
   return c.json({ success: true, queued: true, region, items: items.length });
+});
+app.post("/api/report-sentences", async (c) => {
+  const env = c.env;
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+    return c.json({ success: false, error: "Supabase \u672A\u914D\u7F6E" }, 500);
+  }
+  let body = null;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
+  const regionInput = body?.region ?? body?.country_code ?? body?.location;
+  let region = normalizeRegion(regionInput);
+  try {
+    const rawReq = c.req?.raw;
+    const cfCountry = String(rawReq?.cf?.country || "").trim().toUpperCase();
+    if (region === "Global" && /^[A-Z]{2}$/.test(cfCountry)) region = cfCountry;
+  } catch {
+  }
+  const normalizeSentence = /* @__PURE__ */ __name((s) => {
+    const raw2 = String(s ?? "").replace(/\s+/g, " ").trim();
+    return raw2.replace(/^[\s"'“”‘’`~!！?？。.,，;；:：()\[\]{}<>-]+/g, "").replace(/[\s"'“”‘’`~!！?？。.,，;；:：()\[\]{}<>-]+$/g, "").trim();
+  }, "normalizeSentence");
+  const isBadSentence = /* @__PURE__ */ __name((s) => {
+    if (!s) return true;
+    if (s.length < 6) return true;
+    if (s.length > 140) return true;
+    const low = s.toLowerCase();
+    if (low.includes("http://") || low.includes("https://")) return true;
+    if (low.includes("```")) return true;
+    const sym = (s.match(/[{}[\]<>$=_*\\|]/g) || []).length;
+    if (sym >= 6) return true;
+    return false;
+  }, "isBadSentence");
+  const items = [];
+  if (Array.isArray(body?.items)) {
+    for (const it of body.items) {
+      const sent = normalizeSentence(it?.sentence);
+      if (isBadSentence(sent)) continue;
+      const cnt = toSafeCount(it?.count ?? 1);
+      items.push({ sentence: sent, count: cnt });
+      if (items.length >= 25) break;
+    }
+  }
+  if (items.length === 0 && Array.isArray(body?.sentences)) {
+    for (const s of body.sentences) {
+      const sent = normalizeSentence(s);
+      if (isBadSentence(sent)) continue;
+      items.push({ sentence: sent, count: 1 });
+      if (items.length >= 25) break;
+    }
+  }
+  if (items.length === 0 && body?.text) {
+    const rawText = String(body.text || "");
+    const parts = rawText.split(/[\n\r]+|[。！？!?；;]+/g).map((x) => normalizeSentence(x)).filter((x) => !isBadSentence(x));
+    const freq = /* @__PURE__ */ new Map();
+    for (const p of parts) freq.set(p, (freq.get(p) || 0) + 1);
+    const ranked = Array.from(freq.entries()).map(([sentence, count]) => ({ sentence, count })).sort((a, b) => b.count - a.count).slice(0, 25);
+    items.push(...ranked);
+  }
+  if (items.length === 0) {
+    return c.json({ success: true, region, accepted: 0 });
+  }
+  const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/upsert_sentence_pool_v1`;
+  const headers = buildSupabaseHeaders(env, { "Content-Type": "application/json" });
+  c.executionCtx.waitUntil((async () => {
+    for (const it of items) {
+      try {
+        await fetchSupabaseJson(env, rpcUrl, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            p_sentence: it.sentence,
+            p_region: region,
+            p_delta: Math.max(1, Math.min(50, it.count))
+          })
+        });
+      } catch (e) {
+      }
+    }
+  })());
+  return c.json({ success: true, region, accepted: items.length });
 });
 app.post("/api/v2/report-vibe", async (c) => {
   const env = c.env;
