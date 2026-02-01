@@ -693,20 +693,39 @@ async function reportKeywords(keywords, { fingerprint = null, timestamp = null, 
 
     const apiEndpoint = getApiEndpointForClient();
     const url = `${apiEndpoint}api/v2/report-vibe`;
-    // 手动地域修正：从 localStorage.selected_country 读取（由地图点击写入）
+    // 手动地域修正：从 localStorage.anchored_country / selected_country 读取（由地图点击写入）
     let anchored = null;
     try {
-      const v = String(localStorage.getItem('selected_country') || '').trim().toUpperCase();
+      const v =
+        String(localStorage.getItem('anchored_country') || '').trim().toUpperCase() ||
+        String(localStorage.getItem('selected_country') || '').trim().toUpperCase();
       if (/^[A-Z]{2}$/.test(v)) anchored = v;
     } catch (e) {}
 
     // 优先锚定国家：避免调用方传入 Global 覆盖用户选择
     const finalRegion = anchored || region || 'Global';
+
+    // location_weight：用户刚切换国籍时，逐渐把贡献迁入新国家（0 -> 1）
+    let locationWeight = 1;
+    let switchedAtIso = null;
+    try {
+      const to = String(localStorage.getItem('country_switch_to') || '').trim().toUpperCase();
+      const ts = Number(localStorage.getItem('country_switch_ts') || 0);
+      if (to && /^[A-Z]{2}$/.test(to) && to === String(finalRegion).toUpperCase() && Number.isFinite(ts) && ts > 0) {
+        const RAMP_MS = 6 * 60 * 60 * 1000; // 6h: 平滑过渡，避免瞬时刷屏
+        const ratio = (Date.now() - ts) / RAMP_MS;
+        locationWeight = Math.max(0, Math.min(1, ratio));
+        switchedAtIso = new Date(ts).toISOString();
+      }
+    } catch (e) {}
     const payload = {
       keywords: list,
       fingerprint: fingerprint || null,
       timestamp: timestamp || new Date().toISOString(),
       region: finalRegion,
+      snapshot_country: finalRegion,          // 行为快照国家：用于后端按快照聚合
+      location_weight: locationWeight,        // 迁移权重（可选）
+      location_switched_at: switchedAtIso,    // 切换时间（可选）
     };
     if (anchored) {
       // 后端优先级：manual_region > cf-ipcountry；确保数据“搬迁”到用户选择国家
@@ -3193,7 +3212,55 @@ export class VibeCodingerAnalyzer {
         fingerprint: fingerprint, // 【V6 新增】浏览器指纹
         dimensions: dimensions, // 【V6 新增】LPDEF 分数
         stats: statsToUpload, // 【V6 适配】包含 stats 字段
-        meta: meta // 【V6 新增】环境信息元数据（完整包含 ip, lang, timezone, fingerprint, vpn, proxy）
+        meta: meta, // 【V6 新增】环境信息元数据（完整包含 ip, lang, timezone, fingerprint, vpn, proxy）
+        // ============================
+        // 行为快照：避免“切国籍污染统计”
+        // 说明：current_location 仅用于用户画像展示；国家聚合应使用 snapshot_country（事件写入）
+        // ============================
+        snapshot_country: (() => {
+          try {
+            const v =
+              String(localStorage.getItem('anchored_country') || '').trim().toUpperCase() ||
+              String(localStorage.getItem('selected_country') || '').trim().toUpperCase();
+            return /^[A-Z]{2}$/.test(v) ? v : null;
+          } catch {
+            return null;
+          }
+        })(),
+        current_location: (() => {
+          try {
+            const v =
+              String(localStorage.getItem('anchored_country') || '').trim().toUpperCase() ||
+              String(localStorage.getItem('selected_country') || '').trim().toUpperCase();
+            return /^[A-Z]{2}$/.test(v) ? v : null;
+          } catch {
+            return null;
+          }
+        })(),
+        location_weight: (() => {
+          try {
+            const to = String(localStorage.getItem('country_switch_to') || '').trim().toUpperCase();
+            const ts = Number(localStorage.getItem('country_switch_ts') || 0);
+            const cur =
+              String(localStorage.getItem('anchored_country') || '').trim().toUpperCase() ||
+              String(localStorage.getItem('selected_country') || '').trim().toUpperCase();
+            if (to && cur && to === cur && Number.isFinite(ts) && ts > 0) {
+              const RAMP_MS = 6 * 60 * 60 * 1000;
+              return Math.max(0, Math.min(1, (Date.now() - ts) / RAMP_MS));
+            }
+            return 1;
+          } catch {
+            return 1;
+          }
+        })(),
+        location_switched_at: (() => {
+          try {
+            const ts = Number(localStorage.getItem('country_switch_ts') || 0);
+            return Number.isFinite(ts) && ts > 0 ? new Date(ts).toISOString() : null;
+          } catch {
+            return null;
+          }
+        })(),
       };
 
       console.log('[VibeAnalyzer] 发送原始聊天数据到 /api/v2/analyze:', {

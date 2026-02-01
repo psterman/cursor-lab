@@ -4425,9 +4425,21 @@ async function fetchGlobalAverage() {
   try {
     // 使用 API_ENDPOINT 常量，确保指向生产环境
     const apiEndpoint = getApiEndpoint();
-    const apiUrl = apiEndpoint.endsWith('/') 
+    let apiUrl = apiEndpoint.endsWith('/') 
       ? `${apiEndpoint}api/global-average` 
       : `${apiEndpoint}/api/global-average`;
+    
+    // 【多国通用化】若本地存在锚定国家，则按国家口径请求（避免“切国籍污染统计”）
+    try {
+      const anchored =
+        String(localStorage.getItem('anchored_country') || '').trim().toUpperCase() ||
+        String(localStorage.getItem('selected_country') || '').trim().toUpperCase();
+      if (/^[A-Z]{2}$/.test(anchored)) {
+        apiUrl += `?country_code=${encodeURIComponent(anchored)}`;
+      }
+    } catch (e) {
+      // ignore
+    }
     
     console.log('[Main] 开始获取全局平均值，URL:', apiUrl);
     

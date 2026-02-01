@@ -946,6 +946,26 @@ interface V6AnalyzePayload {
   userName?: string; // 用户名（可选）
   /** 用户校准的国家/地区代码（地图校准后上报，如 CN、US） */
   manual_location?: string;
+  /** 【行为快照】本次行为发生时的国家（用于国家聚合，避免切换国籍污染） */
+  snapshot_country?: string;
+  /** 兼容字段：camelCase */
+  snapshotCountry?: string;
+  /** 手动地域修正（与 stats2/Analyzer 的 anchored_country 对齐） */
+  manual_region?: string;
+  /** 兼容字段：camelCase */
+  manualRegion?: string;
+  /** 用户当前画像位置（仅用于展示，不用于国家聚合） */
+  current_location?: string;
+  /** 兼容字段：camelCase */
+  currentLocation?: string;
+  /** 国籍切换时间（可选，用于 location_weight 渐进） */
+  location_switched_at?: string | number;
+  /** 兼容字段：camelCase */
+  locationSwitchedAt?: string | number;
+  /** 国籍迁移权重（0~1，可选） */
+  location_weight?: number;
+  /** 兼容字段：camelCase */
+  locationWeight?: number;
   /** 用户校准的经纬度 [lng, lat]（地图校准后上报） */
   manual_coordinates?: [number, number];
   /** 用户校准纬度（可与 manual_location 一起单独上报） */
@@ -2235,6 +2255,23 @@ app.post('/api/v2/analyze', async (c) => {
             payload.ip_location = normalizedIpLocation;
           }
 
+          // ============================
+          // 行为快照：snapshot_country（用于“国别聚合”而非用户当前国籍）
+          // 优先级：前端显式 snapshot_country/manual_region > manual_location > ip_location > Global
+          // ============================
+          const snapshotCountryRaw = normalizeRegion(
+            body?.snapshot_country ??
+            body?.snapshotCountry ??
+            body?.manual_region ??
+            body?.manualRegion ??
+            body?.manual_location ??
+            payload.ip_location ??
+            normalizedIpLocation ??
+            'Global'
+          );
+          const snapshotCountry =
+            /^[A-Za-z]{2}$/.test(snapshotCountryRaw) ? snapshotCountryRaw.toUpperCase() : snapshotCountryRaw;
+
           console.log(`[DB] 准备写入数据:`, {
             fingerprint: payload.fingerprint,
             user_name: payload.user_name,
@@ -2281,6 +2318,35 @@ app.post('/api/v2/analyze', async (c) => {
                   }
                 } catch (err: any) {
                   console.error('[Supabase] ❌ Upsert 异常:', err.message);
+                }
+              })(),
+              // 【行为快照】写入 analysis_events（不与 user_profile 绑定，避免“切国籍污染统计”）
+              (async () => {
+                try {
+                  const fp = (payload.fingerprint ? String(payload.fingerprint).trim() : '') || null;
+                  const createdAt = new Date().toISOString();
+                  const eventRow: any = {
+                    fingerprint: fp,
+                    snapshot_country: snapshotCountry,
+                    created_at: createdAt,
+                    // 关键指标：用于国家级聚合
+                    total_chars: payload.total_chars ?? null,
+                    total_messages: payload.total_messages ?? null,
+                    lpdef: lpdef || null,
+                    personality_type: personalityType || payload.personality_type || null,
+                    dimensions: dimensions || null,
+                    stats: finalStats || null,
+                    // 辅助字段：追溯“迁移/权重”
+                    location_switched_at: body?.location_switched_at ?? body?.locationSwitchedAt ?? null,
+                    location_weight: body?.location_weight ?? body?.locationWeight ?? null,
+                  };
+                  await fetchSupabaseJson(env, `${env.SUPABASE_URL}/rest/v1/analysis_events`, {
+                    method: 'POST',
+                    headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
+                    body: JSON.stringify(eventRow),
+                  }).catch(() => null);
+                } catch {
+                  // ignore
                 }
               })(),
               // 【V6 协议】增量更新 KV 全局统计
@@ -2347,6 +2413,59 @@ app.post('/api/v2/analyze', async (c) => {
       },
       totalUsers: 1,
     }, 500);
+  }
+});
+
+/**
+ * POST /api/v2/update_location
+ * 前端“切换国籍/视角”时调用：仅更新用户画像中的 current_location，不影响历史行为快照。
+ * payload: { fingerprint?: string, current_location?: string, anchored_country?: string, switched_at?: string|number }
+ */
+app.post('/api/v2/update_location', async (c) => {
+  const env = c.env;
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+    return c.json({ status: 'error', error: 'Supabase 未配置' }, 500);
+  }
+  let body: any = null;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ status: 'error', error: 'Invalid JSON' }, 400);
+  }
+
+  const fingerprint = (body?.fingerprint ? String(body.fingerprint).trim() : '') || '';
+  const currentLocationRaw =
+    body?.current_location ?? body?.currentLocation ?? body?.anchored_country ?? body?.anchoredCountry ?? '';
+  const currentLocation = String(currentLocationRaw || '').trim().toUpperCase();
+  const switchedAt = body?.switched_at ?? body?.switchedAt ?? body?.location_switched_at ?? null;
+
+  if (!fingerprint) {
+    return c.json({ status: 'error', error: 'fingerprint 必填' }, 400);
+  }
+  if (!/^[A-Z]{2}$/.test(currentLocation)) {
+    return c.json({ status: 'error', error: 'current_location 必须为 2 位国家码' }, 400);
+  }
+
+  try {
+    const patchPayload: any = {
+      current_location: currentLocation,
+      location_switched_at: switchedAt || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const url = `${env.SUPABASE_URL}/rest/v1/user_analysis?fingerprint=eq.${encodeURIComponent(fingerprint)}`;
+    const res = await fetchSupabase(env, url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify(patchPayload),
+    });
+    if (!res.ok) {
+      const t = await res.text().catch(() => '');
+      // 不阻塞：即便列不存在/无权限，也不影响前端切换体验
+      return c.json({ status: 'warning', updated: false, error: t || `HTTP ${res.status}` }, 200);
+    }
+    return c.json({ status: 'success', updated: true, current_location: currentLocation });
+  } catch (e: any) {
+    return c.json({ status: 'warning', updated: false, error: e?.message || String(e) }, 200);
   }
 });
 
@@ -3497,35 +3616,56 @@ app.get('/api/global-average', async (c) => {
   // ============================
   const env = c.env;
   const countryCode = c.req.query('country_code') || c.req.query('countryCode') || c.req.query('location') || '';
-  const wantsUS = isUSLocation(countryCode);
+  const region = normalizeRegion(countryCode);
+  const wantsUS = isUSLocation(region);
+  const wantsSnapshotRegion = /^[A-Z]{2}$/.test(String(region || '').toUpperCase()) && String(region).toUpperCase() !== 'GLOBAL';
 
   if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
     return c.json({ success: false, error: 'Supabase 未配置' }, 500);
   }
 
-  // 1) Cache Hit：优先读 KV
+  // 1) Cache Hit：优先读 KV（按 region 分 key，避免跨国缓存污染）
   let baseRow: any | null = null;
+  const kvKey = region === 'Global' ? KV_KEY_GLOBAL_DASHBOARD_DATA : `${KV_KEY_GLOBAL_DASHBOARD_DATA}:${String(region).toUpperCase()}`;
   if (env.STATS_STORE) {
     try {
-      baseRow = await env.STATS_STORE.get(KV_KEY_GLOBAL_DASHBOARD_DATA, 'json');
+      baseRow = await env.STATS_STORE.get(kvKey, 'json');
     } catch (err) {
       console.warn('[Worker] ⚠️ /api/global-average KV 读取失败，回源 Supabase:', err);
     }
   }
 
-  // 2) Cache Miss：回源 Supabase（注意 data[0]）
+  // 2) Cache Miss：回源 Supabase（优先 RPC：快照聚合；否则回退旧全局视图 v_global_stats_v6）
   if (!baseRow) {
     try {
-      const url = `${env.SUPABASE_URL}/rest/v1/v_global_stats_v6?select=*`;
-      const data = await fetchSupabaseJson<any[]>(env, url, {
-        headers: buildSupabaseHeaders(env),
-      }, SUPABASE_FETCH_TIMEOUT_MS);
-      baseRow = (Array.isArray(data) ? data[0] : null) || {};
+      if (wantsSnapshotRegion) {
+        // ✅ 新策略：国家聚合按行为快照（analysis_events.snapshot_country / keyword_logs.snapshot_country）
+        // 若 RPC/表尚未部署，会自动回退旧逻辑，不阻塞上线。
+        const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_country_dashboard_v1`;
+        const rpcRes = await fetchSupabaseJson<any>(env, rpcUrl, {
+          method: 'POST',
+          headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ p_region: String(region).toUpperCase() }),
+        }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => null);
+        // Supabase RPC 可能返回 object 或数组（取第一项）
+        const rpcRow = Array.isArray(rpcRes) ? rpcRes[0] : rpcRes;
+        if (rpcRow && typeof rpcRow === 'object') {
+          baseRow = rpcRow;
+        } else {
+          baseRow = {};
+        }
+      } else {
+        const url = `${env.SUPABASE_URL}/rest/v1/v_global_stats_v6?select=*`;
+        const data = await fetchSupabaseJson<any[]>(env, url, {
+          headers: buildSupabaseHeaders(env),
+        }, SUPABASE_FETCH_TIMEOUT_MS);
+        baseRow = (Array.isArray(data) ? data[0] : null) || {};
+      }
 
       // 3) 写回 KV（300s）
       if (env.STATS_STORE) {
         try {
-          await (env.STATS_STORE.put as any)(KV_KEY_GLOBAL_DASHBOARD_DATA, JSON.stringify(baseRow), {
+          await (env.STATS_STORE.put as any)(kvKey, JSON.stringify(baseRow), {
             expirationTtl: KV_GLOBAL_STATS_V6_VIEW_TTL,
           });
         } catch (err) {
@@ -3546,7 +3686,7 @@ app.get('/api/global-average', async (c) => {
     }));
   }
 
-  // 5) 地理过滤：US 平替（us 为 null/0 时回退到 global，避免 ECharts 报错）
+  // 5) 地理过滤：US 平替（保留兼容）；其他国家由 RPC 直接返回该国口径
   const finalRow = wantsUS ? applyUsStatsToGlobalRow(baseRow) : baseRow;
 
   // 6) monthly_vibes：返回该国 Top 词云（slang / merit / sv_slang）
@@ -4033,13 +4173,21 @@ app.post('/api/v2/report-vibe', async (c) => {
   if (/^[A-Z]{2}$/.test(manualRegion)) region = manualRegion;
   else if (/^[A-Z]{2}$/.test(cfCountry)) region = cfCountry;
   const keywords = Array.isArray(body?.keywords) ? body.keywords : [];
+  const locationWeightRaw = Number(body?.location_weight ?? body?.locationWeight ?? 1);
+  const locationWeight = Number.isFinite(locationWeightRaw) ? Math.max(0, Math.min(1, locationWeightRaw)) : 1;
+  const switchedAt = body?.location_switched_at ?? body?.locationSwitchedAt ?? null;
+  const snapshotCountry = region; // 该行为发生时的快照国家（用于后续聚合）
 
   const items: Array<{ phrase: string; category: VibeCategory; delta: number }> = [];
   for (const it of keywords) {
     const phrase = String(it?.phrase || '').trim();
     if (!phrase || phrase.length < 2 || phrase.length > 120) continue;
     const category = normalizeCategory(it?.category);
-    const delta = toSafePoolDelta(it?.weight ?? 1);
+    const baseDelta = toSafePoolDelta(it?.weight ?? 1);
+    // location_weight：用户刚切换国籍时，逐渐把贡献从 0 -> 1 迁入新国家（防止瞬时刷屏/污染）
+    const scaled = Math.floor(baseDelta * locationWeight);
+    const delta = Math.max(0, Math.min(5, scaled));
+    if (delta <= 0) continue;
     items.push({ phrase, category, delta });
     if (items.length >= 25) break;
   }
@@ -4166,6 +4314,29 @@ app.post('/api/v2/report-vibe', async (c) => {
       } catch (err: any) {
         console.warn('[Worker] ⚠️ /api/v2/report-vibe upsert_slang_pool_hits_v1 失败:', err?.message || String(err));
       }
+    }
+
+    // 事件日志（可选）：写入 keyword_logs，携带 snapshot_country，支持“快照聚合”与追溯
+    try {
+      const fp = (body?.fingerprint ? String(body.fingerprint).trim() : '') || null;
+      const rows = items.map((x) => ({
+        phrase: x.phrase,
+        category: x.category,
+        weight: x.delta,
+        fingerprint: fp,
+        snapshot_country: snapshotCountry,
+        location_weight: locationWeight,
+        location_switched_at: switchedAt,
+        created_at: new Date().toISOString(),
+      }));
+      // 允许表不存在/无权限：失败不影响主流程
+      await fetchSupabaseJson(env, `${env.SUPABASE_URL}/rest/v1/keyword_logs`, {
+        method: 'POST',
+        headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
+        body: JSON.stringify(rows),
+      }).catch(() => null);
+    } catch {
+      // ignore
     }
   })());
 
