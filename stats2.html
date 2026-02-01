@@ -2814,6 +2814,135 @@
         };
 
         /**
+         * 将国家名标准化为可比对 key
+         * - 去括号内容、标点、连字符、重音符、压缩空白
+         * @param {string} s
+         * @returns {string}
+         */
+        function normalizeCountryKey(s) {
+            try {
+                return String(s || '')
+                    .trim()
+                    .toLowerCase()
+                    // 去括号内容：Bolivia (Plurinational State of) -> Bolivia
+                    .replace(/\s*\([^)]*\)\s*/g, ' ')
+                    // 逗号/点/撇号等
+                    .replace(/[.,'’]/g, ' ')
+                    // 连接符
+                    .replace(/[-_/]/g, ' ')
+                    // 去重音符（Côte d'Ivoire -> Cote d Ivoire）
+                    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+            } catch {
+                return String(s || '').trim().toLowerCase();
+            }
+        }
+
+        /**
+         * 预加载 ISO3166 英文名 -> ISO2 映射（用于 ECharts 的 world.js 未包含 iso_a2 的情况）
+         * - 优先 localStorage 缓存，失败再走网络拉取
+         * - 网络数据来源：lukes/ISO-3166-Countries-with-Regional-Codes slim-2（仅 name + alpha-2）
+         */
+        async function ensureIsoNameToIso2MapLoaded() {
+            try {
+                if (window.__isoNameToIso2 instanceof Map && window.__isoNameToIso2.size > 50) return;
+            } catch { /* ignore */ }
+
+            // 1) localStorage 缓存（压成对象存储，恢复为 Map）
+            try {
+                const cached = localStorage.getItem('__isoNameToIso2_v1');
+                if (cached) {
+                    const obj = JSON.parse(cached);
+                    if (obj && typeof obj === 'object') {
+                        const m = new Map(Object.entries(obj));
+                        if (m.size > 50) {
+                            window.__isoNameToIso2 = m;
+                            return;
+                        }
+                    }
+                }
+            } catch { /* ignore */ }
+
+            // 2) 网络拉取（不阻塞主流程：失败就降级）
+            try {
+                const url = 'https://raw.githubusercontent.com/lukes/ISO-3166-Countries-with-Regional-Codes/master/slim-2/slim-2.json';
+                const res = await fetch(url, { cache: 'force-cache' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const arr = await res.json();
+                const m = new Map();
+
+                const setIfMissing = (k, v) => {
+                    const key = normalizeCountryKey(k);
+                    const val = String(v || '').trim().toUpperCase();
+                    if (!key || !/^[A-Z]{2}$/.test(val)) return;
+                    if (!m.has(key)) m.set(key, val);
+                };
+
+                if (Array.isArray(arr)) {
+                    for (const row of arr) {
+                        const name = row && (row.name || row['name']);
+                        const iso2 = row && (row['alpha-2'] || row.alpha2 || row['alpha2']);
+                        if (!name || !iso2) continue;
+
+                        // 完整名
+                        setIfMissing(name, iso2);
+
+                        // 逗号前（Moldova, Republic of -> Moldova）
+                        try {
+                            const beforeComma = String(name).split(',')[0].trim();
+                            if (beforeComma && beforeComma !== name) setIfMissing(beforeComma, iso2);
+                        } catch { /* ignore */ }
+
+                        // 括号前（Iran (Islamic Republic of) -> Iran）
+                        try {
+                            const beforeParen = String(name).split('(')[0].trim();
+                            if (beforeParen && beforeParen !== name) setIfMissing(beforeParen, iso2);
+                        } catch { /* ignore */ }
+                    }
+                }
+
+                // ✅ 额外别名（适配 ECharts world.js 常见缩写/写法）
+                // 注意：这些 key 走 normalizeCountryKey，所以这里直接写“人类可读”的原始形式即可
+                const extraAliases = {
+                    'W. Sahara': 'EH',
+                    'Bosnia and Herz.': 'BA',
+                    'Antigua and Barb.': 'AG',
+                    'Fr. S. Antarctic Lands': 'TF',
+                    'Aland': 'AX',
+                    'S. Korea': 'KR',
+                    'N. Korea': 'KP',
+                    'Russia': 'RU',
+                    'Iran': 'IR',
+                    'Laos': 'LA',
+                    'Syria': 'SY',
+                    'Palestine': 'PS',
+                    'Czech Rep.': 'CZ',
+                    'Macedonia': 'MK',
+                    'Venezuela': 'VE',
+                    'Bolivia': 'BO',
+                    'Tanzania': 'TZ',
+                    'Moldova': 'MD',
+                    'Brunei': 'BN',
+                    'Vietnam': 'VN',
+                    'Ivory Coast': 'CI',
+                };
+                for (const [k, v] of Object.entries(extraAliases)) setIfMissing(k, v);
+
+                window.__isoNameToIso2 = m;
+
+                // 写回缓存（避免每次加载都 fetch）
+                try {
+                    const obj = Object.fromEntries(m.entries());
+                    localStorage.setItem('__isoNameToIso2_v1', JSON.stringify(obj));
+                } catch { /* ignore */ }
+            } catch (e) {
+                // 静默降级：不影响页面其他功能
+                try { console.warn('[ISO] ⚠️ ISO 名称映射加载失败，国家透视可能降级为仅支持少数国家:', e?.message || e); } catch { /* ignore */ }
+            }
+        }
+
+        /**
          * 将 ECharts world 地图的国家名称解析为 ISO2 国家码（如 'United States of America' -> 'US'）
          * 仅做 UI 层路由用（抽屉/国家透视），失败时返回 null。
          */
@@ -2822,26 +2951,6 @@
             if (!raw) return null;
             // 直接是 ISO2
             if (/^[A-Za-z]{2}$/.test(raw)) return raw.toUpperCase();
-
-            const normalizeKey = (s) => {
-                try {
-                    return String(s || '')
-                        .trim()
-                        .toLowerCase()
-                        // 去括号内容：Bolivia (Plurinational State of) -> Bolivia
-                        .replace(/\s*\([^)]*\)\s*/g, ' ')
-                        // 逗号/点/撇号等
-                        .replace(/[.,'’]/g, ' ')
-                        // 连接符
-                        .replace(/[-_/]/g, ' ')
-                        // 去重音符（Côte d'Ivoire -> Cote d Ivoire）
-                        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-                        .replace(/\s+/g, ' ')
-                        .trim();
-                } catch {
-                    return String(s || '').trim().toLowerCase();
-                }
-            };
 
             // 1) 优先：从 ECharts world geoJson 中读取 iso2（覆盖全球国家，最可靠）
             try {
@@ -2872,12 +2981,12 @@
                                 f?.name,
                             ].filter(Boolean);
                             for (const nm of names) {
-                                const k = normalizeKey(nm);
+                                const k = normalizeCountryKey(nm);
                                 if (k) m.set(k, iso2Upper);
                                 // 额外：逗号前半段（"Korea, Republic of" -> "Korea"）
                                 try {
                                     const beforeComma = String(nm).split(',')[0].trim();
-                                    const kc = normalizeKey(beforeComma);
+                                    const kc = normalizeCountryKey(beforeComma);
                                     if (kc) m.set(kc, iso2Upper);
                                 } catch { /* ignore */ }
                             }
@@ -2885,11 +2994,11 @@
                     }
                     window.__worldGeoNameToIso2 = m;
                 }
-                const hit = window.__worldGeoNameToIso2.get(normalizeKey(raw));
+                const hit = window.__worldGeoNameToIso2.get(normalizeCountryKey(raw));
                 if (hit) return String(hit).toUpperCase();
             } catch { /* ignore */ }
 
-            const n = normalizeKey(raw);
+            const n = normalizeCountryKey(raw);
 
             // 2) 高优先级别名：ECharts world 常见命名差异
             const alias = {
@@ -2931,18 +3040,30 @@
             if (n.includes('united kingdom')) return 'GB';
             if (n.includes('democratic republic of the congo')) return 'CD';
 
+            // 2.5) 使用 ISO3166 国家名映射（适配 world.js 仅有 name 字段的情况）
+            try {
+                const m = window.__isoNameToIso2;
+                if (m instanceof Map) {
+                    const hit = m.get(n);
+                    if (hit) return String(hit).toUpperCase();
+                }
+            } catch { /* ignore */ }
+
             // 3) 从 countryNameMap 反查（en/zh 都支持；仅覆盖你手工维护的国家）
             try {
                 for (const [code, names] of Object.entries(countryNameMap || {})) {
                     if (!names) continue;
-                    const en = normalizeKey(names.en || '');
-                    const zh = normalizeKey(names.zh || '');
+                    const en = normalizeCountryKey(names.en || '');
+                    const zh = normalizeCountryKey(names.zh || '');
                     if (en && en === n) return String(code).toUpperCase();
                     if (zh && zh === n) return String(code).toUpperCase();
                 }
             } catch { /* ignore */ }
             return null;
         }
+
+        // 预热：尽量在用户点击地图前把映射准备好
+        try { ensureIsoNameToIso2MapLoaded(); } catch { /* ignore */ }
 
         let mapChart, radarChart;
         let currentViewState = 'GLOBAL'; // GLOBAL 或 COUNTRY（右侧抽屉：实时动态流 / 国家透视）
