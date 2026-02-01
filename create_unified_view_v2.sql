@@ -15,7 +15,11 @@ WITH base_data AS (
         id, user_name, fingerprint, user_identity,
         l_score, p_score, d_score, e_score, f_score,
         stats, dimensions, personality,
-        total_messages, total_chars, work_days,
+        total_messages,
+        total_chars,
+        -- 兼容口径：若未来区分“用户输出字符数”，可改为真实列；当前先与 total_chars 同口径
+        total_chars AS total_user_chars,
+        work_days,
         jiafang_count, ketao_count,
         vibe_index AS vibe_index_str,
         lpdef,
@@ -32,23 +36,39 @@ unified AS (
         id, user_name, fingerprint, user_identity,
         l_score, p_score, d_score, e_score, f_score,
         stats, dimensions, personality,
-        total_messages, total_chars, work_days,
+        total_messages,
+        total_chars,
+        total_user_chars,
+        work_days,
         jiafang_count, ketao_count,
         vibe_index_str, lpdef,
         ip_location,
         COALESCE(manual_lat, raw_lat) AS lat,
         COALESCE(manual_lng, raw_lng) AS lng,
         manual_location, manual_lat, manual_lng,
-        COALESCE(manual_location, ip_location) AS country_code,
+        -- 国家口径强约束：只接受 ISO2（避免 legacy 写入 IP/未知/国家全名导致国家聚合为 0）
+        CASE
+          WHEN manual_location ~ '^[A-Za-z]{2}$' THEN UPPER(manual_location)
+          WHEN ip_location ~ '^[A-Za-z]{2}$' THEN UPPER(ip_location)
+          ELSE NULL
+        END AS country_code,
         created_at, updated_at,
-        ROUND((COALESCE(l_score,0)*0.25 + COALESCE(p_score,0)*0.20 + COALESCE(d_score,0)*0.25 + COALESCE(e_score,0)*0.15 + COALESCE(f_score,0)*0.15)::numeric, 2) AS vibe_index
+        ROUND((COALESCE(l_score,0)*0.25 + COALESCE(p_score,0)*0.20 + COALESCE(d_score,0)*0.25 + COALESCE(e_score,0)*0.15 + COALESCE(f_score,0)*0.15)::numeric, 2) AS vibe_index,
+        CASE WHEN total_messages IS NOT NULL AND total_messages > 0
+          THEN ROUND((total_user_chars::numeric / NULLIF(total_messages, 0))::numeric, 2)
+          ELSE NULL
+        END AS avg_user_message_length
     FROM base_data
 )
 SELECT
     id, user_name, fingerprint, user_identity,
     l_score, p_score, d_score, e_score, f_score,
     stats, dimensions, personality,
-    total_messages, total_chars, work_days,
+    total_messages,
+    total_user_chars,
+    total_chars,
+    avg_user_message_length,
+    work_days,
     jiafang_count, ketao_count,
     vibe_index_str, lpdef,
     ip_location, lat, lng,
@@ -70,8 +90,9 @@ COMMENT ON VIEW public.v_unified_analysis_v2 IS
 功能：
 1. 去重：DISTINCT ON (fingerprint/id)，GitHub 身份优先，再按 created_at DESC
 2. 光标位置：lat/lng 对外统一为 COALESCE(manual_lat, raw_lat)、COALESCE(manual_lng, raw_lng)，手动校准与自动定位和谐相处
-3. country_code：COALESCE(manual_location, ip_location)
-4. vibe_index / vibe_rank / vibe_percentile 供技术排名；jiafang_count / ketao_count 供甲方上身、赛博磕头展示';
+3. country_code：严格 ISO2（manual_location 优先，否则 ip_location；非 ISO2 则为 NULL）
+4. total_user_chars / avg_user_message_length：国家累计 & 排名用（当前与 total_chars 同口径）
+5. vibe_index / vibe_rank / vibe_percentile 供技术排名；jiafang_count / ketao_count 供甲方上身、赛博磕头展示';
 
 -- 步骤 3: 创建索引（提升查询性能）
 -- 注意：视图本身不能创建索引，但可以在基础表上创建索引

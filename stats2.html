@@ -1552,13 +1552,22 @@
                     <div id="rtRealtimeList" class="space-y-3 text-[11px] leading-snug"></div>
                 </div>
 
-                <!-- [01.7] COUNTRY TOTALS & MY RANKS -->
+                <!-- [01.7] COUNTRY TOTALS -->
                 <div class="clinic-card">
                     <div class="card-header">
                         <i data-lucide="bar-chart-3"></i>
-                        <span class="card-title">国家累计 & 我的排名 / Country Totals & My Rank</span>
+                        <span class="card-title">国家累计 / Country Totals</span>
                     </div>
                     <div id="rtCountryTotals" class="space-y-2 text-[11px] leading-snug"></div>
+                </div>
+
+                <!-- [01.8] MY COUNTRY RANK -->
+                <div class="clinic-card">
+                    <div class="card-header">
+                        <i data-lucide="trophy"></i>
+                        <span class="card-title">我的排名 / My Country Rank</span>
+                    </div>
+                    <div id="rtMyCountryRanks" class="space-y-2 text-[11px] leading-snug"></div>
                 </div>
 
                 <!-- [02] POWER STRUGGLE (PK) -->
@@ -2529,26 +2538,58 @@
 
                 // =========================
                 // 国家累计 & 我的排名（来自 /api/country-summary 扩展字段）
+                // - 拆分成两张卡：#rtCountryTotals（Σ）与 #rtMyCountryRanks（me + rank）
                 // =========================
                 try {
-                    const box = document.getElementById('rtCountryTotals');
-                    if (box) {
+                    const totalsBox = document.getElementById('rtCountryTotals');
+                    const ranksBox = document.getElementById('rtMyCountryRanks');
+                    if (totalsBox || ranksBox) {
                         const fmt = (n) => new Intl.NumberFormat('zh-CN').format(Number(n) || 0);
                         const fp = (() => { try { return localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch { return ''; } })();
-                        const cName = (() => {
-                            try { return (currentDrawerCountry && currentDrawerCountry.name) ? String(currentDrawerCountry.name) : ''; } catch { return ''; }
+                        const uid = (() => {
+                            try {
+                                // GitHub 登录后通常清掉 fingerprint，此时必须带 user_id 才能算“我的排名”
+                                const fromWindow = (window.currentUser && window.currentUser.id) ||
+                                    (window.currentUserData && window.currentUserData.id) ||
+                                    (window.supabaseAuthUser && window.supabaseAuthUser.id) ||
+                                    (window.authenticatedUserId) ||
+                                    (window.__authUserId) ||
+                                    '';
+                                if (fromWindow) return String(fromWindow);
+                                // 兜底：尝试从 localStorage 取（部分登录链路会持久化）
+                                return localStorage.getItem('github_user_id') ||
+                                    localStorage.getItem('supabase_user_id') ||
+                                    localStorage.getItem('auth_user_id') ||
+                                    localStorage.getItem('user_id') ||
+                                    '';
+                            } catch { return ''; }
                         })();
-                        const url2 = `${API_ENDPOINT}api/country-summary?country=${encodeURIComponent(String(countryCode || '').toUpperCase())}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}`;
+                        const cName = (() => {
+                            try {
+                                const cc = String(countryCode || '').trim().toUpperCase();
+                                // 优先使用内置映射的英文国名（更可能与数据库中的 legacy 全名一致，如 "United States"）
+                                const mapped = (typeof countryNameMap === 'object' && countryNameMap && countryNameMap[cc])
+                                    ? (countryNameMap[cc].en || countryNameMap[cc].zh || '')
+                                    : '';
+                                if (mapped) return String(mapped);
+                                return (currentDrawerCountry && currentDrawerCountry.name) ? String(currentDrawerCountry.name) : '';
+                            } catch {
+                                return '';
+                            }
+                        })();
+                        // 加时间戳：避免 edge cache/中间层缓存导致“永远是 0”
+                        const url2 = `${API_ENDPOINT}api/country-summary?country=${encodeURIComponent(String(countryCode || '').toUpperCase())}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${uid ? `&user_id=${encodeURIComponent(uid)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}&_ts=${Date.now()}`;
 
                         // cache-first：避免切换抖动
                         if (!window.__countryTotalsCache) window.__countryTotalsCache = new Map();
                         const cacheKey2 = `CT:${String(countryCode || '').toUpperCase()}`;
                         const hit2 = window.__countryTotalsCache.get(cacheKey2);
-                        if (hit2 && typeof hit2 === 'object' && hit2.html) {
-                            box.innerHTML = hit2.html;
-                        } else {
-                            box.innerHTML = '<div class="text-zinc-500 text-xs">加载中...</div>';
+                        if (hit2 && typeof hit2 === 'object') {
+                            if (totalsBox && hit2.totalsHtml) totalsBox.innerHTML = hit2.totalsHtml;
+                            if (ranksBox && hit2.ranksHtml) ranksBox.innerHTML = hit2.ranksHtml;
                         }
+                        if (totalsBox && !String(totalsBox.innerHTML || '').trim()) totalsBox.innerHTML = '<div class="text-zinc-500 text-xs">加载中...</div>';
+                        if (ranksBox && !String(ranksBox.innerHTML || '').trim()) ranksBox.innerHTML = '<div class="text-zinc-500 text-xs">加载中...</div>';
 
                         // 并发保护：复用 updateCountryDashboard 的 requestSeq / isStaleRequest
                         const resp2 = await fetch(url2, { cache: 'no-cache' });
@@ -2558,42 +2599,73 @@
                         if (isStaleRequest()) return;
 
                         const totals = payload2.countryTotals || payload2.data?.countryTotals || null;
+                        const totalsRanks = payload2.countryTotalsRanks || payload2.data?.countryTotalsRanks || null;
                         const ranks = payload2.myCountryRanks || payload2.data?.myCountryRanks || null;
                         const meVals = payload2.myCountryValues || payload2.data?.myCountryValues || null;
+                        // 关键：高分图谱的数据源来自 country-summary，而不是 global-average
+                        try {
+                            data.topByMetrics = payload2.topByMetrics || payload2.data?.topByMetrics || [];
+                        } catch { /* ignore */ }
 
-                        const row = (label, totalVal, myVal, r) => {
-                            const rankText = r && r.rank ? `#${r.rank}/${r.total}` : '--';
+                        const rowTotals = (label, totalVal, r) => {
+                            const rankText = (r && r.rank) ? `#${r.rank}/${r.total}` : '--';
                             return `
                                 <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
                                     <div class="text-zinc-200">${label}</div>
                                     <div class="flex items-center gap-3 min-w-0">
                                         <span class="text-[10px] text-zinc-500">Σ ${fmt(totalVal)}</span>
-                                        <span class="text-[10px] text-zinc-400">me ${fmt(myVal)}</span>
+                                        <span class="text-[10px] text-green-500 font-bold tabular-nums">${rankText}</span>
+                                    </div>
+                                </div>
+                            `;
+                        };
+                        const fmtMe = (v) => (v === undefined || v === null || Number.isNaN(Number(v))) ? '--' : fmt(v);
+                        const rowRanks = (label, myVal, r) => {
+                            const rankText = r && r.rank ? `#${r.rank}/${r.total}` : '--';
+                            return `
+                                <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
+                                    <div class="text-zinc-200">${label}</div>
+                                    <div class="flex items-center gap-3 min-w-0">
+                                        <span class="text-[10px] text-zinc-400">me ${fmtMe(myVal)}</span>
                                         <span class="text-[10px] text-green-500 font-bold tabular-nums">${rankText}</span>
                                     </div>
                                 </div>
                             `;
                         };
 
-                        const html = totals
+                        const totalsHtml = totals
                             ? [
-                                row('调戏AI次数 / Messages', totals.total_messages, meVals?.total_messages, ranks?.total_messages),
-                                row('对话字符数 / Total Chars', totals.total_chars, meVals?.total_chars, ranks?.total_chars),
-                                row('废话输出 / User Chars', totals.total_user_chars, meVals?.total_user_chars, ranks?.total_user_chars),
-                                row('平均长度 / Avg Len', Math.round(Number(totals.avg_user_message_length) || 0), Math.round(Number(meVals?.avg_user_message_length) || 0), ranks?.avg_user_message_length),
-                                row('甲方上身 / Jiafang', totals.jiafang_count, meVals?.jiafang_count, ranks?.jiafang_count),
-                                row('磕头 / Ketao', totals.ketao_count, meVals?.ketao_count, ranks?.ketao_count),
+                                rowTotals('调戏AI次数 / Messages', totals.total_messages, totalsRanks?.total_messages),
+                                rowTotals('对话字符数 / Total Chars', totals.total_chars, totalsRanks?.total_chars),
+                                rowTotals('废话输出 / User Chars', totals.total_user_chars, totalsRanks?.total_user_chars),
+                                rowTotals('平均长度 / Avg Len', Math.round(Number(totals.avg_user_message_length) || 0), totalsRanks?.avg_user_message_length),
+                                rowTotals('甲方上身 / Jiafang', totals.jiafang_count, totalsRanks?.jiafang_count),
+                                rowTotals('磕头 / Ketao', totals.ketao_count, totalsRanks?.ketao_count),
                               ].join('')
                             : '<div class="text-zinc-500 text-xs">暂无数据</div>';
 
-                        box.innerHTML = html;
-                        try { window.__countryTotalsCache.set(cacheKey2, { html, ts: Date.now() }); } catch { /* ignore */ }
+                        const ranksHtml = totals
+                            ? [
+                                rowRanks('调戏AI次数 / Messages', meVals?.total_messages, ranks?.total_messages),
+                                rowRanks('对话字符数 / Total Chars', meVals?.total_chars, ranks?.total_chars),
+                                rowRanks('废话输出 / User Chars', meVals?.total_user_chars, ranks?.total_user_chars),
+                                rowRanks('平均长度 / Avg Len', Math.round(Number(meVals?.avg_user_message_length) || 0), ranks?.avg_user_message_length),
+                                rowRanks('甲方上身 / Jiafang', meVals?.jiafang_count, ranks?.jiafang_count),
+                                rowRanks('磕头 / Ketao', meVals?.ketao_count, ranks?.ketao_count),
+                              ].join('')
+                            : '<div class="text-zinc-500 text-xs">暂无数据</div>';
+
+                        if (totalsBox) totalsBox.innerHTML = totalsHtml;
+                        if (ranksBox) ranksBox.innerHTML = ranksHtml;
+                        try { window.__countryTotalsCache.set(cacheKey2, { totalsHtml, ranksHtml, ts: Date.now() }); } catch { /* ignore */ }
                     }
                 } catch (e) {
                     // 不阻断主面板
                     try {
-                        const box = document.getElementById('rtCountryTotals');
-                        if (box && !box.innerHTML.trim()) box.innerHTML = '<div class="text-zinc-500 text-xs">暂无数据</div>';
+                        const totalsBox = document.getElementById('rtCountryTotals');
+                        const ranksBox = document.getElementById('rtMyCountryRanks');
+                        if (totalsBox && !totalsBox.innerHTML.trim()) totalsBox.innerHTML = '<div class="text-zinc-500 text-xs">暂无数据</div>';
+                        if (ranksBox && !ranksBox.innerHTML.trim()) ranksBox.innerHTML = '<div class="text-zinc-500 text-xs">暂无数据</div>';
                     } catch { /* ignore */ }
                 }
 
@@ -2657,133 +2729,44 @@
 
                 // =========================
                 // 需求：高分图谱 (#rtTopTalentsList)
-                // 数据源：data.top_talents [{dim,user_name,score}]
+                // 新口径：该国 6 项指标 Top1（/api/country-summary.topByMetrics）
                 // =========================
                 const topTalentsEl = document.getElementById('rtTopTalentsList');
                 const topTalentsHeroesEl = document.getElementById('rtTopTalentsHeroes');
-                let topTalents = Array.isArray(data.top_talents) ? data.top_talents : [];
-                const dimTitleMap = {
-                    L: '逻辑之神',
-                    P: '执行机器',
-                    D: '统治领主',
-                    E: '定海神针',
-                    F: '细节狂魔',
-                };
-                // ✅ 国家口径兜底：如果接口没返回 top_talents，则直接从 Supabase 统一视图按国家筛选取 Top1
-                // 目的：确保能显示“真实的 GitHub 用户名与头像”，而不是占位符 @--
-                if (!effectiveIsGlobal && /^[A-Z]{2}$/.test(String(countryCode || '').toUpperCase()) && (!Array.isArray(topTalents) || topTalents.length === 0)) {
-                    try {
-                        const cc = String(countryCode || '').toUpperCase();
-                        const canQuerySupabase = (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.from === 'function');
-                        if (canQuerySupabase) {
-                            const dims = ['L', 'P', 'D', 'E', 'F'];
-                            const colMap = { L: 'l_score', P: 'p_score', D: 'd_score', E: 'e_score', F: 'f_score' };
-                            const selectCols = [
-                                'user_name',
-                                'github_username',
-                                'user_identity',
-                                'country_code',
-                                'ip_location',
-                                'manual_location',
-                                'l_score','p_score','d_score','e_score','f_score'
-                            ].join(',');
-                            const countryOr = `country_code.eq.${cc},ip_location.eq.${cc},manual_location.eq.${cc}`;
-
-                            const results = await Promise.all(dims.map(async (dim) => {
-                                const col = colMap[dim];
-                                try {
-                                    const { data: rows, error } = await supabaseClient
-                                        .from('v_unified_analysis_v2')
-                                        .select(selectCols)
-                                        .or(countryOr)
-                                        .not(col, 'is', null)
-                                        .order(col, { ascending: false })
-                                        .limit(1);
-                                    if (error) return null;
-                                    const row = Array.isArray(rows) ? rows[0] : null;
-                                    const score = Number(row?.[col] ?? row?.[dim] ?? row?.[String(dim).toLowerCase()] ?? 0);
-                                    if (!Number.isFinite(score) || score <= 0) return null;
-                                    return {
-                                        dim,
-                                        user_name: row?.user_name ?? row?.name ?? '',
-                                        github_username: row?.github_username ?? row?.githubUsername ?? '',
-                                        user_identity: row?.user_identity ?? row?.userIdentity ?? null,
-                                        score
-                                    };
-                                } catch {
-                                    return null;
-                                }
-                            }));
-                            topTalents = results.filter(Boolean);
-                            if (topTalents.length > 0) {
-                                try { data.top_talents = topTalents; } catch { /* ignore */ }
-                            }
-                        }
-                    } catch { /* ignore */ }
-                }
-                if (topTalentsHeroesEl) {
-                    const normalized = topTalents
-                        .map((t) => ({
-                            dim: String(t?.dim || '').toUpperCase(),
-                            user_name: t?.user_name ?? t?.userName ?? t?.username ?? '',
-                            github_username: t?.github_username ?? t?.githubUsername ?? t?.gh ?? '',
-                            user_identity: t?.user_identity ?? t?.userIdentity ?? null,
-                            score: Number(t?.score),
-                        }))
-                        .filter((t) => Number.isFinite(t.score))
-                        .sort((a, b) => b.score - a.score)
-                        .slice(0, 5);
-                    if (normalized.length === 0) {
-                        topTalentsHeroesEl.innerHTML = '';
+                let topBy = Array.isArray(data.topByMetrics) ? data.topByMetrics : [];
+                if (topTalentsHeroesEl) topTalentsHeroesEl.innerHTML = '';
+                if (topTalentsEl) {
+                    if (!topBy || topBy.length === 0) {
+                        topTalentsEl.innerHTML = '<div class="text-zinc-500 text-xs">暂无高分图谱数据</div>';
                     } else {
-                        topTalentsHeroesEl.innerHTML = normalized.map((t) => {
-                            const meta = _resolveUserMeta(t);
-                            const scoreText = Number.isFinite(t.score) ? t.score.toFixed(1) : '--';
-                            const dim = t.dim && /^[A-Z]$/.test(t.dim) ? t.dim : '';
-                            const dimBadge = dim ? `<span class="text-[10px] px-2 py-0.5 border border-[#00ff41]/30 text-[#00ff41] bg-[#00ff41]/5">${escapeHtml(dim)}</span>` : '';
-                            const name = meta.profileUrl
-                                ? `<a href="${escapeHtml(meta.profileUrl)}" target="_blank" rel="noopener noreferrer" class="text-[11px] text-white font-bold truncate hover:underline">${escapeHtml(meta.display)}</a>`
-                                : `<div class="text-[11px] text-white font-bold truncate">${escapeHtml(meta.display)}</div>`;
+                        const fmtScore = (item) => {
+                            const s = Number(item?.score);
+                            if (!Number.isFinite(s)) return '--';
+                            const f = String(item?.format || '').toLowerCase();
+                            return f === 'float' ? String(Math.round(s)) : new Intl.NumberFormat('zh-CN').format(Math.round(s));
+                        };
+                        topTalentsEl.innerHTML = topBy.map((it) => {
+                            const user = it?.user || {};
+                            const meta = _resolveUserMeta(user);
+                            const label = `${escapeHtml(it?.labelZh || it?.key || '--')} / ${escapeHtml(it?.labelEn || '')}`;
+                            const scoreText = fmtScore(it);
+                            const nameHtml = meta.profileUrl
+                                ? `<a href="${escapeHtml(meta.profileUrl)}" target="_blank" rel="noopener noreferrer" class="text-[10px] text-zinc-200 truncate hover:underline">${escapeHtml(meta.display)}</a>`
+                                : `<span class="text-[10px] text-zinc-400 truncate">${escapeHtml(meta.display)}</span>`;
                             return `
-                                <div class="flex items-center gap-2 border border-white/10 bg-zinc-950/40 px-2 py-1.5">
-                                    <img src="${escapeHtml(meta.avatar)}" alt="" width="24" height="24" style="width:24px;height:24px;border-radius:999px;object-fit:cover;border:1px solid rgba(0,255,65,0.25);" />
+                                <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
                                     <div class="min-w-0">
-                                        <div class="flex items-center gap-2 min-w-0">
-                                            ${dimBadge}
-                                            ${name}
-                                        </div>
-                                        <div class="text-[10px] text-green-500 tabular-nums">score: ${escapeHtml(scoreText)}</div>
+                                        <div class="text-xs text-white font-bold truncate">${label}</div>
+                                    </div>
+                                    <div class="flex items-center gap-3 min-w-0">
+                                        <img src="${escapeHtml(meta.avatar)}" alt="" width="18" height="18" style="width:18px;height:18px;border-radius:999px;object-fit:cover;border:1px solid rgba(0,255,65,0.2);" />
+                                        ${nameHtml}
+                                        <span class="text-xs text-green-500 font-bold tabular-nums">${escapeHtml(scoreText)}</span>
                                     </div>
                                 </div>
                             `;
                         }).join('');
                     }
-                }
-                if (topTalentsEl) {
-                    const dims = ['L', 'P', 'D', 'E', 'F'];
-                    topTalentsEl.innerHTML = dims.map((dim) => {
-                        const found = topTalents.find((t) => String(t?.dim || '').toUpperCase() === dim) || null;
-                        const userName = found?.user_name ?? found?.userName ?? '--';
-                        const scoreNum = Number(found?.score);
-                        const scoreText = Number.isFinite(scoreNum) ? scoreNum.toFixed(1) : '--';
-                        const meta = found ? _resolveUserMeta(found) : { display: `@${userName}`, avatar: 'https://github.com/identicons/guest.png', profileUrl: '' };
-                        const nameHtml = meta.profileUrl
-                            ? `<a href="${escapeHtml(meta.profileUrl)}" target="_blank" rel="noopener noreferrer" class="text-[10px] text-zinc-200 truncate hover:underline">${escapeHtml(meta.display)}</a>`
-                            : `<span class="text-[10px] text-zinc-400 truncate">${escapeHtml(meta.display)}</span>`;
-                        return `
-                            <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
-                                <div class="flex items-center gap-2 min-w-0">
-                                    <span class="text-[10px] px-2 py-0.5 border border-[#00ff41]/30 text-[#00ff41] bg-[#00ff41]/5">${dim}</span>
-                                    <span class="text-xs text-white font-bold">${escapeHtml(dimTitleMap[dim] || dim)}</span>
-                                </div>
-                                <div class="flex items-center gap-3 min-w-0">
-                                    <img src="${escapeHtml(meta.avatar)}" alt="" width="18" height="18" style="width:18px;height:18px;border-radius:999px;object-fit:cover;border:1px solid rgba(0,255,65,0.2);" />
-                                    ${nameHtml}
-                                    <span class="text-xs text-green-500 font-bold tabular-nums">${escapeHtml(scoreText)}</span>
-                                </div>
-                            </div>
-                        `;
-                    }).join('');
                 }
 
                 // 语义爆发词云卡片：仅保留词云形态（ECharts wordCloud），不再渲染 slang/merit/sv_slang 文本区

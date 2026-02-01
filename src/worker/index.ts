@@ -56,6 +56,22 @@ export type Env = {
   prompts_library?: D1Database; // D1 数据库：答案之书
 };
 
+async function refreshCountryStatsCurrent(env: Env): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (!env.SUPABASE_URL || !env.SUPABASE_KEY) return { success: false, error: 'Supabase 未配置' };
+    // RPC：public.refresh_country_stats_current()
+    const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/refresh_country_stats_current`;
+    await fetchSupabaseJson<any>(env, rpcUrl, {
+      method: 'POST',
+      headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({}),
+    }, SUPABASE_FETCH_TIMEOUT_MS);
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: e?.message || String(e) };
+  }
+}
+
 // KV 存储的键名
 const KV_KEY_GLOBAL_AVERAGE = 'global_average';
 const KV_KEY_LAST_UPDATE = 'global_average_last_update';
@@ -4594,10 +4610,12 @@ app.get('/api/v2/wordcloud-data', handleWordCloudRequest);
  */
 app.get('/api/country-summary', async (c) => {
   try {
-    const country = (c.req.query('country') || '').trim().toUpperCase();
+    const countryRaw = (c.req.query('country') || '').trim();
+    const country = String(countryRaw || '').toUpperCase();
     if (!country || country.length !== 2) {
       return c.json({ success: false, error: 'country 必填且为 2 位国家代码' }, 400);
     }
+    // 兼容参数（不参与筛选）：已切换到 v_unified_analysis_v2，统一使用 country_code.eq.ISO2
     const countryNameRaw = (c.req.query('country_name') || c.req.query('countryName') || '').trim();
     const fingerprint = (c.req.query('fingerprint') || c.req.query('fp') || '').trim();
     const userId = (c.req.query('user_id') || c.req.query('userId') || c.req.query('id') || '').trim();
@@ -4605,153 +4623,105 @@ app.get('/api/country-summary', async (c) => {
     if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
       return c.json({ success: false, error: 'Supabase 未配置' }, 500);
     }
-    const sanitizeCountryName = (s: string) => {
-      const t = String(s || '')
-        .replace(/[^\w\s\-.'()]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-      if (!t) return '';
-      // 太长/太怪的名称就不要参与 or（避免 PostgREST 解析异常）
-      if (t.length > 64) return t.slice(0, 64).trim();
-      return t;
-    };
-    const countryName = sanitizeCountryName(countryNameRaw);
-    const orParts: string[] = [
-      `country_code.eq.${country}`,
-      `ip_location.eq.${country}`,
-      `manual_location.eq.${country}`,
-    ];
-    // 兼容：历史数据可能存的是国家全名（如 "United States"），补一层模糊匹配兜底
-    if (countryName && countryName.toUpperCase() !== country) {
-      // 精确匹配
-      orParts.push(`country_code.eq.${countryName}`, `ip_location.eq.${countryName}`, `manual_location.eq.${countryName}`);
-      // 模糊匹配（ilike 使用 * 通配，避免大小写差异）
-      const pat = `*${countryName}*`;
-      orParts.push(`country_code.ilike.${pat}`, `ip_location.ilike.${pat}`, `manual_location.ilike.${pat}`);
-    }
-    const countryOr = `(${orParts.join(',')})`;
+    // ✅ 简化筛选逻辑：只用 ISO2 country_code
+    const cc = String(country || '').toUpperCase();
 
     // ----------------------------
-    // Cache: country totals (短 TTL)
+    // ✅ 新方案：一次 RPC 返回“国家总额 + 排名”
+    // Supabase 禁止对视图做 sum()/avg() 时，必须走数据库函数
     // ----------------------------
-    const totalsCacheKey = `COUNTRY_SUMMARY_TOTALS_V1:${country}`;
-    const totalsTtlSec = 60; // 防抖：避免频繁切国导致数据库抖动
-    let cachedTotals: any | null = null;
-    if (env.STATS_STORE) {
-      try {
-        cachedTotals = await env.STATS_STORE.get(totalsCacheKey, 'json');
-      } catch {
-        cachedTotals = null;
-      }
-    }
+    const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_country_ranks_v2`;
+    const rpcRows = await fetchSupabaseJson<any>(env, rpcUrl, {
+      method: 'POST',
+      headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({}),
+    }, SUPABASE_FETCH_TIMEOUT_MS);
+    const rpcList: any[] = Array.isArray(rpcRows) ? rpcRows : (rpcRows ? [rpcRows] : []);
+    const row = rpcList.find((it) => String(it?.country_code || '').trim().toUpperCase() === cc) || null;
 
-    const now = Date.now();
-    const isFresh = cachedTotals && typeof cachedTotals === 'object' && (now - Number(cachedTotals.ts || 0) < totalsTtlSec * 1000);
-
-    let totals: any = isFresh ? cachedTotals.totals : null;
-    let _debugCountStatus: any = null;
-    if (!totals) {
-      // 1) totalUsers：用 count=exact 取 Content-Range
+    // 该国总人数：用 count=exact（不依赖 RPC 是否返回 total_users）
+    let countryTotalUsers = 0;
+    try {
       const countUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
       countUrl.searchParams.set('select', 'id');
-      countUrl.searchParams.set('or', countryOr);
-      const countRes = await fetch(countUrl.toString(), {
+      countUrl.searchParams.set('country_code', `eq.${cc}`);
+      const res = await fetch(countUrl.toString(), {
         headers: {
-          'apikey': env.SUPABASE_KEY,
-          'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+          ...buildSupabaseHeaders(env),
           'Prefer': 'count=exact',
           'Range': '0-0',
         },
       });
-      let totalUsers = 0;
-      if (countRes.ok) {
-        const cr = countRes.headers.get('content-range');
+      if (res.ok) {
+        const cr = res.headers.get('content-range');
         if (cr) {
           const parts = cr.split('/');
           if (parts.length === 2) {
-            const n = parseInt(parts[1]);
-            if (!Number.isNaN(n) && n >= 0) totalUsers = n;
+            const nAll = parseInt(parts[1]);
+            if (!Number.isNaN(nAll) && nAll >= 0) countryTotalUsers = nAll;
           }
         }
-      } else {
-        const errText = await countRes.text().catch(() => '');
-        _debugCountStatus = {
-          ok: false,
-          status: countRes.status,
-          error: String(errText || '').slice(0, 300),
-        };
       }
-
-      if (totalUsers <= 0) {
-        totals = {
-          totalUsers: 0,
-          total_messages_sum: 0,
-          total_user_chars_sum: 0,
-          total_chars_sum: 0,
-          jiafang_count_sum: 0,
-          ketao_count_sum: 0,
-        };
-      } else {
-        // 2) sums：PostgREST 聚合（尽量只回 1 行）
-        const aggUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
-        // 兼容：v_unified_analysis_v2 默认未必存在 total_user_chars 字段，避免 400
-        aggUrl.searchParams.set(
-          'select',
-          [
-            'total_messages.sum()',
-            'total_chars.sum()',
-            'jiafang_count.sum()',
-            'ketao_count.sum()',
-          ].join(',')
-        );
-        aggUrl.searchParams.set('or', `(${countryOr})`);
-        const aggRows = await fetchSupabaseJson<any[]>(env, aggUrl.toString(), {
-          headers: buildSupabaseHeaders(env),
-        }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
-        const row = Array.isArray(aggRows) ? (aggRows[0] || {}) : (aggRows || {});
-
-        // PostgREST 不同版本字段命名可能不同：做鲁棒映射
-        const pickNum = (keys: string[]) => {
-          for (const k of keys) {
-            if (row && row[k] != null) {
-              const v = Number(row[k]);
-              if (Number.isFinite(v)) return v;
-            }
-          }
-          return 0;
-        };
-        const total_messages_sum = pickNum(['total_messages_sum', 'total_messages']);
-        const total_chars_sum = pickNum(['total_chars_sum', 'total_chars']);
-        const jiafang_count_sum = pickNum(['jiafang_count_sum', 'jiafang_count']);
-        const ketao_count_sum = pickNum(['ketao_count_sum', 'ketao_count']);
-
-        totals = {
-          totalUsers,
-          total_messages_sum,
-          total_chars_sum,
-          jiafang_count_sum,
-          ketao_count_sum,
-        };
-      }
-
-      if (env.STATS_STORE) {
-        try {
-          await (env.STATS_STORE.put as any)(totalsCacheKey, JSON.stringify({ ts: now, totals }), {
-            expirationTtl: totalsTtlSec,
-          });
-        } catch {
-          // ignore
-        }
-      }
+    } catch {
+      countryTotalUsers = 0;
     }
 
-    const totalUsers = Number(totals?.totalUsers) || 0;
+    const n = (v: any) => {
+      const x = Number(v ?? 0);
+      return Number.isFinite(x) ? x : 0;
+    };
+    const ni = (v: any) => {
+      const x = Math.round(Number(v ?? NaN));
+      return Number.isFinite(x) && x > 0 ? x : null;
+    };
+
+    const tm = n(row?.tm ?? row?.total_messages ?? row?.total_messages_sum);
+    const tuc = n(row?.tuc ?? row?.total_user_chars ?? row?.total_user_chars_sum);
+    const tc = n(row?.tc ?? row?.total_chars ?? row?.total_chars_sum);
+    const jc = n(row?.jc ?? row?.jiafang_count ?? row?.jiafang_count_sum);
+    const kc = n(row?.kc ?? row?.ketao_count ?? row?.ketao_count_sum);
+    const avgLen = n(row?.avg_user_message_length ?? row?.avg_len ?? (tm > 0 ? (tuc / tm) : 0));
+
+    const totalUsers = countryTotalUsers > 0 ? countryTotalUsers : n(row?.total_users ?? row?.users ?? row?.totalUsers ?? 0);
+    const totalCountries = Math.max(0, ni(row?.total_countries ?? row?.totalCountries) || rpcList.length || 0);
+
+    const mkRank = (rankVal: any) => {
+      const r = ni(rankVal);
+      if (!r || !totalCountries) return null;
+      return { rank: r, total: totalCountries };
+    };
+
+    const totals = {
+      totalUsers,
+      total_messages_sum: tm,
+      total_user_chars_sum: tuc,
+      total_chars_sum: tc,
+      jiafang_count_sum: jc,
+      ketao_count_sum: kc,
+      avg_user_message_length_sum: avgLen,
+      source: 'rpc_get_country_ranks_v2',
+    };
+
+    // total_chars 的排名：若 RPC 未提供，退回使用 rank_user_chars（两者在现有口径常一致）
+    const rankUserChars = row?.rank_user_chars ?? row?.rank_total_user_chars;
+    const countryTotalsRanks: any = {
+      total_messages: mkRank(row?.rank_messages ?? row?.rank_total_messages),
+      total_user_chars: mkRank(rankUserChars),
+      total_chars: mkRank(row?.rank_total_chars ?? row?.rank_chars ?? rankUserChars),
+      jiafang_count: mkRank(row?.rank_jiafang ?? row?.rank_jiafang_count),
+      ketao_count: mkRank(row?.rank_ketao ?? row?.rank_ketao_count),
+      avg_user_message_length: mkRank(row?.rank_avg_len ?? row?.rank_avg_user_message_length),
+      _meta: { totalCountries: totalCountries || 0 },
+    };
+
     const totalMessages = Number(totals?.total_messages_sum) || 0;
     const totalChars = Number(totals?.total_chars_sum) || 0;
-    // 兼容：数据库未提供 total_user_chars 时，用 total_chars 兜底（前端仍可展示）
     const totalUserChars = Number(totals?.total_user_chars_sum) || totalChars;
     const avgPerUser = totalUsers > 0 ? Math.round(totalChars / totalUsers) : 0;
     const avgPerScan = totalMessages > 0 ? Math.round(totalChars / totalMessages) : 0;
+
+    // radar 暂时沿用默认（RPC 可扩展返回 avg_l..avg_f 后再接入）
+    const avgDims = { L: 50, P: 50, D: 50, E: 50, F: 50 };
 
     // ----------------------------
     // my record + country ranks (按需)
@@ -4763,13 +4733,32 @@ app.get('/api/country-summary', async (c) => {
     const canIdentify = !!(userId || fingerprint);
     if (canIdentify && totalUsers > 0) {
       try {
-        // 兼容策略：
-        // - v_unified_analysis_v2 默认不一定有 github_username / total_user_chars / avg_user_message_length
-        // - 先按“最小列集合”查询，避免列不存在导致 400
-        const meUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
-        meUrl.searchParams.set(
-          'select',
-          [
+        // 优先用完整字段集合（V2 视图），失败则回退最小集合
+        const fetchMe = async (selectCols: string) => {
+          const meUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
+          meUrl.searchParams.set('select', selectCols);
+          if (userId) meUrl.searchParams.set('id', `eq.${encodeURIComponent(userId)}`);
+          else meUrl.searchParams.set('fingerprint', `eq.${encodeURIComponent(fingerprint)}`);
+          meUrl.searchParams.set('limit', '1');
+          return await fetchSupabaseJson<any[]>(env, meUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS);
+        };
+
+        let meRows: any[] = [];
+        try {
+          meRows = await fetchMe([
+            'id',
+            'user_name',
+            'fingerprint',
+            'user_identity',
+            'total_messages',
+            'total_user_chars',
+            'total_chars',
+            'avg_user_message_length',
+            'jiafang_count',
+            'ketao_count',
+          ].join(','));
+        } catch {
+          meRows = await fetchMe([
             'id',
             'user_name',
             'fingerprint',
@@ -4778,22 +4767,16 @@ app.get('/api/country-summary', async (c) => {
             'total_chars',
             'jiafang_count',
             'ketao_count',
-          ].join(',')
-        );
-        if (userId) meUrl.searchParams.set('id', `eq.${encodeURIComponent(userId)}`);
-        else meUrl.searchParams.set('fingerprint', `eq.${encodeURIComponent(fingerprint)}`);
-        meUrl.searchParams.set('limit', '1');
-        const meRows = await fetchSupabaseJson<any[]>(env, meUrl.toString(), {
-          headers: buildSupabaseHeaders(env),
-        }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
+          ].join(',')).catch(() => []);
+        }
         const me = Array.isArray(meRows) ? (meRows[0] || null) : null;
         if (me) {
           myOut.id = me.id ?? null;
           myOut.user_name = me.user_name ?? null;
           const msg = Number(me.total_messages) || 0;
           const chars = Number(me.total_chars) || 0;
-          const userChars = chars; // 兼容：目前数据库口径只有 total_chars
-          const avgLen = msg > 0 ? (userChars / msg) : 0; // 兼容：平均长度用公式
+          const userChars = Number(me.total_user_chars) || chars;
+          const avgLen = Number(me.avg_user_message_length) || (msg > 0 ? (userChars / msg) : 0);
           const jia = Number(me.jiafang_count) || 0;
           const ket = Number(me.ketao_count) || 0;
 
@@ -4810,7 +4793,7 @@ app.get('/api/country-summary', async (c) => {
             if (!Number.isFinite(value) || value <= 0) return 0;
             const qUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
             qUrl.searchParams.set('select', 'id');
-            qUrl.searchParams.set('or', countryOr);
+            qUrl.searchParams.set('country_code', `eq.${cc}`);
             qUrl.searchParams.set(col, `gt.${value}`);
             const res = await fetch(qUrl.toString(), {
               headers: {
@@ -4836,8 +4819,7 @@ app.get('/api/country-summary', async (c) => {
           const cols: Array<[string, string]> = [
             ['total_messages', 'total_messages'],
             ['total_chars', 'total_chars'],
-            // total_user_chars 当前口径等同 total_chars（如未来视图加列，可恢复为 total_user_chars）
-            ['total_user_chars', 'total_chars'],
+            ['total_user_chars', 'total_user_chars'],
             // avg_user_message_length 依赖数据库视图是否提供该列；没有则会降级为 --
             ['avg_user_message_length', 'avg_user_message_length'],
             ['jiafang_count', 'jiafang_count'],
@@ -4871,7 +4853,7 @@ app.get('/api/country-summary', async (c) => {
     try {
       const lrUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
       lrUrl.searchParams.set('select', 'user_name,github_username,user_identity,personality_type,ip_location,manual_location,updated_at,created_at');
-      lrUrl.searchParams.set('or', `(${countryOr})`);
+      lrUrl.searchParams.set('country_code', `eq.${cc}`);
       lrUrl.searchParams.set('order', 'updated_at.desc');
       lrUrl.searchParams.set('limit', '8');
       const lr = await fetchSupabaseJson<any[]>(env, lrUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
@@ -4887,6 +4869,76 @@ app.get('/api/country-summary', async (c) => {
       latestRecords = [];
     }
 
+    // ----------------------------
+    // 该国六项指标 Top1（用于 stats2 “高分图谱”卡片）
+    // ----------------------------
+    let topByMetrics: any[] = [];
+    try {
+      const cc = String(country || '').toUpperCase();
+      if (/^[A-Z]{2}$/.test(cc)) {
+        const metrics: Array<{ key: string; col: string; labelZh: string; labelEn: string; format?: 'int' | 'float' }> = [
+          { key: 'total_messages', col: 'total_messages', labelZh: '调戏AI次数', labelEn: 'Messages', format: 'int' },
+          { key: 'total_chars', col: 'total_chars', labelZh: '对话字符数', labelEn: 'Total Chars', format: 'int' },
+          { key: 'total_user_chars', col: 'total_user_chars', labelZh: '废话输出', labelEn: 'User Chars', format: 'int' },
+          { key: 'avg_user_message_length', col: 'avg_user_message_length', labelZh: '平均长度', labelEn: 'Avg Len', format: 'float' },
+          { key: 'jiafang_count', col: 'jiafang_count', labelZh: '甲方上身', labelEn: 'Jiafang', format: 'int' },
+          { key: 'ketao_count', col: 'ketao_count', labelZh: '磕头', labelEn: 'Ketao', format: 'int' },
+        ];
+        const selectCols = [
+          'id',
+          'user_name',
+          'fingerprint',
+          'user_identity',
+          'country_code',
+          'total_messages',
+          'total_chars',
+          'total_user_chars',
+          'avg_user_message_length',
+          'jiafang_count',
+          'ketao_count',
+        ].join(',');
+        const results = await Promise.all(metrics.map(async (m) => {
+          try {
+            const url = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
+            url.searchParams.set('select', selectCols);
+            url.searchParams.set('country_code', `eq.${cc}`);
+            // 排除 null
+            url.searchParams.set(m.col, 'not.is.null');
+            url.searchParams.set('order', `${m.col}.desc`);
+            url.searchParams.set('limit', '1');
+            const rows = await fetchSupabaseJson<any[]>(env, url.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
+            const row = Array.isArray(rows) ? rows[0] : null;
+            if (!row) return null;
+            const score = Number(row?.[m.col]);
+            if (!Number.isFinite(score) || score <= 0) return null;
+            return {
+              key: m.key,
+              col: m.col,
+              labelZh: m.labelZh,
+              labelEn: m.labelEn,
+              format: m.format || 'int',
+              score,
+              user: {
+                id: row?.id ?? null,
+                user_name: row?.user_name ?? '',
+                github_username: '',
+                fingerprint: row?.fingerprint ?? null,
+                user_identity: row?.user_identity ?? null,
+              },
+            };
+          } catch {
+            return null;
+          }
+        }));
+        topByMetrics = results.filter(Boolean);
+      }
+    } catch {
+      topByMetrics = [];
+    }
+
+    const debugFlag = String(c.req.query('debug') || '').trim();
+    const includeDebug = debugFlag === '1' || debugFlag.toLowerCase() === 'true';
+
     const out: any = {
       success: true,
       totalUsers,
@@ -4895,12 +4947,13 @@ app.get('/api/country-summary', async (c) => {
       avgPerUser,
       avgPerScan,
       // 保持兼容：country-summary 仍返回这两个字段（stats2 右侧雷达使用）
-      globalAverage: { L: 50, P: 50, D: 50, E: 50, F: 50 },
-      averages: { L: 50, P: 50, D: 50, E: 50, F: 50 },
+      globalAverage: avgDims,
+      averages: avgDims,
       locationRank: [{ name: country, value: totalUsers }],
       personalityRank: [],
       personalityDistribution: [],
       latestRecords,
+      topByMetrics,
       // 新增：国家累计与个人国家排名
       countryTotals: {
         country,
@@ -4910,19 +4963,31 @@ app.get('/api/country-summary', async (c) => {
         total_chars: totalChars,
         jiafang_count: Number(totals?.jiafang_count_sum) || 0,
         ketao_count: Number(totals?.ketao_count_sum) || 0,
+        // 与 rollup 口径一致：加权平均长度
         avg_user_message_length: totalMessages > 0 ? (totalUserChars / totalMessages) : 0,
       },
+      countryTotalsRanks,
       myCountry: myOut,
       myCountryValues: myValues,
       myCountryRanks: myRanks,
       _meta: {
-        totalsCacheHit: !!isFresh,
-        totalsTtlSec,
-        countryName: countryName || null,
-        countDebug: _debugCountStatus,
+        totalsSource: totals?.source || null,
+        countryName: (countryNameRaw || null),
+        countDebug: null,
         at: new Date().toISOString(),
       },
     };
+
+    if (includeDebug) {
+      out._debug = {
+        country,
+        countryName: countryNameRaw || null,
+        rpcUrl,
+        rpcRows: rpcList.length,
+        found: !!row,
+      };
+      c.header('Cache-Control', 'no-store');
+    }
 
     // 抗抖：短缓存，允许前端切国快速重复请求
     c.header('Cache-Control', 'public, max-age=30');
@@ -6138,19 +6203,31 @@ export async function scheduled(event: ScheduledEvent, env: Env, ctx: any) {
     scheduledTime: new Date(event.scheduledTime * 1000).toISOString(),
     cron: event.cron,
   });
-  
-  // 执行原有聚合任务
+
+  // 多 Cron 支持：
+  // - 0 * * * *：全网聚合（较重）
+  // - */10 * * * *：国家累计 rollup（更轻，保证“动态感”）
+  const cron = String(event.cron || '').trim();
+
+  if (cron === '*/10 * * * *') {
+    const r = await refreshCountryStatsCurrent(env);
+    if (r.success) console.log('[Worker] ✅ 国家累计 rollup 刷新完成');
+    else console.warn('[Worker] ⚠️ 国家累计 rollup 刷新失败:', r.error);
+    return;
+  }
+
+  // 默认：执行原有聚合任务（兼容旧 cron 配置）
   const result = await performAggregation(env);
-  
-  // 【V6 协议】执行 V6 全量聚合任务
   const v6Result = await performV6Aggregation(env);
-  
-  if (result.success && v6Result.success) {
-    console.log('[Worker] ✅ 定期汇总任务完成（包含 V6 聚合）');
+  const countryRollup = await refreshCountryStatsCurrent(env);
+
+  if (result.success && v6Result.success && countryRollup.success) {
+    console.log('[Worker] ✅ 定期汇总任务完成（包含 V6 + 国家 rollup）');
   } else {
     console.error('[Worker] ❌ 定期汇总任务失败:', {
       aggregation: result.error,
       v6Aggregation: v6Result.error,
+      countryRollup: countryRollup.error,
     });
   }
 }
@@ -6188,6 +6265,23 @@ app.get('/cdn-cgi/handler/scheduled', async (c) => {
       error: error.message || '未知错误',
       timestamp: new Date().toISOString(),
     }, 500);
+  }
+});
+
+/**
+ * 路由：手动刷新国家累计 rollup（用于测试）
+ * 访问方式：GET /cdn-cgi/handler/refresh-country-rollup
+ */
+app.get('/cdn-cgi/handler/refresh-country-rollup', async (c) => {
+  try {
+    const env = c.env;
+    const r = await refreshCountryStatsCurrent(env);
+    if (r.success) {
+      return c.json({ status: 'success', message: '国家累计 rollup 刷新成功', at: new Date().toISOString() });
+    }
+    return c.json({ status: 'error', error: r.error || '刷新失败', at: new Date().toISOString() }, 500);
+  } catch (e: any) {
+    return c.json({ status: 'error', error: e?.message || '未知错误', at: new Date().toISOString() }, 500);
   }
 });
 
