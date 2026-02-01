@@ -170,6 +170,10 @@ export const I18N = {
         analysisFailed: '分析失败，使用降级方案...',
         parserReady: '分析模块已就绪',
         initializingParser: '初始化解析器...'
+        ,
+        // 后台同步：不阻塞用户进入报告
+        backgroundSync: '后台同步全球排名中…（不影响使用）',
+        rankUploadFailed: '全球排名同步失败（稍后重试或刷新）'
       }
     },
 
@@ -417,7 +421,9 @@ export const I18N = {
         analysisComplete: 'Analysis complete!',
         analysisFailed: 'Analysis failed, using fallback method...',
         parserReady: 'Analysis module ready',
-        initializingParser: 'Initializing parser...'
+        initializingParser: 'Initializing parser...',
+        backgroundSync: 'Background syncing global ranking… (you can continue)',
+        rankUploadFailed: 'Global ranking sync failed (retry later)'
       }
     },
 

@@ -3453,12 +3453,13 @@
                 newElements.push({
                     id: 'fixed-cursor',
                     type: 'group',
-                    left: screenX,
-                    top: screenY,
+                    // 使用 x/y（而非 left/top）避免 bbox/layout 导致的“飘移”
+                    x: screenX,
+                    y: screenY,
                     children: [
                         {
                             type: 'circle',
-                            shape: { r: 10 },
+                            shape: { cx: 0, cy: 0, r: 10 },
                             style: {
                                 fill: fixedColor,
                                 stroke: '#000000',
@@ -3489,6 +3490,12 @@
                 localStorage.setItem('fixed_cursor_lng', String(lng));
                 localStorage.setItem('fixed_cursor_lat', String(lat));
                 localStorage.setItem('fixed_cursor_color', color);
+
+                // 绑定跟随地图的同步逻辑，保证拖拽/缩放/重绘后仍定位在保存坐标
+                try {
+                    bindFixedCursorFollowMap();
+                    syncFixedCursorGraphicPosition('setFixedCursorOnScreen');
+                } catch { /* ignore */ }
 
                 console.log('[Homeland] ✅ 光标已固定在屏幕位置（深色）:', { lng, lat, screenX, screenY });
             } catch (e) {
@@ -3590,6 +3597,88 @@
                     console.log('[Homeland] ✅ 已恢复固定的屏幕光标');
                 }
             }
+        }
+
+        // ==========================================================
+        // 固定光标位置同步（拖拽/缩放/重绘/刷新后仍定在保存坐标）
+        // ==========================================================
+        let __fixedCursorSyncRaf = 0;
+        let __fixedCursorFollowHandlers = null;
+
+        function _normalizeGraphicElements(graphicOpt) {
+            if (!graphicOpt) return { elements: [] };
+            // 某些情况下 getOption() 可能返回数组形式
+            if (Array.isArray(graphicOpt)) return { elements: graphicOpt };
+            if (typeof graphicOpt === 'object' && Array.isArray(graphicOpt.elements)) return { elements: graphicOpt.elements };
+            return { elements: [] };
+        }
+
+        function syncFixedCursorGraphicPosition(reason = '') {
+            if (!mapChart || (typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) return false;
+            if (localStorage.getItem('cursor_fixed_to_homeland') !== 'true') return false;
+
+            const lngStr = localStorage.getItem('fixed_cursor_lng');
+            const latStr = localStorage.getItem('fixed_cursor_lat');
+            if (!lngStr || !latStr) return false;
+            const lng = Number(lngStr);
+            const lat = Number(latStr);
+            if (isNaN(lng) || isNaN(lat)) return false;
+
+            try {
+                const px = mapChart.convertToPixel('geo', [lng, lat]);
+                if (!px || !Array.isArray(px) || px.length < 2) return false;
+                const x = Number(px[0]);
+                const y = Number(px[1]);
+                if (!isFinite(x) || !isFinite(y)) return false;
+
+                const opt = mapChart.getOption();
+                const { elements } = _normalizeGraphicElements(opt?.graphic);
+                if (!elements || !Array.isArray(elements) || elements.length === 0) return false;
+
+                const next = elements.map((el) => {
+                    if (!el || el.id !== 'fixed-cursor') return el;
+                    // 强制使用 x/y，清除 left/top（避免布局计算导致漂移）
+                    const { left, top, ...rest } = el;
+                    return { ...rest, x, y };
+                });
+
+                mapChart.setOption({ graphic: { elements: next } }, { notMerge: false, lazyUpdate: false });
+                if (reason) console.log('[Homeland] 📌 同步固定光标位置:', reason, { lng, lat, x, y });
+                return true;
+            } catch (e) {
+                console.warn('[Homeland] 同步固定光标位置失败:', reason, e);
+                return false;
+            }
+        }
+
+        function bindFixedCursorFollowMap() {
+            if (!mapChart || (typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) return;
+
+            // 解绑旧 handler，避免重复绑定
+            try {
+                if (__fixedCursorFollowHandlers) {
+                    try { mapChart.off('georoam', __fixedCursorFollowHandlers.georoam); } catch { /* ignore */ }
+                    try { mapChart.off('finished', __fixedCursorFollowHandlers.finished); } catch { /* ignore */ }
+                }
+            } catch { /* ignore */ }
+
+            const scheduleSync = (reason) => {
+                if (__fixedCursorSyncRaf) return;
+                __fixedCursorSyncRaf = requestAnimationFrame(() => {
+                    __fixedCursorSyncRaf = 0;
+                    syncFixedCursorGraphicPosition(reason);
+                });
+            };
+
+            const georoam = () => scheduleSync('echarts.georoam');
+            const finished = () => scheduleSync('echarts.finished');
+            __fixedCursorFollowHandlers = { georoam, finished };
+
+            try { mapChart.on('georoam', georoam); } catch { /* ignore */ }
+            try { mapChart.on('finished', finished); } catch { /* ignore */ }
+
+            // 初次绑定后立即对齐一次（尤其是刷新/首次渲染完成后）
+            scheduleSync('bindFixedCursorFollowMap.init');
         }
 
         // 🔍 称号与说明映射（完全同步 content.ts 的业务语义）
@@ -4458,31 +4547,72 @@
                     renderUserStatsCards(leftBody, userForStats);
                 } else {
                     console.log('[Drawer] ⚠️ 未找到用户数据，跳过统计卡片渲染');
-                    // 即使没有匹配到用户，如果 localStorage 中有 fingerprint，也显示一个提示
+                    // 即使没有匹配到用户，如果 localStorage 中有 fingerprint：
+                    // - 先尝试直接从 v_unified_analysis_v2 按 fingerprint 拉取（避免一直 WAIT）
+                    // - 失败则有限次数重试，最终给出明确提示（避免无限“处理中”）
                     try {
                         const currentFingerprint = localStorage.getItem('user_fingerprint');
-                        if (currentFingerprint) {
+                        const canQuerySupabase = (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.from === 'function');
+                        const attemptKey = '__drawerUserWaitAttempts';
+                        const attempts = Number(window[attemptKey] || 0);
+
+                        const showWaitCard = (mode = 'WAIT') => {
                             const waitingCard = document.createElement('div');
                             waitingCard.className = 'drawer-item';
                             waitingCard.innerHTML = `
                                 <div class="flex items-center justify-between mb-3">
                                     <span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">⏳</span>
                                     <span class="text-[8px] leading-none text-[#00ff41] border border-[#00ff41]/40 px-1 py-0.5 tracking-widest uppercase bg-[#00ff41]/5">
-                                        WAIT
+                                        ${mode}
                                     </span>
                                 </div>
                                 <div class="drawer-item-label mb-2">数据加载中</div>
                                 <div class="text-[10px] text-[#00ff41]/60">
-                                    您的数据正在处理中，请稍候...
+                                    ${attempts >= 6 ? '暂未找到云端汇总数据。请先在 index.html 上传一次聊天记录后再刷新。' : '正在同步云端数据，请稍候…'}
                                 </div>
                                 <div class="text-[8px] text-[#00ff41]/40 mt-2">
-                                    指纹: ${currentFingerprint.substring(0, 8)}...
+                                    指纹: ${currentFingerprint ? currentFingerprint.substring(0, 8) : 'N/A'}...
                                 </div>
                             `;
                             leftBody.appendChild(waitingCard);
+                        };
+
+                        if (currentFingerprint) {
+                            // 先展示占位符（避免空白）
+                            showWaitCard(attempts >= 6 ? 'EMPTY' : 'WAIT');
+
+                            // 尝试直接查统一视图：按 fingerprint 精确匹配
+                            if (canQuerySupabase && attempts < 6) {
+                                window[attemptKey] = attempts + 1;
+                                supabaseClient
+                                    .from('v_unified_analysis_v2')
+                                    .select('*')
+                                    .eq('fingerprint', currentFingerprint)
+                                    .maybeSingle()
+                                    .then(({ data: dbUser }) => {
+                                        if (!dbUser) return;
+                                        console.log('[Drawer] ✅ 通过 fingerprint 从 v_unified_analysis_v2 找到用户:', dbUser.user_name || dbUser.name);
+                                        window.currentUser = dbUser;
+                                        const lb = document.getElementById('left-drawer-body');
+                                        if (lb) renderUserStatsCards(lb, getBestUserRecordForStats(dbUser));
+                                    })
+                                    .catch(() => {});
+
+                                // 退避重试：再次拉取大盘数据并重绘抽屉（避免永远卡住）
+                                const delayMs = 600 + attempts * 600;
+                                setTimeout(() => {
+                                    try {
+                                        if (typeof fetchData === 'function') fetchData();
+                                        // 触发一次刷新：用“当前国家”重绘左侧抽屉
+                                        if (currentDrawerCountry?.code) {
+                                            showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);
+                                        }
+                                    } catch { /* ignore */ }
+                                }, delayMs);
+                            }
                         }
                     } catch (e) {
-                        console.warn('[Drawer] ⚠️ 显示等待卡片失败:', e);
+                        console.warn('[Drawer] ⚠️ 显示/重试等待卡片失败:', e);
                     }
                 }
             }
@@ -5212,6 +5342,9 @@
                   // 【新功能】恢复固定的屏幕光标
                   try {
                       restoreFixedCursor();
+                      // 绑定 roam/finished 同步，避免拖动地图或刷新重绘后“飘移”
+                      bindFixedCursorFollowMap();
+                      syncFixedCursorGraphicPosition('initGlobalMap-after-restoreFixedCursor');
                   } catch (e) {
                       console.warn('[Map] ⚠️ 恢复固定光标失败:', e);
                   }
@@ -5430,6 +5563,8 @@
                 const resizeHandler = () => {
                     if (mapChart && !(typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) {
                         mapChart.resize();
+                        // resize 后 convertToPixel 的结果会变化，必须同步 fixed-cursor
+                        try { syncFixedCursorGraphicPosition('window.resize'); } catch { /* ignore */ }
                     }
                 };
                 window.mapResizeHandler = resizeHandler;
@@ -7206,26 +7341,37 @@
                             if (!window.allData) {
                                 window.allData = [];
                             }
-                            
-                            // 查找并更新对应的记录
-                            const index = window.allData.findIndex(item => 
-                                (item.id && updatedRecord.id && item.id === updatedRecord.id) ||
-                                (item.fingerprint && updatedRecord.fingerprint && item.fingerprint === updatedRecord.fingerprint) ||
-                                (item.user_identity && updatedRecord.user_identity && item.user_identity === updatedRecord.user_identity)
-                            );
-                            
+
+                            // 【修复】用“规范化匹配 + upsert”替代简单 push/unshift，避免重复累加
+                            const normalizeFp = (fp) => {
+                                if (!fp) return '';
+                                return String(fp).trim().toLowerCase();
+                            };
+                            const recordId = (updatedRecord.id != null) ? String(updatedRecord.id) : '';
+                            const recordFp = normalizeFp(updatedRecord.fingerprint || updatedRecord.user_fingerprint);
+                            const recordIdentity = normalizeFp(updatedRecord.user_identity);
+
+                            const index = window.allData.findIndex((item) => {
+                                if (!item) return false;
+                                const itemId = (item.id != null) ? String(item.id) : '';
+                                if (recordId && itemId && itemId === recordId) return true;
+                                const itemFp = normalizeFp(item.fingerprint || item.user_fingerprint);
+                                const itemIdentity = normalizeFp(item.user_identity);
+                                return (
+                                    (recordFp && itemFp && itemFp === recordFp) ||
+                                    (recordIdentity && itemIdentity && itemIdentity === recordIdentity) ||
+                                    (recordFp && itemIdentity && itemIdentity === recordFp) ||
+                                    (recordIdentity && itemFp && itemFp === recordIdentity)
+                                );
+                            });
+
                             if (index !== -1) {
-                                // 更新现有记录
                                 window.allData[index] = { ...window.allData[index], ...updatedRecord };
                                 console.log(`[Realtime] ✅ 已更新 window.allData 中的记录 (索引: ${index})`);
                             } else {
-                                // 如果没找到，添加到数组前面
                                 window.allData.unshift(updatedRecord);
-                                // 限制 allData 长度
-                                if (window.allData.length > 1000) {
-                                    window.allData = window.allData.slice(0, 1000);
-                                }
-                                console.log(`[Realtime] ✅ 已将更新记录添加到 window.allData`);
+                                if (window.allData.length > 1000) window.allData = window.allData.slice(0, 1000);
+                                console.log(`[Realtime] ✅ 已 upsert 更新记录到 window.allData`);
                             }
                             
                             // 检查更新的记录是否是当前用户，如果是则刷新排名卡片
@@ -7313,8 +7459,7 @@
                                         allData[updateIndex] = updatedRecord;
                                         window.allData = allData;
                                     } else {
-                                        // 如果没找到，添加到数组
-                                        allData.push(updatedRecord);
+                                        // 如果没找到，说明上面的 upsert 已做过（或匹配条件不同）；这里不再 push，避免重复
                                         window.allData = allData;
                                     }
                                     
@@ -8401,38 +8546,12 @@
                         // 【严格校验迁移逻辑】检查是否有影子令牌
                         // 注意:新的强制认领机制只认 claimToken,不再支持纯指纹迁移
                         if (!claimToken) {
-                            console.warn('[Auth] ⚠️ 本地无 claim_token，无法执行数据认领。');
-                            // 显示提示弹窗
-                            const noDataDialog = document.createElement('div');
-                            noDataDialog.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50';
-                            noDataDialog.id = 'no-data-dialog';
-                            noDataDialog.innerHTML = `
-                                <div class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
-                                    <h3 class="text-lg font-semibold text-gray-900 mb-2">未检测到待认领数据</h3>
-                                    <p class="text-sm text-gray-600 mb-4">未发现本地分析数据，将为您创建新账号数据。</p>
-                                    <div class="flex gap-3 justify-end">
-                                        <button class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors" id="no-data-confirm">确定</button>
-                                    </div>
-                                </div>
-                            `;
-                            document.body.appendChild(noDataDialog);
-                            
-                            await new Promise((resolve) => {
-                                const removeDialog = () => {
-                                    const dialogElement = document.getElementById('no-data-dialog');
-                                    if (dialogElement && dialogElement.parentNode) {
-                                        dialogElement.parentNode.removeChild(dialogElement);
-                                    }
-                                    resolve();
-                                };
-                                
-                                noDataDialog.querySelector('#no-data-confirm')?.addEventListener('click', removeDialog);
-                            });
-                            
-                            // 没有历史数据，跳过迁移，继续正常流程
-                            hideSyncingOverlay();
-                            return;
-                        }
+                            // 【修复】无 claim_token 时不弹“无用弹窗”，直接静默跳过迁移
+                            // 说明：用户可能只是想登录查看数据；没有待认领数据并不需要阻塞交互。
+                            console.warn('[Auth] ℹ️ 本地无 claim_token，跳过数据认领（静默，无弹窗）');
+                            migrationSuccess = false;
+                            // 继续后续正常流程（更新 UI / 尝试拉取用户数据）
+                        } else
                         
                         // 如果需要确认，先显示弹窗
                         if (hasLocalData && localDataExists) {
@@ -8515,10 +8634,12 @@
                                     migrateBody.claimToken = claimToken; // 后端接收 claimToken（驼峰命名）
                                     console.log('[Auth] 🔑 检测到 vibe_claim_token，执行强行认领:', claimToken.substring(0, 8) + '...');
                                 } else {
-                                    // 【重要】如果没有 claimToken，跳过迁移
-                                    console.warn('[Auth] ⚠️ 无 claimToken，跳过迁移（新的强制认领机制要求必须有 claim_token）');
-                                    hideSyncingOverlay();
-                                    return;
+                                    // 【修复】没有 claimToken 也允许继续登录并加载 GitHub 用户数据
+                                    // 迁移/认领只是“把匿名战绩合并到账号”，不应阻断“查看自己数据”。
+                                    console.warn('[Auth] ⚠️ 无 claimToken，跳过迁移（仅跳过认领，不阻断登录）');
+                                    migrationSuccess = false;
+                                    // 跳过迁移请求，继续后续流程（会走 user_id 同步 + 刷新抽屉）
+                                    migrateResponse = null;
                                 }
 
                                 
@@ -8854,10 +8975,40 @@
                                     // 调用后端分析接口同步数据
                                     if (analysisData.chatData && analysisData.chatData.length > 0) {
                                         try {
-                                            // 【修复 API 路径】使用 meta 标签中的 api-endpoint
+                                            // 【关键修复】对齐 index.html 提交链路：使用 /api/v2/analyze（会按 OAuth user_id 正确 upsert）
                                             const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content || 
                                                               'https://cursor-clinical-analysis.psterman.workers.dev/';
-                                            const analyzeUrl = `${apiEndpoint}api/analyze`;
+                                            const analyzeUrl = `${apiEndpoint}api/v2/analyze`;
+                                            
+                                            // 兼容：若 last_analysis_data 里没有 lang/fingerprint，这里补齐
+                                            const safeLang = (analysisData && analysisData.lang) ? analysisData.lang : (localStorage.getItem('appLanguage') || 'zh-CN');
+                                            const safeFp = currentFp || (analysisData && analysisData.fingerprint) || null;
+                                            
+                                            // 如果没有 chatData（可能因 localStorage 容量限制被降级），则只做本地回填，不发请求
+                                            if (!analysisData.chatData || !Array.isArray(analysisData.chatData) || analysisData.chatData.length === 0) {
+                                                console.warn('[Auth] ⚠️ last_analysis_data.chatData 缺失，跳过静默同步，改为本地回填');
+                                                
+                                                // 用本地缓存的维度/统计回填，避免一直显示默认 50
+                                                try {
+                                                    const cachedDims = analysisData.dimensions || null;
+                                                    const cachedStats = analysisData.stats || null;
+                                                    const patched = { ...updatedUser };
+                                                    if (cachedDims) patched.dimensions = cachedDims;
+                                                    if (cachedStats) patched.stats = cachedStats;
+                                                    window.currentUser = patched;
+                                                    
+                                                    const allData2 = window.allData || [];
+                                                    const userIndex2 = allData2.findIndex(item => item.id === patched.id);
+                                                    if (userIndex2 !== -1) allData2[userIndex2] = { ...allData2[userIndex2], ...patched };
+                                                    else allData2.push(patched);
+                                                    window.allData = allData2;
+                                                    
+                                                    if (typeof window.refreshUserStats === 'function') {
+                                                        try { await window.refreshUserStats(); } catch { /* ignore */ }
+                                                    }
+                                                } catch { /* ignore */ }
+                                                return;
+                                            }
                                             
                                             const analyzeResponse = await fetch(analyzeUrl, {
                                                 method: 'POST',
@@ -8867,9 +9018,10 @@
                                                 },
                                                 body: JSON.stringify({
                                                     ...analysisData,
-                                                    userId: githubUserId,
-                                                    user_name: normalizedUsername,
-                                                    fingerprint: currentFp // 修复 ReferenceError
+                                                    // /api/v2/analyze 识别用户名字段为 userName（驼峰）
+                                                    userName: normalizedUsername,
+                                                    lang: safeLang,
+                                                    fingerprint: safeFp
                                                 })
                                             });
                                             
@@ -10056,32 +10208,12 @@
 
                 console.log('[AutoReport] 📤 准备提交数据到 user_analysis 表:', payload);
 
-                // 5. 插入到 Supabase（如果已登录，使用 upsert 确保更新到正确的行）
-                let data, error;
-                if (authenticatedUserId) {
-                    // 已登录：使用 upsert，以 id 为冲突键
-                    const { data: upsertData, error: upsertError } = await supabaseClient
-                        .from('user_analysis')
-                        .upsert([payload], { onConflict: 'id' })
-                        .select();
-                    data = upsertData;
-                    error = upsertError;
-                } else {
-                    // 未登录：使用 insert
-                    const { data: insertData, error: insertError } = await supabaseClient
-                        .from('user_analysis')
-                        .insert([payload])
-                        .select();
-                    data = insertData;
-                    error = insertError;
-                }
-
-                if (error) {
-                    console.error('[AutoReport] ❌ 提交失败:', error);
-                    return { success: false, error: error.message };
-                }
-
-                console.log('[AutoReport] ✅ 自动上报成功:', data);
+                // 5. 【重要】禁用 AUTO_REPORT 写入 user_analysis
+                // 说明：AUTO_REPORT 是占位/在线状态用途，但会导致 user_analysis 出现“额外一条类似数据”，
+                // 与 index.html 上传分析生成的真实人格记录混在一起（你贴的第一条 AUTO_REPORT 就来自这里）。
+                // 这里只保留本地光标展示与状态逻辑，不再向 Supabase 写入占位行。
+                console.warn('[AutoReport] 🚫 已禁用 AUTO_REPORT 写入 user_analysis（仅本地显示，不写库）');
+                const data = null;
 
                 // 6. 立即反馈:上报成功后立即在地图上显示自己的位置(不等待 Realtime 监听)
                 if (lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng)) {
@@ -10199,6 +10331,14 @@
          * 基于 index.ts 的接口返回格式（数据直接返回，不包裹在 data 字段中）
          */
         async function fetchData() {
+            // 【修复】防止 fetchData 并发/重复调用导致多次渲染、重复触发 autoReportSelf
+            try {
+                if (window.__fetchDataPromise) {
+                    return await window.__fetchDataPromise;
+                }
+            } catch { /* ignore */ }
+
+            window.__fetchDataPromise = (async () => {
             try {
                 const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content;
                 console.group('%c 🚀 Dashboard Data Sync Starting ', 'background: #222; color: #bada55; font-size: 12px;');
@@ -10387,10 +10527,15 @@
 
                 console.log('%c [5/5] ✅ 渲染逻辑同步完毕 ', 'color: #00ff41');
 
-                // 执行自动上报（异步，不阻塞主流程）
-                autoReportSelf().catch(err => {
-                    console.warn('[AutoReport] ⚠️ 自动上报失败（不影响主流程）:', err);
-                });
+                // 执行自动上报（异步，不阻塞主流程）——只执行一次，避免重复日志/重复流程
+                try {
+                    if (!window.__autoReportSelfOnce) {
+                        window.__autoReportSelfOnce = true;
+                        autoReportSelf().catch(err => {
+                            console.warn('[AutoReport] ⚠️ 自动上报失败（不影响主流程）:', err);
+                        });
+                    }
+                } catch { /* ignore */ }
 
             } catch (err) {
                 console.error('[ERROR] Dashboard 渲染崩溃:', err);
@@ -10411,6 +10556,13 @@
                 // 确保异常情况下也关闭加载过场
                 setLoadingState(false);
                 console.groupEnd();
+            }
+            })();
+
+            try {
+                return await window.__fetchDataPromise;
+            } finally {
+                try { window.__fetchDataPromise = null; } catch { /* ignore */ }
             }
         }
 
@@ -10777,22 +10929,36 @@
                 
                 // 【修复】GitHub 用户：即使 latestRecords 里字段不全，也不应一直卡在“同步中”
                 // 典型场景：/api/global-average 返回的 latestRecords 会做隐私裁剪，可能缺少 id/fingerprint/维度字段
-                const candidateUserName = String(userData?.user_name || userData?.name || '').trim();
+                const candidateUserName = String(
+                    userData?.user_name ||
+                    userData?.name ||
+                    (() => {
+                        try { return localStorage.getItem('github_username') || ''; } catch { return ''; }
+                    })()
+                ).trim();
                 const candidateIdentity = userData?.user_identity || null;
                 const isGitHubUser = !!(candidateUserName && typeof isValidGitHubUsername === 'function' && isValidGitHubUsername(candidateUserName, candidateIdentity));
                 const canQuerySupabase = (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.from === 'function');
 
                 // 若是 GitHub 用户但数据不全：自动从统一视图拉完整记录后再渲染，避免无限 loading
-                if ((!hasDimensions || isDefaultScores) && !userData.id && isGitHubUser && canQuerySupabase && !userData.__unifiedFetchAttempted) {
+                // 兼容：userData 可能已有 id 但字段仍不全（例如登录后刚 upsert 的简略记录）
+                if ((!hasDimensions || isDefaultScores) && isGitHubUser && canQuerySupabase && !userData.__unifiedFetchAttempted) {
                     try {
                         userData.__unifiedFetchAttempted = true; // 标记：避免递归死循环
-                        console.log('[UserStats] 🔄 GitHub 用户数据不全，尝试从 v_unified_analysis_v2 拉取完整记录:', candidateUserName);
-                        supabaseClient
+                        console.log('[UserStats] 🔄 GitHub 用户数据不全，尝试从 v_unified_analysis_v2 拉取完整记录:', {
+                            candidateUserName,
+                            hasId: !!userData.id
+                        });
+                        let q = supabaseClient
                             .from('v_unified_analysis_v2')
-                            .select('*')
-                            // GitHub 用户名大小写不敏感：避免 user_name 大小写不一致导致查不到
-                            .ilike('user_name', candidateUserName)
-                            .maybeSingle()
+                            .select('*');
+                        // 优先用 id 精确匹配（最稳定），否则用 user_name（不区分大小写）
+                        if (userData.id) {
+                            q = q.eq('id', userData.id);
+                        } else {
+                            q = q.ilike('user_name', candidateUserName);
+                        }
+                        q.maybeSingle()
                             .then(({ data: dbUser }) => {
                                 if (!dbUser) {
                                     console.warn('[UserStats] ⚠️ v_unified_analysis_v2 未找到用户记录:', candidateUserName);
@@ -10801,6 +10967,7 @@
                                     return;
                                 }
                                 console.log('[UserStats] ✅ 已获取完整用户记录，刷新统计卡片:', dbUser.user_name || dbUser.name);
+                                try { window.currentUser = dbUser; } catch { /* ignore */ }
                                 renderUserStatsCards(leftBody, getBestUserRecordForStats(dbUser));
                             })
                             .catch((e) => {

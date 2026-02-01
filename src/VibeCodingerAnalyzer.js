@@ -3043,8 +3043,8 @@ export class VibeCodingerAnalyzer {
       if (onProgress) {
         const currentLang = this.lang;
         onProgress(currentLang === 'en' 
-          ? 'Connecting to database, syncing global ranking...' 
-          : '正在连接数据库，同步全球排名...');
+          ? 'Syncing global ranking in background…' 
+          : '后台同步全球排名中…');
       }
 
       // 2. 获取原始聊天数据（多重降级方案）
@@ -3106,6 +3106,100 @@ export class VibeCodingerAnalyzer {
 
       if (formattedChatData.length === 0) {
         throw new Error('聊天数据为空，无法进行分析');
+      }
+
+      // ==========================================================
+      // 【幂等防重复】同一份数据只允许上传一次（防止重复事件/降级重试/多处调用导致 Supabase 写入重复）
+      // - 并发去重：同一个签名共享同一个 in-flight Promise
+      // - 近期缓存：短时间内重复调用直接复用上次结果，避免再次写入
+      // ==========================================================
+      const _fnv1a32 = (str) => {
+        // FNV-1a 32-bit
+        let h = 0x811c9dc5;
+        for (let i = 0; i < str.length; i++) {
+          h ^= str.charCodeAt(i);
+          // h *= 16777619 (使用位运算实现)
+          h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+        }
+        return ('00000000' + h.toString(16)).slice(-8);
+      };
+
+      const _safeSlice = (s, n = 64) => {
+        try { return String(s || '').slice(0, n); } catch { return ''; }
+      };
+
+      const _normalizeFp = (fp) => {
+        if (!fp) return '';
+        return String(fp).trim().toLowerCase();
+      };
+
+      const _getLocalFingerprint = () => {
+        try {
+          const v = localStorage.getItem('user_fingerprint') || localStorage.getItem('fingerprint') || '';
+          return _normalizeFp(v);
+        } catch {
+          return '';
+        }
+      };
+
+      // 生成“上传签名”（尽量稳定 + 足够区分不同数据集；避免对全量 JSON 做 hash）
+      const _buildUploadSignature = (metaFp, lang) => {
+        const msgCount = formattedChatData.length;
+        const first = formattedChatData[0]?.text || '';
+        const last = formattedChatData[formattedChatData.length - 1]?.text || '';
+        // 粗略总字符（避免 O(n) 扫全量，优先用 stats；这里先用样本+长度）
+        let totalLen = 0;
+        try {
+          // 只扫前后各 50 条，足够稳定又不太慢
+          const head = formattedChatData.slice(0, 50);
+          const tail = formattedChatData.slice(-50);
+          totalLen = head.reduce((s, m) => s + (m?.text?.length || 0), 0) + tail.reduce((s, m) => s + (m?.text?.length || 0), 0);
+        } catch { totalLen = 0; }
+
+        const fp = _normalizeFp(metaFp) || _getLocalFingerprint() || 'no_fp';
+        const src = [
+          'v2',
+          'lang=' + String(lang || ''),
+          'fp=' + fp,
+          'msg=' + msgCount,
+          'head=' + _safeSlice(first, 96),
+          'tail=' + _safeSlice(last, 96),
+          'sampleLen=' + String(totalLen)
+        ].join('|');
+        return _fnv1a32(src);
+      };
+
+      // 这里 meta 可能稍后才构造，先尽力拿 fingerprint
+      const _metaFpHint =
+        vibeResult?.meta?.fingerprint ||
+        vibeResult?.fingerprint ||
+        vibeResult?.context?.fingerprint ||
+        null;
+
+      const __uploadSig = _buildUploadSignature(_metaFpHint, this.lang || 'zh-CN');
+
+      const inflightMap = (globalThis.__vibeUploadInflightBySig ||= new Map());
+      const cacheKey = `__vibeUploadCache_v2_${__uploadSig}`;
+
+      // 近期缓存（10 分钟）：避免多处调用/重试再次写入
+      try {
+        const cachedRaw = localStorage.getItem(cacheKey);
+        if (cachedRaw) {
+          const cached = JSON.parse(cachedRaw);
+          const ts = Number(cached?.ts || 0);
+          const res = cached?.result || null;
+          const fresh = ts > 0 && (Date.now() - ts) < 10 * 60 * 1000;
+          if (fresh && res && typeof res === 'object') {
+            console.log('[VibeAnalyzer] 🧠 命中上传缓存，跳过重复上报:', { sig: __uploadSig });
+            return res;
+          }
+        }
+      } catch { /* ignore */ }
+
+      // 并发去重：同一个 sig 复用同一个 Promise
+      if (inflightMap.has(__uploadSig)) {
+        console.log('[VibeAnalyzer] ⏳ 检测到同签名上报进行中，复用 in-flight 请求:', { sig: __uploadSig });
+        return await inflightMap.get(__uploadSig);
       }
 
       // 3. 获取 API 端点（与 index.html 降级逻辑保持一致）
@@ -3276,20 +3370,39 @@ export class VibeCodingerAnalyzer {
       analyzeUrl = apiEndpoint.endsWith('/') 
         ? `${apiEndpoint}api/v2/analyze` 
         : `${apiEndpoint}/api/v2/analyze`;
-      
-      const response = await fetch(analyzeUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(uploadData)
-      });
 
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => '无法读取错误信息');
-        throw new Error(`HTTP error! status: ${response.status}, error: ${errorText}`);
+      // 将真实请求包装为可复用的 in-flight Promise
+      const doRequestPromise = (async () => {
+        const response = await fetch(analyzeUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(uploadData)
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => '无法读取错误信息');
+          throw new Error(`HTTP error! status: ${response.status}, error: ${errorText}`);
+        }
+
+        const result = await response.json();
+        console.log('[VibeAnalyzer] 后端返回数据:', result);
+
+        // 成功则写入短期缓存，避免后续重复上报
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), result }));
+        } catch { /* ignore */ }
+
+        return result;
+      })();
+
+      inflightMap.set(__uploadSig, doRequestPromise);
+
+      let result;
+      try {
+        result = await doRequestPromise;
+      } finally {
+        try { inflightMap.delete(__uploadSig); } catch { /* ignore */ }
       }
-
-      const result = await response.json();
-      console.log('[VibeAnalyzer] 后端返回数据:', result);
       
       // 【V6 上报协议对齐】保存后端返回的 global_stats 到本地
       if (result.global_stats) {

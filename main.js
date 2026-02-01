@@ -760,7 +760,7 @@ class VibeCodingApp {
    * @param {Function} onProgress - 进度回调函数
    * @returns {Promise<Object>} 分析结果
    */
-  async analyzeFile(chatData, extraStats = null, onProgress = null) {
+  async analyzeFile(chatData, extraStats = null, onProgress = null, options = {}) {
     if (!this.analyzer) {
       throw new Error('分析器未初始化，请先调用 init()');
     }
@@ -815,8 +815,15 @@ class VibeCodingApp {
     // 【V6 统一映射】使用 AutoMappingEngine 一次性更新所有 UI
     this.updateUIWithStats(result, this.globalStatsCache);
 
-    // 步骤2: 立即 await 调用 uploadToSupabase 获取真实排名
-    if (result && result.statistics) {
+    // ==========================================================
+    // 【性能优化】默认改为“先出本地报告，后后台同步全球排名”
+    // 说明：uploadToSupabase 需要联网并可能较慢（会提示“连接全球”），
+    // 会让用户误以为上传卡死。这里默认 deferGlobalSync=true。
+    // ==========================================================
+    const deferGlobalSync = options?.deferGlobalSync !== false; // 默认 true
+
+    const doGlobalSync = async () => {
+      if (!result || !result.statistics) return;
       const stats = result.statistics;
       
       // 将 extraStats 合并到 result.statistics 中，确保字段名与 Work.js 的 findVal 匹配
@@ -835,9 +842,56 @@ class VibeCodingApp {
       stats.userMessages = stats.userMessages || stats.totalMessages || 0;
 
       try {
-        // 步骤3: 立即 await 调用 uploadToSupabase 联网获取真实排名
+        // 步骤3: 调用 uploadToSupabase 联网获取真实排名（后台执行时不阻塞 UI）
         // 传递完整的 result 对象和 chatData，确保能获取原始聊天数据
         const liveRank = await this.analyzer.uploadToSupabase(result, chatData, onProgress);
+        
+        // 【关键修复】统一保存 claim_token，确保后续 GitHub 登录可认领匿名数据
+        // stats2.html / 认领逻辑读取的 key 为 vibe_claim_token
+        try {
+          if (liveRank?.claim_token) {
+            localStorage.setItem('vibe_claim_token', liveRank.claim_token);
+          }
+        } catch { /* ignore */ }
+
+        // 【修复】后台同步完成后，推送横向排名数据到 index.html 的 UI
+        // index.html 的大卡片依赖 window.userRankings + window.updateRankingBadges
+        try {
+          if (typeof window !== 'undefined') {
+            const totalUsers = Number(liveRank?.totalUsers || result?.rankData?.totalUsers || 0) || 0;
+            const ranks = liveRank?.ranks || null; // { ketaoRank, jiafangRank, messageRank, charRank, avgRank, daysRank }，通常是百分比
+
+            const convertPercentToRank = (percent) => {
+              if (percent === null || percent === undefined || totalUsers <= 0) return null;
+              const p = Number(percent);
+              if (Number.isNaN(p)) return null;
+              if (p <= 0) return totalUsers;
+              const beaten = Math.floor(totalUsers * (p / 100));
+              return Math.max(1, totalUsers - beaten);
+            };
+
+            if (totalUsers > 0 && ranks) {
+              window.userRankings = {
+                qingCount: { rank: convertPercentToRank(ranks.ketaoRank), total: totalUsers },
+                buCount: { rank: convertPercentToRank(ranks.jiafangRank), total: totalUsers },
+                userMessages: { rank: convertPercentToRank(ranks.messageRank), total: totalUsers },
+                totalUserChars: { rank: convertPercentToRank(ranks.charRank), total: totalUsers },
+                avgUserMessageLength: { rank: convertPercentToRank(ranks.avgRank), total: totalUsers },
+                usageDays: { rank: convertPercentToRank(ranks.daysRank), total: totalUsers },
+              };
+
+              // 触发 index.html 的渲染更新
+              if (typeof window.updateRankingBadges === 'function') {
+                const lang = localStorage.getItem('appLanguage') || 'zh-CN';
+                Promise.resolve(window.updateRankingBadges(window.userRankings, lang))
+                  .catch(() => {});
+              }
+              try {
+                window.dispatchEvent(new CustomEvent('userRankingsUpdated', { detail: window.userRankings }));
+              } catch { /* ignore */ }
+            }
+          }
+        } catch { /* ignore */ }
         
         // 【V6 上报协议对齐】从本地存储读取 global_stats（由 uploadToSupabase 保存）
         try {
@@ -973,16 +1027,73 @@ class VibeCodingApp {
                           (currentLang === 'en' 
                             ? 'Failed to upload ranking data' 
                             : '排名数据上传失败');
-          onProgress(`> ${errorText}`);
+          // onProgress 自己会负责格式化日志前缀，这里不要再加 '>'
+          onProgress(errorText);
         }
       }
-    }
+    };
 
     // 保存结果
     this.vibeResult = result;
+
+    // 【关键修复】缓存最后一次分析数据（供 stats2.html 登录后“静默同步/回填”使用）
+    // 说明：stats2.html 会在检测到 GitHub 账号为默认空记录(50分)时尝试读取 last_analysis_data 进行补齐。
+    // 这里尽量缓存 /api/v2/analyze 需要的最小字段；若 localStorage 容量不足则退化为仅缓存非 chatData 字段。
+    try {
+      const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
+      const safeFp = (context && context.fingerprint) ? String(context.fingerprint) : (localStorage.getItem('user_fingerprint') || null);
+      const payloadForStats2 = {
+        // stats2 会检查 chatData 是否存在；尽量提供，但允许在容量不足时降级
+        chatData: chatData,
+        lang: safeLang,
+        fingerprint: safeFp,
+        dimensions: result?.dimensions || null,
+        stats: result?.stats || result?.statistics || null,
+        meta: context || null,
+        vibeIndex: result?.vibeIndex || result?.vibe_index || null,
+        personalityType: result?.personalityType || result?.personality_type || null,
+      };
+      localStorage.setItem('last_analysis_data', JSON.stringify(payloadForStats2));
+    } catch (e) {
+      try {
+        // 降级：避免存不下导致完全没有 last_analysis_data
+        const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
+        const safeFp = (context && context.fingerprint) ? String(context.fingerprint) : (localStorage.getItem('user_fingerprint') || null);
+        const payloadLite = {
+          chatData: null,
+          lang: safeLang,
+          fingerprint: safeFp,
+          dimensions: result?.dimensions || null,
+          stats: result?.stats || result?.statistics || null,
+          meta: context || null,
+          vibeIndex: result?.vibeIndex || result?.vibe_index || null,
+          personalityType: result?.personalityType || result?.personality_type || null,
+          note: 'localStorage_limit_exceeded',
+        };
+        localStorage.setItem('last_analysis_data', JSON.stringify(payloadLite));
+      } catch { /* ignore */ }
+    }
     
     // 步骤5: 最后执行 renderReport
     this.renderReport(result);
+
+    // 后台同步（不阻塞返回）
+    if (deferGlobalSync) {
+      try {
+        // 提示文案：用“后台同步”避免让用户以为卡住
+        if (typeof onProgress === 'function') {
+          const currentLang2 = getCurrentLang();
+          const hint = window.i18n?.getText('upload.logs.backgroundSync', currentLang2) ||
+            (currentLang2 === 'en' ? 'Background syncing global ranking… (you can continue)' : '后台同步全球排名中…（不影响使用）');
+          onProgress(hint);
+        }
+      } catch { /* ignore */ }
+      Promise.resolve()
+        .then(() => doGlobalSync())
+        .catch((e) => console.warn('[VibeCodingApp] 后台全球同步失败:', e));
+    } else {
+      await doGlobalSync();
+    }
     
     return result;
   }
@@ -994,7 +1105,7 @@ class VibeCodingApp {
    * @param {Function} onProgress - 进度回调函数
    * @returns {Promise<Object>} 分析结果
    */
-  async analyzeFileSync(chatData, extraStats = null, onProgress = null) {
+  async analyzeFileSync(chatData, extraStats = null, onProgress = null, options = {}) {
     if (!this.analyzer) {
       throw new Error('分析器未初始化，请先调用 init()');
     }
@@ -1050,8 +1161,13 @@ class VibeCodingApp {
     // 【V6 统一映射】使用 AutoMappingEngine 一次性更新所有 UI
     this.updateUIWithStats(result, this.globalStatsCache);
 
-    // 步骤2: 立即 await 调用 uploadToSupabase 获取真实排名
-    if (result && result.statistics) {
+    // ==========================================================
+    // 【性能优化】默认改为“先出本地报告，后后台同步全球排名”
+    // ==========================================================
+    const deferGlobalSync = options?.deferGlobalSync !== false; // 默认 true
+
+    const doGlobalSync = async () => {
+      if (!result || !result.statistics) return;
       const stats = result.statistics;
       
       // 将 extraStats 合并到 result.statistics 中，确保字段名与 Work.js 的 findVal 匹配
@@ -1085,9 +1201,53 @@ class VibeCodingApp {
       stats.totalMessages = realTotalMessages || stats.totalMessages || stats.userMessages || 0;
 
       try {
-        // 步骤3: 立即 await 调用 uploadToSupabase 联网获取真实排名
+        // 步骤3: 调用 uploadToSupabase 联网获取真实排名（后台执行时不阻塞 UI）
         // 传递完整的 result 对象和 chatData，确保能获取原始聊天数据
         const liveRank = await this.analyzer.uploadToSupabase(result, chatData, onProgress);
+        
+        // 【关键修复】统一保存 claim_token，确保后续 GitHub 登录可认领匿名数据
+        try {
+          if (liveRank?.claim_token) {
+            localStorage.setItem('vibe_claim_token', liveRank.claim_token);
+          }
+        } catch { /* ignore */ }
+
+        // 【修复】后台同步完成后，推送横向排名数据到 index.html 的 UI（同步方法同样适用）
+        try {
+          if (typeof window !== 'undefined') {
+            const totalUsers = Number(liveRank?.totalUsers || result?.rankData?.totalUsers || 0) || 0;
+            const ranks = liveRank?.ranks || null;
+
+            const convertPercentToRank = (percent) => {
+              if (percent === null || percent === undefined || totalUsers <= 0) return null;
+              const p = Number(percent);
+              if (Number.isNaN(p)) return null;
+              if (p <= 0) return totalUsers;
+              const beaten = Math.floor(totalUsers * (p / 100));
+              return Math.max(1, totalUsers - beaten);
+            };
+
+            if (totalUsers > 0 && ranks) {
+              window.userRankings = {
+                qingCount: { rank: convertPercentToRank(ranks.ketaoRank), total: totalUsers },
+                buCount: { rank: convertPercentToRank(ranks.jiafangRank), total: totalUsers },
+                userMessages: { rank: convertPercentToRank(ranks.messageRank), total: totalUsers },
+                totalUserChars: { rank: convertPercentToRank(ranks.charRank), total: totalUsers },
+                avgUserMessageLength: { rank: convertPercentToRank(ranks.avgRank), total: totalUsers },
+                usageDays: { rank: convertPercentToRank(ranks.daysRank), total: totalUsers },
+              };
+
+              if (typeof window.updateRankingBadges === 'function') {
+                const lang = localStorage.getItem('appLanguage') || 'zh-CN';
+                Promise.resolve(window.updateRankingBadges(window.userRankings, lang))
+                  .catch(() => {});
+              }
+              try {
+                window.dispatchEvent(new CustomEvent('userRankingsUpdated', { detail: window.userRankings }));
+              } catch { /* ignore */ }
+            }
+          }
+        } catch { /* ignore */ }
         
           // 如果后端返回了 globalAverage，更新全局变量
           if (liveRank && liveRank.globalAverage) {
@@ -1173,16 +1333,66 @@ class VibeCodingApp {
                           (currentLang === 'en' 
                             ? 'Failed to upload ranking data' 
                             : '排名数据上传失败');
-          onProgress(`> ${errorText}`);
+          onProgress(errorText);
         }
       }
-    }
+    };
 
     // 保存结果
     this.vibeResult = result;
+
+    // 【关键修复】缓存最后一次分析数据（同步方法同样写入，供 stats2.html 回填）
+    try {
+      const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
+      const safeFp = (context && context.fingerprint) ? String(context.fingerprint) : (localStorage.getItem('user_fingerprint') || null);
+      const payloadForStats2 = {
+        chatData: chatData,
+        lang: safeLang,
+        fingerprint: safeFp,
+        dimensions: result?.dimensions || null,
+        stats: result?.stats || result?.statistics || null,
+        meta: context || null,
+        vibeIndex: result?.vibeIndex || result?.vibe_index || null,
+        personalityType: result?.personalityType || result?.personality_type || null,
+      };
+      localStorage.setItem('last_analysis_data', JSON.stringify(payloadForStats2));
+    } catch (e) {
+      try {
+        const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
+        const safeFp = (context && context.fingerprint) ? String(context.fingerprint) : (localStorage.getItem('user_fingerprint') || null);
+        const payloadLite = {
+          chatData: null,
+          lang: safeLang,
+          fingerprint: safeFp,
+          dimensions: result?.dimensions || null,
+          stats: result?.stats || result?.statistics || null,
+          meta: context || null,
+          vibeIndex: result?.vibeIndex || result?.vibe_index || null,
+          personalityType: result?.personalityType || result?.personality_type || null,
+          note: 'localStorage_limit_exceeded',
+        };
+        localStorage.setItem('last_analysis_data', JSON.stringify(payloadLite));
+      } catch { /* ignore */ }
+    }
     
     // 步骤5: 最后执行 renderReport
     this.renderReport(result);
+
+    if (deferGlobalSync) {
+      try {
+        if (typeof onProgress === 'function') {
+          const currentLang2 = getCurrentLang();
+          const hint = window.i18n?.getText('upload.logs.backgroundSync', currentLang2) ||
+            (currentLang2 === 'en' ? 'Background syncing global ranking… (you can continue)' : '后台同步全球排名中…（不影响使用）');
+          onProgress(hint);
+        }
+      } catch { /* ignore */ }
+      Promise.resolve()
+        .then(() => doGlobalSync())
+        .catch((e) => console.warn('[VibeCodingApp] 后台全球同步失败（同步方法）:', e));
+    } else {
+      await doGlobalSync();
+    }
     
     return result;
   }
@@ -1345,6 +1555,13 @@ export const reanalyzeWithLanguage = async (lang) => {
         // 传递完整的 vibeResult 对象和 allChatData，确保能获取原始聊天数据
         const liveRank = await vibeAnalyzer.uploadToSupabase(vibeResult, allChatData);
         
+        // 【关键修复】保存 claim_token，避免“本地数据无法与 GitHub 认领匹配”
+        try {
+          if (liveRank?.claim_token) {
+            localStorage.setItem('vibe_claim_token', liveRank.claim_token);
+          }
+        } catch { /* ignore */ }
+        
         // 如果后端返回了 globalAverage，更新全局变量
         if (liveRank && liveRank.globalAverage) {
           const avg = liveRank.globalAverage;
@@ -1466,6 +1683,13 @@ export const reanalyzeWithLanguage = async (lang) => {
       try {
         // 传递完整的 vibeResult 对象和 allChatData，确保能获取原始聊天数据
         const liveRank = await vibeAnalyzer.uploadToSupabase(vibeResult, allChatData);
+        
+        // 【关键修复】保存 claim_token，避免“本地数据无法与 GitHub 认领匹配”
+        try {
+          if (liveRank?.claim_token) {
+            localStorage.setItem('vibe_claim_token', liveRank.claim_token);
+          }
+        } catch { /* ignore */ }
         
         // 如果后端返回了 globalAverage，更新全局变量
         if (liveRank && liveRank.globalAverage) {
@@ -1783,22 +2007,27 @@ let isAnalyzing = false;
  * 生成32位唯一哈希，实现"先读后写"的单例模式
  * 
  * 特性：
- * 1. 使用固定的 key: 'cursor_clinical_fingerprint'
+ * 1. 使用统一的 key: 'user_fingerprint'（与 stats2.html / 后端一致）
  * 2. 32位哈希：结合随机值和浏览器特征，确保唯一性
- * 3. 向后兼容：如果存在旧的 'vibe_fp'，会迁移到新 key
+ * 3. 向后兼容：兼容旧 key（'cursor_clinical_fingerprint' / 'vibe_fp'），会迁移到统一 key
  * 4. 单例模式：确保同一浏览器环境始终返回相同的指纹
  * 
  * @returns {string} 持久化的指纹字符串（32位十六进制）
  */
 async function getStableFingerprint() {
-  const FINGERPRINT_KEY = 'cursor_clinical_fingerprint';
-  const OLD_FINGERPRINT_KEY = 'vibe_fp'; // 旧 key，用于迁移
+  // 统一 key：stats2.html / Worker 侧默认读取 user_fingerprint
+  const PRIMARY_FINGERPRINT_KEY = 'user_fingerprint';
+  // 旧 key：本页历史版本曾使用 cursor_clinical_fingerprint
+  const LEGACY_FINGERPRINT_KEY = 'cursor_clinical_fingerprint';
+  const OLD_FINGERPRINT_KEY = 'vibe_fp'; // 更旧 key，用于迁移
   
   try {
-    // 先读：尝试从 localStorage 获取已存在的指纹（新 key）
-    let fp = localStorage.getItem(FINGERPRINT_KEY);
+    // 先读：优先读取统一 key，保证跨页面一致（stats2 / index 共用）
+    let fp =
+      localStorage.getItem(PRIMARY_FINGERPRINT_KEY) ||
+      localStorage.getItem(LEGACY_FINGERPRINT_KEY);
     
-    // 【向后兼容】如果新 key 不存在，尝试从旧 key 迁移
+    // 【向后兼容】如果仍不存在，尝试从更旧 key 迁移
     if (!fp || fp.length < 16) {
       const oldFp = localStorage.getItem(OLD_FINGERPRINT_KEY);
       if (oldFp && oldFp.length >= 8) {
@@ -1815,7 +2044,9 @@ async function getStableFingerprint() {
           fp = oldFp;
         }
         try {
-          localStorage.setItem(FINGERPRINT_KEY, fp);
+          // 写回统一 key，并同步写入旧 key，避免不同页面读到不同 fingerprint
+          localStorage.setItem(PRIMARY_FINGERPRINT_KEY, fp);
+          localStorage.setItem(LEGACY_FINGERPRINT_KEY, fp);
           console.log('[Main] ✅ 已从旧 key 迁移 fingerprint:', fp);
         } catch (migrationError) {
           console.warn('[Main] ⚠️ 指纹迁移失败，但继续使用旧指纹:', migrationError);
@@ -1853,13 +2084,24 @@ async function getStableFingerprint() {
       
       // 后写：保存到 localStorage
       try {
-        localStorage.setItem(FINGERPRINT_KEY, fp);
+        // 同步写入统一 key + 旧 key，确保其他页面（stats2 等）能直接复用
+        localStorage.setItem(PRIMARY_FINGERPRINT_KEY, fp);
+        localStorage.setItem(LEGACY_FINGERPRINT_KEY, fp);
         console.log('[Main] ✅ 已生成并持久化32位 fingerprint:', fp);
       } catch (storageError) {
         console.warn('[Main] ⚠️ localStorage 写入失败，但继续使用生成的指纹:', storageError);
       }
     } else {
       console.log('[Main] ✅ 从 localStorage 读取已存在的 fingerprint:', fp);
+      // 保险：如果读到的是 legacy key，也补写到统一 key，避免后续页面“找不到 user_fingerprint”
+      try {
+        if (!localStorage.getItem(PRIMARY_FINGERPRINT_KEY)) {
+          localStorage.setItem(PRIMARY_FINGERPRINT_KEY, fp);
+        }
+        if (!localStorage.getItem(LEGACY_FINGERPRINT_KEY)) {
+          localStorage.setItem(LEGACY_FINGERPRINT_KEY, fp);
+        }
+      } catch { /* ignore */ }
     }
     
     return fp;
@@ -1880,7 +2122,8 @@ async function getStableFingerprint() {
       
       // 尝试保存降级指纹
       try {
-        localStorage.setItem(FINGERPRINT_KEY, fallbackFp);
+        localStorage.setItem(PRIMARY_FINGERPRINT_KEY, fallbackFp);
+        localStorage.setItem(LEGACY_FINGERPRINT_KEY, fallbackFp);
       } catch (e) {
         // 忽略保存错误
       }
@@ -1890,7 +2133,8 @@ async function getStableFingerprint() {
       // 最终降级：纯字符串哈希
       const simpleFp = btoa(fallbackString).replace(/[^a-zA-Z0-9]/g, '').substring(0, 32);
       try {
-        localStorage.setItem(FINGERPRINT_KEY, simpleFp);
+        localStorage.setItem(PRIMARY_FINGERPRINT_KEY, simpleFp);
+        localStorage.setItem(LEGACY_FINGERPRINT_KEY, simpleFp);
       } catch (e) {
         // 忽略保存错误
       }
@@ -1904,18 +2148,22 @@ async function getStableFingerprint() {
  * 如果异步版本不可用，使用同步降级方案
  */
 function getStableFingerprintSync() {
-  const FINGERPRINT_KEY = 'cursor_clinical_fingerprint';
+  const PRIMARY_FINGERPRINT_KEY = 'user_fingerprint';
+  const LEGACY_FINGERPRINT_KEY = 'cursor_clinical_fingerprint';
   const OLD_FINGERPRINT_KEY = 'vibe_fp';
   
   try {
-    let fp = localStorage.getItem(FINGERPRINT_KEY);
+    let fp =
+      localStorage.getItem(PRIMARY_FINGERPRINT_KEY) ||
+      localStorage.getItem(LEGACY_FINGERPRINT_KEY);
     
     if (!fp || fp.length < 16) {
       const oldFp = localStorage.getItem(OLD_FINGERPRINT_KEY);
       if (oldFp && oldFp.length >= 8) {
         fp = oldFp.length === 16 ? (oldFp + oldFp) : oldFp;
         try {
-          localStorage.setItem(FINGERPRINT_KEY, fp);
+          localStorage.setItem(PRIMARY_FINGERPRINT_KEY, fp);
+          localStorage.setItem(LEGACY_FINGERPRINT_KEY, fp);
         } catch (e) {}
       }
     }
@@ -1930,7 +2178,8 @@ function getStableFingerprintSync() {
       const combined = randomHex + browserString;
       fp = btoa(combined).replace(/[^a-zA-Z0-9]/g, '').substring(0, 32);
       try {
-        localStorage.setItem(FINGERPRINT_KEY, fp);
+        localStorage.setItem(PRIMARY_FINGERPRINT_KEY, fp);
+        localStorage.setItem(LEGACY_FINGERPRINT_KEY, fp);
       } catch (e) {}
     }
     
@@ -1938,7 +2187,8 @@ function getStableFingerprintSync() {
   } catch (error) {
     const fallback = `fp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`.substring(0, 32);
     try {
-      localStorage.setItem(FINGERPRINT_KEY, fallback);
+      localStorage.setItem(PRIMARY_FINGERPRINT_KEY, fallback);
+      localStorage.setItem(LEGACY_FINGERPRINT_KEY, fallback);
     } catch (e) {}
     return fallback;
   }
@@ -4659,84 +4909,42 @@ async function displayRealtimeStats(vibeResult) {
         estimatedRank = 0; // 降级处理：设置为 0
       }
     } else {
-      // 如果没有 rankData，尝试调用 uploadToSupabase 获取排名
-      // 确保 vibeResult 包含所有必要的数据
-      if (currentVibeResult && !isShareMode && vibeAnalyzer) {
-        try {
-          // 确保 statistics 中包含必要的字段
-          if (currentVibeResult.statistics) {
-            currentVibeResult.statistics.qingCount = globalStats?.qingCount || 0;
-            currentVibeResult.statistics.buCount = globalStats?.buCount || 0;
-            currentVibeResult.statistics.usageDays = globalStats?.usageDays || 1;
-          }
-          
-          console.log('[Main] displayRealtimeStats: 调用 uploadToSupabase 上传数据并获取排名');
-          // 尝试从全局变量获取 chatData
-          const chatDataForUpload = typeof allChatData !== 'undefined' ? allChatData : (typeof window !== 'undefined' && window.allChatData) || null;
-          const liveRank = await vibeAnalyzer.uploadToSupabase(currentVibeResult, chatDataForUpload);
-          
-          // 如果后端返回了 globalAverage，更新全局变量
-          if (liveRank && liveRank.globalAverage) {
-            const avg = liveRank.globalAverage;
-            // 检查是否是有效数据（不是默认值）
-            const isDefaultValue = avg.L === 50 && avg.P === 50 && avg.D === 50 && avg.E === 50 && avg.F === 50;
-            if (!isDefaultValue) {
-              globalAverageData = avg;
-              globalAverageDataLoaded = true;
-              console.log('[Main] ✅ 从 uploadToSupabase 获取到全局平均值:', globalAverageData);
-              
-              // 如果雷达图已经渲染，更新它
-              if (window.vibeRadarChartInstance) {
-                renderVibeRadarChart();
-              }
-            } else {
-              console.warn('[Main] ⚠️ uploadToSupabase 返回的全局平均值是默认值，忽略');
-            }
-          }
-          
-          if (liveRank && (liveRank.rankPercent !== undefined || liveRank.ranking !== undefined)) {
-            // 兼容 ranking 和 rankPercent 字段
-            const finalRank = liveRank.rankPercent ?? liveRank.ranking ?? 0;
-            
-            // 更新 vibeResult 的 rankData
-            if (!currentVibeResult.rankData) {
-              currentVibeResult.rankData = {};
-            }
-            currentVibeResult.rankData.rankPercent = finalRank;
-            currentVibeResult.rankData.totalUsers = liveRank.totalUsers || totalTestUsers;
-            
-            // ✅ 关键修复：注入 ranks 对象（六个排名数据）
-            if (liveRank.ranks) {
-              currentVibeResult.rankData.ranks = liveRank.ranks;
-              console.log('[Main] ✅ ranks 对象已注入（displayRealtimeStats）:', liveRank.ranks);
-            }
-            
-            rankPercent = finalRank;
-            if (rankPercent >= 0 && rankPercent <= 100) {
-              const rankPercentile = rankPercent / 100;
-              estimatedRank = Math.max(1, Math.round(totalTestUsers * (1 - rankPercentile)));
-              console.log('[Main] 成功获取排名数据:', { rankPercent, estimatedRank, totalUsers: liveRank.totalUsers, hasRanks: !!liveRank.ranks });
-            }
-          } else {
-            console.warn('[Main] uploadToSupabase 未返回有效的排名数据');
-            rankPercent = null;
-            estimatedRank = 0;
-          }
-        } catch (uploadError) {
-          console.error('[Main] uploadToSupabase 调用失败:', uploadError);
-          rankPercent = null;
-          estimatedRank = 0;
+      // 【关键修复】这里禁止再次调用 uploadToSupabase
+      // 原因：上传流程（analyzeFile / analyzeFileSync）已经会调用 uploadToSupabase 写入 user_analysis。
+      // displayRealtimeStats 再调用一次会导致“一次上传 -> 两次写入 -> /api/global-average 看到两条雷同记录”。
+      //
+      // 替代方案：短暂等待 rankData 注入（同一对象/异步渲染时序），超时则降级显示 0。
+      const waitForRankData = async (timeoutMs = 2500) => {
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+          try {
+            if (currentVibeResult && currentVibeResult.rankData) return currentVibeResult.rankData;
+          } catch { /* ignore */ }
+          await new Promise(r => setTimeout(r, 120));
         }
+        return null;
+      };
+
+      const rd = await waitForRankData();
+      if (rd) {
+        const rankingValue = rd.ranking ?? rd.rankPercent ?? null;
+        const numValue = Number(rankingValue);
+        if (!isNaN(numValue)) {
+          if (numValue >= 0 && numValue <= 100) {
+            rankPercent = numValue;
+          } else if (numValue > 0 && totalTestUsers > 0) {
+            rankPercent = ((totalTestUsers - numValue) / totalTestUsers) * 100;
+          }
+          if (rankPercent != null && !isNaN(rankPercent) && rankPercent >= 0 && rankPercent <= 100) {
+            const rankPercentile = rankPercent / 100;
+            estimatedRank = Math.max(1, Math.round(totalTestUsers * (1 - rankPercentile)));
+          }
+        }
+        console.log('[Main] displayRealtimeStats: 等待到 rankData，跳过二次上报', { hasRankData: true });
       } else {
-        // 容错处理：后端排名数据不可用，只打印警告，不中断后续逻辑
-        console.warn('[Main] 警告：后端排名数据不可用，排名将显示为 0', {
-          hasVibeResult: !!currentVibeResult,
-          hasRankData: !!(currentVibeResult && currentVibeResult.rankData),
-          isShareMode,
-          hasVibeAnalyzer: !!vibeAnalyzer
-        });
+        console.warn('[Main] displayRealtimeStats: 未拿到 rankData（已禁止二次上报），降级显示 0');
         rankPercent = null;
-        estimatedRank = 0; // 降级处理：设置为 0
+        estimatedRank = 0;
       }
     }
   } catch (error) {

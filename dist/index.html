@@ -1803,7 +1803,7 @@
             }
         }
     </style>
-  <script type="module" crossorigin src="/cursor-lab/assets/main-BQbiyyVX.js"></script>
+  <script type="module" crossorigin src="/cursor-lab/assets/main-Bkc18Q3w.js"></script>
 </head>
 <body class="bg-[#050505]">
     <div id="root"></div>
@@ -4033,155 +4033,55 @@
                 let data = null; // 用于存储 API 返回的数据
                 
                 if (vibeResult && analyzer) {
+                    // ==========================================================
+                    // 【只读模式：彻底禁止二次写入】
+                    // main.js 的首次分析流程已经会写入并返回排名。
+                    // showFullReport 这里不再触发 uploadToSupabase，也不再走 /api/analyze 降级，
+                    // 否则会导致“一次上传 -> 多次写入 -> Supabase 出现多条相似记录”。
+                    // ==========================================================
                     try {
-                        // 确保 statistics 中包含必要的字段
-                        if (vibeResult.statistics) {
-                            vibeResult.statistics.qingCount = stats?.qingCount || 0;
-                            vibeResult.statistics.buCount = stats?.buCount || 0;
-                            vibeResult.statistics.usageDays = usageDays;
-                        }
-                        
-                        // 调用 uploadToSupabase 上传数据并获取排名（内部已发送 submit_stats）
-                        // 尝试从全局变量获取 chatData，如果不存在则传入 null（方法内部会尝试其他来源）
-                        const chatDataForUpload = window.allChatData || null;
-                        rankingResult = await analyzer.uploadToSupabase(vibeResult, chatDataForUpload);
-                        
-                        console.log('[React] uploadToSupabase 返回结果:', rankingResult);
+                        const existingTotalUsers =
+                            (vibeResult?.statistics?.totalUsers ?? vibeResult?.rankData?.totalUsers ?? null);
+                        const existingRankPercent =
+                            (vibeResult?.statistics?.rankPercent ?? vibeResult?.rankData?.rankPercent ?? null);
+                        const existingRanks = (vibeResult?.rankData?.ranks ?? null);
 
-                        // 【关键修复】捕获并保存 claim_token 用于后续认领
-                        if (rankingResult && rankingResult.claim_token) {
-                            localStorage.setItem('vibe_claim_token', rankingResult.claim_token);
-                            console.log('[React] 🔑 影子令牌已保存:', rankingResult.claim_token.substring(0, 8) + '...');
-                        }
-
-                        // ✅ 关键调试：检查 ranks 对象是否存在
-                        if (rankingResult && rankingResult.ranks) {
-                          console.log('[React] ✅ rankingResult.ranks 存在:', rankingResult.ranks);
-                        } else {
-                          console.warn('[React] ⚠️ rankingResult.ranks 不存在！', {
-                            hasRankingResult: !!rankingResult,
-                            hasRanks: !!(rankingResult && rankingResult.ranks),
-                            rankingResult: rankingResult
-                          });
-                        }
-                        
-                        // 兼容所有可能的排名字段名
-                        const finalRank = rankingResult?.rankPercent ?? rankingResult?.ranking ?? 0;
-                        
-                        // 从 uploadToSupabase 的返回结果中获取总人数
-                        newCount = rankingResult?.totalUsers ?? 0;
-                        
-                        // 检查数据是否有效：允许 rankPercent 为 0（表示排名很低），但 totalUsers 必须 >= 0
-                        // 如果 totalUsers 为 0，可能是数据库为空或查询失败
-                        if (typeof newCount === 'number' && newCount >= 0 && typeof finalRank === 'number' && finalRank >= 0) {
-                            console.log('[React] ✅ 排名数据已获取（来自 uploadToSupabase）:', {
-                                rankPercent: finalRank,
-                                totalUsers: newCount,
-                                hasError: !!rankingResult?.error
-                            });
-                            
-                            // 如果有错误信息，记录但不抛出异常（允许继续使用数据）
-                            if (rankingResult?.error) {
-                                console.warn('[React] ⚠️ uploadToSupabase 返回了错误信息，但数据可用:', rankingResult.error);
-                                // 显示调试信息给用户
-                                if (window.showRankingDebugInfo) {
-                                    window.showRankingDebugInfo({
-                                        error: rankingResult.error,
-                                        errorType: rankingResult.errorType,
-                                        isNetworkError: rankingResult.isNetworkError,
-                                        timestamp: rankingResult.timestamp,
-                                        url: rankingResult.url
-                                    });
-                                }
-                            }
-                        } else {
-                            console.warn('[React] ⚠️ uploadToSupabase 返回的数据格式不正确:', {
-                                rankPercent: finalRank,
-                                totalUsers: newCount,
-                                rankingResult
-                            });
-                            // 如果数据格式不正确，降级为直接发送 submit_stats 请求
-                            throw new Error('uploadToSupabase returned invalid data format');
-                        }
-                    } catch (uploadError) {
-                        console.warn('[React] uploadToSupabase 调用失败，降级为直接发送 submit_stats:', uploadError);
-                        // 如果 uploadToSupabase 失败，降级为直接发送 submit_stats 请求
+                        // 尝试从本地缓存读 totalUsers（uploadToSupabase 通常会写 vibe_global_stats）
+                        let cachedTotalUsers = null;
                         try {
-                            // 使用与 uploadToSupabase 相同的字段名，确保后端能正确解析
-                            const userStats = {
-                                totalMessages: stats?.userMessages || vibeResult?.statistics?.totalMessages || 0,
-                                totalChars: stats?.userBehaviorStats?.totalUserChars || vibeResult?.statistics?.totalChars || 0,
-                                vibeIndex: vibeResult?.vibeIndex || "00000",
-                                personality: vibeResult?.personalityType || "Unknown",
-                                personalityType: vibeResult?.personalityType || "Unknown",
-                                dimensions: vibeResult?.dimensions || {},
-                                // 保留旧字段以兼容（如果后端需要）
-                                qingCount: stats?.qingCount || vibeResult?.statistics?.qingCount || 0,
-                                buCount: stats?.buCount || vibeResult?.statistics?.buCount || 0,
-                                avgMessageLength: stats?.userBehaviorStats?.avgUserMessageLength || vibeResult?.statistics?.avgMessageLength || 0,
-                                usageDays: usageDays || vibeResult?.statistics?.usageDays || 1
-                            };
-                            
-                            console.log('[React] 降级请求：发送 submit_stats，数据:', userStats);
-                            
-                            // 获取 API 端点（与 main.js 保持一致）
-                            const getApiEndpoint = () => {
-                                if (typeof window !== 'undefined') {
-                                    const envApiUrl = window.__API_ENDPOINT__ || window.API_ENDPOINT;
-                                    if (envApiUrl) {
-                                        return envApiUrl;
-                                    }
-                                    const metaApi = document.querySelector('meta[name="api-endpoint"]');
-                                    if (metaApi && metaApi.content) {
-                                        const apiUrl = metaApi.content.trim();
-                                        return apiUrl.endsWith('/') ? apiUrl : apiUrl + '/';
-                                    }
-                                }
-                                return 'https://cursor-clinical-analysis.psterman.workers.dev/';
-                            };
-                            
-                            const apiEndpoint = getApiEndpoint();
-                            // 降级请求应走 /api/analyze（旧格式统计上传），不要打到 /api/v2/analyze（只接受 {chatData, lang}）
-                            const apiUrl = apiEndpoint.endsWith('/') 
-                                ? `${apiEndpoint}api/analyze` 
-                                : `${apiEndpoint}/api/analyze`;
-                            
-                            const response = await fetch(apiUrl, {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                },
-                                mode: 'cors',
-                                credentials: 'omit', // 避免 CORS 预检问题
-                                body: JSON.stringify(userStats),
-                            });
-                            
-                            if (response.ok) {
-                                data = await response.json();
-                                console.log('[React] 降级请求成功，返回数据:', data);
-                                
-                                // 【关键修复】降级请求也要捕获 claim_token
-                                if (data && data.claim_token) {
-                                    localStorage.setItem('vibe_claim_token', data.claim_token);
-                                    console.log('[React] 🔑 降级请求捕获到令牌:', data.claim_token.substring(0, 8) + '...');
-                                }
-
-                                newCount = data.totalUsers ?? data.value ?? data.total ?? data.count ?? 0;
-                                
-                                // 如果降级请求成功，也保存排名数据
-                                if (data.rankPercent !== undefined || data.ranking !== undefined) {
-                                    rankingResult = {
-                                        rankPercent: data.rankPercent ?? data.ranking ?? 0,
-                                        totalUsers: newCount
-                                    };
-                                }
-                            } else {
-                                const errorText = await response.text().catch(() => '无法读取错误信息');
-                                console.warn('[React] 降级 POST 请求失败，状态码:', response.status, '错误:', errorText);
+                            const gsRaw = localStorage.getItem('vibe_global_stats');
+                            if (gsRaw) {
+                                const gs = JSON.parse(gsRaw);
+                                cachedTotalUsers = gs?.totalUsers ?? gs?.total_users ?? null;
                             }
-                        } catch (fallbackError) {
-                            console.error('[React] 降级 POST 请求异常:', fallbackError);
+                        } catch { /* ignore */ }
+                        if (cachedTotalUsers == null) {
+                            try {
+                                const v = localStorage.getItem('totalTestUsers');
+                                cachedTotalUsers = (v != null && v !== '') ? Number(v) : null;
+                            } catch { /* ignore */ }
                         }
+
+                        const totalUsersToUse = (existingTotalUsers != null ? existingTotalUsers : cachedTotalUsers);
+                        if (totalUsersToUse != null) newCount = Number(totalUsersToUse) || 0;
+
+                        if (existingTotalUsers != null && (existingRankPercent != null || existingRanks)) {
+                            rankingResult = {
+                                rankPercent: existingRankPercent ?? 0,
+                                totalUsers: Number(existingTotalUsers) || 0,
+                                ranks: existingRanks
+                            };
+                        } else {
+                            rankingResult = null;
+                        }
+
+                        console.log('[React] 🧠 showFullReport 只读：复用已有/缓存排名数据', {
+                            totalUsers: newCount,
+                            hasRanks: !!existingRanks,
+                            hasRankPercent: existingRankPercent != null
+                        });
+                    } catch (e) {
+                        console.warn('[React] showFullReport 只读模式异常:', e);
                     }
                 }
                 
