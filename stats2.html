@@ -281,6 +281,11 @@
         /* =========================
            顶部固定 Header 样式
            ========================= */
+        :root {
+            /* JS 会在运行时按实际 header 高度覆写，避免抽屉遮挡标题栏 */
+            --top-header-height: 60px;
+        }
+
         .top-header {
             position: fixed;
             top: 0;
@@ -412,12 +417,12 @@
 
         /* 为 body 添加顶部 padding，避免内容被 header 遮挡 */
         body.p-4 {
-            padding-top: 100px !important;
+            padding-top: calc(var(--top-header-height, 60px) + 40px) !important;
         }
         
         @media (min-width: 768px) {
             body.md\:p-8 {
-                padding-top: 120px !important;
+                padding-top: calc(var(--top-header-height, 60px) + 40px) !important;
             }
         }
 
@@ -426,9 +431,9 @@
            ========================= */
         .cyber-drawer {
             position: fixed;
-            top: 60px; /* 在顶部 header 下方，不遮盖 header */
+            top: var(--top-header-height, 60px); /* 在顶部 header 下方，不遮盖 header */
             width: 400px;
-            height: calc(100vh - 60px); /* 减去 header 高度 */
+            height: calc(100vh - var(--top-header-height, 60px)); /* 减去 header 高度 */
             z-index: 100; /* 高于顶部 header (z-index: 50) */
             pointer-events: none;
             transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
@@ -446,8 +451,8 @@
 
         @media (max-width: 768px) {
             .cyber-drawer {
-                top: 140px; /* 移动端 header 更高 */
-                height: calc(100vh - 140px);
+                top: var(--top-header-height, 60px); /* 移动端动态高度 */
+                height: calc(100vh - var(--top-header-height, 60px));
             }
         }
 
@@ -1378,6 +1383,13 @@
             background: #00ff41;
             color: #050505;
         }
+
+        /* LIVE_FEED：墨绿色底（按需覆盖 invert） */
+        .country-panel-template #rtStatusTag {
+            background: #052e16; /* 墨绿色 */
+            color: #d1fae5;
+            border-color: rgba(16, 185, 129, 0.8);
+        }
     </style>
 </head>
 <body class="p-4 md:p-8">
@@ -1386,8 +1398,7 @@
         <div class="top-header-left">
             <div class="top-header-title">
                 <h1>
-                    <span class="text-white">GLOBAL</span>
-                    <span class="text-[var(--accent-terminal)]">DATA_STATION</span>
+                    <span class="lang-key text-white" data-key="top-title">Cursor行为报告全球分布图</span>
                 </h1>
                 <p id="sub-title">Telemetry Uplink: Active // Source: Central_Pacific</p>
             </div>
@@ -1484,7 +1495,7 @@
                 <!-- HEADER -->
                 <div class="mb-8 border-b-2 border-white pb-4">
                     <div class="flex justify-between items-start">
-                        <h1 class="text-2xl font-black italic tracking-tighter">NAT_CLINIC <span class="text-green-500">v2.6</span></h1>
+                        <h1 class="text-2xl font-black italic tracking-tighter" id="rtPanelTitle">国家透视 / Country Panel</h1>
                         <div class="status-tag invert" id="rtStatusTag">LIVE_FEED</div>
                     </div>
                     <div class="mt-3">
@@ -1502,7 +1513,7 @@
                 <div class="clinic-card">
                     <div class="card-header">
                         <i data-lucide="globe"></i>
-                        <span class="card-title">宏观体量 / Macro Scale</span>
+                        <span class="card-title">统计 / Stats</span>
                     </div>
                     <div class="flex justify-between items-center mb-8">
                         <div class="text-5xl" id="rtFlag">🏳️</div>
@@ -1536,7 +1547,7 @@
                 <div class="clinic-card">
                     <div class="card-header">
                         <i data-lucide="radio"></i>
-                        <span class="card-title">实时动态 / Live Feed</span>
+                        <span class="card-title">人格分布 / Personality Distribution</span>
                     </div>
                     <div id="rtRealtimeList" class="space-y-3 text-[11px] leading-snug"></div>
                 </div>
@@ -1545,12 +1556,12 @@
                 <div class="clinic-card">
                     <div class="card-header">
                         <i data-lucide="swords"></i>
-                        <span class="card-title">权力博弈 / Power Struggle</span>
+                        <span class="card-title">问答态度 / Q&A Attitude</span>
                     </div>
                     <div class="space-y-5">
                         <div class="flex justify-between text-[11px] font-bold uppercase">
-                            <span class="text-white" id="rtPkLeftLabel">甲方 Dominance</span>
-                            <span class="text-green-500" id="rtPkRightLabel">磕头 Kowtow</span>
+                            <span class="text-white" id="rtPkLeftLabel">傲娇 / Tsundere</span>
+                            <span class="text-green-500" id="rtPkRightLabel">跪舔 / Bootlick</span>
                         </div>
                         <div class="pk-track">
                             <div class="pk-divider"></div>
@@ -1558,8 +1569,14 @@
                             <div class="pk-right" id="rtPkRightFill" style="width: 50%;"></div>
                         </div>
                         <div class="flex justify-between text-[16px] font-bold">
-                            <span id="rtPkLeftPct">50.0%</span>
-                            <span class="text-green-500" id="rtPkRightPct">50.0%</span>
+                            <span>
+                                <span class="text-[10px] text-zinc-500 mr-2">霸道值</span>
+                                <span id="rtPkLeftPct">50.0%</span>
+                            </span>
+                            <span class="text-green-500">
+                                <span class="text-[10px] text-zinc-500 mr-2">跪舔值</span>
+                                <span id="rtPkRightPct">50.0%</span>
+                            </span>
                         </div>
                         <div>
                             <div class="flex justify-between items-center text-[11px]">
@@ -1570,9 +1587,7 @@
                                 <div id="power-bar" class="h-full bg-white" style="width: 0%;"></div>
                             </div>
                         </div>
-                        <div class="p-3 bg-zinc-900 border-l-2 border-white text-xs leading-relaxed italic text-zinc-300" id="rtPkQuote">
-                            "..."
-                        </div>
+                        <div class="p-3 bg-zinc-900 border-l-2 border-white text-xs leading-relaxed italic text-zinc-300" id="rtPkQuote" style="display:none"></div>
                     </div>
                 </div>
 
@@ -1609,26 +1624,15 @@
                 <div class="clinic-card" id="vibe-explosion-card">
                     <div class="card-header">
                         <i data-lucide="cloud"></i>
-                        <span class="card-title">语义爆发 / Semantic Burst</span>
-                        <div class="ml-auto flex items-center gap-3">
-                            <div id="anchor-country-badge" class="px-2 py-1 text-[10px] font-mono border border-[#00ff41]/30 text-[#00ff41] bg-[#00ff41]/5 uppercase tracking-widest select-none">
-                                锚定: --
-                            </div>
-                            <button id="sb-usertext-btn" type="button" onclick="window.openUserTextDebug && window.openUserTextDebug()" class="px-2 py-1 text-[10px] border border-white/10 text-zinc-300 hover:bg-white/5 transition-colors font-mono">
-                                USER_TEXT
-                            </button>
-                            <label class="text-[10px] text-zinc-500 uppercase tracking-widest select-none flex items-center gap-2">
-                                <input id="sb-debug-toggle" type="checkbox" class="accent-[#00ff41]" />
-                                DEBUG
-                            </label>
-                        </div>
+                        <span class="card-title">本国词云 / National Word Cloud</span>
+                        <div class="ml-auto flex items-center gap-3"></div>
                     </div>
                     <div class="p-2" id="rtSemanticTags">
                         <!-- 黑话榜：按国家聚合（Top10 + Cloud50） -->
                         <div class="bg-zinc-950/60 border border-zinc-800 p-2 mb-4" id="vibe-burst-root">
                             <div class="flex items-center justify-between mb-2">
                                 <div class="text-[11px] text-zinc-400 uppercase tracking-widest">黑话榜 / Vibe Hotlist</div>
-                                <div class="text-[10px] text-zinc-500" id="vibe-country-hint">COUNTRY: --</div>
+                                <div class="text-[10px] text-zinc-500" id="vibe-country-hint">NATION: --</div>
                             </div>
 
                             <!-- 上方：该国 Top50 词云形态（综合） -->
@@ -1655,15 +1659,6 @@
                                 </div>
                             </div>
 
-                            <div id="sb-debug-panel" class="hidden mt-3 border border-white/10 bg-zinc-950/30 p-3">
-                                <div class="flex items-center justify-between gap-3">
-                                    <div class="text-[10px] text-zinc-500 uppercase tracking-widest">Semantic Burst Debug</div>
-                                    <button id="sb-debug-refresh" type="button" class="px-2 py-1 text-[10px] border border-[#00ff41]/40 text-[#00ff41] hover:bg-[#00ff41]/10 transition-colors">
-                                        REFETCH
-                                    </button>
-                                </div>
-                                <div class="mt-2 text-[11px] text-zinc-400 font-mono whitespace-pre-wrap" id="sb-debug-text">--</div>
-                            </div>
                         </div>
                         <div class="text-xs text-zinc-300 mb-3" id="rtCoreTrait">该地区核心特质：--</div>
                         <div class="flex justify-between items-center text-[11px]">
@@ -1686,6 +1681,7 @@
                         <i data-lucide="users"></i>
                         <span class="card-title">高分图谱 / LPDEF Ranking</span>
                     </div>
+                    <div id="rtTopTalentsHeroes" class="flex flex-wrap gap-2 mb-3"></div>
                     <div class="scrolling-wrapper" id="rtEliteList">
                         <div id="rtTopTalentsList" class="space-y-2"></div>
                     </div>
@@ -1701,19 +1697,7 @@
                         <span class="card-title">全球占比 / Global Ratio</span>
                     </div>
                     <div class="chart-container">
-                        <svg width="150" height="150" viewBox="0 0 32 32">
-                            <circle r="16" cx="16" cy="16" fill="#111" />
-                            <circle r="16" cx="16" cy="16" fill="transparent"
-                                    stroke="#00ff41" stroke-width="32"
-                                    stroke-dasharray="45 100" transform="rotate(-90 16 16)" />
-                            <circle r="16" cx="16" cy="16" fill="transparent"
-                                    stroke="#ffffff" stroke-width="32"
-                                    stroke-dasharray="25 100" transform="rotate(72 16 16)" />
-                            <circle r="16" cx="16" cy="16" fill="transparent"
-                                    stroke="#008f11" stroke-width="32"
-                                    stroke-dasharray="15 100" transform="rotate(162 16 16)" />
-                            <circle r="8" cx="16" cy="16" fill="#050505" />
-                        </svg>
+                        <div id="rtGlobalRatioPie" style="width: 200px; height: 200px;"></div>
                     </div>
                     <div class="mt-3">
                         <div class="flex justify-between items-center text-[11px]">
@@ -2025,22 +2009,22 @@
 
             let countryCode = '';
             if (!isGlobal) {
-                if (rawCountry.length === 2) {
+                if (/^[A-Za-z]{2}$/.test(rawCountry)) {
                     countryCode = rawCountry.toUpperCase();
-                } else if (rawCountry === 'United States' || rawCountry === '美国') {
-                    countryCode = 'US';
-                } else if (rawCountry.toUpperCase() === 'US') {
-                    countryCode = 'US';
-                } else {
-                    // 无法从名称可靠推断国家代码时，退回 Global（避免错误写入/查询）
-                    countryCode = 'Global';
+                } else if (typeof resolveCountryCodeFromMapName === 'function') {
+                    const cc = resolveCountryCodeFromMapName(rawCountry);
+                    countryCode = cc ? String(cc).toUpperCase() : '';
+                }
+                // 无法解析 ISO2 时：退回全网口径（避免错误查询导致 ratio 失真）
+                if (!/^[A-Z]{2}$/.test(countryCode)) {
+                    countryCode = '';
                 }
             }
-            const isUS = countryCode === 'US';
+            const effectiveIsGlobal = isGlobal || !/^[A-Z]{2}$/.test(countryCode);
 
             const base = (document.querySelector('meta[name="api-endpoint"]')?.content || '').trim();
             const API_ENDPOINT = base.endsWith('/') ? base : `${base}/`;
-            const url = isGlobal
+            const url = effectiveIsGlobal
                 ? `${API_ENDPOINT}api/global-average`
                 : `${API_ENDPOINT}api/global-average?country_code=${encodeURIComponent(countryCode)}`;
 
@@ -2142,7 +2126,7 @@
                 }
                 dom.innerHTML = '';
                 window.__countryRadarChart = echarts.init(dom, null, { renderer: 'canvas' });
-                const radarLabel = isGlobal
+                const radarLabel = effectiveIsGlobal
                     ? 'GLOBAL_AVG'
                     : (countryCode && /^[A-Z]{2}$/.test(String(countryCode).toUpperCase())
                         ? `${String(countryCode).toUpperCase()}_AVG`
@@ -2188,7 +2172,7 @@
             };
 
             // Cache-first：切换国家时先展示缓存，再后台静默刷新
-            const cacheKey = isGlobal ? 'GLOBAL' : (countryCode || rawCountry || 'UNKNOWN');
+            const cacheKey = effectiveIsGlobal ? 'GLOBAL' : (countryCode || rawCountry || 'UNKNOWN');
             // 竞态保护：保证旧国家请求不会覆盖新国家 UI
             const requestKey = String(cacheKey || '').toUpperCase();
             const requestSeq = (() => {
@@ -2208,7 +2192,7 @@
                     if (latest.seq !== requestSeq) return true;
                     if (String(latest.key || '').toUpperCase() !== requestKey) return true;
                     // 在国家透视模式下，还要校验 currentDrawerCountry（避免 US 请求回写 CN 面板）
-                    if (!isGlobal && typeof currentViewState === 'string' && currentViewState === 'COUNTRY') {
+                    if (!effectiveIsGlobal && typeof currentViewState === 'string' && currentViewState === 'COUNTRY') {
                         const cur = String(currentDrawerCountry?.code || '').toUpperCase();
                         const expected = String(countryCode || '').toUpperCase();
                         if (cur && expected && cur !== expected) return true;
@@ -2245,31 +2229,101 @@
                 }
             } catch { /* ignore */ }
 
-            // 实时动态
+            // 人格分布（基于最新记录/实时流的轻量聚合展示）
+            const INVALID_NAMES = new Set(['自动上报用户', 'anonymous', 'guest', '']);
+            const _cleanHandle = (s) => String(s ?? '').trim().replace(/^@+/, '').trim();
+            const _isInvalidHandle = (s) => {
+                const x = _cleanHandle(s).toLowerCase();
+                return INVALID_NAMES.has(x) || INVALID_NAMES.has(String(s ?? '').trim());
+            };
+            const _looksLikeGitHubUsername = (s, identity = null) => {
+                const h = _cleanHandle(s);
+                if (!h) return false;
+                if (_isInvalidHandle(h)) return false;
+                // 优先使用项目内既有校验函数（支持 user_identity 兜底）
+                try {
+                    if (typeof isValidGitHubUsername === 'function') return !!isValidGitHubUsername(h, identity);
+                } catch { /* ignore */ }
+                // fallback：GitHub 用户名规则（近似）
+                if (h.length > 39) return false;
+                if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(h)) return false;
+                if (h.includes('--')) return false;
+                return true;
+            };
+            const _regionName = (maybeCode) => {
+                const raw = String(maybeCode ?? '').trim();
+                if (!raw) return '';
+                const code = /^[A-Za-z]{2}$/.test(raw) ? raw.toUpperCase() : '';
+                if (!code) return raw;
+                try {
+                    const loc = (typeof currentLang === 'string' && currentLang === 'en') ? 'en' : 'zh-CN';
+                    const dn = new Intl.DisplayNames([loc], { type: 'region' });
+                    return dn.of(code) || code;
+                } catch {
+                    return code;
+                }
+            };
+            const _resolveUserMeta = (r) => {
+                const identity = r?.user_identity ?? r?.userIdentity ?? null;
+                const githubRaw = _cleanHandle(r?.github_username ?? r?.githubUsername ?? r?.gh ?? r?.github ?? '');
+                const u1 = _cleanHandle(r?.user_name ?? r?.userName ?? r?.username ?? r?.user ?? '');
+                const fp = _cleanHandle(r?.fingerprint ?? r?.fp ?? r?.fpId ?? r?.user_fingerprint ?? '');
+                const id = _cleanHandle(r?.user_id ?? r?.userId ?? r?.id ?? '');
+
+                // GitHub 优先：显式 github_username，其次 user_name 也可能就是 GitHub 用户名
+                const github = _looksLikeGitHubUsername(githubRaw, identity)
+                    ? githubRaw
+                    : (_looksLikeGitHubUsername(u1, identity) ? u1 : '');
+                const chosen = github || (!_isInvalidHandle(u1) ? u1 : '');
+                const display = chosen
+                    ? `@${chosen}`
+                    : (fp ? `user_${fp.slice(0, 6)}` : (id ? `user_${id.slice(0, 6)}` : (currentLang === 'en' ? 'unknown' : '未知')));
+                const avatar = github
+                    ? `https://github.com/${encodeURIComponent(github)}.png?size=64`
+                    : 'https://github.com/identicons/guest.png';
+                const profileUrl = github ? `https://github.com/${encodeURIComponent(github)}` : '';
+                return { display, avatar, profileUrl };
+            };
             const renderRealtime = (records) => {
                 const box = document.getElementById('rtRealtimeList');
                 if (!box) return;
                 if (!Array.isArray(records) || records.length === 0) {
-                    box.innerHTML = '<div class="text-zinc-500 text-xs">暂无实时动态</div>';
+                    box.innerHTML = '<div class="text-zinc-500 text-xs">暂无人格分布数据</div>';
                     return;
                 }
                 box.innerHTML = records
                     .map((r) => {
-                        const user = r.user_name ?? r.userName ?? r.username ?? 'Anonymous';
                         const type =
                             r.personality_type ??
                             r.p_type ??
                             r.type ??
                             (r.personality && (r.personality.type || r.personality['type'])) ??
                             'UNKNOWN';
-                        const loc = r.ip_location ?? r.location ?? r.ipLocation ?? '未知';
+                        const rawLoc =
+                            r.country_code ??
+                            r.countryCode ??
+                            r.region ??
+                            r.ip_location ??
+                            r.location ??
+                            r.ipLocation ??
+                            '';
+                        const loc = _regionName(rawLoc) || (currentLang === 'en' ? 'Unknown' : '未知');
+                        const u = _resolveUserMeta(r);
+                        const nameHtml = u.profileUrl
+                            ? `<a href="${escapeHtml(u.profileUrl)}" target="_blank" rel="noopener noreferrer" class="text-[10px] text-green-400/90 mt-1 truncate hover:underline">${escapeHtml(u.display)}</a>`
+                            : `<div class="text-[10px] text-green-400/90 mt-1 truncate">${escapeHtml(u.display)}</div>`;
                         return `
                             <div class="border border-white/10 bg-zinc-950/40 p-3">
-                                <div class="flex justify-between gap-3">
-                                    <div class="text-white font-bold truncate">${escapeHtml(String(type).toUpperCase())}</div>
-                                    <div class="text-[10px] text-zinc-500 truncate">${escapeHtml(loc)}</div>
+                                <div class="flex items-center gap-3">
+                                    <img src="${escapeHtml(u.avatar)}" alt="" width="28" height="28" style="width:28px;height:28px;border-radius:999px;object-fit:cover;border:1px solid rgba(0,255,65,0.25);" />
+                                    <div class="min-w-0 flex-1">
+                                        <div class="flex justify-between gap-3">
+                                            <div class="text-white font-bold truncate">${escapeHtml(String(type).toUpperCase())}</div>
+                                            <div class="text-[10px] text-zinc-500 truncate">${escapeHtml(loc)}</div>
+                                        </div>
+                                        ${nameHtml}
+                                    </div>
                                 </div>
-                                <div class="text-[10px] text-green-400/90 mt-1 truncate">@${escapeHtml(user)}</div>
                             </div>
                         `;
                     })
@@ -2308,7 +2362,7 @@
             };
 
             // 非全网：仅更新状态（词云由 loadWordCloud() 负责渲染）
-            if (!isGlobal && !opts.silent) {
+            if (!effectiveIsGlobal && !opts.silent) {
                 if (statusEl) statusEl.textContent = 'DATA: FETCHING';
             }
 
@@ -2417,7 +2471,7 @@
                 let localTotalUsers;
                 let localTotalAnalysis;
                 
-                if (isGlobal) {
+                if (effectiveIsGlobal) {
                     // 全网模式:本地=全球
                     localTotalUsers = globalTotalUsers;
                     localTotalAnalysis = globalTotalAnalysis;
@@ -2432,13 +2486,16 @@
                         data.totalAnalysis ?? data.total_analysis ?? data.totalanalysis ?? null
                     );
                     
-                    // 国家模式下，需要重新获取全网数据用于占比计算
-                    // (因为上面的 globalTotalUsers 实际是该国数据)
+                // 国家模式下，需要重新获取全网数据用于占比计算
+                // (因为上面的 globalTotalUsers 实际是该国数据)
                     try {
                         const gResp = await fetch(`${API_ENDPOINT}api/global-average`);
                         if (gResp.ok) {
                             const gPayload = await gResp.json();
-                            const gData = gPayload?.data ?? gPayload ?? {};
+                        // 与主请求一致：合并 root + data（避免只取到部分字段）
+                        const gRoot = (gPayload && typeof gPayload === 'object') ? gPayload : {};
+                        const gNested = (gRoot && typeof gRoot.data === 'object' && gRoot.data) ? gRoot.data : {};
+                        const gData = { ...gRoot, ...gNested };
                             globalTotalUsers = Number(gData.totalUsers ?? gData.total_users ?? gData.totalusers ?? 0);
                             globalTotalAnalysis = Number(gData.totalAnalysis ?? gData.total_analysis ?? gData.totalanalysis ?? 0);
                         }
@@ -2463,8 +2520,8 @@
 
                 // 数值填充 + UI 降级：0/空不闪烁
                 // 规则：地区卡片展示“当前地区”口径；全网模式展示全网
-                setValueOrNA(usersValEl, isUS ? localTotalUsers : (isGlobal ? globalTotalUsers : localTotalUsers));
-                setValueOrNA(analysisValEl, isUS ? localTotalAnalysis : (isGlobal ? globalTotalAnalysis : localTotalAnalysis));
+                setValueOrNA(usersValEl, effectiveIsGlobal ? globalTotalUsers : localTotalUsers);
+                setValueOrNA(analysisValEl, effectiveIsGlobal ? globalTotalAnalysis : localTotalAnalysis);
                 if (usersValEl && usersValEl.textContent !== 'N/A') flash(usersCardEl || usersValEl);
                 if (analysisValEl && analysisValEl.textContent !== 'N/A') flash(analysisCardEl || analysisValEl);
 
@@ -2495,7 +2552,7 @@
                     semantic: clampPct(avgL * 0.6 + avgF * 0.4),
                     ratio: clampPct(globalTotalUsers > 0 ? (localTotalUsers / globalTotalUsers) * 100 : 0),
                 };
-                if (isGlobal) metrics.ratio = 100;
+                if (effectiveIsGlobal) metrics.ratio = 100;
 
                 // 数值填充
                 const powerScoreEl = document.getElementById('rtPowerScore');
@@ -2524,6 +2581,7 @@
                 // 数据源：data.top_talents [{dim,user_name,score}]
                 // =========================
                 const topTalentsEl = document.getElementById('rtTopTalentsList');
+                const topTalentsHeroesEl = document.getElementById('rtTopTalentsHeroes');
                 const topTalents = Array.isArray(data.top_talents) ? data.top_talents : [];
                 const dimTitleMap = {
                     L: '逻辑之神',
@@ -2532,6 +2590,43 @@
                     E: '定海神针',
                     F: '细节狂魔',
                 };
+                if (topTalentsHeroesEl) {
+                    const normalized = topTalents
+                        .map((t) => ({
+                            dim: String(t?.dim || '').toUpperCase(),
+                            user_name: t?.user_name ?? t?.userName ?? t?.username ?? '',
+                            github_username: t?.github_username ?? t?.githubUsername ?? t?.gh ?? '',
+                            score: Number(t?.score),
+                        }))
+                        .filter((t) => Number.isFinite(t.score))
+                        .sort((a, b) => b.score - a.score)
+                        .slice(0, 5);
+                    if (normalized.length === 0) {
+                        topTalentsHeroesEl.innerHTML = '';
+                    } else {
+                        topTalentsHeroesEl.innerHTML = normalized.map((t) => {
+                            const meta = _resolveUserMeta(t);
+                            const scoreText = Number.isFinite(t.score) ? t.score.toFixed(1) : '--';
+                            const dim = t.dim && /^[A-Z]$/.test(t.dim) ? t.dim : '';
+                            const dimBadge = dim ? `<span class="text-[10px] px-2 py-0.5 border border-[#00ff41]/30 text-[#00ff41] bg-[#00ff41]/5">${escapeHtml(dim)}</span>` : '';
+                            const name = meta.profileUrl
+                                ? `<a href="${escapeHtml(meta.profileUrl)}" target="_blank" rel="noopener noreferrer" class="text-[11px] text-white font-bold truncate hover:underline">${escapeHtml(meta.display)}</a>`
+                                : `<div class="text-[11px] text-white font-bold truncate">${escapeHtml(meta.display)}</div>`;
+                            return `
+                                <div class="flex items-center gap-2 border border-white/10 bg-zinc-950/40 px-2 py-1.5">
+                                    <img src="${escapeHtml(meta.avatar)}" alt="" width="24" height="24" style="width:24px;height:24px;border-radius:999px;object-fit:cover;border:1px solid rgba(0,255,65,0.25);" />
+                                    <div class="min-w-0">
+                                        <div class="flex items-center gap-2 min-w-0">
+                                            ${dimBadge}
+                                            ${name}
+                                        </div>
+                                        <div class="text-[10px] text-green-500 tabular-nums">score: ${escapeHtml(scoreText)}</div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('');
+                    }
+                }
                 if (topTalentsEl) {
                     const dims = ['L', 'P', 'D', 'E', 'F'];
                     topTalentsEl.innerHTML = dims.map((dim) => {
@@ -2539,6 +2634,10 @@
                         const userName = found?.user_name ?? found?.userName ?? '--';
                         const scoreNum = Number(found?.score);
                         const scoreText = Number.isFinite(scoreNum) ? scoreNum.toFixed(1) : '--';
+                        const meta = found ? _resolveUserMeta(found) : { display: `@${userName}`, avatar: 'https://github.com/identicons/guest.png', profileUrl: '' };
+                        const nameHtml = meta.profileUrl
+                            ? `<a href="${escapeHtml(meta.profileUrl)}" target="_blank" rel="noopener noreferrer" class="text-[10px] text-zinc-200 truncate hover:underline">${escapeHtml(meta.display)}</a>`
+                            : `<span class="text-[10px] text-zinc-400 truncate">${escapeHtml(meta.display)}</span>`;
                         return `
                             <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
                                 <div class="flex items-center gap-2 min-w-0">
@@ -2546,7 +2645,8 @@
                                     <span class="text-xs text-white font-bold">${escapeHtml(dimTitleMap[dim] || dim)}</span>
                                 </div>
                                 <div class="flex items-center gap-3 min-w-0">
-                                    <span class="text-[10px] text-zinc-400 truncate">@${escapeHtml(userName)}</span>
+                                    <img src="${escapeHtml(meta.avatar)}" alt="" width="18" height="18" style="width:18px;height:18px;border-radius:999px;object-fit:cover;border:1px solid rgba(0,255,65,0.2);" />
+                                    ${nameHtml}
                                     <span class="text-xs text-green-500 font-bold tabular-nums">${escapeHtml(scoreText)}</span>
                                 </div>
                             </div>
@@ -2566,11 +2666,56 @@
                 const globalRatioEl = document.getElementById('rtGlobalRatio');
                 const ratioPct = (globalTotalUsers > 0)
                     ? (localTotalUsers / globalTotalUsers) * 100
-                    : (isGlobal ? 100 : metrics.ratio);
-                const ratioText = `${(Number.isFinite(ratioPct) ? ratioPct : 0).toFixed(1)}%`;
+                    : (effectiveIsGlobal ? 100 : metrics.ratio);
+                const ratioPctClamped = clampPct(Number.isFinite(ratioPct) ? ratioPct : 0);
+                const ratioText = `${ratioPctClamped.toFixed(1)}%`;
                 if (globalRatioEl) globalRatioEl.textContent = ratioText;
                 if (ratioPctEl) ratioPctEl.textContent = ratioText;
-                setBar('ratio-bar', Number.isFinite(ratioPct) ? ratioPct : 0);
+                setBar('ratio-bar', ratioPctClamped);
+
+                // 饼图（ECharts pie）：替换旧 SVG 环形图
+                try {
+                    const pieDom = document.getElementById('rtGlobalRatioPie');
+                    if (pieDom && typeof echarts !== 'undefined') {
+                        const own = clampPct(ratioPctClamped);
+                        const rest = clampPct(100 - own);
+                        const label = effectiveIsGlobal ? 'GLOBAL' : (countryCode || 'REGION');
+                        try {
+                            const existing = window.__rtGlobalRatioPieChart;
+                            const domChanged = existing && typeof existing.getDom === 'function' && existing.getDom() !== pieDom;
+                            if (domChanged) {
+                                try { existing.dispose(); } catch { /* ignore */ }
+                                window.__rtGlobalRatioPieChart = null;
+                            }
+                        } catch { /* ignore */ }
+                        if (!window.__rtGlobalRatioPieChart) {
+                            window.__rtGlobalRatioPieChart = echarts.init(pieDom, null, { renderer: 'canvas' });
+                            if (!window.__rtGlobalRatioPieResizeBound) {
+                                window.__rtGlobalRatioPieResizeBound = true;
+                                window.addEventListener('resize', () => {
+                                    try { window.__rtGlobalRatioPieChart && window.__rtGlobalRatioPieChart.resize(); } catch { /* ignore */ }
+                                });
+                            }
+                        }
+                        window.__rtGlobalRatioPieChart.setOption({
+                            backgroundColor: 'transparent',
+                            tooltip: { trigger: 'item' },
+                            series: [
+                                {
+                                    type: 'pie',
+                                    radius: ['58%', '82%'],
+                                    avoidLabelOverlap: true,
+                                    label: { show: false },
+                                    labelLine: { show: false },
+                                    data: [
+                                        { name: label, value: own, itemStyle: { color: '#00ff41' } },
+                                        { name: 'OTHERS', value: rest, itemStyle: { color: '#3f3f46' } },
+                                    ],
+                                }
+                            ]
+                        }, true);
+                    }
+                } catch { /* ignore */ }
 
                 // 复用现有 PK 条（左=Power，右=100-Power）
                 const pkLeftFill = document.getElementById('rtPkLeftFill');
@@ -2605,22 +2750,36 @@
                 }
                 const coreTrait = dimKeys[maxIdx] || 'L';
                 const coreTraitEl = document.getElementById('rtCoreTrait');
-                if (coreTraitEl) coreTraitEl.textContent = `该地区核心特质：${coreTrait}`;
+                const traitMap = {
+                    L: { zh: '逻辑力', en: 'Logic' },
+                    P: { zh: '耐心值', en: 'Patience' },
+                    D: { zh: '细腻度', en: 'Detail' },
+                    E: { zh: '探索欲', en: 'Exploration' },
+                    F: { zh: '反馈感', en: 'Feedback' },
+                };
+                const traitName = (currentLang === 'en' ? (traitMap[coreTrait]?.en) : (traitMap[coreTrait]?.zh)) || coreTrait;
+                if (coreTraitEl) {
+                    coreTraitEl.textContent =
+                        (currentLang === 'en')
+                            ? `Core trait: ${traitName} (${coreTrait}) · highest of 5D averages`
+                            : `该地区核心特质：${traitName}（${coreTrait}）· 该国 5 维平均分最高项`;
+                }
 
                 const semanticMostUsedEl = document.getElementById('rtSemanticMostUsed');
                 const semanticFreqEl = document.getElementById('rtSemanticFreq');
-                if (semanticMostUsedEl) semanticMostUsedEl.textContent = `CORE_TRAIT: ${coreTrait}`;
+                if (semanticMostUsedEl) semanticMostUsedEl.textContent = `CORE_TRAIT: ${traitName} (${coreTrait})`;
                 if (semanticFreqEl) semanticFreqEl.textContent = `SEMANTIC: ${metrics.semantic.toFixed(1)}`;
 
                 // 全球占比列表（简单两项）
                 const ratioListEl = document.getElementById('rtRatioList');
                 if (ratioListEl) {
-                    const label = isGlobal ? 'GLOBAL' : (countryCode && countryCode !== 'Global' ? countryCode : 'REGION');
-                    const rest = clampPct(100 - metrics.ratio);
+                    const label = effectiveIsGlobal ? 'GLOBAL' : (countryCode ? countryCode : 'REGION');
+                    const ownPct = clampPct(Number.isFinite(ratioPct) ? ratioPct : metrics.ratio);
+                    const rest = clampPct(100 - ownPct);
                     ratioListEl.innerHTML = `
                         <div class="flex justify-between text-xs">
                             <span class="flex items-center gap-2"><div class="w-2 h-2 bg-[#00ff41]"></div> ${label}</span>
-                            <span class="font-bold">${metrics.ratio.toFixed(2)}%</span>
+                            <span class="font-bold">${ownPct.toFixed(2)}%</span>
                         </div>
                         <div class="flex justify-between text-xs text-zinc-500">
                             <span class="flex items-center gap-2"><div class="w-2 h-2 bg-zinc-700"></div> OTHERS</span>
@@ -2759,6 +2918,7 @@
         }, 100);
         const i18n = {
             zh: {
+                'top-title': 'Cursor行为报告全球分布图',
                 'sub-title': '实时远程监测状态 // 节点：太平洋中部',
                 'total-victims': '已诊断开发者',
                 'total-analysis': '全网扫描次数',
@@ -2779,6 +2939,7 @@
                 'rank': '排名'
             },
             en: {
+                'top-title': 'Cursor Behavior Report · Global Distribution Map',
                 'sub-title': 'Telemetry Status // Node: Central_Pacific',
                 'total-victims': 'Total Developers',
                 'total-analysis': 'Total Scans',
@@ -3809,6 +3970,36 @@
             }
         }
 
+        // 动态同步顶部标题栏高度（避免抽屉/内容遮挡）
+        function syncTopHeaderHeight() {
+            try {
+                const header = document.querySelector('.top-header');
+                if (!header) return;
+                const h = Math.max(0, Math.round(header.getBoundingClientRect().height || header.offsetHeight || 0));
+                if (h > 0) {
+                    document.documentElement.style.setProperty('--top-header-height', `${h}px`);
+                }
+            } catch { /* ignore */ }
+        }
+        try {
+            // 首次渲染
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', () => {
+                    syncTopHeaderHeight();
+                    setTimeout(syncTopHeaderHeight, 60);
+                });
+            } else {
+                syncTopHeaderHeight();
+                setTimeout(syncTopHeaderHeight, 60);
+            }
+            // resize 适配
+            let __topHeaderResizeTimer = null;
+            window.addEventListener('resize', () => {
+                try { if (__topHeaderResizeTimer) clearTimeout(__topHeaderResizeTimer); } catch { /* ignore */ }
+                __topHeaderResizeTimer = setTimeout(() => syncTopHeaderHeight(), 80);
+            });
+        } catch { /* ignore */ }
+
         /**
          * 检查地图数据是否已加载
          * world.js 加载后会在 echarts 中注册 'world' 地图
@@ -4321,8 +4512,8 @@
                     
                     <!-- 用户信息（GitHub 或指纹） -->
                     <div class="mb-3 pb-3 border-b border-[#00ff41]/10">
-                        <div class="flex items-center gap-2 mb-2">
-                            <div class="w-8 h-8 rounded-full overflow-hidden border border-[#00ff41]/30 flex-shrink-0">
+                        <div class="flex items-center gap-3">
+                            <div class="w-9 h-9 rounded-full overflow-hidden border border-[#00ff41]/30 flex-shrink-0">
                                 <img 
                                     src="${avatarUrl}" 
                                     alt="Avatar" 
@@ -4334,25 +4525,39 @@
                                 <div class="drawer-item-value text-sm truncate">${displayName}</div>
                                 <div class="drawer-item-desc text-[8px]">${displayLabel}</div>
                             </div>
+                            ${githubUsername && isValidGitHubUsername(githubUsername, userIdentity)
+                                ? `
+                                <button 
+                                    onclick="logout()"
+                                    class="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-[8px] text-zinc-300 hover:text-white transition-colors rounded"
+                                    title="退出登录"
+                                >
+                                    退出
+                                </button>
+                                `
+                                : ''
+                            }
                         </div>
                         <!-- 用户国家/地区：国旗 + 自动识别 / 用户校准 -->
                         <div id="user-country-flag" class="flex items-center gap-2 mt-2 text-[10px]"></div>
+                        ${githubUsername && isValidGitHubUsername(githubUsername, userIdentity)
+                            ? `
+                            <a 
+                                href="https://github.com/${githubUsername}" 
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                class="mt-2 inline-block text-[9px] text-[#00ff41]/70 hover:text-[#00ff41] transition-colors font-mono"
+                            >
+                                github.com/${githubUsername}
+                            </a>
+                            `
+                            : ''
+                        }
                     </div>
                     
-                    <!-- 状态信息 -->
-                    <div class="mb-2">
-                        <div class="drawer-item-label mb-1">当前状态</div>
-                        <div class="flex items-center gap-2">
-                            <span class="text-lg">${statusConfig.emoji}</span>
-                            <div>
-                                <div class="drawer-item-value text-sm" style="color: ${statusConfig.color}">${statusConfig.label}</div>
-                                <div class="drawer-item-desc text-[8px]">${currentLang === 'zh' ? '工作状态' : 'Status'}</div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- 状态切换按钮 -->
-                    <div class="flex gap-1.5 mt-3 pt-3 border-t border-[#00ff41]/10">
+                    <!-- 状态切换按钮（简约：仅用选中态表达当前状态） -->
+                    <div class="drawer-item-label mb-2">${currentLang === 'zh' ? '状态' : 'Status'}</div>
+                    <div class="flex gap-1.5">
                         <button 
                             onclick="setUserStatus('idle'); if(currentDrawerCountry.code) showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);"
                             class="flex-1 px-2 py-1.5 bg-zinc-900/50 border ${currentStatus === 'idle' ? 'border-[#00ff41]' : 'border-zinc-800'} text-[10px] font-bold uppercase tracking-wider hover:border-[#00ff41] transition-colors"
@@ -4379,35 +4584,7 @@
                     <!-- GitHub OAuth 登录区域 -->
                     <div class="mt-3 pt-3 border-t border-[#00ff41]/10" id="auth-login-section">
                         ${githubUsername && isValidGitHubUsername(githubUsername, userIdentity) 
-                            ? `
-                            <!-- 已登录状态：显示用户信息和退出按钮 -->
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-2">
-                                    <img 
-                                        src="${getGitHubAvatarUrl(githubUsername)}" 
-                                        alt="${githubUsername}"
-                                        class="w-6 h-6 rounded-full border border-[#00ff41]/30"
-                                        onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
-                                    />
-                                    <div>
-                                        <div class="text-[10px] text-white font-bold">${githubUsername}</div>
-                                        <a 
-                                            href="https://github.com/${githubUsername}" 
-                                            target="_blank"
-                                            class="text-[8px] text-[#00ff41]/60 hover:text-[#00ff41] transition-colors"
-                                        >
-                                            查看 GitHub
-                                        </a>
-                                    </div>
-                                </div>
-                                <button 
-                                    onclick="logout()"
-                                    class="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-[8px] text-zinc-400 hover:text-white transition-colors rounded"
-                                >
-                                    退出
-                                </button>
-                            </div>
-                            `
+                            ? ''
                             : `
                             <!-- 未登录状态：显示 GitHub 登录按钮 -->
                             <div class="drawer-item-label mb-2">GitHub 登录</div>
@@ -4897,7 +5074,7 @@
                 nodeName: `${String(name || 'REGION').toUpperCase()}_NODE`,
                 diagnosedTotal: '--',
                 scanTotal: '--',
-                pk: { leftLabel: 'Dominance', rightLabel: 'Kowtow', leftPct: 50, rightPct: 50, quote: '"Coming soon..."' },
+                pk: { leftLabel: 'Dominance', rightLabel: 'Kowtow', leftPct: 50, rightPct: 50, quote: '' },
                 meltdown: { words: '-- WORDS', fillPct: 0, level: 'PENDING', victims: '--' },
                 semantic: { tags: [], mostUsed: 'MOST_USED: --', freq: 'FREQ: --' },
                 elite: [],
@@ -4918,7 +5095,8 @@
             setText('#rtPkRightLabel', `${model.pk.rightLabel}`);
             setText('#rtPkLeftPct', pct(model.pk.leftPct));
             setText('#rtPkRightPct', pct(model.pk.rightPct));
-            setText('#rtPkQuote', model.pk.quote);
+            // 兼容：rtPkQuote 已隐藏，不再渲染占位文案
+            setText('#rtPkQuote', model.pk.quote || '');
             const pkLeftFill = q('#rtPkLeftFill');
             const pkRightFill = q('#rtPkRightFill');
             if (pkLeftFill) pkLeftFill.style.width = `${clamp(model.pk.leftPct, 0, 100)}%`;
@@ -4975,7 +5153,7 @@
             // 将“暂无数据”的占位渲染出来，避免空白
             const realtimeBox = q('#rtRealtimeList');
             if (realtimeBox && !realtimeBox.innerHTML.trim()) {
-                realtimeBox.innerHTML = '<div class="text-zinc-500 text-xs">暂无实时动态</div>';
+                realtimeBox.innerHTML = '<div class="text-zinc-500 text-xs">暂无人格分布数据</div>';
             }
         }
 
@@ -9324,54 +9502,24 @@
                                             identityCard.querySelector('.mt-3.pt-3.border-t');
                         
                         if (userInfoSection) {
-                            userInfoSection.innerHTML = `
-                                <div class="flex items-center gap-2 mb-2">
-                                    <div class="w-8 h-8 rounded-full overflow-hidden border border-[#00ff41]/30 flex-shrink-0">
-                                        <img 
-                                            src="${userInfo.avatarUrl}" 
-                                            alt="Avatar" 
-                                            class="w-full h-full object-cover"
-                                            onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
-                                        />
-                                    </div>
-                                    <div class="flex-1 min-w-0">
-                                        <div class="drawer-item-value text-sm truncate">${userInfo.username}</div>
-                                        <div class="drawer-item-desc text-[8px]">GitHub Account</div>
-                                    </div>
-                                </div>
-                            `;
+                            // ✅ 简约：只更新现有区域里的 avatar / name / label，不再重建 DOM（避免重复头像/姓名）
+                            try {
+                                const img = userInfoSection.querySelector('img');
+                                if (img) img.src = userInfo.avatarUrl || DEFAULT_AVATAR;
+                                const nameEl = userInfoSection.querySelector('.drawer-item-value');
+                                if (nameEl) nameEl.textContent = userInfo.username || '';
+                                const labelEl = userInfoSection.querySelector('.drawer-item-desc');
+                                if (labelEl) labelEl.textContent = 'GitHub ID';
+                                const link = userInfoSection.querySelector('a[href*="github.com/"]');
+                                if (link) link.href = `https://github.com/${userInfo.username}`;
+                            } catch { /* ignore */ }
                         }
                         
                         // 更新登录区域
                         if (loginSection) {
-                            loginSection.innerHTML = `
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center gap-2">
-                                        <img 
-                                            src="${userInfo.avatarUrl}" 
-                                            alt="${userInfo.username}"
-                                            class="w-6 h-6 rounded-full border border-[#00ff41]/30"
-                                            onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
-                                        />
-                                        <div>
-                                            <div class="text-[10px] text-white font-bold">${userInfo.username}</div>
-                                            <a 
-                                                href="https://github.com/${userInfo.username}" 
-                                                target="_blank"
-                                                class="text-[8px] text-[#00ff41]/60 hover:text-[#00ff41] transition-colors"
-                                            >
-                                                查看 GitHub
-                                            </a>
-                                        </div>
-                                    </div>
-                                    <button 
-                                        onclick="logout()"
-                                        class="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-[8px] text-zinc-400 hover:text-white transition-colors rounded"
-                                    >
-                                        退出
-                                    </button>
-                                </div>
-                            `;
+                            // ✅ 已登录：登录区保持为空（身份区已含退出/链接）
+                            loginSection.innerHTML = '';
+                            try { loginSection.style.display = 'none'; } catch { /* ignore */ }
                         }
                     }
                 }
@@ -9389,21 +9537,22 @@
                                             identityCard.querySelector('.mt-3.pt-3.border-t');
                         
                         if (userInfoSection) {
-                            userInfoSection.innerHTML = `
-                                <div class="flex items-center gap-2 mb-2">
-                                    <div class="w-8 h-8 rounded-full overflow-hidden border border-zinc-700 flex-shrink-0 bg-zinc-800 flex items-center justify-center">
-                                        <span class="text-lg">👤</span>
-                                    </div>
-                                    <div class="flex-1 min-w-0">
-                                        <div class="drawer-item-value text-sm text-zinc-500">未登录</div>
-                                        <div class="drawer-item-desc text-[8px]">请使用 GitHub 登录</div>
-                                    </div>
-                                </div>
-                            `;
+                            // ✅ 简约：不重建 DOM，避免重复块；仅将用户名置空并恢复默认头像
+                            try {
+                                const img = userInfoSection.querySelector('img');
+                                if (img) img.src = DEFAULT_AVATAR;
+                                const nameEl = userInfoSection.querySelector('.drawer-item-value');
+                                if (nameEl) nameEl.textContent = '未登录';
+                                const labelEl = userInfoSection.querySelector('.drawer-item-desc');
+                                if (labelEl) labelEl.textContent = '请使用 GitHub 登录';
+                                const link = userInfoSection.querySelector('a[href*="github.com/"]');
+                                if (link) link.remove();
+                            } catch { /* ignore */ }
                         }
                         
                         // 替换登录输入框为登录按钮
                         if (loginSection) {
+                            try { loginSection.style.display = ''; } catch { /* ignore */ }
                             loginSection.innerHTML = `
                                 <div class="drawer-item-label mb-2">GitHub 登录</div>
                                 <button 
@@ -10903,6 +11052,14 @@
             }
             
             try {
+                const esc = (s) =>
+                    String(s ?? '')
+                        .replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;')
+                        .replace(/'/g, '&#39;');
+
                 // 【Task 4】检查是否为新用户（维度/统计为空或为默认值）
                 // 修复：统一视图/隐私裁剪可能不返回 l_score..f_score，但仍可能返回其它统计字段（total_messages 等）
                 const quickScoreKeys = ['l_score','p_score','d_score','e_score','f_score','l','p','d','e','f','L','P','D','E','F'];
@@ -11364,6 +11521,27 @@
                 } catch (e) {
                     console.warn('[UserStats] ⚠️ 处理 answer_book 失败:', e);
                 }
+
+                // 9. 真实评价（引用 index.html 的最终分析结果：cursor_clinical_history.analysisData.vibeResult）
+                let realEvalTitle = '';
+                let realEvalText = '';
+                let realEvalTraits = [];
+                try {
+                    const histStr = localStorage.getItem('cursor_clinical_history') || '';
+                    const hist = histStr ? JSON.parse(histStr) : null;
+                    const vr = hist?.analysisData?.vibeResult || null;
+                    if (vr) {
+                        // 标题优先用人格称号（用户可读），其次用 analysis.name
+                        realEvalTitle =
+                            String(vr.personalityName || vr.personality_name || vr.analysis?.name || '').trim();
+                        // 正文优先用 roastText（最像“真实评价”），其次用 analysis.description
+                        realEvalText =
+                            String(vr.roastText || vr.roast_text || vr.analysis?.description || '').trim();
+                        if (Array.isArray(vr.analysis?.traits)) {
+                            realEvalTraits = vr.analysis.traits.map((t) => String(t || '').trim()).filter(Boolean).slice(0, 5);
+                        }
+                    }
+                } catch { /* ignore */ }
                 
                 // 创建用户统计卡片容器
                 const statsCard = document.createElement('div');
@@ -11415,12 +11593,26 @@
                         <div class="drawer-item-value text-sm" data-stat="personality-name">${personalityName}</div>
                         <div class="drawer-item-desc text-[8px]">${personalityType === 'AUTO_REPORT' ? '' : (personalityType || '')}</div>
                     </div>
+
+                    ${(realEvalText || realEvalTitle) ? `
+                    <div class="mb-3 pb-3 border-b border-[#00ff41]/10">
+                        <div class="drawer-item-label mb-1">${currentLang === 'en' ? 'Real Evaluation' : '真实评价'}</div>
+                        ${realEvalTitle ? `<div class="text-[12px] text-white font-bold mb-1">${esc(realEvalTitle)}</div>` : ''}
+                        ${realEvalText ? `<div class="text-[12px] text-zinc-300 leading-relaxed">${esc(realEvalText)}</div>` : ''}
+                        ${Array.isArray(realEvalTraits) && realEvalTraits.length ? `
+                            <div class="mt-2 space-y-1">
+                                ${realEvalTraits.map((t) => `<div class="text-[11px] text-[#00ff41]/70">- ${esc(t)}</div>`).join('')}
+                            </div>
+                        ` : ''}
+                        <div class="drawer-item-desc text-[8px] mt-2">${currentLang === 'en' ? 'From index.html final report' : '来自 index.html 最终报告'}</div>
+                    </div>
+                    ` : ''}
                     
                     <!-- 答案之书（参考 index.html：去掉"答案之书"标题，只显示 title 和 content，增大正文字体） -->
                     ${(answerBookTitle && answerBookTitle !== '暂无') || (answerBookContent && answerBookContent !== '暂无说明') ? `
                     <div class="mb-2">
                         ${answerBookTitle && answerBookTitle !== '暂无' ? `<div class="text-[13px] text-white font-bold mb-2">${answerBookTitle}</div>` : ''}
-                        <div class="text-[13px] text-[#00ff41]/80 leading-relaxed">${answerBookContent && answerBookContent !== '暂无说明' ? answerBookContent : ''}</div>
+                        <div class="text-[13px] text-[#00ff41]/80 leading-relaxed">${answerBookContent && answerBookContent !== '暂无说明' ? esc(answerBookContent) : ''}</div>
                     </div>
                     ` : ''}
                 `;
@@ -12835,7 +13027,17 @@
             try {
                 const region = String(countryCodeRaw || currentDrawerCountry?.code || '').trim().toUpperCase();
                 const hint = document.getElementById('vibe-country-hint');
-                if (hint) hint.textContent = `COUNTRY: ${region || '--'}`;
+                if (hint) {
+                    let label = region || '--';
+                    if (/^[A-Z]{2}$/.test(label)) {
+                        try {
+                            const loc = (typeof currentLang === 'string' && currentLang === 'en') ? 'en' : 'zh-CN';
+                            const dn = new Intl.DisplayNames([loc], { type: 'region' });
+                            label = dn.of(label) || label;
+                        } catch { /* ignore */ }
+                    }
+                    hint.textContent = `NATION: ${label}`;
+                }
 
                 const top10 = Array.isArray(data?.top10) ? data.top10 : (Array.isArray(window.__latestTop10) ? window.__latestTop10 : []);
                 const cloud50 = Array.isArray(data?.cloud50) ? data.cloud50 : (Array.isArray(window.__latestCloud50) ? window.__latestCloud50 : []);

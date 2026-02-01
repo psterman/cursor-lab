@@ -173,6 +173,50 @@
             box-shadow: 0 0 8px var(--accent-terminal);
         }
 
+        /* stats2 顶部标题栏风格：仅用于 fullReport 顶部 */
+        .fullreport-topbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1200;
+            background: rgba(5, 5, 5, 0.95);
+            backdrop-filter: blur(18px);
+            border-bottom: 1px solid rgba(0, 255, 65, 0.2);
+            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.5);
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .fullreport-topbar .title {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+        .fullreport-topbar .title .main {
+            color: #ffffff;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            font-style: italic;
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .fullreport-topbar .title .sub {
+            margin-top: 2px;
+            font-size: 10px;
+            color: #71717a;
+            letter-spacing: 0.22em;
+            text-transform: uppercase;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
         .logo-box {
             display: inline-block;
             padding: 8px 16px;
@@ -7183,7 +7227,22 @@
 
                     {/* 完整报告阶段 */}
                     {step === 'fullReport' && (
-                        <div className="w-full" style={{minHeight: '100vh'}}>
+                        <div className="w-full" style={{minHeight: '100vh', paddingTop: '64px'}}>
+                            <div className="fullreport-topbar" role="banner">
+                                <div className="title">
+                                    <div className="main">
+                                        {lang === 'en' ? 'CURSOR BEHAVIOR REPORT' : 'CURSOR 迷惑行为报告'}
+                                    </div>
+                                    <div className="sub">
+                                        {lang === 'en' ? 'FULL REPORT' : '完整报告'}
+                                    </div>
+                                </div>
+                                <div style={{display:'flex', alignItems:'center', gap:'10px', flexShrink: 0}}>
+                                    <span style={{fontSize:'10px', color:'#00ff41', fontWeight: 800, letterSpacing:'0.12em'}}>
+                                        {lang === 'en' ? 'ONLINE' : '在线'}
+                                    </span>
+                                </div>
+                            </div>
                             {/* 分享模式提示 */}
                             {isShareMode && (
                                 <div className="w-full bg-zinc-900/50 border border-zinc-700 rounded-sm p-4 mb-4 flex flex-col sm:flex-row items-center justify-between gap-4" style={{marginBottom: '20px', maxWidth: '1100px', margin: '0 auto 20px', padding: '16px'}}>
