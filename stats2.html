@@ -1552,6 +1552,15 @@
                     <div id="rtRealtimeList" class="space-y-3 text-[11px] leading-snug"></div>
                 </div>
 
+                <!-- [01.7] COUNTRY TOTALS & MY RANKS -->
+                <div class="clinic-card">
+                    <div class="card-header">
+                        <i data-lucide="bar-chart-3"></i>
+                        <span class="card-title">国家累计 & 我的排名 / Country Totals & My Rank</span>
+                    </div>
+                    <div id="rtCountryTotals" class="space-y-2 text-[11px] leading-snug"></div>
+                </div>
+
                 <!-- [02] POWER STRUGGLE (PK) -->
                 <div class="clinic-card">
                     <div class="card-header">
@@ -2518,6 +2527,76 @@
                     data.latestRecordsV6 ??
                     [];
 
+                // =========================
+                // 国家累计 & 我的排名（来自 /api/country-summary 扩展字段）
+                // =========================
+                try {
+                    const box = document.getElementById('rtCountryTotals');
+                    if (box) {
+                        const fmt = (n) => new Intl.NumberFormat('zh-CN').format(Number(n) || 0);
+                        const fp = (() => { try { return localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch { return ''; } })();
+                        const cName = (() => {
+                            try { return (currentDrawerCountry && currentDrawerCountry.name) ? String(currentDrawerCountry.name) : ''; } catch { return ''; }
+                        })();
+                        const url2 = `${API_ENDPOINT}api/country-summary?country=${encodeURIComponent(String(countryCode || '').toUpperCase())}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}`;
+
+                        // cache-first：避免切换抖动
+                        if (!window.__countryTotalsCache) window.__countryTotalsCache = new Map();
+                        const cacheKey2 = `CT:${String(countryCode || '').toUpperCase()}`;
+                        const hit2 = window.__countryTotalsCache.get(cacheKey2);
+                        if (hit2 && typeof hit2 === 'object' && hit2.html) {
+                            box.innerHTML = hit2.html;
+                        } else {
+                            box.innerHTML = '<div class="text-zinc-500 text-xs">加载中...</div>';
+                        }
+
+                        // 并发保护：复用 updateCountryDashboard 的 requestSeq / isStaleRequest
+                        const resp2 = await fetch(url2, { cache: 'no-cache' });
+                        if (!resp2.ok) throw new Error(`HTTP ${resp2.status}`);
+                        const payload2 = await resp2.json().catch(() => null);
+                        if (!payload2 || typeof payload2 !== 'object') throw new Error('bad payload');
+                        if (isStaleRequest()) return;
+
+                        const totals = payload2.countryTotals || payload2.data?.countryTotals || null;
+                        const ranks = payload2.myCountryRanks || payload2.data?.myCountryRanks || null;
+                        const meVals = payload2.myCountryValues || payload2.data?.myCountryValues || null;
+
+                        const row = (label, totalVal, myVal, r) => {
+                            const rankText = r && r.rank ? `#${r.rank}/${r.total}` : '--';
+                            return `
+                                <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
+                                    <div class="text-zinc-200">${label}</div>
+                                    <div class="flex items-center gap-3 min-w-0">
+                                        <span class="text-[10px] text-zinc-500">Σ ${fmt(totalVal)}</span>
+                                        <span class="text-[10px] text-zinc-400">me ${fmt(myVal)}</span>
+                                        <span class="text-[10px] text-green-500 font-bold tabular-nums">${rankText}</span>
+                                    </div>
+                                </div>
+                            `;
+                        };
+
+                        const html = totals
+                            ? [
+                                row('调戏AI次数 / Messages', totals.total_messages, meVals?.total_messages, ranks?.total_messages),
+                                row('对话字符数 / Total Chars', totals.total_chars, meVals?.total_chars, ranks?.total_chars),
+                                row('废话输出 / User Chars', totals.total_user_chars, meVals?.total_user_chars, ranks?.total_user_chars),
+                                row('平均长度 / Avg Len', Math.round(Number(totals.avg_user_message_length) || 0), Math.round(Number(meVals?.avg_user_message_length) || 0), ranks?.avg_user_message_length),
+                                row('甲方上身 / Jiafang', totals.jiafang_count, meVals?.jiafang_count, ranks?.jiafang_count),
+                                row('磕头 / Ketao', totals.ketao_count, meVals?.ketao_count, ranks?.ketao_count),
+                              ].join('')
+                            : '<div class="text-zinc-500 text-xs">暂无数据</div>';
+
+                        box.innerHTML = html;
+                        try { window.__countryTotalsCache.set(cacheKey2, { html, ts: Date.now() }); } catch { /* ignore */ }
+                    }
+                } catch (e) {
+                    // 不阻断主面板
+                    try {
+                        const box = document.getElementById('rtCountryTotals');
+                        if (box && !box.innerHTML.trim()) box.innerHTML = '<div class="text-zinc-500 text-xs">暂无数据</div>';
+                    } catch { /* ignore */ }
+                }
+
                 // 数值填充 + UI 降级：0/空不闪烁
                 // 规则：地区卡片展示“当前地区”口径；全网模式展示全网
                 setValueOrNA(usersValEl, effectiveIsGlobal ? globalTotalUsers : localTotalUsers);
@@ -2582,7 +2661,7 @@
                 // =========================
                 const topTalentsEl = document.getElementById('rtTopTalentsList');
                 const topTalentsHeroesEl = document.getElementById('rtTopTalentsHeroes');
-                const topTalents = Array.isArray(data.top_talents) ? data.top_talents : [];
+                let topTalents = Array.isArray(data.top_talents) ? data.top_talents : [];
                 const dimTitleMap = {
                     L: '逻辑之神',
                     P: '执行机器',
@@ -2590,12 +2669,65 @@
                     E: '定海神针',
                     F: '细节狂魔',
                 };
+                // ✅ 国家口径兜底：如果接口没返回 top_talents，则直接从 Supabase 统一视图按国家筛选取 Top1
+                // 目的：确保能显示“真实的 GitHub 用户名与头像”，而不是占位符 @--
+                if (!effectiveIsGlobal && /^[A-Z]{2}$/.test(String(countryCode || '').toUpperCase()) && (!Array.isArray(topTalents) || topTalents.length === 0)) {
+                    try {
+                        const cc = String(countryCode || '').toUpperCase();
+                        const canQuerySupabase = (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.from === 'function');
+                        if (canQuerySupabase) {
+                            const dims = ['L', 'P', 'D', 'E', 'F'];
+                            const colMap = { L: 'l_score', P: 'p_score', D: 'd_score', E: 'e_score', F: 'f_score' };
+                            const selectCols = [
+                                'user_name',
+                                'github_username',
+                                'user_identity',
+                                'country_code',
+                                'ip_location',
+                                'manual_location',
+                                'l_score','p_score','d_score','e_score','f_score'
+                            ].join(',');
+                            const countryOr = `country_code.eq.${cc},ip_location.eq.${cc},manual_location.eq.${cc}`;
+
+                            const results = await Promise.all(dims.map(async (dim) => {
+                                const col = colMap[dim];
+                                try {
+                                    const { data: rows, error } = await supabaseClient
+                                        .from('v_unified_analysis_v2')
+                                        .select(selectCols)
+                                        .or(countryOr)
+                                        .not(col, 'is', null)
+                                        .order(col, { ascending: false })
+                                        .limit(1);
+                                    if (error) return null;
+                                    const row = Array.isArray(rows) ? rows[0] : null;
+                                    const score = Number(row?.[col] ?? row?.[dim] ?? row?.[String(dim).toLowerCase()] ?? 0);
+                                    if (!Number.isFinite(score) || score <= 0) return null;
+                                    return {
+                                        dim,
+                                        user_name: row?.user_name ?? row?.name ?? '',
+                                        github_username: row?.github_username ?? row?.githubUsername ?? '',
+                                        user_identity: row?.user_identity ?? row?.userIdentity ?? null,
+                                        score
+                                    };
+                                } catch {
+                                    return null;
+                                }
+                            }));
+                            topTalents = results.filter(Boolean);
+                            if (topTalents.length > 0) {
+                                try { data.top_talents = topTalents; } catch { /* ignore */ }
+                            }
+                        }
+                    } catch { /* ignore */ }
+                }
                 if (topTalentsHeroesEl) {
                     const normalized = topTalents
                         .map((t) => ({
                             dim: String(t?.dim || '').toUpperCase(),
                             user_name: t?.user_name ?? t?.userName ?? t?.username ?? '',
                             github_username: t?.github_username ?? t?.githubUsername ?? t?.gh ?? '',
+                            user_identity: t?.user_identity ?? t?.userIdentity ?? null,
                             score: Number(t?.score),
                         }))
                         .filter((t) => Number.isFinite(t.score))
@@ -5112,16 +5244,8 @@
             setText('#rtSemanticMostUsed', model.semantic.mostUsed);
             setText('#rtSemanticFreq', model.semantic.freq);
 
-            const eliteEl = q('#rtEliteList');
-            if (eliteEl) {
-                eliteEl.innerHTML = (model.elite || []).map((u) => `
-                    <div class="user-avatar-card">
-                        <div class="avatar-circle">${String(u.id || '').slice(0, 3).toUpperCase()}</div>
-                        <div class="text-[10px] font-bold text-white truncate">${String(u.name || '')}</div>
-                        <div class="text-[9px] text-green-500 mt-1">LPDEF: ${Number(u.lpdef) || 0}</div>
-                    </div>
-                `).join('');
-            }
+            // 注意：#rtEliteList 内包含 #rtTopTalentsList（高分图谱容器），
+            // 骨架渲染阶段不要覆盖其 innerHTML，否则会把榜单 DOM 删掉导致一直空白。
 
             const ratioEl = q('#rtRatioList');
             if (ratioEl) {
