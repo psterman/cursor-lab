@@ -217,6 +217,138 @@
             text-overflow: ellipsis;
         }
 
+        /* stats2 顶部固定 Header（在 index fullReport 复刻） */
+        .top-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1500;
+            background: rgba(5, 5, 5, 0.95);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(0, 255, 65, 0.2);
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.5);
+            pointer-events: auto;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .top-header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            min-width: 0;
+        }
+        .top-header-title {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+        .top-header-title h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 900;
+            letter-spacing: -0.02em;
+            font-style: italic;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .top-header-title p {
+            margin: 4px 0 0 0;
+            font-size: 9px;
+            color: #71717a;
+            letter-spacing: 0.3em;
+            font-weight: bold;
+            text-transform: uppercase;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .top-header-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .top-header-card {
+            border: 1px solid rgba(0, 255, 65, 0.25);
+            background: rgba(0, 0, 0, 0.35);
+            padding: 8px 10px;
+            min-width: 138px;
+        }
+        .top-header-card-label {
+            font-size: 9px;
+            color: rgba(113, 113, 122, 0.95);
+            letter-spacing: 0.22em;
+            text-transform: uppercase;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+        .top-header-card-value {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #00ff41;
+        }
+
+        .lang-flag-btn {
+            padding: 0;
+            background: transparent;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 44px;
+            height: 44px;
+            opacity: 0.6;
+            transform: scale(1);
+            box-shadow: none;
+            overflow: hidden;
+        }
+        .lang-flag-btn img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            border-radius: 50%;
+            transition: all 0.4s ease;
+            padding: 2px;
+            outline: none;
+            border: none;
+            box-shadow: none;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        .lang-flag-btn.active {
+            opacity: 1;
+            border: 3px solid var(--accent-terminal);
+            box-shadow: 0 0 16px rgba(0, 255, 65, 0.6), 0 0 32px rgba(0, 255, 65, 0.3), inset 0 0 20px rgba(0, 255, 65, 0.1);
+            transform: scale(1.1);
+        }
+        .lang-flag-btn:hover:not(.active) {
+            opacity: 0.9;
+            transform: scale(1.15);
+            transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .lang-flag-btn:hover.active {
+            border: 3px solid var(--accent-terminal);
+            transform: scale(1.15);
+            box-shadow: 0 0 20px rgba(0, 255, 65, 0.8), 0 0 40px rgba(0, 255, 65, 0.4), inset 0 0 25px rgba(0, 255, 65, 0.15);
+            transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s ease;
+        }
+
         .logo-box {
             display: inline-block;
             padding: 8px 16px;
@@ -7228,19 +7360,77 @@
                     {/* 完整报告阶段 */}
                     {step === 'fullReport' && (
                         <div className="w-full" style={{minHeight: '100vh', paddingTop: '64px'}}>
-                            <div className="fullreport-topbar" role="banner">
-                                <div className="title">
-                                    <div className="main">
-                                        {lang === 'en' ? 'CURSOR BEHAVIOR REPORT' : 'CURSOR 迷惑行为报告'}
-                                    </div>
-                                    <div className="sub">
-                                        {lang === 'en' ? 'FULL REPORT' : '完整报告'}
+                            {/* 复刻 stats2.html 顶部标题栏（1:1 结构） */}
+                            <div className="top-header" role="banner">
+                                <div className="top-header-left">
+                                    <div className="top-header-title">
+                                        <h1>
+                                            <span className="text-white">
+                                                {lang === 'en'
+                                                    ? 'Cursor Behavior Report · Global Distribution Map'
+                                                    : 'Cursor行为报告全球分布图'}
+                                            </span>
+                                        </h1>
+                                        <p id="sub-title">
+                                            {lang === 'en'
+                                                ? 'Telemetry Status // Node: Central_Pacific'
+                                                : '实时远程监测状态 // 节点：太平洋中部'}
+                                        </p>
                                     </div>
                                 </div>
-                                <div style={{display:'flex', alignItems:'center', gap:'10px', flexShrink: 0}}>
-                                    <span style={{fontSize:'10px', color:'#00ff41', fontWeight: 800, letterSpacing:'0.12em'}}>
-                                        {lang === 'en' ? 'ONLINE' : '在线'}
-                                    </span>
+
+                                <div className="top-header-right">
+                                    <div className="top-header-card">
+                                        <div className="top-header-card-label">
+                                            {lang === 'en' ? 'ACTIVE NODES' : '活跃节点'}
+                                        </div>
+                                        <div className="top-header-card-value text-emerald-400">
+                                            <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full pulse"></span>
+                                            <span>0</span> CONNECTED
+                                        </div>
+                                    </div>
+                                    <div className="top-header-card">
+                                        <div className="top-header-card-label">
+                                            {lang === 'en' ? 'THREAT LEVEL' : '风险评级'}
+                                        </div>
+                                        <div className="top-header-card-value text-red-500">LEVEL_CRITICAL</div>
+                                    </div>
+                                    <div className="flex gap-2 items-center">
+                                        <button
+                                            type="button"
+                                            className={`lang-flag-btn ${lang !== 'en' ? 'active' : ''}`}
+                                            title="中文"
+                                            aria-label="中文"
+                                            onClick={() => {
+                                                try { localStorage.setItem('lang', 'zh'); } catch {}
+                                                switchLanguage('zh-CN');
+                                            }}
+                                        >
+                                            <img
+                                                src="images/zh.png"
+                                                alt="中文"
+                                                onError={(e) => { try { e.currentTarget.style.display = 'none'; } catch {} }}
+                                            />
+                                            <span style={{position:'absolute', left:'-9999px'}}>🇨🇳</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className={`lang-flag-btn ${lang === 'en' ? 'active' : ''}`}
+                                            title="English"
+                                            aria-label="English"
+                                            onClick={() => {
+                                                try { localStorage.setItem('lang', 'en'); } catch {}
+                                                switchLanguage('en');
+                                            }}
+                                        >
+                                            <img
+                                                src="images/us.png"
+                                                alt="English"
+                                                onError={(e) => { try { e.currentTarget.style.display = 'none'; } catch {} }}
+                                            />
+                                            <span style={{position:'absolute', left:'-9999px'}}>🇺🇸</span>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                             {/* 分享模式提示 */}

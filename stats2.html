@@ -291,7 +291,7 @@
             top: 0;
             left: 0;
             right: 0;
-            z-index: 50; /* 在地图(z-index: 0)之上，但低于抽屉(z-index: 100) */
+            z-index: 90; /* 高于地图/浮层，低于抽屉(z-index:100) */
             background: rgba(5, 5, 5, 0.95);
             backdrop-filter: blur(20px);
             border-bottom: 1px solid rgba(0, 255, 65, 0.2);
@@ -723,6 +723,8 @@
             transform: scale(1);
             box-shadow: none;
             overflow: hidden;
+            position: relative;
+            z-index: 95; /* 顶部国旗按钮点击优先级 */
         }
 
         .lang-flag-btn img {
@@ -1398,7 +1400,7 @@
         <div class="top-header-left">
             <div class="top-header-title">
                 <h1>
-                    <span class="lang-key text-white" data-key="top-title">Cursor行为报告全球分布图</span>
+                    <span class="lang-key text-white" data-key="top-title" data-t="top-title">Cursor行为报告全球分布图</span>
                 </h1>
                 <p id="sub-title">Telemetry Uplink: Active // Source: Central_Pacific</p>
             </div>
@@ -1407,7 +1409,7 @@
         <div class="top-header-right">
             <!-- 活跃节点卡片 -->
             <div class="top-header-card">
-                <div class="top-header-card-label lang-key" data-key="active-nodes">活跃节点</div>
+                <div class="top-header-card-label lang-key" data-key="active-nodes" data-t="active-nodes">活跃节点</div>
                 <div class="top-header-card-value text-emerald-400">
                     <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full pulse"></span>
                     <span id="online-count-value">0</span> CONNECTED
@@ -1416,16 +1418,16 @@
             
             <!-- 风险评级卡片 -->
             <div class="top-header-card">
-                <div class="top-header-card-label lang-key" data-key="threat-level">风险评级</div>
+                <div class="top-header-card-label lang-key" data-key="threat-level" data-t="threat-level">风险评级</div>
                 <div class="top-header-card-value text-red-500">LEVEL_CRITICAL</div>
             </div>
             
             <!-- 语言切换按钮 -->
             <div class="flex gap-2 items-center">
-                <button onclick="switchLang('zh')" id="btn-zh" class="lang-flag-btn active" title="中文">
+                <button type="button" id="btn-zh" class="lang-flag-btn active" title="中文" aria-label="中文" data-lang="zh">
                     <img src="images/zh.png" alt="中文" />
                 </button>
-                <button onclick="switchLang('en')" id="btn-en" class="lang-flag-btn" title="English">
+                <button type="button" id="btn-en" class="lang-flag-btn" title="English" aria-label="English" data-lang="en">
                     <img src="images/us.png" alt="English" />
                 </button>
             </div>
@@ -1513,22 +1515,22 @@
                 <div class="clinic-card">
                     <div class="card-header">
                         <i data-lucide="globe"></i>
-                        <span class="card-title">统计 / Stats</span>
+                        <span class="card-title" data-t="panel.stats">统计</span>
                     </div>
                     <div class="flex justify-between items-center mb-8">
                         <div class="text-5xl" id="rtFlag">🏳️</div>
                         <div class="text-right">
                             <div class="metric-value" id="rtNodeName">REGION_NODE</div>
-                            <div class="metric-label">国家识别码</div>
+                            <div class="metric-label" data-t="panel.country_code">国家识别码</div>
                         </div>
                     </div>
                     <div class="grid grid-cols-2 gap-6">
                         <div id="rtUsersCard">
-                            <div class="metric-label">开发者规模</div>
+                            <div class="metric-label" data-t="panel.dev_scale">开发者规模</div>
                             <div class="metric-value" id="rtDiagnosedTotal">--</div>
                         </div>
                         <div id="rtAnalysisCard">
-                            <div class="metric-label">诊断次数</div>
+                            <div class="metric-label" data-t="panel.scan_count">诊断次数</div>
                             <div class="metric-value" id="rtScanTotal">--</div>
                         </div>
                     </div>
@@ -1538,7 +1540,7 @@
                 <div class="clinic-card">
                     <div class="card-header">
                         <i data-lucide="target"></i>
-                        <span class="card-title">开发者画像 / Radar</span>
+                        <span class="card-title" data-t="panel.radar">开发者画像</span>
                     </div>
                     <div id="rtRadar" style="height: 260px; width: 100%;"></div>
                 </div>
@@ -1547,7 +1549,7 @@
                 <div class="clinic-card">
                     <div class="card-header">
                         <i data-lucide="radio"></i>
-                        <span class="card-title">人格分布 / Personality Distribution</span>
+                        <span class="card-title" data-t="panel.personality_distribution">人格分布</span>
                     </div>
                     <div id="rtRealtimeList" class="space-y-3 text-[11px] leading-snug"></div>
                 </div>
@@ -1556,7 +1558,7 @@
                 <div class="clinic-card">
                     <div class="card-header">
                         <i data-lucide="bar-chart-3"></i>
-                        <span class="card-title">国家累计 / Country Totals</span>
+                        <span class="card-title" data-t="panel.country_totals">国家累计</span>
                     </div>
                     <div id="rtCountryTotals" class="space-y-2 text-[11px] leading-snug"></div>
                 </div>
@@ -1565,7 +1567,7 @@
                 <div class="clinic-card">
                     <div class="card-header">
                         <i data-lucide="trophy"></i>
-                        <span class="card-title">我的排名 / My Country Rank</span>
+                        <span class="card-title" data-t="panel.my_country_rank">我的排名</span>
                     </div>
                     <div id="rtMyCountryRanks" class="space-y-2 text-[11px] leading-snug"></div>
                 </div>
@@ -1574,7 +1576,7 @@
                 <div class="clinic-card">
                     <div class="card-header">
                         <i data-lucide="swords"></i>
-                        <span class="card-title">问答态度 / Q&A Attitude</span>
+                        <span class="card-title" data-t="panel.qa_attitude">问答态度</span>
                     </div>
                     <div class="space-y-5">
                         <div class="flex justify-between text-[11px] font-bold uppercase">
@@ -1613,12 +1615,12 @@
                 <div class="clinic-card">
                     <div class="card-header">
                         <i data-lucide="activity"></i>
-                        <span class="card-title">破防监测 / Meltdown Audit</span>
+                        <span class="card-title" data-t="panel.meltdown_audit">破防监测</span>
                     </div>
                     <div class="space-y-5">
                         <div>
                             <div class="flex justify-between items-end">
-                                <div class="metric-label">破防指数</div>
+                                <div class="metric-label" data-t="panel.meltdown_index">破防指数</div>
                                 <div class="text-sm font-bold" id="rtBreakdownRate">--</div>
                             </div>
                             <div class="stat-bar-container">
@@ -1627,11 +1629,11 @@
                         </div>
                         <div class="grid grid-cols-2 gap-4 mt-6">
                             <div class="bg-zinc-900 p-3 border border-zinc-800">
-                                <div class="metric-label">破防等级</div>
+                                <div class="metric-label" data-t="panel.meltdown_level">破防等级</div>
                                 <div class="text-white font-bold text-lg" id="rtMeltdownLevel">--</div>
                             </div>
                             <div class="bg-zinc-900 p-3 border border-zinc-800">
-                                <div class="metric-label">受虐人数</div>
+                                <div class="metric-label" data-t="panel.meltdown_victims">受虐人数</div>
                                 <div class="text-green-500 font-bold text-lg" id="rtMeltdownVictims">--</div>
                             </div>
                         </div>
@@ -1642,7 +1644,7 @@
                 <div class="clinic-card" id="vibe-explosion-card">
                     <div class="card-header">
                         <i data-lucide="cloud"></i>
-                        <span class="card-title">本国词云 / National Word Cloud</span>
+                        <span class="card-title" data-t="panel.wordcloud">本国词云</span>
                         <div class="ml-auto flex items-center gap-3"></div>
                     </div>
                     <div class="p-2" id="rtSemanticTags">
@@ -1697,7 +1699,7 @@
                 <div class="clinic-card">
                     <div class="card-header">
                         <i data-lucide="users"></i>
-                        <span class="card-title">高分图谱 / LPDEF Ranking</span>
+                        <span class="card-title" data-t="panel.lpdef_ranking">高分图谱</span>
                     </div>
                     <div id="rtTopTalentsHeroes" class="flex flex-wrap gap-2 mb-3"></div>
                     <div class="scrolling-wrapper" id="rtEliteList">
@@ -1712,7 +1714,7 @@
                 <div class="clinic-card">
                     <div class="card-header">
                         <i data-lucide="pie-chart"></i>
-                        <span class="card-title">全球占比 / Global Ratio</span>
+                        <span class="card-title" data-t="panel.global_ratio">全球占比</span>
                     </div>
                     <div class="chart-container">
                         <div id="rtGlobalRatioPie" style="width: 200px; height: 200px;"></div>
@@ -2306,7 +2308,7 @@
                 const box = document.getElementById('rtRealtimeList');
                 if (!box) return;
                 if (!Array.isArray(records) || records.length === 0) {
-                    box.innerHTML = '<div class="text-zinc-500 text-xs">暂无人格分布数据</div>';
+                    box.innerHTML = `<div class="text-zinc-500 text-xs">${escapeHtml(getI18nText('realtime.none') || (currentLang === 'en' ? 'No data' : '暂无人格分布数据'))}</div>`;
                     return;
                 }
                 box.innerHTML = records
@@ -2367,7 +2369,7 @@
                     const retryArg = escapeHtml(JSON.stringify(countryNameOrCode));
                     realtimeDom.innerHTML = `
                         <div class="border border-red-500/30 bg-red-950/20 p-4">
-                            <div class="text-red-300 text-sm font-bold mb-2">数据加载失败，请检查网络连接</div>
+                            <div class="text-red-300 text-sm font-bold mb-2">${escapeHtml(getI18nText('error.data_load_failed') || 'Failed to load data')}</div>
                             <div class="text-zinc-400 text-xs mb-3">${escapeHtml(message || '')}</div>
                             <button
                                 type="button"
@@ -2388,8 +2390,8 @@
                 if (statusEl) statusEl.textContent = 'DATA: FETCHING';
                 // 请求发起前先给出加载态，避免旧数据误导
                 if (!opts.silent) {
-                    renderRadarMessage('数据加载中...');
-                    if (realtimeDom) realtimeDom.innerHTML = '<div class="text-zinc-500 text-xs">加载中...</div>';
+                    renderRadarMessage(getI18nText('radar.loading') || 'Loading...');
+                    if (realtimeDom) realtimeDom.innerHTML = `<div class="text-zinc-500 text-xs">${escapeHtml(getI18nText('common.loading') || (currentLang === 'en' ? 'Loading...' : '加载中...'))}</div>`;
                 }
 
                 const resp = await fetch(url);
@@ -2635,25 +2637,25 @@
 
                         const totalsHtml = totals
                             ? [
-                                rowTotals('调戏AI次数 / Messages', totals.total_messages, totalsRanks?.total_messages),
-                                rowTotals('对话字符数 / Total Chars', totals.total_chars, totalsRanks?.total_chars),
-                                rowTotals('废话输出 / User Chars', totals.total_user_chars, totalsRanks?.total_user_chars),
-                                rowTotals('平均长度 / Avg Len', Math.round(Number(totals.avg_user_message_length) || 0), totalsRanks?.avg_user_message_length),
-                                rowTotals('甲方上身 / Jiafang', totals.jiafang_count, totalsRanks?.jiafang_count),
-                                rowTotals('磕头 / Ketao', totals.ketao_count, totalsRanks?.ketao_count),
+                                rowTotals(getI18nText('countryTotals.messages') || 'Messages', totals.total_messages, totalsRanks?.total_messages),
+                                rowTotals(getI18nText('countryTotals.totalChars') || 'Total Chars', totals.total_chars, totalsRanks?.total_chars),
+                                rowTotals(getI18nText('countryTotals.userChars') || 'User Chars', totals.total_user_chars, totalsRanks?.total_user_chars),
+                                rowTotals(getI18nText('countryTotals.avgLen') || 'Avg Len', Math.round(Number(totals.avg_user_message_length) || 0), totalsRanks?.avg_user_message_length),
+                                rowTotals(getI18nText('countryTotals.jiafang') || 'Jiafang', totals.jiafang_count, totalsRanks?.jiafang_count),
+                                rowTotals(getI18nText('countryTotals.ketao') || 'Ketao', totals.ketao_count, totalsRanks?.ketao_count),
                               ].join('')
-                            : '<div class="text-zinc-500 text-xs">暂无数据</div>';
+                            : `<div class="text-zinc-500 text-xs">${currentLang === 'en' ? 'No data' : '暂无数据'}</div>`;
 
                         const ranksHtml = totals
                             ? [
-                                rowRanks('调戏AI次数 / Messages', meVals?.total_messages, ranks?.total_messages),
-                                rowRanks('对话字符数 / Total Chars', meVals?.total_chars, ranks?.total_chars),
-                                rowRanks('废话输出 / User Chars', meVals?.total_user_chars, ranks?.total_user_chars),
-                                rowRanks('平均长度 / Avg Len', Math.round(Number(meVals?.avg_user_message_length) || 0), ranks?.avg_user_message_length),
-                                rowRanks('甲方上身 / Jiafang', meVals?.jiafang_count, ranks?.jiafang_count),
-                                rowRanks('磕头 / Ketao', meVals?.ketao_count, ranks?.ketao_count),
+                                rowRanks(getI18nText('countryTotals.messages') || 'Messages', meVals?.total_messages, ranks?.total_messages),
+                                rowRanks(getI18nText('countryTotals.totalChars') || 'Total Chars', meVals?.total_chars, ranks?.total_chars),
+                                rowRanks(getI18nText('countryTotals.userChars') || 'User Chars', meVals?.total_user_chars, ranks?.total_user_chars),
+                                rowRanks(getI18nText('countryTotals.avgLen') || 'Avg Len', Math.round(Number(meVals?.avg_user_message_length) || 0), ranks?.avg_user_message_length),
+                                rowRanks(getI18nText('countryTotals.jiafang') || 'Jiafang', meVals?.jiafang_count, ranks?.jiafang_count),
+                                rowRanks(getI18nText('countryTotals.ketao') || 'Ketao', meVals?.ketao_count, ranks?.ketao_count),
                               ].join('')
-                            : '<div class="text-zinc-500 text-xs">暂无数据</div>';
+                            : `<div class="text-zinc-500 text-xs">${currentLang === 'en' ? 'No data' : '暂无数据'}</div>`;
 
                         if (totalsBox) totalsBox.innerHTML = totalsHtml;
                         if (ranksBox) ranksBox.innerHTML = ranksHtml;
@@ -2664,8 +2666,9 @@
                     try {
                         const totalsBox = document.getElementById('rtCountryTotals');
                         const ranksBox = document.getElementById('rtMyCountryRanks');
-                        if (totalsBox && !totalsBox.innerHTML.trim()) totalsBox.innerHTML = '<div class="text-zinc-500 text-xs">暂无数据</div>';
-                        if (ranksBox && !ranksBox.innerHTML.trim()) ranksBox.innerHTML = '<div class="text-zinc-500 text-xs">暂无数据</div>';
+                        const noData = escapeHtml(getI18nText('common.no_data') || 'No data');
+                        if (totalsBox && !totalsBox.innerHTML.trim()) totalsBox.innerHTML = `<div class="text-zinc-500 text-xs">${noData}</div>`;
+                        if (ranksBox && !ranksBox.innerHTML.trim()) ranksBox.innerHTML = `<div class="text-zinc-500 text-xs">${noData}</div>`;
                     } catch { /* ignore */ }
                 }
 
@@ -2678,7 +2681,7 @@
 
                 // 雷达图空状态：全部为 0 时显示提示而不是渲染空图
                 if (radarData.every((v) => Number(v) === 0)) {
-                    renderRadarMessage('该地区画像数据不足，正在汇总中...');
+                    renderRadarMessage(getI18nText('radar.insufficient') || 'Not enough data');
                 } else {
                     renderRadar(radarData);
                 }
@@ -2737,7 +2740,7 @@
                 if (topTalentsHeroesEl) topTalentsHeroesEl.innerHTML = '';
                 if (topTalentsEl) {
                     if (!topBy || topBy.length === 0) {
-                        topTalentsEl.innerHTML = '<div class="text-zinc-500 text-xs">暂无高分图谱数据</div>';
+                        topTalentsEl.innerHTML = `<div class="text-zinc-500 text-xs">${escapeHtml(getI18nText('lpdef.none') || 'No data')}</div>`;
                     } else {
                         const fmtScore = (item) => {
                             const s = Number(item?.score);
@@ -2748,7 +2751,11 @@
                         topTalentsEl.innerHTML = topBy.map((it) => {
                             const user = it?.user || {};
                             const meta = _resolveUserMeta(user);
-                            const label = `${escapeHtml(it?.labelZh || it?.key || '--')} / ${escapeHtml(it?.labelEn || '')}`;
+                            // 英文模式不要“中英混排”，只显示对应语言的 label
+                            const labelRaw = (currentLang === 'en')
+                                ? (it?.labelEn || it?.key || '--')
+                                : (it?.labelZh || it?.key || '--');
+                            const label = `${escapeHtml(labelRaw)}`;
                             const scoreText = fmtScore(it);
                             const nameHtml = meta.profileUrl
                                 ? `<a href="${escapeHtml(meta.profileUrl)}" target="_blank" rel="noopener noreferrer" class="text-[10px] text-zinc-200 truncate hover:underline">${escapeHtml(meta.display)}</a>`
@@ -2925,7 +2932,24 @@
         // 全局变量声明（确保在全局作用域，不在闭包内）
         // =========================
         const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content;
-        let currentLang = 'zh';
+        // stats2 多语言：以 localStorage.lang 为准（'en' | 'zh'）
+        const LANG_STORAGE_KEY = 'lang';
+        const normalizeLang = (v) => {
+            const s = String(v || '').trim().toLowerCase();
+            if (s === 'en' || s.startsWith('en')) return 'en';
+            if (s === 'zh' || s === 'zh-cn' || s.startsWith('zh')) return 'zh';
+            return 'zh';
+        };
+        let currentLang = (() => {
+            try {
+                const savedLang = localStorage.getItem(LANG_STORAGE_KEY);
+                // 兼容旧键：appLanguage（index.html 历史遗留）
+                const fallback = localStorage.getItem('appLanguage');
+                return normalizeLang(savedLang || fallback || 'zh');
+            } catch {
+                return 'zh';
+            }
+        })();
         
         // Supabase 相关变量（全局作用域，不在任何函数内）
         let supabaseClient = null;
@@ -3075,6 +3099,356 @@
                 'rank': 'Rank'
             }
         };
+
+        // ============================================
+        // I18N_MAP：动态文案映射（不要直接信任 RPC label）
+        // ============================================
+        const I18N_MAP = {
+            zh: {
+                // Drawer / Panels
+                'drawer.my_stats': '我的数据统计',
+                'drawer.tech_rank': '技术排名',
+                'drawer.personality_title': '人格称号',
+                'drawer.real_evaluation': '真实评价',
+
+                // Country panel titles
+                'panel.stats': '统计',
+                'panel.radar': '开发者画像',
+                'panel.personality_distribution': '人格分布',
+                'panel.country_totals': '国家累计',
+                'panel.my_country_rank': '我的排名',
+                'panel.qa_attitude': '问答态度',
+                'panel.meltdown_audit': '破防监测',
+                'panel.meltdown_index': '破防指数',
+                'panel.meltdown_level': '破防等级',
+                'panel.meltdown_victims': '受虐人数',
+                'panel.wordcloud': '本国词云',
+                'panel.lpdef_ranking': '高分图谱',
+                'panel.global_ratio': '全球占比',
+
+                // Country panel labels
+                'panel.country_code': '国家识别码',
+                'panel.dev_scale': '开发者规模',
+                'panel.scan_count': '诊断次数',
+
+                // Common
+                'common.no_data': '暂无数据',
+                'common.loading': '加载中...',
+                'common.recruiting': '待招募',
+                'common.waiting': '等待加入',
+                'common.syncing': '数据同步中',
+                'common.connecting_cloud': '正在连接云端数据源，请稍候…',
+                'common.no_cloud_summary': '暂未获取到云端汇总数据',
+                'common.suggestion_run_once': '建议：先在主页面完成一次分析/上报，然后刷新此页面。',
+
+                // Metrics
+                'metric.ai_interrogations': '调戏AI次数',
+                'metric.jiafang': '甲方上身次数',
+                'metric.ketao': '赛博磕头次数',
+                'metric.banter_total': '废话输出总数',
+                'metric.avg_len': '平均吹水长度',
+                'metric.avg_len_unit': '字/条',
+
+                // Country totals table labels
+                'countryTotals.messages': '调戏AI次数',
+                'countryTotals.totalChars': '对话字符数',
+                'countryTotals.userChars': '废话输出',
+                'countryTotals.avgLen': '平均长度',
+                'countryTotals.jiafang': '甲方上身',
+                'countryTotals.ketao': '磕头',
+
+                // Radar / states
+                'radar.loading': '数据加载中...',
+                'radar.insufficient': '该地区画像数据不足，正在汇总中...',
+                'realtime.none': '暂无人格分布数据',
+                'lpdef.none': '暂无高分图谱数据',
+
+                // Tooltip labels
+                'tooltip.active_nodes': '活跃节点',
+                'tooltip.record': '战绩',
+                'tooltip.roast': '吐槽',
+                'tooltip.answers': '答案之书',
+
+                // Errors
+                'error.data_load_failed': '数据加载失败，请检查网络连接'
+            },
+            en: {
+                // Drawer / Panels
+                'drawer.my_stats': 'My Stats',
+                'drawer.tech_rank': 'Tech Rank',
+                'drawer.personality_title': 'Title',
+                'drawer.real_evaluation': 'Real Evaluation',
+
+                // Country panel titles
+                'panel.stats': 'Stats',
+                'panel.radar': 'Radar',
+                'panel.personality_distribution': 'Personality Distribution',
+                'panel.country_totals': 'Country Totals',
+                'panel.my_country_rank': 'My Country Rank',
+                'panel.qa_attitude': 'Q&A Attitude',
+                'panel.meltdown_audit': 'Meltdown Audit',
+                'panel.meltdown_index': 'Meltdown Index',
+                'panel.meltdown_level': 'Meltdown Level',
+                'panel.meltdown_victims': 'Victims',
+                'panel.wordcloud': 'National Word Cloud',
+                'panel.lpdef_ranking': 'LPDEF Ranking',
+                'panel.global_ratio': 'Global Ratio',
+
+                // Country panel labels
+                'panel.country_code': 'Country Code',
+                'panel.dev_scale': 'Developer Scale',
+                'panel.scan_count': 'Scan Count',
+
+                // Common
+                'common.no_data': 'No data',
+                'common.loading': 'Loading...',
+                'common.recruiting': 'Recruiting',
+                'common.waiting': 'Waiting',
+                'common.syncing': 'Syncing',
+                'common.connecting_cloud': 'Connecting to cloud source…',
+                'common.no_cloud_summary': 'No cloud summary available yet',
+                'common.suggestion_run_once': 'Tip: run an analysis on the main page first, then refresh this page.',
+
+                // Metrics
+                'metric.ai_interrogations': 'AI Interrogations',
+                'metric.jiafang': 'Boss Mode Triggers',
+                'metric.ketao': 'Cyber Kowtows',
+                'metric.banter_total': 'Banter Output',
+                'metric.avg_len': 'Avg Prompt Length',
+                'metric.avg_len_unit': 'chars/msg',
+
+                // Country totals table labels
+                'countryTotals.messages': 'AI Interrogations',
+                'countryTotals.totalChars': 'Total Chars',
+                'countryTotals.userChars': 'User Chars',
+                'countryTotals.avgLen': 'Avg Len',
+                'countryTotals.jiafang': 'Jiafang',
+                'countryTotals.ketao': 'Ketao',
+
+                // Radar / states
+                'radar.loading': 'Loading...',
+                'radar.insufficient': 'Not enough data yet. Aggregating...',
+                'realtime.none': 'No personality distribution yet',
+                'lpdef.none': 'No LPDEF ranking yet',
+
+                // Tooltip labels
+                'tooltip.active_nodes': 'Active Nodes',
+                'tooltip.record': 'Record',
+                'tooltip.roast': 'Roast',
+                'tooltip.answers': 'Answers',
+
+                // Errors
+                'error.data_load_failed': 'Failed to load data. Check your connection.'
+            }
+        };
+
+        const DIMENSION_NAME_I18N = {
+            ai: { zh: '调戏AI次数', en: 'AI Interrogations', icon: '💬', suffixZh: '次', suffixEn: 'times' },
+            word: { zh: '平均长度', en: 'Avg Length', icon: '📏', suffixZh: '字/条', suffixEn: 'chars/msg' },
+            day: { zh: '上岗天数', en: 'Days On Duty', icon: '📅', suffixZh: '天', suffixEn: 'days' },
+            no: { zh: '甲方上身', en: 'Boss Mode', icon: '🚫', suffixZh: '次', suffixEn: 'times' },
+            say: { zh: '废话输出', en: 'Banter Output', icon: '💭', suffixZh: '字', suffixEn: 'chars' },
+            please: { zh: '赛博磕头', en: 'Cyber Kowtow', icon: '🙏', suffixZh: '次', suffixEn: 'times' }
+        };
+
+        const getI18nText = (key, fallback = '') => {
+            const lang = currentLang === 'en' ? 'en' : 'zh';
+            return (
+                (I18N_MAP[lang] && I18N_MAP[lang][key]) ||
+                (i18n[lang] && i18n[lang][key]) ||
+                fallback ||
+                ''
+            );
+        };
+
+        // 全局 HTML 转义（历史代码里有多处引用 escapeHtml）
+        // 注意：底层实现使用 _escapeHtml（函数声明会被提升，可安全在其定义前调用）
+        function escapeHtml(s) {
+            try { return _escapeHtml(String(s ?? '')); } catch { return String(s ?? ''); }
+        }
+
+        function translatePage() {
+            const lang = currentLang === 'en' ? 'en' : 'zh';
+            try {
+                // 按用户要求：优先 data-t
+                document.querySelectorAll('[data-t]').forEach((el) => {
+                    const k = el.getAttribute('data-t');
+                    if (!k) return;
+                    const v = getI18nText(k, '');
+                    if (v) el.textContent = v;
+                });
+            } catch { /* ignore */ }
+
+            // 兼容现存实现：lang-key + data-key
+            try {
+                document.querySelectorAll('.lang-key').forEach((el) => {
+                    const k = el.getAttribute('data-key');
+                    if (!k) return;
+                    const v = (i18n[lang] && i18n[lang][k]) ? i18n[lang][k] : '';
+                    if (v) el.textContent = v;
+                });
+            } catch { /* ignore */ }
+        }
+
+        // ============================================
+        // 可选：加载英文称号/标签配置（如 rank_en.json）
+        // ============================================
+        let __languageConfigLoaded = false;
+        async function loadLanguageConfig() {
+            if (__languageConfigLoaded) return;
+            __languageConfigLoaded = true;
+            try {
+                const tryFetchJson = async (paths) => {
+                    for (const p of paths) {
+                        try {
+                            const resp = await fetch(p, { cache: 'no-cache' });
+                            if (!resp.ok) continue;
+                            const ct = resp.headers.get('content-type') || '';
+                            if (!ct.includes('json')) continue;
+                            return await resp.json();
+                        } catch { /* ignore */ }
+                    }
+                    return null;
+                };
+
+                // 这些文件不是强依赖：不存在时静默跳过
+                const rankEn = await tryFetchJson([
+                    './rank_en.json',
+                    './src/rank_en.json',
+                    './rank-en.json',
+                    './src/rank-en.json'
+                ]);
+
+                const personalityNamesEn = await tryFetchJson([
+                    './personalityNames_en.json',
+                    './src/personalityNames_en.json',
+                    './personality-names-en.json',
+                    './src/personality-names-en.json'
+                ]);
+
+                window.__LANG_CONFIG = { rankEn, personalityNamesEn };
+            } catch { /* ignore */ }
+        }
+
+        const translateDimensionName = (dimId) => {
+            const x = DIMENSION_NAME_I18N[dimId];
+            if (!x) return String(dimId || '');
+            return currentLang === 'en' ? x.en : x.zh;
+        };
+        const translateDimensionSuffix = (dimId) => {
+            const x = DIMENSION_NAME_I18N[dimId];
+            if (!x) return '';
+            return currentLang === 'en' ? (x.suffixEn || '') : (x.suffixZh || '');
+        };
+
+        // “码农”英文映射：按分数段切换 Code Monkey / Architect
+        const mapCoderTitleToEn = (userData) => {
+            try {
+                const totalUsers = Number(window.lastData?.totalUsers) || 0;
+                const vibeRank = Number(userData?.vibe_rank || userData?.vibeRank || NaN);
+                const vibePercentile = Number(userData?.vibe_percentile || userData?.vibePercentile || NaN);
+                const avgRank = Number(userData?.avg_rank || userData?.avgRank || NaN); // 0-100，越大越强
+
+                // 规则：Top 10% 或 percentile>=90 或 avgRank>=80 => Architect，否则 Code Monkey
+                if (Number.isFinite(vibeRank) && totalUsers > 0) {
+                    if (vibeRank <= Math.max(1, Math.floor(totalUsers * 0.10))) return 'Architect';
+                }
+                if (Number.isFinite(vibePercentile) && vibePercentile >= 90) return 'Architect';
+                if (Number.isFinite(avgRank) && avgRank >= 80) return 'Architect';
+                return 'Code Monkey';
+            } catch {
+                return 'Code Monkey';
+            }
+        };
+
+        const translatePersonalityName = (name, userData) => {
+            const raw = String(name || '').trim();
+            if (currentLang !== 'en') return raw;
+            if (!raw) return raw;
+            if (raw.includes('码农')) return mapCoderTitleToEn(userData);
+            // 若外部英文称号表存在，优先使用（vibe_index_str -> name）
+            try {
+                const idx = String(userData?.vibe_index_str || userData?.vibeIndexStr || userData?.vibeIndex || '').trim();
+                const cfg = window.__LANG_CONFIG;
+                if (cfg && cfg.personalityNamesEn && idx && idx.length === 5) {
+                    const hit = cfg.personalityNamesEn[idx];
+                    if (typeof hit === 'string' && hit.trim()) return hit.trim();
+                    if (hit && typeof hit === 'object' && (hit.name || hit.title)) return String(hit.name || hit.title).trim();
+                }
+            } catch { /* ignore */ }
+            return raw;
+        };
+
+        const translateRankFeedbackLabel = (dimId, label, value) => {
+            const raw = String(label || '').trim();
+            if (currentLang !== 'en') return raw;
+            if (!raw) return raw;
+            try {
+                const cfg = window.__LANG_CONFIG;
+                const rankEn = cfg && cfg.rankEn ? cfg.rankEn : null;
+                const d = String(dimId || '').trim();
+                if (rankEn && d) {
+                    // 支持多种可能结构：rankEn[dimId][label] / rankEn[dimId].labels[label]
+                    const direct = rankEn?.[d]?.[raw];
+                    if (typeof direct === 'string' && direct.trim()) return direct.trim();
+                    const nested = rankEn?.[d]?.labels?.[raw];
+                    if (typeof nested === 'string' && nested.trim()) return nested.trim();
+                }
+            } catch { /* ignore */ }
+
+            // 小范围兜底：若某些 label 恰好是中文称号
+            if (raw.includes('码农')) {
+                return (Number(value) >= 80) ? 'Architect' : 'Code Monkey';
+            }
+            return raw;
+        };
+
+        function updateLanguageContext() {
+            // 读取最新语言设置（以 localStorage.lang 为准）
+            let next = currentLang;
+            try {
+                next = normalizeLang(localStorage.getItem(LANG_STORAGE_KEY) || localStorage.getItem('appLanguage') || currentLang);
+            } catch { /* ignore */ }
+            currentLang = next === 'en' ? 'en' : 'zh';
+
+            // 持久化：新键 lang + 兼容旧键 appLanguage
+            try { localStorage.setItem(LANG_STORAGE_KEY, currentLang); } catch { /* ignore */ }
+            try { localStorage.setItem('appLanguage', currentLang === 'en' ? 'en' : 'zh-CN'); } catch { /* ignore */ }
+            try { document.documentElement.setAttribute('lang', currentLang === 'en' ? 'en' : 'zh-CN'); } catch { /* ignore */ }
+
+            // 顶部国旗按钮选中态
+            const btnZh = document.getElementById('btn-zh');
+            const btnEn = document.getElementById('btn-en');
+            if (btnZh) btnZh.classList.toggle('active', currentLang === 'zh');
+            if (btnEn) btnEn.classList.toggle('active', currentLang === 'en');
+
+            // 静态文案：sub-title + 页面 data-t/data-key
+            try {
+                const sub = document.getElementById('sub-title');
+                if (sub) sub.innerText = (i18n[currentLang] && i18n[currentLang]['sub-title']) ? i18n[currentLang]['sub-title'] : (sub.innerText || '');
+            } catch { /* ignore */ }
+            translatePage();
+
+            // 重新渲染：依赖 currentLang 的列表/地图/抽屉内容
+            try {
+                if (window.lastData) {
+                    renderLocationList(window.lastData.locationRank);
+                    const activityData = window.lastData.latestRecords || window.lastData.recentVictims || [];
+                    renderRecentActivity(activityData);
+                    renderPersonalityDistribution(window.lastData.personalityDistribution);
+                    initGlobalMap(window.lastData.locationRank).catch(() => {});
+                }
+            } catch { /* ignore */ }
+
+            // 如果国家透视面板处于打开状态：静默刷新右侧抽屉（文案会随 currentLang 更新）
+            try {
+                if (typeof refreshCountryRightPanel === 'function') {
+                    refreshCountryRightPanel();
+                } else if (typeof updateCountryDashboard === 'function' && currentDrawerCountry && currentDrawerCountry.code) {
+                    updateCountryDashboard(String(currentDrawerCountry.code).toUpperCase(), { preferCache: true, silent: true });
+                }
+            } catch { /* ignore */ }
+        }
 
         const countryNameMap = {
             'CN': { zh: '中国', en: 'China' },
@@ -3957,13 +4331,39 @@
             scheduleSync('bindFixedCursorFollowMap.init');
         }
 
-        // 🔍 称号与说明映射（完全同步 content.ts 的业务语义）
+        // 🔍 LPDEF 5维度称号与说明（中英双语）
         const DIMENSION_TITLES = {
-            L: { title: '架构师的直觉', description: '在逻辑迷宫中一眼看穿本质' },
-            P: { title: '深海潜航者', description: '面对复杂逻辑拥有极致的静气' },
-            D: { title: '像素级侦探', description: '任何微小的代码瑕疵都无所遁形' },
-            E: { title: '共情架构师', description: '代码中流淌着对用户体验的极致理解' },
-            F: { title: '指尖打击乐手', description: '极致的输入频率下保持着惊人的准确率' }
+            L: {
+                zh: { title: '架构师的直觉', description: '在逻辑迷宫中一眼看穿本质' },
+                en: { title: "Architect's Intuition", description: 'Spot the core through any logic maze' }
+            },
+            P: {
+                zh: { title: '深海潜航者', description: '面对复杂逻辑拥有极致的静气' },
+                en: { title: 'Deep Sea Diver', description: 'Stay calm under complex logic' }
+            },
+            D: {
+                zh: { title: '像素级侦探', description: '任何微小的代码瑕疵都无所遁形' },
+                en: { title: 'Pixel-level Detective', description: 'Catch even the tiniest bug' }
+            },
+            E: {
+                zh: { title: '共情架构师', description: '代码中流淌着对用户体验的极致理解' },
+                en: { title: 'Empathy Architect', description: 'Build with user experience in mind' }
+            },
+            F: {
+                zh: { title: '指尖打击乐手', description: '极致的输入频率下保持着惊人的准确率' },
+                en: { title: 'Finger Drummer', description: 'High-frequency input, high accuracy' }
+            }
+        };
+
+        const getLpdefTitle = (dim) => {
+            const d = DIMENSION_TITLES[dim];
+            if (!d) return '';
+            return currentLang === 'en' ? (d.en?.title || '') : (d.zh?.title || '');
+        };
+        const getLpdefDescription = (dim) => {
+            const d = DIMENSION_TITLES[dim];
+            if (!d) return '';
+            return currentLang === 'en' ? (d.en?.description || '') : (d.zh?.description || '');
         };
         
         let lpdefExperts = { L: null, P: null, D: null, E: null, F: null }; // 存储当前五个维度的专家信息
@@ -4061,28 +4461,14 @@
         }
 
         function switchLang(lang) {
-            currentLang = lang;
-            document.getElementById('btn-zh').classList.toggle('active', lang === 'zh');
-            document.getElementById('btn-en').classList.toggle('active', lang === 'en');
-            
-            // 更新静态文案
-            document.getElementById('sub-title').innerText = i18n[lang]['sub-title'];
-            document.querySelectorAll('.lang-key').forEach(el => {
-                const key = el.getAttribute('data-key');
-                el.innerText = i18n[lang][key];
-            });
+            const next = (String(lang || '').trim().toLowerCase() === 'en') ? 'en' : 'zh';
+            try { localStorage.setItem(LANG_STORAGE_KEY, next); } catch { /* ignore */ }
+            updateLanguageContext();
+        }
 
-            // 重新渲染数据依赖型组件
-            if (window.lastData) {
-                renderLocationList(window.lastData.locationRank);
-                const activityData = window.lastData.latestRecords || window.lastData.recentVictims || [];
-                renderRecentActivity(activityData);
-                renderPersonalityDistribution(window.lastData.personalityDistribution);
-                // 异步渲染地图，确保地图数据已加载
-                initGlobalMap(window.lastData.locationRank).catch(err => {
-                    console.warn('[Dashboard] 语言切换时地图渲染失败:', err);
-                });
-            }
+        // 右上角国旗：点击切换中/英（并写入 localStorage.lang）
+        function toggleLangByUSFlag() {
+            try { switchLang(currentLang === 'en' ? 'zh' : 'en'); } catch { /* ignore */ }
         }
 
         // 动态同步顶部标题栏高度（避免抽屉/内容遮挡）
@@ -4099,11 +4485,29 @@
         try {
             // 首次渲染
             if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', () => {
+                document.addEventListener('DOMContentLoaded', async () => {
+                    // 绑定国旗交互：点击写入 localStorage.lang，并刷新语言上下文
+                    try {
+                        const btnZh = document.getElementById('btn-zh');
+                        const btnEn = document.getElementById('btn-en');
+                        if (btnZh) btnZh.addEventListener('click', () => { try { localStorage.setItem(LANG_STORAGE_KEY, 'zh'); } catch { /* ignore */ } updateLanguageContext(); });
+                        if (btnEn) btnEn.addEventListener('click', () => { try { localStorage.setItem(LANG_STORAGE_KEY, 'en'); } catch { /* ignore */ } updateLanguageContext(); });
+                    } catch { /* ignore */ }
+
+                    // 初始化语言配置（可选）+ 首次刷新语言上下文
+                    try { await loadLanguageConfig(); } catch { /* ignore */ }
+                    try { updateLanguageContext(); } catch { /* ignore */ }
                     syncTopHeaderHeight();
                     setTimeout(syncTopHeaderHeight, 60);
                 });
             } else {
+                try {
+                    const btnZh = document.getElementById('btn-zh');
+                    const btnEn = document.getElementById('btn-en');
+                    if (btnZh) btnZh.addEventListener('click', () => { try { localStorage.setItem(LANG_STORAGE_KEY, 'zh'); } catch { /* ignore */ } updateLanguageContext(); });
+                    if (btnEn) btnEn.addEventListener('click', () => { try { localStorage.setItem(LANG_STORAGE_KEY, 'en'); } catch { /* ignore */ } updateLanguageContext(); });
+                } catch { /* ignore */ }
+                try { loadLanguageConfig().then(() => updateLanguageContext()).catch(() => updateLanguageContext()); } catch { /* ignore */ }
                 syncTopHeaderHeight();
                 setTimeout(syncTopHeaderHeight, 60);
             }
@@ -4171,7 +4575,7 @@
          * @returns {HTMLElement} 卡片元素
          */
         function createDimensionCard(dimId, config, maxValue, targetUserName, targetIpLocation, feedback, isGlobalTopMode) {
-            const displayVal = new Intl.NumberFormat('zh-CN').format(maxValue);
+            const displayVal = new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN').format(maxValue);
             const unit = config.suffix || '';
 
             const card = document.createElement('div');
@@ -4194,7 +4598,7 @@
                 <div class="drawer-item-label">${config.name}</div>
                 <div class="drawer-item-value text-2xl">${displayVal}<span class="text-[10px] ml-1 font-normal opacity-70">${unit}</span></div>
                 <div class="drawer-item-desc mt-2 pt-2 border-t border-[#00ff41]/10">
-                    <div class="text-[10px] text-white font-bold truncate">${feedback ? feedback.label : 'RANKED'}</div>
+                    <div class="text-[10px] text-white font-bold truncate">${feedback ? translateRankFeedbackLabel(dimId, feedback.label, maxValue) : 'RANKED'}</div>
                     <div class="text-[8px] text-[#00ff41]/60 truncate italic">@${targetUserName || 'ANONYMOUS'}</div>
                 </div>
             `;
@@ -4338,14 +4742,14 @@
                 // ignore
             }
 
-            // 定义维度配置
+            // 定义维度配置（名称/单位随语言切换）
             const dimensionConfig = {
-                ai: { name: '对话AI次数', icon: '💬', suffix: '次' },
-                word: { name: '平均长度', icon: '📏', suffix: '字/条' },
-                day: { name: '上岗天数', icon: '📅', suffix: '天' },
-                no: { name: '甲方上身', icon: '🚫', suffix: '次' },
-                say: { name: '废话输出', icon: '💭', suffix: '字' },
-                please: { name: '赛博磕头', icon: '🙏', suffix: '次' }
+                ai: { name: translateDimensionName('ai'), icon: DIMENSION_NAME_I18N.ai?.icon || '💬', suffix: translateDimensionSuffix('ai') },
+                word: { name: translateDimensionName('word'), icon: DIMENSION_NAME_I18N.word?.icon || '📏', suffix: translateDimensionSuffix('word') },
+                day: { name: translateDimensionName('day'), icon: DIMENSION_NAME_I18N.day?.icon || '📅', suffix: translateDimensionSuffix('day') },
+                no: { name: translateDimensionName('no'), icon: DIMENSION_NAME_I18N.no?.icon || '🚫', suffix: translateDimensionSuffix('no') },
+                say: { name: translateDimensionName('say'), icon: DIMENSION_NAME_I18N.say?.icon || '💭', suffix: translateDimensionSuffix('say') },
+                please: { name: translateDimensionName('please'), icon: DIMENSION_NAME_I18N.please?.icon || '🙏', suffix: translateDimensionSuffix('please') }
             };
 
             // 定义左右抽屉的维度分配
@@ -4964,9 +5368,10 @@
                 const totalUsersCard = document.createElement('div');
                 totalUsersCard.className = 'drawer-item';
                 const totalUsers = data.totalUsers !== undefined && data.totalUsers !== null ? Number(data.totalUsers) : undefined;
+                const nfDrawer = new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN');
                 totalUsersCard.innerHTML = `
-                    <div class="drawer-item-label">已诊断开发者</div>
-                    <div class="drawer-item-value text-3xl">${totalUsers !== undefined ? new Intl.NumberFormat('zh-CN').format(totalUsers) : 'N/A'}</div>
+                    <div class="drawer-item-label">${(i18n[currentLang] && i18n[currentLang]['total-victims']) ? i18n[currentLang]['total-victims'] : (currentLang === 'en' ? 'Total Developers' : '已诊断开发者')}</div>
+                    <div class="drawer-item-value text-3xl">${totalUsers !== undefined ? nfDrawer.format(totalUsers) : 'N/A'}</div>
                     <div class="drawer-item-desc">USERS_RECOGNIZED_SUCCESSFULLY</div>
                 `;
                 rightBody.appendChild(totalUsersCard);
@@ -4976,8 +5381,8 @@
                 totalAnalysisCard.className = 'drawer-item';
                 const totalAnalysis = data.totalAnalysis !== undefined && data.totalAnalysis !== null ? Number(data.totalAnalysis) : undefined;
                 totalAnalysisCard.innerHTML = `
-                    <div class="drawer-item-label">全网扫描次数</div>
-                    <div class="drawer-item-value text-3xl">${totalAnalysis !== undefined ? new Intl.NumberFormat('zh-CN').format(totalAnalysis) : 'N/A'}</div>
+                    <div class="drawer-item-label">${(i18n[currentLang] && i18n[currentLang]['total-analysis']) ? i18n[currentLang]['total-analysis'] : (currentLang === 'en' ? 'Total Scans' : '全网扫描次数')}</div>
+                    <div class="drawer-item-value text-3xl">${totalAnalysis !== undefined ? nfDrawer.format(totalAnalysis) : 'N/A'}</div>
                     <div class="drawer-item-desc">TOTAL_SCAN_COUNT</div>
                 `;
                 rightBody.appendChild(totalAnalysisCard);
@@ -4987,8 +5392,8 @@
                 totalCharsCard.className = 'drawer-item';
                 const totalChars = data.totalChars !== undefined && data.totalChars !== null ? Number(data.totalChars) : (data.totalRoastWords !== undefined && data.totalRoastWords !== null ? Number(data.totalRoastWords) : undefined);
                 totalCharsCard.innerHTML = `
-                    <div class="drawer-item-label">累计吐槽字数</div>
-                    <div class="drawer-item-value text-3xl">${totalChars !== undefined ? new Intl.NumberFormat('zh-CN').format(totalChars) : 'N/A'}</div>
+                    <div class="drawer-item-label">${(i18n[currentLang] && i18n[currentLang]['total-roast']) ? i18n[currentLang]['total-roast'] : (currentLang === 'en' ? 'Total Roast Words' : '累计吐槽字数')}</div>
+                    <div class="drawer-item-value text-3xl">${totalChars !== undefined ? nfDrawer.format(totalChars) : 'N/A'}</div>
                     <div class="drawer-item-desc">累计总字数统计</div>
                 `;
                 rightBody.appendChild(totalCharsCard);
@@ -5009,15 +5414,15 @@
                     avgPerScan = Number(totalChars) / Number(data.totalAnalysis);
                 }
                 avgCard.innerHTML = `
-                    <div class="drawer-item-label mb-2">平均篇幅统计</div>
+                    <div class="drawer-item-label mb-2">${escapeHtml(currentLang === 'en' ? 'Average Length' : '平均篇幅统计')}</div>
                     <div class="grid grid-cols-2 gap-3">
                         <div>
                             <div class="drawer-item-value text-xl">${avgPerUser !== undefined ? avgPerUser.toFixed(1) : 'N/A'}</div>
-                            <div class="drawer-item-desc text-[8px]">人均平均篇幅</div>
+                            <div class="drawer-item-desc text-[8px]">${escapeHtml(currentLang === 'en' ? 'Per User' : '人均平均篇幅')}</div>
                         </div>
                         <div>
                             <div class="drawer-item-value text-xl" style="color: #60a5fa;">${avgPerScan !== undefined ? avgPerScan.toFixed(1) : 'N/A'}</div>
-                            <div class="drawer-item-desc text-[8px]">单次平均篇幅</div>
+                            <div class="drawer-item-desc text-[8px]">${escapeHtml(currentLang === 'en' ? 'Per Scan' : '单次平均篇幅')}</div>
                         </div>
                     </div>
                 `;
@@ -5028,7 +5433,7 @@
                 radarCard.className = 'drawer-item';
                 const radarData = data.globalAverage || data.averages;
                 radarCard.innerHTML = `
-                    <div class="drawer-item-label mb-3">全网平均开发者画像</div>
+                    <div class="drawer-item-label mb-3">${escapeHtml((i18n[currentLang] && i18n[currentLang]['radar-title']) ? i18n[currentLang]['radar-title'] : (currentLang === 'en' ? 'Global Developer Persona' : '全网平均开发者画像'))}</div>
                     <div class="aspect-square">
                         <canvas id="drawer-radarChart"></canvas>
                     </div>
@@ -5054,7 +5459,7 @@
                 const locationCard = document.createElement('div');
                 locationCard.className = 'drawer-item';
                 locationCard.innerHTML = `
-                    <div class="drawer-item-label mb-3">地理位置热力排行</div>
+                    <div class="drawer-item-label mb-3">${escapeHtml((i18n[currentLang] && i18n[currentLang]['hot-list']) ? i18n[currentLang]['hot-list'] : (currentLang === 'en' ? 'Geographic Hotspots' : '地理位置热力排行'))}</div>
                     <div id="drawer-locationList" class="space-y-2"></div>
                 `;
                 rightBody.appendChild(locationCard);
@@ -5079,7 +5484,7 @@
                 const personalityCard = document.createElement('div');
                 personalityCard.className = 'drawer-item';
                 personalityCard.innerHTML = `
-                    <div class="drawer-item-label mb-3">人格分布排行</div>
+                    <div class="drawer-item-label mb-3">${escapeHtml((i18n[currentLang] && i18n[currentLang]['personality-dist']) ? i18n[currentLang]['personality-dist'] : (currentLang === 'en' ? 'Personality Distribution' : '人格分布排行'))}</div>
                     <div id="drawer-personalityDistribution" class="space-y-2"></div>
                 `;
                 rightBody.appendChild(personalityCard);
@@ -5260,7 +5665,7 @@
             // 将“暂无数据”的占位渲染出来，避免空白
             const realtimeBox = q('#rtRealtimeList');
             if (realtimeBox && !realtimeBox.innerHTML.trim()) {
-                realtimeBox.innerHTML = '<div class="text-zinc-500 text-xs">暂无人格分布数据</div>';
+                realtimeBox.innerHTML = `<div class="text-zinc-500 text-xs">${escapeHtml(getI18nText('realtime.none') || (currentLang === 'en' ? 'No personality distribution yet' : '暂无人格分布数据'))}</div>`;
             }
         }
 
@@ -5497,20 +5902,24 @@
                                 const proxyLabel = isProxy ? '<span style="color: #ef4444; font-weight: bold;"> [Proxy]</span>' : '';
                                 
                                 // 数据展示：在地图弹窗（Tooltip）中同步展示该冠军的称号和战绩
-                                let tooltipContent = `<div class="font-mono text-xs">${label}${proxyLabel}<br/>活跃节点: ${value}</div>`;
+                                const activeNodesLabel = getI18nText('tooltip.active_nodes') || (currentLang === 'en' ? 'Active Nodes' : '活跃节点');
+                                let tooltipContent = `<div class="font-mono text-xs">${label}${proxyLabel}<br/>${escapeHtml(activeNodesLabel)}: ${value}</div>`;
                                 
                                 // 如果当前有选中的冠军信息，且国家名称匹配，显示冠军信息
                                 if (currentChampionInfo && currentChampionInfo.countryName === name) {
                                     const feedback = currentChampionInfo.feedback ? JSON.parse(currentChampionInfo.feedback) : null;
+                                    const recordLabel = getI18nText('tooltip.record') || (currentLang === 'en' ? 'Record' : '战绩');
+                                    const roastLabel = getI18nText('tooltip.roast') || (currentLang === 'en' ? 'Roast' : '吐槽');
+                                    const translatedFbLabel = feedback ? translateRankFeedbackLabel(currentChampionInfo.dimId, feedback.label, currentChampionInfo.championValue) : '';
                                     tooltipContent = `
                                         <div class="font-mono text-xs">
                                             <div class="text-[#00ff41] font-bold mb-1">🏆 ${currentChampionInfo.championName}</div>
                                             <div class="text-white mb-1">${label}${proxyLabel}</div>
-                                            <div class="text-zinc-400 text-[10px] mb-1">战绩: ${currentChampionInfo.championValue}</div>
+                                            <div class="text-zinc-400 text-[10px] mb-1">${escapeHtml(recordLabel)}: ${currentChampionInfo.championValue}</div>
                                             ${feedback ? `
                                                 <div class="text-zinc-500 text-[9px] mt-2 pt-2 border-t border-zinc-700">
-                                                    <div class="text-[#00ff41]">${feedback.label}</div>
-                                                    <div class="text-white">${feedback.title}</div>
+                                                    <div class="text-[#00ff41]">${escapeHtml(roastLabel)}${translatedFbLabel ? ` · ${escapeHtml(translatedFbLabel)}` : ''}</div>
+                                                    <div class="text-white">${escapeHtml(String(feedback.title || '').trim())}</div>
                                                 </div>
                                             ` : ''}
                                         </div>
@@ -7000,14 +7409,14 @@
                     nameEl.textContent = expert.username || 'Unknown';
                 }
 
-                // 更新称号（左上角）- 使用维度专属称号
-                if (labelEl && DIMENSION_TITLES[dim]) {
-                    labelEl.textContent = DIMENSION_TITLES[dim].title;
+                // 更新称号（左上角）- 使用维度专属称号（中英切换）
+                if (labelEl) {
+                    labelEl.textContent = getLpdefTitle(dim) || labelEl.textContent || '';
                 }
                 
-                // 更新说明（分数下方）- 使用维度专属说明
-                if (descEl && DIMENSION_TITLES[dim]) {
-                    descEl.textContent = DIMENSION_TITLES[dim].description;
+                // 更新说明（分数下方）- 使用维度专属说明（中英切换）
+                if (descEl) {
+                    descEl.textContent = getLpdefDescription(dim) || descEl.textContent || '';
                 }
                 
                 // 更新 personality_type（保留原有逻辑，但不在主要位置显示）
@@ -7027,13 +7436,13 @@
                 }
             } else {
                 // 无数据时的显示（包括无人区状态）
-                // 保持称号和说明（维度专属）
-                if (labelEl && DIMENSION_TITLES[dim]) {
-                    labelEl.textContent = DIMENSION_TITLES[dim].title;
+                // 保持称号和说明（维度专属，中英切换）
+                if (labelEl) {
+                    labelEl.textContent = getLpdefTitle(dim) || labelEl.textContent || '';
                 }
                 
-                if (descEl && DIMENSION_TITLES[dim]) {
-                    descEl.textContent = DIMENSION_TITLES[dim].description;
+                if (descEl) {
+                    descEl.textContent = getLpdefDescription(dim) || descEl.textContent || '';
                 }
                 
                 if (avatarEl) {
@@ -7046,11 +7455,15 @@
                 }
                 
                 if (nameEl) {
-                    nameEl.textContent = isNoDataArea ? '待招募' : '暂无数据';
+                    nameEl.textContent = isNoDataArea
+                        ? (getI18nText('common.recruiting') || 'Recruiting')
+                        : (getI18nText('common.no_data') || 'No data');
                 }
                 
                 if (titleEl) {
-                    titleEl.textContent = isNoDataArea ? '等待加入' : '...';
+                    titleEl.textContent = isNoDataArea
+                        ? (getI18nText('common.waiting') || 'Waiting')
+                        : '...';
                 }
                 
                 if (scoreEl) {
@@ -11260,9 +11673,9 @@
                                 SYNCING
                             </span>
                         </div>
-                        <div class="drawer-item-label mb-2">数据同步中</div>
+                        <div class="drawer-item-label mb-2">${escapeHtml(getI18nText('common.syncing') || (currentLang === 'en' ? 'Syncing' : '数据同步中'))}</div>
                         <div class="text-[10px] text-[#00ff41]/60 mb-3">
-                            您的数据正在处理中，请稍候...
+                            ${escapeHtml(currentLang === 'en' ? 'Your data is being processed. Please wait…' : '您的数据正在处理中，请稍候...')}
                         </div>
                         <div class="flex items-center space-x-2 mb-2">
                             <div class="w-2 h-2 bg-[#00ff41] rounded-full animate-pulse"></div>
@@ -11270,7 +11683,7 @@
                             <div class="w-2 h-2 bg-[#00ff41] rounded-full animate-pulse" style="animation-delay: 0.4s"></div>
                         </div>
                         <div class="text-[8px] text-[#00ff41]/40 mt-2">
-                            用户: ${userData.user_name || userData.name || '未知'}
+                            ${escapeHtml(currentLang === 'en' ? 'User' : '用户')}: ${escapeHtml(userData.user_name || userData.name || (currentLang === 'en' ? 'Unknown' : '未知'))}
                         </div>
                     `;
                     
@@ -11318,12 +11731,12 @@
                                 CONNECT
                             </span>
                         </div>
-                        <div class="drawer-item-label mb-2">我的数据统计</div>
+                        <div class="drawer-item-label mb-2">${escapeHtml(getI18nText('drawer.my_stats') || 'My Stats')}</div>
                         <div class="text-[10px] text-[#00ff41]/60 mb-2">
-                            正在连接云端数据源，请稍候…
+                            ${escapeHtml(getI18nText('common.connecting_cloud') || 'Connecting...')}
                         </div>
                         <div class="text-[8px] text-[#00ff41]/40">
-                            GitHub 用户：${candidateUserName || '未知'}
+                            ${escapeHtml(currentLang === 'en' ? 'GitHub' : 'GitHub 用户')}：${escapeHtml(candidateUserName || (currentLang === 'en' ? 'Unknown' : '未知'))}
                         </div>
                     `;
 
@@ -11357,12 +11770,12 @@
                                 NO DATA
                             </span>
                         </div>
-                        <div class="drawer-item-label mb-2">我的数据统计</div>
+                        <div class="drawer-item-label mb-2">${escapeHtml(getI18nText('drawer.my_stats') || 'My Stats')}</div>
                         <div class="text-[10px] text-[#00ff41]/60 mb-2">
-                            暂未获取到云端汇总数据（GitHub 用户：${candidateUserName || '未知'}）。
+                            ${escapeHtml(getI18nText('common.no_cloud_summary') || 'No cloud summary')}（GitHub：${candidateUserName || (currentLang === 'en' ? 'Unknown' : '未知')}）。
                         </div>
                         <div class="text-[8px] text-[#00ff41]/40">
-                            建议：先在主页面完成一次分析/上报，然后刷新此页面。
+                            ${escapeHtml(getI18nText('common.suggestion_run_once') || '')}
                         </div>
                     `;
 
@@ -11426,37 +11839,43 @@
                 
                 // 优先使用 vibe_rank（如果存在）
                 if (vibeRank !== null && vibeRank !== undefined && totalUsers > 0) {
-                    techRankText = `第 ${vibeRank} 名 / ${totalUsers} 人`;
+                    techRankText = currentLang === 'en'
+                        ? `#${vibeRank} / ${totalUsers}`
+                        : `第 ${vibeRank} 名 / ${totalUsers} 人`;
                 } else if (avgRank !== null && avgRank !== undefined && totalUsers > 0) {
                     // avgRank 是百分比（0-100），需要转换为排名
                     const rankPercent = Math.round((1 - avgRank / 100) * totalUsers);
-                    techRankText = `第 ${rankPercent} 名 / ${totalUsers} 人`;
+                    techRankText = currentLang === 'en'
+                        ? `#${rankPercent} / ${totalUsers}`
+                        : `第 ${rankPercent} 名 / ${totalUsers} 人`;
                 }
                 console.log('[UserStats] 🏆 技术排名:', { vibeRank, vibePercentile, avgRank, totalUsers, techRankText });
                 
+                const nf = new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN');
+
                 // 2. 调戏AI次数（ai维度）
                 const aiCount = dimensionValues.ai !== undefined && dimensionValues.ai !== null 
-                    ? new Intl.NumberFormat('zh-CN').format(dimensionValues.ai) 
+                    ? nf.format(dimensionValues.ai) 
                     : 'N/A';
                 
                 // 3. 甲方爸爸上身次数（no维度）
                 const noCount = dimensionValues.no !== undefined && dimensionValues.no !== null 
-                    ? new Intl.NumberFormat('zh-CN').format(dimensionValues.no) 
+                    ? nf.format(dimensionValues.no) 
                     : 'N/A';
                 
                 // 4. 赛博磕头次数（please维度）
                 const pleaseCount = dimensionValues.please !== undefined && dimensionValues.please !== null 
-                    ? new Intl.NumberFormat('zh-CN').format(dimensionValues.please) 
+                    ? nf.format(dimensionValues.please) 
                     : 'N/A';
                 
                 // 5. 废话输出总数（say维度）
                 const sayTotal = dimensionValues.say !== undefined && dimensionValues.say !== null 
-                    ? new Intl.NumberFormat('zh-CN').format(dimensionValues.say) 
+                    ? nf.format(dimensionValues.say) 
                     : 'N/A';
                 
                 // 6. 平均吹水长度（word维度）
                 const avgLength = dimensionValues.word !== undefined && dimensionValues.word !== null 
-                    ? new Intl.NumberFormat('zh-CN').format(Math.round(dimensionValues.word)) 
+                    ? nf.format(Math.round(dimensionValues.word)) 
                     : 'N/A';
                 
                 // 7. 人格称号（参考 index.html 的获取方式：根据 5 位 vibe_index 从 personalityNames.json 获取）
@@ -11478,7 +11897,21 @@
                             resolve(null);
                             return;
                         }
-                        fetch('src/personalityNames.json')
+                        // 英文优先：若有外部配置/文件，则加载英文称号表
+                        const tryLocal = () => {
+                            try {
+                                const cfg = window.__LANG_CONFIG;
+                                if (currentLang === 'en' && cfg && cfg.personalityNamesEn && cfg.personalityNamesEn[idx]) {
+                                    resolve(String(cfg.personalityNamesEn[idx]));
+                                    return true;
+                                }
+                            } catch { /* ignore */ }
+                            return false;
+                        };
+                        if (tryLocal()) return;
+
+                        const url = (currentLang === 'en') ? 'src/personalityNames_en.json' : 'src/personalityNames.json';
+                        fetch(url)
                             .then(response => {
                                 if (response.ok) {
                                     return response.json();
@@ -11488,7 +11921,7 @@
                             .then(namesData => {
                                 if (namesData && namesData[idx]) {
                                     console.log('[UserStats] ✅ 从 personalityNames.json 获取人格称号:', namesData[idx]);
-                                    resolve(namesData[idx]);
+                                    resolve(String(namesData[idx]));
                                 } else {
                                     resolve(null);
                                 }
@@ -11546,6 +11979,9 @@
                         personalityName = '未知人格';
                     }
                 }
+
+                // 人格称号英文映射（示例：码农 -> Code Monkey/Architect）
+                personalityName = translatePersonalityName(personalityName, userData);
                 
                 // 8. 答案之书说明（answer_book 对象）
                 let answerBookTitle = '暂无';
@@ -11661,11 +12097,11 @@
                         </span>
                     </div>
                     
-                    <div class="drawer-item-label mb-3">我的数据统计</div>
+                    <div class="drawer-item-label mb-3">${getI18nText('drawer.my_stats') || 'My Stats'}</div>
                     
                     <!-- 技术排名 -->
                     <div class="mb-3 pb-3 border-b border-[#00ff41]/10">
-                        <div class="drawer-item-label mb-1">技术排名</div>
+                        <div class="drawer-item-label mb-1">${getI18nText('drawer.tech_rank') || (currentLang === 'en' ? 'Tech Rank' : '技术排名')}</div>
                         <div class="drawer-item-value text-lg">${techRankText}</div>
                         <div class="drawer-item-desc text-[8px]">TECH_RANK</div>
                     </div>
@@ -11673,30 +12109,30 @@
                     <!-- 维度统计 -->
                     <div class="space-y-2 mb-3">
                         <div class="flex items-center justify-between">
-                            <span class="text-[12px] text-[#00ff41]/70">💬 调戏AI次数</span>
+                            <span class="text-[12px] text-[#00ff41]/70">💬 ${getI18nText('metric.ai_interrogations') || (currentLang === 'en' ? 'AI Interrogations' : '调戏AI次数')}</span>
                             <span class="text-[12px] text-white font-bold">${aiCount}</span>
                         </div>
                         <div class="flex items-center justify-between">
-                            <span class="text-[12px] text-[#00ff41]/70">🚫 甲方上身次数</span>
+                            <span class="text-[12px] text-[#00ff41]/70">🚫 ${getI18nText('metric.jiafang') || (currentLang === 'en' ? 'Boss Mode Triggers' : '甲方上身次数')}</span>
                             <span class="text-[12px] text-white font-bold">${noCount}</span>
                         </div>
                         <div class="flex items-center justify-between">
-                            <span class="text-[12px] text-[#00ff41]/70">🙏 赛博磕头次数</span>
+                            <span class="text-[12px] text-[#00ff41]/70">🙏 ${getI18nText('metric.ketao') || (currentLang === 'en' ? 'Cyber Kowtows' : '赛博磕头次数')}</span>
                             <span class="text-[12px] text-white font-bold">${pleaseCount}</span>
                         </div>
                         <div class="flex items-center justify-between">
-                            <span class="text-[12px] text-[#00ff41]/70">💭 废话输出总数</span>
+                            <span class="text-[12px] text-[#00ff41]/70">💭 ${getI18nText('metric.banter_total') || (currentLang === 'en' ? 'Banter Output' : '废话输出总数')}</span>
                             <span class="text-[12px] text-white font-bold">${sayTotal}</span>
                         </div>
                         <div class="flex items-center justify-between">
-                            <span class="text-[12px] text-[#00ff41]/70">📏 平均吹水长度</span>
-                            <span class="text-[12px] text-white font-bold">${avgLength} 字/条</span>
+                            <span class="text-[12px] text-[#00ff41]/70">📏 ${getI18nText('metric.avg_len') || (currentLang === 'en' ? 'Avg Prompt Length' : '平均吹水长度')}</span>
+                            <span class="text-[12px] text-white font-bold">${avgLength} ${getI18nText('metric.avg_len_unit') || (currentLang === 'en' ? 'chars/msg' : '字/条')}</span>
                         </div>
                     </div>
                     
                     <!-- 人格称号（与 index 一致：优先由 vibe_index 从 personalityNames.json 解析） -->
                     <div class="mb-3 pb-3 border-b border-[#00ff41]/10">
-                        <div class="drawer-item-label mb-1">人格称号</div>
+                        <div class="drawer-item-label mb-1">${getI18nText('drawer.personality_title') || (currentLang === 'en' ? 'Title' : '人格称号')}</div>
                         <div class="drawer-item-value text-sm" data-stat="personality-name">${personalityName}</div>
                         <div class="drawer-item-desc text-[8px]">${personalityType === 'AUTO_REPORT' ? '' : (personalityType || '')}</div>
                     </div>
@@ -11747,7 +12183,7 @@
                         if (name) {
                             const personalityNameElement = statsCard.querySelector('[data-stat="personality-name"]');
                             if (personalityNameElement) {
-                                personalityNameElement.textContent = name;
+                                personalityNameElement.textContent = translatePersonalityName(name, userData);
                                 console.log('[UserStats] ✅ 已从 personalityNames.json 更新人格称号:', name);
                             }
                         }
@@ -11940,14 +12376,14 @@
                 }
             }
 
-            // 维度配置（名称映射和数值后缀）
+            // 维度配置（名称/单位随语言切换）
             const dimensionConfig = {
-                ai: { name: '对话AI次数', icon: '💬', suffix: '次' },
-                word: { name: '平均长度', icon: '📏', suffix: '字/条' },
-                day: { name: '上岗天数', icon: '📅', suffix: '天' },
-                no: { name: '甲方上身', icon: '🚫', suffix: '次' },
-                say: { name: '废话输出', icon: '💭', suffix: '字' },
-                please: { name: '赛博磕头', icon: '🙏', suffix: '次' }
+                ai: { name: translateDimensionName('ai'), icon: DIMENSION_NAME_I18N.ai?.icon || '💬', suffix: translateDimensionSuffix('ai') },
+                word: { name: translateDimensionName('word'), icon: DIMENSION_NAME_I18N.word?.icon || '📏', suffix: translateDimensionSuffix('word') },
+                day: { name: translateDimensionName('day'), icon: DIMENSION_NAME_I18N.day?.icon || '📅', suffix: translateDimensionSuffix('day') },
+                no: { name: translateDimensionName('no'), icon: DIMENSION_NAME_I18N.no?.icon || '🚫', suffix: translateDimensionSuffix('no') },
+                say: { name: translateDimensionName('say'), icon: DIMENSION_NAME_I18N.say?.icon || '💭', suffix: translateDimensionSuffix('say') },
+                please: { name: translateDimensionName('please'), icon: DIMENSION_NAME_I18N.please?.icon || '🙏', suffix: translateDimensionSuffix('please') }
             };
 
             // 确保包含所有 6 个维度
@@ -12096,7 +12532,7 @@
                 const globalDataForStatus = window.lastData || {};
                 const totalUsers = Number(globalDataForStatus.totalUsers) || 1;
                 let statusLabel = isGlobalTopMode ? 'TOP' : 'MINE';
-                let feedbackLabel = feedback ? feedback.label : 'RANKED';
+                let feedbackLabel = feedback ? translateRankFeedbackLabel(dimId, feedback.label, maxValue) : 'RANKED';
                 
                 // 如果 totalUsers 为 1，排名统一显示为 TOP 1
                 if (totalUsers <= 1) {
@@ -12120,10 +12556,11 @@
                 let displayVal;
                 let unit = config.suffix || '';
                 if (maxValue !== undefined && maxValue !== null) {
+                    const nfCard = new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN');
                     if (dimId === 'say') {
-                        displayVal = new Intl.NumberFormat('zh-CN').format(maxValue);
+                        displayVal = nfCard.format(maxValue);
                     } else {
-                        displayVal = new Intl.NumberFormat('zh-CN').format(maxValue);
+                        displayVal = nfCard.format(maxValue);
                     }
                 } else {
                     displayVal = 'N/A';
@@ -12272,6 +12709,10 @@
         window.onload = async () => {
             // 加载保存的GitHub用户名（兼容旧代码）
             loadGitHubUsername();
+
+            // 初始化语言配置（可选外部 JSON）并刷新语言上下文
+            try { await loadLanguageConfig(); } catch { /* ignore */ }
+            try { updateLanguageContext(); } catch { /* ignore */ }
 
             // 初始化地图光标工具（校准入口 + 提示）
             initMapCursorTools();
