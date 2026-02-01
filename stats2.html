@@ -1480,8 +1480,8 @@
                 </div>
                 <div id="countryPanel" style="display: none;">
                     <div class="flex items-center gap-2 mb-3">
-                        <button type="button" id="backToGlobalBtn" onclick="switchBackToGlobalView()" class="px-3 py-1.5 text-xs border border-[#00ff41]/50 text-[#00ff41] hover:bg-[#00ff41]/10 transition-colors">[返回全网]</button>
-                        <button type="button" id="refreshDiagnosticsBtn" onclick="refreshCountryRightPanel()" class="px-3 py-1.5 text-xs border border-sky-300/50 text-sky-300 hover:bg-sky-300/10 transition-colors">[REFRESH]</button>
+                        <button type="button" id="backToGlobalBtn" data-t="btn.back_global" onclick="switchBackToGlobalView()" class="px-3 py-1.5 text-xs border border-[#00ff41]/50 text-[#00ff41] hover:bg-[#00ff41]/10 transition-colors">[返回全网]</button>
+                        <button type="button" id="refreshDiagnosticsBtn" data-t="btn.refresh" onclick="refreshCountryRightPanel()" class="px-3 py-1.5 text-xs border border-sky-300/50 text-sky-300 hover:bg-sky-300/10 transition-colors">[REFRESH]</button>
                     </div>
                     <div id="countryTemplateMount" style="font-family: 'JetBrains Mono', monospace;"></div>
                 </div>
@@ -1497,7 +1497,7 @@
                 <!-- HEADER -->
                 <div class="mb-8 border-b-2 border-white pb-4">
                     <div class="flex justify-between items-start">
-                        <h1 class="text-2xl font-black italic tracking-tighter" id="rtPanelTitle">国家透视 / Country Panel</h1>
+                        <h1 class="text-2xl font-black italic tracking-tighter" id="rtPanelTitle" data-t="panel.country_panel">国家透视</h1>
                         <div class="status-tag invert" id="rtStatusTag">LIVE_FEED</div>
                     </div>
                     <div class="mt-3">
@@ -1590,11 +1590,11 @@
                         </div>
                         <div class="flex justify-between text-[16px] font-bold">
                             <span>
-                                <span class="text-[10px] text-zinc-500 mr-2">霸道值</span>
+                                <span class="text-[10px] text-zinc-500 mr-2" data-t="pk.domineering">霸道值</span>
                                 <span id="rtPkLeftPct">50.0%</span>
                             </span>
                             <span class="text-green-500">
-                                <span class="text-[10px] text-zinc-500 mr-2">跪舔值</span>
+                                <span class="text-[10px] text-zinc-500 mr-2" data-t="pk.bootlick">跪舔值</span>
                                 <span id="rtPkRightPct">50.0%</span>
                             </span>
                         </div>
@@ -1651,7 +1651,7 @@
                         <!-- 黑话榜：按国家聚合（Top10 + Cloud50） -->
                         <div class="bg-zinc-950/60 border border-zinc-800 p-2 mb-4" id="vibe-burst-root">
                             <div class="flex items-center justify-between mb-2">
-                                <div class="text-[11px] text-zinc-400 uppercase tracking-widest">黑话榜 / Vibe Hotlist</div>
+                                <div class="text-[11px] text-zinc-400 uppercase tracking-widest" data-t="hotlist.title">黑话榜</div>
                                 <div class="text-[10px] text-zinc-500" id="vibe-country-hint">NATION: --</div>
                             </div>
 
@@ -1662,7 +1662,7 @@
                                     <div class="text-[10px] text-zinc-600 font-mono" id="vibe-cloud50-meta">--</div>
                                 </div>
                                 <div id="vibe-cloud50-container" style="height: 260px; width: 100%;"></div>
-                                <div id="vibe-cloud50-empty" class="hidden text-zinc-500 text-sm p-3 italic">
+                                <div id="vibe-cloud50-empty" class="hidden text-zinc-500 text-sm p-3 italic" data-t="hotlist.building">
                                     正在建立该地区黑话榜...
                                 </div>
                             </div>
@@ -1674,13 +1674,13 @@
                                     <div class="text-[10px] text-zinc-600 font-mono" id="vibe-country-top10-meta">--</div>
                                 </div>
                                 <ol id="vibe-top10-list" class="space-y-1"></ol>
-                                <div id="vibe-top10-empty" class="hidden text-zinc-500 text-sm p-3 italic">
+                                <div id="vibe-top10-empty" class="hidden text-zinc-500 text-sm p-3 italic" data-t="hotlist.collecting">
                                     暂无数据（正在收录中...）
                                 </div>
                             </div>
 
                         </div>
-                        <div class="text-xs text-zinc-300 mb-3" id="rtCoreTrait">该地区核心特质：--</div>
+                        <div class="text-xs text-zinc-300 mb-3" id="rtCoreTrait" data-t="semantic.core_trait_empty">该地区核心特质：--</div>
                         <div class="flex justify-between items-center text-[11px]">
                             <span class="text-zinc-500 uppercase tracking-widest">SEMANTIC</span>
                             <span class="text-green-500 font-bold" id="rtSemanticScore">--</span>
@@ -2363,7 +2363,7 @@
                 const globalRatioEl = document.getElementById('rtGlobalRatio');
                 if (globalRatioEl) globalRatioEl.textContent = 'N/A';
                 const meritEl = document.getElementById('rtMeritBoard');
-                if (meritEl) meritEl.textContent = '已累计分析 -- 万字';
+                if (meritEl) meritEl.textContent = currentLang === 'en' ? 'Analyzed -- ×10k chars' : '已累计分析 -- 万字';
                 if (realtimeDom) {
                     // countryName 变量在此作用域不存在，使用入参回退重试
                     const retryArg = escapeHtml(JSON.stringify(countryNameOrCode));
@@ -2471,9 +2471,12 @@
                 if (meritEl) {
                     // 0 也应显示（否则看起来像“未加载”）
                     if (Number.isFinite(totalCharsSum) && totalCharsSum >= 0) {
-                        meritEl.textContent = `已累计分析 ${(totalCharsSum / 10000).toFixed(1)} 万字`;
+                        meritEl.textContent =
+                            currentLang === 'en'
+                                ? `Analyzed ${(totalCharsSum / 10000).toFixed(1)} ×10k chars`
+                                : `已累计分析 ${(totalCharsSum / 10000).toFixed(1)} 万字`;
                     } else {
-                        meritEl.textContent = '已累计分析 -- 万字';
+                        meritEl.textContent = currentLang === 'en' ? 'Analyzed -- ×10k chars' : '已累计分析 -- 万字';
                     }
                 }
 
@@ -2860,7 +2863,7 @@
                 }
                 if (meltdownVictimsEl) {
                     meltdownVictimsEl.textContent = Number.isFinite(localTotalUsers)
-                        ? new Intl.NumberFormat('zh-CN').format(Math.max(0, localTotalUsers))
+                        ? new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN').format(Math.max(0, localTotalUsers))
                         : 'N/A';
                 }
 
@@ -3057,6 +3060,16 @@
         }, 100);
         const i18n = {
             zh: {
+                // Buttons / panel header / hotlist / PK
+                'btn.back_global': '[返回全网]',
+                'btn.refresh': '[刷新]',
+                'panel.country_panel': '国家透视',
+                'pk.domineering': '霸道值',
+                'pk.bootlick': '跪舔值',
+                'hotlist.title': '黑话榜',
+                'hotlist.building': '正在建立该地区黑话榜...',
+                'hotlist.collecting': '暂无数据（正在收录中...）',
+                'semantic.core_trait_empty': '该地区核心特质：--',
                 'top-title': 'Cursor行为报告全球分布图',
                 'sub-title': '实时远程监测状态 // 节点：太平洋中部',
                 'total-victims': '已诊断开发者',
@@ -3134,12 +3147,16 @@
                 // Common
                 'common.no_data': '暂无数据',
                 'common.loading': '加载中...',
+                'common.current_device': '（当前设备）',
                 'common.recruiting': '待招募',
                 'common.waiting': '等待加入',
                 'common.syncing': '数据同步中',
                 'common.connecting_cloud': '正在连接云端数据源，请稍候…',
                 'common.no_cloud_summary': '暂未获取到云端汇总数据',
                 'common.suggestion_run_once': '建议：先在主页面完成一次分析/上报，然后刷新此页面。',
+
+                // Personality / evaluation
+                'personality.unknown': '未知人格',
 
                 // Metrics
                 'metric.ai_interrogations': '调戏AI次数',
@@ -3202,12 +3219,27 @@
                 // Common
                 'common.no_data': 'No data',
                 'common.loading': 'Loading...',
+                'common.current_device': ' (This Device)',
                 'common.recruiting': 'Recruiting',
                 'common.waiting': 'Waiting',
                 'common.syncing': 'Syncing',
                 'common.connecting_cloud': 'Connecting to cloud source…',
                 'common.no_cloud_summary': 'No cloud summary available yet',
                 'common.suggestion_run_once': 'Tip: run an analysis on the main page first, then refresh this page.',
+
+                // Personality / evaluation
+                'personality.unknown': 'Unknown Title',
+
+                // Buttons / panel header / hotlist / PK
+                'btn.back_global': '[Back to Global]',
+                'btn.refresh': '[REFRESH]',
+                'panel.country_panel': 'Country Panel',
+                'pk.domineering': 'Dominance',
+                'pk.bootlick': 'Bootlick',
+                'hotlist.title': 'Vibe Hotlist',
+                'hotlist.building': 'Building regional hotlist...',
+                'hotlist.collecting': 'No data (collecting...)',
+                'semantic.core_trait_empty': 'Core trait: --',
 
                 // Metrics
                 'metric.ai_interrogations': 'AI Interrogations',
@@ -5174,7 +5206,7 @@
                             LIVE
                         </span>
                     </div>
-                    <div class="drawer-item-label mb-3">实时诊断活动</div>
+                    <div class="drawer-item-label mb-3">${escapeHtml((i18n[currentLang] && i18n[currentLang]['recent-activity']) ? i18n[currentLang]['recent-activity'] : (currentLang === 'en' ? 'Live Activity Feed' : '实时诊断活动'))}</div>
                     <div id="drawer-recentActivity" class="flex-1 overflow-y-auto max-h-[400px] text-[10px] font-mono space-y-3 pr-2"></div>
                 `;
                 leftBody.appendChild(activityCard);
@@ -5185,13 +5217,13 @@
                 const drawerActivityList = document.getElementById('drawer-recentActivity');
                 if (drawerActivityList) {
                     if (activityData.length === 0) {
-                        drawerActivityList.innerHTML = '<div class="text-zinc-500 text-center py-4 text-[10px]">暂无数据</div>';
+                        drawerActivityList.innerHTML = `<div class="text-zinc-500 text-center py-4 text-[10px]">${escapeHtml(getI18nText('common.no_data') || (currentLang === 'en' ? 'No data' : '暂无数据'))}</div>`;
                     } else {
                         drawerActivityList.innerHTML = activityData.map((v, index) => {
                             const time = v.time || v.created_at || new Date().toISOString();
                             const type = v.type || v.personality_type || 'UNKNOWN';
-                            const location = v.location || v.ip_location || '未知';
-                            const name = v.name || `记录${index + 1}`;
+                            const location = v.location || v.ip_location || (currentLang === 'en' ? 'Unknown' : '未知');
+                            const name = v.name || (currentLang === 'en' ? `Record ${index + 1}` : `记录${index + 1}`);
                             
                             const avatarUrl = v.avatar_url || null;
                             const githubUsername = v.github_username || null;
@@ -5226,7 +5258,7 @@
                                         ${avatarHtml}
                                     </div>
                                     <div class="flex-1 min-w-0">
-                                        <div class="text-zinc-500 text-[9px]">${new Date(time).toLocaleTimeString()}</div>
+                                        <div class="text-zinc-500 text-[9px]">${new Date(time).toLocaleTimeString(currentLang === 'en' ? 'en-US' : 'zh-CN')}</div>
                                         <div class="text-white text-[10px] font-bold">${name.length > 8 ? name.slice(0,8) + '...' : name}</div>
                                         <div class="text-[#00ff41] text-[9px]">${type} @ ${location}</div>
                                     </div>
@@ -5262,12 +5294,18 @@
                                         ${mode}
                                     </span>
                                 </div>
-                                <div class="drawer-item-label mb-2">数据加载中</div>
+                                <div class="drawer-item-label mb-2">${escapeHtml(getI18nText('common.loading') || (currentLang === 'en' ? 'Loading...' : '数据加载中'))}</div>
                                 <div class="text-[10px] text-[#00ff41]/60">
-                                    ${attempts >= 6 ? '暂未找到云端汇总数据。请先在 index.html 上传一次聊天记录后再刷新。' : '正在同步云端数据，请稍候…'}
+                                    ${escapeHtml(attempts >= 6
+                                        ? (currentLang === 'en'
+                                            ? 'No cloud summary found yet. Upload once on index.html, then refresh this page.'
+                                            : '暂未找到云端汇总数据。请先在 index.html 上传一次聊天记录后再刷新。')
+                                        : (currentLang === 'en'
+                                            ? 'Syncing cloud data...'
+                                            : '正在同步云端数据，请稍候…'))}
                                 </div>
                                 <div class="text-[8px] text-[#00ff41]/40 mt-2">
-                                    指纹: ${currentFingerprint ? currentFingerprint.substring(0, 8) : 'N/A'}...
+                                    ${escapeHtml(currentLang === 'en' ? 'Fingerprint' : '指纹')}: ${currentFingerprint ? currentFingerprint.substring(0, 8) : 'N/A'}...
                                 </div>
                             `;
                             leftBody.appendChild(waitingCard);
@@ -5594,7 +5632,13 @@
                 nodeName: `${String(name || 'REGION').toUpperCase()}_NODE`,
                 diagnosedTotal: '--',
                 scanTotal: '--',
-                pk: { leftLabel: 'Dominance', rightLabel: 'Kowtow', leftPct: 50, rightPct: 50, quote: '' },
+                pk: {
+                    leftLabel: currentLang === 'en' ? 'Tsundere' : '傲娇',
+                    rightLabel: currentLang === 'en' ? 'Bootlick' : '跪舔',
+                    leftPct: 50,
+                    rightPct: 50,
+                    quote: ''
+                },
                 meltdown: { words: '-- WORDS', fillPct: 0, level: 'PENDING', victims: '--' },
                 semantic: { tags: [], mostUsed: 'MOST_USED: --', freq: 'FREQ: --' },
                 elite: [],
@@ -5610,6 +5654,7 @@
             setText('#rtNodeName', model.nodeName);
             setText('#rtDiagnosedTotal', model.diagnosedTotal);
             setText('#rtScanTotal', model.scanTotal);
+            setText('#rtMeritBoard', currentLang === 'en' ? 'Analyzed -- ×10k chars' : '已累计分析 -- 万字');
 
             setText('#rtPkLeftLabel', `${model.pk.leftLabel}`);
             setText('#rtPkRightLabel', `${model.pk.rightLabel}`);
@@ -5667,6 +5712,9 @@
             if (realtimeBox && !realtimeBox.innerHTML.trim()) {
                 realtimeBox.innerHTML = `<div class="text-zinc-500 text-xs">${escapeHtml(getI18nText('realtime.none') || (currentLang === 'en' ? 'No personality distribution yet' : '暂无人格分布数据'))}</div>`;
             }
+
+            // 关键：国家透视模板渲染完毕后，立即执行页面翻译（避免英文模式仍显示中文硬编码）
+            try { translatePage(); } catch { /* ignore */ }
         }
 
         function refreshCountryRightPanel() {
@@ -7294,7 +7342,7 @@
             const records = victims || [];
             
             if (records.length === 0) {
-                box.innerHTML = '<div class="text-zinc-500 text-center py-4">暂无数据</div>';
+                box.innerHTML = `<div class="text-zinc-500 text-center py-4">${escapeHtml(getI18nText('common.no_data') || (currentLang === 'en' ? 'No data' : '暂无数据'))}</div>`;
                 return;
             }
             
@@ -7302,8 +7350,8 @@
                 // 兼容两种数据格式：latestRecords 和 recentVictims
                 const time = v.time || v.created_at || new Date().toISOString();
                 const type = v.type || v.personality_type || 'UNKNOWN';
-                const location = v.location || v.ip_location || '未知';
-                const name = v.name || `记录${index + 1}`;
+                const location = v.location || v.ip_location || (currentLang === 'en' ? 'Unknown' : '未知');
+                const name = v.name || (currentLang === 'en' ? `Record ${index + 1}` : `记录${index + 1}`);
                 
                 // 获取头像信息
                 const avatarUrl = v.avatar_url || null;
@@ -7345,7 +7393,7 @@
                         ${avatarHtml}
                     </div>
                     <div class="flex-1 min-w-0">
-                        <div class="text-zinc-500">${new Date(time).toLocaleTimeString()}</div>
+                        <div class="text-zinc-500">${new Date(time).toLocaleTimeString(currentLang === 'en' ? 'en-US' : 'zh-CN')}</div>
                         <div class="text-white">${name.length > 6 ? name.slice(0,6) + '...' : name}</div>
                         <div class="text-[var(--accent-terminal)]">${type} @ ${location}</div>
                     </div>
@@ -10530,9 +10578,13 @@
                     if (leftTitle) {
                         const currentTitle = leftTitle.textContent || '';
                         if (!currentTitle.includes(normalizedUsername)) {
-                            // 移除"（当前设备）"标识（如果存在），然后添加新的
-                            const cleanTitle = currentTitle.replace(/\s*（当前设备）\s*$/, '');
-                            leftTitle.textContent = normalizedUsername + '（当前设备）';
+                            // 移除"当前设备/This Device"标识（如果存在），然后添加新的（按语言）
+                            const cleanTitle = currentTitle
+                                .replace(/\s*（当前设备）\s*$/g, '')
+                                .replace(/\s*\(This Device\)\s*$/gi, '')
+                                .trim();
+                            const suffix = getI18nText('common.current_device') || (currentLang === 'en' ? ' (This Device)' : '（当前设备）');
+                            leftTitle.textContent = (cleanTitle && cleanTitle.includes(normalizedUsername) ? cleanTitle : normalizedUsername) + suffix;
                             console.log('[GitHub] ✅ 已更新抽屉标题:', leftTitle.textContent);
                         }
                     }
@@ -11970,13 +12022,13 @@
                     finalPersonalityName: personalityName
                 });
                 
-                // 最终回退：若仍无人格称号，仅当 personalityType 为有意义类型时显示「人格 xxx」；AUTO_REPORT 为占位类型，不展示
+                // 最终回退：若仍无人格称号，则给出可控的本地化兜底
                 if (!personalityName || personalityName === '未知人格' || personalityName === '未知') {
                     const typeUpper = (personalityType && String(personalityType).toUpperCase()) || '';
                     if (personalityType && personalityType !== 'UNKNOWN' && typeUpper !== 'AUTO_REPORT') {
-                        personalityName = `人格 ${personalityType}`;
+                        personalityName = currentLang === 'en' ? `Type ${personalityType}` : `人格 ${personalityType}`;
                     } else {
-                        personalityName = '未知人格';
+                        personalityName = getI18nText('personality.unknown') || (currentLang === 'en' ? 'Unknown Title' : '未知人格');
                     }
                 }
 
@@ -11984,8 +12036,8 @@
                 personalityName = translatePersonalityName(personalityName, userData);
                 
                 // 8. 答案之书说明（answer_book 对象）
-                let answerBookTitle = '暂无';
-                let answerBookContent = '暂无说明';
+                let answerBookTitle = currentLang === 'en' ? 'N/A' : '暂无';
+                let answerBookContent = currentLang === 'en' ? 'N/A' : '暂无说明';
                 let answerBookVibeLevel = '';
                 
                 try {
@@ -12074,14 +12126,63 @@
                     const hist = histStr ? JSON.parse(histStr) : null;
                     const vr = hist?.analysisData?.vibeResult || null;
                     if (vr) {
-                        // 标题优先用人格称号（用户可读），其次用 analysis.name
-                        realEvalTitle =
-                            String(vr.personalityName || vr.personality_name || vr.analysis?.name || '').trim();
-                        // 正文优先用 roastText（最像“真实评价”），其次用 analysis.description
-                        realEvalText =
-                            String(vr.roastText || vr.roast_text || vr.analysis?.description || '').trim();
-                        if (Array.isArray(vr.analysis?.traits)) {
-                            realEvalTraits = vr.analysis.traits.map((t) => String(t || '').trim()).filter(Boolean).slice(0, 5);
+                        const containsCjk = (s) => /[\u3040-\u30ff\u3400-\u9fff]/.test(String(s || ''));
+                        const pickFirstNonEmpty = (arr) => {
+                            for (const x of arr) {
+                                const t = String(x || '').trim();
+                                if (t) return t;
+                            }
+                            return '';
+                        };
+
+                        if (currentLang === 'en') {
+                            // 英文：优先使用 *_en / *En 字段（对齐 index.html reanalyzeWithLanguage 产物）
+                            realEvalTitle = pickFirstNonEmpty([
+                                vr.personalityNameEn,
+                                vr.personality_name_en,
+                                vr.personality_nameEn,
+                                vr.analysis?.name_en,
+                                vr.analysis?.nameEn,
+                                vr.analysis_en?.name,
+                                vr.analysis?.name
+                            ]);
+                            realEvalText = pickFirstNonEmpty([
+                                vr.roastTextEn,
+                                vr.roast_text_en,
+                                vr.roast_textEn,
+                                vr.analysis?.description_en,
+                                vr.analysis?.descriptionEn,
+                                vr.analysis_en?.description,
+                                vr.roastText,
+                                vr.roast_text,
+                                vr.analysis?.description
+                            ]);
+
+                            const traitsEn =
+                                vr.analysis?.traits_en ||
+                                vr.analysis?.traitsEn ||
+                                vr.analysis_en?.traits ||
+                                vr.analysis?.traits;
+                            if (Array.isArray(traitsEn)) {
+                                realEvalTraits = traitsEn.map((t) => String(t || '').trim()).filter(Boolean).slice(0, 5);
+                                // 英文模式下剔除含中文的 trait（避免混排）
+                                realEvalTraits = realEvalTraits.filter((t) => !containsCjk(t));
+                            }
+
+                            // 如果仍然是中文内容：英文模式下不展示中文，给出英文兜底提示
+                            if (containsCjk(realEvalTitle) || containsCjk(realEvalText)) {
+                                realEvalTitle = '';
+                                realEvalTraits = [];
+                                realEvalText = 'Real evaluation is not available in English for this run.';
+                            }
+                        } else {
+                            // 中文：标题优先用人格称号（用户可读），其次用 analysis.name
+                            realEvalTitle = pickFirstNonEmpty([vr.personalityName, vr.personality_name, vr.analysis?.name]);
+                            // 正文优先用 roastText（最像“真实评价”），其次用 analysis.description
+                            realEvalText = pickFirstNonEmpty([vr.roastText, vr.roast_text, vr.analysis?.description]);
+                            if (Array.isArray(vr.analysis?.traits)) {
+                                realEvalTraits = vr.analysis.traits.map((t) => String(t || '').trim()).filter(Boolean).slice(0, 5);
+                            }
                         }
                     }
                 } catch { /* ignore */ }
@@ -12359,15 +12460,16 @@
             // 数据判别：定义变量 const isGlobalTopMode = !userData
             const isGlobalTopMode = !userData;
             
-            // UI 反馈优化：如果识别到是本地指纹匹配的用户，在抽屉标题增加"（当前设备）"标识
+            // UI 反馈优化：如果识别到是本地指纹匹配的用户，在抽屉标题增加"当前设备/This Device"标识
             if (userData && window.currentUserMatchedByFingerprint) {
                 try {
                     const leftTitle = document.getElementById('left-drawer-title');
                     if (leftTitle) {
-                        // 检查标题是否已经包含"（当前设备）"，避免重复添加
+                        // 检查标题是否已经包含"当前设备/This Device"，避免重复添加
                         const currentText = leftTitle.textContent || '';
-                        if (!currentText.includes('（当前设备）') && !currentText.includes('(当前设备)')) {
-                            leftTitle.textContent = currentText + '（当前设备）';
+                        if (!currentText.includes('（当前设备）') && !/\(This Device\)/i.test(currentText)) {
+                            const suffix = getI18nText('common.current_device') || (currentLang === 'en' ? ' (This Device)' : '（当前设备）');
+                            leftTitle.textContent = currentText + suffix;
                             console.log('[Rank] ✅ 已更新左侧抽屉标题，添加"（当前设备）"标识');
                         }
                     }
