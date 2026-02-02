@@ -4639,9 +4639,20 @@ app.get('/api/country-summary', async (c) => {
     const rpcList: any[] = Array.isArray(rpcRows) ? rpcRows : (rpcRows ? [rpcRows] : []);
     const row = rpcList.find((it) => String(it?.country_code || '').trim().toUpperCase() === cc) || null;
 
-    // 该国总人数：用 count=exact（不依赖 RPC 是否返回 total_users）
+    // ✅ 彻底修复顶层统计：不再依赖 user_analysis，改为直接基于 v_unified_analysis_v2 统计
+    // - totalUsers: 优先按 DISTINCT fingerprint（view 中 fingerprint 非空时天然唯一），若为 0 则回退到该国总记录数
+    // - totalAnalysis: 该国总记录数（count(*)）
     let countryTotalUsers = 0;
+    let countryTotalAnalysis = 0;
+    const readCountFromContentRange = (cr: string | null) => {
+      if (!cr) return null;
+      const parts = cr.split('/');
+      if (parts.length !== 2) return null;
+      const nAll = parseInt(parts[1]);
+      return (!Number.isNaN(nAll) && nAll >= 0) ? nAll : null;
+    };
     try {
+      // totalAnalysis = count(*) from v_unified_analysis_v2 (按国家过滤)
       const countUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
       countUrl.searchParams.set('select', 'id');
       countUrl.searchParams.set('country_code', `eq.${cc}`);
@@ -4653,17 +4664,34 @@ app.get('/api/country-summary', async (c) => {
         },
       });
       if (res.ok) {
-        const cr = res.headers.get('content-range');
-        if (cr) {
-          const parts = cr.split('/');
-          if (parts.length === 2) {
-            const nAll = parseInt(parts[1]);
-            if (!Number.isNaN(nAll) && nAll >= 0) countryTotalUsers = nAll;
-          }
-        }
+        const nAll = readCountFromContentRange(res.headers.get('content-range'));
+        if (typeof nAll === 'number') countryTotalAnalysis = nAll;
       }
     } catch {
-      countryTotalUsers = 0;
+      countryTotalAnalysis = 0;
+    }
+    try {
+      // totalUsers = count(DISTINCT fingerprint) from v_unified_analysis_v2
+      // 由于 v_unified_analysis_v2 已对 fingerprint 去重，因此这里用 fingerprint not null 的行数即可近似 distinct(fingerprint)
+      const countUrl2 = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
+      countUrl2.searchParams.set('select', 'fingerprint');
+      countUrl2.searchParams.set('country_code', `eq.${cc}`);
+      countUrl2.searchParams.set('fingerprint', 'not.is.null');
+      const res2 = await fetch(countUrl2.toString(), {
+        headers: {
+          ...buildSupabaseHeaders(env),
+          'Prefer': 'count=exact',
+          'Range': '0-0',
+        },
+      });
+      if (res2.ok) {
+        const nFp = readCountFromContentRange(res2.headers.get('content-range'));
+        if (typeof nFp === 'number') countryTotalUsers = nFp;
+      }
+      // 回退：如果该国没有 fingerprint（纯 GitHub 身份），避免显示 0
+      if (!countryTotalUsers && countryTotalAnalysis) countryTotalUsers = countryTotalAnalysis;
+    } catch {
+      if (!countryTotalUsers && countryTotalAnalysis) countryTotalUsers = countryTotalAnalysis;
     }
 
     const n = (v: any) => {
@@ -4682,7 +4710,8 @@ app.get('/api/country-summary', async (c) => {
     const kc = n(row?.kc ?? row?.ketao_count ?? row?.ketao_count_sum);
     const avgLen = n(row?.avg_user_message_length ?? row?.avg_len ?? (tm > 0 ? (tuc / tm) : 0));
 
-    const totalUsers = countryTotalUsers > 0 ? countryTotalUsers : n(row?.total_users ?? row?.users ?? row?.totalUsers ?? 0);
+    // 国家口径（用于 countryTotals / 排名换算）
+    const totalUsersCountry = countryTotalUsers > 0 ? countryTotalUsers : n(row?.total_users ?? row?.users ?? row?.totalUsers ?? 0);
     const totalCountries = Math.max(0, ni(row?.total_countries ?? row?.totalCountries) || rpcList.length || 0);
 
     const mkRank = (rankVal: any) => {
@@ -4692,7 +4721,7 @@ app.get('/api/country-summary', async (c) => {
     };
 
     const totals = {
-      totalUsers,
+      totalUsers: totalUsersCountry,
       total_messages_sum: tm,
       total_user_chars_sum: tuc,
       total_chars_sum: tc,
@@ -4717,11 +4746,34 @@ app.get('/api/country-summary', async (c) => {
     const totalMessages = Number(totals?.total_messages_sum) || 0;
     const totalChars = Number(totals?.total_chars_sum) || 0;
     const totalUserChars = Number(totals?.total_user_chars_sum) || totalChars;
-    const avgPerUser = totalUsers > 0 ? Math.round(totalChars / totalUsers) : 0;
+    const avgPerUser = totalUsersCountry > 0 ? Math.round(totalChars / totalUsersCountry) : 0;
     const avgPerScan = totalMessages > 0 ? Math.round(totalChars / totalMessages) : 0;
 
-    // radar 暂时沿用默认（RPC 可扩展返回 avg_l..avg_f 后再接入）
-    const avgDims = { L: 50, P: 50, D: 50, E: 50, F: 50 };
+    // ✅ 支持全站平均分计算：从 v_unified_analysis_v2 聚合全站 l/p/d/e/f 平均值
+    let avgDims = { L: 50, P: 50, D: 50, E: 50, F: 50 };
+    try {
+      const avgUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
+      avgUrl.searchParams.set('select', 'avg_l:avg(l_score),avg_p:avg(p_score),avg_d:avg(d_score),avg_e:avg(e_score),avg_f:avg(f_score)');
+      avgUrl.searchParams.set('limit', '1');
+      const rows = await fetchSupabaseJson<any[]>(env, avgUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
+      const r0 = Array.isArray(rows) ? (rows[0] || null) : null;
+      const clamp = (x: any) => {
+        const v = Number(x);
+        if (!Number.isFinite(v)) return 0;
+        return Math.max(0, Math.min(100, v));
+      };
+      if (r0) {
+        const L = clamp(r0.avg_l);
+        const P = clamp(r0.avg_p);
+        const D = clamp(r0.avg_d);
+        const E = clamp(r0.avg_e);
+        const F = clamp(r0.avg_f);
+        // 若确实拿到有效数据（至少一个非 0），才覆盖默认值
+        if ([L, P, D, E, F].some((v) => v > 0)) avgDims = { L, P, D, E, F };
+      }
+    } catch {
+      // ignore
+    }
 
     // ----------------------------
     // my record + country ranks (按需)
@@ -4731,7 +4783,7 @@ app.get('/api/country-summary', async (c) => {
     let myRanks: any = null;
 
     const canIdentify = !!(userId || fingerprint);
-    if (canIdentify && totalUsers > 0) {
+    if (canIdentify && totalUsersCountry > 0) {
       try {
         // 优先用完整字段集合（V2 视图），失败则回退最小集合
         const fetchMe = async (selectCols: string) => {
@@ -4835,9 +4887,9 @@ app.get('/api/country-summary', async (c) => {
               return;
             }
             const gt = Number(raw) || 0;
-            const rank = totalUsers > 0 ? (gt + 1) : null;
-            const percentile = totalUsers > 0 ? Math.max(0, Math.min(100, (1 - (rank - 1) / totalUsers) * 100)) : null;
-            ranks[key] = { rank, total: totalUsers, percentile };
+            const rank = totalUsersCountry > 0 ? (gt + 1) : null;
+            const percentile = totalUsersCountry > 0 ? Math.max(0, Math.min(100, (1 - (rank - 1) / totalUsersCountry) * 100)) : null;
+            ranks[key] = { rank, total: totalUsersCountry, percentile };
           });
 
           myRanks = ranks;
@@ -4905,6 +4957,45 @@ app.get('/api/country-summary', async (c) => {
       });
 
       if (/^[A-Z]{2}$/.test(cc)) {
+        // ✅ 方案 B：优先使用 Supabase RPC 一次拿到 6 榜单（更省连接/更低延迟，适合免费档）
+        // 如果 RPC 尚未部署或执行失败，则自动回退到旧方案（每指标单独查询）
+        try {
+          const rpcTopUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_country_top_metrics_v1`;
+          const rpcTop = await fetchSupabaseJson<any>(
+            env,
+            rpcTopUrl,
+            {
+              method: 'POST',
+              headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+              body: JSON.stringify({ country_code: cc, top_n: topN }),
+            },
+            SUPABASE_FETCH_TIMEOUT_MS
+          ).catch(() => null);
+          if (Array.isArray(rpcTop) && rpcTop.length > 0) {
+            // 兼容：保证顺序与前端 metricOrder 一致
+            const order = new Map<string, number>(metrics.map((m, i) => [m.key, i]));
+            topByMetrics = rpcTop
+              .slice()
+              .sort((a: any, b: any) => (order.get(String(a?.key || '')) ?? 999) - (order.get(String(b?.key || '')) ?? 999));
+            // 补齐：如果 RPC 返回不足 6 项，也要补齐空项，避免前端指示器/轮播断裂
+            if (topByMetrics.length < metrics.length) {
+              const existing = new Set(topByMetrics.map((x: any) => String(x?.key || '')));
+              for (const m of metrics) {
+                if (!existing.has(m.key)) topByMetrics.push(emptyEntry(m));
+              }
+              topByMetrics = topByMetrics
+                .slice()
+                .sort((a: any, b: any) => (order.get(String(a?.key || '')) ?? 999) - (order.get(String(b?.key || '')) ?? 999));
+            }
+          }
+        } catch {
+          // ignore -> fallback
+        }
+
+        // RPC 成功则不再进行 6 次查询
+        if (Array.isArray(topByMetrics) && topByMetrics.length > 0) {
+          // ok
+        } else {
         const selectColsBase = [
           'id',
           'user_name',
@@ -4993,6 +5084,7 @@ app.get('/api/country-summary', async (c) => {
           }
         }));
         topByMetrics = results;
+        }
       } else {
         // country 参数异常时也返回 6 个空条目，避免前端 UI 断裂
         topByMetrics = metrics.map((m) => emptyEntry(m));
@@ -5005,17 +5097,68 @@ app.get('/api/country-summary', async (c) => {
     const debugFlag = String(c.req.query('debug') || '').trim();
     const includeDebug = debugFlag === '1' || debugFlag.toLowerCase() === 'true';
 
+    // 顶层统计（全站口径）：totalUsers/totalAnalysis
+    // - totalUsers = count(distinct fingerprint) from v_unified_analysis_v2（fingerprint 非空行数即可）
+    // - totalAnalysis = count(*) from v_unified_analysis_v2
+    let globalTotalUsers = 0;
+    let globalTotalAnalysis = 0;
+    try {
+      const countAllUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
+      countAllUrl.searchParams.set('select', 'id');
+      const res = await fetch(countAllUrl.toString(), {
+        headers: {
+          ...buildSupabaseHeaders(env),
+          'Prefer': 'count=exact',
+          'Range': '0-0',
+        },
+      });
+      if (res.ok) {
+        const cr = res.headers.get('content-range');
+        const parts = cr ? cr.split('/') : [];
+        if (parts.length === 2) {
+          const nAll = parseInt(parts[1]);
+          if (!Number.isNaN(nAll) && nAll >= 0) globalTotalAnalysis = nAll;
+        }
+      }
+    } catch {
+      globalTotalAnalysis = 0;
+    }
+    try {
+      const countFpUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
+      countFpUrl.searchParams.set('select', 'fingerprint');
+      countFpUrl.searchParams.set('fingerprint', 'not.is.null');
+      const res2 = await fetch(countFpUrl.toString(), {
+        headers: {
+          ...buildSupabaseHeaders(env),
+          'Prefer': 'count=exact',
+          'Range': '0-0',
+        },
+      });
+      if (res2.ok) {
+        const cr = res2.headers.get('content-range');
+        const parts = cr ? cr.split('/') : [];
+        if (parts.length === 2) {
+          const nAll = parseInt(parts[1]);
+          if (!Number.isNaN(nAll) && nAll >= 0) globalTotalUsers = nAll;
+        }
+      }
+      // 若全站没有 fingerprint（极端情况），回退到全站记录数
+      if (!globalTotalUsers && globalTotalAnalysis) globalTotalUsers = globalTotalAnalysis;
+    } catch {
+      if (!globalTotalUsers && globalTotalAnalysis) globalTotalUsers = globalTotalAnalysis;
+    }
+
     const out: any = {
       success: true,
-      totalUsers,
-      totalAnalysis: totalMessages,
+      totalUsers: globalTotalUsers,
+      totalAnalysis: globalTotalAnalysis,
       totalChars,
       avgPerUser,
       avgPerScan,
       // 保持兼容：country-summary 仍返回这两个字段（stats2 右侧雷达使用）
       globalAverage: avgDims,
       averages: avgDims,
-      locationRank: [{ name: country, value: totalUsers }],
+      locationRank: [{ name: country, value: totalUsersCountry }],
       personalityRank: [],
       personalityDistribution: [],
       latestRecords,
@@ -5023,7 +5166,7 @@ app.get('/api/country-summary', async (c) => {
       // 新增：国家累计与个人国家排名
       countryTotals: {
         country,
-        totalUsers,
+        totalUsers: totalUsersCountry,
         total_messages: totalMessages,
         total_user_chars: totalUserChars, // 兼容：与 total_chars 同口径时也可用
         total_chars: totalChars,
@@ -5061,6 +5204,119 @@ app.get('/api/country-summary', async (c) => {
   } catch (e: any) {
     console.error('[Worker] /api/country-summary 错误:', e);
     return c.json({ success: false, error: e.message || '服务器错误' }, 500);
+  }
+});
+
+/**
+ * 【方案 B 代理查询】GET /api/country-top-metrics?country=CN&topN=10
+ * 目的：
+ * - 让前端/调试可以直接通过 Worker 域名拿到“某国家 6 个指标 TopN 榜单”原始数据
+ * - 内部调用 Supabase RPC：/rest/v1/rpc/get_country_top_metrics_v1
+ *
+ * 返回：
+ * - success: true/false
+ * - data: RPC 返回的 6 项数组（每项含 leaders[]）
+ */
+app.get('/api/country-top-metrics', async (c) => {
+  try {
+    const env = c.env;
+    if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+      return c.json({ success: false, error: 'Supabase 未配置' }, 500);
+    }
+
+    const countryRaw = String(c.req.query('country') || '').trim();
+    const cc = countryRaw.toUpperCase();
+    if (!/^[A-Z]{2}$/.test(cc)) {
+      return c.json({ success: false, error: 'country 必填且为 2 位国家代码' }, 400);
+    }
+
+    const topNRaw = String(c.req.query('topN') || '').trim();
+    const topN = (() => {
+      const n = parseInt(topNRaw, 10);
+      if (Number.isFinite(n) && n > 0) return Math.max(3, Math.min(20, n));
+      return 10;
+    })();
+
+    const langRaw = String(c.req.query('lang') || '').trim().toLowerCase();
+    const lang = langRaw === 'en' ? 'en' : 'zh';
+
+    const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_country_top_metrics_v1`;
+    const raw = await fetchSupabaseJson<any>(
+      env,
+      rpcUrl,
+      {
+        method: 'POST',
+        headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ country_code: cc, top_n: topN }),
+      },
+      SUPABASE_FETCH_TIMEOUT_MS
+    );
+
+    // 轻量映射：保证 label/字段稳定（并提供英文标签），并对 leaders 做兜底清洗
+    const EN_LABELS: Record<string, { labelEn: string; labelZh: string; format?: 'int' | 'float' }> = {
+      total_messages: { labelEn: 'AI Interactions', labelZh: '调戏AI次数', format: 'int' },
+      total_chars: { labelEn: 'Total Chars', labelZh: '对话字符数', format: 'int' },
+      total_user_chars: { labelEn: 'User Chars', labelZh: '废话输出', format: 'int' },
+      avg_user_message_length: { labelEn: 'Avg Len', labelZh: '平均长度', format: 'float' },
+      jiafang_count: { labelEn: 'Client Mode', labelZh: '甲方上身', format: 'int' },
+      ketao_count: { labelEn: 'Humble Mode', labelZh: '磕头', format: 'int' },
+    };
+    const translateTitle = (s: any) => {
+      const rawS = String(s ?? '').trim();
+      if (lang !== 'en' || !rawS) return rawS;
+      // 最小兜底：常见中文称号 -> 英文（与前端 fallback 保持一致）
+      if (rawS.includes('码农')) return 'Code Monkey';
+      if (rawS.includes('架构')) return 'Architect';
+      return rawS;
+    };
+
+    const data = Array.isArray(raw)
+      ? raw.map((it: any) => {
+          const key = String(it?.key || it?.col || '').trim();
+          const meta = EN_LABELS[key] || null;
+          const leaders = Array.isArray(it?.leaders) ? it.leaders : [];
+          const normLeaders = leaders.map((row: any, idx: number) => {
+            const u = row?.user || {};
+            // 如果有 title/label 之类字段，英文时做翻译兜底
+            if (lang === 'en') {
+              if (u && typeof u === 'object') {
+                if (u.title != null) u.title = translateTitle(u.title);
+                if (u.label != null) u.label = translateTitle(u.label);
+                if (u.personality_title != null) u.personality_title = translateTitle(u.personality_title);
+              }
+            }
+            return {
+              rank: Number(row?.rank) || (idx + 1),
+              score: row?.score ?? null,
+              user: u,
+            };
+          });
+
+          // 确保 total_chars 对应 tc 别名（便于调试定位）
+          const outIt: any = { ...it, leaders: normLeaders };
+          if (meta) {
+            outIt.labelEn = meta.labelEn;
+            outIt.labelZh = meta.labelZh;
+            outIt.format = outIt.format || meta.format;
+          }
+          if (key === 'total_chars') outIt.tc = outIt.score ?? null;
+          return outIt;
+        })
+      : raw;
+
+    // 抗抖：短缓存，便于 100 并发查询
+    c.header('Cache-Control', 'public, max-age=30');
+    return c.json({
+      success: true,
+      country: cc,
+      topN,
+      lang,
+      data,
+    });
+  } catch (e: any) {
+    // 常见错误：RPC 未部署（404/400），或权限不足（401/403）
+    console.error('[Worker] /api/country-top-metrics 错误:', e);
+    return c.json({ success: false, error: e?.message || '服务器错误' }, 500);
   }
 });
 

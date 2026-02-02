@@ -762,6 +762,13 @@
             transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s ease;
         }
 
+        /* 防止被 ECharts 图层遮挡：强制提升层级 + 可点击 */
+        #btn-zh, #btn-en {
+            cursor: pointer !important;
+            z-index: 9999 !important;
+            position: relative !important;
+        }
+
         .loading-overlay {
             position: absolute;
             inset: 0;
@@ -1087,7 +1094,7 @@
         }
 
         /* =========================
-           右侧抽屉：高分图谱排行榜（横向滑动 + 指示器）
+           右侧抽屉：高分图谱排行榜（旧：横向滑动 + 指示器；新：6 张纵向卡片）
            ========================= */
         .lpdef-carousel {
             display: flex;
@@ -1104,7 +1111,7 @@
             scroll-snap-align: start;
             border: 1px solid rgba(255,255,255,0.10);
             background: rgba(9, 9, 9, 0.45);
-            padding: 12px;
+            padding: 10px;
             text-align: center; /* 整体文本居中 */
         }
         .lpdef-page-title {
@@ -1124,16 +1131,17 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 10px;
-            padding: 8px 10px;
+            gap: 8px;
+            padding: 7px 9px;
             border: 1px solid rgba(255,255,255,0.08);
             background: rgba(0,0,0,0.25);
         }
         .lpdef-rank-left {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px; /* 更紧凑，避免挤压分值 */
             min-width: 0;
+            flex: 1 1 auto; /* 左侧可压缩，避免挤掉分值 */
             text-align: left; /* 行内依然左对齐更易读 */
         }
         .lpdef-rank-badge {
@@ -1149,13 +1157,28 @@
             color: #00ff41;
             flex: 0 0 auto;
         }
+        .lpdef-rank-rn {
+            width: 38px;
+            flex: 0 0 auto;
+            text-align: left;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.40);
+            font-variant-numeric: tabular-nums;
+        }
         .lpdef-rank-avatar {
-            width: 22px;
-            height: 22px;
+            width: 20px;
+            height: 20px;
             border-radius: 999px;
             object-fit: cover;
             border: 1px solid rgba(0,255,65,0.25);
             flex: 0 0 auto;
+        }
+        .lpdef-name-wrap {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+            flex: 1 1 auto;
         }
         .lpdef-rank-name {
             font-size: 11px;
@@ -1163,14 +1186,96 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            /* 关键：让名字在 flex 中可缩，不挤占分值空间 */
+            min-width: 0;
+            flex: 1 1 auto;
+        }
+        .lpdef-persona-tag {
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.40);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            flex: 0 0 auto;
+            white-space: nowrap;
         }
         .lpdef-rank-score {
             font-size: 12px;
             font-weight: 800;
-            color: #22c55e;
+            color: #22d3ee; /* text-cyan-400 */
             font-variant-numeric: tabular-nums;
             text-align: right;
+            flex: 0 0 auto; /* 不缩，防止 275.3k 被截断 */
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            min-width: 72px; /* 右侧定宽：一行清晰显示“名次/用户/分数” */
+        }
+
+        /* 新布局：6 张纵向卡片 */
+        .lpdef-metric-cards {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding: 6px 0 2px 0;
+        }
+        .lpdef-metric-card {
+            border: 1px solid rgba(255,255,255,0.10);
+            background: rgba(9, 9, 9, 0.45);
+            padding: 10px;
+        }
+        .lpdef-metric-title {
+            font-size: 12px;
+            color: #e5e7eb;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            text-align: left;
+        }
+        .lpdef-rank-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
             flex: 0 0 auto;
+        }
+        .lpdef-rank-delta {
+            min-width: 54px;
+            text-align: right;
+            font-size: 11px;
+            font-weight: 800;
+            color: rgba(255,255,255,0.35);
+            font-variant-numeric: tabular-nums;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            flex: 0 0 auto;
+        }
+        .lpdef-rank-delta.up { color: #00ff41; }
+        .lpdef-rank-delta.down { color: #f87171; }
+        .lpdef-rank-delta.flat { color: rgba(255,255,255,0.45); }
+        .lpdef-rank-delta.na { color: rgba(255,255,255,0.28); }
+        .lpdef-rank-header-row {
+            background: rgba(255,255,255,0.03);
+            border-color: rgba(255,255,255,0.10);
+            padding-top: 6px;
+            padding-bottom: 6px;
+        }
+        .lpdef-rank-header-row .lpdef-rank-rn,
+        .lpdef-rank-header-row .lpdef-rank-name,
+        .lpdef-rank-header-row .lpdef-rank-score,
+        .lpdef-rank-header-row .lpdef-rank-delta {
+            font-size: 10px;
+            font-weight: 700;
+            color: rgba(255,255,255,0.35);
+        }
+        .lpdef-rank-header-row .lpdef-rank-score { min-width: 72px; }
+        .lpdef-rank-header-row .lpdef-rank-delta { min-width: 54px; }
+
+        /* 窄屏进一步收紧：隐藏可选标签，确保三段信息一行显示 */
+        @media (max-width: 420px) {
+            .lpdef-rank-left { gap: 8px; }
+            .lpdef-rank-rn { width: 34px; }
+            .lpdef-rank-avatar { width: 18px; height: 18px; }
+            .lpdef-persona-tag { display: none; }
+            .lpdef-rank-score { min-width: 64px; font-size: 11px; }
+            .lpdef-rank-name { min-width: 0; }
+            .lpdef-rank-delta { min-width: 46px; font-size: 10px; }
+            .lpdef-rank-header-row .lpdef-rank-delta { min-width: 46px; }
         }
         .lpdef-indicators {
             display: flex;
@@ -2723,7 +2828,8 @@
                         } catch { /* ignore */ }
 
                         const rowTotals = (label, totalVal, r) => {
-                            const rankText = (r && r.rank) ? `#${r.rank}/${r.total}` : '--';
+                            const hasRank = r && (r.rank !== null && r.rank !== undefined) && Number.isFinite(Number(r.rank));
+                            const rankText = hasRank ? `#${Number(r.rank)}/${Number(r.total) || ''}` : '--';
                             return `
                                 <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
                                     <div class="text-zinc-200">${label}</div>
@@ -2736,7 +2842,8 @@
                         };
                         const fmtMe = (v) => (v === undefined || v === null || Number.isNaN(Number(v))) ? '--' : fmt(v);
                         const rowRanks = (label, myVal, r) => {
-                            const rankText = r && r.rank ? `#${r.rank}/${r.total}` : '--';
+                            const hasRank = r && (r.rank !== null && r.rank !== undefined) && Number.isFinite(Number(r.rank));
+                            const rankText = hasRank ? `#${Number(r.rank)}/${Number(r.total) || ''}` : '--';
                             return `
                                 <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
                                     <div class="text-zinc-200">${label}</div>
@@ -2846,12 +2953,13 @@
                 // =========================
                 // 需求：高分图谱 (#rtTopTalentsList)
                 // 新口径：该国 6 项指标 TopN（/api/country-summary.topByMetrics[].leaders）
-                // - 指示器 + 左右滑动切换
-                // - 版式居中、间距优化
+                // - 新版 UI：6 个标签 -> 6 张纵向卡片（每张卡片：标题 + TopN）
+                // - 行字段：名次 / 用户（头像+用户名）/ 分数 / 每日晋级（▲/▼，无数据则 --）
                 // =========================
                 const topTalentsEl = document.getElementById('rtTopTalentsList');
                 const topTalentsHeroesEl = document.getElementById('rtTopTalentsHeroes');
                 let topBy = Array.isArray(data.topByMetrics) ? data.topByMetrics : [];
+                const eliteHintEl = document.getElementById('rtEliteHint');
 
                 const metricOrder = [
                     'total_messages',
@@ -2865,17 +2973,31 @@
                     .slice()
                     .sort((a, b) => metricOrder.indexOf(String(a?.key || '')) - metricOrder.indexOf(String(b?.key || '')));
 
-                if (topTalentsHeroesEl) topTalentsHeroesEl.innerHTML = '';
+                // 旧 UI：顶部指示器 + “Swipe” 提示 -> 新 UI 不再需要
+                if (topTalentsHeroesEl) {
+                    topTalentsHeroesEl.innerHTML = '';
+                    try { topTalentsHeroesEl.style.display = 'none'; } catch { /* ignore */ }
+                }
+                if (eliteHintEl) {
+                    try { eliteHintEl.style.display = 'none'; } catch { /* ignore */ }
+                }
                 if (topTalentsEl) {
                     if (!topBy || topBy.length === 0) {
                         topTalentsEl.innerHTML = `<div class="text-zinc-500 text-xs text-center">${escapeHtml(getI18nText('lpdef.none') || 'No data')}</div>`;
                     } else {
-                        const fmtScore = (metric, v) => {
-                            const s = Number(v);
-                            if (!Number.isFinite(s)) return '--';
-                            const f = String(metric?.format || '').toLowerCase();
-                            if (f === 'float') return new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN').format(Math.round(s));
-                            return new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN').format(Math.round(s));
+                        const formatMetricValue = (value, key) => {
+                            const n = Number(value);
+                            if (!Number.isFinite(n)) return '--';
+                            const k = String(key || '').toLowerCase();
+                            // chars: 超过 1000 => k（如 275.3k）
+                            if (k.includes('chars')) {
+                                if (Math.abs(n) >= 1000) return `${(n / 1000).toFixed(1)}k`;
+                                return new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN').format(Math.round(n));
+                            }
+                            // avg_user_message_length：保留 1 位小数
+                            if (k === 'avg_user_message_length') return n.toFixed(1);
+                            // 其余整数：直接显示（带分隔符）
+                            return new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN').format(Math.round(n));
                         };
                         const labelForMetric = (it) => {
                             return (currentLang === 'en')
@@ -2883,97 +3005,123 @@
                                 : (it?.labelZh || it?.key || '--');
                         };
 
-                        // 指示器（复用 #rtTopTalentsHeroes）
-                        if (topTalentsHeroesEl) {
-                            topTalentsHeroesEl.classList.add('lpdef-indicators');
-                            topTalentsHeroesEl.innerHTML = topBy.map((it, idx) => {
-                                const label = String(labelForMetric(it) || '').trim() || `M${idx + 1}`;
-                                return `<button type="button" class="lpdef-indicator-btn ${idx === 0 ? 'active' : ''}" data-lpdef-idx="${idx}">${escapeHtml(label)}</button>`;
-                            }).join('');
-                        }
+                        // “日变”字段兼容：后端未来可返回任一字段名即可直接显示
+                        const _resolveDailyDelta = (row) => {
+                            try {
+                                const currRank = Number(row?.rn ?? row?.rank ?? row?.position ?? row?.pos ?? NaN);
+                                const prevRank = Number(row?.prev_rank ?? row?.prevRank ?? row?.yesterday_rank ?? row?.yesterdayRank ?? row?.rank_prev ?? row?.rankPrev ?? NaN);
+                                if (Number.isFinite(currRank) && Number.isFinite(prevRank)) {
+                                    // 约定：prev - curr > 0 表示名次上升（更靠前）
+                                    return prevRank - currRank;
+                                }
+                                const d = Number(
+                                    row?.delta_rank ??
+                                    row?.deltaRank ??
+                                    row?.rank_delta ??
+                                    row?.rankDelta ??
+                                    row?.rank_change ??
+                                    row?.rankChange ??
+                                    row?.daily_delta_rank ??
+                                    row?.dailyDeltaRank ??
+                                    row?.dailyChange ??
+                                    row?.daily_change ??
+                                    NaN
+                                );
+                                return Number.isFinite(d) ? d : null;
+                            } catch {
+                                return null;
+                            }
+                        };
+                        const _renderDelta = (delta) => {
+                            if (delta === null || delta === undefined || !Number.isFinite(Number(delta))) {
+                                return `<span class="lpdef-rank-delta na">--</span>`;
+                            }
+                            const d = Number(delta) || 0;
+                            if (d > 0) return `<span class="lpdef-rank-delta up">▲ ${Math.abs(d)}</span>`;
+                            if (d < 0) return `<span class="lpdef-rank-delta down">▼ ${Math.abs(d)}</span>`;
+                            return `<span class="lpdef-rank-delta flat">—</span>`;
+                        };
+                        const _headerRow = () => {
+                            return `
+                                <div class="lpdef-rank-row lpdef-rank-header-row">
+                                    <div class="lpdef-rank-left">
+                                        <span class="lpdef-rank-rn">${escapeHtml(currentLang === 'en' ? 'Rank' : '名次')}</span>
+                                        <span class="lpdef-rank-name" style="min-width:0;flex:1 1 auto;">${escapeHtml(currentLang === 'en' ? 'User' : '用户')}</span>
+                                    </div>
+                                    <div class="lpdef-rank-right">
+                                        <span class="lpdef-rank-score">${escapeHtml(currentLang === 'en' ? 'Score' : '分数')}</span>
+                                        <span class="lpdef-rank-delta">${escapeHtml(currentLang === 'en' ? 'Daily' : '日变')}</span>
+                                    </div>
+                                </div>
+                            `;
+                        };
 
-                        const pagesHtml = topBy.map((it, idx) => {
+                        const cardsHtml = topBy.map((it, idx) => {
                             const label = String(labelForMetric(it) || '').trim() || `M${idx + 1}`;
                             const leaders = Array.isArray(it?.leaders) ? it.leaders : (it?.user ? [{ rank: 1, score: it.score, user: it.user }] : []);
                             const rows = leaders.slice(0, 10).map((row) => {
                                 const user = row?.user || {};
                                 const meta = _resolveUserMeta(user);
-                                const scoreText = fmtScore(it, row?.score);
+                                const metricKey = String(it?.key || it?.col || '').trim();
+                                const scoreText = formatMetricValue(row?.score, metricKey);
+                                const rn = Number(row?.rn ?? row?.rank ?? '') || 0;
+                                const rankText = rn > 0 ? `#${rn}` : (row?.rank ? `#${row.rank}` : '#--');
                                 const lpdefText = (() => {
                                     const v = user?.lpdef ?? user?.lpDef ?? '';
                                     const s = String(v || '').trim();
                                     return s ? s : '';
                                 })();
+                                // 可选但推荐：基于 lpdef 的简短性格标签（优先用 personalityNamesEn，否则用 5 位 vibe_index）
+                                const personaTag = (() => {
+                                    try {
+                                        const idx5 = lpdefText ? lpdefToVibeIndex(lpdefText) : null;
+                                        if (!idx5 || String(idx5).length !== 5) return '';
+                                        if (currentLang === 'en') {
+                                            const cfg = window.__LANG_CONFIG;
+                                            const namesEn = cfg && cfg.personalityNamesEn ? cfg.personalityNamesEn : null;
+                                            if (namesEn && typeof namesEn[idx5] === 'string' && String(namesEn[idx5]).trim()) {
+                                                return String(namesEn[idx5]).trim();
+                                            }
+                                        }
+                                        return `V${idx5}`;
+                                    } catch {
+                                        return '';
+                                    }
+                                })();
                                 const nameHtml = meta.profileUrl
                                     ? `<a href="${escapeHtml(meta.profileUrl)}" target="_blank" rel="noopener noreferrer" class="lpdef-rank-name hover:underline">${escapeHtml(meta.display)}</a>`
                                     : `<span class="lpdef-rank-name" style="color: rgba(229,231,235,0.75)">${escapeHtml(meta.display)}</span>`;
+                                const delta = _resolveDailyDelta(row);
                                 return `
                                     <div class="lpdef-rank-row">
                                         <div class="lpdef-rank-left">
-                                            <span class="lpdef-rank-badge">${escapeHtml(String(row?.rank ?? ''))}</span>
+                                            <span class="lpdef-rank-rn">${escapeHtml(rankText)}</span>
                                             <img class="lpdef-rank-avatar" src="${escapeHtml(meta.avatar)}" alt="" onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';" />
-                                            ${nameHtml}
-                                            ${lpdefText ? `<span class="text-[10px] text-zinc-500 font-mono ml-1">${escapeHtml(lpdefText)}</span>` : ``}
+                                            <div class="lpdef-name-wrap">
+                                                ${nameHtml}
+                                                ${personaTag ? `<span class="lpdef-persona-tag">${escapeHtml(personaTag)}</span>` : ``}
+                                            </div>
                                         </div>
-                                        <div class="lpdef-rank-score">${escapeHtml(scoreText)}</div>
+                                        <div class="lpdef-rank-right">
+                                            <div class="lpdef-rank-score">${escapeHtml(String(scoreText))}</div>
+                                            ${_renderDelta(delta)}
+                                        </div>
                                     </div>
                                 `;
                             }).join('');
 
                             return `
-                                <div class="lpdef-page" data-page-index="${idx}">
-                                    <div class="lpdef-page-title">${escapeHtml(label)}</div>
+                                <div class="lpdef-metric-card" data-metric-index="${idx}">
+                                    <div class="lpdef-metric-title">${escapeHtml(label)}</div>
                                     <div class="lpdef-rank-list">
+                                        ${_headerRow()}
                                         ${rows || `<div class="text-zinc-500 text-xs text-center">${escapeHtml(getI18nText('common.no_data') || 'No data')}</div>`}
                                     </div>
                                 </div>
                             `;
                         }).join('');
 
-                        topTalentsEl.innerHTML = `<div class="lpdef-carousel" id="lpdefCarousel">${pagesHtml}</div>`;
-
-                        // 交互：点击指示器 -> 滚动到对应页；滚动时同步 active
-                        try {
-                            const carousel = document.getElementById('lpdefCarousel');
-                            const buttons = topTalentsHeroesEl ? Array.from(topTalentsHeroesEl.querySelectorAll('[data-lpdef-idx]')) : [];
-                            const setActive = (i) => {
-                                buttons.forEach((b) => b.classList.toggle('active', Number(b.getAttribute('data-lpdef-idx')) === i));
-                            };
-                            const scrollToIndex = (i) => {
-                                if (!carousel) return;
-                                const pages = carousel.querySelectorAll('.lpdef-page');
-                                const page = pages && pages[i] ? pages[i] : null;
-                                if (!page) return;
-                                carousel.scrollTo({ left: page.offsetLeft, behavior: 'smooth' });
-                                setActive(i);
-                            };
-                            buttons.forEach((b) => {
-                                b.addEventListener('click', () => {
-                                    const i = Number(b.getAttribute('data-lpdef-idx') || '0') || 0;
-                                    scrollToIndex(i);
-                                });
-                            });
-                            if (carousel) {
-                                let raf = 0;
-                                carousel.addEventListener('scroll', () => {
-                                    if (raf) cancelAnimationFrame(raf);
-                                    raf = requestAnimationFrame(() => {
-                                        try {
-                                            const pages = carousel.querySelectorAll('.lpdef-page');
-                                            if (!pages || !pages.length) return;
-                                            const x = carousel.scrollLeft;
-                                            let best = 0;
-                                            let bestDist = Infinity;
-                                            pages.forEach((p, i) => {
-                                                const d = Math.abs((p).offsetLeft - x);
-                                                if (d < bestDist) { bestDist = d; best = i; }
-                                            });
-                                            setActive(best);
-                                        } catch { /* ignore */ }
-                                    });
-                                }, { passive: true });
-                            }
-                        } catch { /* ignore */ }
+                        topTalentsEl.innerHTML = `<div class="lpdef-metric-cards">${cardsHtml}</div>`;
                     }
                 }
 
@@ -3469,20 +3617,20 @@
                 'badge.syncing': 'SYNCING',
 
                 // Metrics
-                'metric.ai_interrogations': 'AI Interrogations',
-                'metric.jiafang': 'Boss Mode Triggers',
-                'metric.ketao': 'Cyber Kowtows',
+                'metric.ai_interrogations': 'AI Interactions',
+                'metric.jiafang': 'Client Mode',
+                'metric.ketao': 'Humble Mode',
                 'metric.banter_total': 'Banter Output',
                 'metric.avg_len': 'Avg Prompt Length',
                 'metric.avg_len_unit': 'chars/msg',
 
                 // Country totals table labels
-                'countryTotals.messages': 'AI Interrogations',
+                'countryTotals.messages': 'AI Interactions',
                 'countryTotals.totalChars': 'Total Chars',
                 'countryTotals.userChars': 'User Chars',
                 'countryTotals.avgLen': 'Avg Len',
-                'countryTotals.jiafang': 'Jiafang',
-                'countryTotals.ketao': 'Ketao',
+                'countryTotals.jiafang': 'Client Mode',
+                'countryTotals.ketao': 'Humble Mode',
 
                 // Radar / states
                 'radar.loading': 'Loading...',
@@ -3502,12 +3650,12 @@
         };
 
         const DIMENSION_NAME_I18N = {
-            ai: { zh: '调戏AI次数', en: 'AI Interrogations', icon: '💬', suffixZh: '次', suffixEn: 'times' },
+            ai: { zh: '调戏AI次数', en: 'AI Interactions', icon: '💬', suffixZh: '次', suffixEn: 'times' },
             word: { zh: '平均长度', en: 'Avg Length', icon: '📏', suffixZh: '字/条', suffixEn: 'chars/msg' },
             day: { zh: '上岗天数', en: 'Days On Duty', icon: '📅', suffixZh: '天', suffixEn: 'days' },
-            no: { zh: '甲方上身', en: 'Boss Mode', icon: '🚫', suffixZh: '次', suffixEn: 'times' },
+            no: { zh: '甲方上身', en: 'Client Mode', icon: '🚫', suffixZh: '次', suffixEn: 'times' },
             say: { zh: '废话输出', en: 'Banter Output', icon: '💭', suffixZh: '字', suffixEn: 'chars' },
-            please: { zh: '赛博磕头', en: 'Cyber Kowtow', icon: '🙏', suffixZh: '次', suffixEn: 'times' }
+            please: { zh: '赛博磕头', en: 'Humble Mode', icon: '🙏', suffixZh: '次', suffixEn: 'times' }
         };
 
         const getI18nText = (key, fallback = '') => {
@@ -4757,8 +4905,16 @@
                     try {
                         const btnZh = document.getElementById('btn-zh');
                         const btnEn = document.getElementById('btn-en');
-                        if (btnZh) btnZh.addEventListener('click', () => { try { localStorage.setItem(LANG_STORAGE_KEY, 'zh'); } catch { /* ignore */ } updateLanguageContext(); });
-                        if (btnEn) btnEn.addEventListener('click', () => { try { localStorage.setItem(LANG_STORAGE_KEY, 'en'); } catch { /* ignore */ } updateLanguageContext(); });
+                        const setLangAndReload = (next) => {
+                            const v = (String(next || '').trim().toLowerCase() === 'en') ? 'en' : 'zh';
+                            try { localStorage.setItem(LANG_STORAGE_KEY, v); } catch { /* ignore */ }
+                            // 兼容：部分页面/旧逻辑读取 localStorage.lang/appLanguage
+                            try { localStorage.setItem('lang', v); } catch { /* ignore */ }
+                            try { localStorage.setItem('appLanguage', v === 'en' ? 'en' : 'zh-CN'); } catch { /* ignore */ }
+                            try { location.reload(); } catch { /* ignore */ }
+                        };
+                        if (btnZh) btnZh.addEventListener('click', () => setLangAndReload('zh'));
+                        if (btnEn) btnEn.addEventListener('click', () => setLangAndReload('en'));
                     } catch { /* ignore */ }
 
                     // 初始化语言配置（可选）+ 首次刷新语言上下文
@@ -4771,8 +4927,15 @@
                 try {
                     const btnZh = document.getElementById('btn-zh');
                     const btnEn = document.getElementById('btn-en');
-                    if (btnZh) btnZh.addEventListener('click', () => { try { localStorage.setItem(LANG_STORAGE_KEY, 'zh'); } catch { /* ignore */ } updateLanguageContext(); });
-                    if (btnEn) btnEn.addEventListener('click', () => { try { localStorage.setItem(LANG_STORAGE_KEY, 'en'); } catch { /* ignore */ } updateLanguageContext(); });
+                    const setLangAndReload = (next) => {
+                        const v = (String(next || '').trim().toLowerCase() === 'en') ? 'en' : 'zh';
+                        try { localStorage.setItem(LANG_STORAGE_KEY, v); } catch { /* ignore */ }
+                        try { localStorage.setItem('lang', v); } catch { /* ignore */ }
+                        try { localStorage.setItem('appLanguage', v === 'en' ? 'en' : 'zh-CN'); } catch { /* ignore */ }
+                        try { location.reload(); } catch { /* ignore */ }
+                    };
+                    if (btnZh) btnZh.addEventListener('click', () => setLangAndReload('zh'));
+                    if (btnEn) btnEn.addEventListener('click', () => setLangAndReload('en'));
                 } catch { /* ignore */ }
                 try { loadLanguageConfig().then(() => updateLanguageContext()).catch(() => updateLanguageContext()); } catch { /* ignore */ }
                 syncTopHeaderHeight();
