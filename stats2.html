@@ -14273,10 +14273,18 @@
                 }
             }
 
-            return clusters
+            let result = clusters
                 .sort((a, b) => (b.count - a.count) || (a.canonical > b.canonical ? 1 : -1))
-                .slice(0, Math.max(10, Math.min(30, Number(topK) || 20)))
                 .map((c) => ({ name: c.canonical, value: c.count, category: 'personal' }));
+            
+            // 应用可读性过滤器，去除不规则的字母组合
+            const beforeFilter = result.length;
+            result = filterReadableWords(result);
+            if (beforeFilter !== result.length) {
+                console.log(`[WordCloud] Personal 可读性过滤: ${beforeFilter} → ${result.length} 条`);
+            }
+            
+            return result.slice(0, Math.max(10, Math.min(30, Number(topK) || 20)));
         }
 
         function _buildWordCloudOption({ words, maxFont, tooltipFormatter, textStyle, emphasisTextStyle, onClick }) {
@@ -14319,6 +14327,64 @@
             };
         }
 
+        // ========== 词云可读性过滤器 ==========
+        // 用于过滤掉不规则的字母组合，只保留有意义的词汇
+        function filterReadableWords(words) {
+            if (!Array.isArray(words)) return [];
+            
+            return words.filter((w) => {
+                const name = String(w?.name || '').trim();
+                if (!name) return false;
+                
+                // 保留中文词汇（中文不需要过滤）
+                if (/[\u4e00-\u9fa5]/.test(name)) {
+                    return name.length >= 2; // 中文至少2个字
+                }
+                
+                // 对于纯英文，进行可读性检查
+                const englishText = name.replace(/[^a-zA-Z]/g, '');
+                if (englishText.length === 0) return false;
+                
+                // 规则1: 长度检查 - 太短的词通常不可读
+                if (englishText.length < 3) return false;
+                if (englishText.length > 20) return false; // 太长的可能是无意义组合
+                
+                // 规则2: 检查是否是有意义的单词（元音比例检查）
+                // 英文中元音(vowels)与辅音(consonants)的比例应该合理
+                const vowels = 'aeiouAEIOU';
+                const vowelCount = [...englishText].filter(c => vowels.includes(c)).length;
+                const vowelRatio = vowelCount / englishText.length;
+                
+                // 元音比例应该在 15% - 60% 之间
+                if (vowelRatio < 0.15 || vowelRatio > 0.7) return false;
+                
+                // 规则3: 检查连续重复字符（如 aaa, bbbb）
+                const repeatedCharPattern = /(.)Б\1Б\1/;
+                if (repeatedCharPattern.test(englishText)) return false;
+                
+                // 规则4: 检查辅音连续出现的情况
+                // 如果连续4个以上辅音，可能是无意义组合
+                const consonantClusters = englishText.match(/[^aeiouAEIOU]{4,}/g);
+                if (consonantClusters && consonantClusters.some(c => c.length >= 4)) return false;
+                
+                // 规则5: 检查常见无意义模式
+                // 如: x开头的字符串通常是变量名，不是词汇
+                if (/^x[jklmpq][a-z]{0,4}$/i.test(englishText)) return false;
+                
+                // 规则6: 检查是否是常见的编程变量名模式
+                // 如: tmp, buf, ptr, idx, cnt 等
+                const commonVarPatterns = /^(tmp|buf|ptr|idx|cnt|val|var|obj|arr|str|num|flg|flg|err|ret|arg|param|config|cfg|init|dest|src|pos|len)$/i;
+                if (commonVarPatterns.test(englishText)) return false;
+                
+                // 规则7: 检查是否含有可读的英文单词模式
+                // 至少需要有一个元音和一个辅音相间
+                const hasReadablePattern = /[aeiouAEIOU][bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ]|[bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ][aeiouAEIOU]/.test(englishText);
+                if (!hasReadablePattern) return false;
+                
+                return true;
+            });
+        }
+
         // 视觉权重（对数缩放）：fontSize = 12 + (log(hit+1)/log(maxHit+1)) * 16
         function applyLogFontSize(words, getHit) {
             const list = Array.isArray(words) ? words : [];
@@ -14356,10 +14422,15 @@
             const meta = document.getElementById('vibe-country-top10-meta');
             if (!ol) return;
 
-            const items = (Array.isArray(list) ? list : [])
+            let items = (Array.isArray(list) ? list : [])
                 .map((x) => ({ phrase: String(x?.phrase || '').trim(), hit: Number(x?.hit_count ?? x?.hitCount ?? 0) || 0 }))
-                .filter((x) => x.phrase && x.hit > 0)
-                .slice(0, 10);
+                .filter((x) => x.phrase && x.hit > 0);
+            
+            // 应用可读性过滤器
+            items = filterReadableWords(items.map(x => ({ name: x.phrase, value: x.hit })))
+                .map(x => ({ phrase: x.name, hit: x.value }));
+            
+            items = items.slice(0, 10);
 
             if (items.length === 0) {
                 ol.innerHTML = '';
@@ -14406,10 +14477,19 @@
                 return;
             }
 
-            const raw = (Array.isArray(list) ? list : [])
+            let raw = (Array.isArray(list) ? list : [])
                 .map((x) => ({ name: String(x?.phrase || '').trim(), value: Number(x?.hit_count ?? x?.hitCount ?? 0) || 0 }))
-                .filter((x) => x.name && x.value > 0)
-                .slice(0, 50);
+                .filter((x) => x.name && x.value > 0);
+            
+            // 应用可读性过滤器，去除不规则的字母组合
+            const beforeFilter = raw.length;
+            raw = filterReadableWords(raw);
+            const afterFilter = raw.length;
+            if (beforeFilter !== afterFilter) {
+                console.log(`[WordCloud] Cloud50 可读性过滤: ${beforeFilter} → ${afterFilter} 条`);
+            }
+            
+            raw = raw.slice(0, 50);
 
             if (raw.length === 0) {
                 try { container.innerHTML = ''; } catch { /* ignore */ }
@@ -14645,8 +14725,12 @@
                     combined0 = natPhrases
                         .map((x) => ({ name: String(x?.phrase || '').trim(), value: Number(x?.hit_count) || 0, category: 'phrase' }))
                         .filter((x) => x.name && x.value > 0)
-                        .sort((a, b) => b.value - a.value)
-                        .slice(0, 10);
+                        .sort((a, b) => b.value - a.value);
+                    
+                    // 应用可读性过滤器
+                    combined0 = filterReadableWords(combined0);
+                    combined0 = combined0.slice(0, 10);
+                    
                 } else if (Array.isArray(topSentences) && topSentences.length > 0) {
                     combined0 = topSentences
                         .map((x) => ({
@@ -14654,16 +14738,29 @@
                             value: Number(x?.hit_count) || 0,
                             category: 'sentence',
                         }))
-                        .filter((x) => x.name && x.value > 0)
-                        .slice(0, 10);
+                        .filter((x) => x.name && x.value > 0);
+                    
+                    // 应用可读性过滤器
+                    combined0 = filterReadableWords(combined0);
+                    combined0 = combined0.slice(0, 10);
                 } else {
                     combined0 = []
                         .concat(slang.map((x) => ({ name: String(x?.phrase || '').trim(), value: Number(x?.hit_count) || 0, category: 'slang' })))
                         .concat(merit.map((x) => ({ name: String(x?.phrase || '').trim(), value: Number(x?.hit_count) || 0, category: 'merit' })))
                         .concat(sv.map((x) => ({ name: String(x?.phrase || '').trim(), value: Number(x?.hit_count) || 0, category: 'sv_slang' })))
                         .filter((x) => x.name && x.value > 0)
-                        .sort((a, b) => b.value - a.value)
-                        .slice(0, 10);
+                        .sort((a, b) => b.value - a.value);
+                    
+                    // 应用可读性过滤器，去除不规则的字母组合
+                    const beforeFilter = combined0.length;
+                    combined0 = filterReadableWords(combined0);
+                    const afterFilter = combined0.length;
+                    if (beforeFilter !== afterFilter) {
+                        console.log(`[WordCloud] 可读性过滤: ${beforeFilter} → ${afterFilter} 条`);
+                    }
+                    
+                    // 截取前10条
+                    combined0 = combined0.slice(0, 10);
                 }
 
                 if (combined0.length === 0) {
