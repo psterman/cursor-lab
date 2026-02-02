@@ -12316,26 +12316,100 @@
                     ? nf.format(dimensionValues.ai)
                     : 'N/A';
 
-                // 2.5 上岗天数（day维度）——严格对齐 index.html 的 totalConversations（usageDays：由 earliestFileTime 推导）
-                let dayCount = dimensionValues.day !== undefined && dimensionValues.day !== null
-                    ? nf.format(Math.round(dimensionValues.day))
-                    : 'N/A';
+                // 2.5 上岗天数（day维度）
+                // 【修复】定义：用户最早和 Cursor 开始对话 -> 现在 的实时天数（>= 1）
+                // 数据源优先级（与 extractDimensionValues 保持一致）：
+                // 1) 本地：last_analysis_data.stats.earliestFileTime（用户本地 workspacestorage 文件夹最早建立时间）
+                // 2) 云端：userData.first_chat_at / userData.stats.first_chat_at
+                // 3) 兜底：dimensionValues.day（兼容旧字段，但避免硬编码的 1）
+                const _parseMaybeTs = (v) => {
+                    if (v === null || v === undefined) return NaN;
+                    if (typeof v === 'number' && Number.isFinite(v)) return v;
+                    const s = String(v).trim();
+                    if (!s) return NaN;
+                    // 纯数字：10位视为秒，13位视为毫秒
+                    if (/^\d+$/.test(s)) {
+                        const n = Number(s);
+                        if (!Number.isFinite(n)) return NaN;
+                        if (s.length === 10) return n * 1000;
+                        return n;
+                    }
+                    const t = Date.parse(s);
+                    return Number.isFinite(t) ? t : NaN;
+                };
+                const _calcDaysFromTs = (ts) => {
+                    if (!Number.isFinite(ts) || ts <= 0) return null;
+                    const diff = Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24));
+                    // 实时天数：至少 1 天
+                    return Math.max(1, diff);
+                };
+
+                let dayCount = 'N/A';
+                let dayEarliestTs = null;
+                let daySource = null;
+                
+                // 【步骤1】优先从本地 localStorage 获取 earliestFileTime 或 usageDays
                 try {
-                    // 优先使用本地缓存的 last_analysis_data.stats.earliestFileTime 计算 usageDays（与 main.js/displayStats 一致）
                     const raw = localStorage.getItem('last_analysis_data');
                     if (raw) {
                         const obj = JSON.parse(raw);
                         const st = obj && obj.stats ? obj.stats : null;
+                        
+                        // 1a) 优先使用 earliestFileTime 计算天数
                         const earliest = st ? (st.earliestFileTime ?? st.earliest_file_time) : null;
-                        const ts = earliest != null ? Number(earliest) : NaN;
-                        if (Number.isFinite(ts) && ts > 0) {
-                            const diffMs = Date.now() - ts;
-                            const usageDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-                            // 允许 0（与 index 一致），但避免负数
-                            dayCount = nf.format(Math.max(0, usageDays));
+                        const ts = _parseMaybeTs(earliest);
+                        const d = _calcDaysFromTs(ts);
+                        if (d != null) {
+                            dayEarliestTs = ts;
+                            dayCount = nf.format(d);
+                            daySource = 'localStorage.earliestFileTime';
+                        }
+                        
+                        // 1b) 如果没有 earliestFileTime，但有 usageDays，直接使用
+                        if (dayCount === 'N/A') {
+                            const usageDays = st ? (st.usageDays ?? st.usage_days ?? null) : null;
+                            if (usageDays != null && Number(usageDays) > 0) {
+                                dayCount = nf.format(Number(usageDays));
+                                daySource = 'localStorage.usageDays';
+                            }
                         }
                     }
-                } catch { /* ignore */ }
+                } catch (e) { /* ignore */ }
+                
+                // 【步骤2】如果本地没有，尝试云端 first_chat_at
+                if (dayCount === 'N/A') {
+                    try {
+                        const su = userData.stats && typeof userData.stats === 'object' ? userData.stats : null;
+                        const firstChatAt =
+                            userData.first_chat_at ||
+                            (su ? (su.first_chat_at || su.firstChatAt) : null) ||
+                            null;
+                        const tFirst = _parseMaybeTs(firstChatAt);
+                        const dFirst = _calcDaysFromTs(tFirst);
+                        if (dFirst != null) {
+                            dayEarliestTs = tFirst;
+                            dayCount = nf.format(dFirst);
+                            daySource = 'cloud.first_chat_at';
+                        }
+                    } catch { /* ignore */ }
+                }
+                
+                // 【步骤3】最后兜底：使用 dimensionValues.day，但避免硬编码的 1
+                if (dayCount === 'N/A') {
+                    const fallbackDay = (dimensionValues.day !== undefined && dimensionValues.day !== null) ? Number(dimensionValues.day) : null;
+                    // 【关键修复】避免使用硬编码的 1（可能是后端默认值）
+                    if (fallbackDay != null && Number.isFinite(fallbackDay) && fallbackDay > 1) {
+                        dayCount = nf.format(Math.round(fallbackDay));
+                        daySource = 'dimensionValues.day';
+                    }
+                }
+                
+                // 调试日志
+                if (dayCount !== 'N/A') {
+                    console.log('[renderUserStatsCards] dayCount calculated:', { dayCount, dayEarliestTs, source: daySource });
+                } else {
+                    console.log('[renderUserStatsCards] dayCount not available, all sources exhausted');
+                }
                 
                 // 3. 甲方爸爸上身次数（no维度）
                 const noCount = dimensionValues.no !== undefined && dimensionValues.no !== null 
@@ -12853,7 +12927,7 @@
                         </div>
                         <div class="flex items-center justify-between">
                             <span class="text-[12px] text-[#00ff41]/70">📅 ${getI18nText('metric.cursor_days') || (currentLang === 'en' ? 'Days On Duty' : '上岗天数')}</span>
-                            <span class="text-[12px] text-white font-bold">${dayCount} ${getI18nText('metric.cursor_days_unit') || (currentLang === 'en' ? 'days' : '天')}</span>
+                            <span class="text-[12px] text-white font-bold" data-stat="days-on-duty" data-earliest-ts="${dayEarliestTs != null ? String(dayEarliestTs) : ''}">${dayCount} ${getI18nText('metric.cursor_days_unit') || (currentLang === 'en' ? 'days' : '天')}</span>
                         </div>
                         <div class="flex items-center justify-between">
                             <span class="text-[12px] text-[#00ff41]/70">🚫 ${getI18nText('metric.jiafang') || (currentLang === 'en' ? 'Boss Mode Triggers' : '甲方上身次数')}</span>
@@ -12919,6 +12993,34 @@
                 } else {
                     leftBody.appendChild(statsCard);
                 }
+
+                // 上岗天数：抽屉打开后也要“实时增长”（无需手动刷新）
+                try {
+                    const el = statsCard.querySelector('[data-stat="days-on-duty"]');
+                    if (el) {
+                        const tsRaw = (el.getAttribute('data-earliest-ts') || '').trim();
+                        const ts = tsRaw ? Number(tsRaw) : NaN;
+                        if (Number.isFinite(ts) && ts > 0) {
+                            window.__daysOnDutyEarliestTs = ts;
+                            const unit = getI18nText('metric.cursor_days_unit') || (currentLang === 'en' ? 'days' : '天');
+                            const tick = () => {
+                                try {
+                                    const t0 = window.__daysOnDutyEarliestTs;
+                                    if (!Number.isFinite(t0) || t0 <= 0) return;
+                                    const diff = Math.floor((Date.now() - t0) / (1000 * 60 * 60 * 24));
+                                    const days = Math.max(1, diff);
+                                    const nf2 = new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN');
+                                    el.textContent = `${nf2.format(days)} ${unit}`;
+                                } catch { /* ignore */ }
+                            };
+                            tick();
+                            if (!window.__daysOnDutyTimer) {
+                                // 每分钟刷新一次足够“实时”
+                                window.__daysOnDutyTimer = setInterval(tick, 60 * 1000);
+                            }
+                        }
+                    }
+                } catch { /* ignore */ }
                 
                 // 人格称号与 index 一致：有 5 位 vibe_index（vibe_index_str/lpdef）时从 personalityNames.json 解析并更新
                 if (vibeIndexStr && typeof vibeIndexStr === 'string' && vibeIndexStr.length === 5) {
@@ -13005,47 +13107,104 @@
             }
             
             // day (上岗天数)：定义为「最早与 Cursor 开始对话 -> 现在」的时长（按天）
-            // 与 index.html 一致：优先用 earliestFileTime/first_chat_at 计算；若后端已提供 stats.usageDays 则优先使用；
-            // 最后才降级到 work_days/usage_days/days（兼容旧字段）。
+            // 【修复】优先级调整：
+            // 1) 本地：localStorage.last_analysis_data.stats.earliestFileTime（用户本地 workspacestorage 文件夹最早建立时间）
+            // 2) 云端：userData.first_chat_at / userData.stats.first_chat_at
+            // 3) 云端：userData.stats.usageDays / usage_days / workDays / days
+            // 4) 兜底：work_days/usage_days/days（兼容旧字段，但避免使用硬编码的 1）
             let day = undefined;
+            let daySource = null; // 用于调试：记录数据来源
+            
+            // 【步骤1】优先尝试从本地 localStorage 获取 earliestFileTime 或 usageDays
             try {
-                const su = userData.stats && typeof userData.stats === 'object' ? userData.stats : null;
-                const usageDays = su && (su.usageDays ?? su.usage_days ?? su.workDays ?? su.days);
-                if (usageDays != null && Number(usageDays) > 0) {
-                    day = Number(usageDays);
-                } else {
-                    // 兼容：earliestFileTime 可能是毫秒时间戳（number/string）
-                    const earliestFileTime =
-                        (su ? (su.earliestFileTime ?? su.earliest_file_time) : null) ??
-                        userData.earliestFileTime ??
-                        userData.earliest_file_time ??
-                        null;
-                    const earliestTs = earliestFileTime != null ? Number(earliestFileTime) : NaN;
-                    if (Number.isFinite(earliestTs) && earliestTs > 0) {
-                        const diff = Math.floor((Date.now() - earliestTs) / (1000 * 60 * 60 * 24));
-                        day = Math.max(1, diff);
-                    } else {
-                        // 兼容：first_chat_at 可能是 ISO 字符串
-                        const firstChatAt =
-                            userData.first_chat_at ||
-                            (su ? (su.first_chat_at || su.firstChatAt) : null) ||
-                            null;
-                        const t = firstChatAt ? Date.parse(String(firstChatAt)) : NaN;
-                        if (Number.isFinite(t)) {
-                            const diff = Math.floor((Date.now() - t) / (1000 * 60 * 60 * 24));
+                const raw = localStorage.getItem('last_analysis_data');
+                if (raw) {
+                    const obj = JSON.parse(raw);
+                    const st = obj && obj.stats ? obj.stats : null;
+                    
+                    // 1a) 优先使用 earliestFileTime 计算天数
+                    const earliest = st ? (st.earliestFileTime ?? st.earliest_file_time) : null;
+                    if (earliest != null) {
+                        const ts = Number(earliest);
+                        if (Number.isFinite(ts) && ts > 0) {
+                            const diff = Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24));
                             day = Math.max(1, diff);
+                            daySource = 'localStorage.earliestFileTime';
+                        }
+                    }
+                    
+                    // 1b) 如果没有 earliestFileTime，但有 usageDays，直接使用
+                    if (day === undefined || day === null || !(Number(day) > 0)) {
+                        const usageDays = st ? (st.usageDays ?? st.usage_days ?? null) : null;
+                        if (usageDays != null && Number(usageDays) > 0) {
+                            day = Number(usageDays);
+                            daySource = 'localStorage.usageDays';
                         }
                     }
                 }
-            } catch { /* ignore */ }
+            } catch (e) { /* ignore */ }
+            
+            // 【步骤2】如果本地没有，尝试云端数据
             if (day === undefined || day === null || !(Number(day) > 0)) {
-                if (userData.work_days !== undefined && userData.work_days !== null && Number(userData.work_days) > 0) {
-                    day = Number(userData.work_days);
-                } else if (userData.usage_days !== undefined && userData.usage_days !== null && Number(userData.usage_days) > 0) {
-                    day = Number(userData.usage_days);
-                } else if (userData.days !== undefined && userData.days !== null && Number(userData.days) > 0) {
-                    day = Number(userData.days);
+                try {
+                    const su = userData.stats && typeof userData.stats === 'object' ? userData.stats : null;
+                    
+                    // 2a) 尝试云端 usageDays
+                    const usageDays = su && (su.usageDays ?? su.usage_days ?? su.workDays ?? su.days);
+                    if (usageDays != null && Number(usageDays) > 0 && Number(usageDays) !== 1) { // 避免使用硬编码的 1
+                        day = Number(usageDays);
+                        daySource = 'cloud.usageDays';
+                    } else {
+                        // 2b) 尝试云端 earliestFileTime
+                        const earliestFileTime =
+                            (su ? (su.earliestFileTime ?? su.earliest_file_time) : null) ??
+                            userData.earliestFileTime ??
+                            userData.earliest_file_time ??
+                            null;
+                        const earliestTs = earliestFileTime != null ? Number(earliestFileTime) : NaN;
+                        if (Number.isFinite(earliestTs) && earliestTs > 0) {
+                            const diff = Math.floor((Date.now() - earliestTs) / (1000 * 60 * 60 * 24));
+                            day = Math.max(1, diff);
+                            daySource = 'cloud.earliestFileTime';
+                        } else {
+                            // 2c) 尝试云端 first_chat_at
+                            const firstChatAt =
+                                userData.first_chat_at ||
+                                (su ? (su.first_chat_at || su.firstChatAt) : null) ||
+                                null;
+                            const t = firstChatAt ? Date.parse(String(firstChatAt)) : NaN;
+                            if (Number.isFinite(t)) {
+                                const diff = Math.floor((Date.now() - t) / (1000 * 60 * 60 * 24));
+                                day = Math.max(1, diff);
+                                daySource = 'cloud.first_chat_at';
+                            }
+                        }
+                    }
+                } catch { /* ignore */ }
+            }
+            
+            // 【步骤3】最后兜底：使用 work_days 等，但避免硬编码的 1
+            if (day === undefined || day === null || !(Number(day) > 0)) {
+                const fallbackFields = ['work_days', 'usage_days', 'days'];
+                for (const field of fallbackFields) {
+                    const val = userData[field];
+                    if (val !== undefined && val !== null) {
+                        const num = Number(val);
+                        // 【关键修复】避免使用硬编码的 1（可能是后端默认值）
+                        if (Number.isFinite(num) && num > 1) {
+                            day = num;
+                            daySource = `cloud.${field}`;
+                            break;
+                        }
+                    }
                 }
+            }
+            
+            // 调试日志（仅在需要时启用）
+            if (day !== undefined && day !== null) {
+                console.log('[extractDimensionValues] day calculated:', { day, source: daySource });
+            } else {
+                console.log('[extractDimensionValues] day not available, all sources exhausted');
             }
             
             // no (甲方上身)：映射 jiafang_count

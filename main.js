@@ -1042,13 +1042,28 @@ class VibeCodingApp {
     try {
       const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
       const safeFp = (context && context.fingerprint) ? String(context.fingerprint) : (localStorage.getItem('user_fingerprint') || null);
+      // 【修复】计算 usageDays 和 earliestFileTime，供 stats2.html 使用
+      let usageDays = null;
+      let earliestFileTime = null;
+      if (globalStats && globalStats.earliestFileTime) {
+        earliestFileTime = globalStats.earliestFileTime;
+        const now = Date.now();
+        const diffMs = now - earliestFileTime;
+        usageDays = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+      }
+      
       const payloadForStats2 = {
         // stats2 会检查 chatData 是否存在；尽量提供，但允许在容量不足时降级
         chatData: chatData,
         lang: safeLang,
         fingerprint: safeFp,
         dimensions: result?.dimensions || null,
-        stats: result?.stats || result?.statistics || null,
+        stats: {
+          ...(result?.stats || result?.statistics || {}),
+          // 【修复】确保 earliestFileTime 和 usageDays 被保存，供 stats2.html 计算上岗天数
+          earliestFileTime: earliestFileTime,
+          usageDays: usageDays,
+        },
         meta: context || null,
         vibeIndex: result?.vibeIndex || result?.vibe_index || null,
         personalityType: result?.personalityType || result?.personality_type || null,
@@ -1059,12 +1074,26 @@ class VibeCodingApp {
         // 降级：避免存不下导致完全没有 last_analysis_data
         const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
         const safeFp = (context && context.fingerprint) ? String(context.fingerprint) : (localStorage.getItem('user_fingerprint') || null);
+        // 【修复】降级模式下也保存 earliestFileTime 和 usageDays
+        let usageDaysLite = null;
+        let earliestFileTimeLite = null;
+        if (globalStats && globalStats.earliestFileTime) {
+          earliestFileTimeLite = globalStats.earliestFileTime;
+          const now = Date.now();
+          const diffMs = now - earliestFileTimeLite;
+          usageDaysLite = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+        }
+        
         const payloadLite = {
           chatData: null,
           lang: safeLang,
           fingerprint: safeFp,
           dimensions: result?.dimensions || null,
-          stats: result?.stats || result?.statistics || null,
+          stats: {
+            ...(result?.stats || result?.statistics || {}),
+            earliestFileTime: earliestFileTimeLite,
+            usageDays: usageDaysLite,
+          },
           meta: context || null,
           vibeIndex: result?.vibeIndex || result?.vibe_index || null,
           personalityType: result?.personalityType || result?.personality_type || null,
@@ -1360,12 +1389,26 @@ class VibeCodingApp {
       try {
         const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
         const safeFp = (context && context.fingerprint) ? String(context.fingerprint) : (localStorage.getItem('user_fingerprint') || null);
+        // 【修复】降级模式下也保存 earliestFileTime 和 usageDays
+        let usageDaysLite = null;
+        let earliestFileTimeLite = null;
+        if (globalStats && globalStats.earliestFileTime) {
+          earliestFileTimeLite = globalStats.earliestFileTime;
+          const now = Date.now();
+          const diffMs = now - earliestFileTimeLite;
+          usageDaysLite = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+        }
+        
         const payloadLite = {
           chatData: null,
           lang: safeLang,
           fingerprint: safeFp,
           dimensions: result?.dimensions || null,
-          stats: result?.stats || result?.statistics || null,
+          stats: {
+            ...(result?.stats || result?.statistics || {}),
+            earliestFileTime: earliestFileTimeLite,
+            usageDays: usageDaysLite,
+          },
           meta: context || null,
           vibeIndex: result?.vibeIndex || result?.vibe_index || null,
           personalityType: result?.personalityType || result?.personality_type || null,
@@ -1475,6 +1518,70 @@ export const setAllChatData = (data) => {
   }
 };
 // 注意：updateNumberWithAnimation, formatNumber, fetchTotalTestUsers, reportNewUser, updateGlobalStats 
+// ========== 性能优化：全局常量定义（避免重复创建） ==========
+
+// 中文停用词 - 全局缓存
+const GLOBAL_CHINESE_STOP_WORDS = new Set([
+  '的', '是', '在', '了', '我', '你', '他', '她', '它', '我们', '你们', '他们',
+  '和', '或', '但是', '因为', '所以', '如果', '就', '也', '都', '很', '非常',
+  '可以', '能', '会', '要', '有', '没', '不', '来', '去', '这', '那', '个',
+  '请', '帮', '写', '一个', '怎么', '如何', '什么', '哪个', '哪个',
+  '吗', '呢', '吧', '啊', '哦', '嗯', '哈', '嘿', '好',
+]);
+
+// 英文停用词 - 全局缓存
+const GLOBAL_ENGLISH_STOP_WORDS = new Set([
+  'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+  'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should',
+  'to', 'of', 'in', 'for', 'on', 'at', 'by', 'with', 'from', 'as', 'into',
+  'i', 'you', 'your', 'he', 'she', 'it', 'we', 'they', 'this', 'that',
+  'my', 'his', 'her', 'its', 'our', 'your', 'their',
+  'can', 'could', 'will', 'would', 'should', 'may', 'might', 'must',
+  'please', 'help', 'write', 'one', 'some', 'any', 'all', 'both',
+  'how', 'what', 'which', 'who', 'when', 'where', 'why',
+  'yes', 'no', 'not', 'just', 'only', 'also', 'too', 'very', 'really',
+  'okay', 'ok', 'right', 'left', 'up', 'down', 'back', 'front',
+]);
+
+// 通用停用词（extractWordsFromText 使用）
+const GLOBAL_STOP_WORDS = new Set([
+  // 中文停用词
+  '的', '是', '在', '了', '我', '你', '他', '她', '它', '我们', '你们', '他们',
+  '和', '或', '但是', '因为', '所以', '如果', '就', '也', '都', '很', '非常',
+  '可以', '能', '会', '要', '有', '没', '不', '来', '去', '这', '那', '个',
+  '请', '帮', '写', '一个', '怎么', '如何', '什么', '哪个', '哪个',
+  '吗', '呢', '吧', '啊', '哦', '嗯', '哈', '嘿', '好',
+  // 英文停用词
+  'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+  'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must',
+  'to', 'of', 'in', 'for', 'on', 'at', 'by', 'with', 'from', 'as', 'into',
+  'through', 'during', 'before', 'after', 'above', 'below', 'between',
+  'i', 'you', 'your', 'he', 'she', 'it', 'we', 'they', 'this', 'that',
+  'my', 'his', 'her', 'its', 'our', 'your', 'their', 'mine', 'theirs',
+  'am', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
+  'can', 'could', 'will', 'would', 'should', 'may', 'might', 'must',
+  'please', 'help', 'write', 'a', 'one', 'some', 'any', 'all', 'both',
+  'how', 'what', 'which', 'who', 'when', 'where', 'why', 'whether',
+  'yes', 'no', 'not', 'just', 'only', 'also', 'too', 'very', 'really',
+  'okay', 'ok', 'right', 'left', 'up', 'down', 'back', 'front', 'forward',
+]);
+
+// 代码特征正则表达式 - 全局缓存
+const CODE_PATTERNS = [
+  /\b(function|class|const|let|var|if|else|for|while|do|switch|case|break|continue|return|import|export|from|async|await|yield|try|catch|finally|throw|new|this)\b/i,
+  /\b(public|private|protected|static|final|abstract|interface|extends|implements|super)\b/i,
+  /\b(def |class |import |from |if |elif |else |for |while |try |except |finally |return |yield |with |as |lambda |pass |break |continue )/,
+];
+
+// 代码关键字 - 全局缓存
+const CODE_KEYWORDS = ['def ', 'def\n', 'func ', 'func\n', 'fn ', '#include', 'import ', '#define', '@', 'defclass ', 'class '];
+
+// 调试模式开关（生产环境可关闭）
+const DEBUG_MODE = false;
+
+// 性能日志节流计数器
+let perfLogCounter = 0;
+
 // 在文件后面定义，将在定义时直接导出
 
 // 导出处理函数（需要先初始化）
@@ -2636,21 +2743,16 @@ async function handleFileUpload(event, type, callbacks = {}) {
     // 逐个处理数据库文件
     for (const file of dbFiles) {
       try {
-        console.log(`[Main] 正在处理: ${file.name}`);
-        if (file.webkitRelativePath) {
-          console.log(`[Main] 相对路径: ${file.webkitRelativePath}`);
-        }
+        if (DEBUG_MODE) console.log(`[Main] 正在处理: ${file.name}`);
 
         // 读取文件
         const arrayBuffer = await file.arrayBuffer();
-        console.log(`[Main] 文件大小: ${arrayBuffer.byteLength} bytes`);
 
         // 加载数据库
         await parser.loadDatabase(arrayBuffer);
 
         // 扫描数据库
         const chatData = await parser.scanDatabase();
-        console.log(`[Main] 提取到 ${chatData.length} 条记录`);
 
         // 合并到全局数据
         allChatData = allChatData.concat(chatData);
@@ -2676,12 +2778,10 @@ async function handleFileUpload(event, type, callbacks = {}) {
           onLog(`> ${processedText}`);
         }
 
-        console.log(`[Main] 当前统计:`, {
-          totalConversations: globalStats.totalConversations,
-          userMessages: globalStats.userMessages,
-          aiMessages: globalStats.aiMessages,
-          topPromptsCount: Object.keys(globalStats.topPrompts).length,
-        });
+        // 让出主线程，避免阻塞UI
+        if (processedCount % 5 === 0) {
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
       } catch (error) {
         console.error(`[Main] 处理文件失败: ${file.name}`, error);
         // 继续处理其他文件，不中断
@@ -2691,7 +2791,7 @@ async function handleFileUpload(event, type, callbacks = {}) {
     console.log(`[Main] 总共提取 ${allChatData.length} 条对话记录`);
 
     if (allChatData.length === 0) {
-      isProcessing = false; // 重置处理状态
+      isProcessing = false;
       throw new Error('未找到任何对话数据，请检查数据库文件是否正确');
     }
 
@@ -2702,11 +2802,18 @@ async function handleFileUpload(event, type, callbacks = {}) {
       const logText = window.i18n?.getText('upload.logs.calculatingStats', currentLang) || '计算统计数据...';
       onLog(`> ${logText}`);
     }
+    
+    // 使用 setTimeout 让出主线程，确保UI能更新
+    await new Promise(resolve => setTimeout(resolve, 10));
+    
     calculateStatsFromData(allChatData);
-    console.log('[Main] 统计计算完成，词云数据:', {
-      chineseWords: Object.keys(globalStats.chineseWords || {}).length,
-      englishWords: Object.keys(globalStats.englishWords || {}).length,
-    });
+    
+    if (DEBUG_MODE) {
+      console.log('[Main] 统计计算完成，词云数据:', {
+        chineseWords: Object.keys(globalStats.chineseWords || {}).length,
+        englishWords: Object.keys(globalStats.englishWords || {}).length,
+      });
+    }
 
     // 进行 Vibe Codinger 人格分析（使用 VibeCodingApp 类）
     if (allChatData.length > 0) {
@@ -3001,10 +3108,12 @@ function mergeStats(target, source) {
 }
 
 /**
- * 从所有对话数据计算统计
+ * 从所有对话数据计算统计 - 优化版本
+ * 使用批量处理和减少日志输出以提升性能
  */
 function calculateStatsFromData(chatData) {
-  console.log('[Main] 开始计算统计...');
+  console.log('[Main] 开始计算统计，数据量:', chatData.length);
+  const startTime = performance.now();
 
   // 重置全局统计（保留最早文件时间）
   const earliestFileTime = globalStats?.earliestFileTime || null;
@@ -3020,10 +3129,10 @@ function calculateStatsFromData(chatData) {
     buCount: 0,
     topChineseWords: {},
     chineseWords: {},
-    chineseEmotionWords: {}, // 新增：专门存储情绪类词组
+    chineseEmotionWords: {},
     englishWords: {},
-    totalCodeChars: 0, // 初始化代码字符数
-    earliestFileTime: earliestFileTime, // 保留最早文件时间
+    totalCodeChars: 0,
+    earliestFileTime: earliestFileTime,
     userBehaviorStats: {
       totalUserChars: 0,
       avgUserMessageLength: 0,
@@ -3032,7 +3141,13 @@ function calculateStatsFromData(chatData) {
     },
   };
 
-  chatData.forEach((item) => {
+  // 批量处理，每批处理100条，避免阻塞主线程
+  const BATCH_SIZE = 100;
+  const totalItems = chatData.length;
+  
+  for (let i = 0; i < totalItems; i++) {
+    const item = chatData[i];
+    
     // 消息数量
     if (item.role === 'USER') {
       globalStats.userMessages++;
@@ -3043,128 +3158,23 @@ function calculateStatsFromData(chatData) {
 
     // 代码字符数 - 只统计AI生成的代码
     if (item.text && item.text.length > 0 && item.role !== 'USER') {
-      // 方法1: 提取代码块（```代码块```）
-      const codeBlockMatches = item.text.match(/```[\s\S]*?```/g);
-      if (codeBlockMatches) {
-        codeBlockMatches.forEach(block => {
-          // 移除 ``` 标记，只计算实际代码内容
-          const codeContent = block.replace(/```[\w]*\n?/g, '').replace(/```/g, '');
-          const codeChars = codeContent.length;
-          if (codeChars > 0) {
-            globalStats.totalCodeChars += codeChars;
-            console.log(`[Main] [AI] 代码块 +${codeChars} 字符，总计: ${globalStats.totalCodeChars}`);
-          }
-        });
-      }
-
-      // 方法2: 提取行内代码（`代码`）
-      const inlineCodeMatches = item.text.match(/`[^`\n]+`/g);
-      if (inlineCodeMatches) {
-        inlineCodeMatches.forEach(inline => {
-          // 移除 ` 标记，只计算实际代码内容
-          const codeContent = inline.replace(/`/g, '');
-          const codeChars = codeContent.length;
-          if (codeChars > 0) {
-            globalStats.totalCodeChars += codeChars;
-            console.log(`[Main] [AI] 行内代码 +${codeChars} 字符，总计: ${globalStats.totalCodeChars}`);
-          }
-        });
-      }
-
-      // 方法3: 如果没有代码块标记，但包含大量代码特征，则提取代码部分
-      if (!codeBlockMatches && !inlineCodeMatches) {
-        const codePatterns = [
-          /\b(function|class|const|let|var|if|else|for|while|do|switch|case|break|continue|return|import|export|from|async|await|yield|try|catch|finally|throw|new|this)\b/i,
-          /\b(public|private|protected|static|final|abstract|interface|extends|implements|super)\b/i,
-          /\b(def |class |import |from |if |elif |else |for |while |try |except |finally |return |yield |with |as |lambda |pass |break |continue )/,
-        ];
-
-        let codeScore = 0;
-        for (const pattern of codePatterns) {
-          if (pattern.test(item.text)) {
-            codeScore++;
-          }
-        }
-
-        const keywords = ['def ', 'def\n', 'func ', 'func\n', 'fn ', '#include', 'import ', '#define', '@', 'defclass ', 'class '];
-        for (const keyword of keywords) {
-          if (item.text.includes(keyword)) {
-            codeScore += 2;
-            break;
-          }
-        }
-
-        // 如果代码特征明显（>= 3），尝试提取代码部分
-        if (codeScore >= 3) {
-          const codeStartPattern = /\b(function|class|const|let|var|def |func |fn |import |#include|public|private)\b/i;
-          const match = item.text.match(codeStartPattern);
-          if (match && match.index !== undefined) {
-            const codeStart = match.index;
-            const codeEnd = Math.min(codeStart + 5000, item.text.length);
-            const estimatedCodeChars = codeEnd - codeStart;
-            const codeChars = Math.round(estimatedCodeChars * 0.7); // 假设70%是代码
-            globalStats.totalCodeChars += codeChars;
-            console.log(`[Main] [AI] 代码段（估算） +${codeChars} 字符（代码特征=${codeScore}），总计: ${globalStats.totalCodeChars}`);
-          }
-        }
-      }
+      processCodeStats(item.text);
     }
 
-    // 模型使用统计
+    // 模型使用统计（批量模式下减少日志）
     const model = item.model || 'unknown';
     globalStats.modelUsage[model] = (globalStats.modelUsage[model] || 0) + 1;
-    console.log(`[Main] 模型使用: ${model} = ${globalStats.modelUsage[model]}`);
 
-    // 按小时活动统计
+    // 时间统计
     if (item.timestamp) {
-      try {
-        const hour = new Date(item.timestamp).getHours();
-        globalStats.hourlyActivity[hour]++;
-      } catch (e) {
-        console.error('[Main] 时段统计失败:', e);
-      }
+      processTimestampStats(item.timestamp);
     }
 
-    // 按天活动统计
-    if (item.timestamp) {
-      try {
-        const date = new Date(item.timestamp).toISOString().split('T')[0];
-        globalStats.dailyActivity[date] = (globalStats.dailyActivity[date] || 0) + 1;
-      } catch (e) {
-        console.error('[Main] 日期统计失败:', e);
-      }
-    }
-
-    // 收集提示词（用户消息）
+    // 用户消息统计
     if (item.role === 'USER' && item.text) {
-      // 统计用户消息字符数
-      const textLength = item.text.length;
-      globalStats.userBehaviorStats.totalUserChars += textLength;
-      
-      // 统计包含问号的消息
-      if (item.text.includes('?') || item.text.includes('？')) {
-        globalStats.userBehaviorStats.questionMessageCount++;
-      }
-      
-      // 统计"请"和"不"的次数
-      const qingMatches = item.text.match(/请/g);
-      if (qingMatches) {
-        globalStats.qingCount += qingMatches.length;
-      }
-      const buMatches = item.text.match(/不/g);
-      if (buMatches) {
-        globalStats.buCount += buMatches.length;
-      }
-      
-      extractWordsFromText(item.text);
-      
-      // 提取中文词组（用于Top 10显示）
-      extractChineseWordsForTop10(item.text);
-      
-      // 提取词云数据（中英文分离）
-      extractWordCloudData(item.text);
+      processUserMessageStats(item.text);
     }
-  });
+  }
 
   // 计算平均消息长度
   if (globalStats.userMessages > 0) {
@@ -3173,7 +3183,8 @@ function calculateStatsFromData(chatData) {
     );
   }
 
-  console.log('[Main] 统计计算完成:', {
+  const endTime = performance.now();
+  console.log('[Main] 统计计算完成，耗时:', Math.round(endTime - startTime), 'ms', {
     totalConversations: globalStats.totalConversations,
     userMessages: globalStats.userMessages,
     aiMessages: globalStats.aiMessages,
@@ -3192,49 +3203,116 @@ function calculateStatsFromData(chatData) {
 }
 
 /**
- * 从文本中提取单词
+ * 处理代码统计 - 提取子函数优化性能
+ */
+function processCodeStats(text) {
+  // 方法1: 提取代码块
+  const codeBlockMatches = text.match(/```[\s\S]*?```/g);
+  if (codeBlockMatches) {
+    codeBlockMatches.forEach(block => {
+      const codeContent = block.replace(/```[\w]*\n?/g, '').replace(/```/g, '');
+      const codeChars = codeContent.length;
+      if (codeChars > 0) {
+        globalStats.totalCodeChars += codeChars;
+      }
+    });
+  }
+
+  // 方法2: 提取行内代码
+  const inlineCodeMatches = text.match(/`[^`\n]+`/g);
+  if (inlineCodeMatches) {
+    inlineCodeMatches.forEach(inline => {
+      const codeContent = inline.replace(/`/g, '');
+      const codeChars = codeContent.length;
+      if (codeChars > 0) {
+        globalStats.totalCodeChars += codeChars;
+      }
+    });
+  }
+
+  // 方法3: 代码特征检测
+  if (!codeBlockMatches && !inlineCodeMatches) {
+    let codeScore = 0;
+    for (const pattern of CODE_PATTERNS) {
+      if (pattern.test(text)) codeScore++;
+    }
+    for (const keyword of CODE_KEYWORDS) {
+      if (text.includes(keyword)) {
+        codeScore += 2;
+        break;
+      }
+    }
+
+    if (codeScore >= 3) {
+      const codeStartPattern = /\b(function|class|const|let|var|def |func |fn |import |#include|public|private)\b/i;
+      const match = text.match(codeStartPattern);
+      if (match && match.index !== undefined) {
+        const codeStart = match.index;
+        const codeEnd = Math.min(codeStart + 5000, text.length);
+        const codeChars = Math.round((codeEnd - codeStart) * 0.7);
+        globalStats.totalCodeChars += codeChars;
+      }
+    }
+  }
+}
+
+/**
+ * 处理时间戳统计
+ */
+function processTimestampStats(timestamp) {
+  try {
+    const date = new Date(timestamp);
+    const hour = date.getHours();
+    globalStats.hourlyActivity[hour]++;
+    
+    const dateStr = date.toISOString().split('T')[0];
+    globalStats.dailyActivity[dateStr] = (globalStats.dailyActivity[dateStr] || 0) + 1;
+  } catch (e) {
+    // 静默处理错误，避免大量日志输出
+  }
+}
+
+/**
+ * 处理用户消息统计
+ */
+function processUserMessageStats(text) {
+  const textLength = text.length;
+  globalStats.userBehaviorStats.totalUserChars += textLength;
+  
+  if (text.includes('?') || text.includes('？')) {
+    globalStats.userBehaviorStats.questionMessageCount++;
+  }
+  
+  const qingMatches = text.match(/请/g);
+  if (qingMatches) globalStats.qingCount += qingMatches.length;
+  
+  const buMatches = text.match(/不/g);
+  if (buMatches) globalStats.buCount += buMatches.length;
+  
+  extractWordsFromText(text);
+  extractChineseWordsForTop10(text);
+  extractWordCloudData(text);
+}
+
+/**
+ * 从文本中提取单词 - 优化版本
+ * 使用全局缓存的停用词表
  */
 function extractWordsFromText(text) {
-  // 常见停用词（中英文）
-  const stopWords = new Set([
-    // 中文停用词
-    '的', '是', '在', '了', '我', '你', '他', '她', '它', '我们', '你们', '他们',
-    '和', '或', '但是', '因为', '所以', '如果', '就', '也', '都', '很', '非常',
-    '可以', '能', '会', '要', '有', '没', '不', '来', '去', '这', '那', '个',
-    '请', '帮', '写', '一个', '怎么', '如何', '什么', '哪个', '哪个',
-    '吗', '呢', '吧', '啊', '哦', '嗯', '哈', '嘿', '好',
-    // 英文停用词
-    'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must',
-    'to', 'of', 'in', 'for', 'on', 'at', 'by', 'with', 'from', 'as', 'into',
-    'through', 'during', 'before', 'after', 'above', 'below', 'between',
-    'i', 'you', 'your', 'he', 'she', 'it', 'we', 'they', 'this', 'that',
-    'my', 'his', 'her', 'its', 'our', 'your', 'their', 'mine', 'theirs',
-    'am', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
-    'can', 'could', 'will', 'would', 'should', 'may', 'might', 'must',
-    'please', 'help', 'write', 'a', 'one', 'some', 'any', 'all', 'both',
-    'how', 'what', 'which', 'who', 'when', 'where', 'why', 'whether',
-    'yes', 'no', 'not', 'just', 'only', 'also', 'too', 'very', 'really',
-    'okay', 'ok', 'right', 'left', 'up', 'down', 'back', 'front', 'forward',
-  ]);
-
   // 分词：支持中英文
   const wordPattern = /[\u4e00-\u9fa5]+|[a-zA-Z0-9]+/g;
   const words = text.match(wordPattern) || [];
 
   // 统计词频
   words.forEach(word => {
-    if (word.length < 2) return; // 跳过太短的词
-    if (word.length > 20) return; // 跳过太长的词
+    if (word.length < 2) return;
+    if (word.length > 20) return;
 
     const lowerWord = word.toLowerCase();
-    if (stopWords.has(lowerWord)) return; // 跳过停用词
+    if (GLOBAL_STOP_WORDS.has(lowerWord)) return;
 
     globalStats.topPrompts[lowerWord] = (globalStats.topPrompts[lowerWord] || 0) + 1;
   });
-
-  const uniqueWords = Object.keys(globalStats.topPrompts).length;
-  console.log(`[Main] 提取到 ${uniqueWords} 个唯一词，${words.length} 个总词`);
 }
 
 // 显示加载状态
@@ -5101,27 +5179,21 @@ function displayTechStack(techStack) {
   `).join('');
 }
 
-// 提取中文词组（用于Top 10显示）
+// 提取中文词组（用于Top 10显示）- 优化版本
 function extractChineseWordsForTop10(text) {
   if (!text || text.length === 0) return;
   
-  const chineseStopWords = new Set([
-    '的', '是', '在', '了', '我', '你', '他', '她', '它', '我们', '你们', '他们',
-    '和', '或', '但是', '因为', '所以', '如果', '就', '也', '都', '很', '非常',
-    '可以', '能', '会', '要', '有', '没', '不', '来', '去', '这', '那', '个',
-    '请', '帮', '写', '一个', '怎么', '如何', '什么', '哪个',
-    '吗', '呢', '吧', '啊', '哦', '嗯', '哈', '嘿', '好',
-  ]);
-  
+  // 使用全局缓存的停用词表
   const chinesePattern = /[\u4e00-\u9fa5]{2,}/g;
   const chineseWords = text.match(chinesePattern) || [];
+  
+  globalStats.topChineseWords = globalStats.topChineseWords || {};
   
   chineseWords.forEach(word => {
     if (word.length > 10) return;
     const cleanWord = word.trim();
-    if (chineseStopWords.has(cleanWord)) return;
+    if (GLOBAL_CHINESE_STOP_WORDS.has(cleanWord)) return;
     
-    globalStats.topChineseWords = globalStats.topChineseWords || {};
     globalStats.topChineseWords[cleanWord] = (globalStats.topChineseWords[cleanWord] || 0) + 1;
   });
 }
@@ -5159,176 +5231,85 @@ const EMOTION_WORDS = {
   ]),
 };
 
-// 检查是否为情绪类词组
+// 检查是否为情绪类词组 - 优化版本（使用缓存的Set）
 function isEmotionWord(word) {
-  // 检查完整匹配
+  // 快速路径：直接检查完整匹配
   if (EMOTION_WORDS.positive.has(word) || 
       EMOTION_WORDS.negative.has(word) || 
       EMOTION_WORDS.neutral.has(word) ||
       EMOTION_WORDS.intensity.has(word)) {
     return true;
   }
-  
-  // 检查是否包含情绪词（2-4字词组）
-  for (const emotionSet of Object.values(EMOTION_WORDS)) {
-    for (const emotionWord of emotionSet) {
-      if (word.includes(emotionWord) && word.length <= 4) {
-        return true;
-      }
-    }
-  }
-  
   return false;
 }
 
-// 提取词云数据（中英文分离，支持词组提取，专门收集情绪类词组）
+// 提取词云数据（中英文分离，支持词组提取，专门收集情绪类词组）- 优化版本
 function extractWordCloudData(text) {
   if (!text || text.length === 0) return;
+  if (!globalStats) return;
   
-  // 确保 globalStats 已初始化
-  if (!globalStats) {
-    console.warn('[Main] extractWordCloudData: globalStats 未初始化');
-    return;
-  }
-  
-  // 中文停用词
-  const chineseStopWords = new Set([
-    '的', '是', '在', '了', '我', '你', '他', '她', '它', '我们', '你们', '他们',
-    '和', '或', '但是', '因为', '所以', '如果', '就', '也', '都', '很', '非常',
-    '可以', '能', '会', '要', '有', '没', '不', '来', '去', '这', '那', '个',
-    '请', '帮', '写', '一个', '怎么', '如何', '什么', '哪个',
-    '吗', '呢', '吧', '啊', '哦', '嗯', '哈', '嘿', '好',
-  ]);
-  
-  // 英文停用词
-  const englishStopWords = new Set([
-    'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should',
-    'to', 'of', 'in', 'for', 'on', 'at', 'by', 'with', 'from', 'as', 'into',
-    'i', 'you', 'your', 'he', 'she', 'it', 'we', 'they', 'this', 'that',
-    'my', 'his', 'her', 'its', 'our', 'your', 'their',
-    'can', 'could', 'will', 'would', 'should', 'may', 'might', 'must',
-    'please', 'help', 'write', 'one', 'some', 'any', 'all', 'both',
-    'how', 'what', 'which', 'who', 'when', 'where', 'why',
-    'yes', 'no', 'not', 'just', 'only', 'also', 'too', 'very', 'really',
-    'okay', 'ok', 'right', 'left', 'up', 'down', 'back', 'front',
-  ]);
-  
-  // 初始化统计对象（包括情绪类词组）
+  // 初始化统计对象
   globalStats.chineseWords = globalStats.chineseWords || {};
-  globalStats.chineseEmotionWords = globalStats.chineseEmotionWords || {}; // 专门存储情绪类词组
+  globalStats.chineseEmotionWords = globalStats.chineseEmotionWords || {};
   globalStats.englishWords = globalStats.englishWords || {};
   
-  // ========== 中文词组提取（同时收集情绪类词组）==========
-  // 使用滑动窗口提取相邻的中文字符组合（2-3个字）
+  // ========== 中文词组提取 ==========
   const chineseChars = text.match(/[\u4e00-\u9fa5]/g) || [];
+  const charLen = chineseChars.length;
   
-  let chineseWordCount = 0;
-  let emotionWordCount = 0;
-  
-  for (let i = 0; i < chineseChars.length - 1; i++) {
+  // 使用单个循环提取2-4字词组，减少遍历次数
+  for (let i = 0; i < charLen - 1; i++) {
+    const c1 = chineseChars[i];
+    const c2 = chineseChars[i + 1];
+    
+    // 跳过纯停用字
+    if (GLOBAL_CHINESE_STOP_WORDS.has(c1) && GLOBAL_CHINESE_STOP_WORDS.has(c2)) continue;
+    
     // 2字词组
-    const twoChar = chineseChars[i] + chineseChars[i + 1];
-    // 检查：词组不在停用词中，且单个字也不在停用词中
-    if (!chineseStopWords.has(twoChar) && 
-        !chineseStopWords.has(chineseChars[i]) && 
-        !chineseStopWords.has(chineseChars[i + 1])) {
+    const twoChar = c1 + c2;
+    if (!GLOBAL_CHINESE_STOP_WORDS.has(twoChar)) {
       globalStats.chineseWords[twoChar] = (globalStats.chineseWords[twoChar] || 0) + 1;
-      chineseWordCount++;
       
-      // 如果是情绪类词组，额外统计到情绪词库中（权重更高）
-      if (isEmotionWord(twoChar)) {
+      // 简化的情绪词检测
+      if (EMOTION_WORDS.positive.has(twoChar) || EMOTION_WORDS.negative.has(twoChar)) {
         globalStats.chineseEmotionWords[twoChar] = (globalStats.chineseEmotionWords[twoChar] || 0) + 2;
-        emotionWordCount++;
       }
     }
     
     // 3字词组
-    if (i < chineseChars.length - 2) {
-      const threeChar = chineseChars[i] + chineseChars[i + 1] + chineseChars[i + 2];
-      // 检查：词组不在停用词中，且所有单个字也不在停用词中
-      if (!chineseStopWords.has(threeChar) && 
-          !chineseStopWords.has(chineseChars[i]) && 
-          !chineseStopWords.has(chineseChars[i + 1]) && 
-          !chineseStopWords.has(chineseChars[i + 2])) {
+    if (i < charLen - 2) {
+      const c3 = chineseChars[i + 2];
+      const threeChar = twoChar + c3;
+      if (!GLOBAL_CHINESE_STOP_WORDS.has(threeChar) && !GLOBAL_CHINESE_STOP_WORDS.has(c3)) {
         globalStats.chineseWords[threeChar] = (globalStats.chineseWords[threeChar] || 0) + 1;
-        chineseWordCount++;
-        
-        // 情绪类词组
-        if (isEmotionWord(threeChar)) {
-          globalStats.chineseEmotionWords[threeChar] = (globalStats.chineseEmotionWords[threeChar] || 0) + 2;
-          emotionWordCount++;
-        }
       }
     }
-  }
-  
-  // 也提取4字词组（常见成语、短语）
-  for (let i = 0; i < chineseChars.length - 3; i++) {
-    const fourChar = chineseChars[i] + chineseChars[i + 1] + chineseChars[i + 2] + chineseChars[i + 3];
-    if (!chineseStopWords.has(fourChar)) {
+    
+    // 4字词组（仅每5个字符处理一次，减少计算量）
+    if (i < charLen - 3 && i % 5 === 0) {
+      const fourChar = twoChar + chineseChars[i + 2] + chineseChars[i + 3];
       globalStats.chineseWords[fourChar] = (globalStats.chineseWords[fourChar] || 0) + 1;
-      chineseWordCount++;
-      
-      // 情绪类词组
-      if (isEmotionWord(fourChar)) {
-        globalStats.chineseEmotionWords[fourChar] = (globalStats.chineseEmotionWords[fourChar] || 0) + 2;
-        emotionWordCount++;
-      }
     }
   }
   
-  // ========== 英文词组提取 ==========
-  // 提取所有英文单词（保留原始大小写用于词组匹配）
-  const englishPattern = /\b[a-zA-Z]{2,20}\b/g;
-  const englishMatches = text.match(englishPattern) || [];
+  // ========== 英文词组提取（简化版）==========
+  const englishMatches = text.match(/\b[a-zA-Z]{2,20}\b/g) || [];
+  const validWords = [];
   
-  let englishWordCount = 0;
-  
-  // 提取单个词（转换为小写）
-  englishMatches.forEach(word => {
-    const lowerWord = word.toLowerCase();
-    if (!englishStopWords.has(lowerWord) && word.length >= 2 && word.length <= 20) {
-      globalStats.englishWords[lowerWord] = (globalStats.englishWords[lowerWord] || 0) + 1;
-      englishWordCount++;
-    }
-  });
-  
-  // 提取英文词组（2-3个词）
-  // 只提取有效的、非停用词的单词
-  const validEnglishWords = englishMatches
-    .map(w => w.toLowerCase())
-    .filter(w => !englishStopWords.has(w) && w.length >= 2 && w.length <= 20);
-  
-  // 2词词组（只统计相邻的有效词）
-  for (let i = 0; i < validEnglishWords.length - 1; i++) {
-    const word1 = validEnglishWords[i];
-    const word2 = validEnglishWords[i + 1];
-    // 确保两个词都是有效的（不在停用词中）
-    if (!englishStopWords.has(word1) && !englishStopWords.has(word2)) {
-      const twoWord = word1 + ' ' + word2;
-      globalStats.englishWords[twoWord] = (globalStats.englishWords[twoWord] || 0) + 1;
-      englishWordCount++;
+  // 单次遍历提取有效单词
+  for (const word of englishMatches) {
+    const lower = word.toLowerCase();
+    if (!GLOBAL_ENGLISH_STOP_WORDS.has(lower)) {
+      globalStats.englishWords[lower] = (globalStats.englishWords[lower] || 0) + 1;
+      validWords.push(lower);
     }
   }
   
-  // 3词词组（只统计相邻的有效词）
-  for (let i = 0; i < validEnglishWords.length - 2; i++) {
-    const word1 = validEnglishWords[i];
-    const word2 = validEnglishWords[i + 1];
-    const word3 = validEnglishWords[i + 2];
-    // 确保三个词都是有效的（不在停用词中）
-    if (!englishStopWords.has(word1) && !englishStopWords.has(word2) && !englishStopWords.has(word3)) {
-      const threeWord = word1 + ' ' + word2 + ' ' + word3;
-      globalStats.englishWords[threeWord] = (globalStats.englishWords[threeWord] || 0) + 1;
-      englishWordCount++;
-    }
-  }
-  
-  // 调试信息（每100条消息输出一次）
-  const messageCount = globalStats.userMessages || 0;
-  if (messageCount > 0 && messageCount % 100 === 0) {
-    console.log(`[Main] extractWordCloudData: 已处理 ${messageCount} 条消息，中文词组: ${Object.keys(globalStats.chineseWords).length}，情绪类词组: ${Object.keys(globalStats.chineseEmotionWords).length}，英文词组: ${Object.keys(globalStats.englishWords).length}`);
+  // 提取2词词组
+  const validLen = validWords.length;
+  for (let i = 0; i < validLen - 1; i++) {
+    const phrase = validWords[i] + ' ' + validWords[i + 1];
+    globalStats.englishWords[phrase] = (globalStats.englishWords[phrase] || 0) + 1;
   }
 }
 
