@@ -3563,6 +3563,7 @@
             const [analysisData, setAnalysisData] = useState(null);
             const [error, setError] = useState(null);
             const [isInitialized, setIsInitialized] = useState(false);
+            const [isSubmitting, setIsSubmitting] = useState(false); // 防止重复触发分析/重复写库
             const [totalTestUsers, setTotalTestUsers] = useState(0); // 从 API 获取，不使用硬编码
             // 实时统计数据（全部从 Cloudflare API 获取）
             const [totalUsers, setTotalUsers] = useState(0); // 受虐人数
@@ -4602,6 +4603,12 @@
                 console.log('handleFileSelect 被调用', type);
                 console.log('folderInputRef.current:', folderInputRef.current);
                 console.log('fileInputRef.current:', fileInputRef.current);
+
+                // 请求未返回前禁止重复触发
+                if (isSubmitting || step === 'analyzing') {
+                    console.warn('[UI] 🛑 分析进行中，忽略重复选择操作');
+                    return;
+                }
                 
                 if (type === 'folder') {
                     if (folderInputRef.current) {
@@ -4623,6 +4630,12 @@
             // 处理文件上传
             const handleFileUpload = async (event, type) => {
                 console.log('handleFileUpload 被调用', { type, files: event.target.files });
+
+                // 【防重复】同一轮分析未结束前，忽略重复触发（双击/重复 onChange/并发）
+                if (isSubmitting || step === 'analyzing') {
+                    console.warn('[UI] 🛑 检测到重复触发 handleFileUpload，已忽略');
+                    return;
+                }
                 
                 const files = Array.from(event.target.files || []);
                 console.log('文件列表:', files.map(f => ({ name: f.name, size: f.size })));
@@ -4633,6 +4646,7 @@
                 }
 
                 setError(null);
+                setIsSubmitting(true);
                 setStep('analyzing');
                 setLogs([`> ${t('upload.logs.startParsing')}`]);
 
@@ -4697,18 +4711,21 @@
                             setLogs(prev => [...prev, `> ${t('upload.logs.analysisComplete')}`]);
                             setTimeout(() => {
                                 setStep('preview');
+                                setIsSubmitting(false);
                             }, 500);
                         },
                         onError: (err) => {
                             console.error('onError:', err);
                             setError(err.message || '处理失败');
                             setStep('upload');
+                            setIsSubmitting(false);
                         }
                     });
                 } catch (err) {
                     console.error('处理失败:', err);
                     setError(err.message || '处理失败');
                     setStep('upload');
+                    setIsSubmitting(false);
                 }
             };
 
@@ -6796,6 +6813,10 @@
                         style={{ display: 'none' }}
                         onChange={(e) => {
                             console.log('文件夹选择事件触发', e.target.files);
+                            if (isSubmitting || step === 'analyzing') {
+                                console.warn('[UI] 🛑 分析进行中，忽略重复文件夹选择事件');
+                                return;
+                            }
                             handleFileUpload(e, 'folder');
                         }}
                     />
@@ -6807,6 +6828,10 @@
                         style={{ display: 'none' }}
                         onChange={(e) => {
                             console.log('文件选择事件触发', e.target.files);
+                            if (isSubmitting || step === 'analyzing') {
+                                console.warn('[UI] 🛑 分析进行中，忽略重复文件选择事件');
+                                return;
+                            }
                             handleFileUpload(e, 'file');
                         }}
                     />
@@ -7034,7 +7059,8 @@
                                     <div className="flex gap-4 justify-center mt-6">
                                         <button 
                                             onClick={() => handleFileSelect('folder')}
-                                            className="px-6 py-3 bg-green-500 hover:bg-transparent hover:text-green-500 text-black rounded-sm font-semibold transition-colors border border-green-500 uppercase tracking-wider font-mono"
+                                            disabled={isSubmitting || step === 'analyzing'}
+                                            className={`px-6 py-3 bg-green-500 hover:bg-transparent hover:text-green-500 text-black rounded-sm font-semibold transition-colors border border-green-500 uppercase tracking-wider font-mono ${isSubmitting || step === 'analyzing' ? 'opacity-60 cursor-not-allowed pointer-events-none' : ''}`}
                                         >
                                         {t('upload.selectFolder')}
                                         </button>

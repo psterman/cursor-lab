@@ -6,6 +6,63 @@
 import type { Env } from './index';
 
 /**
+ * 10 秒去重：检查 user_analysis 在过去 N ms 内是否已有记录（按 fingerprint/claim_token）
+ * 目的：防止重复触发/并发导致短时间内重复创建/更新，进而出现“两个临时账号”。
+ */
+async function hasRecentUserAnalysisRecordByKey(
+  env: Env,
+  params: { fingerprint?: string | null; claim_token?: string | null },
+  withinMs = 10_000
+): Promise<boolean> {
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) return false;
+
+  const now = Date.now();
+  const checkOne = async (kind: 'fingerprint' | 'claim_token', val: string) => {
+    const v = String(val || '').trim();
+    if (!v) return false;
+
+    const url = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
+    url.searchParams.set('select', 'id,created_at,updated_at');
+    url.searchParams.set(kind, `eq.${v}`);
+    url.searchParams.set('order', 'updated_at.desc,created_at.desc');
+    url.searchParams.set('limit', '1');
+
+    const res = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        'apikey': env.SUPABASE_KEY,
+        'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation',
+      },
+    }).catch(() => null);
+    if (!res || !res.ok) return false;
+
+    const rows = await res.json().catch(() => null);
+    const row = Array.isArray(rows) ? rows[0] : null;
+    if (!row) return false;
+
+    const tsRaw = row?.updated_at || row?.created_at || null;
+    const ts = tsRaw ? Date.parse(String(tsRaw)) : NaN;
+    if (!Number.isFinite(ts)) return false;
+
+    return (now - ts) <= withinMs;
+  };
+
+  const fp = params.fingerprint != null ? String(params.fingerprint).trim() : '';
+  if (fp) {
+    const hit = await checkOne('fingerprint', fp);
+    if (hit) return true;
+  }
+  const ct = params.claim_token != null ? String(params.claim_token).trim() : '';
+  if (ct) {
+    const hit = await checkOne('claim_token', ct);
+    if (hit) return true;
+  }
+  return false;
+}
+
+/**
  * 根据指纹识别用户
  * @param fingerprint - 浏览器生成的指纹
  * @param env - 环境变量
@@ -138,8 +195,24 @@ export async function bindFingerprintToUser(
   }
 
   try {
+    // 【10 秒去重】并发/重复触发时直接复用现有记录
+    const recentHit = await hasRecentUserAnalysisRecordByKey(env, { fingerprint }, 10_000);
+    if (recentHit) {
+      const existing = await identifyUserByFingerprint(fingerprint, env);
+      if (existing) {
+        console.warn('[Fingerprint] 🛑 10 秒内重复绑定请求，复用现有记录:', {
+          id: String(existing?.id || '').slice(0, 8) + '...',
+        });
+        return existing;
+      }
+    }
+
     // 规范化 GitHub 用户名
     const normalizedUsername = githubUsername.trim().toLowerCase();
+
+    // 【并发安全】优先按 fingerprint 查找并更新，避免“先查 user_name 未命中 -> 创建新行”
+    // 这在 GitHub 登录与浏览器指纹并行到达时，容易创建两个临时账号。
+    const existingByFp = await identifyUserByFingerprint(fingerprint, env);
 
     // 首先尝试根据 user_name 查找现有用户
     const findUserUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?user_name=eq.${encodeURIComponent(normalizedUsername)}&select=*`;
@@ -176,6 +249,34 @@ export async function bindFingerprintToUser(
       updated_at: new Date().toISOString(),
     };
 
+    // 1) fingerprint 已存在：直接更新该行（不创建新 ID）
+    if (existingByFp) {
+      const updateUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(existingByFp.id)}`;
+      const updateResponse = await fetch(updateUrl, {
+        method: 'PATCH',
+        headers: {
+          'apikey': env.SUPABASE_KEY,
+          'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!updateResponse.ok) {
+        const errorText = await updateResponse.text();
+        console.error('[Fingerprint] ❌ 更新用户失败(按 fingerprint):', {
+          status: updateResponse.status,
+          error: errorText,
+        });
+        return null;
+      }
+
+      const updateData = await updateResponse.json();
+      return Array.isArray(updateData) ? updateData[0] : updateData;
+    }
+
+    // 2) user_name 已存在：更新该行
     if (existingUser) {
       // 更新现有用户
       const updateUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${existingUser.id}`;
@@ -208,22 +309,39 @@ export async function bindFingerprintToUser(
       });
       return Array.isArray(updateData) ? updateData[0] : updateData;
     } else {
-      // 创建新用户
-      payload.id = crypto.randomUUID();
-      payload.created_at = new Date().toISOString();
-      
-      const insertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis`;
-      
-      const insertResponse = await fetch(insertUrl, {
-        method: 'POST',
-        headers: {
-          'apikey': env.SUPABASE_KEY,
-          'Authorization': `Bearer ${env.SUPABASE_KEY}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=representation',
-        },
-        body: JSON.stringify([payload]), // Supabase 需要数组格式
-      });
+      // 3) 新用户：使用基于 fingerprint 的 upsert（并发下也幂等）
+      // - 若 fingerprint 已存在：更新该行（不会创建新 ID）
+      // - 若 fingerprint 不存在：插入新行（id 由数据库默认值生成；若无默认值再回退为前端生成）
+      const upsertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=fingerprint`;
+
+      const tryUpsert = async (row: any) => {
+        return await fetch(upsertUrl, {
+          method: 'POST',
+          headers: {
+            'apikey': env.SUPABASE_KEY,
+            'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation,resolution=merge-duplicates',
+          },
+          body: JSON.stringify([row]),
+        });
+      };
+
+      // 首选：不传 id，避免冲突更新时误改主键
+      let insertResponse = await tryUpsert({ ...payload, created_at: new Date().toISOString() });
+      if (!insertResponse.ok) {
+        const errorText = await insertResponse.text().catch(() => '');
+        // 回退：如果表没有默认 id，补一个 id 再试一次
+        if (errorText.includes('null value') && (errorText.includes('id') || errorText.includes('"id"'))) {
+          insertResponse = await tryUpsert({ ...payload, id: crypto.randomUUID(), created_at: new Date().toISOString() });
+        } else {
+          console.error('[Fingerprint] ❌ 创建/Upsert 用户失败:', {
+            status: insertResponse.status,
+            error: errorText,
+          });
+          return null;
+        }
+      }
 
       if (!insertResponse.ok) {
         const errorText = await insertResponse.text();
@@ -517,15 +635,15 @@ export async function migrateFingerprintToUserId(
         }),
       });
 
-      const insertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis`;
-      
-      const response = await fetch(insertUrl, {
+      // 幂等：按 id upsert，避免并发/重试导致重复插入或 409 失败
+      const upsertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=id`;
+      const response = await fetch(upsertUrl, {
         method: 'POST',
         headers: {
           'apikey': env.SUPABASE_KEY,
           'Authorization': `Bearer ${env.SUPABASE_KEY}`,
           'Content-Type': 'application/json',
-          'Prefer': 'return=representation',
+          'Prefer': 'return=representation,resolution=merge-duplicates',
         },
         body: JSON.stringify([insertData]),
       });
@@ -559,6 +677,27 @@ export async function migrateFingerprintToUserId(
 async function deleteSourceRecord(sourceId: string, env: Env): Promise<void> {
   try {
     console.log('[Migrate] 🗑️ 销毁源记录...');
+
+    // 【已处理标记】即便 DELETE 失败，也要把旧临时数据标记为已处理，避免后续链路再次误认领/误统计
+    try {
+      const markUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(sourceId)}`;
+      await fetch(markUrl, {
+        method: 'PATCH',
+        headers: {
+          'apikey': env.SUPABASE_KEY,
+          'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_identity: 'migrated',
+          claim_token: null,
+          updated_at: new Date().toISOString(),
+        }),
+      }).catch(() => null);
+    } catch {
+      // ignore
+    }
+
     const deleteUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(sourceId)}`;
     
     const response = await fetch(deleteUrl, {

@@ -1048,6 +1048,142 @@ async function generateFingerprint(userId: string, _totalChars?: number): Promis
     .join('');
 }
 
+/**
+ * 写入去重：检查 user_analysis 在过去 N ms 内是否已有记录
+ * - 优先按 fingerprint
+ * - 若提供 claim_token，则在 fingerprint 未命中时再按 claim_token 检查
+ *
+ * 目的：防止前端重复触发/并发请求导致短时间内重复写库与副作用（排行榜重复、统计被重复累加等）。
+ */
+async function hasRecentUserAnalysisRecord(
+  env: Env,
+  params: { fingerprint?: string | null; claim_token?: string | null },
+  withinMs = 10_000
+): Promise<boolean> {
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) return false;
+
+  const now = Date.now();
+  const checkOne = async (kind: 'fingerprint' | 'claim_token', val: string) => {
+    const v = String(val || '').trim();
+    if (!v) return false;
+
+    const url = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
+    url.searchParams.set('select', 'id,created_at,updated_at');
+    url.searchParams.set(kind, `eq.${v}`);
+    url.searchParams.set('order', 'updated_at.desc,created_at.desc');
+    url.searchParams.set('limit', '1');
+
+    const res = await fetch(url.toString(), {
+      method: 'GET',
+      headers: buildSupabaseHeaders(env, { Prefer: 'return=representation' }),
+    }).catch(() => null);
+    if (!res || !res.ok) return false;
+
+    const rows = await res.json().catch(() => null);
+    const row = Array.isArray(rows) ? rows[0] : null;
+    if (!row) return false;
+
+    const tsRaw = row?.updated_at || row?.created_at || null;
+    const ts = tsRaw ? Date.parse(String(tsRaw)) : NaN;
+    if (!Number.isFinite(ts)) return false;
+
+    return (now - ts) <= withinMs;
+  };
+
+  // 1) fingerprint 优先
+  const fp = params.fingerprint != null ? String(params.fingerprint).trim() : '';
+  if (fp) {
+    const hit = await checkOne('fingerprint', fp);
+    if (hit) return true;
+  }
+
+  // 2) claim_token 兜底
+  const ct = params.claim_token != null ? String(params.claim_token).trim() : '';
+  if (ct) {
+    const hit = await checkOne('claim_token', ct);
+    if (hit) return true;
+  }
+
+  return false;
+}
+
+/**
+ * 5 秒短期幂等：用于阻止“同一用户短时间重复入库”
+ * 规则（满足任一即视为重复）：
+ * - claim_token 相同（优先）
+ * - fingerprint 相同
+ * - 同一 IP（ip_location）且 total_messages 相同（高度相似）
+ *
+ * 返回：最近一条记录（如果命中），否则 null
+ */
+async function getRecentDuplicateUserAnalysis(
+  env: Env,
+  params: { claim_token?: string | null; fingerprint?: string | null; ip_location?: string | null; total_messages?: number | null },
+  withinMs = 5_000
+): Promise<any | null> {
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) return null;
+
+  const sinceIso = new Date(Date.now() - withinMs).toISOString();
+  const tryFetch = async (url: URL) => {
+    try {
+      const res = await fetch(url.toString(), {
+        method: 'GET',
+        headers: buildSupabaseHeaders(env, { Prefer: 'return=representation' }),
+      });
+      if (!res.ok) return null;
+      const rows = await res.json().catch(() => null);
+      return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const claimToken = params.claim_token != null ? String(params.claim_token).trim() : '';
+  if (claimToken) {
+    const url = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
+    url.searchParams.set('select', '*');
+    url.searchParams.set('claim_token', `eq.${claimToken}`);
+    url.searchParams.set('updated_at', `gte.${sinceIso}`);
+    url.searchParams.set('order', 'updated_at.desc,created_at.desc');
+    url.searchParams.set('limit', '1');
+    const row = await tryFetch(url);
+    if (row) return row;
+  }
+
+  const fp = params.fingerprint != null ? String(params.fingerprint).trim() : '';
+  if (fp) {
+    const url = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
+    url.searchParams.set('select', '*');
+    url.searchParams.set('fingerprint', `eq.${fp}`);
+    url.searchParams.set('updated_at', `gte.${sinceIso}`);
+    url.searchParams.set('order', 'updated_at.desc,created_at.desc');
+    url.searchParams.set('limit', '1');
+    const row = await tryFetch(url);
+    if (row) return row;
+  }
+
+  const ip = params.ip_location != null ? String(params.ip_location).trim() : '';
+  const tm = params.total_messages != null ? Number(params.total_messages) : NaN;
+  if (ip && Number.isFinite(tm) && tm > 0) {
+    const url = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
+    url.searchParams.set('select', '*');
+    url.searchParams.set('ip_location', `eq.${ip}`);
+    url.searchParams.set('total_messages', `eq.${String(Math.floor(tm))}`);
+    url.searchParams.set('updated_at', `gte.${sinceIso}`);
+    url.searchParams.set('order', 'updated_at.desc,created_at.desc');
+    url.searchParams.set('limit', '1');
+    const row = await tryFetch(url);
+    if (row) return row;
+  }
+
+  return null;
+}
+
+// 5 秒返回缓存（同一个 Worker 实例内）：直接复用上一次响应，彻底避免“双请求双写库”
+const __analysisResponseCache: Map<string, { ts: number; payload: any }> =
+  (globalThis as any).__analysisResponseCache ||
+  (((globalThis as any).__analysisResponseCache = new Map()) as Map<string, { ts: number; payload: any }>);
+
 // 创建 Hono 应用
 const app = new Hono<{ Bindings: Env }>();
 
@@ -1285,6 +1421,45 @@ app.post('/api/v2/analyze', async (c) => {
     const lang = body.lang || 'zh-CN';
     const { chatData } = body;
     const env = c.env;
+
+    // 【指纹统一】若 fingerprint 未上报，尝试从 meta.fingerprint 兜底补齐（避免出现“同一次流程 fingerprint 不一致”）
+    try {
+      const fpFromBody = body?.fingerprint ? String(body.fingerprint).trim() : '';
+      const fpFromMeta = (body as any)?.meta?.fingerprint ? String((body as any).meta.fingerprint).trim() : '';
+      if (!fpFromBody && fpFromMeta) {
+        (body as any).fingerprint = fpFromMeta;
+      }
+    } catch {
+      // ignore
+    }
+
+    // ==========================================================
+    // 【5 秒短期幂等：响应缓存】（优先命中内存缓存，直接返回上一次结果）
+    // 触发条件：claim_token / fingerprint / ip + totalMessages（高度相似）
+    // ==========================================================
+    const clientIP =
+      c.req.header('CF-Connecting-IP') ||
+      c.req.header('X-Forwarded-For') ||
+      c.req.header('X-Real-IP') ||
+      'anonymous';
+    const fpKey = (body?.fingerprint ? String(body.fingerprint).trim() : '') || '';
+    const ctKey = (body as any)?.claim_token ? String((body as any).claim_token).trim() : '';
+    const tmKey =
+      (body?.stats && (body.stats as any).totalMessages != null)
+        ? Number((body.stats as any).totalMessages)
+        : null;
+    const cacheKey =
+      (ctKey ? `ct:${ctKey}` : (fpKey ? `fp:${fpKey}` : (tmKey != null ? `ip:${clientIP}|tm:${Math.floor(Number(tmKey) || 0)}` : ''))) || '';
+    if (cacheKey) {
+      const hit = __analysisResponseCache.get(cacheKey);
+      if (hit && (Date.now() - hit.ts) <= 5_000) {
+        const cached = hit.payload;
+        if (cached && typeof cached === 'object') {
+          (cached as any)._dedup = { hit: true, source: 'memory_cache', within_ms: 5000 };
+          return c.json(cached);
+        }
+      }
+    }
 
     // 【V6.0 新增】初始化词云缓冲区（如果不存在）
     c.executionCtx.waitUntil(initWordCloudBuffer(env));
@@ -2307,6 +2482,50 @@ app.post('/api/v2/analyze', async (c) => {
           const supabaseUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=${conflictKey}`;
           
           try {
+            // 【5 秒短期幂等（数据库侧）】claim_token / fingerprint / ip+total_messages
+            // - 命中则：直接跳过写库与所有副作用（避免重复入库/重复累加）
+            // - 响应由上面的 5 秒内存缓存兜底复用（同实例）；
+            //   跨实例情况下，至少保证不会重复写入。
+            try {
+              const dupRow = await getRecentDuplicateUserAnalysis(env, {
+                claim_token: payload?.claim_token ?? (body as any)?.claim_token ?? null,
+                fingerprint: payload?.fingerprint ?? null,
+                ip_location: payload?.ip_location ?? null,
+                total_messages: payload?.total_messages ?? null,
+              }, 5_000);
+              if (dupRow) {
+                console.warn('[DB] 🛑 5 秒短期幂等命中（数据库侧），跳过写库与副作用:', {
+                  conflictKey,
+                  hasClaimToken: !!(payload?.claim_token ?? (body as any)?.claim_token),
+                  fingerprint: String(payload?.fingerprint || '').slice(0, 8) + '...',
+                  ip: String(payload?.ip_location || '').slice(0, 24),
+                  total_messages: payload?.total_messages ?? null,
+                });
+                return;
+              }
+            } catch {
+              // ignore -> fallback to existing checks
+            }
+
+            // 【10 秒去重】防止前端重复触发/并发请求导致短时间内重复写入与副作用
+            // - 命中则直接跳过所有写库（user_analysis / analysis_events / 全局统计 / 词云），避免重复累加与排行榜异常
+            const recentHit = await hasRecentUserAnalysisRecord(
+              env,
+              {
+                fingerprint: payload?.fingerprint ?? null,
+                claim_token: payload?.claim_token ?? null,
+              },
+              10_000
+            );
+            if (recentHit) {
+              console.warn('[DB] 🛑 检测到 10 秒内重复上报，跳过写库与统计副作用:', {
+                conflictKey,
+                fingerprint: String(payload?.fingerprint || '').slice(0, 8) + '...',
+                hasClaimToken: !!payload?.claim_token,
+              });
+              return;
+            }
+
             await Promise.all([
               // 写入 Supabase（增强错误处理）
               (async () => {
@@ -2404,6 +2623,14 @@ app.post('/api/v2/analyze', async (c) => {
     }
 
     // 返回结果（不阻塞数据库写入）
+    // 写入 5 秒缓存：防止前端重复触发导致出现第二次 /api/v2/analyze 调用与重复入库
+    if (cacheKey) {
+      try {
+        __analysisResponseCache.set(cacheKey, { ts: Date.now(), payload: { ...result, _dedup: { hit: false, source: 'computed', within_ms: 5000 } } });
+      } catch {
+        // ignore
+      }
+    }
     return c.json(result);
   } catch (error: any) {
     console.error('[Worker] /api/v2/analyze 错误:', error);
@@ -3154,6 +3381,31 @@ app.post('/api/analyze', async (c) => {
         error: 'Supabase 环境变量未配置',
       }, 500);
     }
+
+    // ==========================================================
+    // 🚨 重要：弃用写库的旧接口 /api/analyze
+    //
+    // 你贴出来的“重复记录（fingerprint 32 位 + 64 位）”的根因之一就是：
+    // - 旧接口在 fingerprint 缺失时会用 total_messages/total_chars 生成 SHA-256 指纹（64 hex），
+    // - 新接口 /api/v2/analyze 使用浏览器稳定指纹（通常 32 hex）。
+    // 两条链路并发/重复触发时会写入两行，导致排行榜重复。
+    //
+    // 为彻底止血：这里不再写入 user_analysis，只返回兼容提示，
+    // 让所有真实写入统一收敛到 /api/v2/analyze（已包含 5 秒幂等 + 10 秒去重 + upsert）。
+    // ==========================================================
+    console.warn('[Worker] ⚠️ /api/analyze 已弃用写库，请改用 /api/v2/analyze。', {
+      ip: clientIP,
+      hasFingerprint: !!(body?.fingerprint || body?.meta?.fingerprint),
+    });
+    return c.json({
+      status: 'success',
+      success: true,
+      deprecated: true,
+      message: '/api/analyze 已弃用写库，请升级前端改用 /api/v2/analyze（避免重复记录）。',
+      // 兼容旧前端字段：不给 rankPercent，避免误导；旧前端应迁移到 v2。
+      rankPercent: null,
+      totalUsers: null,
+    });
     
     // 1. 数据深度挖掘（兼容扁平化及嵌套结构）
     const sources = [body, body.statistics || {}, body.metadata || {}, body.stats || {}];
@@ -3194,6 +3446,10 @@ app.post('/api/analyze', async (c) => {
       userIdentity = Array.from(new Uint8Array(hashBuffer))
         .map(b => b.toString(16).padStart(2, '0')).join('');
     }
+
+    // 【幂等写入】优先使用前端上报 fingerprint；否则回退到本路由生成的 userIdentity
+    // 目的：为数据库唯一约束与 Upsert 提供稳定冲突键，避免重复记录堆积导致排行榜重复
+    const fingerprint = (body?.fingerprint ? String(body.fingerprint).trim() : '') || userIdentity;
     
     // 3. 写入 Supabase - 直接写入 user_analysis 表
     // 【字段对齐】确保字段名与 user_analysis 表定义完全一致
@@ -3206,6 +3462,7 @@ app.post('/api/analyze', async (c) => {
     console.log('[Worker] 🔑 为匿名用户(v1)生成 claim_token:', claimToken.substring(0, 8) + '...');
 
     const payload = {
+      fingerprint,
       user_identity: userIdentity,
       claim_token: claimToken, // 保存令牌到数据库
       // 强制写入明确数值（保底 50），并与数据库列名（小写）保持一致
@@ -3221,34 +3478,47 @@ app.post('/api/analyze', async (c) => {
       total_chars: totalChars,      // 注意：user_analysis 表使用 total_chars，不是 total_user_chars
       ip_location: clientIP !== 'anonymous' ? clientIP : '未知', // 从请求头获取 IP
       // 注意：roast_text 由 /api/v2/analyze 路由生成并保存
-      created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
     
-    const insertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis`;
-    // 【执行 Supabase 插入】Body 必须是数组格式
-    const insertBody = JSON.stringify([payload]);
+    // 【方案一：后端 Upsert】按 fingerprint 幂等写入，冲突时 merge 更新字段
+    const upsertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=fingerprint`;
+    // 【执行 Supabase Upsert】Body 必须是数组格式
+    const upsertBody = JSON.stringify([payload]);
     
-    console.log('[Worker] 📤 准备插入数据到 user_analysis 表:', {
-      url: insertUrl,
+    console.log('[Worker] 📤 准备 Upsert 数据到 user_analysis 表:', {
+      url: upsertUrl,
       method: 'POST',
       headers: {
         'apikey': '***',
         'Authorization': 'Bearer ***',
         'Content-Type': 'application/json',
-        'Prefer': 'return=minimal',
+        'Prefer': 'resolution=merge-duplicates,return=minimal',
       },
-      body: insertBody,
+      body: upsertBody,
       payload: payload,
     });
     
-    const writeRes = await fetchSupabase(env, insertUrl, {
+    // 【10 秒去重】防止前端重复触发导致短时间内重复写库与统计副作用
+    const recentHit = await hasRecentUserAnalysisRecord(
+      env,
+      { fingerprint: payload.fingerprint, claim_token: payload.claim_token },
+      10_000
+    );
+    if (recentHit) {
+      console.warn('[Worker] 🛑 检测到 10 秒内重复上报，跳过写库:', {
+        fingerprint: String(payload.fingerprint || '').slice(0, 8) + '...',
+        hasClaimToken: !!payload.claim_token,
+      });
+      // 继续返回排名/统计查询（读操作），但不再写库
+    } else {
+    const writeRes = await fetchSupabase(env, upsertUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Prefer': 'return=minimal',
+        'Prefer': 'resolution=merge-duplicates,return=minimal',
       },
-      body: insertBody, // 数组格式：JSON.stringify([payload])
+      body: upsertBody, // 数组格式：JSON.stringify([payload])
     });
     
     if (!writeRes.ok) {
@@ -3258,12 +3528,14 @@ app.post('/api/analyze', async (c) => {
         statusText: writeRes.statusText,
         error: errorText,
         userIdentity: userIdentity,
+        fingerprint,
         payload: payload,
-        requestBody: insertBody,
+        requestBody: upsertBody,
       });
     } else {
       console.log('[Worker] ✅ 分析数据已保存到 user_analysis 表', {
         userIdentity,
+        fingerprint,
         ipLocation: payload.ip_location,
         vibeIndex,
         personalityType: personality,
@@ -3275,6 +3547,7 @@ app.post('/api/analyze', async (c) => {
       if (executionCtx && typeof executionCtx.waitUntil === 'function') {
         executionCtx.waitUntil(refreshGlobalStatsV6Rpc(env));
       }
+    }
     }
     
     // 4. 并行计算排名 + 获取全局平均值（带超时 abortSignal，防止并发堆积）

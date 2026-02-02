@@ -3142,6 +3142,58 @@ export class VibeCodingerAnalyzer {
         }
       };
 
+      // 确保本地稳定指纹存在：没有则生成并写入 user_fingerprint
+      const _ensureLocalFingerprint = async () => {
+        const KEY = 'user_fingerprint';
+        try {
+          const existing = _normalizeFp(localStorage.getItem(KEY) || '');
+          if (existing) return existing;
+
+          // 兼容旧 key：迁移到统一 key
+          const legacy = _normalizeFp(
+            localStorage.getItem('cursor_clinical_fingerprint') ||
+            localStorage.getItem('vibe_fp') ||
+            localStorage.getItem('fingerprint') ||
+            ''
+          );
+          if (legacy) {
+            try { localStorage.setItem(KEY, legacy); } catch { /* ignore */ }
+            return legacy;
+          }
+
+          // 生成新的稳定指纹（优先 sha256 -> 取前 32 位 hex；否则使用 fnv1a 叠加）
+          const tz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; } })();
+          const ua = (() => { try { return navigator.userAgent || ''; } catch { return ''; } })();
+          const rand = (() => {
+            try {
+              if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+            } catch { /* ignore */ }
+            return String(Math.random()) + '|' + String(Date.now());
+          })();
+          const seed = `fp|${ua}|${tz}|${rand}`;
+
+          let fp = '';
+          try {
+            if (globalThis.crypto?.subtle?.digest) {
+              const buf = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(seed));
+              const hex = Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+              fp = _normalizeFp(hex.slice(0, 32)); // 固化为 32 hex
+            }
+          } catch { /* ignore */ }
+          if (!fp) {
+            // fallback: 4 段 fnv 拼接成 32 hex
+            fp = _normalizeFp((_fnv1a32(seed + '|a') + _fnv1a32(seed + '|b') + _fnv1a32(seed + '|c') + _fnv1a32(seed + '|d')).slice(0, 32));
+          }
+
+          if (fp) {
+            try { localStorage.setItem(KEY, fp); } catch { /* ignore */ }
+          }
+          return fp;
+        } catch {
+          return '';
+        }
+      };
+
       // 生成“上传签名”（尽量稳定 + 足够区分不同数据集；避免对全量 JSON 做 hash）
       const _buildUploadSignature = (metaFp, lang) => {
         const msgCount = formattedChatData.length;
@@ -3279,7 +3331,9 @@ export class VibeCodingerAnalyzer {
       
       // 【V6 上报协议对齐】构建完整的 Payload，包含 fingerprint, dimensions, stats, meta
       // 从 vibeResult 中提取完整数据
-      const fingerprint = vibeResult?.meta?.fingerprint || vibeResult?.fingerprint || null;
+      // ⚠️ 关键修复：fingerprint 仅代表“浏览器指纹”（稳定、持久）
+      // 禁止使用 vibeResult.fingerprint（它可能是语义指纹/内容指纹，导致同一次流程 fingerprint 不一致 -> 触发两次 /api/v2/analyze）
+      const fingerprintHint = vibeResult?.meta?.fingerprint || vibeResult?.context?.fingerprint || null;
       const dimensions = vibeResult?.dimensions || {};
       
       // 【V6 环境与网络安全】确保 meta 字段完整包含所有环境信息
@@ -3292,18 +3346,42 @@ export class VibeCodingerAnalyzer {
           ip: context.ip || '0.0.0.0',
           lang: context.lang || this.lang || 'zh-CN',
           timezone: context.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-          fingerprint: context.fingerprint || fingerprint || null,
+          fingerprint: context.fingerprint || fingerprintHint || null,
           vpn: context.isVpn || context.vpn || false,
           proxy: context.isProxy || context.proxy || false,
           timestamp: new Date().toISOString()
         };
       }
 
+      // 统一/固化浏览器指纹：localStorage(user_fingerprint) > meta.fingerprint > hint
+      let stableBrowserFingerprint = _getLocalFingerprint() || _normalizeFp(meta?.fingerprint) || _normalizeFp(fingerprintHint) || null;
+      if (!stableBrowserFingerprint) {
+        stableBrowserFingerprint = await _ensureLocalFingerprint();
+      }
+      if (stableBrowserFingerprint) {
+        meta.fingerprint = stableBrowserFingerprint;
+      }
+
+      // 复用 claim_token：用于后端短期幂等（避免同一用户短时间二次写入）
+      const _readClaimToken = () => {
+        try {
+          const v = String(localStorage.getItem('vibe_claim_token') || '').trim();
+          // UUID v4/v1 都可接受：只做宽松校验
+          if (!v) return null;
+          if (!/^[0-9a-fA-F-]{16,64}$/.test(v)) return null;
+          return v;
+        } catch {
+          return null;
+        }
+      };
+      const claimToken = _readClaimToken();
+
       const uploadData = {
         chatData: formattedChatData,
         lang: this.lang || 'zh-CN',
         countryCode: this.countryCode || null, // 【v4.0 新增】传递国家代码
-        fingerprint: fingerprint, // 【V6 新增】浏览器指纹
+        fingerprint: stableBrowserFingerprint, // 【V6 新增】浏览器指纹（稳定）
+        claim_token: claimToken, // 【幂等】复用影子令牌（若存在）
         dimensions: dimensions, // 【V6 新增】LPDEF 分数
         stats: statsToUpload, // 【V6 适配】包含 stats 字段
         meta: meta, // 【V6 新增】环境信息元数据（完整包含 ip, lang, timezone, fingerprint, vpn, proxy）
