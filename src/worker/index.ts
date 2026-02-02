@@ -4870,23 +4870,45 @@ app.get('/api/country-summary', async (c) => {
     }
 
     // ----------------------------
-    // 该国六项指标 Top1（用于 stats2 “高分图谱”卡片）
+    // 该国六项指标排行榜（用于 stats2 “高分图谱”卡片）
+    // - 兼容旧字段：topByMetrics 仍存在，但每项会带 leaders[]（TopN）
     // ----------------------------
     let topByMetrics: any[] = [];
     try {
-      const cc = String(country || '').toUpperCase();
-      if (/^[A-Z]{2}$/.test(cc)) {
-        const metrics: Array<{ key: string; col: string; labelZh: string; labelEn: string; format?: 'int' | 'float' }> = [
+      const topNRaw = String(c.req.query('topN') || '').trim();
+      const topN = (() => {
+        const n = parseInt(topNRaw, 10);
+        if (Number.isFinite(n) && n > 0) return Math.max(3, Math.min(20, n));
+        return 10;
+      })();
+      const metrics: Array<{ key: string; col: string; labelZh: string; labelEn: string; format?: 'int' | 'float' }> = [
           { key: 'total_messages', col: 'total_messages', labelZh: '调戏AI次数', labelEn: 'Messages', format: 'int' },
           { key: 'total_chars', col: 'total_chars', labelZh: '对话字符数', labelEn: 'Total Chars', format: 'int' },
           { key: 'total_user_chars', col: 'total_user_chars', labelZh: '废话输出', labelEn: 'User Chars', format: 'int' },
           { key: 'avg_user_message_length', col: 'avg_user_message_length', labelZh: '平均长度', labelEn: 'Avg Len', format: 'float' },
           { key: 'jiafang_count', col: 'jiafang_count', labelZh: '甲方上身', labelEn: 'Jiafang', format: 'int' },
           { key: 'ketao_count', col: 'ketao_count', labelZh: '磕头', labelEn: 'Ketao', format: 'int' },
-        ];
-        const selectCols = [
+      ];
+
+      // 无论是否有数据，都返回 6 个条目，前端才能稳定显示 6 个排行榜 + 指示器
+      const emptyEntry = (m: { key: string; col: string; labelZh: string; labelEn: string; format?: 'int' | 'float' }) => ({
+        key: m.key,
+        col: m.col,
+        labelZh: m.labelZh,
+        labelEn: m.labelEn,
+        format: m.format || 'int',
+        // 兼容旧使用：保留 top1 字段，但允许为空
+        score: null,
+        user: null,
+        leaders: [],
+        topN,
+      });
+
+      if (/^[A-Z]{2}$/.test(cc)) {
+        const selectColsBase = [
           'id',
           'user_name',
+          'github_username',
           'fingerprint',
           'user_identity',
           'country_code',
@@ -4897,42 +4919,86 @@ app.get('/api/country-summary', async (c) => {
           'jiafang_count',
           'ketao_count',
         ].join(',');
+        // 注意：部分环境的视图可能尚未包含 lpdef 列。这里先尝试带 lpdef，失败则回退到不带 lpdef，
+        // 避免整项榜单因 select 列不存在而变成空数据。
+        const selectColsWithLpdef = `${selectColsBase},lpdef`;
         const results = await Promise.all(metrics.map(async (m) => {
           try {
-            const url = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
-            url.searchParams.set('select', selectCols);
-            url.searchParams.set('country_code', `eq.${cc}`);
-            // 排除 null
-            url.searchParams.set(m.col, 'not.is.null');
-            url.searchParams.set('order', `${m.col}.desc`);
-            url.searchParams.set('limit', '1');
-            const rows = await fetchSupabaseJson<any[]>(env, url.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
-            const row = Array.isArray(rows) ? rows[0] : null;
-            if (!row) return null;
-            const score = Number(row?.[m.col]);
-            if (!Number.isFinite(score) || score <= 0) return null;
+            const buildUrl = (selectCols: string) => {
+              const url = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
+              url.searchParams.set('select', selectCols);
+              url.searchParams.set('country_code', `eq.${cc}`);
+              // 排除 0 / null
+              url.searchParams.set(m.col, 'gt.0');
+              url.searchParams.set('order', `${m.col}.desc`);
+              url.searchParams.set('limit', String(topN));
+              return url.toString();
+            };
+
+            // 先尝试带 lpdef 列，若失败回退不带 lpdef
+            let rows: any[] = [];
+            try {
+              rows = await fetchSupabaseJson<any[]>(
+                env,
+                buildUrl(selectColsWithLpdef),
+                { headers: buildSupabaseHeaders(env) },
+                SUPABASE_FETCH_TIMEOUT_MS
+              ).catch(() => []);
+            } catch {
+              rows = [];
+            }
+            if (!Array.isArray(rows) || rows.length === 0) {
+              // 只有在“请求失败/列不存在”导致 rows 为空时才回退；如果确实没数据也会是空，但回退成本可接受
+              try {
+                rows = await fetchSupabaseJson<any[]>(
+                  env,
+                  buildUrl(selectColsBase),
+                  { headers: buildSupabaseHeaders(env) },
+                  SUPABASE_FETCH_TIMEOUT_MS
+                ).catch(() => []);
+              } catch {
+                rows = [];
+              }
+            }
+            const list = Array.isArray(rows) ? rows : [];
+            const leaders = list
+              .map((row: any, idx: number) => {
+                const score = Number(row?.[m.col]);
+                if (!Number.isFinite(score) || score <= 0) return null;
+                return {
+                  rank: idx + 1,
+                  score,
+                  user: {
+                    id: row?.id ?? null,
+                    user_name: row?.user_name ?? '',
+                    github_username: row?.github_username ?? '',
+                    fingerprint: row?.fingerprint ?? null,
+                    user_identity: row?.user_identity ?? null,
+                    lpdef: row?.lpdef ?? null,
+                  },
+                };
+              })
+              .filter(Boolean);
+            if (!leaders.length) return emptyEntry(m);
+            const top1 = leaders[0] as any;
             return {
-              key: m.key,
-              col: m.col,
-              labelZh: m.labelZh,
-              labelEn: m.labelEn,
-              format: m.format || 'int',
-              score,
-              user: {
-                id: row?.id ?? null,
-                user_name: row?.user_name ?? '',
-                github_username: '',
-                fingerprint: row?.fingerprint ?? null,
-                user_identity: row?.user_identity ?? null,
-              },
+              ...emptyEntry(m),
+              // 兼容旧使用：保留 top1
+              score: Number(top1?.score),
+              user: top1?.user || null,
+              leaders,
             };
           } catch {
-            return null;
+            return emptyEntry(m);
           }
         }));
-        topByMetrics = results.filter(Boolean);
+        topByMetrics = results;
+      } else {
+        // country 参数异常时也返回 6 个空条目，避免前端 UI 断裂
+        topByMetrics = metrics.map((m) => emptyEntry(m));
       }
     } catch {
+      // 兜底：返回空数组（保持兼容），前端会显示“暂无数据”
       topByMetrics = [];
     }
 

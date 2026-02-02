@@ -1086,6 +1086,116 @@
             opacity: 1;
         }
 
+        /* =========================
+           右侧抽屉：高分图谱排行榜（横向滑动 + 指示器）
+           ========================= */
+        .lpdef-carousel {
+            display: flex;
+            overflow-x: auto;
+            scroll-snap-type: x mandatory;
+            -webkit-overflow-scrolling: touch;
+            gap: 12px;
+            padding: 6px 0 2px 0;
+        }
+        .lpdef-carousel::-webkit-scrollbar { height: 6px; }
+        .lpdef-carousel::-webkit-scrollbar-thumb { background: rgba(0,255,65,0.25); border-radius: 999px; }
+        .lpdef-page {
+            flex: 0 0 100%;
+            scroll-snap-align: start;
+            border: 1px solid rgba(255,255,255,0.10);
+            background: rgba(9, 9, 9, 0.45);
+            padding: 12px;
+            text-align: center; /* 整体文本居中 */
+        }
+        .lpdef-page-title {
+            font-size: 12px;
+            color: #e5e7eb;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+        .lpdef-rank-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px; /* 间距调整 */
+        }
+        .lpdef-rank-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 8px 10px;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: rgba(0,0,0,0.25);
+        }
+        .lpdef-rank-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
+            text-align: left; /* 行内依然左对齐更易读 */
+        }
+        .lpdef-rank-badge {
+            width: 22px;
+            height: 22px;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 800;
+            border: 1px solid rgba(0,255,65,0.35);
+            color: #00ff41;
+            flex: 0 0 auto;
+        }
+        .lpdef-rank-avatar {
+            width: 22px;
+            height: 22px;
+            border-radius: 999px;
+            object-fit: cover;
+            border: 1px solid rgba(0,255,65,0.25);
+            flex: 0 0 auto;
+        }
+        .lpdef-rank-name {
+            font-size: 11px;
+            color: #e5e7eb;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .lpdef-rank-score {
+            font-size: 12px;
+            font-weight: 800;
+            color: #22c55e;
+            font-variant-numeric: tabular-nums;
+            text-align: right;
+            flex: 0 0 auto;
+        }
+        .lpdef-indicators {
+            display: flex;
+            gap: 6px;
+            justify-content: center;
+            margin: 4px 0 10px 0;
+            flex-wrap: wrap;
+        }
+        .lpdef-indicator-btn {
+            border: 1px solid rgba(0,255,65,0.28);
+            background: rgba(0,255,65,0.06);
+            color: rgba(0,255,65,0.85);
+            font-size: 10px;
+            padding: 4px 8px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            cursor: pointer;
+        }
+        .lpdef-indicator-btn.active {
+            border-color: rgba(0,255,65,0.75);
+            background: rgba(0,255,65,0.12);
+            color: #00ff41;
+            box-shadow: 0 0 0 1px rgba(0,255,65,0.18) inset;
+        }
+
         /* LPDEF 卡片动画 */
         @keyframes lpdef-scan {
             0% {
@@ -2300,7 +2410,7 @@
                     : (fp ? `user_${fp.slice(0, 6)}` : (id ? `user_${id.slice(0, 6)}` : (currentLang === 'en' ? 'unknown' : '未知')));
                 const avatar = github
                     ? `https://github.com/${encodeURIComponent(github)}.png?size=64`
-                    : 'https://github.com/identicons/guest.png';
+                    : DEFAULT_AVATAR;
                 const profileUrl = github ? `https://github.com/${encodeURIComponent(github)}` : '';
                 return { display, avatar, profileUrl };
             };
@@ -2735,47 +2845,135 @@
 
                 // =========================
                 // 需求：高分图谱 (#rtTopTalentsList)
-                // 新口径：该国 6 项指标 Top1（/api/country-summary.topByMetrics）
+                // 新口径：该国 6 项指标 TopN（/api/country-summary.topByMetrics[].leaders）
+                // - 指示器 + 左右滑动切换
+                // - 版式居中、间距优化
                 // =========================
                 const topTalentsEl = document.getElementById('rtTopTalentsList');
                 const topTalentsHeroesEl = document.getElementById('rtTopTalentsHeroes');
                 let topBy = Array.isArray(data.topByMetrics) ? data.topByMetrics : [];
+
+                const metricOrder = [
+                    'total_messages',
+                    'total_chars',
+                    'total_user_chars',
+                    'avg_user_message_length',
+                    'jiafang_count',
+                    'ketao_count'
+                ];
+                topBy = topBy
+                    .slice()
+                    .sort((a, b) => metricOrder.indexOf(String(a?.key || '')) - metricOrder.indexOf(String(b?.key || '')));
+
                 if (topTalentsHeroesEl) topTalentsHeroesEl.innerHTML = '';
                 if (topTalentsEl) {
                     if (!topBy || topBy.length === 0) {
-                        topTalentsEl.innerHTML = `<div class="text-zinc-500 text-xs">${escapeHtml(getI18nText('lpdef.none') || 'No data')}</div>`;
+                        topTalentsEl.innerHTML = `<div class="text-zinc-500 text-xs text-center">${escapeHtml(getI18nText('lpdef.none') || 'No data')}</div>`;
                     } else {
-                        const fmtScore = (item) => {
-                            const s = Number(item?.score);
+                        const fmtScore = (metric, v) => {
+                            const s = Number(v);
                             if (!Number.isFinite(s)) return '--';
-                            const f = String(item?.format || '').toLowerCase();
-                            return f === 'float' ? String(Math.round(s)) : new Intl.NumberFormat('zh-CN').format(Math.round(s));
+                            const f = String(metric?.format || '').toLowerCase();
+                            if (f === 'float') return new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN').format(Math.round(s));
+                            return new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN').format(Math.round(s));
                         };
-                        topTalentsEl.innerHTML = topBy.map((it) => {
-                            const user = it?.user || {};
-                            const meta = _resolveUserMeta(user);
-                            // 英文模式不要“中英混排”，只显示对应语言的 label
-                            const labelRaw = (currentLang === 'en')
+                        const labelForMetric = (it) => {
+                            return (currentLang === 'en')
                                 ? (it?.labelEn || it?.key || '--')
                                 : (it?.labelZh || it?.key || '--');
-                            const label = `${escapeHtml(labelRaw)}`;
-                            const scoreText = fmtScore(it);
-                            const nameHtml = meta.profileUrl
-                                ? `<a href="${escapeHtml(meta.profileUrl)}" target="_blank" rel="noopener noreferrer" class="text-[10px] text-zinc-200 truncate hover:underline">${escapeHtml(meta.display)}</a>`
-                                : `<span class="text-[10px] text-zinc-400 truncate">${escapeHtml(meta.display)}</span>`;
-                            return `
-                                <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
-                                    <div class="min-w-0">
-                                        <div class="text-xs text-white font-bold truncate">${label}</div>
+                        };
+
+                        // 指示器（复用 #rtTopTalentsHeroes）
+                        if (topTalentsHeroesEl) {
+                            topTalentsHeroesEl.classList.add('lpdef-indicators');
+                            topTalentsHeroesEl.innerHTML = topBy.map((it, idx) => {
+                                const label = String(labelForMetric(it) || '').trim() || `M${idx + 1}`;
+                                return `<button type="button" class="lpdef-indicator-btn ${idx === 0 ? 'active' : ''}" data-lpdef-idx="${idx}">${escapeHtml(label)}</button>`;
+                            }).join('');
+                        }
+
+                        const pagesHtml = topBy.map((it, idx) => {
+                            const label = String(labelForMetric(it) || '').trim() || `M${idx + 1}`;
+                            const leaders = Array.isArray(it?.leaders) ? it.leaders : (it?.user ? [{ rank: 1, score: it.score, user: it.user }] : []);
+                            const rows = leaders.slice(0, 10).map((row) => {
+                                const user = row?.user || {};
+                                const meta = _resolveUserMeta(user);
+                                const scoreText = fmtScore(it, row?.score);
+                                const lpdefText = (() => {
+                                    const v = user?.lpdef ?? user?.lpDef ?? '';
+                                    const s = String(v || '').trim();
+                                    return s ? s : '';
+                                })();
+                                const nameHtml = meta.profileUrl
+                                    ? `<a href="${escapeHtml(meta.profileUrl)}" target="_blank" rel="noopener noreferrer" class="lpdef-rank-name hover:underline">${escapeHtml(meta.display)}</a>`
+                                    : `<span class="lpdef-rank-name" style="color: rgba(229,231,235,0.75)">${escapeHtml(meta.display)}</span>`;
+                                return `
+                                    <div class="lpdef-rank-row">
+                                        <div class="lpdef-rank-left">
+                                            <span class="lpdef-rank-badge">${escapeHtml(String(row?.rank ?? ''))}</span>
+                                            <img class="lpdef-rank-avatar" src="${escapeHtml(meta.avatar)}" alt="" onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';" />
+                                            ${nameHtml}
+                                            ${lpdefText ? `<span class="text-[10px] text-zinc-500 font-mono ml-1">${escapeHtml(lpdefText)}</span>` : ``}
+                                        </div>
+                                        <div class="lpdef-rank-score">${escapeHtml(scoreText)}</div>
                                     </div>
-                                    <div class="flex items-center gap-3 min-w-0">
-                                        <img src="${escapeHtml(meta.avatar)}" alt="" width="18" height="18" style="width:18px;height:18px;border-radius:999px;object-fit:cover;border:1px solid rgba(0,255,65,0.2);" />
-                                        ${nameHtml}
-                                        <span class="text-xs text-green-500 font-bold tabular-nums">${escapeHtml(scoreText)}</span>
+                                `;
+                            }).join('');
+
+                            return `
+                                <div class="lpdef-page" data-page-index="${idx}">
+                                    <div class="lpdef-page-title">${escapeHtml(label)}</div>
+                                    <div class="lpdef-rank-list">
+                                        ${rows || `<div class="text-zinc-500 text-xs text-center">${escapeHtml(getI18nText('common.no_data') || 'No data')}</div>`}
                                     </div>
                                 </div>
                             `;
                         }).join('');
+
+                        topTalentsEl.innerHTML = `<div class="lpdef-carousel" id="lpdefCarousel">${pagesHtml}</div>`;
+
+                        // 交互：点击指示器 -> 滚动到对应页；滚动时同步 active
+                        try {
+                            const carousel = document.getElementById('lpdefCarousel');
+                            const buttons = topTalentsHeroesEl ? Array.from(topTalentsHeroesEl.querySelectorAll('[data-lpdef-idx]')) : [];
+                            const setActive = (i) => {
+                                buttons.forEach((b) => b.classList.toggle('active', Number(b.getAttribute('data-lpdef-idx')) === i));
+                            };
+                            const scrollToIndex = (i) => {
+                                if (!carousel) return;
+                                const pages = carousel.querySelectorAll('.lpdef-page');
+                                const page = pages && pages[i] ? pages[i] : null;
+                                if (!page) return;
+                                carousel.scrollTo({ left: page.offsetLeft, behavior: 'smooth' });
+                                setActive(i);
+                            };
+                            buttons.forEach((b) => {
+                                b.addEventListener('click', () => {
+                                    const i = Number(b.getAttribute('data-lpdef-idx') || '0') || 0;
+                                    scrollToIndex(i);
+                                });
+                            });
+                            if (carousel) {
+                                let raf = 0;
+                                carousel.addEventListener('scroll', () => {
+                                    if (raf) cancelAnimationFrame(raf);
+                                    raf = requestAnimationFrame(() => {
+                                        try {
+                                            const pages = carousel.querySelectorAll('.lpdef-page');
+                                            if (!pages || !pages.length) return;
+                                            const x = carousel.scrollLeft;
+                                            let best = 0;
+                                            let bestDist = Infinity;
+                                            pages.forEach((p, i) => {
+                                                const d = Math.abs((p).offsetLeft - x);
+                                                if (d < bestDist) { bestDist = d; best = i; }
+                                            });
+                                            setActive(best);
+                                        } catch { /* ignore */ }
+                                    });
+                                }, { passive: true });
+                            }
+                        } catch { /* ignore */ }
                     }
                 }
 
@@ -2961,8 +3159,23 @@
         const SUPABASE_URL = 'https://dtcplfhcgnxdzpigmotb.supabase.co';
         const SUPABASE_KEY = 'sb_publishable_-rrlujgXDNxqb-UsMJckNw_G2rn2e8x';
         
-        // 默认头像常量
-        const DEFAULT_AVATAR = 'https://github.com/identicons/guest.png';
+        // 默认头像常量（匿名受害者：使用内置 SVG，避免依赖外链 identicon）
+        const DEFAULT_AVATAR = "data:image/svg+xml;utf8," + encodeURIComponent(`
+            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+              <defs>
+                <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#00ff41" stop-opacity="0.9"/>
+                  <stop offset="1" stop-color="#00b7ff" stop-opacity="0.9"/>
+                </linearGradient>
+              </defs>
+              <rect x="2" y="2" width="60" height="60" rx="14" fill="#0a0a0a" stroke="url(#g)" stroke-width="2"/>
+              <circle cx="24" cy="28" r="5" fill="#e5e7eb"/>
+              <circle cx="40" cy="28" r="5" fill="#e5e7eb"/>
+              <rect x="20" y="40" width="24" height="6" rx="3" fill="#e5e7eb" opacity="0.9"/>
+              <path d="M18 18h28" stroke="#00ff41" stroke-opacity="0.55" stroke-width="3" stroke-linecap="round"/>
+              <path d="M18 50h28" stroke="#00ff41" stroke-opacity="0.25" stroke-width="3" stroke-linecap="round"/>
+            </svg>
+        `);
         
         // 无效用户名的默认值列表（这些值不应该请求GitHub头像）
         const INVALID_USERNAME_VALUES = ['自动上报用户', 'Anonymous', 'Guest', 'guest', 'anonymous', ''];
@@ -3070,6 +3283,13 @@
                 'hotlist.building': '正在建立该地区黑话榜...',
                 'hotlist.collecting': '暂无数据（正在收录中...）',
                 'semantic.core_trait_empty': '该地区核心特质：--',
+
+                // Badges (card top-right)
+                'badge.config': '配置',
+                'badge.stats': '统计',
+                'badge.live': '实时',
+                'badge.connect': '连接',
+                'badge.syncing': '同步',
                 'top-title': 'Cursor行为报告全球分布图',
                 'sub-title': '实时远程监测状态 // 节点：太平洋中部',
                 'total-victims': '已诊断开发者',
@@ -3241,6 +3461,13 @@
                 'hotlist.collecting': 'No data (collecting...)',
                 'semantic.core_trait_empty': 'Core trait: --',
 
+                // Badges (card top-right)
+                'badge.config': 'CONFIG',
+                'badge.stats': 'STATS',
+                'badge.live': 'LIVE',
+                'badge.connect': 'CONNECT',
+                'badge.syncing': 'SYNCING',
+
                 // Metrics
                 'metric.ai_interrogations': 'AI Interrogations',
                 'metric.jiafang': 'Boss Mode Triggers',
@@ -3358,7 +3585,15 @@
                     './src/personality-names-en.json'
                 ]);
 
-                window.__LANG_CONFIG = { rankEn, personalityNamesEn };
+                // 答案之书：中英文共用同一份 JSON（{[vibeIndex]: {title_zh,content_zh,title_en,content_en}}）
+                const answerBookByVibeIndex = await tryFetchJson([
+                    './answerBookByVibeIndex.json',
+                    './src/answerBookByVibeIndex.json',
+                    './answer-book-by-vibe-index.json',
+                    './src/answer-book-by-vibe-index.json'
+                ]);
+
+                window.__LANG_CONFIG = { rankEn, personalityNamesEn, answerBookByVibeIndex };
             } catch { /* ignore */ }
         }
 
@@ -5055,7 +5290,7 @@
                     <div class="flex items-center justify-between mb-3">
                         <span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">🕶️</span>
                         <span class="text-[8px] leading-none text-[#00ff41] border border-[#00ff41]/40 px-1 py-0.5 tracking-widest uppercase bg-[#00ff41]/5">
-                            CONFIG
+                            ${escapeHtml(getI18nText('badge.config') || 'CONFIG')}
                         </span>
                     </div>
                     
@@ -5203,7 +5438,7 @@
                     <div class="flex items-center justify-between mb-3">
                         <span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">📡</span>
                         <span class="text-[8px] leading-none text-[#00ff41] border border-[#00ff41]/40 px-1 py-0.5 tracking-widest uppercase bg-[#00ff41]/5">
-                            LIVE
+                            ${escapeHtml(getI18nText('badge.live') || 'LIVE')}
                         </span>
                     </div>
                     <div class="drawer-item-label mb-3">${escapeHtml((i18n[currentLang] && i18n[currentLang]['recent-activity']) ? i18n[currentLang]['recent-activity'] : (currentLang === 'en' ? 'Live Activity Feed' : '实时诊断活动'))}</div>
@@ -12089,6 +12324,21 @@
                             console.warn('[UserStats] 读取 user_answer_book 失败:', e);
                         }
                     }
+
+                    // 中文模式：若 localStorage 注入的是英文文案，则回退用本地 JSON 的中文版本（避免中文页出现英文）
+                    if (currentLang !== 'en') {
+                        const hasCjk = (s) => /[\u3040-\u30ff\u3400-\u9fff]/.test(String(s || ''));
+                        const looksEnglishOnly = (s) => {
+                            const x = String(s || '').trim();
+                            if (!x) return false;
+                            if (hasCjk(x)) return false;
+                            return /^[\x00-\x7F\s\S]+$/.test(x);
+                        };
+                        if (looksEnglishOnly(answerBookTitle) || looksEnglishOnly(answerBookContent)) {
+                            answerBookTitle = '暂无';
+                            answerBookContent = '暂无说明';
+                        }
+                    }
                     
                     // 与 index 同步：若无 answer_book 且无 localStorage，用 5 位 vibe_index（vibe_index_str/lpdef）查 JSON
                     if ((!answerBookTitle || answerBookTitle === '暂无') && (!answerBookContent || answerBookContent === '暂无说明')) {
@@ -12121,6 +12371,7 @@
                 let realEvalTitle = '';
                 let realEvalText = '';
                 let realEvalTraits = [];
+                let realEvalUsedAnswerBookFallback = false;
                 try {
                     const histStr = localStorage.getItem('cursor_clinical_history') || '';
                     const hist = histStr ? JSON.parse(histStr) : null;
@@ -12133,6 +12384,90 @@
                                 if (t) return t;
                             }
                             return '';
+                        };
+                        const buildTraitsZhFromVibeIndex = (idx) => {
+                            const s = String(idx || '').trim();
+                            if (!/^\d{5}$/.test(s)) return [];
+                            const toLevel = (d) => (d === '2' ? '高' : (d === '1' ? '中' : '低'));
+                            const pairs = [
+                                ['逻辑', toLevel(s[0])],
+                                ['耐心', toLevel(s[1])],
+                                ['细节', toLevel(s[2])],
+                                ['探索', toLevel(s[3])],
+                                ['反馈', toLevel(s[4])]
+                            ];
+                            return pairs.map(([k, v]) => `${k}${v}`);
+                        };
+                        const looksEnglishOnly = (s) => {
+                            const x = String(s || '').trim();
+                            if (!x) return false;
+                            if (containsCjk(x)) return false;
+                            // 只包含 ASCII / 拉丁字符，视为英文
+                            return /^[\x00-\x7F\s\S]+$/.test(x);
+                        };
+                        // 过滤“交互风格指数/Standard Developer”等 answer_book 模板（该模板来自后端 answer_book 兜底，不属于真实评价）
+                        const isStyleIndexTemplate = (title, text) => {
+                            const t = String(title || '');
+                            const x = String(text || '');
+                            const joined = `${t}\n${x}`;
+                            // 中文模板关键字
+                            if (/交互风格指数/.test(joined) && /(标准型开发者|雄辩家|冷酷极客)/.test(joined)) return true;
+                            if (/保持了平衡的沟通方式|既不过于详细|也不过于简洁/.test(joined)) return true;
+                            // 英文模板关键字
+                            if (/\bstyle index\b/i.test(joined) && /(standard developer|eloquent speaker|cold geek)/i.test(joined)) return true;
+                            if (/neither too detailed nor too concise/i.test(joined)) return true;
+                            if (/average message length/i.test(joined) && /\bstyle index\b/i.test(joined)) return true;
+                            return false;
+                        };
+                        const loadRoastLibraryForLang = async (lang) => {
+                            const safeLang = (lang === 'en') ? 'en' : 'zh';
+                            try {
+                                const cfg = window.__LANG_CONFIG || {};
+                                const cached = (safeLang === 'en') ? cfg.roastEn : cfg.roastZh;
+                                if (cached && typeof cached === 'object') return cached;
+                            } catch { /* ignore */ }
+                            const url = (safeLang === 'en') ? 'src/roastLibrary2.json' : 'src/roastLibrary.json';
+                            try {
+                                const resp = await fetch(url, { cache: 'no-cache' });
+                                if (!resp.ok) return null;
+                                const data = await resp.json();
+                                try {
+                                    const cfg = window.__LANG_CONFIG || {};
+                                    window.__LANG_CONFIG = {
+                                        ...cfg,
+                                        ...(safeLang === 'en' ? { roastEn: data } : { roastZh: data })
+                                    };
+                                } catch { /* ignore */ }
+                                return data;
+                            } catch {
+                                return null;
+                            }
+                        };
+                        const fillRealEvalFromDossier = async () => {
+                            const idx = (vibeIndexStr && typeof vibeIndexStr === 'string' && vibeIndexStr.length === 5) ? vibeIndexStr : '';
+                            if (!idx) return false;
+                            const lang = (currentLang === 'en') ? 'en' : 'zh';
+                            const lib = await loadRoastLibraryForLang(lang);
+                            const raw = lib && typeof lib === 'object' ? (lib[idx] || '') : '';
+                            const s = String(raw || '').trim();
+                            if (!s) return false;
+                            // roastLibrary 的格式一般为 "称号: 说明..."（中英文分别使用 ： / : 都可能）
+                            let titleFromLib = '';
+                            let textFromLib = s;
+                            const m = s.match(/^(.+?)[：:]\s*(.+)$/);
+                            if (m) {
+                                titleFromLib = String(m[1] || '').trim();
+                                textFromLib = String(m[2] || '').trim();
+                            }
+                            // 标题优先用已解析的人格称号（和 index.html 同源），否则用 roast 库自带称号
+                            if (!realEvalTitle) realEvalTitle = personalityName || titleFromLib || '';
+                            // 正文使用人格档案说明（roast library）
+                            realEvalText = textFromLib || realEvalText || '';
+                            // traits：中文用五维推导，英文保持原有/或留空
+                            if (lang !== 'en' && (!Array.isArray(realEvalTraits) || realEvalTraits.length === 0)) {
+                                realEvalTraits = buildTraitsZhFromVibeIndex(idx).slice(0, 5);
+                            }
+                            return true;
                         };
 
                         if (currentLang === 'en') {
@@ -12169,23 +12504,134 @@
                                 realEvalTraits = realEvalTraits.filter((t) => !containsCjk(t));
                             }
 
-                            // 如果仍然是中文内容：英文模式下不展示中文，给出英文兜底提示
-                            if (containsCjk(realEvalTitle) || containsCjk(realEvalText)) {
+                            // 过滤 answer_book 模板（交互风格指数等），并优先使用人格档案库（roastLibrary2）
+                            if (isStyleIndexTemplate(realEvalTitle, realEvalText)) {
                                 realEvalTitle = '';
+                                realEvalText = '';
                                 realEvalTraits = [];
-                                realEvalText = 'Real evaluation is not available in English for this run.';
+                            }
+
+                            // 如果仍然是中文内容：英文模式下不展示中文，用人格档案库兜底；再不行才提示
+                            if (containsCjk(realEvalTitle) || containsCjk(realEvalText) || (!realEvalTitle && !realEvalText)) {
+                                const ok = await fillRealEvalFromDossier().catch(() => false);
+                                if (!ok) {
+                                    realEvalTitle = '';
+                                    realEvalTraits = [];
+                                    realEvalText = 'Real evaluation is not available in English for this run.';
+                                }
                             }
                         } else {
                             // 中文：标题优先用人格称号（用户可读），其次用 analysis.name
-                            realEvalTitle = pickFirstNonEmpty([vr.personalityName, vr.personality_name, vr.analysis?.name]);
-                            // 正文优先用 roastText（最像“真实评价”），其次用 analysis.description
-                            realEvalText = pickFirstNonEmpty([vr.roastText, vr.roast_text, vr.analysis?.description]);
-                            if (Array.isArray(vr.analysis?.traits)) {
-                                realEvalTraits = vr.analysis.traits.map((t) => String(t || '').trim()).filter(Boolean).slice(0, 5);
+                            realEvalTitle = pickFirstNonEmpty([
+                                vr.personalityNameZh,
+                                vr.personality_name_zh,
+                                vr.personality_nameZh,
+                                vr.analysis?.name_zh,
+                                vr.analysis?.nameZh,
+                                vr.analysis_zh?.name,
+                                vr.personalityName,
+                                vr.personality_name,
+                                vr.analysis?.name
+                            ]);
+                            // 正文优先用 roastTextZh/description_zh；否则才退回通用字段
+                            realEvalText = pickFirstNonEmpty([
+                                vr.roastTextZh,
+                                vr.roast_text_zh,
+                                vr.roast_textZh,
+                                vr.analysis?.description_zh,
+                                vr.analysis?.descriptionZh,
+                                vr.analysis_zh?.description,
+                                vr.roastText,
+                                vr.roast_text,
+                                vr.analysis?.description
+                            ]);
+
+                            const traitsZh =
+                                vr.analysis?.traits_zh ||
+                                vr.analysis?.traitsZh ||
+                                vr.analysis_zh?.traits ||
+                                vr.analysis?.traits;
+                            if (Array.isArray(traitsZh)) {
+                                realEvalTraits = traitsZh.map((t) => String(t || '').trim()).filter(Boolean).slice(0, 5);
+                                // 中文模式下剔除“明显是英文句子”的 trait，避免中文页混英文标签
+                                realEvalTraits = realEvalTraits.filter((t) => containsCjk(t));
+                            }
+
+                            // 过滤 answer_book 模板（交互风格指数/标准型开发者等），并优先使用人格档案库（roastLibrary）
+                            if (isStyleIndexTemplate(realEvalTitle, realEvalText)) {
+                                realEvalTitle = '';
+                                realEvalText = '';
+                                realEvalTraits = [];
+                            }
+
+                            // 中文模式：如果拿到的是英文/或空/或被过滤，则强制用“用户对应的中文人格档案说明”（roastLibrary.json）
+                            if (looksEnglishOnly(realEvalTitle) || looksEnglishOnly(realEvalText) || (!realEvalTitle && !realEvalText)) {
+                                const ok = await fillRealEvalFromDossier().catch(() => false);
+                                if (!ok) {
+                                    // 次级兜底：答案之书（避免空白，但不再使用“交互风格指数”模板）
+                                    realEvalUsedAnswerBookFallback = true;
+                                    try {
+                                        if (answerBookTitle && answerBookTitle !== '暂无') realEvalTitle = answerBookTitle;
+                                        if (answerBookContent && answerBookContent !== '暂无说明') realEvalText = answerBookContent;
+                                    } catch { /* ignore */ }
+
+                                    if ((!realEvalTitle || !realEvalText) && vibeIndexStr && typeof vibeIndexStr === 'string' && vibeIndexStr.length === 5) {
+                                        try {
+                                            const cfg = window.__LANG_CONFIG;
+                                            const book = cfg && cfg.answerBookByVibeIndex;
+                                            const entry = book ? (book[vibeIndexStr] || null) : null;
+                                            if (entry) {
+                                                if (!realEvalTitle) realEvalTitle = entry.title_zh || '';
+                                                if (!realEvalText) realEvalText = entry.content_zh || '';
+                                            }
+                                        } catch { /* ignore */ }
+                                    }
+
+                                    // 标签兜底：用 vibe_index 的 5 维（L/P/D/E/F）推导中文标签
+                                    if ((!Array.isArray(realEvalTraits) || realEvalTraits.length === 0) && vibeIndexStr && typeof vibeIndexStr === 'string' && vibeIndexStr.length === 5) {
+                                        realEvalTraits = buildTraitsZhFromVibeIndex(vibeIndexStr).slice(0, 5);
+                                    }
+
+                                    // 最后兜底
+                                    if (!realEvalTitle) realEvalTitle = '';
+                                    if (!realEvalText) realEvalText = '暂无真实评价（中文文案缺失）';
+                                }
                             }
                         }
                     }
                 } catch { /* ignore */ }
+
+                // 若没有 index 历史结果，也尽量给中文真实评价填入“人格档案说明”
+                if (currentLang !== 'en' && (!realEvalTitle && !realEvalText)) {
+                    try {
+                        if (vibeIndexStr && typeof vibeIndexStr === 'string' && vibeIndexStr.length === 5) {
+                            // 直接走 roastLibrary.json（避免空白）
+                            const resp = await fetch('src/roastLibrary.json', { cache: 'no-cache' });
+                            if (resp.ok) {
+                                const lib = await resp.json();
+                                const raw = lib && lib[vibeIndexStr] ? String(lib[vibeIndexStr]) : '';
+                                const s = String(raw || '').trim();
+                                if (s) {
+                                    const m = s.match(/^(.+?)[：:]\s*(.+)$/);
+                                    if (m) {
+                                        realEvalTitle = personalityName || String(m[1] || '').trim();
+                                        realEvalText = String(m[2] || '').trim();
+                                    } else {
+                                        realEvalTitle = personalityName || '';
+                                        realEvalText = s;
+                                    }
+                                    realEvalTraits = realEvalTraits && realEvalTraits.length ? realEvalTraits : [
+                                        `逻辑${vibeIndexStr[0] === '2' ? '高' : (vibeIndexStr[0] === '1' ? '中' : '低')}`,
+                                        `耐心${vibeIndexStr[1] === '2' ? '高' : (vibeIndexStr[1] === '1' ? '中' : '低')}`,
+                                        `细节${vibeIndexStr[2] === '2' ? '高' : (vibeIndexStr[2] === '1' ? '中' : '低')}`,
+                                        `探索${vibeIndexStr[3] === '2' ? '高' : (vibeIndexStr[3] === '1' ? '中' : '低')}`,
+                                        `反馈${vibeIndexStr[4] === '2' ? '高' : (vibeIndexStr[4] === '1' ? '中' : '低')}`,
+                                    ].slice(0, 5);
+                                }
+                            }
+                        }
+                    } catch { /* ignore */ }
+                }
                 
                 // 创建用户统计卡片容器
                 const statsCard = document.createElement('div');
@@ -12194,7 +12640,7 @@
                     <div class="flex items-center justify-between mb-3">
                         <span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">📊</span>
                         <span class="text-[8px] leading-none text-[#00ff41] border border-[#00ff41]/40 px-1 py-0.5 tracking-widest uppercase bg-[#00ff41]/5">
-                            STATS
+                            ${escapeHtml(getI18nText('badge.stats') || 'STATS')}
                         </span>
                     </div>
                     
@@ -12253,7 +12699,7 @@
                     ` : ''}
                     
                     <!-- 答案之书（参考 index.html：去掉"答案之书"标题，只显示 title 和 content，增大正文字体） -->
-                    ${(answerBookTitle && answerBookTitle !== '暂无') || (answerBookContent && answerBookContent !== '暂无说明') ? `
+                    ${(!realEvalUsedAnswerBookFallback && ((answerBookTitle && answerBookTitle !== '暂无') || (answerBookContent && answerBookContent !== '暂无说明'))) ? `
                     <div class="mb-2">
                         ${answerBookTitle && answerBookTitle !== '暂无' ? `<div class="text-[13px] text-white font-bold mb-2">${answerBookTitle}</div>` : ''}
                         <div class="text-[13px] text-[#00ff41]/80 leading-relaxed">${answerBookContent && answerBookContent !== '暂无说明' ? esc(answerBookContent) : ''}</div>
