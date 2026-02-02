@@ -1,2066 +1,4 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Global Statistics Dashboard - Vibe Coding</title>
-    <!-- API Endpoint -->
-    <meta name="api-endpoint" content="https://cursor-clinical-analysis.psterman.workers.dev/">
-    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
-    <!-- ECharts WordCloud plugin (required for wordCloud series) -->
-    <script src="https://cdn.jsdelivr.net/npm/echarts-wordcloud@2/dist/echarts-wordcloud.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/echarts/map/js/world.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
-        
-        :root {
-            --bg-color: #050505;
-            --card-bg: rgba(24, 24, 27, 0.7);
-            --card-border: #27272a;
-            --text-main: #ffffff;
-            --text-dim: #71717a;
-            --accent-terminal: #00ff41;
-        }
 
-        /* 数据刷新提示：短暂“呼吸闪烁” */
-        @keyframes breathe-flash {
-            0% {
-                transform: translateZ(0) scale(1);
-                box-shadow: 0 0 0 rgba(0, 255, 65, 0);
-                background-color: rgba(0, 255, 65, 0.02);
-            }
-            50% {
-                transform: translateZ(0) scale(1.01);
-                box-shadow: 0 0 18px rgba(0, 255, 65, 0.35);
-                background-color: rgba(0, 255, 65, 0.06);
-            }
-            100% {
-                transform: translateZ(0) scale(1);
-                box-shadow: 0 0 0 rgba(0, 255, 65, 0);
-                background-color: rgba(0, 255, 65, 0.02);
-            }
-        }
-        .breathe-flash {
-            animation: breathe-flash 0.9s ease-in-out 1;
-        }
-
-        /* 语义爆发 Tag 动画：fade-in-up */
-        @keyframes fade-in-up {
-            0% { opacity: 0; transform: translateY(8px); }
-            100% { opacity: 1; transform: translateY(0); }
-        }
-        .semantic-burst-tag {
-            animation-name: fade-in-up;
-            animation-duration: 520ms;
-            animation-timing-function: ease-out;
-            animation-fill-mode: both;
-            will-change: transform, opacity;
-        }
-
-        /* WordCloud loader (pulse) */
-        @keyframes wc-pulse {
-            0%, 100% { opacity: 0.35; transform: scale(0.98); }
-            50% { opacity: 1; transform: scale(1); }
-        }
-        .vibe-cloud-loader {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            height: 100%;
-            min-height: 220px;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            background: rgba(255, 255, 255, 0.02);
-        }
-        .vibe-cloud-loader .dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 999px;
-            background: rgba(168, 85, 247, 0.85);
-            animation: wc-pulse 900ms ease-in-out infinite;
-            margin: 0 6px;
-        }
-        .vibe-cloud-loader .dot:nth-child(2) { animation-delay: 120ms; opacity: 0.7; }
-        .vibe-cloud-loader .dot:nth-child(3) { animation-delay: 240ms; opacity: 0.55; }
-        .vibe-cloud-loader .label {
-            margin-left: 12px;
-            font-size: 12px;
-            color: rgba(148, 163, 184, 0.9);
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        /* 语义爆发卡片刷新动效（淡入/闪烁） */
-        @keyframes vibe-refresh {
-            0% { opacity: 0.55; filter: saturate(0.9) brightness(0.92); }
-            50% { opacity: 1; filter: saturate(1.05) brightness(1.05); }
-            100% { opacity: 0.85; filter: saturate(1) brightness(1); }
-        }
-        .vibe-refreshing {
-            animation: vibe-refresh 650ms ease-in-out 1;
-        }
-
-        /* Personal sentence chips (pulse outline) */
-        .sentence-chip {
-            position: relative;
-            padding: 6px 8px;
-            border-radius: 999px;
-            border: 1px solid rgba(0, 255, 65, 0.35);
-            background: rgba(0, 0, 0, 0.35);
-            color: rgba(229, 231, 235, 0.92);
-            font-size: 11px;
-            line-height: 1.1;
-            max-width: 100%;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        .sentence-chip.pulse {
-            animation: sentencePulse 1.8s ease-in-out infinite;
-            border-color: rgba(0, 255, 65, 0.55);
-            box-shadow: 0 0 0 1px rgba(0, 255, 65, 0.08), 0 0 18px rgba(0, 255, 65, 0.08);
-        }
-        @keyframes sentencePulse {
-            0%, 100% {
-                box-shadow: 0 0 0 1px rgba(0, 255, 65, 0.08), 0 0 12px rgba(0, 255, 65, 0.08);
-                filter: saturate(1);
-            }
-            50% {
-                box-shadow: 0 0 0 1px rgba(0, 255, 65, 0.14), 0 0 22px rgba(0, 255, 65, 0.16);
-                filter: saturate(1.15);
-            }
-        }
-
-        body {
-            font-family: 'JetBrains Mono', monospace;
-            background-color: var(--bg-color);
-            color: var(--text-main);
-            overflow-x: hidden;
-            position: relative;
-        }
-        
-        body::before {
-            content: '';
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            z-index: 1;
-            background-image: 
-                repeating-linear-gradient(
-                    0deg,
-                    transparent,
-                    transparent 2px,
-                    rgba(0, 255, 65, 0.02) 2px,
-                    rgba(0, 255, 65, 0.02) 4px
-                ),
-                radial-gradient(
-                    circle,
-                    rgba(0, 255, 65, 0.03) 1px,
-                    transparent 1px
-                );
-            background-size: 100% 4px, 20px 20px;
-        }
-        
-        body::after {
-            content: '';
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            z-index: 1;
-            background: linear-gradient(
-                180deg,
-                transparent 0%,
-                rgba(0, 255, 65, 0.05) 50%,
-                transparent 100%
-            );
-            animation: scanline 8s linear infinite;
-        }
-        
-        @keyframes scanline {
-            0% { transform: translateY(-100%); }
-            100% { transform: translateY(100%); }
-        }
-
-        .hacker-border {
-            border: 1px solid var(--card-border);
-            position: relative;
-            background: var(--card-bg);
-            backdrop-filter: blur(10px);
-        }
-
-        .hacker-border::before {
-            content: '';
-            position: absolute;
-            top: -1px; left: 0; width: 60px; height: 1px;
-            background: var(--accent-terminal);
-            box-shadow: 0 0 10px var(--accent-terminal);
-        }
-
-        #map-container {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 0;
-            pointer-events: auto;
-            background: transparent;
-        }
-
-        /* 地图光标工具（校准/拖拽提示） */
-        #map-cursor-tools {
-            position: fixed;
-            left: 14px;
-            bottom: 14px;
-            z-index: 50;
-            pointer-events: auto;
-            font-family: 'JetBrains Mono', monospace;
-        }
-        #map-cursor-tools .tool-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 10px;
-            border: 1px solid rgba(0, 255, 65, 0.45);
-            background: rgba(0, 0, 0, 0.55);
-            color: #00ff41;
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            backdrop-filter: blur(8px);
-        }
-        #map-cursor-tools .tool-btn:hover {
-            background: rgba(0, 255, 65, 0.08);
-        }
-        #map-cursor-tools .hint {
-            margin-top: 8px;
-            max-width: 320px;
-            padding: 10px 10px;
-            border: 1px solid rgba(59, 130, 246, 0.45);
-            background: rgba(0, 0, 0, 0.55);
-            color: #93c5fd;
-            font-size: 11px;
-            line-height: 1.35;
-            backdrop-filter: blur(8px);
-            display: none;
-        }
-        #map-cursor-tools .hint b { color: #ffffff; }
-
-        /* 确保主容器允许穿透，但交互元素可点击 */
-        .max-w-\[1600px\] {
-            pointer-events: none;
-        }
-
-        /* 所有可交互元素恢复 pointer-events */
-        .max-w-\[1600px\] button,
-        .max-w-\[1600px\] input,
-        .max-w-\[1600px\] select,
-        .max-w-\[1600px\] textarea,
-        .max-w-\[1600px\] a,
-        .max-w-\[1600px\] [onclick],
-        .max-w-\[1600px\] .stat-card,
-        .max-w-\[1600px\] .hacker-border,
-        .max-w-\[1600px\] canvas,
-        .max-w-\[1600px\] #rank-cards-container,
-        .max-w-\[1600px\] #rank-cards-container > *,
-        .max-w-\[1600px\] .lang-flag-btn,
-        .max-w-\[1600px\] img[onerror] {
-            pointer-events: auto;
-        }
-
-        /* =========================
-           顶部固定 Header 样式
-           ========================= */
-        :root {
-            /* JS 会在运行时按实际 header 高度覆写，避免抽屉遮挡标题栏 */
-            --top-header-height: 60px;
-        }
-
-        .top-header {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            z-index: 90; /* 高于地图/浮层，低于抽屉(z-index:100) */
-            background: rgba(5, 5, 5, 0.95);
-            backdrop-filter: blur(20px);
-            border-bottom: 1px solid rgba(0, 255, 65, 0.2);
-            padding: 12px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.5);
-            pointer-events: auto; /* 确保可以点击 */
-        }
-
-        .top-header-left {
-            display: flex;
-            align-items: center;
-            gap: 20px;
-        }
-
-        .top-header-title {
-            display: flex;
-            flex-direction: column;
-        }
-
-        .top-header-title h1 {
-            margin: 0;
-            font-size: 24px;
-            font-weight: 900;
-            letter-spacing: -0.02em;
-            font-style: italic;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .top-header-title p {
-            margin: 4px 0 0 0;
-            font-size: 9px;
-            color: #71717a;
-            letter-spacing: 0.3em;
-            font-weight: bold;
-            text-transform: uppercase;
-        }
-
-        .top-header-right {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            flex-wrap: wrap;
-        }
-
-        .top-header-cards {
-            display: flex;
-            gap: 12px;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-
-        /* 响应式调整 */
-        @media (max-width: 768px) {
-            .top-header {
-                padding: 8px 12px;
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 8px;
-            }
-
-            .top-header-left {
-                width: 100%;
-            }
-
-            .top-header-right {
-                width: 100%;
-                justify-content: space-between;
-            }
-
-            .top-header-title h1 {
-                font-size: 18px;
-            }
-
-            .top-header-title p {
-                font-size: 8px;
-            }
-
-            .top-header-card {
-                padding: 6px 10px;
-            }
-
-            .top-header-card-label {
-                font-size: 8px;
-            }
-
-            .top-header-card-value {
-                font-size: 10px;
-            }
-
-            body.p-4 {
-                padding-top: 140px !important;
-            }
-        }
-
-        .top-header-card {
-            background: rgba(0, 0, 0, 0.6);
-            border: 1px solid rgba(0, 255, 65, 0.2);
-            border-radius: 4px;
-            padding: 8px 12px;
-            backdrop-filter: blur(10px);
-        }
-
-        .top-header-card-label {
-            font-size: 9px;
-            color: #71717a;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            margin-bottom: 4px;
-        }
-
-        .top-header-card-value {
-            font-size: 11px;
-            font-weight: bold;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        /* 为 body 添加顶部 padding，避免内容被 header 遮挡 */
-        body.p-4 {
-            padding-top: calc(var(--top-header-height, 60px) + 40px) !important;
-        }
-        
-        @media (min-width: 768px) {
-            body.md\:p-8 {
-                padding-top: calc(var(--top-header-height, 60px) + 40px) !important;
-            }
-        }
-
-        /* =========================
-           赛博朋克抽屉样式
-           ========================= */
-        .cyber-drawer {
-            position: fixed;
-            top: var(--top-header-height, 60px); /* 在顶部 header 下方，不遮盖 header */
-            width: 400px;
-            height: calc(100vh - var(--top-header-height, 60px)); /* 减去 header 高度 */
-            z-index: 100; /* 高于顶部 header (z-index: 50) */
-            pointer-events: none;
-            transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        .left-drawer {
-            left: 0;
-            transform: translateX(-100%);
-        }
-
-        .right-drawer {
-            right: 0;
-            transform: translateX(100%);
-        }
-
-        @media (max-width: 768px) {
-            .cyber-drawer {
-                top: var(--top-header-height, 60px); /* 移动端动态高度 */
-                height: calc(100vh - var(--top-header-height, 60px));
-            }
-        }
-
-        .left-drawer.active {
-            transform: translateX(0);
-            pointer-events: auto;
-        }
-
-        .right-drawer.active {
-            transform: translateX(0);
-            pointer-events: auto;
-        }
-
-        .drawer-content {
-            width: 100%;
-            height: 100%;
-            background: rgba(5, 5, 5, 0.85);
-            backdrop-filter: blur(20px);
-            border-right: 1px solid rgba(0, 255, 65, 0.3);
-            border-left: 1px solid rgba(0, 255, 65, 0.3);
-            box-shadow: 
-                0 0 30px rgba(0, 255, 65, 0.2),
-                inset 0 0 50px rgba(0, 255, 65, 0.05);
-            display: flex;
-            flex-direction: column;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .right-drawer .drawer-content {
-            border-right: none;
-            border-left: 1px solid rgba(0, 255, 65, 0.3);
-        }
-
-        .left-drawer .drawer-content {
-            border-left: none;
-            border-right: 1px solid rgba(0, 255, 65, 0.3);
-        }
-
-        /* 赛博朋克扫描线效果 */
-        .drawer-content::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 2px;
-            background: linear-gradient(
-                90deg,
-                transparent,
-                rgba(0, 255, 65, 0.8),
-                transparent
-            );
-            animation: drawer-scanline 3s linear infinite;
-            z-index: 1;
-        }
-
-        @keyframes drawer-scanline {
-            0% { transform: translateY(0); opacity: 0; }
-            10% { opacity: 1; }
-            90% { opacity: 1; }
-            100% { transform: translateY(100vh); opacity: 0; }
-        }
-
-        /* 抽屉头部 */
-        .drawer-header {
-            padding: 20px;
-            border-bottom: 1px solid rgba(0, 255, 65, 0.2);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: rgba(0, 255, 65, 0.05);
-            position: relative;
-            z-index: 2;
-        }
-
-        .drawer-title {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .drawer-icon {
-            font-size: 20px;
-            filter: drop-shadow(0 0 5px rgba(0, 255, 65, 0.8));
-        }
-
-        .drawer-title-text {
-            font-size: 16px;
-            font-weight: bold;
-            color: #00ff41;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            font-family: 'JetBrains Mono', monospace;
-            text-shadow: 0 0 10px rgba(0, 255, 65, 0.5);
-        }
-
-        .drawer-close-btn {
-            width: 30px;
-            height: 30px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border: 1px solid rgba(0, 255, 65, 0.3);
-            color: #00ff41;
-            cursor: pointer;
-            transition: all 0.3s;
-            font-size: 18px;
-            font-weight: bold;
-            background: rgba(0, 255, 65, 0.1);
-        }
-
-        .drawer-close-btn:hover {
-            background: rgba(0, 255, 65, 0.3);
-            border-color: #00ff41;
-            box-shadow: 0 0 15px rgba(0, 255, 65, 0.5);
-            transform: scale(1.1);
-        }
-
-        /* 抽屉内容区域 */
-        .drawer-body {
-            flex: 1;
-            overflow-y: auto;
-            padding: 20px;
-            position: relative;
-            z-index: 1;
-        }
-
-        /* =========================
-           Drawer micro-skeleton (country switch)
-           ========================= */
-        .cyber-drawer.drawer-loading .drawer-body::after {
-            content: '';
-            position: absolute;
-            inset: 0;
-            pointer-events: none;
-            background:
-                linear-gradient(90deg,
-                    rgba(0,0,0,0) 0%,
-                    rgba(0,255,65,0.06) 35%,
-                    rgba(0,255,65,0.12) 50%,
-                    rgba(0,255,65,0.06) 65%,
-                    rgba(0,0,0,0) 100%);
-            transform: translateX(-60%);
-            animation: drawer-shimmer 0.9s ease-in-out infinite;
-            z-index: 3;
-        }
-
-        @keyframes drawer-shimmer {
-            0% { transform: translateX(-60%); opacity: 0.2; }
-            40% { opacity: 0.55; }
-            100% { transform: translateX(60%); opacity: 0.2; }
-        }
-
-        .drawer-body::-webkit-scrollbar {
-            width: 6px;
-        }
-
-        .drawer-body::-webkit-scrollbar-track {
-            background: rgba(0, 0, 0, 0.3);
-        }
-
-        .drawer-body::-webkit-scrollbar-thumb {
-            background: rgba(0, 255, 65, 0.3);
-            border-radius: 3px;
-        }
-
-        .drawer-body::-webkit-scrollbar-thumb:hover {
-            background: rgba(0, 255, 65, 0.5);
-        }
-
-        /* 抽屉内容项样式 */
-        .drawer-item {
-            padding: 15px;
-            margin-bottom: 15px;
-            background: rgba(0, 255, 65, 0.05);
-            border: 1px solid rgba(0, 255, 65, 0.2);
-            border-radius: 4px;
-            transition: all 0.3s;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .drawer-item::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(
-                90deg,
-                transparent,
-                rgba(0, 255, 65, 0.1),
-                transparent
-            );
-            transition: left 0.5s;
-        }
-
-        .drawer-item:hover {
-            border-color: rgba(0, 255, 65, 0.5);
-            background: rgba(0, 255, 65, 0.1);
-            box-shadow: 0 0 20px rgba(0, 255, 65, 0.2);
-        }
-
-        .drawer-item:hover::before {
-            left: 100%;
-        }
-
-        .drawer-item-label {
-            font-size: 11px;
-            color: rgba(0, 255, 65, 0.6);
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 8px;
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        .drawer-item-value {
-            font-size: 18px;
-            color: #00ff41;
-            font-weight: bold;
-            font-family: 'JetBrains Mono', monospace;
-            text-shadow: 0 0 10px rgba(0, 255, 65, 0.5);
-        }
-
-        .drawer-item-desc {
-            font-size: 12px;
-            color: rgba(255, 255, 255, 0.6);
-            margin-top: 8px;
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        /* 响应式调整 */
-        @media (max-width: 768px) {
-            .cyber-drawer {
-                width: 100%;
-            }
-        }
-
-        .stat-card {
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
-        .stat-card:hover {
-            border-color: var(--accent-terminal);
-            transform: translateY(-2px);
-            box-shadow: 0 0 20px rgba(0, 255, 65, 0.1);
-        }
-
-        /* =========================
-           Language Switch (Flags)
-           ========================= */
-        .lang-flag-btn {
-            padding: 0;
-            background: transparent;
-            border: none;
-            border-radius: 50%;
-            cursor: pointer;
-            font-family: 'JetBrains Mono', monospace;
-            transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 44px;
-            height: 44px;
-            opacity: 0.6;
-            transform: scale(1);
-            box-shadow: none;
-            overflow: hidden;
-            position: relative;
-            z-index: 95; /* 顶部国旗按钮点击优先级 */
-        }
-
-        .lang-flag-btn img {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-            border-radius: 50%;
-            transition: all 0.4s ease;
-            padding: 2px;
-            outline: none;
-            border: none;
-            box-shadow: none;
-            -webkit-appearance: none;
-            appearance: none;
-        }
-
-        .lang-flag-btn.active {
-            opacity: 1;
-            border: 3px solid var(--accent-terminal);
-            box-shadow: 0 0 16px rgba(0, 255, 65, 0.6), 0 0 32px rgba(0, 255, 65, 0.3), inset 0 0 20px rgba(0, 255, 65, 0.1);
-            transform: scale(1.1);
-        }
-
-        .lang-flag-btn:hover:not(.active) {
-            opacity: 0.9;
-            transform: scale(1.15);
-            transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
-        }
-
-        .lang-flag-btn:hover.active {
-            /* 选中状态：保持 3px 粗边框，只改变缩放和阴影 */
-            border: 3px solid var(--accent-terminal);
-            transform: scale(1.15);
-            box-shadow: 0 0 20px rgba(0, 255, 65, 0.8), 0 0 40px rgba(0, 255, 65, 0.4), inset 0 0 25px rgba(0, 255, 65, 0.15);
-            transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s ease;
-        }
-
-        /* 防止被 ECharts 图层遮挡：强制提升层级 + 可点击 */
-        #btn-zh, #btn-en {
-            cursor: pointer !important;
-            z-index: 9999 !important;
-            position: relative !important;
-        }
-
-        .loading-overlay {
-            position: absolute;
-            inset: 0;
-            background: var(--bg-color);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 50;
-        }
-
-        @keyframes pulse-soft {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        .pulse { animation: pulse-soft 2s infinite; }
-
-        /* 在线人数数字更新时的缩放动画 */
-        @keyframes scale-bounce {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.2); }
-            100% { transform: scale(1); }
-        }
-
-        .online-count-update {
-            animation: scale-bounce 0.4s ease-out;
-        }
-
-        /* =========================
-           Cyberpunk Loading Effects
-           ========================= */
-        @keyframes skeleton-shimmer {
-            0% { background-position: -200% 0; }
-            100% { background-position: 200% 0; }
-        }
-
-        /* 流光骨架屏：用于数字占位（主题色绿+蓝） */
-        .skeleton {
-            position: relative;
-            color: transparent !important;
-            user-select: none;
-            border-radius: 2px;
-            background: linear-gradient(
-                90deg,
-                rgba(39, 39, 42, 0.25) 0%,
-                rgba(0, 255, 65, 0.18) 40%,
-                rgba(59, 130, 246, 0.14) 55%,
-                rgba(39, 39, 42, 0.25) 100%
-            );
-            background-size: 240% 100%;
-            animation: skeleton-shimmer 1.2s ease-in-out infinite;
-            box-shadow: 0 0 18px rgba(0, 255, 65, 0.06);
-        }
-
-        /* 骨架屏期间保持布局高度稳定 */
-        #totalUsers.skeleton,
-        #totalAnalysis.skeleton,
-        #totalChars.skeleton {
-            min-height: 2.5rem;
-        }
-        #avgPerUser.skeleton,
-        #avgPerScan.skeleton,
-        #systemDays.skeleton,
-        #cityCount.skeleton {
-            min-height: 1.6rem;
-        }
-
-        @keyframes scan-sweep {
-            0% { transform: translateY(-120%); opacity: 0; }
-            10% { opacity: 0.9; }
-            90% { opacity: 0.9; }
-            100% { transform: translateY(120%); opacity: 0; }
-        }
-
-        /* 全屏扫描线：加载期间叠加 */
-        .scan-line {
-            position: fixed;
-            inset: 0;
-            pointer-events: none;
-            z-index: 40;
-            opacity: 0;
-            mix-blend-mode: screen;
-        }
-        .scan-line::before {
-            content: '';
-            position: absolute;
-            left: 0;
-            right: 0;
-            height: 18vh;
-            top: -20vh;
-            background: linear-gradient(
-                180deg,
-                transparent 0%,
-                rgba(0, 255, 65, 0.14) 45%,
-                rgba(59, 130, 246, 0.10) 60%,
-                transparent 100%
-            );
-            filter: blur(1px);
-            box-shadow: 0 0 30px rgba(0, 255, 65, 0.12);
-            animation: scan-sweep 1.6s linear infinite;
-        }
-        .scan-line.active {
-            opacity: 1;
-        }
-        
-        /* 确保内容在背景动画之上 */
-        body > div {
-            position: relative;
-            z-index: 10;
-        }
-        
-        /* 状态按钮激活样式 */
-        .status-btn.active {
-            border-width: 2px;
-            box-shadow: 0 0 10px currentColor;
-        }
-        
-        /* 用户列表项样式 */
-        .user-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px;
-            border: 1px solid transparent;
-            border-radius: 4px;
-            transition: all 0.2s ease;
-            cursor: pointer;
-        }
-        
-        .user-item:hover {
-            background: rgba(39, 39, 42, 0.5);
-            border-color: var(--card-border);
-        }
-        
-        /* 头像呼吸灯边框 */
-        .avatar-pulse {
-            position: relative;
-            border-radius: 50%;
-            padding: 2px;
-        }
-        
-        .avatar-pulse::before {
-            content: '';
-            position: absolute;
-            inset: -2px;
-            border-radius: 50%;
-            border: 2px solid currentColor;
-            opacity: 0.6;
-            animation: pulse-border 2s ease-in-out infinite;
-        }
-        
-        @keyframes pulse-border {
-            0%, 100% { opacity: 0.6; transform: scale(1); }
-            50% { opacity: 1; transform: scale(1.05); }
-        }
-        
-        /* 私信浮窗样式 */
-        .message-popup {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: var(--card-bg);
-            border: 2px solid var(--accent-terminal);
-            border-radius: 8px;
-            padding: 20px;
-            min-width: 300px;
-            max-width: 500px;
-            z-index: 1000;
-            box-shadow: 0 0 30px rgba(0, 255, 65, 0.3);
-            animation: popup-appear 0.3s ease-out;
-        }
-        
-        @keyframes popup-appear {
-            from {
-                opacity: 0;
-                transform: translate(-50%, -50%) scale(0.9);
-            }
-            to {
-                opacity: 1;
-                transform: translate(-50%, -50%) scale(1);
-            }
-        }
-        
-        .message-popup.destroying {
-            animation: popup-destroy 0.5s ease-out forwards;
-        }
-        
-        @keyframes popup-destroy {
-            to {
-                opacity: 0;
-                transform: translate(-50%, -50%) scale(0.8);
-            }
-        }
-        
-        /* 私信输入框样式 */
-        .message-input-overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.7);
-            z-index: 999;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        /* UserText Debug Modal（用于检查 userText/提词/上报列表） */
-        .usertext-debug-overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.75);
-            z-index: 1200;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 16px;
-        }
-        
-        .message-input-box {
-            background: var(--card-bg);
-            border: 2px solid var(--accent-terminal);
-            border-radius: 8px;
-            padding: 20px;
-            min-width: 400px;
-            z-index: 1000;
-        }
-        
-        /* 悬浮抽屉式列表样式 */
-        .live-nodes-drawer {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            z-index: 100;
-            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        
-        .live-nodes-drawer.collapsed {
-            transform: translateY(calc(100% - 48px));
-        }
-        
-        .live-nodes-drawer.expanded {
-            transform: translateY(0);
-        }
-        
-        .live-nodes-header {
-            background: rgba(24, 24, 27, 0.9);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border-top: 2px solid var(--accent-terminal);
-            box-shadow: 0 -4px 20px rgba(0, 255, 65, 0.2);
-            padding: 12px 16px;
-            cursor: pointer;
-            user-select: none;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            transition: all 0.3s ease;
-        }
-        
-        .live-nodes-header:hover {
-            background: rgba(24, 24, 27, 0.95);
-            box-shadow: 0 -4px 30px rgba(0, 255, 65, 0.3);
-        }
-        
-        .live-nodes-content {
-            background: rgba(24, 24, 27, 0.85);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border-top: 1px solid rgba(0, 255, 65, 0.2);
-            max-height: 400px;
-            overflow-y: auto;
-            transition: all 0.3s ease;
-        }
-        
-        #online-users-list {
-            max-height: 400px;
-            overflow-y: auto;
-        }
-        
-        .live-nodes-content::-webkit-scrollbar {
-            width: 6px;
-        }
-        
-        .live-nodes-content::-webkit-scrollbar-track {
-            background: rgba(39, 39, 42, 0.5);
-        }
-        
-        .live-nodes-content::-webkit-scrollbar-thumb {
-            background: rgba(0, 255, 65, 0.3);
-            border-radius: 3px;
-        }
-        
-        .live-nodes-content::-webkit-scrollbar-thumb:hover {
-            background: rgba(0, 255, 65, 0.5);
-        }
-        
-        .chevron-icon {
-            transition: transform 0.3s ease;
-        }
-        
-        .live-nodes-drawer.expanded .chevron-icon {
-            transform: rotate(180deg);
-        }
-        
-        .user-item-verified {
-            border-left: 2px solid var(--accent-terminal);
-        }
-        
-        .user-item-anonymous {
-            opacity: 0.7;
-        }
-        
-        .github-link-icon {
-            width: 14px;
-            height: 14px;
-            opacity: 0.6;
-            transition: opacity 0.2s ease;
-        }
-        
-        .user-item:hover .github-link-icon {
-            opacity: 1;
-        }
-
-        /* =========================
-           右侧抽屉：高分图谱排行榜（旧：横向滑动 + 指示器；新：6 张纵向卡片）
-           ========================= */
-        .lpdef-carousel {
-            display: flex;
-            overflow-x: auto;
-            scroll-snap-type: x mandatory;
-            -webkit-overflow-scrolling: touch;
-            gap: 12px;
-            padding: 6px 0 2px 0;
-        }
-        .lpdef-carousel::-webkit-scrollbar { height: 6px; }
-        .lpdef-carousel::-webkit-scrollbar-thumb { background: rgba(0,255,65,0.25); border-radius: 999px; }
-        .lpdef-page {
-            flex: 0 0 100%;
-            scroll-snap-align: start;
-            border: 1px solid rgba(255,255,255,0.10);
-            background: rgba(9, 9, 9, 0.45);
-            padding: 10px;
-            text-align: center; /* 整体文本居中 */
-        }
-        .lpdef-page-title {
-            font-size: 12px;
-            color: #e5e7eb;
-            font-weight: 800;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            margin-bottom: 10px;
-        }
-        .lpdef-rank-list {
-            display: flex;
-            flex-direction: column;
-            gap: 8px; /* 间距调整 */
-        }
-        .lpdef-rank-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 8px;
-            padding: 7px 9px;
-            border: 1px solid rgba(255,255,255,0.08);
-            background: rgba(0,0,0,0.25);
-        }
-        .lpdef-rank-left {
-            display: flex;
-            align-items: center;
-            gap: 8px; /* 更紧凑，避免挤压分值 */
-            min-width: 0;
-            flex: 1 1 auto; /* 左侧可压缩，避免挤掉分值 */
-            text-align: left; /* 行内依然左对齐更易读 */
-        }
-        .lpdef-rank-badge {
-            width: 22px;
-            height: 22px;
-            border-radius: 999px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 11px;
-            font-weight: 800;
-            border: 1px solid rgba(0,255,65,0.35);
-            color: #00ff41;
-            flex: 0 0 auto;
-        }
-        .lpdef-rank-rn {
-            width: 38px;
-            flex: 0 0 auto;
-            text-align: left;
-            font-size: 11px;
-            color: rgba(255, 255, 255, 0.40);
-            font-variant-numeric: tabular-nums;
-        }
-        .lpdef-rank-avatar {
-            width: 20px;
-            height: 20px;
-            border-radius: 999px;
-            object-fit: cover;
-            border: 1px solid rgba(0,255,65,0.25);
-            flex: 0 0 auto;
-        }
-        .lpdef-name-wrap {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            min-width: 0;
-            flex: 1 1 auto;
-        }
-        .lpdef-rank-name {
-            font-size: 11px;
-            color: #e5e7eb;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            /* 关键：让名字在 flex 中可缩，不挤占分值空间 */
-            min-width: 0;
-            flex: 1 1 auto;
-        }
-        .lpdef-persona-tag {
-            font-size: 10px;
-            color: rgba(255, 255, 255, 0.40);
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-            flex: 0 0 auto;
-            white-space: nowrap;
-        }
-        .lpdef-rank-score {
-            font-size: 12px;
-            font-weight: 800;
-            color: #22d3ee; /* text-cyan-400 */
-            font-variant-numeric: tabular-nums;
-            text-align: right;
-            flex: 0 0 auto; /* 不缩，防止 275.3k 被截断 */
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-            min-width: 72px; /* 右侧定宽：一行清晰显示“名次/用户/分数” */
-        }
-
-        /* 新布局：6 张纵向卡片 */
-        .lpdef-metric-cards {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            padding: 6px 0 2px 0;
-        }
-        .lpdef-metric-card {
-            border: 1px solid rgba(255,255,255,0.10);
-            background: rgba(9, 9, 9, 0.45);
-            padding: 10px;
-        }
-        .lpdef-metric-title {
-            font-size: 12px;
-            color: #e5e7eb;
-            font-weight: 800;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            margin-bottom: 8px;
-            text-align: left;
-        }
-        .lpdef-rank-right {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            flex: 0 0 auto;
-        }
-        .lpdef-rank-delta {
-            min-width: 54px;
-            text-align: right;
-            font-size: 11px;
-            font-weight: 800;
-            color: rgba(255,255,255,0.35);
-            font-variant-numeric: tabular-nums;
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-            flex: 0 0 auto;
-        }
-        .lpdef-rank-delta.up { color: #00ff41; }
-        .lpdef-rank-delta.down { color: #f87171; }
-        .lpdef-rank-delta.flat { color: rgba(255,255,255,0.45); }
-        .lpdef-rank-delta.na { color: rgba(255,255,255,0.28); }
-        .lpdef-rank-header-row {
-            background: rgba(255,255,255,0.03);
-            border-color: rgba(255,255,255,0.10);
-            padding-top: 6px;
-            padding-bottom: 6px;
-        }
-        .lpdef-rank-header-row .lpdef-rank-rn,
-        .lpdef-rank-header-row .lpdef-rank-name,
-        .lpdef-rank-header-row .lpdef-rank-score,
-        .lpdef-rank-header-row .lpdef-rank-delta {
-            font-size: 10px;
-            font-weight: 700;
-            color: rgba(255,255,255,0.35);
-        }
-        .lpdef-rank-header-row .lpdef-rank-score { min-width: 72px; }
-        .lpdef-rank-header-row .lpdef-rank-delta { min-width: 54px; }
-
-        /* 窄屏进一步收紧：隐藏可选标签，确保三段信息一行显示 */
-        @media (max-width: 420px) {
-            .lpdef-rank-left { gap: 8px; }
-            .lpdef-rank-rn { width: 34px; }
-            .lpdef-rank-avatar { width: 18px; height: 18px; }
-            .lpdef-persona-tag { display: none; }
-            .lpdef-rank-score { min-width: 64px; font-size: 11px; }
-            .lpdef-rank-name { min-width: 0; }
-            .lpdef-rank-delta { min-width: 46px; font-size: 10px; }
-            .lpdef-rank-header-row .lpdef-rank-delta { min-width: 46px; }
-        }
-        .lpdef-indicators {
-            display: flex;
-            gap: 6px;
-            justify-content: center;
-            margin: 4px 0 10px 0;
-            flex-wrap: wrap;
-        }
-        .lpdef-indicator-btn {
-            border: 1px solid rgba(0,255,65,0.28);
-            background: rgba(0,255,65,0.06);
-            color: rgba(0,255,65,0.85);
-            font-size: 10px;
-            padding: 4px 8px;
-            letter-spacing: 0.06em;
-            text-transform: uppercase;
-            cursor: pointer;
-        }
-        .lpdef-indicator-btn.active {
-            border-color: rgba(0,255,65,0.75);
-            background: rgba(0,255,65,0.12);
-            color: #00ff41;
-            box-shadow: 0 0 0 1px rgba(0,255,65,0.18) inset;
-        }
-
-        /* LPDEF 卡片动画 */
-        @keyframes lpdef-scan {
-            0% {
-                box-shadow: 0 0 0 0 rgba(0, 255, 65, 0);
-            }
-            50% {
-                box-shadow: 0 0 20px 5px rgba(0, 255, 65, 0.5);
-            }
-            100% {
-                box-shadow: 0 0 0 0 rgba(0, 255, 65, 0);
-            }
-        }
-
-        @keyframes lpdef-flash {
-            0%, 100% { opacity: 1; }
-            25% { opacity: 0.3; }
-            50% { opacity: 0.6; }
-            75% { opacity: 0.3; }
-        }
-
-        .lpdef-card.scanning {
-            animation: lpdef-scan 1.5s ease-in-out;
-        }
-
-        .lpdef-card.recalculating {
-            animation: lpdef-flash 0.8s ease-in-out;
-        }
-
-        .lpdef-card.recalculating::after {
-            content: '数据重算...';
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.9);
-            color: var(--accent-terminal);
-            padding: 8px 16px;
-            border: 1px solid var(--accent-terminal);
-            font-size: 10px;
-            font-weight: bold;
-            z-index: 10;
-            pointer-events: none;
-        }
-
-        /* LPDEF 容器扫描动画 */
-        @keyframes lpdef-container-scan {
-            0% {
-                box-shadow: 0 0 0 0 rgba(0, 255, 65, 0);
-            }
-            50% {
-                box-shadow: 0 0 30px 10px rgba(0, 255, 65, 0.6);
-            }
-            100% {
-                box-shadow: 0 0 0 0 rgba(0, 255, 65, 0);
-            }
-        }
-
-        #lpdef-container.lpdef-scan {
-            animation: lpdef-container-scan 1.5s ease-in-out;
-        }
-
-        /* 光条扫描效果 */
-        @keyframes lpdef-light-sweep {
-            0% {
-                background-position: -100% 0;
-            }
-            100% {
-                background-position: 200% 0;
-            }
-        }
-
-        #lpdef-container.lpdef-scan::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: linear-gradient(
-                90deg,
-                transparent 0%,
-                rgba(0, 255, 65, 0.3) 50%,
-                transparent 100%
-            );
-            background-size: 200% 100%;
-            animation: lpdef-light-sweep 1.5s ease-in-out;
-            pointer-events: none;
-            z-index: 1;
-        }
-        /* =========================
-           Right Drawer Template (right.html) - namespaced
-           ========================= */
-        .country-panel-template {
-            color: #ffffff;
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        .country-panel-template .report-container {
-            width: 100%;
-            max-width: 100%;
-            padding: 0 2px;
-            position: relative;
-        }
-
-        .country-panel-template .clinic-card {
-            border: 1px solid rgba(0, 255, 65, 0.22);
-            background: rgba(5, 5, 5, 0.92);
-            padding: 16px;
-            margin-bottom: 16px;
-            position: relative;
-            box-shadow: 0 0 20px rgba(0, 255, 65, 0.03);
-        }
-
-        .country-panel-template .clinic-card::before {
-            content: ">>";
-            position: absolute;
-            top: -2px;
-            left: 12px;
-            background: var(--bg-color);
-            padding: 0 6px;
-            color: #00ff41;
-            font-size: 12px;
-            font-weight: 700;
-        }
-
-        .country-panel-template .card-header {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            border-bottom: 1px solid rgba(0, 255, 65, 0.22);
-            padding-bottom: 10px;
-            margin-bottom: 14px;
-        }
-
-        .country-panel-template .card-header i {
-            width: 18px;
-            height: 18px;
-            color: #00ff41;
-        }
-
-        .country-panel-template .card-title {
-            font-size: 13px;
-            color: #00ff41;
-            text-transform: uppercase;
-            letter-spacing: 1.2px;
-            font-weight: 700;
-        }
-
-        .country-panel-template .metric-label {
-            font-size: 11px;
-            color: rgba(0, 255, 65, 0.8);
-            text-transform: uppercase;
-            opacity: 0.9;
-        }
-
-        .country-panel-template .metric-value {
-            font-size: 18px;
-            font-weight: 800;
-            color: #ffffff;
-            letter-spacing: -0.5px;
-        }
-
-        .country-panel-template .stat-bar-container {
-            height: 6px;
-            background: #111;
-            margin-top: 6px;
-            position: relative;
-            border: 1px solid rgba(0, 255, 65, 0.18);
-        }
-
-        .country-panel-template .stat-bar-fill {
-            height: 100%;
-            background: #00ff41;
-            box-shadow: 0 0 10px rgba(0, 255, 65, 0.55);
-        }
-
-        .country-panel-template .pk-track {
-            height: 14px;
-            background: #111;
-            display: flex;
-            position: relative;
-            border: 1px solid rgba(0, 255, 65, 0.22);
-        }
-
-        .country-panel-template .pk-left {
-            background: #ffffff;
-            height: 100%;
-        }
-
-        .country-panel-template .pk-right {
-            background: #00ff41;
-            height: 100%;
-        }
-
-        .country-panel-template .pk-divider {
-            position: absolute;
-            left: 50%;
-            top: -4px;
-            bottom: -4px;
-            width: 2px;
-            background: #ffffff;
-            z-index: 10;
-        }
-
-        .country-panel-template .scrolling-wrapper {
-            display: flex;
-            flex-wrap: nowrap;
-            overflow-x: auto;
-            gap: 12px;
-            padding-bottom: 10px;
-            scrollbar-width: none;
-        }
-
-        .country-panel-template .scrolling-wrapper::-webkit-scrollbar {
-            display: none;
-        }
-
-        .country-panel-template .user-avatar-card {
-            flex: 0 0 108px;
-            text-align: center;
-            background: rgba(13, 13, 13, 0.95);
-            border: 1px solid rgba(0, 255, 65, 0.18);
-            padding: 10px;
-        }
-
-        .country-panel-template .avatar-circle {
-            width: 48px;
-            height: 48px;
-            border-radius: 50%;
-            margin: 0 auto 8px;
-            border: 2px solid #00ff41;
-            background: #111;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 800;
-            color: #00ff41;
-            font-size: 12px;
-        }
-
-        .country-panel-template .cloud-tag {
-            display: inline-block;
-            margin: 4px;
-            padding: 2px 8px;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            transition: all 0.2s;
-        }
-
-        .country-panel-template .cloud-tag:hover {
-            border-color: #00ff41;
-            color: #00ff41;
-        }
-
-        /* 语义爆发词云：按类别上色（slang/merit/sv_slang） */
-        .country-panel-template .cloud-tag.slang {
-            border-color: rgba(168, 85, 247, 0.65); /* #A855F7 */
-            background: rgba(168, 85, 247, 0.12);
-            color: #d8b4fe;
-            box-shadow: 0 0 10px rgba(168, 85, 247, 0.16);
-        }
-        .country-panel-template .cloud-tag.merit {
-            border-color: rgba(16, 185, 129, 0.65); /* #10B981 */
-            background: rgba(16, 185, 129, 0.12);
-            color: #6ee7b7;
-            box-shadow: 0 0 10px rgba(16, 185, 129, 0.14);
-        }
-        .country-panel-template .cloud-tag.sv_slang {
-            border-color: rgba(249, 115, 22, 0.65); /* #F97316 */
-            background: rgba(249, 115, 22, 0.12);
-            color: #fdba74;
-            box-shadow: 0 0 10px rgba(249, 115, 22, 0.14);
-        }
-        .country-panel-template .cloud-tag.slang:hover,
-        .country-panel-template .cloud-tag.merit:hover,
-        .country-panel-template .cloud-tag.sv_slang:hover {
-            filter: brightness(1.08);
-        }
-
-        /* 语义爆发词云：无额外切换控件 */
-
-        .country-panel-template .chart-container {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 16px 0;
-        }
-
-        .country-panel-template .status-tag {
-            font-size: 10px;
-            padding: 3px 8px;
-            border: 1px solid #00ff41;
-            color: #00ff41;
-            font-weight: 800;
-        }
-
-        .country-panel-template .status-tag.invert {
-            background: #00ff41;
-            color: #050505;
-        }
-
-        /* LIVE_FEED：墨绿色底（按需覆盖 invert） */
-        .country-panel-template #rtStatusTag {
-            background: #052e16; /* 墨绿色 */
-            color: #d1fae5;
-            border-color: rgba(16, 185, 129, 0.8);
-        }
-    </style>
-</head>
-<body class="p-4 md:p-8">
-    <!-- 顶部固定 Header -->
-    <div class="top-header">
-        <div class="top-header-left">
-            <div class="top-header-title">
-                <h1>
-                    <span class="lang-key text-white" data-key="top-title" data-t="top-title">Cursor行为报告全球分布图</span>
-                </h1>
-                <p id="sub-title">Telemetry Uplink: Active // Source: Central_Pacific</p>
-            </div>
-        </div>
-        
-        <div class="top-header-right">
-            <!-- 活跃节点卡片 -->
-            <div class="top-header-card">
-                <div class="top-header-card-label lang-key" data-key="active-nodes" data-t="active-nodes">活跃节点</div>
-                <div class="top-header-card-value text-emerald-400">
-                    <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full pulse"></span>
-                    <span id="online-count-value">0</span> CONNECTED
-                </div>
-            </div>
-            
-            <!-- 风险评级卡片 -->
-            <div class="top-header-card">
-                <div class="top-header-card-label lang-key" data-key="threat-level" data-t="threat-level">风险评级</div>
-                <div class="top-header-card-value text-red-500">LEVEL_CRITICAL</div>
-            </div>
-            
-            <!-- 语言切换按钮 -->
-            <div class="flex gap-2 items-center">
-                <button type="button" id="btn-zh" class="lang-flag-btn active" title="中文" aria-label="中文" data-lang="zh">
-                    <img src="images/zh.png" alt="中文" />
-                </button>
-                <button type="button" id="btn-en" class="lang-flag-btn" title="English" aria-label="English" data-lang="en">
-                    <img src="images/us.png" alt="English" />
-                </button>
-            </div>
-        </div>
-    </div>
-    
-    <!-- 全屏地图背景 -->
-    <div id="map-container"></div>
-    <!-- 地图光标工具：用于手动校准（避免光标消失时无法进入校准） -->
-    <div id="map-cursor-tools" aria-live="polite">
-        <button type="button" id="btn-calibrate-location" class="tool-btn">
-            <span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:#00ff41;"></span>
-            <span id="btn-calibrate-location-text">校准位置</span>
-        </button>
-        <div id="map-cursor-hint" class="hint">
-            <div><b>校准模式</b>：拖动地图上的 <b>YOU</b> 光标，或点击地图任意位置设置坐标。</div>
-            <div style="margin-top:6px;">完成后会自动保存到本机与后端（`manual_lat/manual_lng/manual_location`）。</div>
-            <div style="margin-top:6px; opacity:0.9;">提示：你也可以先点击国家来设置“锚定国家”，再校准坐标。</div>
-        </div>
-    </div>
-    
-    <!-- 左右赛博朋克抽屉 -->
-    <div id="left-drawer" class="cyber-drawer left-drawer">
-        <div class="drawer-content">
-            <div class="drawer-header">
-                <div class="drawer-title">
-                    <span class="drawer-icon">⚡</span>
-                    <span class="drawer-title-text" id="left-drawer-title">国家数据</span>
-                </div>
-                <div class="drawer-close-btn" onclick="closeDrawers()">✕</div>
-            </div>
-            <div class="drawer-body" id="left-drawer-body">
-                <!-- 内容将通过 JavaScript 动态填充 -->
-            </div>
-        </div>
-    </div>
-    
-    <div id="right-drawer" class="cyber-drawer right-drawer">
-        <div class="drawer-content">
-            <div class="drawer-header">
-                <div class="drawer-title">
-                    <span class="drawer-icon">🔍</span>
-                    <span class="drawer-title-text" id="right-drawer-title">详细信息</span>
-                </div>
-                <div class="drawer-close-btn" onclick="closeDrawers()">✕</div>
-            </div>
-            <div class="drawer-body" id="right-drawer-body">
-                <div id="globalFlowPanel">
-                    <!-- 实时动态流：内容将通过 JavaScript 动态填充 -->
-                </div>
-                <div id="countryPanel" style="display: none;">
-                    <div class="flex items-center gap-2 mb-3">
-                        <button type="button" id="backToGlobalBtn" data-t="btn.back_global" onclick="switchBackToGlobalView()" class="px-3 py-1.5 text-xs border border-[#00ff41]/50 text-[#00ff41] hover:bg-[#00ff41]/10 transition-colors">[返回全网]</button>
-                        <button type="button" id="refreshDiagnosticsBtn" data-t="btn.refresh" onclick="refreshCountryRightPanel()" class="px-3 py-1.5 text-xs border border-sky-300/50 text-sky-300 hover:bg-sky-300/10 transition-colors">[REFRESH]</button>
-                    </div>
-                    <div id="countryTemplateMount" style="font-family: 'JetBrains Mono', monospace;"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div id="scanLine" class="scan-line" aria-hidden="true"></div>
-    <!-- right.html 模板：用于国家透视右侧抽屉（美国） -->
-    <template id="rightDrawerTemplate">
-        <div class="country-panel-template">
-            <div class="report-container">
-                <!-- HEADER -->
-                <div class="mb-8 border-b-2 border-white pb-4">
-                    <div class="flex justify-between items-start">
-                        <h1 class="text-2xl font-black italic tracking-tighter" id="rtPanelTitle" data-t="panel.country_panel">国家透视</h1>
-                        <div class="status-tag invert" id="rtStatusTag">LIVE_FEED</div>
-                    </div>
-                    <div class="mt-3">
-                        <span id="rtMeritBoard" class="inline-block text-[11px] text-indigo-200 border border-indigo-400/40 bg-indigo-500/5 px-2 py-1">
-                            已累计分析 -- 万字
-                        </span>
-                    </div>
-                    <div class="text-[11px] mt-3 text-zinc-500 flex justify-between uppercase">
-                        <span id="rtCoord">COORD: --</span>
-                        <span id="rtDataStatus">DATA: STABLE</span>
-                    </div>
-                </div>
-
-                <!-- [01] MACRO SCALE -->
-                <div class="clinic-card">
-                    <div class="card-header">
-                        <i data-lucide="globe"></i>
-                        <span class="card-title" data-t="panel.stats">统计</span>
-                    </div>
-                    <div class="flex justify-between items-center mb-8">
-                        <div class="text-5xl" id="rtFlag">🏳️</div>
-                        <div class="text-right">
-                            <div class="metric-value" id="rtNodeName">REGION_NODE</div>
-                            <div class="metric-label" data-t="panel.country_code">国家识别码</div>
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-6">
-                        <div id="rtUsersCard">
-                            <div class="metric-label" data-t="panel.dev_scale">开发者规模</div>
-                            <div class="metric-value" id="rtDiagnosedTotal">--</div>
-                        </div>
-                        <div id="rtAnalysisCard">
-                            <div class="metric-label" data-t="panel.scan_count">诊断次数</div>
-                            <div class="metric-value" id="rtScanTotal">--</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- [01.5] RADAR -->
-                <div class="clinic-card">
-                    <div class="card-header">
-                        <i data-lucide="target"></i>
-                        <span class="card-title" data-t="panel.radar">开发者画像</span>
-                    </div>
-                    <div id="rtRadar" style="height: 260px; width: 100%;"></div>
-                </div>
-
-                <!-- [01.6] LIVE FEED -->
-                <div class="clinic-card">
-                    <div class="card-header">
-                        <i data-lucide="radio"></i>
-                        <span class="card-title" data-t="panel.personality_distribution">人格分布</span>
-                    </div>
-                    <div id="rtRealtimeList" class="space-y-3 text-[11px] leading-snug"></div>
-                </div>
-
-                <!-- [01.7] COUNTRY TOTALS -->
-                <div class="clinic-card">
-                    <div class="card-header">
-                        <i data-lucide="bar-chart-3"></i>
-                        <span class="card-title" data-t="panel.country_totals">国家累计</span>
-                    </div>
-                    <div id="rtCountryTotals" class="space-y-2 text-[11px] leading-snug"></div>
-                </div>
-
-                <!-- [01.8] MY COUNTRY RANK -->
-                <div class="clinic-card">
-                    <div class="card-header">
-                        <i data-lucide="trophy"></i>
-                        <span class="card-title" data-t="panel.my_country_rank">我的排名</span>
-                    </div>
-                    <div id="rtMyCountryRanks" class="space-y-2 text-[11px] leading-snug"></div>
-                </div>
-
-                <!-- [02] POWER STRUGGLE (PK) -->
-                <div class="clinic-card">
-                    <div class="card-header">
-                        <i data-lucide="swords"></i>
-                        <span class="card-title" data-t="panel.qa_attitude">问答态度</span>
-                    </div>
-                    <div class="space-y-5">
-                        <div class="flex justify-between text-[11px] font-bold uppercase">
-                            <span class="text-white" id="rtPkLeftLabel">傲娇 / Tsundere</span>
-                            <span class="text-green-500" id="rtPkRightLabel">跪舔 / Bootlick</span>
-                        </div>
-                        <div class="pk-track">
-                            <div class="pk-divider"></div>
-                            <div class="pk-left" id="rtPkLeftFill" style="width: 50%;"></div>
-                            <div class="pk-right" id="rtPkRightFill" style="width: 50%;"></div>
-                        </div>
-                        <div class="flex justify-between text-[16px] font-bold">
-                            <span>
-                                <span class="text-[10px] text-zinc-500 mr-2" data-t="pk.domineering">霸道值</span>
-                                <span id="rtPkLeftPct">50.0%</span>
-                            </span>
-                            <span class="text-green-500">
-                                <span class="text-[10px] text-zinc-500 mr-2" data-t="pk.bootlick">跪舔值</span>
-                                <span id="rtPkRightPct">50.0%</span>
-                            </span>
-                        </div>
-                        <div>
-                            <div class="flex justify-between items-center text-[11px]">
-                                <span class="text-zinc-500 uppercase tracking-widest">POWER</span>
-                                <span class="text-white font-bold" id="rtPowerScore">--</span>
-                            </div>
-                            <div class="mt-2 h-1 bg-zinc-800 w-full overflow-hidden">
-                                <div id="power-bar" class="h-full bg-white" style="width: 0%;"></div>
-                            </div>
-                        </div>
-                        <div class="p-3 bg-zinc-900 border-l-2 border-white text-xs leading-relaxed italic text-zinc-300" id="rtPkQuote" style="display:none"></div>
-                    </div>
-                </div>
-
-                <!-- [03] EMOTIONAL AUDIT -->
-                <div class="clinic-card">
-                    <div class="card-header">
-                        <i data-lucide="activity"></i>
-                        <span class="card-title" data-t="panel.meltdown_audit">破防监测</span>
-                    </div>
-                    <div class="space-y-5">
-                        <div>
-                            <div class="flex justify-between items-end">
-                                <div class="metric-label" data-t="panel.meltdown_index">破防指数</div>
-                                <div class="text-sm font-bold" id="rtBreakdownRate">--</div>
-                            </div>
-                            <div class="stat-bar-container">
-                                <div class="stat-bar-fill" id="breakdown-bar" style="width: 0%;"></div>
-                            </div>
-                        </div>
-                        <div class="grid grid-cols-2 gap-4 mt-6">
-                            <div class="bg-zinc-900 p-3 border border-zinc-800">
-                                <div class="metric-label" data-t="panel.meltdown_level">破防等级</div>
-                                <div class="text-white font-bold text-lg" id="rtMeltdownLevel">--</div>
-                            </div>
-                            <div class="bg-zinc-900 p-3 border border-zinc-800">
-                                <div class="metric-label" data-t="panel.meltdown_victims">受虐人数</div>
-                                <div class="text-green-500 font-bold text-lg" id="rtMeltdownVictims">--</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- [04] SEMANTIC BURST -->
-                <div class="clinic-card" id="vibe-explosion-card">
-                    <div class="card-header">
-                        <i data-lucide="cloud"></i>
-                        <span class="card-title" data-t="panel.wordcloud">本国词云</span>
-                        <div class="ml-auto flex items-center gap-3"></div>
-                    </div>
-                    <div class="p-2" id="rtSemanticTags">
-                        <!-- 黑话榜：按国家聚合（Top10 + Cloud50） -->
-                        <div class="bg-zinc-950/60 border border-zinc-800 p-2 mb-4" id="vibe-burst-root">
-                            <div class="flex items-center justify-between mb-2">
-                                <div class="text-[11px] text-zinc-400 uppercase tracking-widest" data-t="hotlist.title">黑话榜</div>
-                                <div class="text-[10px] text-zinc-500" id="vibe-country-hint">NATION: --</div>
-                            </div>
-
-                            <!-- 上方：该国 Top50 词云形态（综合） -->
-                            <div class="border border-white/10 bg-zinc-950/30 p-2 mb-3">
-                                <div class="flex items-center justify-between mb-2">
-                                    <div class="text-[10px] text-zinc-500 uppercase tracking-widest">NATIONAL CLOUD 50</div>
-                                    <div class="text-[10px] text-zinc-600 font-mono" id="vibe-cloud50-meta">--</div>
-                                </div>
-                                <div id="vibe-cloud50-container" style="height: 260px; width: 100%;"></div>
-                                <div id="vibe-cloud50-empty" class="hidden text-zinc-500 text-sm p-3 italic" data-t="hotlist.building">
-                                    正在建立该地区黑话榜...
-                                </div>
-                            </div>
-
-                            <!-- 下方：文字榜单（国家Top10） -->
-                            <div class="border border-white/10 bg-zinc-950/30 p-2">
-                                <div class="flex items-center justify-between mb-2">
-                                    <div class="text-[10px] text-zinc-500 uppercase tracking-widest">COUNTRY TOP 10</div>
-                                    <div class="text-[10px] text-zinc-600 font-mono" id="vibe-country-top10-meta">--</div>
-                                </div>
-                                <ol id="vibe-top10-list" class="space-y-1"></ol>
-                                <div id="vibe-top10-empty" class="hidden text-zinc-500 text-sm p-3 italic" data-t="hotlist.collecting">
-                                    暂无数据（正在收录中...）
-                                </div>
-                            </div>
-
-                        </div>
-                        <div class="text-xs text-zinc-300 mb-3" id="rtCoreTrait" data-t="semantic.core_trait_empty">该地区核心特质：--</div>
-                        <div class="flex justify-between items-center text-[11px]">
-                            <span class="text-zinc-500 uppercase tracking-widest">SEMANTIC</span>
-                            <span class="text-green-500 font-bold" id="rtSemanticScore">--</span>
-                        </div>
-                        <div class="mt-2 h-1 bg-zinc-800 w-full overflow-hidden">
-                            <div id="semantic-bar" class="h-full bg-[#00ff41]" style="width: 0%;"></div>
-                        </div>
-                    </div>
-                    <div class="mt-4 pt-3 border-t border-zinc-800 flex justify-between text-[11px]">
-                        <span class="text-zinc-500" id="rtSemanticMostUsed">MOST_USED: --</span>
-                        <span class="text-green-500" id="rtSemanticFreq">FREQ: --</span>
-                    </div>
-                </div>
-
-                <!-- [05] ELITE RANKING -->
-                <div class="clinic-card">
-                    <div class="card-header">
-                        <i data-lucide="users"></i>
-                        <span class="card-title" data-t="panel.lpdef_ranking">高分图谱</span>
-                    </div>
-                    <div id="rtTopTalentsHeroes" class="flex flex-wrap gap-2 mb-3"></div>
-                    <div class="scrolling-wrapper" id="rtEliteList">
-                        <div id="rtTopTalentsList" class="space-y-2"></div>
-                    </div>
-                    <div class="text-[10px] text-zinc-500 mt-2 text-center uppercase tracking-tighter" id="rtEliteHint">
-                        &lt;--- Swipe to view Top Agents ---&gt;
-                    </div>
-                </div>
-
-                <!-- [06] GLOBAL SHARE -->
-                <div class="clinic-card">
-                    <div class="card-header">
-                        <i data-lucide="pie-chart"></i>
-                        <span class="card-title" data-t="panel.global_ratio">全球占比</span>
-                    </div>
-                    <div class="chart-container">
-                        <div id="rtGlobalRatioPie" style="width: 200px; height: 200px;"></div>
-                    </div>
-                    <div class="mt-3">
-                        <div class="flex justify-between items-center text-[11px]">
-                            <span class="text-zinc-500 uppercase tracking-widest">RATIO</span>
-                            <span class="text-green-500 font-bold" id="rtRatioPct">--</span>
-                        </div>
-                        <div class="mt-2 h-1 bg-zinc-800 w-full overflow-hidden">
-                            <div id="ratio-bar" class="h-full bg-white" style="width: 0%;"></div>
-                        </div>
-                    </div>
-                    <div class="mt-2 text-[11px] text-zinc-400">
-                        <span class="text-zinc-500">GLOBAL_RATIO:</span>
-                        <span id="rtGlobalRatio" class="text-green-500 font-bold">--</span>
-                    </div>
-                    <div class="space-y-2 mt-2" id="rtRatioList"></div>
-                </div>
-            </div>
-        </div>
-    </template>
-    <div class="max-w-[1600px] mx-auto relative z-10">
-        <!-- Main Dashboard Layout -->
-        <div class="grid grid-cols-1 xl:grid-cols-12 gap-6">
-            
-            <!-- Side Panel: Core Metrics (左侧) - 已移至抽屉，隐藏 -->
-            <div class="xl:col-span-3 flex flex-col gap-4 order-2 xl:order-1 items-start" style="display: none;">
-                <!-- 统计卡片已移至右边抽屉，隐藏原容器 -->
-                <div class="hacker-border p-6 rounded-sm stat-card" style="display: none;">
-                    <div class="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest lang-key" data-key="total-victims">已诊断开发者</div>
-                    <div id="totalUsers" class="text-4xl font-bold text-[var(--accent-terminal)]">0</div>
-                    <div class="mt-4 text-[9px] text-zinc-600 font-mono">USERS_RECOGNIZED_SUCCESSFULLY</div>
-                </div>
-
-                <div class="hacker-border p-6 rounded-sm stat-card" style="display: none;">
-                    <div class="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest lang-key" data-key="total-analysis">全网扫描次数</div>
-                    <div id="totalAnalysis" class="text-4xl font-bold">0</div>
-                    <div class="mt-4 text-[9px] text-zinc-600 font-mono">TOTAL_SCAN_COUNT</div>
-                </div>
-
-                <div class="hacker-border p-6 rounded-sm stat-card" style="display: none;">
-                    <div class="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest lang-key" data-key="total-roast">累计吐槽字数</div>
-                    <div id="totalChars" class="text-4xl font-bold">0</div>
-                    <div class="mt-4 h-1 bg-zinc-800 w-full overflow-hidden">
-                        <div class="bg-[var(--accent-terminal)] h-full w-[65%]"></div>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-2 gap-4 stat-card" style="display: none;">
-                    <div class="hacker-border p-4 rounded-sm bg-zinc-900/50">
-                        <div class="text-zinc-500 text-[10px] uppercase tracking-tighter mb-1">Avg Words / 人均平均篇幅</div>
-                        <div id="avgPerUser" class="text-2xl font-bold font-mono text-[var(--accent-terminal)]">0</div>
-                        <div class="text-[9px] text-zinc-600 mt-1 uppercase">Per Developer Basis</div>
-                    </div>
-                    
-                    <div class="hacker-border p-4 rounded-sm bg-zinc-900/50">
-                        <div class="text-zinc-500 text-[10px] uppercase tracking-tighter mb-1">Scan Words / 单次平均篇幅</div>
-                        <div id="avgPerScan" class="text-2xl font-bold font-mono text-blue-400">0</div>
-                        <div class="text-[9px] text-zinc-600 mt-1 uppercase">Per Analysis Basis</div>
-                    </div>
-                </div>
-
-                <div class="hacker-border p-6 rounded-sm stat-card bg-zinc-900/40" style="display: none;">
-                    <div class="text-[10px] text-zinc-500 mb-4 uppercase tracking-widest lang-key" data-key="radar-title">全网平均开发者画像</div>
-                    <div class="aspect-square">
-                        <canvas id="radarChart"></canvas>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Central Map Area (中间) - 地图已移至全屏背景，此区域已移除 -->
-            <!-- 维度排名卡片容器：已移至抽屉显示 -->
-            <div id="rank-cards-container" style="display: none;">
-                <!-- 卡片已移至抽屉显示 -->
-            </div>
-        </div>
-
-        <!-- Secondary Charts & Logs (右侧) - 已移至抽屉，隐藏原容器 -->
-        <div class="xl:col-span-3 grid grid-cols-1 gap-6 mt-6 items-start" style="display: none;">
-            <div class="hacker-border p-6 rounded-sm">
-                <h3 class="text-xs font-bold text-zinc-400 mb-6 uppercase tracking-widest lang-key" data-key="hot-list">地理位置热力排行</h3>
-                <div id="locationList" class="space-y-3">
-                    <div class="animate-pulse space-y-2">
-                        <div class="h-8 bg-zinc-800 rounded"></div>
-                        <div class="h-8 bg-zinc-800 rounded"></div>
-                        <div class="h-8 bg-zinc-800 rounded"></div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="hacker-border p-6 rounded-sm">
-                <h3 class="text-xs font-bold text-zinc-400 mb-6 uppercase tracking-widest lang-key" data-key="personality-dist">人格分布排行</h3>
-                <div id="personalityDistribution" class="space-y-3">
-                    <div class="animate-pulse space-y-2">
-                        <div class="h-8 bg-zinc-800 rounded"></div>
-                        <div class="h-8 bg-zinc-800 rounded"></div>
-                        <div class="h-8 bg-zinc-800 rounded"></div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="hacker-border p-6 rounded-sm flex flex-col">
-                <h3 class="text-xs font-bold text-zinc-400 mb-6 uppercase tracking-widest lang-key" data-key="recent-activity">实时诊断活动</h3>
-                <div id="recentActivity" class="flex-1 overflow-y-auto max-h-[300px] text-[10px] font-mono space-y-4 pr-2">
-                    <!-- Logs here -->
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- 悬浮抽屉式在线用户列表 -->
-    <div id="live-nodes-drawer" class="live-nodes-drawer expanded">
-        <div class="live-nodes-header" onclick="toggleDrawer()">
-            <div class="flex items-center gap-3">
-                <span class="text-[10px] text-zinc-500 uppercase tracking-widest lang-key" data-key="active-nodes">Live Nodes</span>
-                <span id="online-count-badge" class="w-2 h-2 bg-[var(--accent-terminal)] rounded-full pulse"></span>
-                <span id="online-count-text" class="text-xs font-bold text-[var(--accent-terminal)]">0</span>
-            </div>
-            <svg class="chevron-icon w-4 h-4 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-            </svg>
-        </div>
-        <div class="live-nodes-content">
-            <div id="online-users-list" class="p-4 space-y-2">
-                <div class="text-zinc-500 text-center py-4 text-[10px]">Scanning for nearby nodes...</div>
-            </div>
-        </div>
-    </div>
-
-    <script>
         let calibrationDebounceTimer = null; // 脚本最顶部声明，彻底拦截定位漂移，避免 ReferenceError
 
         // ==========================================
@@ -3530,11 +1468,9 @@
                 'metric.ai_interrogations': '调戏AI次数',
                 'metric.jiafang': '甲方上身次数',
                 'metric.ketao': '赛博磕头次数',
-                'metric.cursor_days': '上岗天数',
                 'metric.banter_total': '废话输出总数',
                 'metric.avg_len': '平均吹水长度',
                 'metric.avg_len_unit': '字/条',
-                'metric.cursor_days_unit': '天',
 
                 // Country totals table labels
                 'countryTotals.messages': '调戏AI次数',
@@ -3622,11 +1558,9 @@
                 'metric.ai_interrogations': 'AI Interactions',
                 'metric.jiafang': 'Client Mode',
                 'metric.ketao': 'Humble Mode',
-                'metric.cursor_days': 'Days On Duty',
                 'metric.banter_total': 'Banter Output',
                 'metric.avg_len': 'Avg Prompt Length',
                 'metric.avg_len_unit': 'chars/msg',
-                'metric.cursor_days_unit': 'days',
 
                 // Country totals table labels
                 'countryTotals.messages': 'AI Interactions',
@@ -5207,12 +3141,48 @@
                         if (!fp) return '';
                         return String(fp).trim().toLowerCase();
                     };
+
+                    // 统一稳定指纹：user_fingerprint（缺失则生成并写入，避免抽屉一直 N/A）
+                    const getOrCreateStableFingerprint = () => {
+                        const KEY = 'user_fingerprint';
+                        try {
+                            const cur = normalizeFingerprint(localStorage.getItem(KEY) || '');
+                            if (cur) return cur;
+                            // 迁移旧 key
+                            const legacy = normalizeFingerprint(
+                                localStorage.getItem('cursor_clinical_fingerprint') ||
+                                localStorage.getItem('vibe_fp') ||
+                                localStorage.getItem('fingerprint') ||
+                                ''
+                            );
+                            if (legacy) {
+                                try { localStorage.setItem(KEY, legacy); } catch { /* ignore */ }
+                                return legacy;
+                            }
+                            // 生成 32 位 hex（持久化）
+                            let hex = '';
+                            try {
+                                const bytes = new Uint8Array(16);
+                                (crypto || window.crypto).getRandomValues(bytes);
+                                hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+                            } catch {
+                                hex = (String(Math.random()) + String(Date.now())).replace(/[^0-9a-f]/gi, '').padEnd(32, '0').slice(0, 32);
+                            }
+                            const fp = normalizeFingerprint(hex.slice(0, 32));
+                            if (fp) {
+                                try { localStorage.setItem(KEY, fp); } catch { /* ignore */ }
+                            }
+                            return fp;
+                        } catch {
+                            return '';
+                        }
+                    };
                     
                     let localGitHubName = null;
                     let currentFingerprint = null;
                     try {
                         localGitHubName = localStorage.getItem('github_username');
-                        currentFingerprint = localStorage.getItem('user_fingerprint');
+                        currentFingerprint = getOrCreateStableFingerprint();
                         console.log('[Drawer] 🔍 从 localStorage 读取:', {
                             hasFingerprint: !!currentFingerprint,
                             fingerprintPrefix: currentFingerprint ? currentFingerprint.substring(0, 8) : null,
@@ -5681,7 +3651,9 @@
                     // - 先尝试直接从 v_unified_analysis_v2 按 fingerprint 拉取（避免一直 WAIT）
                     // - 失败则有限次数重试，最终给出明确提示（避免无限“处理中”）
                     try {
-                        const currentFingerprint = localStorage.getItem('user_fingerprint');
+                        const currentFingerprint = (() => {
+                            try { return localStorage.getItem('user_fingerprint') || localStorage.getItem('fingerprint') || ''; } catch { return ''; }
+                        })();
                         const canQuerySupabase = (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.from === 'function');
                         const attemptKey = '__drawerUserWaitAttempts';
                         const attempts = Number(window[attemptKey] || 0);
@@ -12024,6 +9996,84 @@
                 console.warn('[UserStats] ⚠️ userData 不存在，跳过渲染');
                 return;
             }
+
+            // ----------------------------------------------------------
+            // 修复：避免“拿不到真实用户 -> 用默认 50/UNKNOWN 伪数据渲染”
+            // - 如果本机有 user_fingerprint，则优先用它从 v_unified_analysis_v2 拉一条真实记录再渲染
+            // - 避免重复请求：用全局锁防止递归/并发
+            // ----------------------------------------------------------
+            const getLocalFp = () => {
+                try {
+                    const KEY = 'user_fingerprint';
+                    let fp = (localStorage.getItem(KEY) || '').trim();
+                    if (!fp) {
+                        fp = (localStorage.getItem('cursor_clinical_fingerprint') || localStorage.getItem('vibe_fp') || localStorage.getItem('fingerprint') || '').trim();
+                        if (fp) {
+                            try { localStorage.setItem(KEY, fp); } catch { /* ignore */ }
+                        }
+                    }
+                    if (!fp) {
+                        // 生成一个稳定指纹（仅用于之后能认领/查询；不会覆盖已有云端数据）
+                        try {
+                            const bytes = new Uint8Array(16);
+                            (crypto || window.crypto).getRandomValues(bytes);
+                            fp = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+                            fp = fp.slice(0, 32);
+                            try { localStorage.setItem(KEY, fp); } catch { /* ignore */ }
+                        } catch { /* ignore */ }
+                    }
+                    return fp || '';
+                } catch {
+                    return '';
+                }
+            };
+
+            const localFp = getLocalFp();
+            const canQuerySupabase = (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.from === 'function');
+            const looksPlaceholder = (() => {
+                try {
+                    // 没有任何核心统计字段 + 维度分接近默认值时，视为占位/伪数据
+                    const hasCore =
+                        (userData.total_messages != null && Number(userData.total_messages) > 0) ||
+                        (userData.total_user_chars != null && Number(userData.total_user_chars) > 0) ||
+                        (userData.avg_user_message_length != null && Number(userData.avg_user_message_length) > 0) ||
+                        (userData.stats && typeof userData.stats === 'object' && (Number(userData.stats.totalMessages) > 0 || Number(userData.stats.totalChars) > 0));
+                    if (hasCore) return false;
+                    const l = Number(userData.l_score ?? userData.l ?? 0);
+                    const p = Number(userData.p_score ?? userData.p ?? 0);
+                    const d = Number(userData.d_score ?? userData.d ?? 0);
+                    const e = Number(userData.e_score ?? userData.e ?? 0);
+                    const f = Number(userData.f_score ?? userData.f ?? 0);
+                    const nearDefault = [l, p, d, e, f].every((x) => !Number.isFinite(x) || x === 0 || x === 50);
+                    return nearDefault;
+                } catch {
+                    return false;
+                }
+            })();
+
+            if (looksPlaceholder && localFp && canQuerySupabase && !window.__userStatsCardDbFixing) {
+                window.__userStatsCardDbFixing = true;
+                try {
+                    supabaseClient
+                        .from('v_unified_analysis_v2')
+                        .select('*')
+                        .eq('fingerprint', localFp)
+                        .maybeSingle()
+                        .then(({ data: dbUser }) => {
+                            if (!dbUser) return;
+                            console.log('[UserStats] ✅ 使用本机 fingerprint 拉取到真实用户记录，刷新左抽屉:', dbUser.user_name || dbUser.name);
+                            window.currentUser = dbUser;
+                            const lb = document.getElementById('left-drawer-body');
+                            if (lb) renderUserStatsCards(lb, getBestUserRecordForStats(dbUser));
+                        })
+                        .catch(() => {})
+                        .finally(() => {
+                            try { window.__userStatsCardDbFixing = false; } catch { /* ignore */ }
+                        });
+                    return;
+                } catch { /* ignore */ }
+                try { window.__userStatsCardDbFixing = false; } catch { /* ignore */ }
+            }
             
             try {
                 const esc = (s) =>
@@ -12307,35 +10357,10 @@
                 
                 const nf = new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN');
 
-                const unitTimes = currentLang === 'en' ? 'times' : '次';
-                const unitChars = currentLang === 'en' ? 'chars' : '字';
-                const withUnit = (v, u) => (v === 'N/A' ? 'N/A' : `${v} ${u}`);
-
                 // 2. 调戏AI次数（ai维度）
-                const aiCount = dimensionValues.ai !== undefined && dimensionValues.ai !== null
-                    ? nf.format(dimensionValues.ai)
+                const aiCount = dimensionValues.ai !== undefined && dimensionValues.ai !== null 
+                    ? nf.format(dimensionValues.ai) 
                     : 'N/A';
-
-                // 2.5 上岗天数（day维度）——严格对齐 index.html 的 totalConversations（usageDays：由 earliestFileTime 推导）
-                let dayCount = dimensionValues.day !== undefined && dimensionValues.day !== null
-                    ? nf.format(Math.round(dimensionValues.day))
-                    : 'N/A';
-                try {
-                    // 优先使用本地缓存的 last_analysis_data.stats.earliestFileTime 计算 usageDays（与 main.js/displayStats 一致）
-                    const raw = localStorage.getItem('last_analysis_data');
-                    if (raw) {
-                        const obj = JSON.parse(raw);
-                        const st = obj && obj.stats ? obj.stats : null;
-                        const earliest = st ? (st.earliestFileTime ?? st.earliest_file_time) : null;
-                        const ts = earliest != null ? Number(earliest) : NaN;
-                        if (Number.isFinite(ts) && ts > 0) {
-                            const diffMs = Date.now() - ts;
-                            const usageDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-                            // 允许 0（与 index 一致），但避免负数
-                            dayCount = nf.format(Math.max(0, usageDays));
-                        }
-                    }
-                } catch { /* ignore */ }
                 
                 // 3. 甲方爸爸上身次数（no维度）
                 const noCount = dimensionValues.no !== undefined && dimensionValues.no !== null 
@@ -12356,6 +10381,33 @@
                 const avgLength = dimensionValues.word !== undefined && dimensionValues.word !== null 
                     ? nf.format(Math.round(dimensionValues.word)) 
                     : 'N/A';
+
+                // 7. Cursor 上岗天数 + 最早对话时间（最精准：stats.first_chat_at / stats.usageDays）
+                let firstChatAtText = 'N/A';
+                let cursorDaysText = 'N/A';
+                try {
+                    const su = userData.stats && typeof userData.stats === 'object' ? userData.stats : null;
+                    const firstChatAt =
+                        userData.first_chat_at ||
+                        (su ? (su.first_chat_at || su.firstChatAt) : null) ||
+                        null;
+                    if (firstChatAt) {
+                        const t = Date.parse(String(firstChatAt));
+                        if (!Number.isNaN(t)) {
+                            const d = new Date(t);
+                            // 展示日期：YYYY-MM-DD
+                            firstChatAtText = d.toISOString().slice(0, 10);
+                            const diff = Math.floor((Date.now() - t) / (1000 * 60 * 60 * 24));
+                            const calcDays = Math.max(1, diff);
+                            cursorDaysText = nf.format(calcDays);
+                        }
+                    }
+                    // 若有 usageDays（更精准），优先覆盖天数
+                    const usageDays = su && (su.usageDays ?? su.usage_days ?? su.workDays ?? su.days);
+                    if (usageDays != null && Number(usageDays) > 0) {
+                        cursorDaysText = nf.format(Number(usageDays));
+                    }
+                } catch { /* ignore */ }
                 
                 // 7. 人格称号（参考 index.html 的获取方式：根据 5 位 vibe_index 从 personalityNames.json 获取）
                 const personalityType = userData.personality_type || userData.personalityType || userData.type || 'UNKNOWN';
@@ -12844,28 +10896,32 @@
                         <div class="drawer-item-value text-lg">${techRankText}</div>
                         <div class="drawer-item-desc text-[8px]">TECH_RANK</div>
                     </div>
+
+                    <!-- Cursor 上岗天数 -->
+                    <div class="mb-3 pb-3 border-b border-[#00ff41]/10">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[12px] text-[#00ff41]/70">🕒 ${currentLang === 'en' ? 'Cursor Days' : 'Cursor 上岗天数'}</span>
+                            <span class="text-[12px] text-white font-bold">${cursorDaysText} ${currentLang === 'en' ? 'days' : '天'}</span>
+                        </div>
+                    </div>
                     
                     <!-- 维度统计 -->
                     <div class="space-y-2 mb-3">
                         <div class="flex items-center justify-between">
                             <span class="text-[12px] text-[#00ff41]/70">💬 ${getI18nText('metric.ai_interrogations') || (currentLang === 'en' ? 'AI Interrogations' : '调戏AI次数')}</span>
-                            <span class="text-[12px] text-white font-bold">${withUnit(aiCount, unitTimes)}</span>
-                        </div>
-                        <div class="flex items-center justify-between">
-                            <span class="text-[12px] text-[#00ff41]/70">📅 ${getI18nText('metric.cursor_days') || (currentLang === 'en' ? 'Days On Duty' : '上岗天数')}</span>
-                            <span class="text-[12px] text-white font-bold">${dayCount} ${getI18nText('metric.cursor_days_unit') || (currentLang === 'en' ? 'days' : '天')}</span>
+                            <span class="text-[12px] text-white font-bold">${aiCount}</span>
                         </div>
                         <div class="flex items-center justify-between">
                             <span class="text-[12px] text-[#00ff41]/70">🚫 ${getI18nText('metric.jiafang') || (currentLang === 'en' ? 'Boss Mode Triggers' : '甲方上身次数')}</span>
-                            <span class="text-[12px] text-white font-bold">${withUnit(noCount, unitTimes)}</span>
+                            <span class="text-[12px] text-white font-bold">${noCount}</span>
                         </div>
                         <div class="flex items-center justify-between">
                             <span class="text-[12px] text-[#00ff41]/70">🙏 ${getI18nText('metric.ketao') || (currentLang === 'en' ? 'Cyber Kowtows' : '赛博磕头次数')}</span>
-                            <span class="text-[12px] text-white font-bold">${withUnit(pleaseCount, unitTimes)}</span>
+                            <span class="text-[12px] text-white font-bold">${pleaseCount}</span>
                         </div>
                         <div class="flex items-center justify-between">
                             <span class="text-[12px] text-[#00ff41]/70">💭 ${getI18nText('metric.banter_total') || (currentLang === 'en' ? 'Banter Output' : '废话输出总数')}</span>
-                            <span class="text-[12px] text-white font-bold">${withUnit(sayTotal, unitChars)}</span>
+                            <span class="text-[12px] text-white font-bold">${sayTotal}</span>
                         </div>
                         <div class="flex items-center justify-between">
                             <span class="text-[12px] text-[#00ff41]/70">📏 ${getI18nText('metric.avg_len') || (currentLang === 'en' ? 'Avg Prompt Length' : '平均吹水长度')}</span>
@@ -12971,16 +11027,17 @@
                 messages = Number(userData.L);
             }
             
-            // say (总字数/累计字数)：优先取 total_user_chars（v_top_records 视图使用），其次 total_chars
-            // 字段回退：total_user_chars -> total_chars -> totalUserChars -> p_score -> p -> P
-            // 关键：v_top_records 视图使用 total_user_chars 字段
+            // say（废话输出/用户输出字符数，不含 AI）：
+            // 以最精准口径统一：total_user_chars（优先）-> stats.totalChars（后端统一口径写入）-> total_chars（兼容旧数据）
             let chars = undefined;
             if (userData.total_user_chars !== undefined && userData.total_user_chars !== null && Number(userData.total_user_chars) > 0) {
                 chars = Number(userData.total_user_chars);
-            } else if (userData.total_chars !== undefined && userData.total_chars !== null && Number(userData.total_chars) > 0) {
-                chars = Number(userData.total_chars);
+            } else if (userData.stats && typeof userData.stats === 'object' && userData.stats.totalChars !== undefined && userData.stats.totalChars !== null && Number(userData.stats.totalChars) > 0) {
+                chars = Number(userData.stats.totalChars);
             } else if (userData.totalUserChars !== undefined && userData.totalUserChars !== null && Number(userData.totalUserChars) > 0) {
                 chars = Number(userData.totalUserChars);
+            } else if (userData.total_chars !== undefined && userData.total_chars !== null && Number(userData.total_chars) > 0) {
+                chars = Number(userData.total_chars);
             } else if (userData.p_score !== undefined && userData.p_score !== null && Number(userData.p_score) > 0) {
                 chars = Number(userData.p_score);
             } else if (userData.p !== undefined && userData.p !== null && Number(userData.p) > 0) {
@@ -12989,8 +11046,7 @@
                 chars = Number(userData.P);
             }
             
-            // word (平均长度)：若 avg_user_message_length 为 0 或无效，必须执行 Math.round(total_chars / total_messages)
-            // 字段回退：avg_user_message_length -> avgMessageLength -> avgUserMessageLength -> 公式计算
+            // word（平均吹水长度，用户口径）：优先 avg_user_message_length，否则用 chars/messages 计算
             let word = undefined;
             if (userData.avg_user_message_length !== undefined && userData.avg_user_message_length !== null && Number(userData.avg_user_message_length) > 0) {
                 word = Number(userData.avg_user_message_length);
@@ -13004,9 +11060,7 @@
                 word = Math.round(chars / messages);
             }
             
-            // day (上岗天数)：定义为「最早与 Cursor 开始对话 -> 现在」的时长（按天）
-            // 与 index.html 一致：优先用 earliestFileTime/first_chat_at 计算；若后端已提供 stats.usageDays 则优先使用；
-            // 最后才降级到 work_days/usage_days/days（兼容旧字段）。
+            // day（Cursor 上岗天数）：优先 stats.usageDays（最精准），否则按 first_chat_at 计算
             let day = undefined;
             try {
                 const su = userData.stats && typeof userData.stats === 'object' ? userData.stats : null;
@@ -13014,39 +11068,14 @@
                 if (usageDays != null && Number(usageDays) > 0) {
                     day = Number(usageDays);
                 } else {
-                    // 兼容：earliestFileTime 可能是毫秒时间戳（number/string）
-                    const earliestFileTime =
-                        (su ? (su.earliestFileTime ?? su.earliest_file_time) : null) ??
-                        userData.earliestFileTime ??
-                        userData.earliest_file_time ??
-                        null;
-                    const earliestTs = earliestFileTime != null ? Number(earliestFileTime) : NaN;
-                    if (Number.isFinite(earliestTs) && earliestTs > 0) {
-                        const diff = Math.floor((Date.now() - earliestTs) / (1000 * 60 * 60 * 24));
+                    const firstChatAt = userData.first_chat_at || (su ? (su.first_chat_at || su.firstChatAt) : null) || null;
+                    const t = firstChatAt ? Date.parse(String(firstChatAt)) : NaN;
+                    if (Number.isFinite(t)) {
+                        const diff = Math.floor((Date.now() - t) / (1000 * 60 * 60 * 24));
                         day = Math.max(1, diff);
-                    } else {
-                        // 兼容：first_chat_at 可能是 ISO 字符串
-                        const firstChatAt =
-                            userData.first_chat_at ||
-                            (su ? (su.first_chat_at || su.firstChatAt) : null) ||
-                            null;
-                        const t = firstChatAt ? Date.parse(String(firstChatAt)) : NaN;
-                        if (Number.isFinite(t)) {
-                            const diff = Math.floor((Date.now() - t) / (1000 * 60 * 60 * 24));
-                            day = Math.max(1, diff);
-                        }
                     }
                 }
             } catch { /* ignore */ }
-            if (day === undefined || day === null || !(Number(day) > 0)) {
-                if (userData.work_days !== undefined && userData.work_days !== null && Number(userData.work_days) > 0) {
-                    day = Number(userData.work_days);
-                } else if (userData.usage_days !== undefined && userData.usage_days !== null && Number(userData.usage_days) > 0) {
-                    day = Number(userData.usage_days);
-                } else if (userData.days !== undefined && userData.days !== null && Number(userData.days) > 0) {
-                    day = Number(userData.days);
-                }
-            }
             
             // no (甲方上身)：映射 jiafang_count
             // 字段回退：jiafang_count -> f_score -> f -> F
@@ -15689,6 +13718,4 @@
         window.addEventListener('beforeunload', () => {
             stopRealtimeListener();
         });
-    </script>
-</body>
-</html>
+    
