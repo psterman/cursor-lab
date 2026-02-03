@@ -1,13 +1,19 @@
 # -*- coding: utf-8 -*-
+import codecs
+
+# Decode the hex to get the actual quotes
+left_quote = codecs.decode('e2809c', 'hex').decode('utf-8')
+right_quote = codecs.decode('e2809d', 'hex').decode('utf-8')
+
 with open('stats2.html', 'r', encoding='utf-8') as f:
     content = f.read()
 
-# Find and replace with proper Chinese quotes
+# Build the pattern with correct quotes
 old_pattern = '''                } else {
                     console.log('[Drawer] ⚠️ 未找到用户数据，跳过统计卡片渲染');
                     // 即使没有匹配到用户，如果 localStorage 中有 fingerprint：
                     // - 先尝试直接从 v_unified_analysis_v2 按 fingerprint 拉取（避免一直 WAIT）
-                    // - 失败则有限次数重试，最终给出明确提示（避免无限"处理中"）
+                    // - 失败则有限次数重试，最终给出明确提示（避免无限''' + left_quote + '''处理中''' + right_quote + '''）
                     try {
                         const currentFingerprint = localStorage.getItem('user_fingerprint');'''
 
@@ -51,7 +57,7 @@ new_code = '''                } else {
                         console.log('[Drawer] 未找到本地数据，尝试从云端获取...');
                         // 即使没有匹配到用户，如果 localStorage 中有 fingerprint：
                         // - 先尝试直接从 v_unified_analysis_v2 按 fingerprint 拉取（避免一直 WAIT）
-                        // - 失败则有限次数重试，最终给出明确提示（避免无限"处理中"）
+                        // - 失败则有限次数重试，最终给出明确提示（避免无限''' + left_quote + '''处理中''' + right_quote + '''）
                         try {
                             const currentFingerprint = localStorage.getItem('user_fingerprint');'''
 
@@ -62,15 +68,3 @@ if old_pattern in content:
     print('SUCCESS: Replacement done!')
 else:
     print('ERROR: Pattern not found')
-    # Try to find the line
-    import re
-    match = re.search(r'未找到用户数据', content)
-    if match:
-        print(f'Found "未找到用户数据" at index {match.start()}')
-        # Show context
-        start = max(0, match.start() - 100)
-        end = min(len(content), match.end() + 200)
-        context = content[start:end]
-        with open('context_debug.txt', 'w', encoding='utf-8') as f:
-            f.write(context)
-        print('Context written to context_debug.txt')

@@ -1,0 +1,6 @@
+ards(leftBody, userForStats);
+                } else {
+                    console.log('[Drawer] ⚠️ 未找到用户数据，跳过统计卡片渲染');
+                    // 即使没有匹配到用户，如果 localStorage 中有 fingerprint：
+                    // - 先尝试直接从 v_unified_analysis_v2 按 fingerprint 拉取（避免一直 WAIT）
+                    // - 失败则有限次数重试，最终给出明

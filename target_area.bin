@@ -1,0 +1,7 @@
+ ? 'allData 中的完整记录' : '当前用户记录');
+                    renderUserStatsCards(leftBody, userForStats);
+                } else {
+                    console.log('[Drawer] ⚠️ 未找到用户数据，跳过统计卡片渲染');
+                    // 即使没有匹配到用户，如果 localStorage 中有 fingerprint：
+                    // - 先尝试直接从 v_unified_analysis_v2 按 fingerprint 拉取（避免一直 WAIT）
+                    // - 失败则有�

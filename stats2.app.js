@@ -3685,33 +3685,46 @@
                             leftBody.appendChild(waitingCard);
                         };
 
-                        if (currentFingerprint) {
-                            // 先展示占位符（避免空白）
+                        const localGh = (localStorage.getItem('github_username') || '').trim();
+                        const hasFingerprintOrGh = currentFingerprint || (localGh && /^[a-zA-Z0-9_-]+$/.test(localGh));
+
+                        if (hasFingerprintOrGh) {
                             showWaitCard(attempts >= 6 ? 'EMPTY' : 'WAIT');
 
-                            // 尝试直接查统一视图：按 fingerprint 精确匹配
                             if (canQuerySupabase && attempts < 6) {
                                 window[attemptKey] = attempts + 1;
-                                supabaseClient
-                                    .from('v_unified_analysis_v2')
-                                    .select('*')
-                                    .eq('fingerprint', currentFingerprint)
-                                    .maybeSingle()
-                                    .then(({ data: dbUser }) => {
-                                        if (!dbUser) return;
-                                        console.log('[Drawer] ✅ 通过 fingerprint 从 v_unified_analysis_v2 找到用户:', dbUser.user_name || dbUser.name);
-                                        window.currentUser = dbUser;
-                                        const lb = document.getElementById('left-drawer-body');
-                                        if (lb) renderUserStatsCards(lb, getBestUserRecordForStats(dbUser));
-                                    })
-                                    .catch(() => {});
+                                const onUserFound = (dbUser) => {
+                                    if (!dbUser) return;
+                                    console.log('[Drawer] ✅ 从 v_unified_analysis_v2 找到用户:', dbUser.user_name || dbUser.name);
+                                    window.currentUser = dbUser;
+                                    const lb = document.getElementById('left-drawer-body');
+                                    if (lb) renderUserStatsCards(lb, getBestUserRecordForStats(dbUser));
+                                };
+                                if (currentFingerprint) {
+                                    supabaseClient
+                                        .from('v_unified_analysis_v2')
+                                        .select('*')
+                                        .eq('fingerprint', currentFingerprint)
+                                        .maybeSingle()
+                                        .then(({ data: dbUser }) => onUserFound(dbUser))
+                                        .catch(() => {});
+                                }
+                                if (localGh && !window.currentUser) {
+                                    supabaseClient
+                                        .from('v_unified_analysis_v2')
+                                        .select('*')
+                                        .ilike('user_name', localGh)
+                                        .limit(1)
+                                        .then(({ data: rows }) => {
+                                            if (rows && rows[0]) onUserFound(rows[0]);
+                                        })
+                                        .catch(() => {});
+                                }
 
-                                // 退避重试：再次拉取大盘数据并重绘抽屉（避免永远卡住）
                                 const delayMs = 600 + attempts * 600;
                                 setTimeout(() => {
                                     try {
                                         if (typeof fetchData === 'function') fetchData();
-                                        // 触发一次刷新：用“当前国家”重绘左侧抽屉
                                         if (currentDrawerCountry?.code) {
                                             showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);
                                         }
@@ -7407,15 +7420,14 @@
             
             try {
                 console.log('[Auth] 🚀 开始 GitHub OAuth 登录流程...');
-                
-                // 获取当前页面 URL 作为重定向地址
                 const redirectTo = window.location.origin + window.location.pathname;
+                console.log('[Auth] 重定向地址（请在 Supabase 中已添加）:', redirectTo);
                 
                 const { data, error } = await supabaseClient.auth.signInWithOAuth({
                     provider: 'github',
                     options: {
                         redirectTo: redirectTo,
-                        scopes: 'read:user user:email', // 请求读取用户信息和邮箱的权限
+                        scopes: 'read:user user:email',
                     }
                 });
                 
@@ -7425,14 +7437,17 @@
                     return;
                 }
                 
-                console.log('[Auth] ✅ GitHub OAuth 登录请求已发送，等待重定向...');
-                // 注意：signInWithOAuth 会触发页面重定向，后续逻辑在 handleAuthStateChange 中处理
-                
+                if (data?.url) {
+                    window.location.href = data.url;
+                } else {
+                    console.log('[Auth] ✅ 登录请求已发送，等待重定向...');
+                }
             } catch (error) {
                 console.error('[Auth] ❌ GitHub OAuth 登录异常:', error);
                 alert(`登录失败: ${error.message || '未知错误'}`);
             }
         }
+        window.loginWithGitHub = loginWithGitHub;
         
         /**
          * 退出登录
