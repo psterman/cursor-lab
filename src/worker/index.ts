@@ -2772,6 +2772,21 @@ app.get('/api/random_prompt', async (c) => {
 });
 
 /**
+ * 路由：GET /api/rank-resources
+ * 功能：返回 rank-content 维度排名配置（供前端 Cloudflare 部署时加载，避免请求 /src/rank-content.ts 或 rank-data.json 404）
+ */
+app.get('/api/rank-resources', async (c) => {
+  try {
+    return c.json(RANK_RESOURCES, 200, {
+      'Cache-Control': 'public, max-age=3600',
+    });
+  } catch (error: any) {
+    console.error('[Worker] /api/rank-resources 错误:', error);
+    return c.json({ error: error?.message || '未知错误' }, 500);
+  }
+});
+
+/**
  * 路由：/api/fingerprint/identify
  * 功能：根据指纹识别用户（On Load）
  * 当页面加载时，前端调用此接口查询用户信息

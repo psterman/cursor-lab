@@ -9671,7 +9671,7 @@
         async function getUserLocation() {
             try {
                 // 使用 ip-api.com API 获取 IP 归属地信息
-                const ipResponse = await fetch('http://ip-api.com/json/', {
+                const ipResponse = await fetch('https://ip-api.com/json/', {
                     method: 'GET',
                     headers: { 'Accept': 'application/json' }
                 });
@@ -12037,7 +12037,7 @@
                 try {
                     // 使用 ip-api.com API 获取 IP 归属地信息（更稳定的免费 API）
                     // 返回字段：country, countryCode, city, lat, lon 等
-                    const ipResponse = await fetch('http://ip-api.com/json/', {
+                    const ipResponse = await fetch('https://ip-api.com/json/', {
                         method: 'GET',
                         headers: {
                             'Accept': 'application/json'
@@ -12692,9 +12692,28 @@
 
         /**
          * 加载 rank-content.ts 数据
+         * 线上（Cloudflare）：优先从 Worker /api/rank-resources 拉取，避免 /src/rank-content.ts 等静态路径 404
          */
         async function loadRankResources() {
             try {
+                // 优先从 Worker API 拉取（线上部署时静态文件路径可能 404）
+                const apiEndpoint = (window.getApiEndpoint ? window.getApiEndpoint() : document.querySelector('meta[name="api-endpoint"]')?.content) || '';
+                const base = apiEndpoint.endsWith('/') ? apiEndpoint : (apiEndpoint ? apiEndpoint + '/' : '');
+                if (base) {
+                    try {
+                        const res = await fetch(base + 'api/rank-resources', { cache: 'force-cache' });
+                        if (res.ok) {
+                            const json = await res.json();
+                            if (json && typeof json === 'object' && Object.keys(json).length > 0) {
+                                RANK_RESOURCES = json;
+                                console.log('[Rank] ✅ 从 Worker API 加载 rank-resources 成功');
+                                return true;
+                            }
+                        }
+                    } catch (e) {
+                        console.debug('[Rank] Worker rank-resources 请求失败，尝试本地路径:', e?.message);
+                    }
+                }
                 // 优化：优先尝试读取 TS 文件（因为环境目前解析 TS 文件更稳定）
                 const tsPaths = [
                     './src/rank-content.ts',
