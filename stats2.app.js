@@ -1333,31 +1333,6 @@
         let initAttempts = 0;
         const maxAttempts = 50; // 最多尝试 5 秒（50 * 100ms）
 
-        // 检测是否为 Cloudflare 环境
-        const host = typeof window !== 'undefined' && window.location && window.location.hostname ? window.location.hostname : '';
-        const isCloudflareHost = /\.pages\.dev$/.test(host) || /\.workers\.dev$/.test(host) || host === 'pages.dev' || host === 'workers.dev';
-        const cfRay = document.cookie.split(';').find(c => c.trim().startsWith('CF-Ray=')) ||
-                       (typeof window !== 'undefined' && window.performance && window.performance.getEntriesByType ?
-                       window.performance.getEntriesByType('resource').some(r => r.name.includes('cloudflare')) : false);
-        const isCloudflareEnv = isCloudflareHost || cfRay;
-
-        // 构建实时连接配置
-        const realtimeConfig = {
-            params: {
-                // Supabase Realtime 参数
-            }
-        };
-
-        if (isCloudflareEnv) {
-            // Cloudflare 环境：使用 Worker 代理的 WebSocket 端点
-            // 从当前 Worker URL 构建代理端点
-            const workerUrl = typeof window !== 'undefined' && window.location
-                ? `${window.location.protocol}//${window.location.host}`
-                : '';
-            realtimeConfig.params.ws = `${workerUrl}/realtime/v1`;
-            console.log('[Init] 🔄 Cloudflare 环境检测到，使用 WebSocket 代理:', realtimeConfig.params.ws);
-        }
-
         const initInterval = setInterval(() => {
             initAttempts++;
 
@@ -1366,9 +1341,11 @@
                 clearInterval(initInterval);
 
                 try {
-                    // 实例化客户端（配置实时连接）
+                    // 实例化客户端（简化配置，让 Supabase 自动处理 Realtime 端点）
                     supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-                        realtime: realtimeConfig
+                        realtime: {
+                            heartbeatIntervalMs: 5000, // 5秒心跳，增加连接稳定性
+                        }
                     });
 
                     // 挂载到全局 window，供控制台脚本使用
@@ -1376,9 +1353,6 @@
 
                     console.log('[Init] ✅ Supabase 客户端已成功挂载至 window.supabaseClient');
                     console.log('[Init] 💡 可在控制台使用 window.supabaseClient 访问客户端');
-                    if (isCloudflareEnv) {
-                        console.log('[Init] ✨ WebSocket 代理已启用，实时功能应正常工作');
-                    }
                 } catch (err) {
                     console.error('[Init] ❌ 初始化失败:', err);
                 }
