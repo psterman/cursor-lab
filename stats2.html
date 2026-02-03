@@ -9941,6 +9941,7 @@
                                 alt="${userName}" 
                                 class="w-8 h-8 rounded-full border border-[var(--accent-terminal)]"
                                 loading="lazy"
+                                referrerpolicy="no-referrer"
                                 onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
                             />
                             <div class="flex flex-col flex-1 min-w-0">
@@ -9972,6 +9973,7 @@
                                 alt="${userName}" 
                                 class="w-8 h-8 rounded-full border border-zinc-700"
                                 loading="lazy"
+                                referrerpolicy="no-referrer"
                                 onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
                             />
                             <div class="flex flex-col flex-1 min-w-0">
@@ -13010,6 +13012,7 @@
                 const hasAnyScore = quickScoreKeys.some(k => userData[k] !== null && userData[k] !== undefined);
 
                 const extracted = extractDimensionValues(userData);
+                console.log('[UserStats] 📊 extractDimensionValues 结果:', extracted);
                 const hasAnyMetric =
                     (extracted.ai !== undefined && extracted.ai !== null && extracted.ai > 0) ||
                     (extracted.say !== undefined && extracted.say !== null && extracted.say > 0) ||
@@ -13314,40 +13317,57 @@
                     return Math.max(1, diff);
                 };
 
+                // 【修复】上岗天数使用 dimensionValues.day（extractDimensionValues 已优先从本地 localStorage 获取）
                 let dayCount = 'N/A';
                 let dayEarliestTs = null;
                 let daySource = null;
                 
-                // 【步骤1】优先从本地 localStorage 获取 earliestFileTime 或 usageDays
-                try {
-                    const raw = localStorage.getItem('last_analysis_data');
-                    if (raw) {
-                        const obj = JSON.parse(raw);
-                        const st = obj && obj.stats ? obj.stats : null;
-                        
-                        // 1a) 优先使用 earliestFileTime 计算天数
-                        const earliest = st ? (st.earliestFileTime ?? st.earliest_file_time) : null;
-                        const ts = _parseMaybeTs(earliest);
-                        const d = _calcDaysFromTs(ts);
-                        if (d != null) {
-                            dayEarliestTs = ts;
-                            dayCount = nf.format(d);
-                            daySource = 'localStorage.earliestFileTime';
-                        }
-                        
-                        // 1b) 如果没有 earliestFileTime，但有 usageDays/work_days，直接使用（含 Cloudflare 兜底）
-                        if (dayCount === 'N/A') {
-                            const usageDays = st ? (st.usageDays ?? st.usage_days ?? st.work_days ?? null) : null;
-                            if (usageDays != null && Number(usageDays) > 0) {
-                                dayCount = nf.format(Number(usageDays));
-                                daySource = 'localStorage.usageDays';
+                // 优先使用 extractDimensionValues 返回的 day（已包含本地数据逻辑）
+                if (dimensionValues.day !== undefined && dimensionValues.day !== null && dimensionValues.day > 0) {
+                    dayCount = nf.format(Math.round(dimensionValues.day));
+                    daySource = 'dimensionValues.day';
+                }
+                
+                // 【步骤1】优先从本地 localStorage 获取 earliestFileTime 或 usageDays（Cloudflare 环境强化）
+                if (dayCount === 'N/A' || dayCount === '1') { // 如果是1天，可能是默认值，尝试从本地获取更准确值
+                    try {
+                        const raw = localStorage.getItem('last_analysis_data');
+                        console.log('[renderUserStatsCards] 本地数据 raw:', raw ? '存在' : '不存在');
+                        if (raw) {
+                            const obj = JSON.parse(raw);
+                            console.log('[renderUserStatsCards] 本地数据 parsed:', obj);
+                            const st = obj && obj.stats ? obj.stats : null;
+                            
+                            // 1a) 优先使用 earliestFileTime 计算天数
+                            const earliest = st ? (st.earliestFileTime ?? st.earliest_file_time) : null;
+                            console.log('[renderUserStatsCards] earliestFileTime:', earliest);
+                            const ts = _parseMaybeTs(earliest);
+                            const d = _calcDaysFromTs(ts);
+                            if (d != null && d > 1) { // 只有计算值大于1才使用
+                                dayEarliestTs = ts;
+                                dayCount = nf.format(d);
+                                daySource = 'localStorage.earliestFileTime';
+                                console.log('[renderUserStatsCards] 使用本地 earliestFileTime:', d);
+                            }
+                            
+                            // 1b) 如果没有 earliestFileTime，但有 usageDays/work_days，直接使用
+                            if (dayCount === 'N/A' || dayCount === '1') {
+                                const usageDays = st ? (st.usageDays ?? st.usage_days ?? st.work_days ?? null) : null;
+                                console.log('[renderUserStatsCards] usageDays from local:', usageDays);
+                                if (usageDays != null && Number(usageDays) > 1) { // 只有大于1才使用
+                                    dayCount = nf.format(Number(usageDays));
+                                    daySource = 'localStorage.usageDays';
+                                    console.log('[renderUserStatsCards] 使用本地 usageDays:', usageDays);
+                                }
                             }
                         }
+                    } catch (e) { 
+                        console.warn('[renderUserStatsCards] 本地数据读取失败:', e);
                     }
-                } catch (e) { /* ignore */ }
+                }
                 
                 // 【步骤2】如果本地没有，尝试云端 first_chat_at
-                if (dayCount === 'N/A') {
+                if (dayCount === 'N/A' || dayCount === '1') {
                     try {
                         const su = userData.stats && typeof userData.stats === 'object' ? userData.stats : null;
                         const firstChatAt =
@@ -13356,7 +13376,7 @@
                             null;
                         const tFirst = _parseMaybeTs(firstChatAt);
                         const dFirst = _calcDaysFromTs(tFirst);
-                        if (dFirst != null) {
+                        if (dFirst != null && dFirst > 1) {
                             dayEarliestTs = tFirst;
                             dayCount = nf.format(dFirst);
                             daySource = 'cloud.first_chat_at';
@@ -13364,21 +13384,8 @@
                     } catch { /* ignore */ }
                 }
                 
-                // 【步骤3】最后兜底：使用 dimensionValues.day（>=1 即显示，避免 Cloudflare 等环境仅返回 1 时显示 N/A）
-                if (dayCount === 'N/A') {
-                    const fallbackDay = (dimensionValues.day !== undefined && dimensionValues.day !== null) ? Number(dimensionValues.day) : null;
-                    if (fallbackDay != null && Number.isFinite(fallbackDay) && fallbackDay >= 1) {
-                        dayCount = nf.format(Math.round(fallbackDay));
-                        daySource = 'dimensionValues.day';
-                    }
-                }
-                
                 // 调试日志
-                if (dayCount !== 'N/A') {
-                    console.log('[renderUserStatsCards] dayCount calculated:', { dayCount, dayEarliestTs, source: daySource });
-                } else {
-                    console.log('[renderUserStatsCards] dayCount not available, all sources exhausted');
-                }
+                console.log('[renderUserStatsCards] dayCount 最终结果:', { dayCount, dayEarliestTs, source: daySource, dimensionValuesDay: dimensionValues.day });
                 
                 // 3. 甲方爸爸上身次数（no维度）
                 const noCount = dimensionValues.no !== undefined && dimensionValues.no !== null 
