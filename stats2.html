@@ -3996,6 +3996,12 @@
         let initAttempts = 0;
         const maxAttempts = 50; // 最多尝试 5 秒（50 * 100ms）
 
+        // 检测是否为 Cloudflare 环境
+        const host = typeof window !== 'undefined' && window.location && window.location.hostname ? window.location.hostname : '';
+        const isCloudflareEnv = /\.pages\.dev$/.test(host) || /\.workers\.dev$/.test(host) ||
+                               (typeof window !== 'undefined' && window.performance ?
+                               window.performance.getEntriesByType('resource').some(r => r.name.includes('cloudflare')) : false);
+
         const initInterval = setInterval(() => {
             initAttempts++;
 
@@ -4004,11 +4010,70 @@
                 clearInterval(initInterval);
 
                 try {
-                    // 实例化客户端（简化配置，让 Supabase 自动处理 Realtime 端点）
-                    supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-                        realtime: {
-                            heartbeatIntervalMs: 5000, // 5秒心跳，增加连接稳定性
+                    // 构建实时连接配置
+                    const realtimeConfig = {
+                        heartbeatIntervalMs: 5000, // 5秒心跳
+                    };
+
+                    // Cloudflare 环境下，尝试使用自定义 WebSocket transport
+                    // （需要 Worker 实现WebSocket代理后才能工作）
+                    if (isCloudflareEnv && typeof window !== 'undefined' && window.location) {
+                        const workerUrl = `${window.location.protocol}//${window.location.host}`;
+
+                        // 自定义 WebSocket 构造函数（通过代理）
+                        class ProxyWebSocket {
+                            constructor(url, protocols) {
+                                console.log('[ProxyWebSocket] Creating connection to:', workerUrl);
+
+                                // 构建实际的 WebSocket URL（替换为代理）
+                                const proxyUrl = url.replace(/wss?:\/\/[^\/]+/, workerUrl);
+
+                                this.socket = new WebSocket(proxyUrl, protocols);
+                                this.readyState = this.socket.CONNECTING;
+
+                                // 转发事件
+                                this.socket.onopen = (e) => {
+                                    this.readyState = this.socket.OPEN;
+                                    if (this.onopen) this.onopen(e);
+                                };
+
+                                this.socket.onmessage = (e) => {
+                                    if (this.onmessage) this.onmessage(e);
+                                };
+
+                                this.socket.onclose = (e) => {
+                                    this.readyState = this.socket.CLOSED;
+                                    if (this.onclose) this.onclose(e);
+                                };
+
+                                this.socket.onerror = (e) => {
+                                    this.readyState = this.socket.CLOSED;
+                                    if (this.onerror) this.onerror(e);
+                                };
+
+                                // 模拟标准 WebSocket API
+                                this.OPEN = WebSocket.OPEN;
+                                this.CONNECTING = WebSocket.CONNECTING;
+                                this.CLOSING = WebSocket.CLOSING;
+                                this.CLOSED = WebSocket.CLOSED;
+                            }
+
+                            send(data) {
+                                return this.socket.send(data);
+                            }
+
+                            close(code, reason) {
+                                return this.socket.close(code, reason);
+                            }
                         }
+
+                        realtimeConfig.transport = ProxyWebSocket;
+                        console.log('[Init] 🔄 Cloudflare 环境检测到，使用自定义 WebSocket transport:', workerUrl);
+                    }
+
+                    // 实例化客户端
+                    supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+                        realtime: realtimeConfig
                     });
 
                     // 挂载到全局 window，供控制台脚本使用
@@ -4016,6 +4081,9 @@
 
                     console.log('[Init] ✅ Supabase 客户端已成功挂载至 window.supabaseClient');
                     console.log('[Init] 💡 可在控制台使用 window.supabaseClient 访问客户端');
+                    if (isCloudflareEnv) {
+                        console.log('[Init] ⚠️ Cloudflare 环境：实时功能可能受限，需要 Worker 支持 WebSocket 代理');
+                    }
                 } catch (err) {
                     console.error('[Init] ❌ 初始化失败:', err);
                 }
@@ -9438,7 +9506,8 @@
                 // =========================
                 // Supabase Presence 功能：统计实时在线人数
                 // =========================
-                
+
+
                 // 如果已有 Presence 频道，先取消订阅
                 if (presenceChannel) {
                     try {
@@ -14372,13 +14441,13 @@
         }
 
         /**
-         * 渲染 6 个维度排名卡片
-         * @param {Object} userData - 用户数据对象（从 Supabase 返回），如果为 null 则显示默认值
+         * 启动 Supabase Realtime 监听
+         * 监听 user_analysis 表的 INSERT 事件
          */
-        function renderRankCards(userData) {
-            const container = document.getElementById('rank-cards-container');
-            if (!container) {
-                console.warn('[Rank] ⚠️ rank-cards-container 容器不存在');
+        function startRealtimeListener() {
+            // 健壮性检查：确保 Supabase 客户端已初始化
+            if (!supabaseClient) {
+                console.warn('[Realtime] ⚠️ Supabase 客户端未初始化，跳过 Realtime 监听');
                 return;
             }
 
