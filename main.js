@@ -6,6 +6,83 @@
 import { CursorParser } from './src/CursorParser.js';
 import { VibeCodingerAnalyzer, DIMENSIONS } from './src/VibeCodingerAnalyzer.js';
 
+// ========== 全环境 Auth 拦截器（IIFE，import 之后立即执行） ==========
+(function () {
+  if (typeof window === 'undefined') return;
+  const hash = window.location.hash || '';
+  const hasToken = /access_token=/.test(hash);
+
+  if (hasToken) {
+    const params = {};
+    hash.slice(1).split('&').forEach(function (pair) {
+      const i = pair.indexOf('=');
+      if (i !== -1) {
+        const k = decodeURIComponent(pair.slice(0, i));
+        const v = decodeURIComponent((pair.slice(i + 1) || '').replace(/\+/g, ' '));
+        params[k] = v;
+      }
+    });
+    const token = params.access_token || params['access_token'];
+    const refreshToken = params.refresh_token || params['refresh_token'];
+    if (token) {
+      try {
+        window.localStorage.setItem('vibe_github_access_token', token);
+        if (refreshToken) window.localStorage.setItem('vibe_github_refresh_token', refreshToken);
+        window.__VIBE_GITHUB_ACCESS_TOKEN__ = token;
+        console.log('[Auth] ✅ 已从 Hash 捕获 access_token 并写入 localStorage + 全局变量');
+      } catch (e) {
+        console.warn('[Auth] 写入 token 失败:', e);
+      }
+      try {
+        const parts = token.split('.');
+        if (parts.length >= 2) {
+          const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+          const padded = payload + Array((4 - payload.length % 4) % 4 + 1).join('=');
+          const json = atob(padded);
+          const data = JSON.parse(json);
+          const meta = data.user_metadata || {};
+          const avatar = meta.avatar_url || meta.avatar || meta.picture || '';
+          const name = meta.user_name || meta.full_name || meta.name || meta.preferred_username || meta.login || data.email || '';
+          if (avatar || name) {
+            const cache = { avatar: avatar, name: name, at: Date.now() };
+            try {
+              window.localStorage.setItem('vibe_github_user_cache', JSON.stringify(cache));
+            } catch (_) {}
+            if (typeof window !== 'undefined') window.__vibeGitHubUser = cache;
+          }
+        }
+      } catch (_) {}
+      try {
+        if (window.history && window.history.replaceState) {
+          const url = window.location.pathname + (window.location.search || '');
+          window.history.replaceState(null, '', url);
+          console.log('[Auth] ✅ 已清理地址栏 Hash');
+        }
+      } catch (_) {}
+    }
+  } else {
+    try {
+      const stored = window.localStorage.getItem('vibe_github_access_token');
+      if (stored && String(stored).trim()) {
+        window.__VIBE_GITHUB_ACCESS_TOKEN__ = stored.trim();
+        console.log('[Auth] 兜底：已从 localStorage 加载 Token 到全局变量');
+      }
+    } catch (_) {}
+  }
+})();
+
+/** 多环境 Redirect URL：localhost 跳回 localhost，pages.dev 跳回 pages.dev */
+if (typeof window !== 'undefined') {
+  window.getVibeRedirectUrl = function () {
+    return window.location.origin + window.location.pathname;
+  };
+}
+
+/** 请求并发锁（去重）：{ promise: 当前进行中的请求, done: 是否已成功完成一次 } */
+if (typeof globalThis !== 'undefined') {
+  globalThis.__vibeUploadLock = globalThis.__vibeUploadLock || { promise: null, done: false };
+}
+
 /**
  * 【V6 维度字典】V6_METRIC_CONFIG - 全量40维度配置
  * 包含勋章类、指标类、全网类三大类别的维度定义
@@ -202,6 +279,21 @@ if (!window.BASE_PATH) {
     isGitHubPages,
     isLocalhost
   });
+}
+
+/**
+ * 解析资源路径（适配 GitHub Pages 二级路径，如 https://xxx.github.io/cursor-lab/）
+ * 图片、脚本等相对路径应通过此函数或 BASE_PATH 拼接，避免 404
+ * @param {string} path - 相对路径，如 '/img/logo.png' 或 'img/logo.png'
+ * @returns {string} 带 basePath 的路径
+ */
+if (typeof window !== 'undefined') {
+  window.getVibeAssetUrl = function (path) {
+    const base = window.BASE_PATH || '';
+    const p = String(path || '').trim();
+    const normalized = p.startsWith('/') ? p : '/' + p;
+    return base + normalized;
+  };
 }
 
 /**
@@ -2620,10 +2712,10 @@ async function handleFileUpload(event, type, callbacks = {}) {
     window.updateUploadButtonsState(true);
   }
 
-  // 【唯一提交入口】新一次上传流程允许本 Run 内触发一次有效提交；重置 Session 提交标记
+  // 【唯一提交入口】新一次上传流程重置 Session 锁，允许本 Run 内触发一次有效提交
   try {
     if (typeof window !== 'undefined') {
-      window.__vibeSessionSubmitted = false;
+      window.__vibeSubmitted = false;
       window.__vibeLastUploadResult = null;
     }
   } catch (_) { /* ignore */ }

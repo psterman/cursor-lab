@@ -3233,20 +3233,38 @@ export class VibeCodingerAnalyzer {
       const inflightMap = (globalThis.__vibeUploadInflightBySig ||= new Map());
       const cacheKey = `__vibeUploadCache_v2_${__uploadSig}`;
 
-      // 【Session 内只提交一次】若本 Session 已成功提交过，直接返回上次结果，不再请求
+      // 【优先级 0 - 全局并发锁】若 globalThis.__vibeUploadLock.done 为 true，直接跳过请求
       try {
-        if (typeof window !== 'undefined' && window.__vibeSessionSubmitted && window.__vibeLastUploadResult) {
-          console.log('[VibeAnalyzer] 🧠 Session 内已提交过，跳过重复上报');
+        const lock = typeof globalThis !== 'undefined' && globalThis.__vibeUploadLock;
+        if (lock && lock.done === true) {
+          const cached = (typeof window !== 'undefined' && window.__vibeLastUploadResult) || null;
+          if (cached) {
+            console.log('[VibeAnalyzer] 🧠 全局锁已完成 (__vibeUploadLock.done)，跳过请求');
+            return cached;
+          }
+        }
+        if (lock && lock.promise && typeof lock.promise.then === 'function') {
+          console.log('[VibeAnalyzer] ⏳ 复用全局锁进行中的请求 (__vibeUploadLock.promise)');
+          return await lock.promise;
+        }
+      } catch (_) { /* ignore */ }
+
+      // 【优先级 1 - Session 锁】若本页面已成功提交过（window.__vibeSubmitted），直接返回旧结果
+      try {
+        if (typeof window !== 'undefined' && window.__vibeSubmitted && window.__vibeLastUploadResult) {
+          console.log('[VibeAnalyzer] 🧠 Session 已提交过 (__vibeSubmitted)，跳过重复上报');
           return window.__vibeLastUploadResult;
         }
       } catch (_) { /* ignore */ }
 
-      // 【全局请求锁】防止数据计算/UI 渲染期间的并发重复请求
-      const globalLock = (typeof globalThis !== 'undefined' && globalThis.__vibeUploadInProgress) || (typeof window !== 'undefined' && window.__vibeUploadInProgress);
-      if (globalLock && typeof globalThis !== 'undefined' && globalThis.__vibeUploadInProgressPromise) {
-        console.log('[VibeAnalyzer] ⏳ 已有上报进行中，复用全局 Promise');
-        return await globalThis.__vibeUploadInProgressPromise;
-      }
+      // 【优先级 2 - 并发锁】全局单例 globalThis.__vibeUploadPromise：若有请求正在 pending，复用并等待
+      try {
+        const pending = typeof globalThis !== 'undefined' && globalThis.__vibeUploadPromise;
+        if (pending && typeof (pending && pending.then) === 'function') {
+          console.log('[VibeAnalyzer] ⏳ 已有上报进行中，复用 globalThis.__vibeUploadPromise');
+          return await globalThis.__vibeUploadPromise;
+        }
+      } catch (_) { /* ignore */ }
 
       // 近期缓存（10 分钟）：避免多处调用/重试再次写入
       try {
@@ -3464,22 +3482,18 @@ export class VibeCodingerAnalyzer {
         ? `${apiEndpoint}api/v2/analyze` 
         : `${apiEndpoint}/api/v2/analyze`;
 
-      // 【身份优先级】若存在 GitHub 身份则带 Authorization，后端只写一条 user_id 记录，不产生匿名 fingerprint 重复
+      // 【优先级 3 - 身份附带】请求头必须带上 Authorization: Bearer <token>（优先使用全局变量）
       const authHeaders = { 'Content-Type': 'application/json' };
       try {
         const token = (typeof window !== 'undefined' && window.__VIBE_GITHUB_ACCESS_TOKEN__) ||
           (typeof window !== 'undefined' && window.localStorage && window.localStorage.getItem('vibe_github_access_token'));
         if (token && String(token).trim()) {
           authHeaders['Authorization'] = 'Bearer ' + String(token).trim();
-          console.log('[VibeAnalyzer] 使用 GitHub 身份上报，避免匿名指纹重复记录');
+          console.log('[VibeAnalyzer] 使用 GitHub Token 上报 (Authorization: Bearer)');
         }
       } catch (_) { /* ignore */ }
 
-      // 将真实请求包装为可复用的 in-flight Promise，并加全局锁（先同步设锁再创建 Promise，避免并发时重复请求）
-      try {
-        if (typeof globalThis !== 'undefined') globalThis.__vibeUploadInProgress = true;
-        if (typeof window !== 'undefined') window.__vibeUploadInProgress = true;
-      } catch (_) { /* ignore */ }
+      // 并发锁：将本次请求 Promise 挂到全局单例与 __vibeUploadLock，供其他并发调用复用
       const doRequestPromise = (async () => {
         try {
           const response = await fetch(analyzeUrl, {
@@ -3496,28 +3510,30 @@ export class VibeCodingerAnalyzer {
         const result = await response.json();
         console.log('[VibeAnalyzer] 后端返回数据:', result);
 
-        // 成功则写入短期缓存，并标记 Session 已提交（同一 Session 不再重复请求）
+        // 成功则写入短期缓存，并标记本页面已提交（Session 锁）+ 全局锁 done
         try {
           localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), result }));
           if (typeof window !== 'undefined') {
-            window.__vibeSessionSubmitted = true;
+            window.__vibeSubmitted = true;
             window.__vibeLastUploadResult = result;
+          }
+          if (typeof globalThis !== 'undefined' && globalThis.__vibeUploadLock) {
+            globalThis.__vibeUploadLock.done = true;
           }
         } catch { /* ignore */ }
 
         return result;
         } finally {
           try {
-            if (typeof globalThis !== 'undefined') globalThis.__vibeUploadInProgress = false;
-            if (typeof window !== 'undefined') window.__vibeUploadInProgress = false;
-            if (typeof globalThis !== 'undefined' && globalThis.__vibeUploadInProgressPromise !== undefined) {
-              globalThis.__vibeUploadInProgressPromise = undefined;
-            }
+            if (typeof globalThis !== 'undefined') globalThis.__vibeUploadPromise = undefined;
           } catch (_) { /* ignore */ }
         }
       })();
       try {
-        if (typeof globalThis !== 'undefined') globalThis.__vibeUploadInProgressPromise = doRequestPromise;
+        if (typeof globalThis !== 'undefined') {
+          globalThis.__vibeUploadPromise = doRequestPromise;
+          if (globalThis.__vibeUploadLock) globalThis.__vibeUploadLock.promise = doRequestPromise;
+        }
       } catch (_) { /* ignore */ }
 
       inflightMap.set(__uploadSig, doRequestPromise);

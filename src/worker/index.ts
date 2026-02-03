@@ -2262,7 +2262,7 @@ app.post('/api/v2/analyze', async (c) => {
       try {
         const executionCtx = c.executionCtx;
         if (executionCtx && typeof executionCtx.waitUntil === 'function') {
-          // 【GitHub OAuth 优先】检查请求头中是否包含 Authorization token
+          // 【后端适配】Header 带 Authorization 时优先使用 Supabase Auth 的 user.id（JWT payload.sub）作为主键 upsert；无 Token 则按 fingerprint upsert
           const authHeader = c.req.header('Authorization');
           let authenticatedUserId: string | null = null;
           let useUserIdForUpsert = false;
@@ -2270,7 +2270,7 @@ app.post('/api/v2/analyze', async (c) => {
           if (authHeader && authHeader.startsWith('Bearer ')) {
             try {
               const token = authHeader.substring(7);
-              // 从 JWT token 中提取 user_id（sub 字段）
+              // 从 JWT token 中提取 user_id（Supabase Auth 的 user.id 即 payload.sub）
               // JWT 格式：header.payload.signature，payload 是 base64url 编码的 JSON
               const parts = token.split('.');
               if (parts.length === 3) {
@@ -2494,8 +2494,7 @@ app.post('/api/v2/analyze', async (c) => {
           });
 
           // 【同步存储】必须 await 以确保后续认领操作能找到数据
-          // 【后端幂等 Upsert】基于 fingerprint 或 user_id：ON CONFLICT 时更新而非新建，同一用户/指纹仅一条记录
-          // 【GitHub OAuth 优先】如果使用 user_id，则按 id 冲突；否则按 fingerprint 冲突
+          // 【后端幂等 Upsert】有身份时 onConflict=id（Supabase Auth user.id），无身份时 onConflict=fingerprint
           const conflictKey = useUserIdForUpsert ? 'id' : 'fingerprint';
           const supabaseUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=${conflictKey}`;
           
