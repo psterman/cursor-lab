@@ -1134,7 +1134,7 @@ class VibeCodingApp {
     try {
       const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
       const safeFp = (context && context.fingerprint) ? String(context.fingerprint) : (localStorage.getItem('user_fingerprint') || null);
-      // 【修复】计算 usageDays 和 earliestFileTime，供 stats2.html 使用
+      // 【修复】计算 usageDays 和 earliestFileTime，供 stats2.html 使用（含 Cloudflare/多环境兜底）
       let usageDays = null;
       let earliestFileTime = null;
       if (globalStats && globalStats.earliestFileTime) {
@@ -1143,7 +1143,17 @@ class VibeCodingApp {
         const diffMs = now - earliestFileTime;
         usageDays = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
       }
-      
+      // 云端/Cloudflare 可能无 earliestFileTime，用后端返回的 work_days 兜底，避免 stats2 显示 N/A
+      const fromResult = result?.stats || result?.statistics || {};
+      if (usageDays == null) {
+        usageDays = fromResult.work_days ?? fromResult.usageDays ?? fromResult.usage_days ?? fromResult.days ?? null;
+        if (usageDays != null) usageDays = Math.max(1, Number(usageDays));
+      }
+      if (earliestFileTime == null && (fromResult.earliestFileTime ?? fromResult.earliest_file_time ?? fromResult.first_chat_at)) {
+        const ts = Number(fromResult.earliestFileTime ?? fromResult.earliest_file_time ?? fromResult.first_chat_at);
+        if (Number.isFinite(ts) && ts > 0) earliestFileTime = ts;
+      }
+
       const payloadForStats2 = {
         // stats2 会检查 chatData 是否存在；尽量提供，但允许在容量不足时降级
         chatData: chatData,
@@ -1151,10 +1161,11 @@ class VibeCodingApp {
         fingerprint: safeFp,
         dimensions: result?.dimensions || null,
         stats: {
-          ...(result?.stats || result?.statistics || {}),
-          // 【修复】确保 earliestFileTime 和 usageDays 被保存，供 stats2.html 计算上岗天数
+          ...(fromResult),
+          // 【修复】确保 earliestFileTime 和 usageDays 被保存，供 stats2.html 计算上岗天数（含云端兜底）
           earliestFileTime: earliestFileTime,
           usageDays: usageDays,
+          work_days: usageDays ?? fromResult.work_days ?? null,
         },
         meta: context || null,
         vibeIndex: result?.vibeIndex || result?.vibe_index || null,
@@ -1174,7 +1185,7 @@ class VibeCodingApp {
         // 降级：避免存不下导致完全没有 last_analysis_data
         const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
         const safeFp = (context && context.fingerprint) ? String(context.fingerprint) : (localStorage.getItem('user_fingerprint') || null);
-        // 【修复】降级模式下也保存 earliestFileTime 和 usageDays
+        // 【修复】降级模式下也保存 earliestFileTime 和 usageDays（含云端 work_days 兜底）
         let usageDaysLite = null;
         let earliestFileTimeLite = null;
         if (globalStats && globalStats.earliestFileTime) {
@@ -1183,16 +1194,21 @@ class VibeCodingApp {
           const diffMs = now - earliestFileTimeLite;
           usageDaysLite = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
         }
-        
+        const fromResultLite = result?.stats || result?.statistics || {};
+        if (usageDaysLite == null)
+          usageDaysLite = fromResultLite.work_days ?? fromResultLite.usageDays ?? fromResultLite.usage_days ?? fromResultLite.days ?? null;
+        if (usageDaysLite != null) usageDaysLite = Math.max(1, Number(usageDaysLite));
+
         const payloadLite = {
           chatData: null,
           lang: safeLang,
           fingerprint: safeFp,
           dimensions: result?.dimensions || null,
           stats: {
-            ...(result?.stats || result?.statistics || {}),
+            ...(fromResultLite),
             earliestFileTime: earliestFileTimeLite,
             usageDays: usageDaysLite,
+            work_days: usageDaysLite ?? fromResultLite.work_days ?? null,
           },
           meta: context || null,
           vibeIndex: result?.vibeIndex || result?.vibe_index || null,
@@ -1470,16 +1486,22 @@ class VibeCodingApp {
     // 保存结果
     this.vibeResult = result;
 
-    // 【关键修复】缓存最后一次分析数据（同步方法同样写入，供 stats2.html 回填）
+    // 【关键修复】缓存最后一次分析数据（同步方法同样写入，供 stats2.html 回填；含 usageDays/work_days 供 Cloudflare 显示上岗天数）
     try {
       const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
       const safeFp = (context && context.fingerprint) ? String(context.fingerprint) : (localStorage.getItem('user_fingerprint') || null);
+      const st = result?.stats || result?.statistics || {};
+      const usageDaysSync = st.work_days ?? st.usageDays ?? st.usage_days ?? st.days ?? null;
       const payloadForStats2 = {
         chatData: chatData,
         lang: safeLang,
         fingerprint: safeFp,
         dimensions: result?.dimensions || null,
-        stats: result?.stats || result?.statistics || null,
+        stats: {
+          ...(st),
+          usageDays: usageDaysSync != null ? Math.max(1, Number(usageDaysSync)) : null,
+          work_days: usageDaysSync != null ? Math.max(1, Number(usageDaysSync)) : (st.work_days ?? null),
+        },
         meta: context || null,
         vibeIndex: result?.vibeIndex || result?.vibe_index || null,
         personalityType: result?.personalityType || result?.personality_type || null,
@@ -1489,25 +1511,18 @@ class VibeCodingApp {
       try {
         const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
         const safeFp = (context && context.fingerprint) ? String(context.fingerprint) : (localStorage.getItem('user_fingerprint') || null);
-        // 【修复】降级模式下也保存 earliestFileTime 和 usageDays
-        let usageDaysLite = null;
-        let earliestFileTimeLite = null;
-        if (globalStats && globalStats.earliestFileTime) {
-          earliestFileTimeLite = globalStats.earliestFileTime;
-          const now = Date.now();
-          const diffMs = now - earliestFileTimeLite;
-          usageDaysLite = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
-        }
-        
+        const fromResultLite2 = result?.stats || result?.statistics || {};
+        let usageDaysLite2 = fromResultLite2.work_days ?? fromResultLite2.usageDays ?? fromResultLite2.usage_days ?? fromResultLite2.days ?? null;
+        if (usageDaysLite2 != null) usageDaysLite2 = Math.max(1, Number(usageDaysLite2));
         const payloadLite = {
           chatData: null,
           lang: safeLang,
           fingerprint: safeFp,
           dimensions: result?.dimensions || null,
           stats: {
-            ...(result?.stats || result?.statistics || {}),
-            earliestFileTime: earliestFileTimeLite,
-            usageDays: usageDaysLite,
+            ...(fromResultLite2),
+            usageDays: usageDaysLite2,
+            work_days: usageDaysLite2 ?? fromResultLite2.work_days ?? null,
           },
           meta: context || null,
           vibeIndex: result?.vibeIndex || result?.vibe_index || null,

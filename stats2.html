@@ -13317,9 +13317,9 @@
                             daySource = 'localStorage.earliestFileTime';
                         }
                         
-                        // 1b) 如果没有 earliestFileTime，但有 usageDays，直接使用
+                        // 1b) 如果没有 earliestFileTime，但有 usageDays/work_days，直接使用（含 Cloudflare 兜底）
                         if (dayCount === 'N/A') {
-                            const usageDays = st ? (st.usageDays ?? st.usage_days ?? null) : null;
+                            const usageDays = st ? (st.usageDays ?? st.usage_days ?? st.work_days ?? null) : null;
                             if (usageDays != null && Number(usageDays) > 0) {
                                 dayCount = nf.format(Number(usageDays));
                                 daySource = 'localStorage.usageDays';
@@ -13346,11 +13346,10 @@
                     } catch { /* ignore */ }
                 }
                 
-                // 【步骤3】最后兜底：使用 dimensionValues.day，但避免硬编码的 1
+                // 【步骤3】最后兜底：使用 dimensionValues.day（>=1 即显示，避免 Cloudflare 等环境仅返回 1 时显示 N/A）
                 if (dayCount === 'N/A') {
                     const fallbackDay = (dimensionValues.day !== undefined && dimensionValues.day !== null) ? Number(dimensionValues.day) : null;
-                    // 【关键修复】避免使用硬编码的 1（可能是后端默认值）
-                    if (fallbackDay != null && Number.isFinite(fallbackDay) && fallbackDay > 1) {
+                    if (fallbackDay != null && Number.isFinite(fallbackDay) && fallbackDay >= 1) {
                         dayCount = nf.format(Math.round(fallbackDay));
                         daySource = 'dimensionValues.day';
                     }
@@ -14137,9 +14136,9 @@
                         }
                     }
                     
-                    // 1b) 如果没有 earliestFileTime，但有 usageDays，直接使用
+                    // 1b) 如果没有 earliestFileTime，但有 usageDays/work_days，直接使用（含 Cloudflare 兜底）
                     if (day === undefined || day === null || !(Number(day) > 0)) {
-                        const usageDays = st ? (st.usageDays ?? st.usage_days ?? null) : null;
+                        const usageDays = st ? (st.usageDays ?? st.usage_days ?? st.work_days ?? null) : null;
                         if (usageDays != null && Number(usageDays) > 0) {
                             day = Number(usageDays);
                             daySource = 'localStorage.usageDays';
@@ -14153,9 +14152,9 @@
                 try {
                     const su = userData.stats && typeof userData.stats === 'object' ? userData.stats : null;
                     
-                    // 2a) 尝试云端 usageDays
-                    const usageDays = su && (su.usageDays ?? su.usage_days ?? su.workDays ?? su.days);
-                    if (usageDays != null && Number(usageDays) > 0 && Number(usageDays) !== 1) { // 避免使用硬编码的 1
+                    // 2a) 尝试云端 usageDays（含 work_days，>=1 即用，避免 Cloudflare 显示 N/A）
+                    const usageDays = su && (su.usageDays ?? su.usage_days ?? su.work_days ?? su.workDays ?? su.days);
+                    if (usageDays != null && Number(usageDays) >= 1) {
                         day = Number(usageDays);
                         daySource = 'cloud.usageDays';
                     } else {
@@ -14187,15 +14186,14 @@
                 } catch { /* ignore */ }
             }
             
-            // 【步骤3】最后兜底：使用 work_days 等，但避免硬编码的 1
+            // 【步骤3】最后兜底：使用 work_days 等（>=1 即用，避免 Cloudflare 仅返回 1 时显示 N/A）
             if (day === undefined || day === null || !(Number(day) > 0)) {
                 const fallbackFields = ['work_days', 'usage_days', 'days'];
                 for (const field of fallbackFields) {
                     const val = userData[field];
                     if (val !== undefined && val !== null) {
                         const num = Number(val);
-                        // 【关键修复】避免使用硬编码的 1（可能是后端默认值）
-                        if (Number.isFinite(num) && num > 1) {
+                        if (Number.isFinite(num) && num >= 1) {
                             day = num;
                             daySource = `cloud.${field}`;
                             break;
