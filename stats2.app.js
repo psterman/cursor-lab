@@ -6253,6 +6253,34 @@
          * 监听 user_analysis 表的 INSERT 事件
          */
         function startRealtimeListener() {
+            // Cloudflare 部署环境：不发起 Realtime/Presence，避免 CHANNEL_ERROR / TIMED_OUT（本地正常、线上失败）
+            const host = typeof window !== 'undefined' && window.location && window.location.hostname ? window.location.hostname : '';
+            // 增强 Cloudflare 检测：包括自定义域名（通过 CF-Ray header 检测）
+            const isCloudflareHost = /\.pages\.dev$/.test(host) || /\.workers\.dev$/.test(host) || host === 'pages.dev' || host === 'workers.dev';
+            // 检测 CF-Ray header（Cloudflare 唯一标识）
+            const cfRay = document.cookie.split(';').find(c => c.trim().startsWith('CF-Ray=')) ||
+                           (typeof window !== 'undefined' && window.performance && window.performance.getEntriesByType ?
+                           window.performance.getEntriesByType('resource').some(r => r.name.includes('cloudflare')) : false);
+            const isCloudflareEnv = isCloudflareHost || cfRay;
+
+            if (isCloudflareEnv) {
+                window.__PRESENCE_SKIPPED = true; // 供 trackSelf/updateOnlineList 静默降级，不刷「Presence频道未初始化」
+                console.log('[Realtime] ℹ️ 当前为 Cloudflare 环境，跳过 Realtime/Presence 订阅，使用静态数据');
+                try {
+                    const el = document.getElementById('online-count-value');
+                    if (el) el.textContent = '-';
+                    const textEl = document.getElementById('online-count-text');
+                    if (textEl) textEl.textContent = '-';
+                    // 在在线用户列表中显示说明
+                    const listContainer = document.getElementById('online-users-list');
+                    if (listContainer) {
+                        const msg = (typeof getI18nText === 'function' && getI18nText('realtime.unavailable')) || '当前环境不支持实时在线';
+                        listContainer.innerHTML = '<div class="text-zinc-500 text-center py-4 text-xs">' + escapeHtml(msg) + '</div>';
+                    }
+                } catch (_) {}
+                return;
+            }
+
             // 健壮性检查：确保 Supabase 客户端已初始化
             if (!supabaseClient) {
                 console.warn('[Realtime] ⚠️ Supabase 客户端未初始化，跳过 Realtime 监听');
