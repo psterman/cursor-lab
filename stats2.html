@@ -3988,7 +3988,7 @@
             // 阻止默认行为（控制台报错），但记录错误
             event.preventDefault();
         });
-        
+
         // ============================================
         // 初始化 Supabase 客户端（全局作用域直接执行）
         // ============================================
@@ -3996,22 +3996,52 @@
         let initAttempts = 0;
         const maxAttempts = 50; // 最多尝试 5 秒（50 * 100ms）
 
+        // 检测是否为 Cloudflare 环境
+        const host = typeof window !== 'undefined' && window.location && window.location.hostname ? window.location.hostname : '';
+        const isCloudflareHost = /\.pages\.dev$/.test(host) || /\.workers\.dev$/.test(host) || host === 'pages.dev' || host === 'workers.dev';
+        const cfRay = document.cookie.split(';').find(c => c.trim().startsWith('CF-Ray=')) ||
+                       (typeof window !== 'undefined' && window.performance && window.performance.getEntriesByType ?
+                       window.performance.getEntriesByType('resource').some(r => r.name.includes('cloudflare')) : false);
+        const isCloudflareEnv = isCloudflareHost || cfRay;
+
+        // 构建实时连接配置
+        const realtimeConfig = {
+            params: {
+                // Supabase Realtime 参数
+            }
+        };
+
+        if (isCloudflareEnv) {
+            // Cloudflare 环境：使用 Worker 代理的 WebSocket 端点
+            // 从当前 Worker URL 构建代理端点
+            const workerUrl = typeof window !== 'undefined' && window.location
+                ? `${window.location.protocol}//${window.location.host}`
+                : '';
+            realtimeConfig.params.ws = `${workerUrl}/realtime/v1`;
+            console.log('[Init] 🔄 Cloudflare 环境检测到，使用 WebSocket 代理:', realtimeConfig.params.ws);
+        }
+
         const initInterval = setInterval(() => {
             initAttempts++;
-            
+
             // 检查 supabase 是否已加载
             if (typeof supabase !== 'undefined') {
                 clearInterval(initInterval);
-                
+
                 try {
-                    // 实例化客户端（直接赋值给全局变量）
-                    supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-                    
+                    // 实例化客户端（配置实时连接）
+                    supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+                        realtime: realtimeConfig
+                    });
+
                     // 挂载到全局 window，供控制台脚本使用
                     window.supabaseClient = supabaseClient;
-                    
+
                     console.log('[Init] ✅ Supabase 客户端已成功挂载至 window.supabaseClient');
                     console.log('[Init] 💡 可在控制台使用 window.supabaseClient 访问客户端');
+                    if (isCloudflareEnv) {
+                        console.log('[Init] ✨ WebSocket 代理已启用，实时功能应正常工作');
+                    }
                 } catch (err) {
                     console.error('[Init] ❌ 初始化失败:', err);
                 }
@@ -9078,34 +9108,6 @@
          * 【Cloudflare】在 pages.dev / workers.dev 等环境下 WebSocket 易超时或失败，直接跳过避免报错
          */
         function startRealtimeListener() {
-            // Cloudflare 部署环境：不发起 Realtime/Presence，避免 CHANNEL_ERROR / TIMED_OUT（本地正常、线上失败）
-            const host = typeof window !== 'undefined' && window.location && window.location.hostname ? window.location.hostname : '';
-            // 增强 Cloudflare 检测：包括自定义域名（通过 CF-Ray header 检测）
-            const isCloudflareHost = /\.pages\.dev$/.test(host) || /\.workers\.dev$/.test(host) || host === 'pages.dev' || host === 'workers.dev';
-            // 检测 CF-Ray header（Cloudflare 唯一标识）
-            const cfRay = document.cookie.split(';').find(c => c.trim().startsWith('CF-Ray=')) ||
-                           (typeof window !== 'undefined' && window.performance && window.performance.getEntriesByType ?
-                           window.performance.getEntriesByType('resource').some(r => r.name.includes('cloudflare')) : false);
-            const isCloudflareEnv = isCloudflareHost || cfRay;
-
-            if (isCloudflareEnv) {
-                window.__PRESENCE_SKIPPED = true; // 供 trackSelf/updateOnlineList 静默降级，不刷「Presence频道未初始化」
-                console.log('[Realtime] ℹ️ 当前为 Cloudflare 环境，跳过 Realtime/Presence 订阅，使用静态数据');
-                try {
-                    const el = document.getElementById('online-count-value');
-                    if (el) el.textContent = '-';
-                    const textEl = document.getElementById('online-count-text');
-                    if (textEl) textEl.textContent = '-';
-                    // 在在线用户列表中显示说明
-                    const listContainer = document.getElementById('online-users-list');
-                    if (listContainer) {
-                        const msg = (typeof getI18nText === 'function' && getI18nText('realtime.unavailable')) || '当前环境不支持实时在线';
-                        listContainer.innerHTML = '<div class="text-zinc-500 text-center py-4 text-xs">' + escapeHtml(msg) + '</div>';
-                    }
-                } catch (_) {}
-                return;
-            }
-
             // 健壮性检查：确保 Supabase 客户端已初始化
             if (!supabaseClient) {
                 console.warn('[Realtime] ⚠️ Supabase 客户端未初始化，跳过 Realtime 监听');
