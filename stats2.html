@@ -3890,6 +3890,15 @@
             }
         })();
         
+        // 忽略浏览器扩展触发的无关未处理 Promise 错误（避免控制台刷 "message channel closed"）
+        window.addEventListener('unhandledrejection', function (event) {
+            const msg = (event.reason && (event.reason.message || String(event.reason))) || '';
+            if (typeof msg === 'string' && msg.includes('message channel closed') && msg.includes('asynchronous response')) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+        }, true);
+
         // Supabase 相关变量（全局作用域，不在任何函数内）
         let supabaseClient = null;
         let realtimeChannel = null;
@@ -9062,8 +9071,17 @@
         /**
          * 启动 Supabase Realtime 监听
          * 监听 user_analysis 表的 INSERT 事件
+         * 【Cloudflare】在 pages.dev / workers.dev 等环境下 WebSocket 易超时或失败，直接跳过避免报错
          */
         function startRealtimeListener() {
+            // Cloudflare 部署环境：不发起 Realtime/Presence，避免 CHANNEL_ERROR / TIMED_OUT（本地正常、线上失败）
+            const host = typeof window !== 'undefined' && window.location && window.location.hostname ? window.location.hostname : '';
+            const isCloudflareHost = /\.pages\.dev$/.test(host) || /\.workers\.dev$/.test(host) || host === 'pages.dev' || host === 'workers.dev';
+            if (isCloudflareHost) {
+                console.log('[Realtime] ℹ️ 当前为 Cloudflare 环境，跳过 Realtime/Presence 订阅，使用静态数据');
+                return;
+            }
+
             // 健壮性检查：确保 Supabase 客户端已初始化
             if (!supabaseClient) {
                 console.warn('[Realtime] ⚠️ Supabase 客户端未初始化，跳过 Realtime 监听');
@@ -9407,8 +9425,9 @@
                     .subscribe((status) => {
                         if (status === 'SUBSCRIBED') {
                             console.log('[Realtime] ✅ 已成功订阅 user_analysis 表的 INSERT 和 UPDATE 事件');
-                        } else if (status === 'CHANNEL_ERROR') {
-                            console.error('[Realtime] ❌ 订阅通道错误');
+                        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                            // 通道错误/超时常见于：Realtime 未开启、网络/防火墙限制 WebSocket，降级为警告避免刷屏
+                            console.warn('[Realtime] ⚠️ 订阅未就绪（' + status + '），将使用静态数据更新');
                         } else {
                             console.log(`[Realtime] ℹ️ 订阅状态: ${status}`);
                         }
@@ -9549,8 +9568,9 @@
                                 
                                 // 强制同步自身状态（必须显式调用）
                                 await trackSelf();
-                            } else if (status === 'CHANNEL_ERROR') {
-                                console.error('[Presence] ❌ Presence 频道错误');
+                            } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                                // 与 Realtime 一致：降级为警告，避免控制台刷红
+                                console.warn('[Presence] ⚠️ 订阅未就绪（' + status + '），在线人数将不实时更新');
                             } else {
                                 console.log(`[Presence] ℹ️ Presence 订阅状态: ${status}`);
                             }
@@ -9558,11 +9578,11 @@
 
                     console.log('[Presence] 🚀 Presence 监听已启动');
                 } catch (presenceError) {
-                    console.error('[Presence] ❌ 启动 Presence 监听失败:', presenceError);
+                    console.warn('[Presence] ⚠️ 启动 Presence 监听失败（将不显示实时在线）:', presenceError);
                 }
 
             } catch (error) {
-                console.error('[Realtime] ❌ 启动 Realtime 监听失败:', error);
+                console.warn('[Realtime] ⚠️ 启动 Realtime 监听失败（将使用静态数据）:', error);
             }
         }
 
