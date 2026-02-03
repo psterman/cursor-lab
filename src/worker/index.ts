@@ -5193,11 +5193,11 @@ app.get('/api/country-summary', async (c) => {
       }
     }
 
-    // latestRecords：保留少量，避免 payload 过大
+    // latestRecords：含 work_days、user_name、github_username，供 stats2 抽屉上岗天数与活跃节点头像
     let latestRecords: any[] = [];
     try {
       const lrUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
-      lrUrl.searchParams.set('select', 'user_name,github_username,user_identity,personality_type,ip_location,manual_location,updated_at,created_at');
+      lrUrl.searchParams.set('select', 'user_name,github_username,user_identity,personality_type,ip_location,manual_location,updated_at,created_at,work_days');
       lrUrl.searchParams.set('country_code', `eq.${cc}`);
       lrUrl.searchParams.set('order', 'updated_at.desc');
       lrUrl.searchParams.set('limit', '8');
@@ -5208,7 +5208,9 @@ app.get('/api/country-summary', async (c) => {
         location: r?.manual_location || r?.ip_location || country,
         time: r?.updated_at || r?.created_at || '',
         github_username: r?.github_username || null,
+        user_name: r?.user_name || null,
         user_identity: r?.user_identity || null,
+        work_days: r?.work_days != null ? Number(r.work_days) : undefined,
       }));
     } catch {
       latestRecords = [];

@@ -6295,7 +6295,8 @@
                             const name = v.name || (currentLang === 'en' ? `Record ${index + 1}` : `记录${index + 1}`);
                             
                             const avatarUrl = v.avatar_url || null;
-                            const githubUsername = v.github_username || null;
+                            // 活跃节点：优先 github_username，无则用 user_name（Cloudflare 上 API 可能只返回 user_name）
+                            const githubUsername = v.github_username || v.user_name || null;
                             
                             // 【修复】将 recordUserIdentity 定义移到 if 块外，确保在所有情况下都能访问
                             const recordUserIdentity = v.user_identity || null;
@@ -8504,6 +8505,7 @@
             }
 
             // 如果有有效的头像URL，使用它，但onerror时回退到DEFAULT_AVATAR
+            // referrerPolicy="no-referrer" 避免 Cloudflare 等环境下 GitHub 头像被拦截
             return `<img 
                 src="${avatarUrl}" 
                 alt="avatar" 
@@ -8512,6 +8514,7 @@
                 height="${size}" 
                 loading="lazy" 
                 style="object-fit: cover;"
+                referrerpolicy="no-referrer"
                 onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
             />`;
         }
@@ -8535,9 +8538,9 @@
                 const location = v.location || v.ip_location || (currentLang === 'en' ? 'Unknown' : '未知');
                 const name = v.name || (currentLang === 'en' ? `Record ${index + 1}` : `记录${index + 1}`);
                 
-                // 获取头像信息
+                // 获取头像信息（Cloudflare：无 github_username 时用 user_name 作为 GitHub 登录名回退）
                 const avatarUrl = v.avatar_url || null;
-                const githubUsername = v.github_username || null;
+                const githubUsername = v.github_username || v.user_name || null;
                 
                 // 判断逻辑：如果 github_username 为空、或者是默认值，则不要请求 GitHub 图片
                 // 【Task 3】传入 user_identity，对 fingerprint 用户跳过严格校验
@@ -12946,7 +12949,22 @@
                     bestScore = cs;
                 }
             }
-            return best || user;
+            best = best || user;
+            // 【Cloudflare 上岗天数】优先采用同人记录中 work_days 最大的值，避免 DB 旧记录为 1 时始终显示 1 天
+            const maxWorkDaysCandidate = candidates.reduce((a, c) => {
+                const d = c && (c.work_days ?? c.usage_days ?? c.usageDays ?? c.days);
+                const n = d != null ? Number(d) : NaN;
+                const aVal = a && (a.work_days ?? a.usage_days ?? a.usageDays ?? a.days);
+                const aNum = aVal != null ? Number(aVal) : NaN;
+                return (Number.isFinite(n) && n > (Number.isFinite(aNum) ? aNum : 0)) ? c : a;
+            }, null);
+            if (maxWorkDaysCandidate) {
+                const maxDays = maxWorkDaysCandidate.work_days ?? maxWorkDaysCandidate.usage_days ?? maxWorkDaysCandidate.usageDays ?? maxWorkDaysCandidate.days;
+                if (maxDays != null && Number(maxDays) >= 1) {
+                    best = { ...best, work_days: Number(maxDays), usage_days: Number(maxDays), usageDays: Number(maxDays) };
+                }
+            }
+            return best;
         }
 
         /**
