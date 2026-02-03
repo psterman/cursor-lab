@@ -1067,6 +1067,14 @@ class VibeCodingApp {
         meta: context || null,
         vibeIndex: result?.vibeIndex || result?.vibe_index || null,
         personalityType: result?.personalityType || result?.personality_type || null,
+        // 【新增】保存真实评价所需字段
+        personalityName: result?.personalityName || result?.personality_name || null,
+        personalityNameZh: result?.personalityNameZh || result?.personality_name_zh || null,
+        personalityNameEn: result?.personalityNameEn || result?.personality_name_en || null,
+        roastText: result?.roastText || result?.roast_text || null,
+        roastTextZh: result?.roastTextZh || result?.roast_text_zh || null,
+        roastTextEn: result?.roastTextEn || result?.roast_text_en || null,
+        analysis: result?.analysis || null,
       };
       localStorage.setItem('last_analysis_data', JSON.stringify(payloadForStats2));
     } catch (e) {
