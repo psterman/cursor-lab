@@ -9669,10 +9669,14 @@
             try {
                 // 优先从 Worker API 拉取（线上部署时静态文件路径可能 404）
                 const apiEndpoint = (window.getApiEndpoint ? window.getApiEndpoint() : document.querySelector('meta[name="api-endpoint"]')?.content) || '';
+                const metaEndpoint = (document.querySelector('meta[name="api-endpoint"]')?.content || '').trim();
                 const base = apiEndpoint.endsWith('/') ? apiEndpoint : (apiEndpoint ? apiEndpoint + '/' : '');
-                if (base) {
+                const metaBase = metaEndpoint.endsWith('/') ? metaEndpoint : (metaEndpoint ? metaEndpoint + '/' : '');
+                const urlsToTry = base ? [base + 'api/rank-resources'] : [];
+                if (metaBase && metaBase !== base) urlsToTry.push(metaBase + 'api/rank-resources');
+                for (const url of urlsToTry) {
                     try {
-                        const res = await fetch(base + 'api/rank-resources', { cache: 'force-cache' });
+                        const res = await fetch(url, { cache: 'force-cache', signal: AbortSignal.timeout(8000) });
                         if (res.ok) {
                             const json = await res.json();
                             if (json && typeof json === 'object' && Object.keys(json).length > 0) {
@@ -9682,8 +9686,11 @@
                             }
                         }
                     } catch (e) {
-                        console.debug('[Rank] Worker rank-resources 请求失败，尝试本地路径:', e?.message);
+                        console.debug('[Rank] Worker rank-resources 请求失败:', e?.message);
                     }
+                }
+                if (urlsToTry.length > 0) {
+                    console.warn('[Rank] Worker API 不可用，尝试本地/静态路径');
                 }
                 // 优化：优先尝试读取 TS 文件（因为环境目前解析 TS 文件更稳定）
                 const tsPaths = [
