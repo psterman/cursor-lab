@@ -1718,9 +1718,12 @@ app.post('/api/v2/analyze', async (c) => {
     const avgMessageLength = Math.round(totalChars / totalMessages || 0);
 
     // 【计算额外统计信息】用于 work_days, jiafang_count, ketao_count
-    // 计算使用天数（从消息时间戳中提取唯一日期数量，或从 body 中获取）
+    // 计算使用天数：优先客户端上报（body.stats.work_days/usageDays），确保 Cloudflare 与本地一致
     let workDays = 1;
-    if (body.usageDays !== undefined || body.days !== undefined || body.workDays !== undefined) {
+    const statsWorkDays = (body.stats as any)?.work_days ?? (body.stats as any)?.usageDays ?? (body.stats as any)?.usage_days ?? (body.stats as any)?.days;
+    if (statsWorkDays !== undefined && statsWorkDays !== null && Number(statsWorkDays) >= 1) {
+      workDays = Math.max(1, Number(statsWorkDays));
+    } else if (body.usageDays !== undefined || body.days !== undefined || body.workDays !== undefined) {
       workDays = body.usageDays || body.days || body.workDays || 1;
     } else if (userMessages.length > 0) {
       // 从消息时间戳中提取唯一日期
@@ -5884,8 +5887,8 @@ async function fetchFromSupabase(
         }),
         // 3) 获取所有 personality_type（用于统计人格分布）
         fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/user_analysis?select=personality_type`),
-        // 4) 获取最新 5 条记录（personality_type、ip_location、created_at 和 user_name）
-        fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/user_analysis?select=personality_type,ip_location,created_at,user_name&order=created_at.desc&limit=5`),
+        // 4) 获取最新记录（含 work_days、github_username，供 stats2 抽屉「上岗天数」正确显示）
+        fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/user_analysis?select=personality_type,ip_location,created_at,user_name,work_days,github_username,user_identity,fingerprint,updated_at&order=updated_at.desc&limit=20`),
       ]),
     ]);
 
@@ -5901,7 +5904,7 @@ async function fetchFromSupabase(
     let avgPerScan: number = 0; // 【新增】单次平均篇幅（优先使用视图字段）
     let avgCharsPerUser: number = 0; // 【新增】人均平均篇幅（优先使用视图字段）
     let personalityDistribution: Array<{ type: string; count: number }> = []; // 人格分布（前三个）
-    let latestRecords: Array<{ personality_type: string; ip_location: string; created_at: string; name: string; type: string; location: string; time: string }> = []; // 最新 5 条记录
+    let latestRecords: Array<{ personality_type: string; ip_location: string; created_at: string; name: string; type: string; location: string; time: string; work_days?: number; usage_days?: number; github_username?: string | null; user_identity?: string | null; fingerprint?: string | null; user_name?: string | null }> = []; // 最新记录（含 work_days 供 stats2 上岗天数）
 
     if (!globalStatsRes.ok) {
       console.error('[View Error] v_global_stats_v6:', `HTTP ${globalStatsRes.status} - ${globalStatsRes.statusText}`);
@@ -6143,7 +6146,7 @@ async function fetchFromSupabase(
             }
           }
           
-          // 【处理最新记录】获取最近 5 条诊断记录
+          // 【处理最新记录】获取最近记录（含 work_days，供 stats2 抽屉「上岗天数」正确显示）
           if (latestRes && latestRes.ok) {
             try {
               const latestData = await latestRes.json();
@@ -6155,7 +6158,13 @@ async function fetchFromSupabase(
                   name: item.user_name || `匿名受害者${index + 1}`,
                   type: item.personality_type || 'UNKNOWN',
                   location: item.ip_location || '未知',
-                  time: item.created_at || new Date().toISOString(),
+                  time: item.updated_at || item.created_at || new Date().toISOString(),
+                  work_days: item.work_days != null ? Number(item.work_days) : undefined,
+                  usage_days: item.work_days != null ? Number(item.work_days) : undefined,
+                  github_username: item.github_username || null,
+                  user_identity: item.user_identity || null,
+                  fingerprint: item.fingerprint || null,
+                  user_name: item.user_name || null,
                 }));
                 
                 console.log('[Worker] ✅ 最新记录获取完成:', latestRecords.length);
