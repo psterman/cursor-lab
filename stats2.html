@@ -9078,7 +9078,14 @@
             const host = typeof window !== 'undefined' && window.location && window.location.hostname ? window.location.hostname : '';
             const isCloudflareHost = /\.pages\.dev$/.test(host) || /\.workers\.dev$/.test(host) || host === 'pages.dev' || host === 'workers.dev';
             if (isCloudflareHost) {
+                window.__PRESENCE_SKIPPED = true; // 供 trackSelf/updateOnlineList 静默降级，不刷「Presence频道未初始化」
                 console.log('[Realtime] ℹ️ 当前为 Cloudflare 环境，跳过 Realtime/Presence 订阅，使用静态数据');
+                try {
+                    const el = document.getElementById('online-count-value');
+                    if (el) el.textContent = '-';
+                    const textEl = document.getElementById('online-count-text');
+                    if (textEl) textEl.textContent = '-';
+                } catch (_) {}
                 return;
             }
 
@@ -9687,6 +9694,7 @@
          */
         async function trackSelf() {
             if (!presenceChannel) {
+                if (window.__PRESENCE_SKIPPED) return; // Cloudflare 已跳过 Presence，静默返回
                 console.warn('[Presence] ⚠️ Presence频道未初始化');
                 return;
             }
@@ -9858,6 +9866,11 @@
          */
         function updateOnlineList() {
             if (!presenceChannel) {
+                if (window.__PRESENCE_SKIPPED) {
+                    // Cloudflare 环境：显示「当前环境不支持实时在线」占位，避免反复报错
+                    renderOnlineUsersListUnavailable();
+                    return;
+                }
                 console.warn('[UserList] ⚠️ Presence频道未初始化');
                 return;
             }
@@ -9865,6 +9878,17 @@
             // 通过 onlineChannel.presenceState() 获取最新状态
             const state = presenceChannel.presenceState();
             renderOnlineUsersList(state);
+        }
+
+        /** Cloudflare 等未启用 Presence 时：在线用户列表占位文案，不报错 */
+        function renderOnlineUsersListUnavailable() {
+            const listContainer = document.getElementById('online-users-list');
+            if (!listContainer) return;
+            const msg = (typeof getI18nText === 'function' && getI18nText('realtime.unavailable')) || '当前环境不支持实时在线';
+            if (!listContainer.dataset.unavailableShown) {
+                listContainer.dataset.unavailableShown = '1';
+                listContainer.innerHTML = '<div class="text-zinc-500 text-center py-4 text-xs">' + escapeHtml(msg) + '</div>';
+            }
         }
         
         /**
