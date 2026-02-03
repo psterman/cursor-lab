@@ -4879,6 +4879,570 @@
                 }, 0);
             };
 
+            // ===== 排名数据加载和更新函数 =====
+            
+            // 加载排名JSON数据
+            // 将缓存暴露到全局，以便在语言切换时清除
+            if (!window.rankingDataCache) {
+                window.rankingDataCache = {};
+            }
+            const rankingDataCache = window.rankingDataCache;
+            const loadRankingData = async (jsonFile, lang = 'zh-CN') => {
+                // 根据语言生成缓存键
+                const cacheKey = `${jsonFile}_${lang}`;
+                if (rankingDataCache[cacheKey]) {
+                    return rankingDataCache[cacheKey];
+                }
+                try {
+                    // 尝试加载对应语言的JSON文件
+                    let targetFile = jsonFile;
+                    if (lang === 'en') {
+                        // 英文版使用*2.json格式（如please2.json, word2.json等）
+                        const enFile = jsonFile.replace('.json', '2.json');
+                        try {
+                            const enResponse = await fetch(`src/${enFile}`);
+                            if (enResponse.ok) {
+                                targetFile = enFile;
+                            } else {
+                                // 英文文件不存在，使用中文版本
+                                console.warn(`英文版文件 ${enFile} 不存在（HTTP ${enResponse.status}），使用中文版本`);
+                            }
+                        } catch (e) {
+                            // 英文文件不存在，使用中文版本
+                            console.warn(`英文版文件 ${enFile} 加载失败，使用中文版本:`, e.message);
+                        }
+                    }
+                    const response = await fetch(`src/${targetFile}`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    // 英文版JSON文件可能包含多个JSON对象，需要特殊处理
+                    const text = await response.text();
+                    let data;
+                    if (lang === 'en' && targetFile.endsWith('2.json')) {
+                        // 英文版文件（*2.json）可能包含多个独立的JSON对象
+                        // 先尝试作为单个JSON解析
+                        try {
+                            data = JSON.parse(text);
+                            // 如果解析成功但没有segments字段，说明是单个对象，需要转换为segments数组
+                            if (!data.segments && !data.levels) {
+                                data = { segments: [data], isEnglishFormat: true };
+                            } else if (data.segments) {
+                                data.isEnglishFormat = true;
+                            }
+                        } catch (e) {
+                            // 如果失败，尝试分割多个JSON对象
+                            // 查找所有独立的JSON对象（以{开头，以}结尾）
+                            const segments = [];
+                            let braceCount = 0;
+                            let startPos = -1;
+                            
+                            for (let i = 0; i < text.length; i++) {
+                                if (text[i] === '{') {
+                                    if (braceCount === 0) startPos = i;
+                                    braceCount++;
+                                } else if (text[i] === '}') {
+                                    braceCount--;
+                                    if (braceCount === 0 && startPos !== -1) {
+                                        // 找到一个完整的JSON对象
+                                        try {
+                                            const jsonStr = text.substring(startPos, i + 1);
+                                            const obj = JSON.parse(jsonStr);
+                                            segments.push(obj);
+                                        } catch (parseError) {
+                                            console.warn('解析JSON对象失败:', parseError);
+                                        }
+                                        startPos = -1;
+                                    }
+                                }
+                            }
+                            
+                            if (segments.length > 0) {
+                                data = { segments: segments, isEnglishFormat: true };
+                            } else {
+                                // 如果英文版解析失败，尝试加载中文版本作为回退
+                                console.warn(`英文版 ${targetFile} 解析失败，尝试加载中文版本`);
+                                const zhFile = jsonFile; // 使用原始的中文文件名
+                                try {
+                                    const zhResponse = await fetch(`src/${zhFile}`);
+                                    if (zhResponse.ok) {
+                                        const zhText = await zhResponse.text();
+                                        data = JSON.parse(zhText);
+                                        console.log(`已回退到中文版本: ${zhFile}`);
+                                    } else {
+                                        throw new Error(`无法加载中文版本 ${zhFile}`);
+                                    }
+                                } catch (zhError) {
+                                    throw new Error(`无法解析JSON文件（英文版和中文版都失败）`);
+                                }
+                            }
+                        }
+                    } else {
+                        data = JSON.parse(text);
+                    }
+                    rankingDataCache[cacheKey] = data;
+                    return data;
+                } catch (error) {
+                    console.error(`加载 ${jsonFile} 失败:`, error);
+                    return null;
+                }
+            };
+            
+            // 根据排名匹配对应的level和comment
+            const getRankingComment = (data, rank, total, lang = 'zh-CN') => {
+                if (!data || rank === null || rank === undefined || total <= 0) {
+                    console.warn('[getRankingComment] 参数无效:', { data: !!data, rank, total, lang });
+                    return null;
+                }
+                
+                // 强制类型转换：将输入值转换为数字，防止字符串对比导致的逻辑失效
+                const rankNum = parseFloat(rank);
+                const totalNum = parseFloat(total);
+                
+                if (isNaN(rankNum) || isNaN(totalNum) || totalNum <= 0) {
+                    console.warn('[getRankingComment] 参数转换失败:', { rank, total, rankNum, totalNum });
+                    return null;
+                }
+                
+                // 限制 rank 范围，防止溢出：Math.min(99, Math.max(1, rank))
+                const safeRank = Math.min(99, Math.max(1, rankNum));
+                const safeTotal = Math.max(1, totalNum);
+                
+                const percent = ((safeTotal - safeRank + 1) / safeTotal * 100);
+                const rankPercent = (safeRank / safeTotal) * 100;
+                
+                console.log('[getRankingComment] 开始匹配:', {
+                    rank, 
+                    total, 
+                    percent: percent.toFixed(1) + '%',
+                    rankPercent: rankPercent.toFixed(1) + '%',
+                    lang,
+                    hasLevels: !!data.levels,
+                    levelsCount: data.levels?.length
+                });
+                
+                // 处理英文版JSON格式（有segments数组或isEnglishFormat标志）
+                if (data.isEnglishFormat && data.segments) {
+                    // 英文版：根据rank匹配segment
+                    for (const segment of data.segments) {
+                        if (!segment.segment || !segment.comments) continue;
+                        
+                        // 解析segment格式，如"Rank 1-33"或"Rank 68-100"
+                        const segmentMatch = segment.segment.match(/Rank\s+(\d+)-(\d+)/);
+                        if (segmentMatch) {
+                            const minRank = parseInt(segmentMatch[1]);
+                            const maxRank = parseInt(segmentMatch[2]);
+                            if (rank >= minRank && rank <= maxRank) {
+                                // 找到匹配的segment，随机选择一个comment
+                                const randomComment = segment.comments[Math.floor(Math.random() * segment.comments.length)];
+                                return {
+                                    title: randomComment.title,
+                                    content: randomComment.content,
+                                    label: segment.segment
+                                };
+                            }
+                        }
+                    }
+                    return null;
+                }
+                
+                // 处理中文版JSON格式（有levels数组）
+                if (!data.levels) {
+                    return null;
+                }
+                
+                // 遍历levels，找到匹配的level
+                for (const level of data.levels) {
+                    const range = level.range;
+                    
+                    // 处理不同的range格式
+                    let matched = false;
+                    
+                    // 处理 "TOP 81-100" 格式（please.json）
+                    if (range.startsWith('TOP ')) {
+                        const rangeStr = range.replace('TOP ', '');
+                        const [minPercent, maxPercent] = rangeStr.split('-').map(s => parseFloat(s.trim()));
+                        const minP = parseFloat(minPercent);
+                        const maxP = parseFloat(maxPercent);
+                        if (!isNaN(minP) && !isNaN(maxP) && percent >= minP && percent <= maxP) {
+                            matched = true;
+                        }
+                    }
+                    // 处理 "1-10", "11-30" 等格式（no.json, ai.json）
+                    else if (/^\d+-\d+$/.test(range)) {
+                        const [minRank, maxRank] = range.split('-').map(s => parseInt(s.trim()));
+                        const minR = parseInt(minRank);
+                        const maxR = parseInt(maxRank);
+                        if (!isNaN(minR) && !isNaN(maxR) && safeRank >= minR && safeRank <= maxR) {
+                            matched = true;
+                        }
+                    }
+                    // 处理 "91-100+" 格式（no.json）
+                    else if (/^\d+-\d+\+$/.test(range)) {
+                        const [minRank] = range.replace('+', '').split('-').map(s => parseInt(s.trim()));
+                        const minR = parseInt(minRank);
+                        if (!isNaN(minR) && safeRank >= minR) {
+                            matched = true;
+                        }
+                    }
+                    // 处理 "1-7天", "8-30天" 等格式（day.json）
+                    else if (range.includes('天') || range === '181+' || range === '181+天') {
+                        const currentRankPercent = (safeRank / safeTotal) * 100;
+                        
+                        console.log(`[day.json匹配] range: ${range}, currentRankPercent: ${currentRankPercent}`);
+                        
+                        if (range === '181+' || range === '181+天') {
+                            if (currentRankPercent <= 20.0) {
+                                console.log(`[day.json匹配成功] ${range} matched!`);
+                                matched = true;
+                            }
+                        } else if (range === '91-180天') {
+                            if (currentRankPercent > 20.0 && currentRankPercent <= 40.0) matched = true;
+                        } else if (range === '31-90天') {
+                            if (currentRankPercent > 40.0 && currentRankPercent <= 60.0) matched = true;
+                        } else if (range === '8-30天') {
+                            if (currentRankPercent > 60.0 && currentRankPercent <= 80.0) matched = true;
+                        } else if (range === '1-7天') {
+                            if (currentRankPercent > 80.0) matched = true;
+                        }
+                    }
+                    // 处理 "1-50字", "51-200字" 等格式（word.json）
+                    else if (range === '1001+' || range === '1001+字' || range === '1-50字' || range === '51-200字' || range === '201-500字' || range === '501-1000字') {
+                        const currentRankPercent = (safeRank / safeTotal) * 100;
+                        
+                        console.log(`[word.json匹配] range: ${range}, currentRankPercent: ${currentRankPercent}`);
+                        
+                        if (range === '1001+' || range === '1001+字') {
+                            if (currentRankPercent <= 20.0) {
+                                console.log(`[word.json匹配成功] ${range} matched!`);
+                                matched = true;
+                            }
+                        } else if (range === '501-1000字') {
+                            if (currentRankPercent > 20.0 && currentRankPercent <= 40.0) {
+                                console.log(`[word.json匹配成功] ${range} matched!`);
+                                matched = true;
+                            }
+                        } else if (range === '201-500字') {
+                            if (currentRankPercent > 40.0 && currentRankPercent <= 60.0) matched = true;
+                        } else if (range === '51-200字') {
+                            if (currentRankPercent > 60.0 && currentRankPercent <= 80.0) matched = true;
+                        } else if (range === '1-50字') {
+                            if (currentRankPercent > 80.0) matched = true;
+                        }
+                    }
+                    // 处理 "1-500字", "501-2000字" 等格式（say.json）
+                    else if (range === '10001+字' || range === '5001-10000字' || range === '2001-5000字' || range === '501-2000字' || range === '1-500字') {
+                        const currentRankPercent = (safeRank / safeTotal) * 100;
+                        if (range === '10001+字') {
+                            if (currentRankPercent <= 20) matched = true;
+                        } else if (range === '5001-10000字') {
+                            if (currentRankPercent > 20 && currentRankPercent <= 40) matched = true;
+                        } else if (range === '2001-5000字') {
+                            if (currentRankPercent > 40 && currentRankPercent <= 60) matched = true;
+                        } else if (range === '501-2000字') {
+                            if (currentRankPercent > 60 && currentRankPercent <= 80) matched = true;
+                        } else if (range === '1-500字') {
+                            if (currentRankPercent > 80) matched = true;
+                        }
+                    }
+                    
+                    if (matched && level.comments && level.comments.length > 0) {
+                        // 随机选择一个comment
+                        const randomComment = level.comments[Math.floor(Math.random() * level.comments.length)];
+                        
+                        // 调试日志
+                        console.log(`[getRankingComment] 匹配成功:`, {
+                            range: range,
+                            rank: rank,
+                            total: total,
+                            rankPercent: rankPercent.toFixed(1) + '%',
+                            title: randomComment.title,
+                            content: randomComment.content?.substring(0, 50) + '...'
+                        });
+                        
+                        // 根据语言选择对应的文本
+                        let title = randomComment.title;
+                        let content = randomComment.content;
+                        let label = level.label;
+                        
+                        // 如果当前语言是英文，但数据是中文，尝试使用多语言字段或提供默认翻译
+                        if (lang === 'en') {
+                            // 优先使用英文字段（如果存在）
+                            if (randomComment.title_en) {
+                                title = randomComment.title_en;
+                            }
+                            if (randomComment.content_en) {
+                                content = randomComment.content_en;
+                            }
+                            if (level.label_en) {
+                                label = level.label_en;
+                            }
+                        }
+                        
+                        return {
+                            title: title,
+                            content: content,
+                            label: label
+                        };
+                    }
+                }
+                
+                console.warn('[getRankingComment] 未找到匹配的level:', {
+                    rank: safeRank,
+                    total: safeTotal,
+                    rankPercent: rankPercent.toFixed(1) + '%',
+                    levels: data.levels?.map(l => l.range)
+                });
+                // 处理 0% 的情况：返回默认值而不是 undefined
+                if (rankPercent === 0 || safeRank === 0) {
+                    return {
+                        title: lang === 'en' ? 'Ranking Data' : '排名数据',
+                        content: lang === 'en' ? 'Your ranking data is being calculated.' : '您的排名数据正在计算中。',
+                        label: lang === 'en' ? 'Top 0%' : '前 0%'
+                    };
+                }
+                return null;
+            };
+            
+            // 统一更新排名徽章的函数（暴露到全局，以便在语言切换时调用）
+            const updateRankingBadges = async (rankings, lang = 'zh-CN') => {
+                if (!rankings) {
+                    console.warn('[updateRankingBadges] rankings 为空，无法更新排名徽章');
+                    return;
+                }
+                
+                // 辅助函数：从排名对象中提取 rank 值，兼容 ranking 或 rankPercent 字段
+                const extractRank = (rankingObj, total) => {
+                    if (!rankingObj) return null;
+                    
+                    // 优先使用 rank 字段
+                    if (rankingObj.rank !== null && rankingObj.rank !== undefined) {
+                        return Number(rankingObj.rank);
+                    }
+                    
+                    // 兼容 ranking 字段
+                    if (rankingObj.ranking !== null && rankingObj.ranking !== undefined) {
+                        const rankingValue = Number(rankingObj.ranking);
+                        // 如果 ranking 是 0-100 之间的值，认为是百分比，需要转换为排名
+                        if (!isNaN(rankingValue) && rankingValue >= 0 && rankingValue <= 100 && total > 0) {
+                            // 百分比转换为排名（rankPercent 越小，排名越靠前）
+                            return Math.max(1, Math.round(total * (rankingValue / 100)));
+                        }
+                        // 如果 ranking 大于 100，认为是排名数字
+                        return rankingValue;
+                    }
+                    
+                    // 兼容 rankPercent 字段
+                    if (rankingObj.rankPercent !== null && rankingObj.rankPercent !== undefined && total > 0) {
+                        const rankPercent = Number(rankingObj.rankPercent);
+                        if (!isNaN(rankPercent) && rankPercent >= 0 && rankPercent <= 100) {
+                            // 百分比转换为排名（rankPercent 越小，排名越靠前）
+                            return Math.max(1, Math.round(total * (rankPercent / 100)));
+                        }
+                    }
+                    
+                    return null;
+                };
+                
+                // 获取i18n翻译函数
+                const t = (key) => {
+                    if (window.i18n && window.i18n.getText) {
+                        return window.i18n.getText(key, lang);
+                    }
+                    return key;
+                };
+                
+                // 格式化数字函数
+                const formatNumber = (num) => {
+                    if (typeof num !== 'number' || isNaN(num)) return '0';
+                    const isEn = lang === 'en';
+                    
+                    if (isEn) {
+                        if (num >= 1000000000000) return (num / 1000000000000).toFixed(1) + 'T';
+                        if (num >= 1000000000) return (num / 1000000000).toFixed(1) + 'B';
+                        if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+                        if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+                        return num.toString();
+                    }
+                    
+                    if (num >= 100000000) return (num / 100000000).toFixed(1) + '亿';
+                    if (num >= 10000) return (num / 10000).toFixed(1) + '万';
+                    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+                    return num.toString();
+                };
+                
+                // 更新排名徽章（统计卡片右下角）
+                const updateBadge = (badgeId, rankingObj, total) => {
+                    const badge = document.getElementById(badgeId);
+                    if (!badge) return;
+                    
+                    const rank = extractRank(rankingObj, total);
+                    const actualTotal = rankingObj?.total || total || 0;
+                    
+                    if (rank !== null && rank !== undefined && actualTotal > 0) {
+                        // 限制 rank 范围，防止溢出：Math.min(99, Math.max(1, rank))
+                        const safeRank = Math.min(99, Math.max(1, rank));
+                        const safeTotal = Math.max(1, actualTotal);
+                        const percent = Math.min(99, Math.max(1, ((safeTotal - safeRank + 1) / safeTotal * 100))).toFixed(1);
+                        if (lang === 'en') {
+                            badge.textContent = `#${safeRank} (Top ${percent}%)`;
+                        } else {
+                            badge.textContent = `#${safeRank} (前${percent}%)`;
+                        }
+                        badge.classList.add('has-rank');
+                    } else {
+                        badge.textContent = '--';
+                        badge.classList.remove('has-rank');
+                    }
+                };
+                
+                // 更新"全网横向排名"区域的卡片（大卡片）
+                const updateRankingCard = async (valueId, percentId, rankingObj, total, jsonFile) => {
+                    const valueEl = document.getElementById(valueId);
+                    const percentEl = document.getElementById(percentId);
+                    const beatenEl = document.getElementById(percentId.replace('Percent', 'Beaten'));
+                    
+                    // 确保标题不换行
+                    if (valueEl) {
+                        valueEl.style.whiteSpace = 'nowrap';
+                        valueEl.style.overflow = 'hidden';
+                        valueEl.style.textOverflow = 'ellipsis';
+                    }
+                    if (percentEl) {
+                        percentEl.style.whiteSpace = 'nowrap';
+                        percentEl.style.overflow = 'hidden';
+                        percentEl.style.textOverflow = 'ellipsis';
+                    }
+                    if (beatenEl) {
+                        beatenEl.style.whiteSpace = 'nowrap';
+                        beatenEl.style.overflow = 'visible';
+                        beatenEl.style.textOverflow = 'clip';
+                    }
+                    
+                    // 从 rankingObj 中提取 rank 值，兼容 ranking 或 rankPercent 字段
+                    const rank = extractRank(rankingObj, total);
+                    const actualTotal = rankingObj?.total || total || 0;
+                    
+                    // 使用原始 rank 值计算击败人数，但显示时限制范围防止溢出
+                    const actualRank = rank !== null && rank !== undefined ? rank : null;
+                    const safeRank = actualRank !== null ? Math.min(99, Math.max(1, actualRank)) : null;
+                    
+                    if (actualRank !== null && actualRank !== undefined && actualTotal > 0) {
+                        // 计算击败人数：使用原始 rank 值，而不是被限制的 safeRank
+                        const beatenCount = Math.max(0, actualTotal - actualRank);
+                        
+                        // 判断是否在100名内
+                        if (safeRank <= 100) {
+                            // 100名内：显示排名数字和JSON中的标题和评语
+                            const data = await loadRankingData(jsonFile, lang);
+                            const comment = getRankingComment(data, safeRank, actualTotal, lang);
+                            
+                            if (comment && valueEl && percentEl) {
+                                // valueEl显示排名数字
+                                valueEl.textContent = safeRank;
+                                valueEl.style.fontSize = '36px';
+                                valueEl.style.fontWeight = '700';
+                                valueEl.style.fontFamily = "'JetBrains Mono', monospace";
+                                
+                                // percentEl显示JSON中的title和content
+                                percentEl.innerHTML = `<strong>${comment.title}</strong><br/>${comment.content}`;
+                                percentEl.style.whiteSpace = 'normal';
+                                percentEl.style.color = '#ffffff';
+                                
+                                // 击败人数
+                                if (beatenEl) {
+                                    const beatPercent = actualTotal > 0 
+                                        ? Math.min(99.9, Math.max(0.1, (beatenCount / actualTotal * 100))).toFixed(1)
+                                        : '0.0';
+                                    if (lang === 'en') {
+                                        beatenEl.textContent = `Defeated ${formatNumber(beatenCount)} users (Top ${beatPercent}%)`;
+                                    } else {
+                                        beatenEl.textContent = `击败了 ${formatNumber(beatenCount)} 人 (超过 ${beatPercent}%)`;
+                                    }
+                                }
+                            } else {
+                                // 如果无法从JSON获取，使用默认显示
+                                const percent = Math.min(99, Math.max(1, ((actualTotal - safeRank + 1) / actualTotal * 100))).toFixed(1);
+                                if (valueEl) {
+                                    valueEl.textContent = safeRank;
+                                    valueEl.style.fontSize = '36px';
+                                    valueEl.style.fontWeight = '700';
+                                    valueEl.style.fontFamily = "'JetBrains Mono', monospace";
+                                }
+                                if (percentEl) {
+                                    if (lang === 'en') {
+                                        percentEl.textContent = `Top ${percent}%`;
+                                    } else {
+                                        percentEl.textContent = `前 ${percent}%`;
+                                    }
+                                    percentEl.style.whiteSpace = 'nowrap';
+                                }
+                                if (beatenEl) {
+                                    const beatPercent = actualTotal > 0 
+                                        ? Math.min(99.9, Math.max(0.1, (beatenCount / actualTotal * 100))).toFixed(1)
+                                        : '0.0';
+                                    if (lang === 'en') {
+                                        beatenEl.textContent = `Defeated ${formatNumber(beatenCount)} users (Top ${beatPercent}%)`;
+                                    } else {
+                                        beatenEl.textContent = `击败了 ${formatNumber(beatenCount)} 人 (超过 ${beatPercent}%)`;
+                                    }
+                                }
+                            }
+                        } else {
+                            // 101名以后：只显示数字排名
+                            if (valueEl) {
+                                valueEl.textContent = safeRank;
+                                valueEl.style.fontSize = '36px';
+                                valueEl.style.fontWeight = '700';
+                                valueEl.style.fontFamily = "'JetBrains Mono', monospace";
+                            }
+                            if (percentEl) {
+                                if (lang === 'en') {
+                                    percentEl.textContent = 'Rank';
+                                } else {
+                                    percentEl.textContent = '名';
+                                }
+                                percentEl.style.whiteSpace = 'nowrap';
+                            }
+                            if (beatenEl) {
+                                const beatPercent = actualTotal > 0 
+                                    ? Math.min(99.9, Math.max(0.1, (beatenCount / actualTotal * 100))).toFixed(1)
+                                    : '0.0';
+                                if (lang === 'en') {
+                                    beatenEl.textContent = `Defeated ${formatNumber(beatenCount)} users (Top ${beatPercent}%)`;
+                                } else {
+                                    beatenEl.textContent = `击败了 ${formatNumber(beatenCount)} 人 (超过 ${beatPercent}%)`;
+                                }
+                            }
+                        }
+                    } else {
+                        // 使用 (val ?? '--') 代替 (val && val)，确保当数值为 0 时依然渲染标题和边框
+                        if (valueEl) valueEl.textContent = '--';
+                        if (percentEl) percentEl.textContent = '--';
+                        if (beatenEl) beatenEl.textContent = '--';
+                    }
+                };
+                
+                // 更新各个统计卡片的排名徽章（右下角小徽章）
+                updateBadge('rankingQingCountBadge', rankings.qingCount, rankings.qingCount?.total);
+                updateBadge('rankingBuCountBadge', rankings.buCount, rankings.buCount?.total);
+                updateBadge('rankingUserMessagesBadge', rankings.userMessages, rankings.userMessages?.total);
+                updateBadge('rankingTotalCharsBadge', rankings.totalUserChars, rankings.totalUserChars?.total);
+                updateBadge('rankingAvgLengthBadge', rankings.avgUserMessageLength, rankings.avgUserMessageLength?.total);
+                updateBadge('rankingUsageDaysBadge', rankings.usageDays, rankings.usageDays?.total);
+                
+                // 更新"全网横向排名"区域的卡片（大卡片显示）
+                await updateRankingCard('rankingQingCount', 'rankingQingCountPercent', rankings.qingCount, rankings.qingCount?.total, 'please.json');
+                await updateRankingCard('rankingBuCount', 'rankingBuCountPercent', rankings.buCount, rankings.buCount?.total, 'no.json');
+                await updateRankingCard('rankingUserMessages', 'rankingUserMessagesPercent', rankings.userMessages, rankings.userMessages?.total, 'ai.json');
+                await updateRankingCard('rankingTotalChars', 'rankingTotalCharsPercent', rankings.totalUserChars, rankings.totalUserChars?.total, 'say.json');
+                await updateRankingCard('rankingAvgLength', 'rankingAvgLengthPercent', rankings.avgUserMessageLength, rankings.avgUserMessageLength?.total, 'word.json');
+                await updateRankingCard('rankingUsageDays', 'rankingUsageDaysPercent', rankings.usageDays, rankings.usageDays?.total, 'day.json');
+            };
+            
+            // 将updateRankingBadges暴露到全局作用域
+            window.updateRankingBadges = updateRankingBadges;
+
             // ===== 超短分享编码系统 =====
 
             /**
