@@ -1,0 +1,8 @@
+6353: '                } else {\n'
+6354: "                    console.log('[Drawer] ⚠️ 未找到用户数据，跳过统计卡片渲染');\n"
+6355: '                    // 即使没有匹配到用户，如果 localStorage 中有 fingerprint：\n'
+6356: '                    // - 先尝试直接从 v_unified_analysis_v2 按 fingerprint 拉取（避免一直 WAIT）\n'
+6357: '                    // - 失败则有限次数重试，最终给出明确提示（避免无限“处理中”）\n'
+6358: '                    try {\n'
+6359: "                        const currentFingerprint = localStorage.getItem('user_fingerprint');\n"
+6360: "                        const canQuerySupabase = (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.from === 'function');\n"

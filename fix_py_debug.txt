@@ -1,0 +1,4 @@
+10: '                    // - 先尝试直接从 v_unified_analysis_v2 按 fingerprint 拉取（避免一直 WAIT）\n'
+11: '                    // - 失败则有限次数重试，最终给出明确提示（避免无限"处理中"）\n'
+12: '                    try {\n'
+13: '                        const currentFingerprint = localStorage.getItem(\'user_fingerprint\');"""\n'
