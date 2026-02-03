@@ -1206,7 +1206,7 @@ const ALLOWED_ORIGINS = [
 app.use('/*', cors({
   origin: '*', // 允许所有来源（公开 API）
   allowMethods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'],
-  allowHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Cache-Control', 'Pragma', 'If-None-Match', 'If-Modified-Since', 'Accept'],
+  allowHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   exposeHeaders: ['Content-Length', 'Content-Type'],
   credentials: false, // 不允许携带凭证（因为允许所有来源）
   maxAge: 86400, // Access-Control-Max-Age: 86400
@@ -2783,25 +2783,6 @@ app.get('/api/rank-resources', async (c) => {
   } catch (error: any) {
     console.error('[Worker] /api/rank-resources 错误:', error);
     return c.json({ error: error?.message || '未知错误' }, 500);
-  }
-});
-
-/**
- * 路由：GET /api/ip-location
- * 功能：代理 IP/地理位置请求（服务端请求 ip-api.com，避免前端直连被 403/CSP 限制）
- */
-app.get('/api/ip-location', async (c) => {
-  try {
-    const res = await fetch('https://ip-api.com/json/?fields=status,country,countryCode,city,lat,lon', {
-      headers: { 'Accept': 'application/json' },
-    });
-    const data = await res.json().catch(() => ({}));
-    return c.json(data, res.ok ? 200 : 502, {
-      'Cache-Control': 'public, max-age=60',
-    });
-  } catch (error: any) {
-    console.warn('[Worker] /api/ip-location 代理失败:', error?.message);
-    return c.json({ status: 'fail', message: error?.message || '代理失败' }, 502);
   }
 });
 
@@ -6996,134 +6977,9 @@ app.get('/', async (c) => {
 });
 
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const url = new URL(request.url);
-    const upgradeHeader = request.headers.get('Upgrade');
-
-    // 检查是否为 WebSocket 升级请求
-    if (upgradeHeader === 'websocket') {
-      return handleWebSocketProxy(request, env, ctx);
-    }
-
-    // 普通 HTTP 请求通过 Hono app 处理
-    return app.fetch(request, env, ctx);
-  },
+  fetch: app.fetch, // Hono 完美支持这种简写
   scheduled: scheduled // 必须显式导出这个函数，否则 Cron 触发器不会生效
 };
-
-// WebSocket 代理处理
-async function handleWebSocketProxy(
-  request: Request,
-  env: Env,
-  ctx: ExecutionContext
-): Promise<Response> {
-  const url = new URL(request.url);
-  const supabaseUrl = env.SUPABASE_URL;
-
-  if (!supabaseUrl) {
-    console.error('[WS Proxy] ❌ SUPABASE_URL not configured');
-    return new Response('SUPABASE_URL not configured', { status: 500 });
-  }
-
-  // 构建目标 WebSocket URL
-  // 客户端请求: wss://your-worker.workers.dev/realtime/v1
-  // 转发到: wss://<project-ref>.supabase.co/realtime/v1
-  const realtimePath = url.pathname.startsWith('/realtime')
-    ? url.pathname
-    : '/realtime/v1';
-
-  const targetUrl = supabaseUrl
-    .replace(/^https?:\/\//, 'wss://')
-    + realtimePath;
-
-  console.log('[WS Proxy] 🔄 Proxying WebSocket:', url.pathname, '→', targetUrl);
-
-  // 获取客户端 WebSocket
-  const clientWebSocket = request.webSocket;
-  if (!clientWebSocket) {
-    console.error('[WS Proxy] ❌ No WebSocket in request');
-    return new Response('Expected WebSocket', { status: 426 });
-  }
-
-  const serverWebSocket = new WebSocket(targetUrl);
-
-  try {
-    // 接受客户端连接
-    await clientWebSocket.accept();
-    console.log('[WS Proxy] ✅ Client accepted');
-
-    // Supabase → Client
-    serverWebSocket.addEventListener('message', (event) => {
-      try {
-        clientWebSocket.send(event.data);
-      } catch (e) {
-        console.error('[WS Proxy] ❌ Error sending to client:', e);
-      }
-    });
-
-    serverWebSocket.addEventListener('close', (event) => {
-      console.log('[WS Proxy] 📤 Server closed:', event.code, event.reason);
-      try {
-        clientWebSocket.close(event.code, event.reason);
-      } catch (e) {
-        console.error('[WS Proxy] ❌ Error closing client:', e);
-      }
-    });
-
-    serverWebSocket.addEventListener('error', (error) => {
-      console.error('[WS Proxy] ❌ Server error:', error);
-      try {
-        clientWebSocket.close(1011, 'Proxy server error');
-      } catch (e) {
-        console.error('[WS Proxy] ❌ Error closing client after error:', e);
-      }
-    });
-
-    // Client → Supabase
-    clientWebSocket.addEventListener('message', (event) => {
-      try {
-        if (serverWebSocket.readyState === WebSocket.OPEN) {
-          serverWebSocket.send(event.data);
-        } else {
-          console.warn('[WS Proxy] ⚠️ Server not ready, dropping message');
-        }
-      } catch (e) {
-        console.error('[WS Proxy] ❌ Error sending to server:', e);
-      }
-    });
-
-    clientWebSocket.addEventListener('close', (event) => {
-      console.log('[WS Proxy] 📥 Client closed:', event.code, event.reason);
-      if (serverWebSocket.readyState === WebSocket.OPEN) {
-        serverWebSocket.close(event.code, event.reason);
-      }
-    });
-
-    clientWebSocket.addEventListener('error', (error) => {
-      console.error('[WS Proxy] ❌ Client error:', error);
-      if (serverWebSocket.readyState === WebSocket.OPEN) {
-        serverWebSocket.close(1011, 'Client connection error');
-      }
-    });
-
-    return new Response(null, { status: 101, webSocket: clientWebSocket });
-
-  } catch (error: any) {
-    console.error('[WS Proxy] ❌ WebSocket handler error:', error);
-    try {
-      clientWebSocket.close(1011, 'Proxy error: ' + (error.message || 'Unknown'));
-    } catch (e) {
-      console.error('[WS Proxy] ❌ Error closing client after handler error:', e);
-    }
-    return new Response(JSON.stringify({
-      error: 'WebSocket handler failed',
-      message: error.message || 'Unknown error'
-    }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
-}
 
 /**
  * 【V6.0 新增】GET /api/v2/keyword-location

@@ -1325,7 +1325,7 @@
             // 阻止默认行为（控制台报错），但记录错误
             event.preventDefault();
         });
-
+        
         // ============================================
         // 初始化 Supabase 客户端（全局作用域直接执行）
         // ============================================
@@ -1333,94 +1333,22 @@
         let initAttempts = 0;
         const maxAttempts = 50; // 最多尝试 5 秒（50 * 100ms）
 
-        // 检测是否为 Cloudflare 环境
-        const host = typeof window !== 'undefined' && window.location && window.location.hostname ? window.location.hostname : '';
-        const isCloudflareEnv = /\.pages\.dev$/.test(host) || /\.workers\.dev$/.test(host) ||
-                               (typeof window !== 'undefined' && window.performance ?
-                               window.performance.getEntriesByType('resource').some(r => r.name.includes('cloudflare')) : false);
-
         const initInterval = setInterval(() => {
             initAttempts++;
-
+            
             // 检查 supabase 是否已加载
             if (typeof supabase !== 'undefined') {
                 clearInterval(initInterval);
-
+                
                 try {
-                    // 构建实时连接配置
-                    const realtimeConfig = {
-                        heartbeatIntervalMs: 5000, // 5秒心跳
-                    };
-
-                    // Cloudflare 环境下，尝试使用自定义 WebSocket transport
-                    // （需要 Worker 实现WebSocket代理后才能工作）
-                    if (isCloudflareEnv && typeof window !== 'undefined' && window.location) {
-                        const workerUrl = `${window.location.protocol}//${window.location.host}`;
-
-                        // 自定义 WebSocket 构造函数（通过代理）
-                        class ProxyWebSocket {
-                            constructor(url, protocols) {
-                                console.log('[ProxyWebSocket] Creating connection to:', workerUrl);
-
-                                // 构建实际的 WebSocket URL（替换为代理）
-                                const proxyUrl = url.replace(/wss?:\/\/[^\/]+/, workerUrl);
-
-                                this.socket = new WebSocket(proxyUrl, protocols);
-                                this.readyState = this.socket.CONNECTING;
-
-                                // 转发事件
-                                this.socket.onopen = (e) => {
-                                    this.readyState = this.socket.OPEN;
-                                    if (this.onopen) this.onopen(e);
-                                };
-
-                                this.socket.onmessage = (e) => {
-                                    if (this.onmessage) this.onmessage(e);
-                                };
-
-                                this.socket.onclose = (e) => {
-                                    this.readyState = this.socket.CLOSED;
-                                    if (this.onclose) this.onclose(e);
-                                };
-
-                                this.socket.onerror = (e) => {
-                                    this.readyState = this.socket.CLOSED;
-                                    if (this.onerror) this.onerror(e);
-                                };
-
-                                // 模拟标准 WebSocket API
-                                this.OPEN = WebSocket.OPEN;
-                                this.CONNECTING = WebSocket.CONNECTING;
-                                this.CLOSING = WebSocket.CLOSING;
-                                this.CLOSED = WebSocket.CLOSED;
-                            }
-
-                            send(data) {
-                                return this.socket.send(data);
-                            }
-
-                            close(code, reason) {
-                                return this.socket.close(code, reason);
-                            }
-                        }
-
-                        realtimeConfig.transport = ProxyWebSocket;
-                        console.log('[Init] 🔄 Cloudflare 环境检测到，使用自定义 WebSocket transport:', workerUrl);
-                    }
-
-                    // 实例化客户端
-                    supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-                        realtime: realtimeConfig
-                    });
-
+                    // 实例化客户端（直接赋值给全局变量）
+                    supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+                    
                     // 挂载到全局 window，供控制台脚本使用
                     window.supabaseClient = supabaseClient;
-
+                    
                     console.log('[Init] ✅ Supabase 客户端已成功挂载至 window.supabaseClient');
                     console.log('[Init] 💡 可在控制台使用 window.supabaseClient 访问客户端');
-                    if (isCloudflareEnv) {
-                        console.log('[Init] ⚠️ Cloudflare 环境：实时功能可能受限，需要 Worker 支持 WebSocket 代理');
-                    }
                 } catch (err) {
                     console.error('[Init] ❌ 初始化失败:', err);
                 }
@@ -6900,32 +6828,20 @@
         
         /**
          * 获取用户地理位置（经纬度）
-         * 优先走 Worker /api/ip-location 代理，避免直连 ip-api.com 被 403/CSP 限制
          * @returns {Promise<Object>} 包含 lat, lng 的对象
          */
         async function getUserLocation() {
-            const apiBase = (window.getApiEndpoint ? window.getApiEndpoint() : document.querySelector('meta[name="api-endpoint"]')?.content) || '';
-            const base = apiBase.endsWith('/') ? apiBase : (apiBase ? apiBase + '/' : '');
             try {
-                if (base) {
-                    const proxyRes = await fetch(base + 'api/ip-location', { headers: { 'Accept': 'application/json' } });
-                    if (proxyRes.ok) {
-                        const ipInfo = await proxyRes.json();
-                        if (ipInfo && ipInfo.status !== 'fail') {
-                            const lat = ipInfo.lat != null ? Number(ipInfo.lat) : null;
-                            const lng = ipInfo.lon != null ? Number(ipInfo.lon) : null;
-                            return { lat, lng };
-                        }
-                    }
-                }
+                // 使用 ip-api.com API 获取 IP 归属地信息
                 const ipResponse = await fetch('https://ip-api.com/json/', {
                     method: 'GET',
                     headers: { 'Accept': 'application/json' }
                 });
+
                 if (ipResponse.ok) {
                     const ipInfo = await ipResponse.json();
                     const lat = ipInfo.lat ? Number(ipInfo.lat) : null;
-                    const lng = ipInfo.lon ? Number(ipInfo.lon) : null;
+                    const lng = ipInfo.lon ? Number(ipInfo.lon) : null; // 注意：ip-api.com 使用 lon
                     return { lat, lng };
                 }
             } catch (error) {
@@ -9262,37 +9178,42 @@
                 let countryCode = 'Unknown';
 
                 try {
-                    // 优先走 Worker /api/ip-location 代理（避免直连 ip-api.com 被 403/CSP 限制）
-                    const apiBase = (window.getApiEndpoint ? window.getApiEndpoint() : document.querySelector('meta[name="api-endpoint"]')?.content) || '';
-                    const base = apiBase.endsWith('/') ? apiBase : (apiBase ? apiBase + '/' : '');
-                    let ipResponse = null;
-                    if (base) {
-                        ipResponse = await fetch(base + 'api/ip-location', { headers: { 'Accept': 'application/json' } });
-                    }
-                    if (!ipResponse || !ipResponse.ok) {
-                        ipResponse = await fetch('https://ip-api.com/json/', {
-                            method: 'GET',
-                            headers: { 'Accept': 'application/json' }
-                        });
-                    }
-                    if (ipResponse && ipResponse.ok) {
-                        ipInfo = await ipResponse.json();
-                        if (ipInfo && ipInfo.status === 'fail') ipInfo = null;
-                        if (ipInfo) {
-                            console.log('[AutoReport] 🌍 IP 信息已获取:', ipInfo);
-                            countryCode = ipInfo.countryCode || ipInfo.country_code || 'Unknown';
-                            ipLocation = (countryCode && countryCode !== 'Unknown') ? countryCode : 'Unknown';
-                            if (ipInfo.lat != null && ipInfo.lon != null) {
-                                lat = Number(ipInfo.lat);
-                                lng = Number(ipInfo.lon);
-                            } else if (ipInfo.latitude != null && ipInfo.longitude != null) {
-                                lat = Number(ipInfo.latitude);
-                                lng = Number(ipInfo.longitude);
-                            }
+                    // 使用 ip-api.com API 获取 IP 归属地信息（更稳定的免费 API）
+                    // 返回字段：country, countryCode, city, lat, lon 等
+                    const ipResponse = await fetch('https://ip-api.com/json/', {
+                        method: 'GET',
+                        headers: {
+                            'Accept': 'application/json'
                         }
-                    }
-                    if (!ipInfo) {
+                    });
+
+                    if (ipResponse.ok) {
+                        ipInfo = await ipResponse.json();
+                        console.log('[AutoReport] 🌍 IP 信息已获取:', ipInfo);
+
+                        // ip-api.com 返回格式：{ country, countryCode, city, lat, lon, ... }
+                        // 提取关键信息
+                        countryCode = ipInfo.countryCode || ipInfo.country_code || 'Unknown';
+                        
+                        // 构建 ip_location 字符串（使用国家代码）
+                        if (countryCode && countryCode !== 'Unknown') {
+                            ipLocation = countryCode;
+                        } else {
+                            ipLocation = 'Unknown';
+                        }
+                        
+                        // 提取经纬度（注意：ip-api.com 使用 lon 而不是 longitude）
+                        if (ipInfo.lat && ipInfo.lon) {
+                            lat = Number(ipInfo.lat);
+                            lng = Number(ipInfo.lon);
+                        } else if (ipInfo.latitude && ipInfo.longitude) {
+                            // 兼容其他可能的字段名
+                            lat = Number(ipInfo.latitude);
+                            lng = Number(ipInfo.longitude);
+                        }
+                    } else {
                         console.warn('[AutoReport] ⚠️ IP API 请求失败，尝试备用方案...');
+                        // 备用方案：使用 ipify 获取 IP
                         try {
                             const ipifyResponse = await fetch('https://api.ipify.org?format=json');
                             if (ipifyResponse.ok) {
