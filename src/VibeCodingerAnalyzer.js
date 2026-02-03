@@ -3233,6 +3233,21 @@ export class VibeCodingerAnalyzer {
       const inflightMap = (globalThis.__vibeUploadInflightBySig ||= new Map());
       const cacheKey = `__vibeUploadCache_v2_${__uploadSig}`;
 
+      // 【Session 内只提交一次】若本 Session 已成功提交过，直接返回上次结果，不再请求
+      try {
+        if (typeof window !== 'undefined' && window.__vibeSessionSubmitted && window.__vibeLastUploadResult) {
+          console.log('[VibeAnalyzer] 🧠 Session 内已提交过，跳过重复上报');
+          return window.__vibeLastUploadResult;
+        }
+      } catch (_) { /* ignore */ }
+
+      // 【全局请求锁】防止数据计算/UI 渲染期间的并发重复请求
+      const globalLock = (typeof globalThis !== 'undefined' && globalThis.__vibeUploadInProgress) || (typeof window !== 'undefined' && window.__vibeUploadInProgress);
+      if (globalLock && typeof globalThis !== 'undefined' && globalThis.__vibeUploadInProgressPromise) {
+        console.log('[VibeAnalyzer] ⏳ 已有上报进行中，复用全局 Promise');
+        return await globalThis.__vibeUploadInProgressPromise;
+      }
+
       // 近期缓存（10 分钟）：避免多处调用/重试再次写入
       try {
         const cachedRaw = localStorage.getItem(cacheKey);
@@ -3449,13 +3464,29 @@ export class VibeCodingerAnalyzer {
         ? `${apiEndpoint}api/v2/analyze` 
         : `${apiEndpoint}/api/v2/analyze`;
 
-      // 将真实请求包装为可复用的 in-flight Promise
+      // 【身份优先级】若存在 GitHub 身份则带 Authorization，后端只写一条 user_id 记录，不产生匿名 fingerprint 重复
+      const authHeaders = { 'Content-Type': 'application/json' };
+      try {
+        const token = (typeof window !== 'undefined' && window.__VIBE_GITHUB_ACCESS_TOKEN__) ||
+          (typeof window !== 'undefined' && window.localStorage && window.localStorage.getItem('vibe_github_access_token'));
+        if (token && String(token).trim()) {
+          authHeaders['Authorization'] = 'Bearer ' + String(token).trim();
+          console.log('[VibeAnalyzer] 使用 GitHub 身份上报，避免匿名指纹重复记录');
+        }
+      } catch (_) { /* ignore */ }
+
+      // 将真实请求包装为可复用的 in-flight Promise，并加全局锁（先同步设锁再创建 Promise，避免并发时重复请求）
+      try {
+        if (typeof globalThis !== 'undefined') globalThis.__vibeUploadInProgress = true;
+        if (typeof window !== 'undefined') window.__vibeUploadInProgress = true;
+      } catch (_) { /* ignore */ }
       const doRequestPromise = (async () => {
-        const response = await fetch(analyzeUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(uploadData)
-        });
+        try {
+          const response = await fetch(analyzeUrl, {
+            method: 'POST',
+            headers: authHeaders,
+            body: JSON.stringify(uploadData)
+          });
 
         if (!response.ok) {
           const errorText = await response.text().catch(() => '无法读取错误信息');
@@ -3465,13 +3496,29 @@ export class VibeCodingerAnalyzer {
         const result = await response.json();
         console.log('[VibeAnalyzer] 后端返回数据:', result);
 
-        // 成功则写入短期缓存，避免后续重复上报
+        // 成功则写入短期缓存，并标记 Session 已提交（同一 Session 不再重复请求）
         try {
           localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), result }));
+          if (typeof window !== 'undefined') {
+            window.__vibeSessionSubmitted = true;
+            window.__vibeLastUploadResult = result;
+          }
         } catch { /* ignore */ }
 
         return result;
+        } finally {
+          try {
+            if (typeof globalThis !== 'undefined') globalThis.__vibeUploadInProgress = false;
+            if (typeof window !== 'undefined') window.__vibeUploadInProgress = false;
+            if (typeof globalThis !== 'undefined' && globalThis.__vibeUploadInProgressPromise !== undefined) {
+              globalThis.__vibeUploadInProgressPromise = undefined;
+            }
+          } catch (_) { /* ignore */ }
+        }
       })();
+      try {
+        if (typeof globalThis !== 'undefined') globalThis.__vibeUploadInProgressPromise = doRequestPromise;
+      } catch (_) { /* ignore */ }
 
       inflightMap.set(__uploadSig, doRequestPromise);
 

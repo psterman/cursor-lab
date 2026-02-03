@@ -2620,6 +2620,14 @@ async function handleFileUpload(event, type, callbacks = {}) {
     window.updateUploadButtonsState(true);
   }
 
+  // 【唯一提交入口】新一次上传流程允许本 Run 内触发一次有效提交；重置 Session 提交标记
+  try {
+    if (typeof window !== 'undefined') {
+      window.__vibeSessionSubmitted = false;
+      window.__vibeLastUploadResult = null;
+    }
+  } catch (_) { /* ignore */ }
+
   const { onProgress, onLog, onComplete, onError } = callbacks;
   console.log(`[Main] 处理文件上传，类型: ${type}`);
   console.log(`[Main] event.files.length: ${event.target.files?.length}`);

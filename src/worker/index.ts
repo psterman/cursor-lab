@@ -2297,6 +2297,23 @@ app.post('/api/v2/analyze', async (c) => {
               console.warn('[Worker] ⚠️ 解析 Authorization token 失败，将使用 fingerprint:', error.message);
             }
           }
+
+          // 【身份优先级】无 Authorization 时：若该 fingerprint 已关联 GitHub 用户，则复用该用户行，避免产生两条记录（github + 匿名）
+          if (!useUserIdForUpsert) {
+            const fp = (body.fingerprint != null && String(body.fingerprint).trim() !== '') ? String(body.fingerprint).trim() : '';
+            if (fp) {
+              try {
+                const existingByFp = await identifyUserByFingerprint(fp, env);
+                if (existingByFp && (existingByFp as any).user_identity === 'github') {
+                  useUserIdForUpsert = true;
+                  authenticatedUserId = (existingByFp as any).id ?? null;
+                  if (authenticatedUserId) {
+                    console.log('[Worker] ✅ 匿名请求的 fingerprint 已关联 GitHub 用户，将更新该用户行，忽略新建匿名记录:', authenticatedUserId.substring(0, 8) + '...');
+                  }
+                }
+              } catch (_) { /* ignore */ }
+            }
+          }
           
           // 【幂等 Upsert】生成稳定 userId + 基于 userId 的固定 fingerprint
           // 只根据前 10 条消息的内容生成指纹，忽略由于后续对话增加导致的字符总数变化
@@ -2477,6 +2494,7 @@ app.post('/api/v2/analyze', async (c) => {
           });
 
           // 【同步存储】必须 await 以确保后续认领操作能找到数据
+          // 【后端幂等 Upsert】基于 fingerprint 或 user_id：ON CONFLICT 时更新而非新建，同一用户/指纹仅一条记录
           // 【GitHub OAuth 优先】如果使用 user_id，则按 id 冲突；否则按 fingerprint 冲突
           const conflictKey = useUserIdForUpsert ? 'id' : 'fingerprint';
           const supabaseUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=${conflictKey}`;
