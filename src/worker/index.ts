@@ -1206,7 +1206,7 @@ const ALLOWED_ORIGINS = [
 app.use('/*', cors({
   origin: '*', // 允许所有来源（公开 API）
   allowMethods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'],
-  allowHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Cache-Control', 'Pragma', 'If-None-Match', 'If-Modified-Since', 'Accept'],
   exposeHeaders: ['Content-Length', 'Content-Type'],
   credentials: false, // 不允许携带凭证（因为允许所有来源）
   maxAge: 86400, // Access-Control-Max-Age: 86400
@@ -2783,6 +2783,25 @@ app.get('/api/rank-resources', async (c) => {
   } catch (error: any) {
     console.error('[Worker] /api/rank-resources 错误:', error);
     return c.json({ error: error?.message || '未知错误' }, 500);
+  }
+});
+
+/**
+ * 路由：GET /api/ip-location
+ * 功能：代理 IP/地理位置请求（服务端请求 ip-api.com，避免前端直连被 403/CSP 限制）
+ */
+app.get('/api/ip-location', async (c) => {
+  try {
+    const res = await fetch('https://ip-api.com/json/?fields=status,country,countryCode,city,lat,lon', {
+      headers: { 'Accept': 'application/json' },
+    });
+    const data = await res.json().catch(() => ({}));
+    return c.json(data, res.ok ? 200 : 502, {
+      'Cache-Control': 'public, max-age=60',
+    });
+  } catch (error: any) {
+    console.warn('[Worker] /api/ip-location 代理失败:', error?.message);
+    return c.json({ status: 'fail', message: error?.message || '代理失败' }, 502);
   }
 });
 

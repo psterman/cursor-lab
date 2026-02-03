@@ -6828,20 +6828,32 @@
         
         /**
          * 获取用户地理位置（经纬度）
+         * 优先走 Worker /api/ip-location 代理，避免直连 ip-api.com 被 403/CSP 限制
          * @returns {Promise<Object>} 包含 lat, lng 的对象
          */
         async function getUserLocation() {
+            const apiBase = (window.getApiEndpoint ? window.getApiEndpoint() : document.querySelector('meta[name="api-endpoint"]')?.content) || '';
+            const base = apiBase.endsWith('/') ? apiBase : (apiBase ? apiBase + '/' : '');
             try {
-                // 使用 ip-api.com API 获取 IP 归属地信息
+                if (base) {
+                    const proxyRes = await fetch(base + 'api/ip-location', { headers: { 'Accept': 'application/json' } });
+                    if (proxyRes.ok) {
+                        const ipInfo = await proxyRes.json();
+                        if (ipInfo && ipInfo.status !== 'fail') {
+                            const lat = ipInfo.lat != null ? Number(ipInfo.lat) : null;
+                            const lng = ipInfo.lon != null ? Number(ipInfo.lon) : null;
+                            return { lat, lng };
+                        }
+                    }
+                }
                 const ipResponse = await fetch('https://ip-api.com/json/', {
                     method: 'GET',
                     headers: { 'Accept': 'application/json' }
                 });
-
                 if (ipResponse.ok) {
                     const ipInfo = await ipResponse.json();
                     const lat = ipInfo.lat ? Number(ipInfo.lat) : null;
-                    const lng = ipInfo.lon ? Number(ipInfo.lon) : null; // 注意：ip-api.com 使用 lon
+                    const lng = ipInfo.lon ? Number(ipInfo.lon) : null;
                     return { lat, lng };
                 }
             } catch (error) {
@@ -9178,42 +9190,37 @@
                 let countryCode = 'Unknown';
 
                 try {
-                    // 使用 ip-api.com API 获取 IP 归属地信息（更稳定的免费 API）
-                    // 返回字段：country, countryCode, city, lat, lon 等
-                    const ipResponse = await fetch('https://ip-api.com/json/', {
-                        method: 'GET',
-                        headers: {
-                            'Accept': 'application/json'
-                        }
-                    });
-
-                    if (ipResponse.ok) {
+                    // 优先走 Worker /api/ip-location 代理（避免直连 ip-api.com 被 403/CSP 限制）
+                    const apiBase = (window.getApiEndpoint ? window.getApiEndpoint() : document.querySelector('meta[name="api-endpoint"]')?.content) || '';
+                    const base = apiBase.endsWith('/') ? apiBase : (apiBase ? apiBase + '/' : '');
+                    let ipResponse = null;
+                    if (base) {
+                        ipResponse = await fetch(base + 'api/ip-location', { headers: { 'Accept': 'application/json' } });
+                    }
+                    if (!ipResponse || !ipResponse.ok) {
+                        ipResponse = await fetch('https://ip-api.com/json/', {
+                            method: 'GET',
+                            headers: { 'Accept': 'application/json' }
+                        });
+                    }
+                    if (ipResponse && ipResponse.ok) {
                         ipInfo = await ipResponse.json();
-                        console.log('[AutoReport] 🌍 IP 信息已获取:', ipInfo);
-
-                        // ip-api.com 返回格式：{ country, countryCode, city, lat, lon, ... }
-                        // 提取关键信息
-                        countryCode = ipInfo.countryCode || ipInfo.country_code || 'Unknown';
-                        
-                        // 构建 ip_location 字符串（使用国家代码）
-                        if (countryCode && countryCode !== 'Unknown') {
-                            ipLocation = countryCode;
-                        } else {
-                            ipLocation = 'Unknown';
+                        if (ipInfo && ipInfo.status === 'fail') ipInfo = null;
+                        if (ipInfo) {
+                            console.log('[AutoReport] 🌍 IP 信息已获取:', ipInfo);
+                            countryCode = ipInfo.countryCode || ipInfo.country_code || 'Unknown';
+                            ipLocation = (countryCode && countryCode !== 'Unknown') ? countryCode : 'Unknown';
+                            if (ipInfo.lat != null && ipInfo.lon != null) {
+                                lat = Number(ipInfo.lat);
+                                lng = Number(ipInfo.lon);
+                            } else if (ipInfo.latitude != null && ipInfo.longitude != null) {
+                                lat = Number(ipInfo.latitude);
+                                lng = Number(ipInfo.longitude);
+                            }
                         }
-                        
-                        // 提取经纬度（注意：ip-api.com 使用 lon 而不是 longitude）
-                        if (ipInfo.lat && ipInfo.lon) {
-                            lat = Number(ipInfo.lat);
-                            lng = Number(ipInfo.lon);
-                        } else if (ipInfo.latitude && ipInfo.longitude) {
-                            // 兼容其他可能的字段名
-                            lat = Number(ipInfo.latitude);
-                            lng = Number(ipInfo.longitude);
-                        }
-                    } else {
+                    }
+                    if (!ipInfo) {
                         console.warn('[AutoReport] ⚠️ IP API 请求失败，尝试备用方案...');
-                        // 备用方案：使用 ipify 获取 IP
                         try {
                             const ipifyResponse = await fetch('https://api.ipify.org?format=json');
                             if (ipifyResponse.ok) {
