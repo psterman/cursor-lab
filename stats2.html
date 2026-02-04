@@ -9092,19 +9092,12 @@
          */
         function startRealtimeListener() {
             // Cloudflare 部署环境：不发起 Realtime/Presence，避免 CHANNEL_ERROR / TIMED_OUT（本地正常、线上失败）
-            const host = typeof window !== 'undefined' && window.location && window.location.hostname ? window.location.hostname : '';
-            const isCloudflareHost = /\.pages\.dev$/.test(host) || /\.workers\.dev$/.test(host) || host === 'pages.dev' || host === 'workers.dev';
-            if (isCloudflareHost) {
-                window.__PRESENCE_SKIPPED = true; // 供 trackSelf/updateOnlineList 静默降级，不刷「Presence频道未初始化」
-                console.log('[Realtime] ℹ️ 当前为 Cloudflare 环境，跳过 Realtime/Presence 订阅，使用静态数据');
-                try {
-                    const el = document.getElementById('online-count-value');
-                    if (el) el.textContent = '-';
-                    const textEl = document.getElementById('online-count-text');
-                    if (textEl) textEl.textContent = '-';
-                } catch (_) {}
-                return;
-            }
+            // Cloudflare 部署环境：不再跳过 Realtime/Presence，尝试连接
+            // const host = typeof window !== 'undefined' && window.location && window.location.hostname ? window.location.hostname : '';
+            // const isCloudflareHost = /\.pages\.dev$/.test(host) || /\.workers\.dev$/.test(host) || host === 'pages.dev' || host === 'workers.dev';
+            // if (isCloudflareHost) {
+            //    console.log('[Realtime] ℹ️ Cloudflare 环境：不再强制跳过，尝试连接 Supabase Realtime...');
+            // }
 
             // 健壮性检查：确保 Supabase 客户端已初始化
             if (!supabaseClient) {
@@ -9595,6 +9588,7 @@
                             } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
                                 // 与 Realtime 一致：降级为警告，避免控制台刷红
                                 console.warn('[Presence] ⚠️ 订阅未就绪（' + status + '），在线人数将不实时更新');
+                                renderOnlineUsersListUnavailable();
                             } else {
                                 console.log(`[Presence] ℹ️ Presence 订阅状态: ${status}`);
                             }
