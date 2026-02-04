@@ -52,6 +52,7 @@ export default defineConfig({
       input: {
         main: './index.html',
         analysis: './main.js', // 将 main.js 作为独立入口点
+        stats2: './stats2.html',
       },
       output: {
         format: 'es', // ES 模块格式
