@@ -1791,10 +1791,10 @@ self.onmessage = function(e) {
  * @returns {number} 连击数
  */
 function calculateSequenceCombo(
-  categoryWords: Array<{word: string, hits: number}>,
-  currentWord: string,
-  windowSize: number = 3
-): number {
+  categoryWords,
+  currentWord,
+  windowSize = 3
+) {
   // 获取当前窗口内的词汇
   const recent = categoryWords.slice(-windowSize);
   
@@ -1815,7 +1815,7 @@ function calculateSequenceCombo(
  * @param {number} totalHits - 总命中次数（用于归一化）
  * @returns {number} IDF 权重 (1-5)
  */
-function calculateIDFWeight(hits: number, totalHits: number): number {
+function calculateIDFWeight(hits, totalHits) {
   if (hits <= 0) return 1;
   
   // 简单的稀有度模型：命中次数越少，权重越高
@@ -1836,10 +1836,10 @@ function calculateIDFWeight(hits: number, totalHits: number): number {
  * @returns {number} 词云权重（整数）
  */
 function calculateWordCloudWeight(
-  hits: number,
-  idfWeight: number,
-  sequenceCombo: number
-): number {
+  hits,
+  idfWeight,
+  sequenceCombo
+) {
   const comboFactor = Math.log(1 + sequenceCombo);
   return Math.round((hits * idfWeight) * comboFactor);
 }
@@ -1853,16 +1853,13 @@ function calculateWordCloudWeight(
  * @returns {Array} 扁平化的词云数据
  */
 function flattenBlackwordHits(
-  blackwordHits: {
-    chinese_slang: Record<string, number>;
-    english_slang: Record<string, number>;
-  },
-  totalHits: number = 1
-): Array<{name: string; value: number; category: string}> {
-  const result: Array<{name: string; value: number; category: string}> = [];
+  blackwordHits,
+  totalHits = 1
+) {
+  const result = [];
   
   // 词汇历史（用于连击检测）
-  const wordHistory: Array<{word: string, hits: number}> = [];
+  const wordHistory = [];
   
   // 计算各类别的总命中次数（用于归一化）
   const sumChinese = Object.values(blackwordHits.chinese_slang || {}).reduce((a, b) => a + b, 0);

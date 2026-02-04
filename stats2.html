@@ -319,7 +319,7 @@
                 globalCheck: 'Chart'
             },
             tailwind: {
-                local: null,  // Tailwind使用内联回退
+                local: null,
                 cdn: ['https://cdn.tailwindcss.com'],
                 globalCheck: null
             }
@@ -10773,16 +10773,22 @@
                                 console.log('[Auth] ✅ 身份合并完成，历史数据已迁移到 GitHub User ID');
                                 
                                 // 【顺序重组】Step B: 调用 autoReportSelf（上报当前地理位置，确保 GitHub 账号有了 lat/lng）
-                                console.log('[Auth] 🔄 Step B: 开始上报地理位置...');
-                                try {
-                                    const reportResult = await autoReportSelf();
-                                    if (reportResult.success) {
-                                        console.log('[Auth] ✅ Step B: 地理位置上报成功');
-                                    } else {
-                                        console.warn('[Auth] ⚠️ Step B: 地理位置上报失败:', reportResult.error);
+                                // 【去重】若本页已执行过自动上报则跳过，避免 fingerprint/github 数据在后台生成两次
+                                if (!window.__autoReportSelfOnce) {
+                                    window.__autoReportSelfOnce = true;
+                                    console.log('[Auth] 🔄 Step B: 开始上报地理位置...');
+                                    try {
+                                        const reportResult = await autoReportSelf();
+                                        if (reportResult.success) {
+                                            console.log('[Auth] ✅ Step B: 地理位置上报成功');
+                                        } else {
+                                            console.warn('[Auth] ⚠️ Step B: 地理位置上报失败:', reportResult.error);
+                                        }
+                                    } catch (reportError) {
+                                        console.error('[Auth] ❌ Step B: 地理位置上报异常:', reportError);
                                     }
-                                } catch (reportError) {
-                                    console.error('[Auth] ❌ Step B: 地理位置上报异常:', reportError);
+                                } else {
+                                    console.log('[Auth] ℹ️ Step B: 已在本页执行过自动上报，跳过');
                                 }
                                 
                                 // 【迁移优先】只有在迁移请求结束后，才调用 refreshUserStats() 加载数据
@@ -11082,16 +11088,22 @@
                         }
                         
                         // 【顺序重组】Step B: 调用 autoReportSelf（上报当前地理位置，确保 GitHub 账号有了 lat/lng）
-                        console.log('[Auth] 🔄 Step B: 开始上报地理位置...');
-                        try {
-                            const reportResult = await autoReportSelf();
-                            if (reportResult.success) {
-                                console.log('[Auth] ✅ Step B: 地理位置上报成功');
-                            } else {
-                                console.warn('[Auth] ⚠️ Step B: 地理位置上报失败:', reportResult.error);
+                        // 【去重】若本页已执行过自动上报则跳过，避免 fingerprint/github 数据在后台生成两次
+                        if (!window.__autoReportSelfOnce) {
+                            window.__autoReportSelfOnce = true;
+                            console.log('[Auth] 🔄 Step B: 开始上报地理位置...');
+                            try {
+                                const reportResult = await autoReportSelf();
+                                if (reportResult.success) {
+                                    console.log('[Auth] ✅ Step B: 地理位置上报成功');
+                                } else {
+                                    console.warn('[Auth] ⚠️ Step B: 地理位置上报失败:', reportResult.error);
+                                }
+                            } catch (reportError) {
+                                console.error('[Auth] ❌ Step B: 地理位置上报异常:', reportError);
                             }
-                        } catch (reportError) {
-                            console.error('[Auth] ❌ Step B: 地理位置上报异常:', reportError);
+                        } else {
+                            console.log('[Auth] ℹ️ Step B: 已在本页执行过自动上报，跳过');
                         }
                         
                         // 【顺序重组】Step C: 最后调用 window.refreshUserStats() 刷新视图数据

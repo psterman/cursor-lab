@@ -1963,13 +1963,31 @@ export class VibeCodingerAnalyzer {
         this.activeTimeouts.set(taskId, timeoutId);
       });
 
-      // 【v5.0 Worker Singleton】通过全局 Worker 实例调用分析
-      // 使用清洗后的 chatData，确保代码内容不影响语义分析
-      const analysisPromise = this.analyzeFromWorker(sanitizedChatData, safeContext);
+      // 【修正】优先使用本地 Web Worker 进行高性能分析
+      const workerPromise = new Promise((resolve, reject) => {
+        this.pendingTasks.push({
+          id: taskId,
+          payload: { chatData: sanitizedChatData }, // 发送清洗后的数据
+          resolve,
+          reject,
+          timeoutId: null // Timeout 由外部控制
+        });
+        
+        // 尝试处理任务
+        if (this.workerReady) {
+            this.processPendingTasks();
+        } else {
+             // 如果 worker 还没准备好，尝试初始化
+            if (!this.worker) {
+                 this.initWorker();
+            }
+        }
+      });
       
       let workerResult;
       try {
-        workerResult = await Promise.race([analysisPromise, timeoutPromise]);
+        // 竞速：Worker vs 超时
+        workerResult = await Promise.race([workerPromise, timeoutPromise]);
       } catch (error) {
         const timeoutId = this.activeTimeouts.get(taskId);
         if (timeoutId) {
@@ -1977,12 +1995,9 @@ export class VibeCodingerAnalyzer {
           this.activeTimeouts.delete(taskId);
         }
         
-        if (error.message.includes('timeout')) {
-          console.warn('[VibeAnalyzer] 分析超时，降级到本地简单匹配');
-          // 降级方案也使用清洗后的数据
-          return await this.analyzeSync(sanitizedChatData, safeContext.lang, extraStats, onProgress);
-        }
-        throw error;
+        console.warn('[VibeAnalyzer] Worker 分析失败或超时，降级到本地同步匹配:', error);
+        // 降级方案：使用同步方法（这也是 Main Thread Blocking，但作为保底）
+        return await this.analyzeSync(sanitizedChatData, safeContext.lang, extraStats, onProgress);
       }
       
       // 【v5.0 数据封装】整合 Worker 返回的 stats 统计数据与环境元数据
@@ -1997,8 +2012,15 @@ export class VibeCodingerAnalyzer {
         tech_stack: workerStats.tech_stack && typeof workerStats.tech_stack === 'object' 
           ? workerStats.tech_stack 
           : {},
-        work_days: Number(workerStats.work_days) || 0,
-        avg_payload: Number(workerStats.avg_payload) || 0
+        work_days: Number(workerStats.work_days) || 1,
+        avg_payload: Number(workerStats.avg_payload) || 0,
+        // V6 新增字段
+        abuse_value: Number(workerStats.abuse_value) || 0,
+        tease_count: Number(workerStats.tease_count) || 0,
+        nonsense_count: Number(workerStats.nonsense_count) || 0,
+        balance_score: Number(workerStats.balance_score) || 0,
+        style_label: workerStats.style_label || 'Standard',
+        blackword_hits: workerStats.blackword_hits || {}
       };
       
       // 【v5.0 异常兜底】确保所有 dimensions 字段都有默认值 0
@@ -2048,6 +2070,7 @@ export class VibeCodingerAnalyzer {
           lpdef: workerResult.lpdef || 'L0P0D0E0F0'
         }
       };
+
       
       // 【关键修复】生成完整的 analysis 对象
       const analysis = this.generateAnalysis(safeDimensions, result.meta.personalityType);
