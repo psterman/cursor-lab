@@ -1109,7 +1109,8 @@
             100% { transform: translateX(100%); }
         }
         /* Waline 留言板样式覆盖 - 适配 Terminal 终端风格 */
-        #waline {
+        #waline,
+        #waline-comments > div {
             --waline-theme-color: var(--accent-terminal);
             --waline-active-color: var(--accent-terminal);
             --waline-bg-color: var(--card-bg);
@@ -1238,18 +1239,33 @@
         }
         .wl-comment {
             background: transparent !important;
+            display: block !important;
+        }
+        /* 评论元信息与正文分块显示，避免挤在一行 */
+        .wl-comment .wl-meta {
+            color: var(--text-dim) !important;
+            display: block !important;
+            margin-top: 4px !important;
+            margin-bottom: 6px !important;
+            line-height: 1.4 !important;
         }
         .wl-comment .wl-content {
             color: var(--text-main) !important;
-        }
-        .wl-comment .wl-meta {
-            color: var(--text-dim) !important;
+            display: block !important;
+            margin-top: 8px !important;
+            clear: both !important;
+            line-height: 1.6 !important;
         }
         .wl-comment .wl-meta .wl-nick {
             color: var(--accent-terminal) !important;
         }
         .wl-comment .wl-time {
             color: var(--text-dim) !important;
+        }
+        /* 评论列表与加载区布局 */
+        #waline .wl-list,
+        #waline-comments .wl-list {
+            display: block !important;
         }
         .wl-reaction {
             background: rgba(24, 24, 27, 0.6) !important;
@@ -1285,9 +1301,14 @@
         .wl-empty {
             color: var(--text-dim) !important;
         }
-        /* 加载状态 */
+        /* 加载状态：不占过多空间，加载完成后由 Waline 移除 */
         .wl-loading {
             color: var(--accent-terminal) !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            min-height: 48px !important;
+            margin-bottom: 12px !important;
         }
         /* 错误提示 */
         .wl-error {
