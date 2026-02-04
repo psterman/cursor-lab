@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- CSP：页面由 Worker 提供时 _headers 不生效，用 meta 保证 IP/地理位置、ISO 映射、Rank 等请求不被拦截 -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://html2canvas.hertzen.com https://cdn.tailwindcss.com; connect-src 'self' https://cursor-clinical-analysis.psterman.workers.dev https://psterman.supabase.co https://dtcplfhcgnxdzpigmotb.supabase.co https://raw.githubusercontent.com https://api.ipify.org https://ip-api.com; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src 'self' https://fonts.gstatic.com;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://html2canvas.hertzen.com https://cdn.tailwindcss.com; connect-src 'self' https://cursor-clinical-analysis.psterman.workers.dev https://psterman.supabase.co https://dtcplfhcgnxdzpigmotb.supabase.co https://raw.githubusercontent.com https://api.ipify.org https://ip-api.com wss://*.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src 'self' https://fonts.gstatic.com;">
     <title>Global Statistics Dashboard - Vibe Coding</title>
     <!-- 
     ============================================
@@ -9090,7 +9090,7 @@
          * 监听 user_analysis 表的 INSERT 事件
          * 【Cloudflare】在 pages.dev / workers.dev 等环境下 WebSocket 易超时或失败，直接跳过避免报错
          */
-        function startRealtimeListener() {
+        async function startRealtimeListener() {
             // Cloudflare 部署环境：不发起 Realtime/Presence，避免 CHANNEL_ERROR / TIMED_OUT（本地正常、线上失败）
             // Cloudflare 部署环境：不再跳过 Realtime/Presence，尝试连接
             // const host = typeof window !== 'undefined' && window.location && window.location.hostname ? window.location.hostname : '';
@@ -9099,10 +9099,21 @@
             //    console.log('[Realtime] ℹ️ Cloudflare 环境：不再强制跳过，尝试连接 Supabase Realtime...');
             // }
 
-            // 健壮性检查：确保 Supabase 客户端已初始化
+            // 健壮性检查：确保 Supabase 客户端已初始化 (增加等待重试机制)
             if (!supabaseClient) {
-                console.warn('[Realtime] ⚠️ Supabase 客户端未初始化，跳过 Realtime 监听');
-                return;
+                console.log('[Realtime] ⏳ Supabase 客户端尚未就绪，等待中...');
+                let attempts = 0;
+                // 最多等待 10 秒 (20 * 500ms)
+                while (!supabaseClient && attempts < 20) {
+                    await new Promise(r => setTimeout(r, 500));
+                    attempts++;
+                }
+                
+                if (!supabaseClient) {
+                    console.warn('[Realtime] ⚠️ Supabase 客户端初始化超时，跳过 Realtime 监听');
+                    renderOnlineUsersListUnavailable();
+                    return;
+                }
             }
 
             // 如果已有监听通道，先取消订阅
@@ -9579,7 +9590,7 @@
                         .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
                             console.log('[Presence] ➖ 用户离开:', key, leftPresences);
                         })
-                        .subscribe(async (status) => {
+                        .subscribe(async (status, err) => {
                             if (status === 'SUBSCRIBED') {
                                 console.log('[Presence] ✅ 已成功订阅 online_users 频道');
                                 
@@ -9587,7 +9598,10 @@
                                 await trackSelf();
                             } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
                                 // 与 Realtime 一致：降级为警告，避免控制台刷红
-                                console.warn('[Presence] ⚠️ 订阅未就绪（' + status + '），在线人数将不实时更新');
+                                console.warn('[Presence] ⚠️ 订阅未就绪（' + status + '），详情:', err);
+                                if (status === 'CHANNEL_ERROR') {
+                                    console.warn('[Presence] ℹ️ 提示: 请检查 Supabase 后台 -> App -> Realtime 是否开启了 Presence 和 Broadcast 功能');
+                                }
                                 renderOnlineUsersListUnavailable();
                             } else {
                                 console.log(`[Presence] ℹ️ Presence 订阅状态: ${status}`);
