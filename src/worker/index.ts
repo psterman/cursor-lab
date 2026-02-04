@@ -2351,7 +2351,26 @@ app.post('/api/v2/analyze', async (c) => {
           // 注意：created_at 和 updated_at 由数据库自动生成，不需要手动设置
           // 核心：fingerprint 作为幂等 Upsert 的业务主键
           // 【V6 协议】使用 v6Stats 或从 finalStats 构建
-          const v6StatsForStorage = v6Stats || finalStats;
+          const v6StatsForStorage = {
+            ...(v6Stats || finalStats),
+            // 【关键修复】确保 work_days、jiafang_count、ketao_count 被正确传递到 stats jsonb 字段
+            work_days: (v6Stats || finalStats)?.work_days ?? workDays ?? basicAnalysis.day ?? 1,
+            jiafang_count: (v6Stats || finalStats)?.jiafang_count ?? jiafangCount ?? basicAnalysis.no ?? 0,
+            ketao_count: (v6Stats || finalStats)?.ketao_count ?? ketaoCount ?? basicAnalysis.please ?? 0,
+          };
+          
+          // 【调试日志】验证修复后的值
+          console.log('[Worker] ✅ v6StatsForStorage 修复验证:', {
+            work_days: v6StatsForStorage.work_days,
+            jiafang_count: v6StatsForStorage.jiafang_count,
+            ketao_count: v6StatsForStorage.ketao_count,
+            source_workDays: workDays,
+            source_jiafangCount: jiafangCount,
+            source_ketaoCount: ketaoCount,
+            basicAnalysis_day: basicAnalysis.day,
+            basicAnalysis_no: basicAnalysis.no,
+            basicAnalysis_please: basicAnalysis.please,
+          });
           
           // 【场景 A：先分析后登录】如果是匿名用户，生成 claim_token
           // 注意：claimToken 需要在 result 对象中使用，所以定义在外部作用域
