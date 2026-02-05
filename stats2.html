@@ -9337,12 +9337,23 @@
                             }
 
                             // 更新左侧抽屉中的用户校准国家显示
+                            const countryName = (currentLang === 'zh' && country.nameZh) 
+                                ? country.nameZh 
+                                : country.nameEn;
                             if (typeof updateUserCountryFlag === 'function') {
-                                const countryName = (currentLang === 'zh' && country.nameZh) 
-                                    ? country.nameZh 
-                                    : country.nameEn;
                                 updateUserCountryFlag(country.code, countryName, true);
                             }
+
+                            // 触发国家切换：右侧抽屉透视该国 + 拉取该国数据
+                            if (typeof onCountrySwitch === 'function') {
+                                onCountrySwitch(country.code, { source: 'left-drawer-country-list', name: countryName });
+                            }
+                            // 确保左右抽屉打开并显示该国视角
+                            const leftDrawer = document.getElementById('left-drawer');
+                            const rightDrawer = document.getElementById('right-drawer');
+                            if (leftDrawer) leftDrawer.classList.add('active');
+                            if (rightDrawer) rightDrawer.classList.add('active');
+                            try { localStorage.setItem('left_drawer_open', 'true'); localStorage.setItem('right_drawer_open', 'true'); } catch (e) { /* ignore */ }
                             
                             // 重新渲染列表以更新高亮
                             renderCountryList(searchInput.value);
@@ -9353,7 +9364,6 @@
                             searchInput.blur();
                             
                             console.log('[LeftDrawerCountry] ✅ 已选择国家:', country.code);
-                            // 注意：不自动打开抽屉，只保存选择
                         });
                         
                         listContainer.appendChild(item);

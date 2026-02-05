@@ -2731,6 +2731,7 @@ app.post('/api/v2/update_location', async (c) => {
   try {
     const patchPayload: any = {
       current_location: currentLocation,
+      manual_location: currentLocation, // 同步写入，使 v_unified_analysis_v2 能按该国聚合（右侧抽屉国家统计）
       location_switched_at: switchedAt || new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };

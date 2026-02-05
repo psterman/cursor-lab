@@ -3099,9 +3099,7 @@
                             if (!summary) return;
                             try { window.__countrySummaryCache.set(cc, { summary, ts: Date.now() }); } catch { /* ignore */ }
                             if (!currentDrawerCountry || String(currentDrawerCountry.code || '').toUpperCase() !== cc) return;
-                            // 关键保护：若当前处于国家透视（COUNTRY）模式，不允许这条“全球流面板”的刷新覆盖右抽屉
-                            // 否则会出现“美区统计闪一下又被切回全球”的现象
-                            if (typeof currentViewState === 'string' && currentViewState === 'COUNTRY') return;
+                            // summary 为国家口径数据，应刷新右侧抽屉
                             showDrawersWithCountryData(cc, countryName, summary);
                         })
                         .catch(() => {});
