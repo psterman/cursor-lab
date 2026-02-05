@@ -16521,83 +16521,67 @@
             }
             
             // day (上岗天数)：定义为「最早与 Cursor 开始对话 -> 现在」的时长（按天）
-            // 【修复】优先级调整：
-            // 1) 本地：localStorage.last_analysis_data.stats.earliestFileTime（用户本地 workspacestorage 文件夹最早建立时间）
-            // 2) 云端：userData.first_chat_at / userData.stats.first_chat_at
-            // 3) 云端：userData.stats.usageDays / usage_days / workDays / days
-            // 4) 兜底：work_days/usage_days/days（兼容旧字段，但避免使用硬编码的 1）
+            // 【修复】优先级调整：云端数据优先，本地数据作为兜底
+            // 1) 云端：userData.work_days / userData.stats.work_days（最高优先级）
+            // 2) 云端：userData.stats.usageDays / usage_days / workDays / days
+            // 3) 云端：userData.first_chat_at / userData.stats.first_chat_at
+            // 4) 云端：userData.earliestFileTime / userData.stats.earliestFileTime
+            // 5) 兜底：userData.work_days/usage_days/days（兼容旧字段，但避免使用硬编码的 1）
+            // 6) 本地：localStorage.last_analysis_data.stats.earliestFileTime（仅当云端数据完全不存在时）
             let day = undefined;
             let daySource = null; // 用于调试：记录数据来源
             
-            // 【步骤1】优先尝试从本地 localStorage 获取 earliestFileTime 或 usageDays
+            // 【步骤1】优先尝试从云端数据获取（userData 及其嵌套的 stats 对象）
             try {
-                const raw = localStorage.getItem('last_analysis_data');
-                if (raw) {
-                    const obj = JSON.parse(raw);
-                    const st = obj && obj.stats ? obj.stats : null;
-                    
-                    // 1a) 优先使用 earliestFileTime 计算天数
-                    const earliest = st ? (st.earliestFileTime ?? st.earliest_file_time) : null;
-                    if (earliest != null) {
-                        const ts = Number(earliest);
-                        if (Number.isFinite(ts) && ts > 0) {
-                            const diff = Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24));
-                            day = Math.max(1, diff);
-                            daySource = 'localStorage.earliestFileTime';
-                        }
-                    }
-                    
-                    // 1b) 如果没有 earliestFileTime，但有 usageDays/work_days，直接使用（含 Cloudflare 兜底）
-                    if (day === undefined || day === null || !(Number(day) > 0)) {
-                        const usageDays = st ? (st.usageDays ?? st.usage_days ?? st.work_days ?? null) : null;
-                        if (usageDays != null && Number(usageDays) > 0) {
-                            day = Number(usageDays);
-                            daySource = 'localStorage.usageDays';
-                        }
-                    }
-                }
-            } catch (e) { /* ignore */ }
-            
-            // 【步骤2】如果本地没有，尝试云端数据
-            if (day === undefined || day === null || !(Number(day) > 0)) {
-                try {
-                    const su = userData.stats && typeof userData.stats === 'object' ? userData.stats : null;
-                    
-                    // 2a) 尝试云端 usageDays（含 work_days，>=1 即用，避免 Cloudflare 显示 N/A）
-                    const usageDays = su && (su.usageDays ?? su.usage_days ?? su.work_days ?? su.workDays ?? su.days);
+                const su = userData.stats && typeof userData.stats === 'object' ? userData.stats : null;
+                
+                // 1a) 优先尝试云端 work_days（最高优先级，>=1 即用）
+                const cloudWorkDays = userData.work_days ?? (su ? su.work_days : null);
+                if (cloudWorkDays != null && cloudWorkDays !== undefined && Number(cloudWorkDays) >= 1) {
+                    day = Number(cloudWorkDays);
+                    daySource = 'cloud.work_days';
+                } else {
+                    // 1b) 尝试云端 usageDays（含 usage_days、workDays、days）
+                    const usageDays = su && (su.usageDays ?? su.usage_days ?? su.workDays ?? su.days);
                     if (usageDays != null && Number(usageDays) >= 1) {
                         day = Number(usageDays);
                         daySource = 'cloud.usageDays';
                     } else {
-                        // 2b) 尝试云端 earliestFileTime
-                        const earliestFileTime =
-                            (su ? (su.earliestFileTime ?? su.earliest_file_time) : null) ??
-                            userData.earliestFileTime ??
-                            userData.earliest_file_time ??
+                        // 1c) 尝试云端 first_chat_at
+                        const firstChatAt =
+                            userData.first_chat_at ||
+                            (su ? (su.first_chat_at || su.firstChatAt) : null) ||
                             null;
-                        const earliestTs = earliestFileTime != null ? Number(earliestFileTime) : NaN;
-                        if (Number.isFinite(earliestTs) && earliestTs > 0) {
-                            const diff = Math.floor((Date.now() - earliestTs) / (1000 * 60 * 60 * 24));
-                            day = Math.max(1, diff);
-                            daySource = 'cloud.earliestFileTime';
-                        } else {
-                            // 2c) 尝试云端 first_chat_at
-                            const firstChatAt =
-                                userData.first_chat_at ||
-                                (su ? (su.first_chat_at || su.firstChatAt) : null) ||
-                                null;
+                        if (firstChatAt != null && firstChatAt !== undefined) {
                             const t = firstChatAt ? Date.parse(String(firstChatAt)) : NaN;
                             if (Number.isFinite(t)) {
                                 const diff = Math.floor((Date.now() - t) / (1000 * 60 * 60 * 24));
                                 day = Math.max(1, diff);
                                 daySource = 'cloud.first_chat_at';
                             }
+                        } else {
+                            // 1d) 尝试云端 earliestFileTime
+                            const earliestFileTime =
+                                (su ? (su.earliestFileTime ?? su.earliest_file_time) : null) ??
+                                userData.earliestFileTime ??
+                                userData.earliest_file_time ??
+                                null;
+                            if (earliestFileTime != null && earliestFileTime !== undefined) {
+                                const earliestTs = Number(earliestFileTime);
+                                if (Number.isFinite(earliestTs) && earliestTs > 0) {
+                                    const diff = Math.floor((Date.now() - earliestTs) / (1000 * 60 * 60 * 24));
+                                    day = Math.max(1, diff);
+                                    daySource = 'cloud.earliestFileTime';
+                                }
+                            }
                         }
                     }
-                } catch { /* ignore */ }
+                }
+            } catch (e) { 
+                console.warn('[extractDimensionValues] 云端数据读取失败:', e);
             }
             
-            // 【步骤3】最后兜底：使用 work_days 等（>=1 即用，避免 Cloudflare 仅返回 1 时显示 N/A）
+            // 【步骤2】最后兜底：使用 userData 根级别的 work_days/usage_days/days（>=1 即用）
             if (day === undefined || day === null || !(Number(day) > 0)) {
                 const fallbackFields = ['work_days', 'usage_days', 'days'];
                 for (const field of fallbackFields) {
@@ -16610,6 +16594,50 @@
                             break;
                         }
                     }
+                }
+            }
+            
+            // 【步骤3】严格降级：只有当云端数据完全不存在时，才使用本地 localStorage
+            // 检查云端是否真的没有任何有效数据
+            const su = userData.stats && typeof userData.stats === 'object' ? userData.stats : null;
+            const hasCloudWorkDays = (userData.work_days != null && userData.work_days !== undefined) || 
+                                     (su && su.work_days != null && su.work_days !== undefined);
+            const hasCloudUsageDays = su && (su.usageDays != null || su.usage_days != null || su.workDays != null || su.days != null);
+            const hasCloudFirstChatAt = userData.first_chat_at != null || (su && (su.first_chat_at != null || su.firstChatAt != null));
+            const hasCloudEarliestFileTime = userData.earliestFileTime != null || userData.earliest_file_time != null || 
+                                            (su && (su.earliestFileTime != null || su.earliest_file_time != null));
+            const hasCloudData = hasCloudWorkDays || hasCloudUsageDays || hasCloudFirstChatAt || hasCloudEarliestFileTime;
+            
+            if ((day === undefined || day === null || !(Number(day) > 0)) && !hasCloudData) {
+                // 只有当云端完全没有数据时，才使用本地数据
+                try {
+                    const raw = localStorage.getItem('last_analysis_data');
+                    if (raw) {
+                        const obj = JSON.parse(raw);
+                        const st = obj && obj.stats ? obj.stats : null;
+                        
+                        // 3a) 优先使用 earliestFileTime 计算天数
+                        const earliest = st ? (st.earliestFileTime ?? st.earliest_file_time) : null;
+                        if (earliest != null && earliest !== undefined) {
+                            const ts = Number(earliest);
+                            if (Number.isFinite(ts) && ts > 0) {
+                                const diff = Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24));
+                                day = Math.max(1, diff);
+                                daySource = 'localStorage.earliestFileTime';
+                            }
+                        }
+                        
+                        // 3b) 如果没有 earliestFileTime，但有 usageDays/work_days，直接使用
+                        if (day === undefined || day === null || !(Number(day) > 0)) {
+                            const usageDays = st ? (st.usageDays ?? st.usage_days ?? st.work_days ?? null) : null;
+                            if (usageDays != null && Number(usageDays) > 0) {
+                                day = Number(usageDays);
+                                daySource = 'localStorage.usageDays';
+                            }
+                        }
+                    }
+                } catch (e) { 
+                    console.warn('[extractDimensionValues] 本地数据读取失败:', e);
                 }
             }
             
