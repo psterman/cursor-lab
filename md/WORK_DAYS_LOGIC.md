@@ -101,28 +101,7 @@ stats2 里「上岗天数」(day 维度) 的取值顺序在 **stats2.html** 的 
 
 ---
 
----
-
-## 5. 2026-02 完整修复（显式上报 + 数据库保护）
-
-### 5.1 前端
-
-- **VibeCodingerAnalyzer.js**：上报前从 `localStorage.last_analysis_data.stats` 读取 `usageDays/work_days`，作为真实上岗天数写入 `stats.work_days`，并在顶层增加 `work_days` 字段。
-- **stats2.html / stats2.app.js**：`extractDimensionValues` 优先使用接口返回的 `userData.work_days`（≥1 即用），不再做二次计算。
-
-### 5.2 后端
-
-- **index.ts**：从 `body.work_days` 和 `body.stats.work_days` 中读取，并结合已有的「最大值保护」逻辑持久化。
-
-### 5.3 数据库（需手动执行）
-
-- 运行 `md/migrate_work_days_protection.sql`：
-  1. 触发器：UPDATE 时保持 `created_at` 不变。
-  2. 视图：`work_days = COALESCE(work_days, (now() - created_at) 天数)`。
-
----
-
-## 6. 部署与验证
+## 5. 部署与验证
 
 ### 部署 Worker
 

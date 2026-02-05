@@ -988,8 +988,6 @@ interface V6AnalyzePayload {
   manual_lat?: number;
   /** 用户校准经度（可与 manual_location 一起单独上报） */
   manual_lng?: number;
-  /** 【显式】index.html 本地解析的上岗天数（真实值） */
-  work_days?: number;
   // 兼容旧版接口的字段
   usageDays?: number;
   days?: number;
@@ -1720,10 +1718,9 @@ app.post('/api/v2/analyze', async (c) => {
     const avgMessageLength = Math.round(totalChars / totalMessages || 0);
 
     // 【计算额外统计信息】用于 work_days, jiafang_count, ketao_count
-    // work_days：优先客户端上报的真实上岗天数（index.html 本地解析 → body.work_days / body.stats）
+    // work_days：优先客户端上报的真实上岗天数（earliestFileTime→now），其次聊天跨度，最后兜底 1
     let workDays = 1;
     const statsWorkDays =
-      body.work_days ?? // 【显式】前端顶层字段
       (body.stats as any)?.work_days ??
       (body.stats as any)?.usageDays ??
       (body.stats as any)?.usage_days ??
@@ -1731,7 +1728,7 @@ app.post('/api/v2/analyze', async (c) => {
     if (statsWorkDays !== undefined && statsWorkDays !== null && Number(statsWorkDays) >= 1) {
       workDays = Math.max(1, Number(statsWorkDays));
     } else if (body.usageDays !== undefined || body.days !== undefined || body.workDays !== undefined) {
-      workDays = body.usageDays ?? body.days ?? body.workDays ?? 1;
+      workDays = body.usageDays || body.days || body.workDays || 1;
     } else if (userMessages.length > 0) {
       // 从消息时间戳中提取唯一日期
       const uniqueDates = new Set<string>();
