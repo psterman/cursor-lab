@@ -10,3 +10,6 @@ fix_*.js
 
 # 日志和历史记录
 .waylog/
+
+# Skills 文件夹
+skills/

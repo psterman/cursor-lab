@@ -15680,67 +15680,94 @@
                 let dayCount = 'N/A';
                 let dayEarliestTs = null;
                 let daySource = null;
+                let apiWorkDays = null; // 存储 API 返回的 work_days
                 
-                // 优先使用 extractDimensionValues 返回的 day（已包含本地数据逻辑）
-                if (dimensionValues.day !== undefined && dimensionValues.day !== null && dimensionValues.day > 0) {
-                    dayCount = nf.format(Math.round(dimensionValues.day));
-                    daySource = 'dimensionValues.day';
-                }
-                
-                // 【步骤1】优先从本地 localStorage 获取 earliestFileTime 或 usageDays（Cloudflare 环境强化）
-                if (dayCount === 'N/A' || dayCount === '1') { // 如果是1天，可能是默认值，尝试从本地获取更准确值
+                // 【权限分级】步骤0：优先检查 API 返回的 work_days（最高优先级）
+                const su = userData.stats && typeof userData.stats === 'object' ? userData.stats : null;
+                const apiWorkDaysValue = userData.work_days ?? (su ? su.work_days : null);
+                if (apiWorkDaysValue !== null && apiWorkDaysValue !== undefined && Number(apiWorkDaysValue) > 0) {
+                    apiWorkDays = Number(apiWorkDaysValue);
+                    dayCount = nf.format(apiWorkDays);
+                    daySource = 'api.work_days';
+                    console.log('[renderUserStatsCards] ✅ API work_days 存在且大于0，设为唯一来源:', apiWorkDays);
+                    
+                    // 【反向修正】立即将 API 的正确天数写入 localStorage，确保本地缓存被云端数据'洗白'
                     try {
-                        const raw = localStorage.getItem('last_analysis_data');
-                        console.log('[renderUserStatsCards] 本地数据 raw:', raw ? '存在' : '不存在');
-                        if (raw) {
-                            const obj = JSON.parse(raw);
-                            console.log('[renderUserStatsCards] 本地数据 parsed:', obj);
-                            const st = obj && obj.stats ? obj.stats : null;
-                            
-                            // 1a) 优先使用 earliestFileTime 计算天数
-                            const earliest = st ? (st.earliestFileTime ?? st.earliest_file_time) : null;
-                            console.log('[renderUserStatsCards] earliestFileTime:', earliest);
-                            const ts = _parseMaybeTs(earliest);
-                            const d = _calcDaysFromTs(ts);
-                            if (d != null && d > 1) { // 只有计算值大于1才使用
-                                dayEarliestTs = ts;
-                                dayCount = nf.format(d);
-                                daySource = 'localStorage.earliestFileTime';
-                                console.log('[renderUserStatsCards] 使用本地 earliestFileTime:', d);
-                            }
-                            
-                            // 1b) 如果没有 earliestFileTime，但有 usageDays/work_days，直接使用
-                            if (dayCount === 'N/A' || dayCount === '1') {
-                                const usageDays = st ? (st.usageDays ?? st.usage_days ?? st.work_days ?? null) : null;
-                                console.log('[renderUserStatsCards] usageDays from local:', usageDays);
-                                if (usageDays != null && Number(usageDays) > 1) { // 只有大于1才使用
-                                    dayCount = nf.format(Number(usageDays));
-                                    daySource = 'localStorage.usageDays';
-                                    console.log('[renderUserStatsCards] 使用本地 usageDays:', usageDays);
-                                }
-                            }
-                        }
-                    } catch (e) { 
-                        console.warn('[renderUserStatsCards] 本地数据读取失败:', e);
+                        localStorage.setItem('usageDays', String(apiWorkDays));
+                        console.log('[renderUserStatsCards] ✅ 已将 API work_days 写入 localStorage.usageDays:', apiWorkDays);
+                    } catch (e) {
+                        console.warn('[renderUserStatsCards] ⚠️ 写入 localStorage.usageDays 失败:', e);
                     }
                 }
                 
-                // 【步骤2】如果本地没有，尝试云端 first_chat_at
+                // 如果 API work_days 不存在或无效，才使用其他来源
                 if (dayCount === 'N/A' || dayCount === '1') {
-                    try {
-                        const su = userData.stats && typeof userData.stats === 'object' ? userData.stats : null;
-                        const firstChatAt =
-                            userData.first_chat_at ||
-                            (su ? (su.first_chat_at || su.firstChatAt) : null) ||
-                            null;
-                        const tFirst = _parseMaybeTs(firstChatAt);
-                        const dFirst = _calcDaysFromTs(tFirst);
-                        if (dFirst != null && dFirst > 1) {
-                            dayEarliestTs = tFirst;
-                            dayCount = nf.format(dFirst);
-                            daySource = 'cloud.first_chat_at';
+                    // 优先使用 extractDimensionValues 返回的 day（已包含本地数据逻辑）
+                    if (dimensionValues.day !== undefined && dimensionValues.day !== null && dimensionValues.day > 0) {
+                        dayCount = nf.format(Math.round(dimensionValues.day));
+                        daySource = 'dimensionValues.day';
+                    }
+                    
+                    // 【步骤1】优先从本地 localStorage 获取 earliestFileTime 或 usageDays（Cloudflare 环境强化）
+                    if (dayCount === 'N/A' || dayCount === '1') { // 如果是1天，可能是默认值，尝试从本地获取更准确值
+                        try {
+                            const raw = localStorage.getItem('last_analysis_data');
+                            console.log('[renderUserStatsCards] 本地数据 raw:', raw ? '存在' : '不存在');
+                            if (raw) {
+                                const obj = JSON.parse(raw);
+                                console.log('[renderUserStatsCards] 本地数据 parsed:', obj);
+                                const st = obj && obj.stats ? obj.stats : null;
+                                
+                                // 1a) 优先使用 earliestFileTime 计算天数
+                                const earliest = st ? (st.earliestFileTime ?? st.earliest_file_time) : null;
+                                console.log('[renderUserStatsCards] earliestFileTime:', earliest);
+                                
+                                // 【阻止覆盖】只有当 earliestFileTime 存在时才使用，如果为 undefined 则保留当前值
+                                if (earliest !== null && earliest !== undefined) {
+                                    const ts = _parseMaybeTs(earliest);
+                                    const d = _calcDaysFromTs(ts);
+                                    if (d != null && d > 1) { // 只有计算值大于1才使用
+                                        dayEarliestTs = ts;
+                                        dayCount = nf.format(d);
+                                        daySource = 'localStorage.earliestFileTime';
+                                        console.log('[renderUserStatsCards] 使用本地 earliestFileTime:', d);
+                                    }
+                                } else {
+                                    console.log('[renderUserStatsCards] earliestFileTime 为 undefined，保留当前 API 返回值');
+                                }
+                                
+                                // 1b) 如果没有 earliestFileTime，但有 usageDays/work_days，直接使用
+                                if (dayCount === 'N/A' || dayCount === '1') {
+                                    const usageDays = st ? (st.usageDays ?? st.usage_days ?? st.work_days ?? null) : null;
+                                    console.log('[renderUserStatsCards] usageDays from local:', usageDays);
+                                    if (usageDays != null && Number(usageDays) > 1) { // 只有大于1才使用
+                                        dayCount = nf.format(Number(usageDays));
+                                        daySource = 'localStorage.usageDays';
+                                        console.log('[renderUserStatsCards] 使用本地 usageDays:', usageDays);
+                                    }
+                                }
+                            }
+                        } catch (e) { 
+                            console.warn('[renderUserStatsCards] 本地数据读取失败:', e);
                         }
-                    } catch { /* ignore */ }
+                    }
+                    
+                    // 【步骤2】如果本地没有，尝试云端 first_chat_at
+                    if (dayCount === 'N/A' || dayCount === '1') {
+                        try {
+                            const firstChatAt =
+                                userData.first_chat_at ||
+                                (su ? (su.first_chat_at || su.firstChatAt) : null) ||
+                                null;
+                            const tFirst = _parseMaybeTs(firstChatAt);
+                            const dFirst = _calcDaysFromTs(tFirst);
+                            if (dFirst != null && dFirst > 1) {
+                                dayEarliestTs = tFirst;
+                                dayCount = nf.format(dFirst);
+                                daySource = 'cloud.first_chat_at';
+                            }
+                        } catch { /* ignore */ }
+                    }
                 }
                 
                 // 调试日志
