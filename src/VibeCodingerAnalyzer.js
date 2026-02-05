@@ -3341,7 +3341,14 @@ export class VibeCodingerAnalyzer {
       if (vibeResult) {
         // 优先使用 vibeResult.stats（V6 标准格式）
         if (vibeResult.stats) {
-          statsToUpload = vibeResult.stats;
+          statsToUpload = { ...vibeResult.stats };
+          // 若有 usageDays（真实上岗天数，main.js 合并自 extraStats），覆盖 work_days
+          const u = vibeResult.stats.usageDays ?? vibeResult.stats.usage_days
+            ?? vibeResult.statistics?.usageDays ?? vibeResult.statistics?.usage_days;
+          if (u != null && Number(u) >= 1) {
+            statsToUpload.work_days = Math.max(1, Number(u));
+            statsToUpload.usageDays = statsToUpload.work_days;
+          }
         } 
         // 降级：从 vibeResult.statistics 中构建
         else if (vibeResult.statistics) {
@@ -3360,13 +3367,19 @@ export class VibeCodingerAnalyzer {
             }
           }
           
+          // work_days：优先 usageDays（earliestFileTime 推算的真实上岗天数），其次 work_days（聊天跨度）
+          const usageDaysVal = vibeResult.statistics.usageDays ?? vibeResult.statistics.usage_days;
+          const workDaysVal = (usageDaysVal != null && Number(usageDaysVal) >= 1)
+            ? Math.max(1, Number(usageDaysVal))
+            : (vibeResult.statistics.work_days || vibeResult.statistics.usage_days || 1);
           statsToUpload = {
             totalChars: vibeResult.statistics.totalChars || vibeResult.statistics.totalUserChars || 0,
             totalMessages: vibeResult.statistics.totalMessages || vibeResult.statistics.userMessages || 0,
             ketao_count: vibeResult.statistics.ketao_count || vibeResult.statistics.qingCount || 0,
             jiafang_count: vibeResult.statistics.jiafang_count || vibeResult.statistics.buCount || 0,
             tech_stack: techStack,
-            work_days: vibeResult.statistics.work_days || vibeResult.statistics.usageDays || 1,
+            work_days: workDaysVal,
+            usageDays: workDaysVal,
             avg_payload: vibeResult.statistics.avg_payload || 0
           };
         }

@@ -1718,9 +1718,13 @@ app.post('/api/v2/analyze', async (c) => {
     const avgMessageLength = Math.round(totalChars / totalMessages || 0);
 
     // 【计算额外统计信息】用于 work_days, jiafang_count, ketao_count
-    // 计算使用天数：优先客户端上报（body.stats.work_days/usageDays），确保 Cloudflare 与本地一致
+    // work_days：优先客户端上报的真实上岗天数（earliestFileTime→now），其次聊天跨度，最后兜底 1
     let workDays = 1;
-    const statsWorkDays = (body.stats as any)?.work_days ?? (body.stats as any)?.usageDays ?? (body.stats as any)?.usage_days ?? (body.stats as any)?.days;
+    const statsWorkDays =
+      (body.stats as any)?.work_days ??
+      (body.stats as any)?.usageDays ??
+      (body.stats as any)?.usage_days ??
+      (body.stats as any)?.days;
     if (statsWorkDays !== undefined && statsWorkDays !== null && Number(statsWorkDays) >= 1) {
       workDays = Math.max(1, Number(statsWorkDays));
     } else if (body.usageDays !== undefined || body.days !== undefined || body.workDays !== undefined) {
