@@ -11142,12 +11142,23 @@
                 word = Math.round(chars / messages);
             }
             
-            // day（Cursor 上岗天数）：优先本地 earliestFileTime，其次云端 usageDays/first_chat_at
-            // 【修复】避免使用云端硬编码的 work_days=1 作为默认值
+            // day（Cursor 上岗天数）：【修复】接口返回 work_days 直接使用，不再二次计算
+            // 1) 云端 userData.work_days 2) 本地 localStorage 3) 云端 first_chat_at
             let day = undefined;
             let daySource = null;
             
-            // 【步骤1】优先尝试从本地 localStorage 获取 earliestFileTime 或 usageDays
+            // 【步骤0】若接口返回了 work_days 且有效，直接使用
+            const apiWorkDays = userData.work_days ?? (userData.stats && typeof userData.stats === 'object' ? (userData.stats.work_days ?? userData.stats.usageDays ?? userData.stats.usage_days) : null);
+            if (apiWorkDays !== undefined && apiWorkDays !== null) {
+                const n = Number(apiWorkDays);
+                if (Number.isFinite(n) && n >= 1) {
+                    day = n;
+                    daySource = 'api.work_days';
+                }
+            }
+            
+            // 【步骤1】若接口无有效值，尝试从本地 localStorage 获取
+            if (day === undefined || day === null || !(Number(day) > 0)) {
             try {
                 const raw = localStorage.getItem('last_analysis_data');
                 if (raw) {
@@ -11175,6 +11186,7 @@
                     }
                 }
             } catch (e) { /* ignore */ }
+            }
             
             // 【步骤2】如果本地没有，尝试云端数据
             if (day === undefined || day === null || !(Number(day) > 0)) {

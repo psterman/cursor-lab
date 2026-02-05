@@ -3338,12 +3338,23 @@ export class VibeCodingerAnalyzer {
       
       // 从 vibeResult 中提取 stats 对象（如果存在）
       let statsToUpload = null;
+      // 【上岗天数修复】优先从 localStorage.last_analysis_data 读取真实天数（index.html 本地解析 120 天）
+      let explicitWorkDays = null;
+      try {
+        const lastData = localStorage.getItem('last_analysis_data');
+        if (lastData) {
+          const parsed = JSON.parse(lastData);
+          const st = parsed?.stats;
+          const u = st?.usageDays ?? st?.usage_days ?? st?.work_days;
+          if (u != null && Number(u) >= 1) explicitWorkDays = Math.max(1, Number(u));
+        }
+      } catch (_) { /* ignore */ }
       if (vibeResult) {
         // 优先使用 vibeResult.stats（V6 标准格式）
         if (vibeResult.stats) {
           statsToUpload = { ...vibeResult.stats };
-          // 若有 usageDays（真实上岗天数，main.js 合并自 extraStats），覆盖 work_days
-          const u = vibeResult.stats.usageDays ?? vibeResult.stats.usage_days
+          // 若有 usageDays（真实上岗天数），覆盖 work_days
+          const u = explicitWorkDays ?? vibeResult.stats.usageDays ?? vibeResult.stats.usage_days
             ?? vibeResult.statistics?.usageDays ?? vibeResult.statistics?.usage_days;
           if (u != null && Number(u) >= 1) {
             statsToUpload.work_days = Math.max(1, Number(u));
@@ -3367,8 +3378,8 @@ export class VibeCodingerAnalyzer {
             }
           }
           
-          // work_days：优先 usageDays（earliestFileTime 推算的真实上岗天数），其次 work_days（聊天跨度）
-          const usageDaysVal = vibeResult.statistics.usageDays ?? vibeResult.statistics.usage_days;
+          // work_days：优先 explicitWorkDays（localStorage 真实天数）> usageDays > work_days（聊天跨度）
+          const usageDaysVal = explicitWorkDays ?? vibeResult.statistics.usageDays ?? vibeResult.statistics.usage_days;
           const workDaysVal = (usageDaysVal != null && Number(usageDaysVal) >= 1)
             ? Math.max(1, Number(usageDaysVal))
             : (vibeResult.statistics.work_days || vibeResult.statistics.usage_days || 1);
@@ -3445,8 +3456,11 @@ export class VibeCodingerAnalyzer {
       };
       const claimToken = _readClaimToken();
 
+      // 【上岗天数】顶层显式传递，确保后端能正确接收
+      const workDaysForPayload = statsToUpload?.work_days ?? explicitWorkDays ?? 1;
       const uploadData = {
         chatData: formattedChatData,
+        work_days: workDaysForPayload, // 【显式】index.html 本地解析的真实天数
         lang: this.lang || 'zh-CN',
         countryCode: this.countryCode || null, // 【v4.0 新增】传递国家代码
         fingerprint: stableBrowserFingerprint, // 【V6 新增】浏览器指纹（稳定）

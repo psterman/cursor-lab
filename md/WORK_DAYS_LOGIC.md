@@ -90,5 +90,57 @@ stats2 里「上岗天数」(day 维度) 的取值顺序在 **stats2.html** 的 
 2. **Worker**  
    - 已优先使用 `body.stats.work_days` / `body.stats.usageDays`，并补充注释说明语义。
 
-3. **可选：后端兜底**  
-   - 若希望即使用户从未传过 `earliestFileTime`，也能有一个“尽量真实”的天数，可在 Worker 中用该用户最早记录的 `created_at` 计算 `days_since_first` 作为兜底。
+3. **Worker 兜底（已实施）**  
+   - 当 `work_days=1` 时，Worker 查询该用户（fingerprint 或 id）在 `user_analysis` 中的最早 `created_at`，计算 `days_since_first = floor((now - created_at) / 86400000)`，用 `max(1, days_since_first)` 覆盖。  
+   - 解决 Cloudflare 部署环境下前端无法获取 `earliestFileTime` 导致 work_days 恒为 1 的问题。
+
+4. **增量更新 / 首次创建时间保护（已实施）**  
+   - **问题**：每次 upsert 用完整 payload 覆盖，若本次计算的 `work_days=1` 会覆盖已有更大值（如 5）。  
+   - **方案**：写入前查询已有记录的 `work_days`（含 `stats.work_days`），使用 `work_days = max(已有值, 本次计算值)` 作为最终写入值。  
+   - 确保「永不将 work_days 覆盖为更小值」，避免重复上报导致上岗天数回退。
+
+---
+
+---
+
+## 5. 2026-02 完整修复（显式上报 + 数据库保护）
+
+### 5.1 前端
+
+- **VibeCodingerAnalyzer.js**：上报前从 `localStorage.last_analysis_data.stats` 读取 `usageDays/work_days`，作为真实上岗天数写入 `stats.work_days`，并在顶层增加 `work_days` 字段。
+- **stats2.html / stats2.app.js**：`extractDimensionValues` 优先使用接口返回的 `userData.work_days`（≥1 即用），不再做二次计算。
+
+### 5.2 后端
+
+- **index.ts**：从 `body.work_days` 和 `body.stats.work_days` 中读取，并结合已有的「最大值保护」逻辑持久化。
+
+### 5.3 数据库（需手动执行）
+
+- 运行 `md/migrate_work_days_protection.sql`：
+  1. 触发器：UPDATE 时保持 `created_at` 不变。
+  2. 视图：`work_days = COALESCE(work_days, (now() - created_at) 天数)`。
+
+---
+
+## 6. 部署与验证
+
+### 部署 Worker
+
+```bash
+npm run build
+wrangler deploy
+```
+
+### 验证步骤
+
+1. **首次分析**：新用户第一次分析，work_days 可能仍为 1（无历史记录可推算）。
+2. **二次分析**：同一用户再次分析或刷新，Worker 会查到最早 `created_at` 与已有 `work_days`，work_days 应变为「距今天数」或保留已有更大值。  
+3. **增量保护**：若某次上报算出 work_days=1 而库中已有 5，Worker 会保留 5，不会被覆盖为 1。
+4. **Supabase 检查**：
+   ```sql
+   SELECT id, fingerprint, work_days, stats->>'work_days' AS stats_work_days, created_at
+   FROM user_analysis
+   WHERE fingerprint = '你的fingerprint'
+   ORDER BY created_at DESC LIMIT 5;
+   ```
+5. **stats2 检查**：打开 Cloudflare 部署的 stats2 页面，确认上岗天数不再恒为 1。

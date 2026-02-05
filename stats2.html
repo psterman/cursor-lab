@@ -15681,14 +15681,14 @@
                 let dayEarliestTs = null;
                 let daySource = null;
                 
-                // 优先使用 extractDimensionValues 返回的 day（已包含本地数据逻辑）
+                // 优先使用 extractDimensionValues 返回的 day（已优先使用接口 work_days，不再二次计算）
                 if (dimensionValues.day !== undefined && dimensionValues.day !== null && dimensionValues.day > 0) {
                     dayCount = nf.format(Math.round(dimensionValues.day));
                     daySource = 'dimensionValues.day';
                 }
                 
-                // 【步骤1】优先从本地 localStorage 获取 earliestFileTime 或 usageDays（Cloudflare 环境强化）
-                if (dayCount === 'N/A' || dayCount === '1') { // 如果是1天，可能是默认值，尝试从本地获取更准确值
+                // 【步骤1】若接口返回 1 天，尝试从本地 localStorage 获取更准确值（Cloudflare 兜底）
+                if (dayCount === 'N/A' || dayCount === '1') {
                     try {
                         const raw = localStorage.getItem('last_analysis_data');
                         console.log('[renderUserStatsCards] 本地数据 raw:', raw ? '存在' : '不存在');
@@ -16494,15 +16494,26 @@
             }
             
             // day (上岗天数)：定义为「最早与 Cursor 开始对话 -> 现在」的时长（按天）
-            // 【修复】优先级调整：
-            // 1) 本地：localStorage.last_analysis_data.stats.earliestFileTime（用户本地 workspacestorage 文件夹最早建立时间）
-            // 2) 云端：userData.first_chat_at / userData.stats.first_chat_at
-            // 3) 云端：userData.stats.usageDays / usage_days / workDays / days
-            // 4) 兜底：work_days/usage_days/days（兼容旧字段，但避免使用硬编码的 1）
+            // 【修复】优先级：接口返回的 work_days 直接使用，不再前端二次计算
+            // 1) 云端：userData.work_days / userData.stats.work_days（接口返回，>=1 即用）
+            // 2) 本地：localStorage.last_analysis_data.stats.earliestFileTime 或 usageDays
+            // 3) 云端：first_chat_at / earliestFileTime
+            // 4) 兜底：work_days/usage_days/days
             let day = undefined;
             let daySource = null; // 用于调试：记录数据来源
             
-            // 【步骤1】优先尝试从本地 localStorage 获取 earliestFileTime 或 usageDays
+            // 【步骤0】若接口返回了 work_days 且有效，直接使用（不做二次计算）
+            const apiWorkDays = userData.work_days ?? (userData.stats && typeof userData.stats === 'object' ? (userData.stats.work_days ?? userData.stats.usageDays ?? userData.stats.usage_days) : null);
+            if (apiWorkDays !== undefined && apiWorkDays !== null) {
+                const n = Number(apiWorkDays);
+                if (Number.isFinite(n) && n >= 1) {
+                    day = n;
+                    daySource = 'api.work_days';
+                }
+            }
+            
+            // 【步骤1】若接口无有效值，尝试从本地 localStorage 获取 earliestFileTime 或 usageDays
+            if (day === undefined || day === null || !(Number(day) > 0)) {
             try {
                 const raw = localStorage.getItem('last_analysis_data');
                 if (raw) {
@@ -16530,8 +16541,9 @@
                     }
                 }
             } catch (e) { /* ignore */ }
+            }
             
-            // 【步骤2】如果本地没有，尝试云端数据
+            // 【步骤2】如果本地没有，尝试云端 first_chat_at / earliestFileTime
             if (day === undefined || day === null || !(Number(day) > 0)) {
                 try {
                     const su = userData.stats && typeof userData.stats === 'object' ? userData.stats : null;

@@ -988,6 +988,8 @@ interface V6AnalyzePayload {
   manual_lat?: number;
   /** 用户校准经度（可与 manual_location 一起单独上报） */
   manual_lng?: number;
+  /** 【显式】index.html 本地解析的上岗天数（真实值） */
+  work_days?: number;
   // 兼容旧版接口的字段
   usageDays?: number;
   days?: number;
@@ -1718,9 +1720,10 @@ app.post('/api/v2/analyze', async (c) => {
     const avgMessageLength = Math.round(totalChars / totalMessages || 0);
 
     // 【计算额外统计信息】用于 work_days, jiafang_count, ketao_count
-    // work_days：优先客户端上报的真实上岗天数（earliestFileTime→now），其次聊天跨度，最后兜底 1
+    // work_days：优先客户端上报的真实上岗天数（index.html 本地解析 → body.work_days / body.stats）
     let workDays = 1;
     const statsWorkDays =
+      body.work_days ?? // 【显式】前端顶层字段
       (body.stats as any)?.work_days ??
       (body.stats as any)?.usageDays ??
       (body.stats as any)?.usage_days ??
@@ -1728,7 +1731,7 @@ app.post('/api/v2/analyze', async (c) => {
     if (statsWorkDays !== undefined && statsWorkDays !== null && Number(statsWorkDays) >= 1) {
       workDays = Math.max(1, Number(statsWorkDays));
     } else if (body.usageDays !== undefined || body.days !== undefined || body.workDays !== undefined) {
-      workDays = body.usageDays || body.days || body.workDays || 1;
+      workDays = body.usageDays ?? body.days ?? body.workDays ?? 1;
     } else if (userMessages.length > 0) {
       // 从消息时间戳中提取唯一日期
       const uniqueDates = new Set<string>();
@@ -2350,6 +2353,44 @@ app.post('/api/v2/analyze', async (c) => {
             contentLength: stableContent.length,
             fallbackUsed: !stableContent,
           });
+
+          // 【增量更新 / 首次创建时间保护】查询已有记录，避免 work_days 被更小值覆盖
+          let existingWorkDays: number | null = null;
+          if (env.SUPABASE_URL && env.SUPABASE_KEY) {
+            try {
+              const filterCol = useUserIdForUpsert ? 'id' : 'fingerprint';
+              const filterVal = useUserIdForUpsert ? authenticatedUserId! : fingerprint;
+              // 一次查询：获取 work_days、created_at、stats（用于兜底与最大值保护）
+              const existingUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?select=work_days,created_at,stats&${filterCol}=eq.${encodeURIComponent(filterVal)}&order=created_at.asc&limit=1`;
+              const existingRows = await fetchSupabaseJson<any[]>(env, existingUrl, { headers: buildSupabaseHeaders(env) }, 5000);
+              const arr = Array.isArray(existingRows) ? existingRows : (existingRows ? [existingRows] : []);
+              const row = arr[0];
+              if (row) {
+                const fromCol = row.work_days != null ? Number(row.work_days) : NaN;
+                const fromStats = (row.stats && typeof row.stats === 'object' && row.stats.work_days != null) ? Number(row.stats.work_days) : NaN;
+                existingWorkDays = Number.isFinite(fromCol) ? fromCol : (Number.isFinite(fromStats) ? fromStats : null);
+                // 【兜底】当本次计算为 1 时，用最早 created_at 推算
+                if (workDays === 1 && row.created_at) {
+                  const ms = Date.now() - new Date(row.created_at).getTime();
+                  const days = Math.floor(ms / 86400000);
+                  if (days >= 1) {
+                    workDays = Math.max(1, days);
+                    basicAnalysis.day = workDays;
+                    console.log('[Worker] ✅ work_days 兜底: 从最早记录推算', { earliest: row.created_at, days, workDays });
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn('[Worker] work_days 已有记录查询失败:', (e as Error)?.message);
+            }
+          }
+          // 【最大值保护】永不将 work_days 覆盖为更小值（增量更新 / 首次创建时间保护）
+          const prevWorkDays = workDays;
+          workDays = Math.max(existingWorkDays ?? 0, workDays);
+          if (existingWorkDays != null && existingWorkDays > prevWorkDays) {
+            basicAnalysis.day = workDays;
+            console.log('[Worker] ✅ work_days 增量保护: 保留已有更大值', { existingWorkDays, computedWas: prevWorkDays, final: workDays });
+          }
 
           // 【V6 协议】构建完整的数据负载（包含 jsonb 字段存储完整 stats）
           // 注意：created_at 和 updated_at 由数据库自动生成，不需要手动设置
