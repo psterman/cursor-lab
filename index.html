@@ -1333,6 +1333,11 @@
             100% { opacity: 1; transform: translateY(0); }
         }
 
+        @keyframes fadeIn {
+            0% { opacity: 0; }
+            100% { opacity: 1; }
+        }
+
         @media (max-width: 768px) {
             .stats-grid {
                 grid-template-columns: 1fr 1fr;
@@ -3582,6 +3587,7 @@
             const [shareRankings, setShareRankings] = useState(null); // 分享的排名数据
             const [hasHistory, setHasHistory] = useState(false); // 是否有历史记录
             const [shareModal, setShareModal] = useState(null); // 分享弹窗数据 { show: boolean, message: string, shareUrl: string }
+            const [pathCopyToast, setPathCopyToast] = useState(false); // 路径复制轻 toast
             const folderInputRef = useRef(null);
             const fileInputRef = useRef(null);
             // 用于保存动画所需的旧值和新值
@@ -6557,13 +6563,22 @@
                                         {t('upload.selectFolder')}
                                         </button>
                                         {hasHistory && (
-                                            <button 
-                                                onClick={loadHistory}
-                                                className="px-6 py-3 bg-transparent hover:bg-zinc-800 text-green-500 rounded-sm font-semibold transition-colors border border-zinc-700 uppercase tracking-wider font-mono"
-                                                title={t('upload.viewHistory')}
-                                            >
-                                                {t('upload.viewHistory')}
-                                            </button>
+                                            <>
+                                                <button 
+                                                    onClick={loadHistory}
+                                                    className="px-6 py-3 bg-transparent hover:bg-zinc-800 text-green-500 rounded-sm font-semibold transition-colors border border-zinc-700 uppercase tracking-wider font-mono"
+                                                    title={t('upload.viewHistory')}
+                                                >
+                                                    {t('upload.viewHistory')}
+                                                </button>
+                                                <a 
+                                                    href="stats2.html"
+                                                    className="px-6 py-3 bg-transparent hover:bg-zinc-800 text-green-500 rounded-sm font-semibold transition-colors border border-zinc-700 uppercase tracking-wider font-mono inline-block text-center no-underline"
+                                                    title={lang === 'en' ? 'Global Rankings' : '全球排行 PK'}
+                                                >
+                                                    {lang === 'en' ? 'PK' : 'PK'}
+                                                </a>
+                                            </>
                                         )}
                                         {/* <button 
                                             onClick={() => handleFileSelect('file')}
@@ -6588,14 +6603,33 @@
                                             gap: '12px',
                                             marginBottom: '8px'
                                         }}>
-                                            <code style={{ 
-                                                color: 'var(--accent-terminal)', 
-                                                fontSize: '12px', 
-                                                flex: 1, 
-                                                textAlign: 'left',
-                                                wordBreak: 'break-all',
-                                                fontFamily: "'JetBrains Mono', monospace"
-                                            }} id="workspacePath">
+                                            <code 
+                                                id="workspacePath"
+                                                role="button"
+                                                tabIndex={0}
+                                                onClick={() => {
+                                                    const pathEl = document.getElementById('workspacePath');
+                                                    const path = pathEl ? pathEl.textContent.trim() : '';
+                                                    navigator.clipboard.writeText(path).then(() => {
+                                                        setPathCopyToast(true);
+                                                        setTimeout(() => setPathCopyToast(false), 2000);
+                                                    }).catch(err => {
+                                                        console.error('复制失败:', err);
+                                                        alert(t('dashboard.copyFailed'));
+                                                    });
+                                                }}
+                                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); const pathEl = document.getElementById('workspacePath'); const path = pathEl ? pathEl.textContent.trim() : ''; if (path) navigator.clipboard.writeText(path).then(() => { setPathCopyToast(true); setTimeout(() => setPathCopyToast(false), 2000); }); } }}
+                                                style={{ 
+                                                    color: 'var(--accent-terminal)', 
+                                                    fontSize: '12px', 
+                                                    flex: 1, 
+                                                    textAlign: 'left',
+                                                    wordBreak: 'break-all',
+                                                    fontFamily: "'JetBrains Mono', monospace",
+                                                    cursor: 'pointer',
+                                                    userSelect: 'none'
+                                                }}
+                                            >
                                                 {(navigator.platform.toLowerCase().includes('win') || navigator.userAgent.toLowerCase().includes('windows')) 
                                                     ? '%APPDATA%\\Cursor\\User\\workspaceStorage\\' 
                                                     : '~/Library/Application Support/Cursor/User/workspaceStorage/'}
@@ -6603,19 +6637,10 @@
                                             <button 
                                                 onClick={(e) => {
                                                     const pathEl = document.getElementById('workspacePath');
-                                                    const path = pathEl ? pathEl.textContent : '';
+                                                    const path = pathEl ? pathEl.textContent.trim() : '';
                                                     navigator.clipboard.writeText(path).then(() => {
-                                                        const btn = e.target;
-                                                        const originalText = btn.textContent;
-                                                        btn.textContent = t('dashboard.copied');
-                                                        btn.style.color = 'var(--accent-terminal)';
-                                                        btn.style.background = 'var(--accent-terminal)';
-                                                        btn.style.color = '#050505';
-                                                        setTimeout(() => {
-                                                            btn.textContent = originalText;
-                                                            btn.style.background = 'transparent';
-                                                            btn.style.color = 'var(--accent-terminal)';
-                                                        }, 2000);
+                                                        setPathCopyToast(true);
+                                                        setTimeout(() => setPathCopyToast(false), 2000);
                                                     }).catch(err => {
                                                         console.error('复制失败:', err);
                                                         alert(t('dashboard.copyFailed'));
@@ -6647,6 +6672,26 @@
                                                 {t('dashboard.copy')}
                                             </button>
                                         </div>
+                                        {pathCopyToast && (
+                                            <div style={{
+                                                position: 'fixed',
+                                                bottom: '24px',
+                                                left: '50%',
+                                                transform: 'translateX(-50%)',
+                                                padding: '8px 16px',
+                                                background: 'rgba(0, 255, 65, 0.15)',
+                                                border: '1px solid rgba(0, 255, 65, 0.4)',
+                                                borderRadius: '4px',
+                                                color: 'var(--accent-terminal)',
+                                                fontSize: '12px',
+                                                fontFamily: "'JetBrains Mono', monospace",
+                                                zIndex: 9999,
+                                                boxShadow: '0 0 12px rgba(0, 255, 65, 0.2)',
+                                                animation: 'fadeIn 0.2s ease'
+                                            }}>
+                                                {lang === 'en' ? 'Copied' : '已复制'}
+                                            </div>
+                                        )}
                                         <p style={{ 
                                             color: '#ffffff', 
                                             fontSize: '10px', 
@@ -6853,7 +6898,7 @@
 
                             {/* 分享模式下隐藏操作按钮 */}
                             {!isShareMode && (
-                                <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
+                                <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4 flex-wrap">
                                     <button 
                                         onClick={showFullReport}
                                         className="flex items-center justify-center gap-2 bg-green-500 text-black px-8 py-4 rounded-sm font-bold hover:bg-transparent hover:text-green-500 transition-colors border border-green-500 uppercase tracking-wider font-mono relative"
@@ -6862,12 +6907,20 @@
                                         <span>{lang === 'en' ? 'INVASIVE PROFILING' : '偷看档案'}</span>
                                         <Icon name="search" size={18} className="opacity-70" />
                                     </button>
+                                    <a 
+                                        href="stats2.html"
+                                        className="flex items-center justify-center gap-2 bg-transparent text-white px-8 py-4 rounded-sm font-bold hover:bg-zinc-800 transition-colors border border-green-500 uppercase tracking-wider font-mono relative no-underline"
+                                    >
+                                        <Icon name="trending-up" size={18} className="opacity-70" />
+                                        <span>{lang === 'en' ? 'GLOBAL RANKINGS' : '全球排行'}</span>
+                                        <Icon name="trending-up" size={18} className="opacity-70" />
+                                    </a>
                                     <button 
                                         onClick={shareReport}
                                         className="flex items-center justify-center gap-2 bg-transparent text-white px-8 py-4 rounded-sm font-bold hover:bg-zinc-800 transition-colors border border-green-500 uppercase tracking-wider font-mono relative"
                                     >
                                         <Icon name="send" size={18} className="opacity-70" />
-                                        <span>{lang === 'en' ? "DON'T @ ME" : '请君入瓮'}</span>
+                                        <span>{lang === 'en' ? 'Share Report' : '分享病情'}</span>
                                         <Icon name="send" size={18} className="opacity-70" />
                                     </button>
                                 </div>

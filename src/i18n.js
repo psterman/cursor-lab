@@ -156,7 +156,7 @@ export const I18N = {
       pathHelp: '在弹出窗口的地址栏粘贴此路径可瞬间抵达',
       pathHelpMac: '复制路径后，请先打开访达-前往-前往文件夹-粘贴路径-将workspaceStorage文件夹拖到左侧后，再点击上传',
       selectFolder: '上传',
-      viewHistory: '复盘',
+      viewHistory: '复诊',
       privacyNote: '救赎之道 就在其中',
       logs: {
         startParsing: '开始解析数据库文件...',
@@ -404,7 +404,7 @@ export const I18N = {
       subtitle: 'The salvation lies within',
       button: 'Upload',
       dragText: 'Drag files here',
-      viewHistory: 'Review',
+      viewHistory: 'Follow-up',
       processing: 'Processing...',
       error: 'Upload failed, please try again',
       pathHelp: 'Suggested path: %APPDATA%\\Cursor\\User\\workspaceStorage',

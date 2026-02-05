@@ -647,11 +647,18 @@
         /* 地图光标工具（校准/拖拽提示） */
         #map-cursor-tools {
             position: fixed;
-            left: 14px;
-            bottom: 14px;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
             z-index: 50;
             pointer-events: auto;
             font-family: 'JetBrains Mono', monospace;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: center;
         }
         #map-cursor-tools .tool-btn {
             display: inline-flex;
@@ -665,6 +672,7 @@
             text-transform: uppercase;
             letter-spacing: 0.08em;
             backdrop-filter: blur(8px);
+            margin: 0;
         }
         #map-cursor-tools .tool-btn:hover {
             background: rgba(0, 255, 65, 0.08);
@@ -682,6 +690,30 @@
             display: none;
         }
         #map-cursor-tools .hint b { color: #ffffff; }
+        
+        /* 锚定模式按钮激活状态 */
+        #btn-anchor-location.active {
+            background: rgba(59, 130, 246, 0.15);
+            border-color: #3b82f6;
+        }
+        
+        /* 国家选择器样式 */
+        #country-selector-modal .country-item {
+            padding: 10px 12px;
+            border-bottom: 1px solid rgba(0, 255, 65, 0.1);
+            cursor: pointer;
+            color: #00ff41;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+        #country-selector-modal .country-item:hover {
+            background: rgba(0, 255, 65, 0.1);
+        }
+        #country-selector-modal .country-item.selected {
+            background: rgba(59, 130, 246, 0.2);
+            border-left: 3px solid #3b82f6;
+        }
 
         /* 确保主容器允许穿透，但交互元素可点击 */
         .max-w-\[1600px\] {
@@ -919,29 +951,9 @@
             border-right: 1px solid rgba(0, 255, 65, 0.3);
         }
 
-        /* 赛博朋克扫描线效果 */
+        /* 左右抽屉不显示光扫/扫描线效果（已按需求关闭） */
         .drawer-content::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 2px;
-            background: linear-gradient(
-                90deg,
-                transparent,
-                rgba(0, 255, 65, 0.8),
-                transparent
-            );
-            animation: drawer-scanline 3s linear infinite;
-            z-index: 1;
-        }
-
-        @keyframes drawer-scanline {
-            0% { transform: translateY(0); opacity: 0; }
-            10% { opacity: 1; }
-            90% { opacity: 1; }
-            100% { transform: translateY(100vh); opacity: 0; }
+            display: none;
         }
 
         /* 抽屉头部 */
@@ -2200,6 +2212,158 @@
             color: #d1fae5;
             border-color: rgba(16, 185, 129, 0.8);
         }
+
+        /* Leaflet 自定义用户光标样式 */
+        .custom-user-marker {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+        }
+        .custom-user-marker div {
+            pointer-events: none;
+        }
+
+        /* 国家选择下拉菜单样式 - 赛博朋克风格 */
+        .country-select-dropdown {
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(0, 255, 65, 0.4);
+            border-radius: 2px;
+            color: #00ff41;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            outline: none;
+            padding: 6px 24px 6px 8px;
+            transition: all 0.2s;
+            position: relative;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%2300ff41' d='M5 7L1 3h8z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            box-shadow: 0 0 8px rgba(0, 255, 65, 0.2);
+        }
+        .country-select-dropdown:hover {
+            border-color: rgba(0, 255, 65, 0.7);
+            box-shadow: 0 0 12px rgba(0, 255, 65, 0.4);
+            background-color: rgba(0, 255, 65, 0.05);
+        }
+        .country-select-dropdown:focus {
+            border-color: #00ff41;
+            box-shadow: 0 0 16px rgba(0, 255, 65, 0.6);
+            background-color: rgba(0, 255, 65, 0.1);
+        }
+        .country-select-dropdown option {
+            background: #050505 !important;
+            color: #00ff41 !important;
+            padding: 8px 12px;
+            border: none;
+        }
+        .country-select-dropdown option:hover,
+        .country-select-dropdown option:focus {
+            background: rgba(0, 255, 65, 0.2) !important;
+            color: #00ff41 !important;
+        }
+        .country-select-dropdown option:checked,
+        .country-select-dropdown option[selected] {
+            background: rgba(0, 255, 65, 0.3) !important;
+            color: #00ff41 !important;
+        }
+        /* 下拉菜单滚动条样式 - 赛博朋克绿色系 */
+        .country-select-dropdown::-webkit-scrollbar {
+            width: 8px;
+        }
+        .country-select-dropdown::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.8);
+            border-left: 1px solid rgba(0, 255, 65, 0.2);
+        }
+        .country-select-dropdown::-webkit-scrollbar-thumb {
+            background: rgba(0, 255, 65, 0.5);
+            border-radius: 4px;
+            border: 1px solid rgba(0, 255, 65, 0.3);
+        }
+        .country-select-dropdown::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 255, 65, 0.7);
+            box-shadow: 0 0 8px rgba(0, 255, 65, 0.4);
+        }
+
+        /* 脉动闪光效果 */
+        @keyframes pulse-glow {
+            0% {
+                transform: scale(1);
+                opacity: 1;
+                box-shadow: 0 0 0 0 rgba(0, 255, 65, 0.7);
+            }
+            50% {
+                transform: scale(1.1);
+                opacity: 0.9;
+                box-shadow: 0 0 20px 10px rgba(0, 255, 65, 0.4);
+            }
+            100% {
+                transform: scale(1);
+                opacity: 1;
+                box-shadow: 0 0 0 0 rgba(0, 255, 65, 0);
+            }
+        }
+        .pulse-marker {
+            animation: pulse-glow 2s ease-in-out infinite;
+        }
+
+        /* 隐藏旧的工具按钮 */
+        #map-cursor-tools {
+            display: none !important;
+        }
+
+        /* 左侧抽屉国家选择菜单滚动条样式 */
+        #left-drawer-country-list::-webkit-scrollbar {
+            width: 6px;
+        }
+        #left-drawer-country-list::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.3);
+        }
+        #left-drawer-country-list::-webkit-scrollbar-thumb {
+            background: rgba(0, 255, 65, 0.5);
+            border-radius: 3px;
+        }
+        #left-drawer-country-list::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 255, 65, 0.7);
+        }
+
+        /* 左侧抽屉搜索框样式 - 赛博朋克风格 */
+        #left-drawer-country-search {
+            transition: all 0.2s !important;
+        }
+        #left-drawer-country-search:hover {
+            border-color: rgba(0, 255, 65, 0.7) !important;
+            box-shadow: 0 0 12px rgba(0, 255, 65, 0.4) !important;
+            background-color: rgba(0, 255, 65, 0.05) !important;
+        }
+        #left-drawer-country-search:focus {
+            border-color: #00ff41 !important;
+            box-shadow: 0 0 16px rgba(0, 255, 65, 0.6) !important;
+            background-color: rgba(0, 255, 65, 0.1) !important;
+        }
+        #left-drawer-country-search::placeholder {
+            color: rgba(0, 255, 65, 0.5);
+        }
+        /* 左侧抽屉国家列表：默认收起，仅点击搜索框后展开 */
+        #left-drawer-country-list {
+            max-height: 0;
+            overflow: hidden;
+            opacity: 0;
+            transition: max-height 0.2s ease, opacity 0.2s ease;
+            border: none !important;
+            margin-bottom: 0 !important;
+        }
+        #left-drawer-country-list.left-drawer-country-list-visible {
+            max-height: 200px;
+            opacity: 1;
+            overflow-y: auto;
+            border: 1px solid rgba(0, 255, 65, 0.2) !important;
+            margin-bottom: 0 !important;
+        }
     </style>
 </head>
 <body class="p-4 md:p-8">
@@ -2230,6 +2394,14 @@
                 <div class="top-header-card-value text-red-500">LEVEL_CRITICAL</div>
             </div>
             
+            <!-- 国家选择下拉菜单 -->
+            <div class="top-header-card" style="position: relative;">
+                <div class="top-header-card-label lang-key" data-key="select-country" data-t="select-country">选择国家</div>
+                <select id="country-select-dropdown" class="country-select-dropdown">
+                    <option value="">-- 选择国家 --</option>
+                </select>
+            </div>
+            
             <!-- 语言切换按钮 -->
             <div class="flex gap-2 items-center">
                 <button type="button" id="btn-zh" class="lang-flag-btn active" title="中文" aria-label="中文" data-lang="zh">
@@ -2246,14 +2418,44 @@
     <div id="map-container"></div>
     <!-- 地图光标工具：用于手动校准（避免光标消失时无法进入校准） -->
     <div id="map-cursor-tools" aria-live="polite">
+        <button type="button" id="btn-anchor-location" class="tool-btn">
+            <span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:#3b82f6;"></span>
+            <span id="btn-anchor-location-text">定位锚点</span>
+        </button>
+        <button type="button" id="btn-country-selector" class="tool-btn">
+            <span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:#8b5cf6;"></span>
+            <span>身份设置</span>
+        </button>
         <button type="button" id="btn-calibrate-location" class="tool-btn">
             <span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:#00ff41;"></span>
             <span id="btn-calibrate-location-text">校准位置</span>
+        </button>
+        <button type="button" id="btn-reset-location" class="tool-btn" style="display: none;">
+            <span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:#ef4444;"></span>
+            <span>退出锚定</span>
         </button>
         <div id="map-cursor-hint" class="hint">
             <div><b>校准模式</b>：拖动地图上的 <b>YOU</b> 光标，或点击地图任意位置设置坐标。</div>
             <div style="margin-top:6px;">完成后会自动保存到本机与后端（`manual_lat/manual_lng/manual_location`）。</div>
             <div style="margin-top:6px; opacity:0.9;">提示：你也可以先点击国家来设置“锚定国家”，再校准坐标。</div>
+        </div>
+        <div id="map-anchor-hint" class="hint">
+            <div><b>锚定模式</b>：点击地图任意位置，光标立即移动到该坐标，并停止所有基于 IP 的自动重写。</div>
+            <div style="margin-top:6px;">坐标将持久化保存，并绑定到你的 GitHub 账号。</div>
+        </div>
+    </div>
+    
+    <!-- 国家选择器浮窗 -->
+    <div id="country-selector-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 200; background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(4px); pointer-events: auto;">
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 500px; max-height: 80vh; background: rgba(5, 5, 5, 0.95); border: 1px solid rgba(0, 255, 65, 0.45); border-radius: 4px; padding: 20px; overflow: hidden; display: flex; flex-direction: column;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h3 style="color: #00ff41; font-family: 'JetBrains Mono', monospace; font-size: 14px; margin: 0;">身份设置</h3>
+                <button id="country-selector-close" style="background: none; border: none; color: #00ff41; font-size: 20px; cursor: pointer; padding: 0; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;" title="关闭">✕</button>
+            </div>
+            <input type="text" id="country-search-input" placeholder="搜索国家..." style="width: 100%; padding: 8px 12px; background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(0, 255, 65, 0.3); color: #00ff41; font-family: 'JetBrains Mono', monospace; font-size: 12px; margin-bottom: 12px; outline: none;">
+            <div id="country-list-container" style="flex: 1; overflow-y: auto; max-height: calc(80vh - 120px);">
+                <!-- 国家列表将通过 JavaScript 动态填充 -->
+            </div>
         </div>
     </div>
     
@@ -2266,6 +2468,54 @@
                     <span class="drawer-title-text" id="left-drawer-title">国家数据</span>
                 </div>
                 <div class="drawer-close-btn" onclick="closeDrawers()">✕</div>
+            </div>
+            <!-- 国家选择菜单区域 -->
+            <div id="left-drawer-country-selector" style="
+                padding: 16px 20px;
+                border-bottom: 1px solid rgba(0, 255, 65, 0.2);
+                background: rgba(0, 255, 65, 0.03);
+                position: relative;
+                z-index: 2;
+            ">
+                <div style="
+                    font-size: 11px;
+                    color: rgba(0, 255, 65, 0.8);
+                    font-family: 'JetBrains Mono', monospace;
+                    font-weight: 700;
+                    margin-bottom: 8px;
+                    text-transform: uppercase;
+                    letter-spacing: 1px;
+                " class="lang-key" data-key="select-country" data-t="select-country">选择国家</div>
+                <input 
+                    type="text" 
+                    id="left-drawer-country-search" 
+                    placeholder="" 
+                    style="
+                        width: 100%;
+                        padding: 8px 12px;
+                        background: rgba(0, 0, 0, 0.6);
+                        border: 1px solid rgba(0, 255, 65, 0.4);
+                        color: #00ff41;
+                        font-family: 'JetBrains Mono', monospace;
+                        font-size: 12px;
+                        outline: none;
+                        margin-bottom: 8px;
+                        border-radius: 2px;
+                        box-shadow: 0 0 8px rgba(0, 255, 65, 0.2);
+                        transition: all 0.2s;
+                    "
+                    data-placeholder-zh="搜索国家..."
+                    data-placeholder-en="Search countries..."
+                />
+                <div 
+                    id="left-drawer-country-list" 
+                    class=""
+                    style="
+                        background: rgba(0, 0, 0, 0.3);
+                    "
+                >
+                    <!-- 国家列表将通过 JavaScript 动态填充，默认收起，点击搜索框后展开 -->
+                </div>
             </div>
             <div class="drawer-body" id="left-drawer-body">
                 <!-- 内容将通过 JavaScript 动态填充 -->
@@ -3930,28 +4180,34 @@
         // 无效用户名的默认值列表（这些值不应该请求GitHub头像）
         const INVALID_USERNAME_VALUES = ['自动上报用户', 'Anonymous', 'Guest', 'guest', 'anonymous', ''];
         
-        // 用户状态配置
+        // 用户状态配置：在线=可互发消息，忙碌=他人不可给该用户发消息，离线=不可发消息且他人不可给该用户发消息
         const USER_STATUSES = {
             idle: { 
-                label: '极速', 
+                label: '在线', 
                 emoji: '🟢', 
                 color: '#00ff41',
                 status_color: '#00ff41',
-                status: 'idle'
+                status: 'idle',
+                descZh: '可互发消息',
+                descEn: 'Users can send messages to each other'
             },
             busy: { 
                 label: '忙碌', 
                 emoji: '🟠', 
                 color: '#ff8c00',
                 status_color: '#ff8c00',
-                status: 'busy'
+                status: 'busy',
+                descZh: '其他用户不能给你发消息',
+                descEn: 'Other users cannot send you messages'
             },
             sprint: { 
-                label: '冲刺', 
-                emoji: '🚀', 
-                color: '#ff006e',
-                status_color: '#ff006e',
-                status: 'sprint'
+                label: '离线', 
+                emoji: '⚫', 
+                color: '#71717a',
+                status_color: '#71717a',
+                status: 'sprint',
+                descZh: '不能发消息，他人也不能给你发消息',
+                descEn: 'Cannot send messages; others cannot send you messages'
             }
         };
         
@@ -4058,7 +4314,9 @@
                 'recent-activity': '实时诊断活动',
                 'victim': '受害者',
                 'loading': '初始化中...',
-                'rank': '排名'
+                'rank': '排名',
+                'select-country': '选择国家',
+                'search-countries': '搜索国家...'
             },
             en: {
                 'top-title': 'Cursor Behavior Report · Global Distribution Map',
@@ -4079,7 +4337,9 @@
                 'recent-activity': 'Live Activity Feed',
                 'victim': 'Victim',
                 'loading': 'Initializing...',
-                'rank': 'Rank'
+                'rank': 'Rank',
+                'select-country': 'Select Country',
+                'search-countries': 'Search countries...'
             }
         };
 
@@ -4152,8 +4412,8 @@
                 'realtime.none': '暂无人格分布数据',
                 'lpdef.none': '暂无高分图谱数据',
 
-                // Tooltip labels
-                'tooltip.active_nodes': '活跃节点',
+                // Tooltip labels（地图悬浮：该国已提交聊天记录的用户数，非在线人数）
+                'tooltip.active_nodes': '已提交用户',
                 'tooltip.record': '战绩',
                 'tooltip.roast': '吐槽',
                 'tooltip.answers': '答案之书',
@@ -4244,8 +4504,8 @@
                 'realtime.none': 'No personality distribution yet',
                 'lpdef.none': 'No LPDEF ranking yet',
 
-                // Tooltip labels
-                'tooltip.active_nodes': 'Active Nodes',
+                // Tooltip labels (map: submitted chat record users per country, not online count)
+                'tooltip.active_nodes': 'Submitted Users',
                 'tooltip.record': 'Record',
                 'tooltip.roast': 'Roast',
                 'tooltip.answers': 'Answers',
@@ -4481,7 +4741,246 @@
             'DE': { zh: '德国', en: 'Germany' },
             'SG': { zh: '新加坡', en: 'Singapore' },
             'HK': { zh: '中国香港', en: 'Hong Kong' },
-            'TW': { zh: '中国台湾', en: 'Taiwan' }
+            'TW': { zh: '中国台湾', en: 'Taiwan' },
+            // 扩展更多常见国家的中文名称
+            'AF': { zh: '阿富汗', en: 'Afghanistan' },
+            'AX': { zh: '奥兰群岛', en: 'Åland Islands' },
+            'AL': { zh: '阿尔巴尼亚', en: 'Albania' },
+            'DZ': { zh: '阿尔及利亚', en: 'Algeria' },
+            'AS': { zh: '美属萨摩亚', en: 'American Samoa' },
+            'AD': { zh: '安道尔', en: 'Andorra' },
+            'AO': { zh: '安哥拉', en: 'Angola' },
+            'AI': { zh: '安圭拉', en: 'Anguilla' },
+            'AQ': { zh: '南极洲', en: 'Antarctica' },
+            'AG': { zh: '安提瓜和巴布达', en: 'Antigua and Barbuda' },
+            'AR': { zh: '阿根廷', en: 'Argentina' },
+            'AM': { zh: '亚美尼亚', en: 'Armenia' },
+            'AW': { zh: '阿鲁巴', en: 'Aruba' },
+            'AU': { zh: '澳大利亚', en: 'Australia' },
+            'AT': { zh: '奥地利', en: 'Austria' },
+            'AZ': { zh: '阿塞拜疆', en: 'Azerbaijan' },
+            'BS': { zh: '巴哈马', en: 'Bahamas' },
+            'BH': { zh: '巴林', en: 'Bahrain' },
+            'BD': { zh: '孟加拉国', en: 'Bangladesh' },
+            'BB': { zh: '巴巴多斯', en: 'Barbados' },
+            'BY': { zh: '白俄罗斯', en: 'Belarus' },
+            'BE': { zh: '比利时', en: 'Belgium' },
+            'BZ': { zh: '伯利兹', en: 'Belize' },
+            'BJ': { zh: '贝宁', en: 'Benin' },
+            'BM': { zh: '百慕大', en: 'Bermuda' },
+            'BT': { zh: '不丹', en: 'Bhutan' },
+            'BO': { zh: '玻利维亚', en: 'Bolivia' },
+            'BA': { zh: '波黑', en: 'Bosnia and Herzegovina' },
+            'BW': { zh: '博茨瓦纳', en: 'Botswana' },
+            'BV': { zh: '布韦岛', en: 'Bouvet Island' },
+            'BR': { zh: '巴西', en: 'Brazil' },
+            'IO': { zh: '英属印度洋领地', en: 'British Indian Ocean Territory' },
+            'BN': { zh: '文莱', en: 'Brunei Darussalam' },
+            'BG': { zh: '保加利亚', en: 'Bulgaria' },
+            'BF': { zh: '布基纳法索', en: 'Burkina Faso' },
+            'BI': { zh: '布隆迪', en: 'Burundi' },
+            'KH': { zh: '柬埔寨', en: 'Cambodia' },
+            'CM': { zh: '喀麦隆', en: 'Cameroon' },
+            'CA': { zh: '加拿大', en: 'Canada' },
+            'CV': { zh: '佛得角', en: 'Cape Verde' },
+            'KY': { zh: '开曼群岛', en: 'Cayman Islands' },
+            'CF': { zh: '中非', en: 'Central African Republic' },
+            'TD': { zh: '乍得', en: 'Chad' },
+            'CL': { zh: '智利', en: 'Chile' },
+            'CX': { zh: '圣诞岛', en: 'Christmas Island' },
+            'CC': { zh: '科科斯群岛', en: 'Cocos (Keeling) Islands' },
+            'CO': { zh: '哥伦比亚', en: 'Colombia' },
+            'KM': { zh: '科摩罗', en: 'Comoros' },
+            'CG': { zh: '刚果', en: 'Congo' },
+            'CD': { zh: '刚果民主共和国', en: 'Congo, Democratic Republic of the' },
+            'CK': { zh: '库克群岛', en: 'Cook Islands' },
+            'CR': { zh: '哥斯达黎加', en: 'Costa Rica' },
+            'CI': { zh: '科特迪瓦', en: "Côte d'Ivoire" },
+            'HR': { zh: '克罗地亚', en: 'Croatia' },
+            'CU': { zh: '古巴', en: 'Cuba' },
+            'CY': { zh: '塞浦路斯', en: 'Cyprus' },
+            'CZ': { zh: '捷克', en: 'Czechia' },
+            'DK': { zh: '丹麦', en: 'Denmark' },
+            'DJ': { zh: '吉布提', en: 'Djibouti' },
+            'DM': { zh: '多米尼克', en: 'Dominica' },
+            'DO': { zh: '多米尼加', en: 'Dominican Republic' },
+            'EC': { zh: '厄瓜多尔', en: 'Ecuador' },
+            'EG': { zh: '埃及', en: 'Egypt' },
+            'SV': { zh: '萨尔瓦多', en: 'El Salvador' },
+            'GQ': { zh: '赤道几内亚', en: 'Equatorial Guinea' },
+            'ER': { zh: '厄立特里亚', en: 'Eritrea' },
+            'EE': { zh: '爱沙尼亚', en: 'Estonia' },
+            'ET': { zh: '埃塞俄比亚', en: 'Ethiopia' },
+            'FK': { zh: '福克兰群岛', en: 'Falkland Islands (Malvinas)' },
+            'FO': { zh: '法罗群岛', en: 'Faroe Islands' },
+            'FJ': { zh: '斐济', en: 'Fiji' },
+            'FI': { zh: '芬兰', en: 'Finland' },
+            'FR': { zh: '法国', en: 'France' },
+            'GF': { zh: '法属圭亚那', en: 'French Guiana' },
+            'PF': { zh: '法属波利尼西亚', en: 'French Polynesia' },
+            'TF': { zh: '法属南部领地', en: 'French Southern Territories' },
+            'GA': { zh: '加蓬', en: 'Gabon' },
+            'GM': { zh: '冈比亚', en: 'Gambia' },
+            'GE': { zh: '格鲁吉亚', en: 'Georgia' },
+            'GH': { zh: '加纳', en: 'Ghana' },
+            'GI': { zh: '直布罗陀', en: 'Gibraltar' },
+            'GR': { zh: '希腊', en: 'Greece' },
+            'GL': { zh: '格陵兰', en: 'Greenland' },
+            'GD': { zh: '格林纳达', en: 'Grenada' },
+            'GP': { zh: '瓜德罗普', en: 'Guadeloupe' },
+            'GU': { zh: '关岛', en: 'Guam' },
+            'GT': { zh: '危地马拉', en: 'Guatemala' },
+            'GG': { zh: '根西岛', en: 'Guernsey' },
+            'GN': { zh: '几内亚', en: 'Guinea' },
+            'GW': { zh: '几内亚比绍', en: 'Guinea-Bissau' },
+            'GY': { zh: '圭亚那', en: 'Guyana' },
+            'HT': { zh: '海地', en: 'Haiti' },
+            'HM': { zh: '赫德岛和麦克唐纳群岛', en: 'Heard Island and McDonald Islands' },
+            'VA': { zh: '梵蒂冈', en: 'Holy See (Vatican City State)' },
+            'HN': { zh: '洪都拉斯', en: 'Honduras' },
+            'HU': { zh: '匈牙利', en: 'Hungary' },
+            'IS': { zh: '冰岛', en: 'Iceland' },
+            'IN': { zh: '印度', en: 'India' },
+            'ID': { zh: '印度尼西亚', en: 'Indonesia' },
+            'IR': { zh: '伊朗', en: 'Iran, Islamic Republic of' },
+            'IQ': { zh: '伊拉克', en: 'Iraq' },
+            'IE': { zh: '爱尔兰', en: 'Ireland' },
+            'IM': { zh: '马恩岛', en: 'Isle of Man' },
+            'IL': { zh: '以色列', en: 'Israel' },
+            'IT': { zh: '意大利', en: 'Italy' },
+            'JM': { zh: '牙买加', en: 'Jamaica' },
+            'JE': { zh: '泽西岛', en: 'Jersey' },
+            'JO': { zh: '约旦', en: 'Jordan' },
+            'KZ': { zh: '哈萨克斯坦', en: 'Kazakhstan' },
+            'KE': { zh: '肯尼亚', en: 'Kenya' },
+            'KI': { zh: '基里巴斯', en: 'Kiribati' },
+            'KP': { zh: '朝鲜', en: "Korea, Democratic People's Republic of" },
+            'KR': { zh: '韩国', en: 'Korea, Republic of' },
+            'KW': { zh: '科威特', en: 'Kuwait' },
+            'KG': { zh: '吉尔吉斯斯坦', en: 'Kyrgyzstan' },
+            'LA': { zh: '老挝', en: "Lao People's Democratic Republic" },
+            'LV': { zh: '拉脱维亚', en: 'Latvia' },
+            'LB': { zh: '黎巴嫩', en: 'Lebanon' },
+            'LS': { zh: '莱索托', en: 'Lesotho' },
+            'LR': { zh: '利比里亚', en: 'Liberia' },
+            'LY': { zh: '利比亚', en: 'Libya' },
+            'LI': { zh: '列支敦士登', en: 'Liechtenstein' },
+            'LT': { zh: '立陶宛', en: 'Lithuania' },
+            'LU': { zh: '卢森堡', en: 'Luxembourg' },
+            'MO': { zh: '中国澳门', en: 'Macao' },
+            'MK': { zh: '北马其顿', en: 'Macedonia, the Former Yugoslav Republic of' },
+            'MG': { zh: '马达加斯加', en: 'Madagascar' },
+            'MW': { zh: '马拉维', en: 'Malawi' },
+            'MY': { zh: '马来西亚', en: 'Malaysia' },
+            'MV': { zh: '马尔代夫', en: 'Maldives' },
+            'ML': { zh: '马里', en: 'Mali' },
+            'MT': { zh: '马耳他', en: 'Malta' },
+            'MH': { zh: '马绍尔群岛', en: 'Marshall Islands' },
+            'MQ': { zh: '马提尼克', en: 'Martinique' },
+            'MR': { zh: '毛里塔尼亚', en: 'Mauritania' },
+            'MU': { zh: '毛里求斯', en: 'Mauritius' },
+            'YT': { zh: '马约特', en: 'Mayotte' },
+            'MX': { zh: '墨西哥', en: 'Mexico' },
+            'FM': { zh: '密克罗尼西亚', en: 'Micronesia, Federated States of' },
+            'MD': { zh: '摩尔多瓦', en: 'Moldova, Republic of' },
+            'MC': { zh: '摩纳哥', en: 'Monaco' },
+            'MN': { zh: '蒙古', en: 'Mongolia' },
+            'ME': { zh: '黑山', en: 'Montenegro' },
+            'MS': { zh: '蒙特塞拉特', en: 'Montserrat' },
+            'MA': { zh: '摩洛哥', en: 'Morocco' },
+            'MZ': { zh: '莫桑比克', en: 'Mozambique' },
+            'MM': { zh: '缅甸', en: 'Myanmar' },
+            'NA': { zh: '纳米比亚', en: 'Namibia' },
+            'NR': { zh: '瑙鲁', en: 'Nauru' },
+            'NP': { zh: '尼泊尔', en: 'Nepal' },
+            'NL': { zh: '荷兰', en: 'Netherlands' },
+            'NC': { zh: '新喀里多尼亚', en: 'New Caledonia' },
+            'NZ': { zh: '新西兰', en: 'New Zealand' },
+            'NI': { zh: '尼加拉瓜', en: 'Nicaragua' },
+            'NE': { zh: '尼日尔', en: 'Niger' },
+            'NG': { zh: '尼日利亚', en: 'Nigeria' },
+            'NU': { zh: '纽埃', en: 'Niue' },
+            'NF': { zh: '诺福克岛', en: 'Norfolk Island' },
+            'MP': { zh: '北马里亚纳群岛', en: 'Northern Mariana Islands' },
+            'NO': { zh: '挪威', en: 'Norway' },
+            'OM': { zh: '阿曼', en: 'Oman' },
+            'PK': { zh: '巴基斯坦', en: 'Pakistan' },
+            'PW': { zh: '帕劳', en: 'Palau' },
+            'PS': { zh: '巴勒斯坦', en: 'Palestine, State of' },
+            'PA': { zh: '巴拿马', en: 'Panama' },
+            'PG': { zh: '巴布亚新几内亚', en: 'Papua New Guinea' },
+            'PY': { zh: '巴拉圭', en: 'Paraguay' },
+            'PE': { zh: '秘鲁', en: 'Peru' },
+            'PH': { zh: '菲律宾', en: 'Philippines' },
+            'PN': { zh: '皮特凯恩', en: 'Pitcairn' },
+            'PL': { zh: '波兰', en: 'Poland' },
+            'PT': { zh: '葡萄牙', en: 'Portugal' },
+            'PR': { zh: '波多黎各', en: 'Puerto Rico' },
+            'QA': { zh: '卡塔尔', en: 'Qatar' },
+            'RE': { zh: '留尼汪', en: 'Réunion' },
+            'RO': { zh: '罗马尼亚', en: 'Romania' },
+            'RU': { zh: '俄罗斯', en: 'Russian Federation' },
+            'RW': { zh: '卢旺达', en: 'Rwanda' },
+            'BL': { zh: '圣巴泰勒米', en: 'Saint Barthélemy' },
+            'SH': { zh: '圣赫勒拿', en: 'Saint Helena, Ascension and Tristan da Cunha' },
+            'KN': { zh: '圣基茨和尼维斯', en: 'Saint Kitts and Nevis' },
+            'LC': { zh: '圣卢西亚', en: 'Saint Lucia' },
+            'MF': { zh: '法属圣马丁', en: 'Saint Martin (French part)' },
+            'PM': { zh: '圣皮埃尔和密克隆', en: 'Saint Pierre and Miquelon' },
+            'VC': { zh: '圣文森特和格林纳丁斯', en: 'Saint Vincent and the Grenadines' },
+            'WS': { zh: '萨摩亚', en: 'Samoa' },
+            'SM': { zh: '圣马力诺', en: 'San Marino' },
+            'ST': { zh: '圣多美和普林西比', en: 'Sao Tome and Principe' },
+            'SA': { zh: '沙特阿拉伯', en: 'Saudi Arabia' },
+            'SN': { zh: '塞内加尔', en: 'Senegal' },
+            'RS': { zh: '塞尔维亚', en: 'Serbia' },
+            'SC': { zh: '塞舌尔', en: 'Seychelles' },
+            'SL': { zh: '塞拉利昂', en: 'Sierra Leone' },
+            'SK': { zh: '斯洛伐克', en: 'Slovakia' },
+            'SI': { zh: '斯洛文尼亚', en: 'Slovenia' },
+            'SB': { zh: '所罗门群岛', en: 'Solomon Islands' },
+            'SO': { zh: '索马里', en: 'Somalia' },
+            'ZA': { zh: '南非', en: 'South Africa' },
+            'GS': { zh: '南乔治亚和南桑威奇群岛', en: 'South Georgia and the South Sandwich Islands' },
+            'SS': { zh: '南苏丹', en: 'South Sudan' },
+            'ES': { zh: '西班牙', en: 'Spain' },
+            'LK': { zh: '斯里兰卡', en: 'Sri Lanka' },
+            'SD': { zh: '苏丹', en: 'Sudan' },
+            'SR': { zh: '苏里南', en: 'Suriname' },
+            'SJ': { zh: '斯瓦尔巴和扬马延', en: 'Svalbard and Jan Mayen' },
+            'SZ': { zh: '斯威士兰', en: 'Swaziland' },
+            'SE': { zh: '瑞典', en: 'Sweden' },
+            'CH': { zh: '瑞士', en: 'Switzerland' },
+            'SY': { zh: '叙利亚', en: 'Syrian Arab Republic' },
+            'TJ': { zh: '塔吉克斯坦', en: 'Tajikistan' },
+            'TZ': { zh: '坦桑尼亚', en: 'Tanzania, United Republic of' },
+            'TH': { zh: '泰国', en: 'Thailand' },
+            'TL': { zh: '东帝汶', en: 'Timor-Leste' },
+            'TG': { zh: '多哥', en: 'Togo' },
+            'TK': { zh: '托克劳', en: 'Tokelau' },
+            'TO': { zh: '汤加', en: 'Tonga' },
+            'TT': { zh: '特立尼达和多巴哥', en: 'Trinidad and Tobago' },
+            'TN': { zh: '突尼斯', en: 'Tunisia' },
+            'TR': { zh: '土耳其', en: 'Turkey' },
+            'TM': { zh: '土库曼斯坦', en: 'Turkmenistan' },
+            'TC': { zh: '特克斯和凯科斯群岛', en: 'Turks and Caicos Islands' },
+            'TV': { zh: '图瓦卢', en: 'Tuvalu' },
+            'UG': { zh: '乌干达', en: 'Uganda' },
+            'UA': { zh: '乌克兰', en: 'Ukraine' },
+            'AE': { zh: '阿联酋', en: 'United Arab Emirates' },
+            'UM': { zh: '美国本土外小岛屿', en: 'United States Minor Outlying Islands' },
+            'UY': { zh: '乌拉圭', en: 'Uruguay' },
+            'UZ': { zh: '乌兹别克斯坦', en: 'Uzbekistan' },
+            'VU': { zh: '瓦努阿图', en: 'Vanuatu' },
+            'VE': { zh: '委内瑞拉', en: 'Venezuela, Bolivarian Republic of' },
+            'VN': { zh: '越南', en: 'Viet Nam' },
+            'VG': { zh: '英属维尔京群岛', en: 'Virgin Islands, British' },
+            'VI': { zh: '美属维尔京群岛', en: 'Virgin Islands, U.S.' },
+            'WF': { zh: '瓦利斯和富图纳', en: 'Wallis and Futuna' },
+            'EH': { zh: '西撒哈拉', en: 'Western Sahara' },
+            'YE': { zh: '也门', en: 'Yemen' },
+            'ZM': { zh: '赞比亚', en: 'Zambia' },
+            'ZW': { zh: '津巴布韦', en: 'Zimbabwe' }
         };
 
         /**
@@ -4742,6 +5241,146 @@
         let currentChampionInfo = null; // 当前选中的冠军信息（用于地图 tooltip 展示）
         /** 校准模式：点击「Current Location」光标后为 true，停止操作 1.5 秒后恢复 false */
         let isCalibrating = false;
+        let isAnchorMode = false; // 锚定模式标志
+        
+        // ==========================================
+        // 单例光标管理器（Map Cursor Manager）
+        // ==========================================
+        window.mapCursorManager = {
+            // 当前光标实例的唯一标识
+            currentCursorId: null,
+            // 锚定状态
+            isAnchored: false,
+            // 锁定的坐标
+            anchoredCoords: { lng: null, lat: null },
+            // 光标状态缓存
+            cursorState: {
+                lng: null,
+                lat: null,
+                color: '#00ff41',
+                avatarUrl: null,
+                username: null,
+                updatedAt: null
+            },
+            
+            /**
+             * 初始化：从 localStorage 恢复锚定状态
+             */
+            init() {
+                try {
+                    const isLocked = localStorage.getItem('loc_locked') === 'true' || localStorage.getItem('loc_fixed') === 'true';
+                    const manualLat = localStorage.getItem('manual_lat');
+                    const manualLng = localStorage.getItem('manual_lng');
+                    
+                    if (isLocked && manualLat && manualLng) {
+                        this.isAnchored = true;
+                        this.anchoredCoords.lat = Number(manualLat);
+                        this.anchoredCoords.lng = Number(manualLng);
+                        console.log('[CursorManager] ✅ 恢复锚定状态:', this.anchoredCoords);
+                    }
+                } catch (e) {
+                    console.warn('[CursorManager] ⚠️ 初始化失败:', e);
+                }
+            },
+            
+            /**
+             * 设置锚定状态
+             * @param {boolean} anchored - 是否锚定
+             * @param {number} lng - 经度（可选）
+             * @param {number} lat - 纬度（可选）
+             */
+            setAnchored(anchored, lng = null, lat = null) {
+                this.isAnchored = !!anchored;
+                if (anchored && lng !== null && lat !== null) {
+                    this.anchoredCoords.lng = Number(lng);
+                    this.anchoredCoords.lat = Number(lat);
+                } else if (!anchored) {
+                    this.anchoredCoords.lng = null;
+                    this.anchoredCoords.lat = null;
+                }
+                console.log('[CursorManager] 🔒 锚定状态:', this.isAnchored, this.anchoredCoords);
+            },
+            
+            /**
+             * 检查是否允许更新坐标
+             * @param {number} lng - 经度
+             * @param {number} lat - 纬度
+             * @param {boolean} force - 是否强制更新
+             * @returns {boolean} 是否允许更新
+             */
+            canUpdate(lng, lat, force = false) {
+                if (force) return true;
+                if (!this.isAnchored) return true;
+                
+                // 如果已锚定，只允许更新到锚定坐标（允许小的浮点误差）
+                if (this.anchoredCoords.lng !== null && this.anchoredCoords.lat !== null) {
+                    const deltaLng = Math.abs(lng - this.anchoredCoords.lng);
+                    const deltaLat = Math.abs(lat - this.anchoredCoords.lat);
+                    // 允许 0.0001 度的误差（约 11 米）
+                    return deltaLng <= 0.0001 && deltaLat <= 0.0001;
+                }
+                
+                return false;
+            },
+            
+            /**
+             * 清除光标实例（Leaflet 实现：移除 marker）
+             */
+            clearCursor() {
+                // 优先使用 Leaflet marker 清除
+                if (window.userMarker) {
+                    try {
+                        const map = window.map;
+                        if (map && typeof map.removeLayer === 'function') {
+                            map.removeLayer(window.userMarker);
+                            window.userMarker = null;
+                            this.currentCursorId = null;
+                            console.log('[CursorManager] 🗑️ 已清除 Leaflet marker');
+                            return;
+                        }
+                    } catch (e) {
+                        console.warn('[CursorManager] ⚠️ 清除 Leaflet marker 失败:', e);
+                    }
+                }
+
+                // 降级：ECharts 实现（兼容旧代码）
+                if (mapChart && typeof mapChart.isDisposed === 'function' && !mapChart.isDisposed()) {
+                    try {
+                        const currentOption = mapChart.getOption();
+                        if (currentOption && currentOption.series && Array.isArray(currentOption.series)) {
+                            // 移除所有 "Current Location" 系列
+                            const otherSeries = currentOption.series.filter(s => s && s.name !== 'Current Location');
+                            mapChart.setOption({ series: otherSeries }, { notMerge: false, lazyUpdate: false });
+                            this.currentCursorId = null;
+                            console.log('[CursorManager] 🗑️ 已清除 ECharts 光标实例');
+                        }
+                    } catch (e) {
+                        console.warn('[CursorManager] ⚠️ 清除 ECharts 光标失败:', e);
+                    }
+                }
+            },
+            
+            /**
+             * 更新光标状态缓存
+             */
+            updateState(lng, lat, color, avatarUrl, username) {
+                this.cursorState = {
+                    lng: Number(lng),
+                    lat: Number(lat),
+                    color: color || '#00ff41',
+                    avatarUrl: avatarUrl || null,
+                    username: username || null,
+                    updatedAt: Date.now()
+                };
+            }
+        };
+        
+        // 初始化光标管理器
+        try {
+            window.mapCursorManager.init();
+        } catch (e) {
+            console.warn('[CursorManager] ⚠️ 初始化失败:', e);
+        }
         /** 待确认的校准数据（lng, lat, countryCode, countryName） */
         let pendingCalibration = { lng: null, lat: null, countryCode: null, countryName: null };
         /** 国家英文名 -> 近似中心 [lng, lat]（用于校准时光标移动） */
@@ -6165,25 +6804,28 @@
                     <div class="drawer-item-label mb-2">${currentLang === 'zh' ? '状态' : 'Status'}</div>
                     <div class="flex gap-1.5">
                         <button 
+                            title="${(USER_STATUSES.idle && (currentLang === 'zh' ? USER_STATUSES.idle.descZh : USER_STATUSES.idle.descEn)) || ''}"
                             onclick="setUserStatus('idle'); if(currentDrawerCountry.code) showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);"
                             class="flex-1 px-2 py-1.5 bg-zinc-900/50 border ${currentStatus === 'idle' ? 'border-[#00ff41]' : 'border-zinc-800'} text-[10px] font-bold uppercase tracking-wider hover:border-[#00ff41] transition-colors"
                             style="color: ${currentStatus === 'idle' ? '#00ff41' : '#71717a'};"
                         >
-                            🟢 极速
+                            🟢 ${currentLang === 'zh' ? '在线' : 'Online'}
                         </button>
                         <button 
+                            title="${(USER_STATUSES.busy && (currentLang === 'zh' ? USER_STATUSES.busy.descZh : USER_STATUSES.busy.descEn)) || ''}"
                             onclick="setUserStatus('busy'); if(currentDrawerCountry.code) showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);"
                             class="flex-1 px-2 py-1.5 bg-zinc-900/50 border ${currentStatus === 'busy' ? 'border-[#ff8c00]' : 'border-zinc-800'} text-[10px] font-bold uppercase tracking-wider hover:border-[#ff8c00] transition-colors"
                             style="color: ${currentStatus === 'busy' ? '#ff8c00' : '#71717a'};"
                         >
-                            🟠 忙碌
+                            🟠 ${currentLang === 'zh' ? '忙碌' : 'Busy'}
                         </button>
                         <button 
+                            title="${(USER_STATUSES.sprint && (currentLang === 'zh' ? USER_STATUSES.sprint.descZh : USER_STATUSES.sprint.descEn)) || ''}"
                             onclick="setUserStatus('sprint'); if(currentDrawerCountry.code) showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);"
-                            class="flex-1 px-2 py-1.5 bg-zinc-900/50 border ${currentStatus === 'sprint' ? 'border-[#ff006e]' : 'border-zinc-800'} text-[10px] font-bold uppercase tracking-wider hover:border-[#ff006e] transition-colors"
-                            style="color: ${currentStatus === 'sprint' ? '#ff006e' : '#71717a'};"
+                            class="flex-1 px-2 py-1.5 bg-zinc-900/50 border ${currentStatus === 'sprint' ? 'border-[#71717a]' : 'border-zinc-800'} text-[10px] font-bold uppercase tracking-wider hover:border-[#71717a] transition-colors"
+                            style="color: ${currentStatus === 'sprint' ? '#71717a' : '#71717a'};"
                         >
-                            🚀 冲刺
+                            ⚫ ${currentLang === 'zh' ? '离线' : 'Offline'}
                         </button>
                     </div>
                     
@@ -6230,35 +6872,62 @@
                     identityCard.style.transform = 'translateY(0)';
                 });
 
-                // 填充用户国家/地区：优先使用 localStorage 中的手动校准信息
+                // 填充用户国家/地区：优先使用下拉菜单选择的国家
                 if (typeof updateUserCountryFlag === 'function') {
                     let countryCode = '';
                     let countryName = '';
                     let isManual = false;
 
-                    // 优先级 1: localStorage 中的手动校准信息
-                    if (localStorage.getItem('loc_fixed') === 'true' && localStorage.getItem('loc_locked') === 'true') {
+                    // 优先级 1: 下拉菜单选择的国家（user_selected_country）
+                    const selectedCountry = localStorage.getItem('user_selected_country');
+                    if (selectedCountry) {
+                        countryCode = selectedCountry.toUpperCase();
+                        if (countryNameMap[countryCode]) {
+                            countryName = currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en;
+                        } else {
+                            countryName = countryCode;
+                        }
+                        isManual = true; // 用户手动选择的国家视为用户校准
+                    }
+
+                    // 优先级 2: localStorage 中的手动校准信息（旧逻辑，兼容性保留）
+                    if (!countryCode && localStorage.getItem('loc_fixed') === 'true' && localStorage.getItem('loc_locked') === 'true') {
                         countryCode = localStorage.getItem('manual_location') || '';
                         if (countryCode) {
-                            countryName = (countryNameMap[countryCode] ? countryNameMap[countryCode].en : countryCode) || '';
+                            countryCode = countryCode.toUpperCase();
+                            if (countryNameMap[countryCode]) {
+                                countryName = currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en;
+                            } else {
+                                countryName = countryCode;
+                            }
                             isManual = true;
                         }
                     }
 
-                    // 优先级 2: currentUser 中的手动校准信息
+                    // 优先级 3: currentUser 中的手动校准信息
                     if (!countryCode && currentUser) {
                         countryCode = currentUser.manual_location || '';
                         if (countryCode) {
-                            countryName = (countryNameMap[countryCode] ? countryNameMap[countryCode].en : countryCode) || '';
+                            countryCode = countryCode.toUpperCase();
+                            if (countryNameMap[countryCode]) {
+                                countryName = currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en;
+                            } else {
+                                countryName = countryCode;
+                            }
                             isManual = true;
                         }
                     }
 
-                    // 优先级 3: currentUser 中的国家代码
+                    // 优先级 4: currentUser 中的国家代码（自动识别）
                     if (!countryCode && currentUser) {
                         countryCode = currentUser.country_code || currentUser.ip_location || '';
                         if (countryCode) {
-                            countryName = (countryNameMap[countryCode] ? countryNameMap[countryCode].en : countryCode) || '';
+                            countryCode = countryCode.toUpperCase();
+                            if (countryNameMap[countryCode]) {
+                                countryName = currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en;
+                            } else {
+                                countryName = countryCode;
+                            }
                             isManual = !!(currentUser.manual_location || currentUser.manual_lat != null);
                         }
                     }
@@ -6663,9 +7332,13 @@
                 }
             }
 
-            // 显示抽屉
-            leftDrawer.classList.add('active');
-            rightDrawer.classList.add('active');
+            // 显示抽屉（确保打开）
+            if (leftDrawer) {
+                leftDrawer.classList.add('active');
+            }
+            if (rightDrawer) {
+                rightDrawer.classList.add('active');
+            }
 
             // 【修复】保存抽屉打开状态和选中国家到 localStorage
             localStorage.setItem('left_drawer_open', 'true');
@@ -6968,6 +7641,48 @@
          * @param {Array} locationData - 地理位置数据 [{name: string, value: number}]
          */
         async function initGlobalMap(locationData) {
+            // 【优先判断】在地图初始化时检查 localStorage 锁定状态
+            try {
+                if (window.mapCursorManager) {
+                    // 重新初始化光标管理器（从 localStorage 恢复状态）
+                    window.mapCursorManager.init();
+                    
+                    // 如果已锚定，优先使用锚定坐标显示光标
+                    if (window.mapCursorManager.isAnchored && 
+                        window.mapCursorManager.anchoredCoords.lng !== null && 
+                        window.mapCursorManager.anchoredCoords.lat !== null) {
+                        const anchored = window.mapCursorManager.anchoredCoords;
+                        console.log('[InitMap] 🔒 检测到锚定状态，优先使用锚定坐标:', anchored);
+                        
+                        // 延迟显示光标，确保地图完全初始化
+                        setTimeout(() => {
+                            if (typeof setOrUpdateCurrentLocationCursor === 'function') {
+                                try {
+                                    const statusConfig = USER_STATUSES[currentUserStatus] || USER_STATUSES.idle;
+                                    const statusColor = statusConfig.status_color;
+                                    const githubUsername = localStorage.getItem('github_username') || null;
+                                    const avatarUrl = isValidGitHubUsername(githubUsername) 
+                                        ? getGitHubAvatarUrl(githubUsername) 
+                                        : DEFAULT_AVATAR;
+                                    
+                                    setOrUpdateCurrentLocationCursor(
+                                        anchored.lng, 
+                                        anchored.lat, 
+                                        statusColor, 
+                                        avatarUrl, 
+                                        githubUsername,
+                                        true // force: true，强制更新
+                                    );
+                                } catch (e) {
+                                    console.warn('[InitMap] ⚠️ 显示锚定光标失败:', e);
+                                }
+                            }
+                        }, 500);
+                    }
+                }
+            } catch (e) {
+                console.warn('[InitMap] ⚠️ 检查锁定状态失败:', e);
+            }
             try {
                 // 保存到全局变量
                 globalLocationData = locationData || [];
@@ -7027,6 +7742,7 @@
                 }
 
                 // 处理地理位置数据（2D 世界地图名称需与 world.js 的英文国家名匹配）
+                // 约定：locationData 的 value = 该国「已提交聊天记录的用户数」（非在线人数），由 API /api/global-average 的 location_rank 提供
                 const processedData = (locationData || []).map(item => ({
                     name: (countryNameMap[item.name]
                         ? countryNameMap[item.name].en
@@ -7040,6 +7756,11 @@
                     backgroundColor: 'transparent',
                     tooltip: {
                         trigger: 'item',
+                        confine: false,
+                        position: function (point, params, dom, rect, size) {
+                            var tipH = (size && size.contentSize) ? size.contentSize[1] : 60;
+                            return [point[0], point[1] - tipH - 12];
+                        },
                         backgroundColor: '#18181b',
                         borderColor: '#27272a',
                         textStyle: { color: '#00ff41', fontFamily: 'JetBrains Mono' },
@@ -7049,10 +7770,10 @@
                                 return '<div class="font-mono text-xs">未知区域</div>';
                             }
                             
-                            // 如果是地图国家数据，显示国家信息
+                            // 如果是地图国家数据，显示国家信息（必须包含该国家活跃节点数）
                             if (params.seriesType === 'map') {
                                 const name = params.name || params.data?.name || '未知区域';
-                                const value = params.value || 0;
+                                const value = Number(params.value ?? params.data?.value ?? 0) || 0;
                                 // 安全获取中文名称
                                 const code = typeof resolveCountryCodeFromMapName === 'function'
                                     ? resolveCountryCodeFromMapName(name)
@@ -7071,7 +7792,7 @@
                                 const activeNodesLabel = getI18nText('tooltip.active_nodes') || (currentLang === 'en' ? 'Active Nodes' : '活跃节点');
                                 let tooltipContent = `<div class="font-mono text-xs">${label}${proxyLabel}<br/>${escapeHtml(activeNodesLabel)}: ${value}</div>`;
                                 
-                                // 如果当前有选中的冠军信息，且国家名称匹配，显示冠军信息
+                                // 如果当前有选中的冠军信息，且国家名称匹配，显示冠军信息（同时必须保留活跃节点数）
                                 if (currentChampionInfo && currentChampionInfo.countryName === name) {
                                     const feedback = currentChampionInfo.feedback ? JSON.parse(currentChampionInfo.feedback) : null;
                                     const recordLabel = getI18nText('tooltip.record') || (currentLang === 'en' ? 'Record' : '战绩');
@@ -7081,6 +7802,7 @@
                                         <div class="font-mono text-xs">
                                             <div class="text-[#00ff41] font-bold mb-1">🏆 ${currentChampionInfo.championName}</div>
                                             <div class="text-white mb-1">${label}${proxyLabel}</div>
+                                            <div class="text-zinc-400 text-[10px] mb-1">${escapeHtml(activeNodesLabel)}: ${value}</div>
                                             <div class="text-zinc-400 text-[10px] mb-1">${escapeHtml(recordLabel)}: ${currentChampionInfo.championValue}</div>
                                             ${feedback ? `
                                                 <div class="text-zinc-500 text-[9px] mt-2 pt-2 border-t border-zinc-700">
@@ -7178,7 +7900,11 @@
                             borderWidth: 1
                         },
                         emphasis: {
-                            itemStyle: { areaColor: '#00ff41' },
+                            itemStyle: { 
+                                areaColor: 'rgba(0, 255, 65, 0.4)',
+                                borderColor: '#00ff41',
+                                borderWidth: 2
+                            },
                             label: { show: false }
                         },
                         data: processedData
@@ -7188,11 +7914,148 @@
                 // notMerge: true 彻底替换，避免残留旧配置
                 mapChart.setOption(option2D, { notMerge: true, lazyUpdate: false });
 
+                // 添加鼠标悬浮高亮效果
+                mapChart.off('mouseover');
+                mapChart.on('mouseover', (params) => {
+                    if (params.seriesType === 'map' && params.name) {
+                        try {
+                            // 高亮当前悬浮的国家
+                            mapChart.dispatchAction({
+                                type: 'highlight',
+                                name: params.name
+                            });
+                        } catch (e) {
+                            console.warn('[Map] ⚠️ 悬浮高亮失败:', e);
+                        }
+                    }
+                });
+
+                mapChart.off('mouseout');
+                mapChart.on('mouseout', (params) => {
+                    if (params.seriesType === 'map' && params.name) {
+                        try {
+                            // 取消高亮
+                            mapChart.dispatchAction({
+                                type: 'downplay',
+                                name: params.name
+                            });
+                            // 如果当前有选中的国家，重新高亮它
+                            const selectedCountry = localStorage.getItem('user_selected_country');
+                            if (selectedCountry) {
+                                // 尝试获取国家名称
+                                const countryName = countryNameMap?.[selectedCountry]?.en || selectedCountry;
+                                if (countryName && countryName !== params.name) {
+                                    setTimeout(() => {
+                                        try {
+                                            mapChart.dispatchAction({
+                                                type: 'highlight',
+                                                name: countryName
+                                            });
+                                        } catch (e) {
+                                            // ignore
+                                        }
+                                    }, 100);
+                                }
+                            }
+                        } catch (e) {
+                            console.warn('[Map] ⚠️ 取消高亮失败:', e);
+                        }
+                    }
+                });
+
+                // 选择国家后高亮显示
+                function highlightSelectedCountry() {
+                    try {
+                        const selectedCountry = localStorage.getItem('user_selected_country');
+                        if (selectedCountry && mapChart && !(typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) {
+                            // 先取消所有高亮
+                            try {
+                                mapChart.dispatchAction({
+                                    type: 'downplay'
+                                });
+                            } catch (e) {
+                                // ignore
+                            }
+
+                            // 获取国家名称（尝试多种方式）
+                            let countryName = null;
+                            
+                            // 方式1：从 countryNameMap 获取
+                            if (countryNameMap && countryNameMap[selectedCountry]) {
+                                countryName = countryNameMap[selectedCountry].en || countryNameMap[selectedCountry].zh;
+                            }
+                            
+                            // 方式2：如果找不到，尝试使用 resolveCountryCodeFromMapName 反向查找
+                            if (!countryName && typeof resolveCountryCodeFromMapName === 'function') {
+                                // 需要反向查找：从代码找名称
+                                // 这里先尝试直接使用代码作为名称
+                                countryName = selectedCountry;
+                            }
+                            
+                            // 方式3：尝试从 ISO 映射查找
+                            if (!countryName && window.__isoNameToIso2 instanceof Map) {
+                                for (const [name, code] of window.__isoNameToIso2.entries()) {
+                                    if (String(code).toUpperCase() === String(selectedCountry).toUpperCase()) {
+                                        countryName = name;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if (countryName) {
+                                setTimeout(() => {
+                                    try {
+                                        // 高亮选中的国家
+                                        mapChart.dispatchAction({
+                                            type: 'highlight',
+                                            name: countryName
+                                        });
+                                        console.log('[Map] ✅ 已高亮选中的国家:', countryName, '代码:', selectedCountry);
+                                    } catch (e) {
+                                        console.warn('[Map] ⚠️ 高亮选中国家失败:', e, '国家名称:', countryName);
+                                    }
+                                }, 300);
+                            } else {
+                                console.warn('[Map] ⚠️ 无法找到国家名称，代码:', selectedCountry);
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('[Map] ⚠️ highlightSelectedCountry 失败:', e);
+                    }
+                }
+
+                // 页面加载时高亮选中的国家
+                highlightSelectedCountry();
+                // 保存函数到全局，供选择国家后调用
+                window.highlightSelectedCountry = highlightSelectedCountry;
+
+                // 页面加载时恢复选择的国家并显示光标
+                setTimeout(() => {
+                    try {
+                        const savedCountry = localStorage.getItem('user_selected_country');
+                        if (savedCountry) {
+                            setOrUpdateCurrentLocationCursor(savedCountry);
+                            highlightSelectedCountry();
+                        }
+                    } catch (e) {
+                        console.warn('[Map] ⚠️ 恢复选择的国家失败:', e);
+                    }
+                }, 500);
+
                 // ====== 自愈：地图重绘后，确保「Current Location」光标不会被 notMerge:true 清掉 ======
                 try {
                     bindMapCursorSelfHeal();
                     // 如果本地/全局已有坐标，渲染后立即恢复光标（解决“随机消失且刷新无效”）
-                    ensureCurrentLocationCursorIfMissing('initGlobalMap-after-setOption');
+                    // 【修复】延迟执行，确保地图完全渲染完成
+                    setTimeout(() => {
+                        try {
+                            if (typeof ensureCurrentLocationCursorIfMissing === 'function') {
+                                ensureCurrentLocationCursorIfMissing('initGlobalMap-after-setOption');
+                            }
+                        } catch (e) {
+                            console.warn('[Map] ⚠️ 恢复光标失败:', e);
+                        }
+                    }, 300);
                     // 绑定校准拖拽交互（仅校准模式下生效）
                     bindCurrentLocationDragHandlers();
                  } catch (e) {
@@ -7296,6 +8159,62 @@
                          return;
                      }
                     
+                    // ========== 锚定模式下点击地图任意位置：立即移动光标并锁定 ==========
+                    if (isAnchorMode) {
+                        try {
+                            const dom = mapChart.getDom();
+                            if (dom && params.event) {
+                                const rect = dom.getBoundingClientRect();
+                                const x = (params.event.clientX != null ? params.event.clientX : params.event.offsetX) - rect.left;
+                                const y = (params.event.clientY != null ? params.event.clientY : params.event.offsetY) - rect.top;
+                                const point = mapChart.convertFromPixel('geo', [x, y]);
+                                if (point && Array.isArray(point) && point.length >= 2) {
+                                    const lng = Number(point[0]), lat = Number(point[1]);
+                                    if (!isNaN(lng) && !isNaN(lat)) {
+                                        // 立即移动光标
+                                        moveCurrentLocationCursor(lng, lat);
+                                        
+                                        // 获取国家代码
+                                        let countryCode = null;
+                                        let countryName = null;
+                                        const hasValidName = params.name && typeof params.name === 'string' && params.name.trim() !== '';
+                                        if (params.seriesType === 'map' && hasValidName) {
+                                            countryName = params.name;
+                                            countryCode = typeof resolveCountryCodeFromMapName === 'function'
+                                                ? resolveCountryCodeFromMapName(countryName)
+                                                : null;
+                                            if (!countryCode) {
+                                                for (const [code, names] of Object.entries(countryNameMap || {})) {
+                                                    if (names.en === countryName || names.zh === countryName || code === countryName) {
+                                                        countryCode = code;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            // 无国家名称（点到海上等）：使用轻量判国
+                                            countryCode = typeof getCountryByCoords === 'function' ? getCountryByCoords(lng, lat) : null;
+                                            if (countryCode) {
+                                                countryName = countryNameMap?.[countryCode]?.en || countryCode;
+                                            }
+                                        }
+                                        
+                                        // 立即保存并锁定
+                                        saveManualLocation(countryCode || '', lng, lat);
+                                        
+                                        // 退出锚定模式
+                                        setAnchorMode(false);
+                                        
+                                        console.log('[Anchor] ✅ 已锚定位置:', { lng, lat, countryCode, countryName });
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            console.warn('[Anchor] ⚠️ 锚定失败:', e);
+                        }
+                        return;
+                    }
+                    
                     // ========== 校准模式下点击地图任意位置：convertFromPixel 捕获经纬度并移动光标 ==========
                     if (isCalibrating) {
                         try {
@@ -7383,13 +8302,68 @@
                         // ✅ 统一事件流：
                         // - 解析到 ISO2：进入“国家透视右侧抽屉”（非全局面板），并做锚定/迁移
                         // - 解析不到 ISO2：兜底只打开抽屉（无法进入国家透视）
+                        // 更新国家选择（同步到下拉菜单、左侧抽屉、Supabase）
+                        try {
+                            localStorage.setItem('user_selected_country', countryCode);
+                            const dropdown = document.getElementById('country-select-dropdown');
+                            if (dropdown) {
+                                dropdown.value = countryCode;
+                            }
+                            // 更新左侧抽屉选择
+                            const leftSearch = document.getElementById('left-drawer-country-search');
+                            if (leftSearch) {
+                                const renderFn = window.__leftDrawerCountryRender;
+                                if (typeof renderFn === 'function') {
+                                    renderFn(leftSearch.value);
+                                }
+                            }
+                            // 显示光标
+                            setOrUpdateCurrentLocationCursor(countryCode);
+                            // 高亮选中的国家
+                            if (typeof window.highlightSelectedCountry === 'function') {
+                                window.highlightSelectedCountry();
+                            }
+                            // 同步到 Supabase（与下拉列表选择一致）
+                            if (typeof saveCountryToSupabase === 'function') {
+                                saveCountryToSupabase(countryCode).catch(function () {});
+                            }
+                            // 更新左侧抽屉用户校准显示
+                            if (typeof updateUserCountryFlag === 'function') {
+                                const countries = typeof getAllCountries === 'function' ? getAllCountries() : [];
+                                const c = countries.find(function (x) { return (x.code || '').toUpperCase() === (countryCode || '').toUpperCase(); });
+                                if (c) {
+                                    const countryName = (currentLang === 'zh' && c.nameZh) ? c.nameZh : c.nameEn;
+                                    updateUserCountryFlag(countryCode, countryName, true);
+                                }
+                            }
+                        } catch (e) {
+                            console.warn('[Map] ⚠️ 更新国家选择失败:', e);
+                        }
+
                         const ccUpper = String(countryCode || '').trim().toUpperCase();
                         if (/^[A-Z]{2}$/.test(ccUpper)) {
-                            try { onCountrySwitch(ccUpper, { source: 'map-country-click', name: countryName }); } catch { /* ignore */ }
+                            try { 
+                                onCountrySwitch(ccUpper, { source: 'map-country-click', name: countryName });
+                                // 确保打开抽屉
+                                if (typeof showDrawersWithCountryData === 'function') {
+                                    showDrawersWithCountryData(ccUpper, countryName);
+                                }
+                            } catch (e) {
+                                console.warn('[Map] ⚠️ onCountrySwitch 失败，尝试直接打开抽屉:', e);
+                                try { 
+                                    if (typeof showDrawersWithCountryData === 'function') {
+                                        showDrawersWithCountryData(ccUpper, countryName);
+                                    }
+                                } catch { /* ignore */ }
+                            }
                         } else {
                             console.warn('[Map] ⚠️ 无法解析 ISO2 国家码，暂无法进入国家透视右抽屉:', { countryName, countryCode });
                             // 兜底：仍允许任意国家弹出抽屉（但不进入国家透视/不触发后端国籍更新）
-                            try { showDrawersWithCountryData(countryCode, countryName); } catch { /* ignore */ }
+                            try { 
+                                if (typeof showDrawersWithCountryData === 'function') {
+                                    showDrawersWithCountryData(countryCode, countryName);
+                                }
+                            } catch { /* ignore */ }
                         }
                         return;
                     } else {
@@ -7455,64 +8429,336 @@
          */
         /**
          * 设置或更新「当前用户」持久光标（seriesName: 'Current Location'），不自动移除
+         * 【重构】使用单例光标管理器，实现拦截器机制
+         * @param {number} lng - 经度
+         * @param {number} lat - 纬度
+         * @param {string} color - 颜色
+         * @param {string} avatarUrl - 头像 URL
+         * @param {string} username - 用户名
+         * @param {boolean} force - 是否强制更新（忽略锚定状态）
          */
-        function setOrUpdateCurrentLocationCursor(lng, lat, color = '#00ff41', avatarUrl = null, username = null) {
-            if (!mapChart || (typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) return;
-            if (typeof lng !== 'number' || typeof lat !== 'number' || isNaN(lng) || isNaN(lat)) return;
-            if (!color || typeof color !== 'string') color = '#00ff41';
+        /**
+         * 根据选择的国家显示光标（固定位置，不可移动，带脉动闪光效果）
+         * @param {string} countryCode - 国家代码（如 'CN', 'US'）
+         */
+        function setOrUpdateCurrentLocationCursor(countryCode = null) {
+            // 优先使用 ECharts（当前项目使用 ECharts）
+            if (mapChart && typeof mapChart.setOption === 'function' && !(typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) {
+                return setOrUpdateCurrentLocationCursorECharts(countryCode);
+            }
 
-            // 【新增】如果光标已被锁定，检查是否允许更新
-            if (window.__cursorLocked) {
-                // 只有当坐标与锁定的坐标一致时，才允许更新（用于颜色/头像更新）
-                const lockedLat = localStorage.getItem('manual_lat');
-                const lockedLng = localStorage.getItem('manual_lng');
-                if (lockedLat && lockedLng && !isNaN(Number(lockedLat)) && !isNaN(Number(lockedLng))) {
-                    const lockedLatNum = Number(lockedLat);
-                    const lockedLngNum = Number(lockedLng);
-                    // 允许小的浮点误差（0.0001 度约等于 11 米）
-                    if (Math.abs(lat - lockedLatNum) > 0.0001 || Math.abs(lng - lockedLngNum) > 0.0001) {
-                        console.warn('[MapCursor] 🔒 光标已锁定，拒绝位置更新:', {
-                            requested: { lat, lng },
-                            locked: { lat: lockedLatNum, lng: lockedLngNum }
-                        });
-                        return;
+            // 降级：检查 Leaflet map 实例是否存在
+            const map = window.map;
+            if (map && typeof L !== 'undefined' && typeof map.removeLayer === 'function') {
+                return setOrUpdateCurrentLocationCursorLeaflet(countryCode, map);
+            }
+
+            console.warn('[MapCursor] ⚠️ 地图实例不存在或无效');
+        }
+
+        /**
+         * 使用 ECharts 显示光标
+         * @param {string} countryCode - 国家代码
+         */
+        function setOrUpdateCurrentLocationCursorECharts(countryCode = null) {
+            // 如果没有传入国家代码，尝试从下拉菜单或 localStorage 获取
+            if (!countryCode) {
+                const dropdown = document.getElementById('country-select-dropdown');
+                countryCode = dropdown ? dropdown.value : null;
+                if (!countryCode) {
+                    try {
+                        countryCode = localStorage.getItem('user_selected_country');
+                    } catch (e) {
+                        console.warn('[MapCursor] ⚠️ 无法从 localStorage 获取国家代码');
                     }
                 }
             }
 
+            // 如果没有国家代码，移除光标
+            if (!countryCode) {
+                try {
+                    const currentOption = mapChart.getOption();
+                    if (currentOption && currentOption.series && Array.isArray(currentOption.series)) {
+                        const otherSeries = currentOption.series.filter(s => s && s.name !== 'Current Location');
+                        mapChart.setOption({ series: otherSeries }, { notMerge: false, lazyUpdate: false });
+                    }
+                } catch (e) {
+                    console.warn('[MapCursor] ⚠️ 移除光标失败:', e);
+                }
+                return;
+            }
+
+            // 获取国家中心坐标
+            let countryName = null;
+            let coords = null;
+
+            if (typeof countryNameMap !== 'undefined' && countryNameMap[countryCode]) {
+                countryName = countryNameMap[countryCode].en || countryNameMap[countryCode].zh || countryCode;
+                if (typeof countryCenterMap !== 'undefined' && countryCenterMap[countryName]) {
+                    coords = countryCenterMap[countryName];
+                }
+            }
+
+            if (!coords) {
+                for (const [name, coord] of Object.entries(countryCenterMap || {})) {
+                    if (countryNameMap && countryNameMap[countryCode]) {
+                        const names = countryNameMap[countryCode];
+                        if (names.en === name || names.zh === name) {
+                            coords = coord;
+                            countryName = name;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (!coords) {
+                console.warn('[MapCursor] ⚠️ 无法找到国家坐标:', countryCode);
+                return;
+            }
+
+            const [lng, lat] = coords;
+            const color = '#00ff41';
+
             try {
                 const currentOption = mapChart.getOption();
                 if (!currentOption || !currentOption.series || !Array.isArray(currentOption.series)) return;
-                const otherSeries = currentOption.series.filter(s => s.name !== 'Current Location');
+
+                // 移除旧的 Current Location 系列
+                const otherSeries = currentOption.series.filter(s => s && s.name !== 'Current Location');
+
+                // 创建新的光标系列（带脉动效果）
                 const pulseSeries = {
                     name: 'Current Location',
                     type: 'effectScatter',
                     coordinateSystem: 'geo',
-                    data: [{ value: [lng, lat], name: 'YOU', avatarUrl: avatarUrl || null, username: username || null }],
+                    data: [{ value: [lng, lat], name: 'YOU' }],
                     symbolSize: 20,
                     showEffectOn: 'render',
-                    rippleEffect: { brushType: 'stroke', scale: 5, period: 4, color: color },
-                    itemStyle: { color: color, shadowBlur: 20, shadowColor: color },
-                    label: { show: true, formatter: 'YOU', position: 'top', color: color, fontSize: 10, fontFamily: 'JetBrains Mono' },
-                    avatarUrl: avatarUrl || null,
-                    username: username || null,
+                    rippleEffect: { 
+                        brushType: 'stroke', 
+                        scale: 5, 
+                        period: 4, 
+                        color: color 
+                    },
+                    itemStyle: { 
+                        color: color, 
+                        shadowBlur: 20, 
+                        shadowColor: color 
+                    },
+                    label: { 
+                        show: true, 
+                        formatter: 'YOU', 
+                        position: 'top', 
+                        color: color, 
+                        fontSize: 10, 
+                        fontFamily: 'JetBrains Mono' 
+                    },
                     zlevel: 10,
                     z: 10
                 };
+
                 mapChart.setOption({ series: [...otherSeries, pulseSeries] }, { notMerge: false, lazyUpdate: false });
-                // 记录当前光标状态，供地图重绘自愈（避免"刷新也不回来"）
-                try {
-                    window.__currentLocationCursorState = {
-                        lng,
-                        lat,
-                        color,
-                        avatarUrl: avatarUrl || null,
-                        username: username || null,
-                        updatedAt: Date.now()
-                    };
-                    window.currentUserLocation = { lng, lat, color: color };
-                } catch { /* ignore */ }
-            } catch (e) { console.warn('[MapPulse] setOrUpdateCurrentLocationCursor:', e); }
+                console.log('[MapCursor] ✅ ECharts 光标已显示:', { countryCode, lng, lat });
+            } catch (e) {
+                console.warn('[MapCursor] ⚠️ setOrUpdateCurrentLocationCursorECharts 失败:', e);
+            }
+        }
+
+        /**
+         * 使用 Leaflet 显示光标
+         * @param {string} countryCode - 国家代码
+         * @param {Object} map - Leaflet map 实例
+         */
+        function setOrUpdateCurrentLocationCursorLeaflet(countryCode = null, map) {
+
+            // 如果没有传入国家代码，尝试从下拉菜单或 localStorage 获取
+            if (!countryCode) {
+                const dropdown = document.getElementById('country-select-dropdown');
+                countryCode = dropdown ? dropdown.value : null;
+                if (!countryCode) {
+                    // 尝试从 localStorage 获取
+                    try {
+                        countryCode = localStorage.getItem('user_selected_country');
+                    } catch (e) {
+                        console.warn('[MapCursor] ⚠️ 无法从 localStorage 获取国家代码');
+                    }
+                }
+            }
+
+            // 如果没有国家代码，不显示光标
+            if (!countryCode) {
+                // 移除现有光标
+                if (window.userMarker) {
+                    try {
+                        map.removeLayer(window.userMarker);
+                        window.userMarker = null;
+                    } catch (e) {
+                        console.warn('[MapCursor] ⚠️ 移除光标失败:', e);
+                    }
+                }
+                return;
+            }
+
+            // 获取国家中心坐标
+            let countryName = null;
+            let coords = null;
+
+            // 从 countryNameMap 获取国家名称和坐标
+            if (typeof countryNameMap !== 'undefined' && countryNameMap[countryCode]) {
+                countryName = countryNameMap[countryCode].en || countryNameMap[countryCode].zh || countryCode;
+                // 从 countryCenterMap 获取坐标
+                if (typeof countryCenterMap !== 'undefined' && countryCenterMap[countryName]) {
+                    coords = countryCenterMap[countryName];
+                }
+            }
+
+            // 如果找不到坐标，尝试直接使用国家代码查找
+            if (!coords) {
+                // 尝试通过国家代码查找（需要反向映射）
+                for (const [name, coord] of Object.entries(countryCenterMap || {})) {
+                    if (countryNameMap && countryNameMap[countryCode]) {
+                        const names = countryNameMap[countryCode];
+                        if (names.en === name || names.zh === name) {
+                            coords = coord;
+                            countryName = name;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 如果仍然找不到坐标，使用默认坐标
+            if (!coords) {
+                console.warn('[MapCursor] ⚠️ 无法找到国家坐标，使用默认坐标');
+                coords = [0, 0]; // 默认坐标（非洲中部）
+            }
+
+            const [lng, lat] = coords;
+            const color = '#00ff41'; // 主题绿色
+
+            try {
+                // 【单例管理】检测并移除旧的 marker
+                if (window.userMarker) {
+                    try {
+                        map.removeLayer(window.userMarker);
+                        console.log('[MapCursor] 🗑️ 已移除旧的光标 marker');
+                    } catch (e) {
+                        console.warn('[MapCursor] ⚠️ 移除旧 marker 失败:', e);
+                    }
+                    window.userMarker = null;
+                }
+
+                // 创建光标 HTML 内容（带脉动闪光效果）
+                const iconSize = 20; // 光标大小（像素）
+                const iconHtml = `
+                    <div class="pulse-marker" style="
+                        width: ${iconSize}px;
+                        height: ${iconSize}px;
+                        border-radius: 50%;
+                        background-color: ${color};
+                        border: 2px solid #000000;
+                        box-shadow: 0 0 20px ${color}, 0 0 10px rgba(0, 0, 0, 0.8);
+                        position: relative;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                    ">
+                        <div style="
+                            position: absolute;
+                            top: -20px;
+                            left: 50%;
+                            transform: translateX(-50%);
+                            color: ${color};
+                            font-size: 10px;
+                            font-family: 'JetBrains Mono', monospace;
+                            white-space: nowrap;
+                            text-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
+                        ">YOU</div>
+                    </div>
+                `;
+
+                // 创建 Leaflet divIcon，设置正确的 iconAnchor 确保光标中心与经纬度完全重合
+                const customIcon = L.divIcon({
+                    html: iconHtml,
+                    className: 'custom-user-marker pulse-marker', // 添加脉动动画类
+                    iconSize: [iconSize, iconSize], // 图标尺寸
+                    iconAnchor: [iconSize / 2, iconSize / 2], // 锚点设置为图标中心，确保光标中心与经纬度完全重合
+                    popupAnchor: [0, -iconSize / 2 - 5] // 弹出框锚点
+                });
+
+                // 创建 Leaflet marker（不可拖拽）
+                const marker = L.marker([lat, lng], {
+                    icon: customIcon,
+                    zIndexOffset: 1000, // 确保光标在最上层
+                    draggable: false, // 禁止拖拽
+                    interactive: false // 禁止交互
+                });
+
+                // 添加到地图
+                marker.addTo(map);
+                window.userMarker = marker;
+
+                console.log('[MapCursor] ✅ 光标已显示在国家中心:', { countryCode, countryName, lng, lat });
+                
+            } catch (e) { 
+                console.warn('[MapCursor] ⚠️ setOrUpdateCurrentLocationCursor 失败:', e); 
+            }
+        }
+
+        /**
+         * 初始化 Leaflet map 的 zoom/move 事件监听器
+         * 用于防止在缩放/移动期间更新光标坐标
+         */
+        function initLeafletMapEventHandlers() {
+            const map = window.map;
+            if (!map || typeof L === 'undefined' || typeof map.on !== 'function') {
+                return;
+            }
+
+            // 初始化状态标志
+            window.__isMapZooming = false;
+            window.__isMapMoving = false;
+            window.__isUserManualClick = false;
+
+            // 缩放开始事件
+            map.on('zoomstart', function() {
+                window.__isMapZooming = true;
+            });
+
+            // 缩放结束事件
+            map.on('zoomend', function() {
+                window.__isMapZooming = false;
+            });
+
+            // 移动开始事件
+            map.on('movestart', function() {
+                window.__isMapMoving = true;
+            });
+
+            // 移动结束事件
+            map.on('moveend', function() {
+                window.__isMapMoving = false;
+            });
+
+            // 用户手动点击事件（用于标记用户显式操作）
+            map.on('click', function(e) {
+                window.__isUserManualClick = true;
+                // 500ms 后重置标志，允许后续更新
+                setTimeout(() => {
+                    window.__isUserManualClick = false;
+                }, 500);
+            });
+
+            console.log('[MapCursor] ✅ Leaflet map 事件监听器已初始化');
+        }
+
+        // 如果 Leaflet map 已存在，立即初始化事件监听器
+        if (typeof window !== 'undefined' && (window.map || typeof L !== 'undefined')) {
+            // 延迟初始化，确保 map 实例已完全创建
+            setTimeout(() => {
+                initLeafletMapEventHandlers();
+            }, 100);
         }
 
         /** 仅更新「Current Location」系列颜色（校准模式蓝 / 正常绿） */
@@ -7922,17 +9168,956 @@
             } catch { /* ignore */ }
         }
 
+        /**
+         * 获取完整的国家列表（从 ISO 映射和 countryNameMap）
+         * @returns {Array} 国家列表 [{code, nameZh, nameEn}]
+         */
+        function getAllCountries() {
+            const countries = [];
+            const codeSet = new Set();
+
+            // 1. 从 countryNameMap 获取（优先，有中文名称）
+            if (typeof countryNameMap !== 'undefined') {
+                for (const [code, names] of Object.entries(countryNameMap)) {
+                    if (!codeSet.has(code)) {
+                        countries.push({
+                            code: code,
+                            nameZh: names.zh || '',
+                            nameEn: names.en || code
+                        });
+                        codeSet.add(code);
+                    }
+                }
+            }
+
+            // 2. 从 ISO 映射获取更多国家
+            try {
+                if (window.__isoNameToIso2 instanceof Map) {
+                    const isoMap = window.__isoNameToIso2;
+                    for (const [name, code] of isoMap.entries()) {
+                        const codeUpper = String(code).toUpperCase();
+                        if (!codeSet.has(codeUpper) && /^[A-Z]{2}$/.test(codeUpper)) {
+                            countries.push({
+                                code: codeUpper,
+                                nameZh: '', // ISO 映射通常只有英文名
+                                nameEn: name
+                            });
+                            codeSet.add(codeUpper);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('[CountrySelect] ⚠️ 从 ISO 映射获取国家失败:', e);
+            }
+
+            // 3. 排序
+            countries.sort((a, b) => {
+                const nameA = (currentLang === 'zh' && a.nameZh) ? a.nameZh : a.nameEn;
+                const nameB = (currentLang === 'zh' && b.nameZh) ? b.nameZh : b.nameEn;
+                return nameA.localeCompare(nameB);
+            });
+
+            return countries;
+        }
+
+        /**
+         * 初始化左侧抽屉国家选择菜单
+         */
+        function initLeftDrawerCountrySelector() {
+            try {
+                const searchInput = document.getElementById('left-drawer-country-search');
+                const listContainer = document.getElementById('left-drawer-country-list');
+                
+                if (!searchInput || !listContainer) {
+                    console.warn('[LeftDrawerCountry] ⚠️ 找不到国家选择菜单元素');
+                    return;
+                }
+
+                // 渲染国家列表
+                const renderCountryList = (searchQuery = '') => {
+                    const countries = getAllCountries();
+                    const query = String(searchQuery || '').trim().toLowerCase();
+                    
+                    // 过滤国家
+                    const filtered = countries.filter(country => {
+                        if (!query) return true;
+                        const nameZh = (country.nameZh || '').toLowerCase();
+                        const nameEn = (country.nameEn || '').toLowerCase();
+                        const code = (country.code || '').toLowerCase();
+                        return nameZh.includes(query) || nameEn.includes(query) || code.includes(query);
+                    });
+
+                    // 清空并填充列表
+                    listContainer.innerHTML = '';
+                    
+                    if (filtered.length === 0) {
+                        listContainer.innerHTML = `
+                            <div style="padding: 16px; text-align: center; color: rgba(113, 113, 122, 0.8); font-size: 12px;">
+                                未找到匹配的国家
+                            </div>
+                        `;
+                        return;
+                    }
+
+                    filtered.forEach(country => {
+                        const item = document.createElement('div');
+                        item.className = 'country-select-item';
+                        item.style.cssText = `
+                            padding: 10px 12px;
+                            border-bottom: 1px solid rgba(0, 255, 65, 0.1);
+                            cursor: pointer;
+                            transition: all 0.2s;
+                            color: #ffffff;
+                            font-family: 'JetBrains Mono', monospace;
+                            font-size: 12px;
+                        `;
+                        
+                        const displayName = (currentLang === 'zh' && country.nameZh) 
+                            ? `${country.nameZh} (${country.code})` 
+                            : `${country.nameEn} (${country.code})`;
+                        
+                        item.textContent = displayName;
+                        
+                        // 高亮当前选择的国家
+                        try {
+                            const currentCountry = localStorage.getItem('user_selected_country');
+                            if (currentCountry && currentCountry.toUpperCase() === country.code.toUpperCase()) {
+                                item.style.background = 'rgba(0, 255, 65, 0.15)';
+                                item.style.borderLeft = '3px solid #00ff41';
+                            }
+                        } catch (e) {
+                            // ignore
+                        }
+                        
+                        // 悬停效果
+                        item.addEventListener('mouseenter', () => {
+                            item.style.background = 'rgba(0, 255, 65, 0.2)';
+                            item.style.borderLeft = '3px solid #00ff41';
+                        });
+                        
+                        item.addEventListener('mouseleave', () => {
+                            try {
+                                const currentCountry = localStorage.getItem('user_selected_country');
+                                if (currentCountry && currentCountry.toUpperCase() === country.code.toUpperCase()) {
+                                    item.style.background = 'rgba(0, 255, 65, 0.15)';
+                                } else {
+                                    item.style.background = 'transparent';
+                                    item.style.borderLeft = 'none';
+                                }
+                            } catch (e) {
+                                item.style.background = 'transparent';
+                                item.style.borderLeft = 'none';
+                            }
+                        });
+                        
+                        // 点击选择国家
+                        item.addEventListener('click', async () => {
+                            // 保存选择
+                            try {
+                                localStorage.setItem('user_selected_country', country.code);
+                            } catch (e) {
+                                console.warn('[LeftDrawerCountry] ⚠️ 保存到 localStorage 失败:', e);
+                            }
+
+                            // 更新顶部下拉菜单（不触发 change 事件，避免打开抽屉）
+                            const dropdown = document.getElementById('country-select-dropdown');
+                            if (dropdown) {
+                                dropdown.value = country.code;
+                            }
+                            
+                            // 显示光标
+                            setOrUpdateCurrentLocationCursor(country.code);
+                            
+                            // 保存到 Supabase
+                            await saveCountryToSupabase(country.code);
+
+                            // 高亮选中的国家
+                            if (typeof window.highlightSelectedCountry === 'function') {
+                                window.highlightSelectedCountry();
+                            }
+
+                            // 更新左侧抽屉中的用户校准国家显示
+                            if (typeof updateUserCountryFlag === 'function') {
+                                const countryName = (currentLang === 'zh' && country.nameZh) 
+                                    ? country.nameZh 
+                                    : country.nameEn;
+                                updateUserCountryFlag(country.code, countryName, true);
+                            }
+                            
+                            // 重新渲染列表以更新高亮
+                            renderCountryList(searchInput.value);
+                            // 选择后收起列表，并显示当前国家在搜索框
+                            const displayName = (currentLang === 'zh' && country.nameZh) ? country.nameZh + ' (' + country.code + ')' : country.nameEn + ' (' + country.code + ')';
+                            searchInput.value = displayName;
+                            listContainer.classList.remove('left-drawer-country-list-visible');
+                            searchInput.blur();
+                            
+                            console.log('[LeftDrawerCountry] ✅ 已选择国家:', country.code);
+                            // 注意：不自动打开抽屉，只保存选择
+                        });
+                        
+                        listContainer.appendChild(item);
+                    });
+                };
+
+                // 列表展开/收起：默认收起，仅点击搜索框后展开
+                const showCountryList = () => {
+                    listContainer.classList.add('left-drawer-country-list-visible');
+                    renderCountryList(searchInput.value);
+                };
+                const hideCountryList = () => {
+                    listContainer.classList.remove('left-drawer-country-list-visible');
+                };
+
+                let listCloseTimer = null;
+                const setSearchInputToCurrentCountry = () => {
+                    try {
+                        const code = localStorage.getItem('user_selected_country');
+                        if (!code) { searchInput.value = ''; return; }
+                        const countries = getAllCountries();
+                        const c = countries.find(x => (x.code || '').toUpperCase() === code.toUpperCase());
+                        if (c) {
+                            searchInput.value = (currentLang === 'zh' && c.nameZh) ? c.nameZh + ' (' + c.code + ')' : c.nameEn + ' (' + c.code + ')';
+                        } else { searchInput.value = code; }
+                    } catch (e) { searchInput.value = ''; }
+                };
+
+                searchInput.addEventListener('focus', () => {
+                    if (listCloseTimer) clearTimeout(listCloseTimer);
+                    listCloseTimer = null;
+                    searchInput.value = '';
+                    searchInput.placeholder = (typeof i18n !== 'undefined' && i18n[currentLang] && i18n[currentLang]['search-countries']) ? i18n[currentLang]['search-countries'] : (currentLang === 'zh' ? '搜索国家...' : 'Search countries...');
+                    showCountryList();
+                });
+                searchInput.addEventListener('blur', () => {
+                    listCloseTimer = setTimeout(() => {
+                        hideCountryList();
+                        setSearchInputToCurrentCountry();
+                        updateSearchPlaceholder();
+                    }, 200);
+                });
+
+                // 搜索功能
+                let searchTimeout = null;
+                searchInput.addEventListener('input', (e) => {
+                    if (searchTimeout) clearTimeout(searchTimeout);
+                    searchTimeout = setTimeout(() => {
+                        renderCountryList(e.target.value);
+                    }, 200);
+                });
+
+                // 保存渲染函数到全局，供顶部下拉菜单同步使用
+                window.__leftDrawerCountryRender = renderCountryList;
+
+                // 更新搜索框占位符文本（国际化）
+                const updateSearchPlaceholder = () => {
+                    if (searchInput) {
+                        const placeholderText = (typeof i18n !== 'undefined' && i18n[currentLang] && i18n[currentLang]['search-countries']) 
+                            ? i18n[currentLang]['search-countries'] 
+                            : (currentLang === 'zh' ? '搜索国家...' : 'Search countries...');
+                        searchInput.placeholder = placeholderText;
+                    }
+                };
+                updateSearchPlaceholder();
+                // 监听语言切换（通过监听 localStorage 变化）
+                if (typeof window.addEventListener === 'function') {
+                    window.addEventListener('storage', (e) => {
+                        if (e.key === LANG_STORAGE_KEY || e.key === 'appLanguage') {
+                            const newLang = normalizeLang(e.newValue || localStorage.getItem(LANG_STORAGE_KEY) || localStorage.getItem('appLanguage') || 'zh');
+                            if (newLang !== currentLang) {
+                                currentLang = newLang;
+                                updateSearchPlaceholder();
+                                // 重新渲染列表以更新显示语言
+                                renderCountryList(searchInput.value);
+                            }
+                        }
+                    });
+                    // 也监听自定义语言切换事件
+                    window.addEventListener('languagechange', () => {
+                        currentLang = normalizeLang(localStorage.getItem(LANG_STORAGE_KEY) || localStorage.getItem('appLanguage') || 'zh');
+                        updateSearchPlaceholder();
+                        renderCountryList(searchInput.value);
+                    });
+                }
+
+                // 初始渲染（列表默认收起，仅显示当前已选国家在搜索框）
+                setTimeout(() => {
+                    ensureIsoNameToIso2MapLoaded().then(() => {
+                        renderCountryList('');
+                        setSearchInputToCurrentCountry();
+                    }).catch(() => {
+                        renderCountryList('');
+                        setSearchInputToCurrentCountry();
+                    });
+                }, 500);
+
+                console.log('[LeftDrawerCountry] ✅ 左侧抽屉国家选择菜单已初始化');
+            } catch (e) {
+                console.warn('[LeftDrawerCountry] ⚠️ initLeftDrawerCountrySelector 失败:', e);
+            }
+        }
+
+        /**
+         * 初始化国家选择下拉菜单
+         */
+        function initCountrySelectDropdown() {
+            try {
+                const dropdown = document.getElementById('country-select-dropdown');
+                if (!dropdown) {
+                    console.warn('[CountrySelect] ⚠️ 找不到国家选择下拉菜单');
+                    return;
+                }
+
+                // 使用完整的国家列表
+                const updateDropdown = () => {
+                    const countries = getAllCountries();
+
+                    // 清空并填充选项
+                    const placeholderText = (typeof i18n !== 'undefined' && i18n[currentLang] && i18n[currentLang]['select-country']) 
+                        ? `-- ${i18n[currentLang]['select-country']} --` 
+                        : (currentLang === 'zh' ? '-- 选择国家 --' : '-- Select Country --');
+                    dropdown.innerHTML = `<option value="">${placeholderText}</option>`;
+                    countries.forEach(country => {
+                        const option = document.createElement('option');
+                        option.value = country.code;
+                        // 中文版显示中文国家名，英文版显示英文国家名
+                        const displayName = (currentLang === 'zh' && country.nameZh) 
+                            ? `${country.nameZh} (${country.code})` 
+                            : `${country.nameEn} (${country.code})`;
+                        option.textContent = displayName;
+                        dropdown.appendChild(option);
+                    });
+
+                    // 从 localStorage 恢复选择
+                    try {
+                        const savedCountry = localStorage.getItem('user_selected_country');
+                        if (savedCountry) {
+                            dropdown.value = savedCountry;
+                            // 显示光标
+                            setOrUpdateCurrentLocationCursor(savedCountry);
+                        }
+                    } catch (e) {
+                        console.warn('[CountrySelect] ⚠️ 恢复选择失败:', e);
+                    }
+                };
+
+                // 等待 ISO 映射加载完成后再更新
+                ensureIsoNameToIso2MapLoaded().then(() => {
+                    updateDropdown();
+                }).catch(() => {
+                    updateDropdown(); // 即使失败也更新（使用 countryNameMap）
+                });
+
+                // 监听语言切换，更新下拉菜单
+                if (typeof window.addEventListener === 'function') {
+                    window.addEventListener('storage', (e) => {
+                        if (e.key === LANG_STORAGE_KEY || e.key === 'appLanguage') {
+                            const newLang = normalizeLang(e.newValue || localStorage.getItem(LANG_STORAGE_KEY) || localStorage.getItem('appLanguage') || 'zh');
+                            if (newLang !== currentLang) {
+                                currentLang = newLang;
+                                updateDropdown();
+                            }
+                        }
+                    });
+                    // 也监听自定义语言切换事件
+                    window.addEventListener('languagechange', () => {
+                        currentLang = normalizeLang(localStorage.getItem(LANG_STORAGE_KEY) || localStorage.getItem('appLanguage') || 'zh');
+                        updateDropdown();
+                    });
+                }
+
+                // 监听选择变化（不自动打开抽屉）
+                dropdown.addEventListener('change', async (e) => {
+                    const countryCode = e.target.value;
+                    if (!countryCode) {
+                        // 清除光标
+                        if (window.userMarker) {
+                            try {
+                                const map = window.map;
+                                if (map && typeof map.removeLayer === 'function') {
+                                    map.removeLayer(window.userMarker);
+                                    window.userMarker = null;
+                                }
+                            } catch (err) {
+                                console.warn('[CountrySelect] ⚠️ 清除光标失败:', err);
+                            }
+                        }
+                        // 清除 ECharts 光标
+                        try {
+                            if (mapChart && typeof mapChart.setOption === 'function') {
+                                const currentOption = mapChart.getOption();
+                                if (currentOption && currentOption.series && Array.isArray(currentOption.series)) {
+                                    const otherSeries = currentOption.series.filter(s => s && s.name !== 'Current Location');
+                                    mapChart.setOption({ series: otherSeries }, { notMerge: false, lazyUpdate: false });
+                                }
+                            }
+                        } catch (e) {
+                            // ignore
+                        }
+                        localStorage.removeItem('user_selected_country');
+                        // 同步更新左侧抽屉
+                        const leftSearch = document.getElementById('left-drawer-country-search');
+                        if (leftSearch) {
+                            leftSearch.value = '';
+                            const renderFn = window.__leftDrawerCountryRender;
+                            if (typeof renderFn === 'function') {
+                                renderFn('');
+                            }
+                        }
+                        // 取消高亮
+                        try {
+                            if (mapChart && typeof mapChart.dispatchAction === 'function') {
+                                mapChart.dispatchAction({ type: 'downplay' });
+                            }
+                        } catch (e) {
+                            // ignore
+                        }
+                        return;
+                    }
+
+                    // 保存到 localStorage
+                    try {
+                        localStorage.setItem('user_selected_country', countryCode);
+                    } catch (e) {
+                        console.warn('[CountrySelect] ⚠️ 保存到 localStorage 失败:', e);
+                    }
+
+                    // 显示光标
+                    setOrUpdateCurrentLocationCursor(countryCode);
+
+                    // 保存到 Supabase（绑定到 GitHub 账户）
+                    await saveCountryToSupabase(countryCode);
+
+                    // 高亮选中的国家
+                    if (typeof window.highlightSelectedCountry === 'function') {
+                        window.highlightSelectedCountry();
+                    }
+
+                    // 更新左侧抽屉中的用户校准国家显示
+                    if (typeof updateUserCountryFlag === 'function') {
+                        const countries = getAllCountries();
+                        const selectedCountry = countries.find(c => c.code.toUpperCase() === countryCode.toUpperCase());
+                        if (selectedCountry) {
+                            const countryName = (currentLang === 'zh' && selectedCountry.nameZh) 
+                                ? selectedCountry.nameZh 
+                                : selectedCountry.nameEn;
+                            updateUserCountryFlag(countryCode, countryName, true);
+                        }
+                    }
+
+                    // 同步更新左侧抽屉
+                    const leftSearch = document.getElementById('left-drawer-country-search');
+                    if (leftSearch) {
+                        const renderFn = window.__leftDrawerCountryRender;
+                        if (typeof renderFn === 'function') {
+                            renderFn(leftSearch.value);
+                        }
+                    }
+
+                    // 注意：不自动打开抽屉，只保存选择
+                });
+
+                console.log('[CountrySelect] ✅ 国家选择下拉菜单已初始化');
+            } catch (e) {
+                console.warn('[CountrySelect] ⚠️ initCountrySelectDropdown 失败:', e);
+            }
+        }
+
+        /**
+         * 保存国家选择到 Supabase（绑定到 GitHub 账户）
+         * @param {string} countryCode - 国家代码
+         */
+        async function saveCountryToSupabase(countryCode) {
+            try {
+                // 检查是否有 GitHub 登录会话
+                if (!supabaseClient) {
+                    console.warn('[CountrySelect] ⚠️ Supabase 客户端未初始化');
+                    return;
+                }
+
+                const { data: { session } } = await supabaseClient.auth.getSession();
+                if (!session || !session.user) {
+                    console.warn('[CountrySelect] ⚠️ 用户未登录，无法保存到 Supabase');
+                    return;
+                }
+
+                const userId = session.user.id;
+                console.log('[CountrySelect] 💾 保存国家选择到 Supabase:', { userId, countryCode });
+
+                // 更新 user_analysis 表
+                const { data, error } = await supabaseClient
+                    .from('user_analysis')
+                    .update({
+                        current_location: countryCode.toUpperCase(),
+                        location_switched_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', userId)
+                    .select();
+
+                if (error) {
+                    console.error('[CountrySelect] ❌ 保存到 Supabase 失败:', error);
+                    // 尝试使用 API 接口
+                    try {
+                        const fingerprint = localStorage.getItem('user_fingerprint') || '';
+                        const response = await fetch('/api/v2/update_location', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${session.access_token}`
+                            },
+                            body: JSON.stringify({
+                                fingerprint: fingerprint,
+                                current_location: countryCode.toUpperCase(),
+                                switched_at: new Date().toISOString()
+                            })
+                        });
+                        const result = await response.json();
+                        if (result.status === 'success') {
+                            console.log('[CountrySelect] ✅ 通过 API 保存成功');
+                        } else {
+                            console.warn('[CountrySelect] ⚠️ API 保存失败:', result);
+                        }
+                    } catch (apiError) {
+                        console.error('[CountrySelect] ❌ API 保存异常:', apiError);
+                    }
+                } else {
+                    console.log('[CountrySelect] ✅ 保存到 Supabase 成功:', data);
+                }
+            } catch (e) {
+                console.error('[CountrySelect] ❌ saveCountryToSupabase 异常:', e);
+            }
+        }
+
         function initMapCursorTools() {
             try {
-                const btn = document.getElementById('btn-calibrate-location');
-                if (!btn) return;
-                btn.addEventListener('click', () => setCalibrationMode(!isCalibrating));
-                // 页面首次加载：如果本地已锁定校准，则默认显示绿色光标（即使地图重绘也能自愈）
-                setTimeout(() => {
-                    try { ensureCurrentLocationCursorIfMissing('init-tools'); } catch { /* ignore */ }
-                }, 0);
+                // 初始化国家选择下拉菜单（顶部）
+                initCountrySelectDropdown();
+                
+                // 初始化左侧抽屉国家选择菜单
+                initLeftDrawerCountrySelector();
+                
+                // 移除所有旧的拖拽和移动相关功能
+                // （不再需要校准、锚定等功能）
+                
+                console.log('[MapCursor] ✅ 地图光标工具已初始化（仅国家选择）');
             } catch (e) {
                 console.warn('[MapCursor] ⚠️ initMapCursorTools 失败:', e);
+            }
+        }
+        
+        /**
+         * 设置锚定模式
+         * @param {boolean} enabled - 是否启用锚定模式
+         */
+        function setAnchorMode(enabled) {
+            isAnchorMode = !!enabled;
+            try {
+                const btn = document.getElementById('btn-anchor-location');
+                if (btn) {
+                    btn.classList.toggle('active', isAnchorMode);
+                }
+                const hintEl = document.getElementById('map-anchor-hint');
+                if (hintEl) hintEl.style.display = isAnchorMode ? '' : 'none';
+                const textEl = document.getElementById('btn-anchor-location-text');
+                if (textEl) textEl.textContent = isAnchorMode ? '退出锚定' : '定位锚点';
+                
+                // 如果启用锚定模式，退出校准模式
+                if (isAnchorMode && isCalibrating) {
+                    setCalibrationMode(false);
+                }
+                // 如果启用校准模式，退出锚定模式
+                if (isCalibrating && isAnchorMode) {
+                    isAnchorMode = false;
+                    if (btn) btn.classList.remove('active');
+                    if (hintEl) hintEl.style.display = 'none';
+                    if (textEl) textEl.textContent = '定位锚点';
+                }
+                
+                console.log('[Anchor] 锚定模式:', isAnchorMode ? '已启用' : '已禁用');
+            } catch (e) {
+                console.warn('[Anchor] ⚠️ setAnchorMode 失败:', e);
+            }
+        }
+        
+        /**
+         * 初始化国家选择器浮窗
+         */
+        function initCountrySelector() {
+            try {
+                const modal = document.getElementById('country-selector-modal');
+                const closeBtn = document.getElementById('country-selector-close');
+                const searchInput = document.getElementById('country-search-input');
+                const listContainer = document.getElementById('country-list-container');
+                
+                if (!modal || !closeBtn || !searchInput || !listContainer) return;
+                
+                // 关闭按钮
+                closeBtn.addEventListener('click', () => {
+                    modal.style.display = 'none';
+                });
+                
+                // 点击背景关闭
+                modal.addEventListener('click', (e) => {
+                    if (e.target === modal) {
+                        modal.style.display = 'none';
+                    }
+                });
+                
+                // 搜索功能
+                let searchTimeout = null;
+                searchInput.addEventListener('input', (e) => {
+                    if (searchTimeout) clearTimeout(searchTimeout);
+                    searchTimeout = setTimeout(() => {
+                        renderCountryList(e.target.value.trim());
+                    }, 200);
+                });
+                
+                // 渲染国家列表
+                renderCountryList('');
+            } catch (e) {
+                console.warn('[CountrySelector] ⚠️ initCountrySelector 失败:', e);
+            }
+        }
+        
+        /**
+         * 渲染国家列表
+         * @param {string} searchQuery - 搜索关键词
+         */
+        function renderCountryList(searchQuery) {
+            try {
+                const listContainer = document.getElementById('country-list-container');
+                if (!listContainer) return;
+                
+                // 获取所有国家（从 countryNameMap 和 ISO 映射）
+                const countries = [];
+                
+                // 从 countryNameMap 获取
+                if (typeof countryNameMap !== 'undefined') {
+                    for (const [code, names] of Object.entries(countryNameMap)) {
+                        countries.push({
+                            code: code,
+                            nameZh: names.zh || '',
+                            nameEn: names.en || code
+                        });
+                    }
+                }
+                
+                // 从 ISO 映射获取更多国家（如果有）
+                if (window.__isoNameToIso2 instanceof Map) {
+                    const isoMap = window.__isoNameToIso2;
+                    for (const [name, code] of isoMap.entries()) {
+                        if (!countries.find(c => c.code === code)) {
+                            countries.push({
+                                code: code,
+                                nameZh: '',
+                                nameEn: name
+                            });
+                        }
+                    }
+                }
+                
+                // 排序
+                countries.sort((a, b) => {
+                    const nameA = (currentLang === 'zh' && a.nameZh) ? a.nameZh : a.nameEn;
+                    const nameB = (currentLang === 'zh' && b.nameZh) ? b.nameZh : b.nameEn;
+                    return nameA.localeCompare(nameB);
+                });
+                
+                // 过滤
+                const filtered = searchQuery
+                    ? countries.filter(c => {
+                        const nameZh = c.nameZh.toLowerCase();
+                        const nameEn = c.nameEn.toLowerCase();
+                        const code = c.code.toLowerCase();
+                        const query = searchQuery.toLowerCase();
+                        return nameZh.includes(query) || nameEn.includes(query) || code.includes(query);
+                    })
+                    : countries;
+                
+                // 渲染
+                listContainer.innerHTML = filtered.map(c => {
+                    const displayName = (currentLang === 'zh' && c.nameZh) ? `${c.nameZh} (${c.code})` : `${c.nameEn} (${c.code})`;
+                    const isSelected = (window.currentUser?.manual_location || localStorage.getItem('manual_location') || '').toUpperCase() === c.code.toUpperCase();
+                    return `
+                        <div class="country-item ${isSelected ? 'selected' : ''}" data-code="${c.code}" data-name="${c.nameEn}">
+                            ${displayName}
+                        </div>
+                    `;
+                }).join('');
+                
+                // 绑定点击事件
+                listContainer.querySelectorAll('.country-item').forEach(item => {
+                    item.addEventListener('click', () => {
+                        const code = item.getAttribute('data-code');
+                        const name = item.getAttribute('data-name');
+                        selectCountryFromSelector(code, name);
+                    });
+                });
+            } catch (e) {
+                console.warn('[CountrySelector] ⚠️ renderCountryList 失败:', e);
+            }
+        }
+        
+        /**
+         * 从选择器选择国家
+         * @param {string} countryCode - 国家代码
+         * @param {string} countryName - 国家名称
+         */
+        async function selectCountryFromSelector(countryCode, countryName) {
+            try {
+                const modal = document.getElementById('country-selector-modal');
+                if (modal) modal.style.display = 'none';
+                
+                // 获取国家中心坐标
+                const center = countryCenterMap[countryName] || null;
+                if (!center) {
+                    console.warn('[CountrySelector] ⚠️ 未找到国家中心坐标:', countryName);
+                    return;
+                }
+                
+                const [lng, lat] = center;
+                
+                // 移动到国家中心
+                if (mapChart && typeof moveCurrentLocationCursor === 'function') {
+                    moveCurrentLocationCursor(lng, lat);
+                }
+                
+                // 平滑移动地图视图
+                if (mapChart && typeof mapChart.setOption === 'function') {
+                    const currentOption = mapChart.getOption();
+                    if (currentOption && currentOption.geo && Array.isArray(currentOption.geo) && currentOption.geo.length > 0) {
+                        mapChart.setOption({
+                            geo: currentOption.geo.map(geo => ({
+                                ...geo,
+                                center: [lng, lat],
+                                zoom: 3
+                            }))
+                        }, { notMerge: false, lazyUpdate: false });
+                    }
+                }
+                
+                // 保存到数据库
+                await saveManualLocation(countryCode, lng, lat);
+                
+                console.log('[CountrySelector] ✅ 已选择国家:', countryCode, countryName);
+            } catch (e) {
+                console.warn('[CountrySelector] ⚠️ selectCountryFromSelector 失败:', e);
+            }
+        }
+        
+        /**
+         * 保存手动位置到数据库
+         * @param {string} countryCode - 国家代码
+         * @param {number} lng - 经度
+         * @param {number} lat - 纬度
+         */
+        async function saveManualLocation(countryCode, lng, lat) {
+            try {
+                const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content || '';
+                const base = apiEndpoint.endsWith('/') ? apiEndpoint.slice(0, -1) : apiEndpoint;
+                const analyzeUrl = base ? `${base}/api/v2/analyze` : '/api/v2/analyze';
+                
+                let fingerprint = null;
+                try {
+                    fingerprint = localStorage.getItem('user_fingerprint') || window.fpId || null;
+                } catch (e) {}
+                
+                const payload = {
+                    chatData: [{ role: 'USER', text: '.' }],
+                    manual_location: countryCode || null,
+                    manual_lat: lat,
+                    manual_lng: lng,
+                    fingerprint: fingerprint
+                };
+                
+                // 如果已登录 GitHub，添加 id
+                if (supabaseClient) {
+                    try {
+                        const { data: { session } } = await supabaseClient.auth.getSession();
+                        if (session && session.user) {
+                            payload.id = session.user.id;
+                            payload.user_identity = 'github';
+                        }
+                    } catch (e) {}
+                }
+                
+                const res = await fetch(analyzeUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (res.ok) {
+                    // 【坐标格式化】使用 toFixed(6) 格式化坐标
+                    const formattedLat = Number(lat).toFixed(6);
+                    const formattedLng = Number(lng).toFixed(6);
+                    
+                    // 保存到 localStorage（格式化后的坐标）
+                    localStorage.setItem('loc_locked', 'true');
+                    localStorage.setItem('loc_fixed', 'true');
+                    localStorage.setItem('manual_lat', formattedLat);
+                    localStorage.setItem('manual_lng', formattedLng);
+                    if (countryCode) localStorage.setItem('manual_location', String(countryCode).trim());
+                    
+                    window.__cursorLocked = true;
+                    
+                    // 【单例管理】更新光标管理器的锚定状态
+                    if (window.mapCursorManager) {
+                        window.mapCursorManager.setAnchored(true, Number(formattedLng), Number(formattedLat));
+                    }
+                    
+                    // 更新退出锚定按钮的显示状态
+                    updateResetButtonVisibility();
+                    
+                    // 更新全局用户数据
+                    if (!window.currentUserData) window.currentUserData = window.currentUser || {};
+                    window.currentUserData.manual_lat = Number(formattedLat);
+                    window.currentUserData.manual_lng = Number(formattedLng);
+                    window.currentUserData.manual_location = countryCode;
+                    
+                    if (window.currentUser) {
+                        window.currentUser.manual_location = countryCode;
+                        window.currentUser.country_code = countryCode;
+                        window.currentUser.manual_lat = Number(formattedLat);
+                        window.currentUser.manual_lng = Number(formattedLng);
+                    }
+                    
+                    // 【UI 同步】立即更新光标显示
+                    if (typeof setOrUpdateCurrentLocationCursor === 'function') {
+                        try {
+                            const statusConfig = USER_STATUSES[currentUserStatus] || USER_STATUSES.idle;
+                            const statusColor = statusConfig.status_color;
+                            const githubUsername = localStorage.getItem('github_username') || null;
+                            const avatarUrl = isValidGitHubUsername(githubUsername) 
+                                ? getGitHubAvatarUrl(githubUsername) 
+                                : DEFAULT_AVATAR;
+                            
+                            setOrUpdateCurrentLocationCursor(
+                                Number(formattedLng), 
+                                Number(formattedLat), 
+                                statusColor, 
+                                avatarUrl, 
+                                githubUsername,
+                                true // force: true，强制更新
+                            );
+                        } catch (e) {
+                            console.warn('[SaveLocation] ⚠️ 更新光标显示失败:', e);
+                        }
+                    }
+                    
+                    // 刷新用户统计
+                    if (typeof window.refreshUserStats === 'function') {
+                        setTimeout(() => window.refreshUserStats(), 300);
+                    }
+                    
+                    console.log('[SaveLocation] ✅ 已保存手动位置:', { countryCode, lng: formattedLng, lat: formattedLat });
+                } else {
+                    console.warn('[SaveLocation] ⚠️ 保存失败:', res.status);
+                }
+            } catch (e) {
+                console.warn('[SaveLocation] ⚠️ saveManualLocation 失败:', e);
+            }
+        }
+        
+        /**
+         * 重置到自动定位（退出锚定）
+         * 清除 manual_lat/lng 缓存，将 isAnchored 设为 false，并触发一次基于 IP 的即时定位刷新
+         */
+        async function resetToAutoLocation() {
+            try {
+                console.log('[ResetLocation] 🔄 开始重置到自动定位...');
+                
+                // 清除 localStorage 中的锁定标记和坐标
+                localStorage.removeItem('loc_locked');
+                localStorage.removeItem('loc_fixed');
+                localStorage.removeItem('manual_lat');
+                localStorage.removeItem('manual_lng');
+                localStorage.removeItem('manual_location');
+                
+                // 【单例管理】清除锚定状态
+                if (window.mapCursorManager) {
+                    window.mapCursorManager.setAnchored(false);
+                }
+                
+                window.__cursorLocked = false;
+                
+                // 更新退出锚定按钮的显示状态
+                updateResetButtonVisibility();
+                
+                // 清除全局用户数据中的手动坐标
+                if (window.currentUserData) {
+                    delete window.currentUserData.manual_lat;
+                    delete window.currentUserData.manual_lng;
+                    delete window.currentUserData.manual_location;
+                }
+                
+                if (window.currentUser) {
+                    delete window.currentUser.manual_lat;
+                    delete window.currentUser.manual_lng;
+                    delete window.currentUser.manual_location;
+                }
+                
+                // 清除光标
+                if (window.mapCursorManager) {
+                    window.mapCursorManager.clearCursor();
+                }
+                
+                // 触发一次基于 IP 的即时定位刷新
+                if (typeof autoReportSelf === 'function') {
+                    try {
+                        const reportResult = await autoReportSelf();
+                        console.log('[ResetLocation] ✅ 自动定位刷新完成:', reportResult);
+                    } catch (e) {
+                        console.warn('[ResetLocation] ⚠️ 自动定位刷新失败:', e);
+                    }
+                }
+                
+                // 刷新用户统计
+                if (typeof window.refreshUserStats === 'function') {
+                    setTimeout(() => window.refreshUserStats(), 300);
+                }
+                
+                console.log('[ResetLocation] ✅ 已重置到自动定位');
+            } catch (e) {
+                console.warn('[ResetLocation] ⚠️ resetToAutoLocation 失败:', e);
+            }
+        }
+        
+        /**
+         * 更新退出锚定按钮的显示状态
+         */
+        function updateResetButtonVisibility() {
+            try {
+                const resetBtn = document.getElementById('btn-reset-location');
+                if (resetBtn) {
+                    const isAnchored = window.mapCursorManager?.isAnchored || 
+                                      localStorage.getItem('loc_locked') === 'true' || 
+                                      localStorage.getItem('loc_fixed') === 'true';
+                    resetBtn.style.display = isAnchored ? 'inline-flex' : 'none';
+                }
+            } catch (e) {
+                console.warn('[ResetButton] ⚠️ 更新按钮显示状态失败:', e);
+            }
+        }
+        
+        /**
+         * 打开国家选择器浮窗
+         */
+        function openCountrySelector() {
+            try {
+                const modal = document.getElementById('country-selector-modal');
+                if (modal) {
+                    modal.style.display = 'block';
+                    const searchInput = document.getElementById('country-search-input');
+                    if (searchInput) {
+                        searchInput.value = '';
+                        searchInput.focus();
+                    }
+                    renderCountryList('');
+                }
+            } catch (e) {
+                console.warn('[CountrySelector] ⚠️ openCountrySelector 失败:', e);
             }
         }
 
@@ -9823,19 +12008,30 @@
 
             if (leftDrawer && leftDrawerOpen) {
                 leftDrawer.classList.add('active');
-                // 【修复】优先使用手动校准的国家/地区，否则使用保存的选中国家
+                // 与下拉列表一致：优先使用 user_selected_country，再 manual_location / 锚定
                 let countryCode = null;
                 let countryName = '';
 
-                // 优先级 1: 手动校准的国家 (manual_location)
-                if (localStorage.getItem('loc_fixed') === 'true') {
+                // 优先级 1: 下拉列表选择的国家（与用户校准、Supabase 同步一致）
+                const selectedCountry = localStorage.getItem('user_selected_country');
+                if (selectedCountry) {
+                    countryCode = selectedCountry.toUpperCase();
+                    if (countryNameMap[countryCode]) {
+                        countryName = currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en;
+                    } else {
+                        countryName = countryCode;
+                    }
+                }
+
+                // 优先级 2: 旧版手动校准 (manual_location)
+                if (!countryCode && localStorage.getItem('loc_fixed') === 'true') {
                     countryCode = localStorage.getItem('manual_location') || null;
                     if (countryCode && countryNameMap[countryCode]) {
                         countryName = currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en;
                     }
                 }
 
-                // 优先级 2: 锚定国家 (anchored_country / selected_country)
+                // 优先级 3: 锚定国家 (anchored_country / selected_country)
                 if (!countryCode) {
                     countryCode = _getAnchoredCountryFromStorage() || null;
                     if (countryCode && countryNameMap[countryCode]) {
@@ -9861,24 +12057,43 @@
                     }, 100);
                 }
 
-                // 【新增】恢复用户国家/地区显示（从 localStorage 读取手动校准的信息）
-                if (localStorage.getItem('loc_fixed') === 'true') {
-                    const manualLocation = localStorage.getItem('manual_location') || '';
-                    const manualLat = localStorage.getItem('manual_lat');
-                    const manualLng = localStorage.getItem('manual_lng');
-                    if (manualLocation || (manualLat && manualLng)) {
-                        setTimeout(() => {
-                            if (typeof updateUserCountryFlag === 'function') {
-                                const isManual = true;
-                                const savedCountryName = countryNameMap[manualLocation]
-                                    ? (currentLang === 'zh' ? countryNameMap[manualLocation].zh : countryNameMap[manualLocation].en)
-                                    : manualLocation;
-                                updateUserCountryFlag(manualLocation, savedCountryName || manualLocation, isManual);
-                                console.log('[Drawer] ✅ 已恢复手动校准的国家/地区信息:', { manualLocation, manualLat, manualLng });
+                // 恢复左侧抽屉「用户校准」显示：必须与下拉列表选择的国家一致（优先 user_selected_country）
+                (function () {
+                    const selectedCountry = localStorage.getItem('user_selected_country');
+                    let countryCode = '';
+                    let countryName = '';
+                    let isManual = false;
+
+                    if (selectedCountry) {
+                        countryCode = selectedCountry.toUpperCase();
+                        if (countryNameMap[countryCode]) {
+                            countryName = currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en;
+                        } else {
+                            countryName = countryCode;
+                        }
+                        isManual = true;
+                    } else if (localStorage.getItem('loc_fixed') === 'true') {
+                        const manualLocation = localStorage.getItem('manual_location') || '';
+                        const manualLat = localStorage.getItem('manual_lat');
+                        const manualLng = localStorage.getItem('manual_lng');
+                        if (manualLocation || (manualLat && manualLng)) {
+                            countryCode = manualLocation ? manualLocation.toUpperCase() : '';
+                            if (countryCode && countryNameMap[countryCode]) {
+                                countryName = currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en;
+                            } else {
+                                countryName = countryCode || manualLocation || '';
                             }
+                            isManual = true;
+                        }
+                    }
+
+                    if (countryCode && typeof updateUserCountryFlag === 'function') {
+                        setTimeout(() => {
+                            updateUserCountryFlag(countryCode, countryName, isManual);
+                            console.log('[Drawer] ✅ 已恢复用户校准显示（与下拉一致）:', { countryCode, countryName, isManual });
                         }, 200);
                     }
-                }
+                })();
             }
 
             if (rightDrawer && rightDrawerOpen) {
@@ -12035,10 +14250,16 @@
          * @returns {Promise<Object>} 上报结果
          */
         async function autoReportSelf() {
+            // 【拦截器机制】如果已锚定，禁止执行 IP 定位
+            if (window.mapCursorManager && window.mapCursorManager.isAnchored) {
+                console.log('[AutoReport] 🔒 位置已锚定，跳过自动上报');
+                return { success: false, error: '位置已锚定' };
+            }
+            
             // 核心拦截：如果后端已存手动坐标，或者本地存有锁定标记，禁止执行 IP 定位
             if (window.currentUserData?.manual_lat || localStorage.getItem('loc_fixed') === 'true') {
-                console.log('[Lock] 🔒 位置已手动锁定，跳过自动上报');
-                return;
+                console.log('[AutoReport] 🔒 位置已手动锁定，跳过自动上报');
+                return { success: false, error: '位置已锁定' };
             }
             // 健壮性检查：确保 Supabase 客户端已初始化
             if (!supabaseClient) {
@@ -12209,7 +14430,23 @@
                 const data = null;
 
                 // 6. 立即反馈:上报成功后立即在地图上显示自己的位置(不等待 Realtime 监听)
-                if (lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng)) {
+                // 【修复】即使位置已锁定，也要显示光标（使用锁定的坐标）
+                let finalLat = lat;
+                let finalLng = lng;
+                const isLocked = localStorage.getItem('loc_locked') === 'true' || localStorage.getItem('loc_fixed') === 'true';
+                
+                if (isLocked) {
+                    // 如果已锁定，使用锁定的坐标
+                    const lockedLat = localStorage.getItem('manual_lat');
+                    const lockedLng = localStorage.getItem('manual_lng');
+                    if (lockedLat && lockedLng && !isNaN(Number(lockedLat)) && !isNaN(Number(lockedLng))) {
+                        finalLat = Number(lockedLat);
+                        finalLng = Number(lockedLng);
+                        console.log('[AutoReport] 🔒 使用锁定的坐标:', { lat: finalLat, lng: finalLng });
+                    }
+                }
+                
+                if (finalLat !== null && finalLng !== null && !isNaN(finalLat) && !isNaN(finalLng)) {
                     // 性能保护:检查 setOrUpdateCurrentLocationCursor 函数是否已定义
                     if (typeof setOrUpdateCurrentLocationCursor === 'function') {
                         // 获取用户状态颜色(优先使用当前状态颜色)
@@ -12234,20 +14471,21 @@
                         // 【修复】使用持久化光标函数 setOrUpdateCurrentLocationCursor 代替 triggerMapPulse
                         // 这样光标会一直显示,不会5秒后消失,并且支持手动定位和缩放拖动
                         try {
-                            setOrUpdateCurrentLocationCursor(lng, lat, pulseColor, avatarUrl, githubUsername);
+                            setOrUpdateCurrentLocationCursor(finalLng, finalLat, pulseColor, avatarUrl, githubUsername);
                             console.log('[AutoReport] 🗺️ 已在地图上显示持久化光标:', {
-                                lng,
-                                lat,
+                                lng: finalLng,
+                                lat: finalLat,
                                 color: pulseColor,
                                 status: currentUserStatus,
                                 is_vpn,
+                                isLocked,
                                 avatarUrl,
                                 githubUsername,
                                 isValid: isValidGitHubUsername(githubUsername)
                             });
                             
                             // 保存光标位置到全局变量,供后续使用
-                            window.currentUserLocation = { lng, lat, color: pulseColor };
+                            window.currentUserLocation = { lng: finalLng, lat: finalLat, color: pulseColor };
                         } catch (pulseError) {
                             console.warn('[AutoReport] ⚠️ 调用 setOrUpdateCurrentLocationCursor 失败:', pulseError);
                         }
@@ -14846,8 +17084,19 @@
             try { await loadLanguageConfig(); } catch { /* ignore */ }
             try { updateLanguageContext(); } catch { /* ignore */ }
 
-            // 初始化地图光标工具（校准入口 + 提示）
+            // 初始化地图光标工具（国家选择下拉菜单）
             initMapCursorTools();
+            
+            // 【修复】页面加载后立即尝试显示光标
+            setTimeout(() => {
+                try {
+                    if (typeof ensureCurrentLocationCursorIfMissing === 'function') {
+                        ensureCurrentLocationCursorIfMissing('window.onload-init');
+                    }
+                } catch (e) {
+                    console.warn('[Window.onload] ⚠️ 初始化光标失败:', e);
+                }
+            }, 500);
             
             // 初始化状态按钮
             initStatusButtons();
@@ -17056,8 +19305,10 @@
                 }
                 
                 if (currentUser) {
-                    // 【竟态修复】若本地已锁定校准，优先用本地 manual_* 覆盖 API 返回，避免抽屉被 IP 定位覆盖（localStorage 兜底，防止 currentUserData 被并发刷新覆盖）
-                    if (localStorage.getItem('loc_fixed') === 'true') {
+                    // 【地理锁】优先读取 localStorage 中的 manual_location（绑定 GitHub）
+                    // 只要 loc_locked 或 loc_fixed 为 true，必须优先读取本地保存的经纬度，禁止被 IP-API 的返回结果覆盖
+                    const isLocked = localStorage.getItem('loc_locked') === 'true' || localStorage.getItem('loc_fixed') === 'true';
+                    if (isLocked) {
                         const data = window.currentUserData;
                         const mlat = data?.manual_lat ?? (localStorage.getItem('manual_lat') ? Number(localStorage.getItem('manual_lat')) : undefined);
                         const mlng = data?.manual_lng ?? (localStorage.getItem('manual_lng') ? Number(localStorage.getItem('manual_lng')) : undefined);
@@ -17066,6 +19317,7 @@
                         if (mlng != null && !isNaN(mlng)) currentUser.manual_lng = mlng;
                         if (mloc && String(mloc).trim() !== '') currentUser.manual_location = String(mloc).trim();
                         currentUser.country_code = currentUser.manual_location || currentUser.ip_location;
+                        console.log('[Refresh] 🔒 检测到地理锁，优先使用本地坐标:', { mlat, mlng, mloc });
                     }
                     window.currentUser = currentUser;
                     window.currentUserData = currentUser;
