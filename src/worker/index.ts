@@ -1433,6 +1433,41 @@ app.post('/api/v2/analyze', async (c) => {
       // ignore
     }
 
+    // 【认领机制】如果请求包含 access_token，先调用 migrateFingerprintToUserId
+    const authHeader = c.req.header('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.substring(7);
+        const parts = token.split('.');
+        if (parts.length === 3) {
+          const payload = JSON.parse(
+            atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'))
+          );
+          const authenticatedUserId = payload.sub || null;
+          
+          if (authenticatedUserId && body.fingerprint) {
+            const fingerprint = String(body.fingerprint).trim();
+            if (fingerprint) {
+              console.log('[Worker] 🔑 检测到 access_token，开始迁移 fingerprint 到 user_id...', {
+                userId: authenticatedUserId.substring(0, 8) + '...',
+                fingerprint: fingerprint.substring(0, 8) + '...',
+              });
+              
+              // 调用迁移函数（基于 fingerprint 迁移，不需要 claim_token）
+              const migrateResult = await migrateFingerprintToUserId(fingerprint, authenticatedUserId, undefined, env);
+              if (migrateResult) {
+                console.log('[Worker] ✅ Fingerprint 迁移成功');
+              } else {
+                console.log('[Worker] ℹ️ Fingerprint 迁移未执行（可能已迁移或无需迁移）');
+              }
+            }
+          }
+        }
+      } catch (error: any) {
+        console.warn('[Worker] ⚠️ 迁移 fingerprint 时出错（继续处理请求）:', error.message);
+      }
+    }
+
     // ==========================================================
     // 【5 秒短期幂等：响应缓存】（优先命中内存缓存，直接返回上一次结果）
     // 触发条件：claim_token / fingerprint / ip + totalMessages（高度相似）
@@ -2352,28 +2387,37 @@ app.post('/api/v2/analyze', async (c) => {
           });
 
           // 【增量更新 / 首次创建时间保护】查询已有记录，避免 work_days 被更小值覆盖
+          // 【唯一键变更】始终基于 fingerprint 查询（fingerprint 是唯一主键）
           let existingWorkDays: number | null = null;
-          if (env.SUPABASE_URL && env.SUPABASE_KEY) {
+          let existingCreatedAt: string | null = null;
+          let existingId: string | null = null;
+          if (env.SUPABASE_URL && env.SUPABASE_KEY && fingerprint) {
             try {
-              const filterCol = useUserIdForUpsert ? 'id' : 'fingerprint';
-              const filterVal = useUserIdForUpsert ? authenticatedUserId! : fingerprint;
-              // 一次查询：获取 work_days、created_at、stats（用于兜底与最大值保护）
-              const existingUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?select=work_days,created_at,stats&${filterCol}=eq.${encodeURIComponent(filterVal)}&order=created_at.asc&limit=1`;
+              // 基于 fingerprint 查询已有记录
+              const existingUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?select=id,work_days,created_at,stats&fingerprint=eq.${encodeURIComponent(fingerprint)}&order=created_at.asc&limit=1`;
               const existingRows = await fetchSupabaseJson<any[]>(env, existingUrl, { headers: buildSupabaseHeaders(env) }, 5000);
               const arr = Array.isArray(existingRows) ? existingRows : (existingRows ? [existingRows] : []);
               const row = arr[0];
               if (row) {
+                existingId = row.id || null;
+                existingCreatedAt = row.created_at || null;
+                // 【数据一致性】同时检查独立字段和 JSONB 字段，取较大值
                 const fromCol = row.work_days != null ? Number(row.work_days) : NaN;
                 const fromStats = (row.stats && typeof row.stats === 'object' && row.stats.work_days != null) ? Number(row.stats.work_days) : NaN;
-                existingWorkDays = Number.isFinite(fromCol) ? fromCol : (Number.isFinite(fromStats) ? fromStats : null);
+                // 取两个字段中的较大值，确保数据一致性
+                const maxFromDb = Number.isFinite(fromCol) && Number.isFinite(fromStats) 
+                  ? Math.max(fromCol, fromStats)
+                  : (Number.isFinite(fromCol) ? fromCol : (Number.isFinite(fromStats) ? fromStats : null));
+                existingWorkDays = maxFromDb;
+                
                 // 【兜底】当本次计算为 1 时，用最早 created_at 推算
-                if (workDays === 1 && row.created_at) {
-                  const ms = Date.now() - new Date(row.created_at).getTime();
+                if (workDays === 1 && existingCreatedAt) {
+                  const ms = Date.now() - new Date(existingCreatedAt).getTime();
                   const days = Math.floor(ms / 86400000);
                   if (days >= 1) {
                     workDays = Math.max(1, days);
                     basicAnalysis.day = workDays;
-                    console.log('[Worker] ✅ work_days 兜底: 从最早记录推算', { earliest: row.created_at, days, workDays });
+                    console.log('[Worker] ✅ work_days 兜底: 从最早记录推算', { earliest: existingCreatedAt, days, workDays });
                   }
                 }
               }
@@ -2388,15 +2432,20 @@ app.post('/api/v2/analyze', async (c) => {
             basicAnalysis.day = workDays;
             console.log('[Worker] ✅ work_days 增量保护: 保留已有更大值', { existingWorkDays, computedWas: prevWorkDays, final: workDays });
           }
+          
+          // 【数据一致性】确保独立字段和 JSONB 字段的 work_days 值完全同步
+          const finalWorkDays = workDays;
 
           // 【V6 协议】构建完整的数据负载（包含 jsonb 字段存储完整 stats）
           // 注意：created_at 和 updated_at 由数据库自动生成，不需要手动设置
           // 核心：fingerprint 作为幂等 Upsert 的业务主键
           // 【V6 协议】使用 v6Stats 或从 finalStats 构建
+          // 【数据一致性】确保 work_days 独立字段与 JSONB stats.work_days 完全同步
           const v6StatsForStorage = {
             ...(v6Stats || finalStats),
             // 【关键修复】确保 work_days、jiafang_count、ketao_count 被正确传递到 stats jsonb 字段
-            work_days: (v6Stats || finalStats)?.work_days ?? workDays ?? basicAnalysis.day ?? 1,
+            // 使用 finalWorkDays 确保独立字段和 JSONB 字段完全同步
+            work_days: finalWorkDays,
             jiafang_count: (v6Stats || finalStats)?.jiafang_count ?? jiafangCount ?? basicAnalysis.no ?? 0,
             ketao_count: (v6Stats || finalStats)?.ketao_count ?? ketaoCount ?? basicAnalysis.please ?? 0,
           };
@@ -2426,8 +2475,12 @@ app.post('/api/v2/analyze', async (c) => {
           }
           
           const payload: any = {
-            // 【GitHub OAuth 优先】如果使用 user_id，则设置 id 字段；否则使用 fingerprint
-            ...(useUserIdForUpsert ? { id: authenticatedUserId } : {}),
+            // 【唯一键变更】fingerprint 是唯一主键，如果记录已存在（fingerprint 匹配），则更新现有记录
+            // 【禁止创建新行】如果 fingerprint 已存在，必须更新原行，不能创建新行
+            // 如果用户已登录，更新现有记录的 user_id（基于 fingerprint 作为冲突键）
+            ...(useUserIdForUpsert && authenticatedUserId ? { id: authenticatedUserId } : {}),
+            // 如果已有记录存在 id，保留原有 id（避免主键冲突）
+            ...(existingId && !useUserIdForUpsert ? { id: existingId } : {}),
             fingerprint: v6Dimensions ? (body.fingerprint || fingerprint) : fingerprint,
             user_name: body.userName || '匿名受害者',
             user_identity: useUserIdForUpsert ? 'github' : 'fingerprint',
@@ -2450,7 +2503,8 @@ app.post('/api/v2/analyze', async (c) => {
             f: Math.max(0, Math.min(100, Math.round(dimensions.F))),
             
             // 【V6 协议】核心字段：使用 finalStats 的值
-            work_days: v6StatsForStorage.work_days || basicAnalysis.day || 1,
+            // 【数据一致性】work_days 独立字段与 JSONB stats.work_days 必须完全同步
+            work_days: finalWorkDays,
             jiafang_count: v6StatsForStorage.jiafang_count || basicAnalysis.no || 0,
             ketao_count: v6StatsForStorage.ketao_count || basicAnalysis.please || 0,
             
@@ -2460,11 +2514,14 @@ app.post('/api/v2/analyze', async (c) => {
             lpdef: lpdef,
             lang: body.lang || 'zh-CN',
             updated_at: new Date().toISOString(),
+            // 【保护创建时间】禁止更新 created_at，让数据库保持原有值
+            // 注意：不包含 created_at 字段，Supabase 的 upsert 不会更新已存在的 created_at
             
             // 【V6 架构】保存从 answer_book 获取的合并吐槽文案
             roast_text: combinedRoastText || null,
             
             // 【V6 协议】将完整的 stats 存入 jsonb 字段（确保未来维度增加到 100 个时也不需要改数据库 Schema）
+            // 【数据一致性】确保 stats.work_days 与独立字段 work_days 完全同步
             stats: v6StatsForStorage, // 完整的 V6Stats 对象，包含所有 40 个维度
             
             // 【关键修复】添加 personality 对象，包含 detailedStats 与 answer_book（与 dimensions 等一并同步给 GitHub 用户/视图）
@@ -2558,8 +2615,9 @@ app.post('/api/v2/analyze', async (c) => {
           });
 
           // 【同步存储】必须 await 以确保后续认领操作能找到数据
-          // 【后端幂等 Upsert】有身份时 onConflict=id（Supabase Auth user.id），无身份时 onConflict=fingerprint
-          const conflictKey = useUserIdForUpsert ? 'id' : 'fingerprint';
+          // 【原子更新 Upsert】始终基于 fingerprint 作为唯一冲突键（ON CONFLICT fingerprint）
+          // 如果记录已存在，则更新现有记录的 user_id 和统计数据，而不是创建新行
+          const conflictKey = 'fingerprint';
           const supabaseUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=${conflictKey}`;
           
           try {
@@ -2971,12 +3029,15 @@ app.post('/api/fingerprint/migrate', async (c) => {
       }, 400);
     }
 
-    // 【强制令牌校验】必须提供 claimToken
-    if (!claimToken) {
+    // 【支持两种迁移方式】claimToken 或 fingerprint
+    const hasClaimToken = claimToken && String(claimToken).trim() !== '';
+    const hasFingerprint = oldFingerprint && String(oldFingerprint).trim() !== '';
+    
+    if (!hasClaimToken && !hasFingerprint) {
       return c.json({
         status: 'error',
-        error: 'claimToken 参数必填 - 必须先进行分析才能认领数据',
-        errorCode: 'MISSING_CLAIM_TOKEN',
+        error: '必须提供 claimToken 或 fingerprint 参数',
+        errorCode: 'MISSING_MIGRATION_KEY',
       }, 400);
     }
 
@@ -3049,10 +3110,15 @@ app.post('/api/fingerprint/migrate', async (c) => {
       }, 400);
     }
 
-    // 【步骤 2：强制令牌认领】使用 claimToken 执行迁移
-    console.log('[Worker] 🔑 开始基于 claim_token 的强制认领流程...');
+    // 【步骤 2：执行迁移】使用 claimToken 或 fingerprint 执行迁移
+    const fingerprintToMigrate = oldFingerprint || sourceFp || '';
+    console.log('[Worker] 🔑 开始迁移流程...', {
+      method: hasClaimToken ? 'claim_token' : 'fingerprint',
+      userId: githubUserId.substring(0, 8) + '...',
+      fingerprint: fingerprintToMigrate ? fingerprintToMigrate.substring(0, 8) + '...' : 'none',
+    });
     
-    const result = await migrateFingerprintToUserId('', githubUserId, claimToken, env);
+    const result = await migrateFingerprintToUserId(fingerprintToMigrate, githubUserId, claimToken, env);
     
     if (result) {
       console.log('[Worker] ✅ 数据认领成功');
@@ -3219,9 +3285,21 @@ app.post('/api/fingerprint/migrate', async (c) => {
     }
     
     // 【物理归一化】更新 GitHub 记录的 fingerprint 字段为溯源成功的指纹，实现物理绑定
+    // 【唯一键变更】fingerprint 是唯一主键，必须存在
     if (successfulFp) {
       updateData.fingerprint = successfulFp;
       console.log('[Worker] 🔗 执行物理归一化：关联指纹已存入数据库');
+    } else if (sourceRecord.fingerprint) {
+      // 如果没有 successfulFp，使用源记录的 fingerprint
+      updateData.fingerprint = sourceRecord.fingerprint;
+      console.log('[Worker] 🔗 使用源记录的 fingerprint');
+    } else {
+      console.error('[Worker] ❌ 无法更新：缺少 fingerprint 字段');
+      return c.json({
+        status: 'error',
+        error: '迁移失败：源记录和目标记录都缺少 fingerprint 字段',
+        errorCode: 'MISSING_FINGERPRINT',
+      }, 400);
     }
     
     // 保留目标记录的关键字段（用户名等），如果目标记录不存在则使用源记录
@@ -3295,16 +3373,30 @@ app.post('/api/fingerprint/migrate', async (c) => {
       body: JSON.stringify(cleanedUpdateData),
     });
 
-    // 如果 PATCH 失败（404），尝试使用 upsert 创建新记录
+    // 如果 PATCH 失败（404），尝试使用 upsert
+    // 【禁止创建新行】如果 fingerprint 不存在，无法 upsert，直接返回错误
     if (!updateResponse.ok) {
       const errorText = await updateResponse.text();
-      console.warn('[Worker] ⚠️ PATCH 更新失败，尝试使用 upsert 创建新记录:', {
+      
+      // 【唯一键变更】必须基于 fingerprint 进行 upsert
+      if (!cleanedUpdateData.fingerprint) {
+        console.error('[Worker] ❌ 无法 upsert：缺少 fingerprint 字段');
+        return c.json({
+          status: 'error',
+          error: '更新失败：缺少 fingerprint 字段，无法执行 upsert',
+          errorCode: 'MISSING_FINGERPRINT',
+          details: errorText.substring(0, 500),
+        }, 500);
+      }
+      
+      console.warn('[Worker] ⚠️ PATCH 更新失败，尝试使用 fingerprint upsert:', {
         status: updateResponse.status,
+        fingerprint: cleanedUpdateData.fingerprint?.substring(0, 8) + '...',
         error: errorText.substring(0, 200)
       });
       
-      // 使用 upsert（POST with onConflict）
-      const upsertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis`;
+      // 【唯一键变更】使用 fingerprint 作为冲突键
+      const upsertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=fingerprint`;
       updateResponse = await fetch(upsertUrl, {
         method: 'POST',
         headers: {

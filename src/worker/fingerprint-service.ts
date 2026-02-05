@@ -327,13 +327,15 @@ export async function bindFingerprintToUser(
         });
       };
 
-      // 首选：不传 id，避免冲突更新时误改主键
-      let insertResponse = await tryUpsert({ ...payload, created_at: new Date().toISOString() });
+      // 【保护创建时间】不传 created_at，让数据库自动处理（首次插入时自动生成，更新时保持原值）
+      // 【唯一键变更】基于 fingerprint 的 upsert，不传 id（避免冲突更新时误改主键）
+      let insertResponse = await tryUpsert(payload);
       if (!insertResponse.ok) {
         const errorText = await insertResponse.text().catch(() => '');
         // 回退：如果表没有默认 id，补一个 id 再试一次
+        // 【保护创建时间】不传 created_at，让数据库自动处理
         if (errorText.includes('null value') && (errorText.includes('id') || errorText.includes('"id"'))) {
-          insertResponse = await tryUpsert({ ...payload, id: crypto.randomUUID(), created_at: new Date().toISOString() });
+          insertResponse = await tryUpsert({ ...payload, id: crypto.randomUUID() });
         } else {
           console.error('[Fingerprint] ❌ 创建/Upsert 用户失败:', {
             status: insertResponse.status,
@@ -472,10 +474,10 @@ export async function identifyUserByClaimToken(
 }
 
 /**
- * 将匿名数据迁移到 GitHub User ID (基于 claim_token 的强制认领机制)
- * @param fingerprint - 旧的浏览器指纹 (已废弃,仅用于兼容性)
+ * 将匿名数据迁移到 GitHub User ID (支持 claim_token 和 fingerprint 两种方式)
+ * @param fingerprint - 浏览器指纹 (用于基于 fingerprint 的迁移)
  * @param userId - 新的 GitHub User ID (UUID)
- * @param claimToken - 影子令牌 (必填,唯一合法的认领凭证)
+ * @param claimToken - 影子令牌 (可选,如果提供则优先使用 claim_token 方式)
  * @param env - 环境变量
  * @returns 迁移后的用户数据或 null
  */
@@ -490,20 +492,40 @@ export async function migrateFingerprintToUserId(
     return null;
   }
 
-  // 【强制令牌校验】必须提供 claimToken
-  if (!claimToken) {
-    console.error('[Migrate] ❌ 缺少 claim_token,迁移被拒绝');
-    return null;
-  }
-
   try {
-    console.log('[Migrate] 🔑 开始基于 claim_token 的强制认领流程...');
+    let sourceRecord: any | null = null;
     
-    // 【步骤 1: 精准溯源】使用 claim_token 查找源记录
-    const sourceRecord = await identifyUserByClaimToken(claimToken, env);
-    
-    if (!sourceRecord) {
-      console.error('[Migrate] ❌ claim_token 无效或已过期,未找到待认领记录');
+    // 【方式 1: 优先使用 claim_token】如果提供了 claimToken，使用 claim_token 方式
+    if (claimToken) {
+      console.log('[Migrate] 🔑 开始基于 claim_token 的强制认领流程...');
+      sourceRecord = await identifyUserByClaimToken(claimToken, env);
+      
+      if (!sourceRecord) {
+        console.error('[Migrate] ❌ claim_token 无效或已过期,未找到待认领记录');
+        return null;
+      }
+    } 
+    // 【方式 2: 基于 fingerprint】如果没有 claimToken，使用 fingerprint 方式
+    else if (fingerprint && String(fingerprint).trim() !== '') {
+      console.log('[Migrate] 🔑 开始基于 fingerprint 的认领流程...', {
+        fingerprint: fingerprint.substring(0, 8) + '...',
+        userId: userId.substring(0, 8) + '...',
+      });
+      
+      sourceRecord = await identifyUserByFingerprint(fingerprint, env);
+      
+      if (!sourceRecord) {
+        console.log('[Migrate] ℹ️ 未找到匹配 fingerprint 的记录，可能无需迁移');
+        return null;
+      }
+      
+      // 检查源记录是否已经是 GitHub 用户
+      if (sourceRecord.user_identity === 'github') {
+        console.log('[Migrate] ℹ️ 该 fingerprint 已关联 GitHub 用户，无需迁移');
+        return null;
+      }
+    } else {
+      console.error('[Migrate] ❌ 必须提供 claimToken 或 fingerprint');
       return null;
     }
 
@@ -511,9 +533,10 @@ export async function migrateFingerprintToUserId(
       recordId: sourceRecord.id?.substring(0, 8) + '...',
       total_messages: sourceRecord.total_messages || 0,
       total_chars: sourceRecord.total_chars || 0,
+      user_identity: sourceRecord.user_identity,
     });
 
-    // 【防止冒领】确保源记录是匿名身份
+    // 【防止冒领】确保源记录是匿名身份（已在 fingerprint 分支中检查，这里保留 claim_token 分支的检查）
     if (sourceRecord.user_identity === 'github') {
       console.error('[Migrate] ❌ 源记录已被认领,禁止重复认领');
       return null;
@@ -538,31 +561,44 @@ export async function migrateFingerprintToUserId(
       console.log('[Migrate] ℹ️ 未找到空记录或删除失败(可能目标记录不存在)');
     }
 
-    // 【步骤 3: 检查目标用户是否已有数据】
-    const targetUser = await identifyUserByUserId(userId, env);
-    const targetMessages = targetUser?.total_messages || 0;
-    const targetChars = targetUser?.total_chars || 0;
-    const sourceMessages = sourceRecord.total_messages || 0;
-    const sourceChars = sourceRecord.total_chars || 0;
-
-    console.log('[Migrate] 📊 数据对比:', {
-      target: { messages: targetMessages, chars: targetChars },
-      source: { messages: sourceMessages, chars: sourceChars },
-    });
-
-    // 【步骤 4: 物理过户】使用 UPDATE 语句灌入数据
-    if (targetUser) {
-      // 目标用户已存在,执行增量累加
-      console.log('[Migrate] 🔄 目标用户已存在,执行增量累加...');
+    // 【步骤 3: 检查目标用户是否已有数据（基于 fingerprint 查找）】
+    // 【唯一键变更】fingerprint 是唯一主键，检查是否有其他 fingerprint 已关联该 userId
+    const sourceFingerprint = sourceRecord.fingerprint;
+    let targetUser: any | null = null;
+    
+    if (sourceFingerprint) {
+      // 检查是否有其他记录使用相同的 fingerprint 但不同的 id
+      // 这种情况不应该发生，但如果发生了，我们需要合并数据
+      const existingByFp = await identifyUserByFingerprint(sourceFingerprint, env);
+      if (existingByFp && existingByFp.id !== sourceRecord.id) {
+        console.warn('[Migrate] ⚠️ 发现 fingerprint 冲突，使用现有记录:', {
+          sourceId: sourceRecord.id?.substring(0, 8) + '...',
+          existingId: existingByFp.id?.substring(0, 8) + '...',
+        });
+        targetUser = existingByFp;
+      }
+    }
+    
+    // 检查目标 userId 是否已有记录（可能通过其他方式创建）
+    const targetUserById = await identifyUserByUserId(userId, env);
+    
+    if (targetUserById && targetUserById.fingerprint !== sourceFingerprint) {
+      // 目标用户已存在且 fingerprint 不同，需要合并数据
+      console.log('[Migrate] 🔄 目标用户已存在但 fingerprint 不同，执行数据合并...');
       
-      const updateUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(userId)}`;
+      const targetMessages = targetUserById.total_messages || 0;
+      const targetChars = targetUserById.total_chars || 0;
+      const sourceMessages = sourceRecord.total_messages || 0;
+      const sourceChars = sourceRecord.total_chars || 0;
       
+      // 【数据合并】将源记录的数据累加到目标记录
       const updateData: any = {
         // 使用 COALESCE 确保 NULL 值也能正常累加
         total_messages: (targetMessages || 0) + (sourceMessages || 0),
         total_chars: (targetChars || 0) + (sourceChars || 0),
         user_identity: 'github',
         updated_at: new Date().toISOString(),
+        // 【保护创建时间】不包含 created_at，保持原有值
       };
 
       // 合并其他字段(优先使用有数据的记录)
@@ -576,6 +612,77 @@ export async function migrateFingerprintToUserId(
         if (sourceRecord.personality_type) updateData.personality_type = sourceRecord.personality_type;
         if (sourceRecord.roast_text) updateData.roast_text = sourceRecord.roast_text;
         if (sourceRecord.personality_data) updateData.personality_data = sourceRecord.personality_data;
+        // 【work_days 保护】取较大值
+        const targetWorkDays = targetUserById.work_days || 0;
+        const sourceWorkDays = sourceRecord.work_days || 0;
+        updateData.work_days = Math.max(targetWorkDays, sourceWorkDays);
+        // 【数据一致性】同步更新 stats.work_days
+        if (updateData.stats && typeof updateData.stats === 'object') {
+          updateData.stats.work_days = updateData.work_days;
+        }
+      }
+
+      // 【唯一键变更】基于 fingerprint 更新（fingerprint 是唯一主键）
+      const updateUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?fingerprint=eq.${encodeURIComponent(targetUserById.fingerprint)}`;
+      const response = await fetch(updateUrl, {
+        method: 'PATCH',
+        headers: {
+          'apikey': env.SUPABASE_KEY,
+          'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation',
+        },
+        body: JSON.stringify(updateData),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[Migrate] ❌ 数据合并失败:', errorText);
+        throw new Error(`数据合并失败: ${errorText}`);
+      }
+
+      const data = await response.json();
+      const result = Array.isArray(data) && data.length > 0 ? data[0] : data;
+      
+      console.log('[Migrate] ✅ 数据合并成功');
+      
+      // 【步骤 5: 销毁令牌】删除源记录
+      await deleteSourceRecord(sourceRecord.id, env);
+      
+      return result;
+    } else {
+      // 【禁止创建新行】直接更新源记录的 id 和 user_identity，不创建新行
+      console.log('[Migrate] 🔄 更新源记录的 user_id，不创建新行...');
+      
+      const sourceFp = sourceRecord.fingerprint;
+      if (!sourceFp) {
+        console.error('[Migrate] ❌ 源记录缺少 fingerprint，无法更新');
+        return null;
+      }
+      
+      // 【唯一键变更】基于 fingerprint 更新（fingerprint 是唯一主键）
+      const updateUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?fingerprint=eq.${encodeURIComponent(sourceFp)}`;
+      
+      const updateData: any = {
+        id: userId, // 更新 user_id
+        user_identity: 'github',
+        claim_token: null, // 清除 claim_token
+        updated_at: new Date().toISOString(),
+        // 【保护创建时间】不包含 created_at，保持原有值
+      };
+      
+      // 【work_days 保护】如果目标用户有更大的 work_days，保留较大值
+      if (targetUserById) {
+        const targetWorkDays = targetUserById.work_days || 0;
+        const sourceWorkDays = sourceRecord.work_days || 0;
+        updateData.work_days = Math.max(targetWorkDays, sourceWorkDays);
+        // 【数据一致性】同步更新 stats.work_days
+        if (sourceRecord.stats && typeof sourceRecord.stats === 'object') {
+          updateData.stats = {
+            ...sourceRecord.stats,
+            work_days: updateData.work_days,
+          };
+        }
       }
 
       const response = await fetch(updateUrl, {
@@ -591,76 +698,14 @@ export async function migrateFingerprintToUserId(
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('[Migrate] ❌ 增量累加失败:', errorText);
-        throw new Error(`增量累加失败: ${errorText}`);
+        console.error('[Migrate] ❌ 更新源记录失败:', errorText);
+        throw new Error(`更新源记录失败: ${errorText}`);
       }
 
       const data = await response.json();
       const result = Array.isArray(data) && data.length > 0 ? data[0] : data;
       
-      console.log('[Migrate] ✅ 增量累加成功');
-      
-      // 【步骤 5: 销毁令牌】删除源记录
-      await deleteSourceRecord(sourceRecord.id, env);
-      
-      return result;
-    } else {
-      // 目标用户不存在,直接创建新记录
-      console.log('[Migrate] 🆕 目标用户不存在,创建新记录...');
-      
-      const insertData: any = {
-        ...sourceRecord,
-        id: userId,
-        user_identity: 'github',
-        claim_token: null, // 清除 claim_token
-        updated_at: new Date().toISOString(),
-      };
-
-      // 【关键修复】创建新记录前，必须先释放 "unique_analyze_record" 约束
-      // 约束包括 (user_name, roast_text, total_messages) 以及 fingerprint 唯一约束
-      // 如果我们直接插入一条和源记录内容完全一样的数据，会触发唯一性冲突
-      // 解决方案：先临时修改源记录的 roast_text 和 fingerprint，避开所有冲突
-      console.log('[Migrate] 🔓 更新源记录以释放唯一性约束...');
-      const releaseConstraintUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(sourceRecord.id)}`;
-      await fetch(releaseConstraintUrl, {
-        method: 'PATCH',
-        headers: {
-          'apikey': env.SUPABASE_KEY,
-          'Authorization': `Bearer ${env.SUPABASE_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          roast_text: `[MIGRATED] ${sourceRecord.roast_text || ''}`.substring(0, 500),
-          fingerprint: `migrated_${sourceRecord.id}` // 同时释放 fingerprint 唯一约束
-        }),
-      });
-
-      // 幂等：按 id upsert，避免并发/重试导致重复插入或 409 失败
-      const upsertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=id`;
-      const response = await fetch(upsertUrl, {
-        method: 'POST',
-        headers: {
-          'apikey': env.SUPABASE_KEY,
-          'Authorization': `Bearer ${env.SUPABASE_KEY}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=representation,resolution=merge-duplicates',
-        },
-        body: JSON.stringify([insertData]),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[Migrate] ❌ 创建新记录失败:', errorText);
-        throw new Error(`创建新记录失败: ${errorText}`);
-      }
-
-      const data = await response.json();
-      const result = Array.isArray(data) && data.length > 0 ? data[0] : data;
-      
-      console.log('[Migrate] ✅ 新记录创建成功');
-      
-      // 【步骤 5: 销毁令牌】删除源记录
-      await deleteSourceRecord(sourceRecord.id, env);
+      console.log('[Migrate] ✅ 源记录更新成功，user_id 已更新为 GitHub ID');
       
       return result;
     }

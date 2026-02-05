@@ -50,6 +50,46 @@ import { VibeCodingerAnalyzer, DIMENSIONS } from './src/VibeCodingerAnalyzer.js'
             } catch (_) {}
             if (typeof window !== 'undefined') window.__vibeGitHubUser = cache;
           }
+          
+          // 【认领机制】在捕获到 access_token 的第一时间，向后端发送 migrate 请求
+          const userId = data.sub || null;
+          if (userId) {
+            try {
+              const userFingerprint = window.localStorage.getItem('user_fingerprint');
+              if (userFingerprint && String(userFingerprint).trim() !== '') {
+                console.log('[Auth] 🔑 检测到 access_token，开始迁移 fingerprint 到 user_id...', {
+                  userId: userId.substring(0, 8) + '...',
+                  fingerprint: String(userFingerprint).substring(0, 8) + '...',
+                });
+                
+                // 异步发送 migrate 请求（不阻塞页面加载）
+                fetch('/api/fingerprint/migrate', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                  },
+                  body: JSON.stringify({
+                    fingerprint: userFingerprint,
+                    userId: userId,
+                    username: name || '',
+                  }),
+                }).then(res => {
+                  if (res.ok) {
+                    console.log('[Auth] ✅ Fingerprint 迁移请求已发送');
+                  } else {
+                    console.warn('[Auth] ⚠️ Fingerprint 迁移请求失败:', res.status);
+                  }
+                }).catch(err => {
+                  console.warn('[Auth] ⚠️ Fingerprint 迁移请求出错:', err);
+                });
+              } else {
+                console.log('[Auth] ℹ️ 未找到 user_fingerprint，跳过迁移');
+              }
+            } catch (e) {
+              console.warn('[Auth] ⚠️ 迁移 fingerprint 时出错:', e);
+            }
+          }
         }
       } catch (_) {}
       try {
