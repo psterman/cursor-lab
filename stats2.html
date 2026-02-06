@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- CSP：页面由 Worker 提供时 _headers 不生效，用 meta 保证 IP/地理位置、ISO 映射、Rank 等请求不被拦截 -->
      <script data-cfasync="false" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://html2canvas.hertzen.com https://cdn.tailwindcss.com; connect-src 'self' https://cursor-clinical-analysis.psterman.workers.dev https://psterman.supabase.co https://dtcplfhcgnxdzpigmotb.supabase.co wss://dtcplfhcgnxdzpigmotb.supabase.co https://raw.githubusercontent.com https://api.ipify.org https://ip-api.com wss://*.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src 'self' https://fonts.gstatic.com;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://html2canvas.hertzen.com https://cdn.tailwindcss.com; connect-src 'self' https://cursor-clinical-analysis.psterman.workers.dev https://psterman.supabase.co https://dtcplfhcgnxdzpigmotb.supabase.co wss://dtcplfhcgnxdzpigmotb.supabase.co https://raw.githubusercontent.com https://api.ipify.org https://ip-api.com https://api.github.com wss://*.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src 'self' https://fonts.gstatic.com;">
     <title>Global Statistics Dashboard - Vibe Coding</title>
     <!-- 
     ============================================
@@ -1640,6 +1640,308 @@
         #online-users-list {
             max-height: 400px;
             overflow-y: auto;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 12px !important;
+            align-items: center; /* 确保头像垂直对齐 */
+        }
+        
+        /* 紧凑排列的用户头像 */
+        .user-avatar-compact {
+            position: relative;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 2px solid rgba(0, 255, 65, 0.3);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            /* 移除 overflow: hidden 以允许显示内部的绝对定位弹窗 */
+            /* overflow: hidden; */
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .user-avatar-compact:hover {
+            border-color: rgba(0, 255, 65, 0.8);
+            transform: scale(1.1);
+            z-index: 10;
+            box-shadow: 0 0 12px rgba(0, 255, 65, 0.5);
+        }
+        
+        .user-avatar-compact.busy {
+            cursor: not-allowed;
+            opacity: 0.6;
+            border-color: rgba(255, 140, 0, 0.3);
+        }
+        
+        .user-avatar-compact.busy:hover {
+            border-color: rgba(255, 140, 0, 0.5);
+            box-shadow: 0 0 12px rgba(255, 140, 0, 0.3);
+        }
+        
+        .user-avatar-compact img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 50%; /* 确保图片本身也是圆形的 */
+        }
+        
+        /* 拟态风格弹窗 - 在头像正上方、活跃节点框外（fixed 定位由 JS 计算） */
+        .user-popup {
+            position: fixed;
+            font-size: 13px;
+            width: 300px;
+            max-width: calc(100vw - 40px);
+            background: linear-gradient(145deg, #1e1e22 0%, #25252a 100%);
+            border: none;
+            border-radius: 12px;
+            padding: 16px;
+            z-index: 10001;
+            box-shadow: 6px 6px 14px rgba(0, 0, 0, 0.5),
+                        -6px -6px 14px rgba(50, 50, 55, 0.4),
+                        inset 1px 1px 0 rgba(255, 255, 255, 0.04);
+            animation: popup-appear 0.2s ease-out;
+            pointer-events: auto;
+            white-space: normal;
+            overflow-x: hidden;
+            overflow-y: hidden;
+        }
+        
+        /* 箭头水平位置由 JS 设置 --arrow-left，对准头像中心 */
+        .user-popup::before {
+            content: '';
+            position: absolute;
+            bottom: -8px;
+            left: var(--arrow-left, 50%);
+            transform: translateX(-50%);
+            width: 0;
+            height: 0;
+            border-left: 8px solid transparent;
+            border-right: 8px solid transparent;
+            border-top: 8px solid #25252a;
+            filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3));
+        }
+        
+        .user-popup.top-position::before {
+            bottom: auto;
+            top: -8px;
+            border-top: none;
+            border-bottom: 8px solid #25252a;
+        }
+        
+        @keyframes popup-appear {
+            from {
+                opacity: 0;
+                transform: translateX(-50%) translateY(6px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
+        }
+        
+        .user-popup-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(0, 255, 65, 0.2);
+        }
+        
+        .user-popup-avatar-link {
+            display: block;
+            flex-shrink: 0;
+            cursor: pointer;
+        }
+        
+        .user-popup-avatar-link .user-popup-avatar {
+            display: block;
+        }
+        
+        .user-popup-avatar {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            border: 2px solid rgba(0, 255, 65, 0.5);
+            object-fit: cover;
+        }
+        
+        .user-popup-info {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .user-popup-name {
+            font-size: 1em;
+            font-weight: bold;
+            color: #00ff41;
+            font-family: 'JetBrains Mono', monospace;
+            margin-bottom: 4px;
+            word-break: break-all;
+        }
+        
+        .user-popup-status {
+            font-size: 0.85em;
+            color: rgba(0, 255, 65, 0.7);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .user-popup-repo {
+            margin-top: 12px;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            box-shadow: inset 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        
+        .user-popup-repo-title {
+            font-size: 0.85em;
+            color: rgba(0, 255, 65, 0.7);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+        }
+        
+        .user-popup-repo-list {
+            font-size: 1em;
+            color: rgba(255, 255, 255, 0.9);
+            font-family: 'JetBrains Mono', monospace;
+            max-height: 140px;
+            overflow-x: hidden;
+            overflow-y: auto;
+        }
+        
+        .user-popup-repo-item {
+            position: relative;
+            padding: 6px 8px;
+            margin-bottom: 4px;
+            border-radius: 6px;
+            border-bottom: 1px solid rgba(0, 255, 65, 0.1);
+            cursor: pointer;
+            transition: background 0.2s, box-shadow 0.2s;
+            word-break: break-word;
+            overflow-wrap: break-word;
+        }
+        
+        .user-popup-repo-item-meta {
+            font-size: 0.8em;
+            color: rgba(255, 255, 255, 0.5);
+            margin-top: 2px;
+        }
+        
+        .user-popup-repo-meta-gap {
+            display: inline-block;
+            width: 1em;
+        }
+        
+        .user-popup-repo-item:hover {
+            background: rgba(0, 255, 65, 0.08);
+            box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.2);
+        }
+        
+        .user-popup-repo-item:last-child {
+            border-bottom: none;
+        }
+        
+        a.user-popup-repo-item {
+            text-decoration: none;
+            color: inherit;
+            display: block;
+        }
+        
+        /* 仓库项悬浮预览（介绍） */
+        .user-popup-repo-item-tooltip {
+            position: absolute;
+            left: 100%;
+            top: 50%;
+            transform: translateY(-50%);
+            margin-left: 8px;
+            width: 200px;
+            padding: 8px 10px;
+            background: linear-gradient(145deg, #25252a 0%, #1e1e22 100%);
+            border-radius: 8px;
+            box-shadow: 4px 4px 12px rgba(0, 0, 0, 0.5);
+            font-size: 0.9em;
+            color: rgba(255, 255, 255, 0.85);
+            line-height: 1.4;
+            white-space: normal;
+            z-index: 10002;
+            pointer-events: none;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.15s, visibility 0.15s;
+        }
+        
+        .user-popup-repo-item:hover .user-popup-repo-item-tooltip {
+            opacity: 1;
+            visibility: visible;
+        }
+        
+        .user-popup-repo-item-tooltip.no-desc {
+            font-style: italic;
+            color: rgba(255, 255, 255, 0.45);
+        }
+        
+        .user-popup-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        
+        .user-popup-btn {
+            flex: 1;
+            padding: 8px 12px;
+            background: rgba(0, 255, 65, 0.1);
+            border: 1px solid rgba(0, 255, 65, 0.4);
+            color: #00ff41;
+            font-size: 1em;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        
+        .user-popup-btn:hover {
+            background: rgba(0, 255, 65, 0.2);
+            border-color: rgba(0, 255, 65, 0.8);
+            box-shadow: 0 0 8px rgba(0, 255, 65, 0.3);
+        }
+        
+        .user-popup-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .user-popup-btn.repo-btn {
+            background: rgba(0, 255, 65, 0.05);
+        }
+        
+        .user-popup-btn.repo-btn:hover {
+            background: rgba(0, 255, 65, 0.15);
+        }
+        
+        .user-popup-repo-list::-webkit-scrollbar {
+            width: 4px;
+        }
+        
+        .user-popup-repo-list::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.3);
+        }
+        
+        .user-popup-repo-list::-webkit-scrollbar-thumb {
+            background: rgba(0, 255, 65, 0.4);
+            border-radius: 2px;
+        }
+        
+        .user-popup-repo-list::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 255, 65, 0.6);
         }
         
         .live-nodes-content::-webkit-scrollbar {
@@ -2206,11 +2508,74 @@
             color: #050505;
         }
 
-        /* LIVE_FEED：墨绿色底（按需覆盖 invert） */
+        /* LIVE_FEED：线框和背景绿色，文字白色 */
         .country-panel-template #rtStatusTag {
-            background: #052e16; /* 墨绿色 */
-            color: #d1fae5;
-            border-color: rgba(16, 185, 129, 0.8);
+            background: rgba(0, 255, 65, 0.4) !important;
+            color: #ffffff !important;
+            border: 1px solid rgba(0, 255, 65, 0.9) !important;
+        }
+
+        /* 人格分布：竖向柱状图（圆角柱 + 类型缩写 + 文字名称 + 百分比） */
+        .personality-vbar-chart {
+            background: transparent;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 6px 10px;
+            align-items: flex-end;
+            min-height: 140px;
+        }
+        .personality-vbar-col {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 52px;
+            flex-shrink: 0;
+        }
+        .personality-vbar-bar-wrap {
+            width: 100%;
+            height: 72px;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            margin-bottom: 4px;
+        }
+        .personality-vbar-fill {
+            width: 100%;
+            min-height: 4px;
+            border-radius: 4px 4px 0 0;
+            background: linear-gradient(180deg, rgba(0, 255, 65, 0.65) 0%, rgba(0, 255, 65, 0.25) 100%);
+            transition: height 0.35s ease-out;
+        }
+        .personality-vbar-label {
+            font-size: 10px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+            color: rgba(255, 255, 255, 0.95);
+        }
+        .personality-vbar-name {
+            font-size: 9px;
+            color: rgba(255, 255, 255, 0.6);
+            text-align: center;
+            line-height: 1.2;
+            max-width: 52px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
+            -webkit-box-orient: vertical;
+            margin-top: 1px;
+        }
+        .personality-vbar-pct {
+            font-size: 9px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            color: rgba(0, 255, 65, 0.95);
+            font-variant-numeric: tabular-nums;
+            margin-top: 2px;
         }
 
         /* Leaflet 自定义用户光标样式 */
@@ -2388,10 +2753,10 @@
                 </div>
             </div>
             
-            <!-- 风险评级卡片 -->
+            <!-- 体检人数卡片：显示已上传过聊天记录的人数 -->
             <div class="top-header-card">
-                <div class="top-header-card-label lang-key" data-key="threat-level" data-t="threat-level">风险评级</div>
-                <div class="top-header-card-value text-red-500">LEVEL_CRITICAL</div>
+                <div class="top-header-card-label lang-key" data-key="threat-level" data-t="threat-level">体检人数</div>
+                <div id="physical-exam-count" class="top-header-card-value text-[var(--accent-terminal)]">--</div>
             </div>
             
             <!-- 国家选择下拉菜单 -->
@@ -2539,7 +2904,7 @@
                 <div id="countryPanel" style="display: none;">
                     <div class="flex items-center gap-2 mb-3">
                         <button type="button" id="backToGlobalBtn" data-t="btn.back_global" onclick="switchBackToGlobalView()" class="px-3 py-1.5 text-xs border border-[#00ff41]/50 text-[#00ff41] hover:bg-[#00ff41]/10 transition-colors">[返回全网]</button>
-                        <button type="button" id="refreshDiagnosticsBtn" data-t="btn.refresh" onclick="refreshCountryRightPanel()" class="px-3 py-1.5 text-xs border border-sky-300/50 text-sky-300 hover:bg-sky-300/10 transition-colors">[REFRESH]</button>
+                        <button type="button" id="refreshDiagnosticsBtn" data-t="btn.refresh" onclick="refreshCountryRightPanel()" class="px-3 py-1.5 text-xs border border-[#00ff41]/50 text-[#00ff41] hover:bg-[#00ff41]/10 transition-colors">[REFRESH]</button>
                     </div>
                     <div id="countryTemplateMount" style="font-family: 'JetBrains Mono', monospace;"></div>
                 </div>
@@ -2556,7 +2921,7 @@
                 <div class="mb-8 border-b-2 border-white pb-4">
                     <div class="flex justify-between items-start">
                         <h1 class="text-2xl font-black italic tracking-tighter" id="rtPanelTitle" data-t="panel.country_panel">国家透视</h1>
-                        <div class="status-tag invert" id="rtStatusTag">LIVE_FEED</div>
+                        <div class="status-tag" id="rtStatusTag">LIVE_FEED</div>
                     </div>
                     <div class="mt-3">
                         <span id="rtMeritBoard" class="inline-block text-[11px] text-[var(--accent-terminal)] border border-[var(--accent-terminal)]/40 bg-[var(--accent-terminal)]/5 px-2 py-1">
@@ -2578,8 +2943,7 @@
                     <div class="flex justify-between items-center mb-8">
                         <div class="text-5xl" id="rtFlag">🏳️</div>
                         <div class="text-right">
-                            <div class="metric-value" id="rtNodeName">REGION_NODE</div>
-                            <div class="metric-label" data-t="panel.country_code">国家识别码</div>
+                            <div class="metric-value" id="rtNodeName">--</div>
                         </div>
                     </div>
                     <div class="grid grid-cols-2 gap-6">
@@ -3369,43 +3733,32 @@
                     box.innerHTML = `<div class="text-zinc-500 text-xs">${escapeHtml(getI18nText('realtime.none') || (currentLang === 'en' ? 'No data' : '暂无人格分布数据'))}</div>`;
                     return;
                 }
-                box.innerHTML = records
-                    .map((r) => {
-                        const type =
-                            r.personality_type ??
-                            r.p_type ??
-                            r.type ??
-                            (r.personality && (r.personality.type || r.personality['type'])) ??
-                            'UNKNOWN';
-                        const rawLoc =
-                            r.country_code ??
-                            r.countryCode ??
-                            r.region ??
-                            r.ip_location ??
-                            r.location ??
-                            r.ipLocation ??
-                            '';
-                        const loc = _regionName(rawLoc) || (currentLang === 'en' ? 'Unknown' : '未知');
-                        const u = _resolveUserMeta(r);
-                        const nameHtml = u.profileUrl
-                            ? `<a href="${escapeHtml(u.profileUrl)}" target="_blank" rel="noopener noreferrer" class="text-[10px] text-[var(--accent-terminal)]/90 mt-1 truncate hover:underline">${escapeHtml(u.display)}</a>`
-                            : `<div class="text-[10px] text-[var(--accent-terminal)]/90 mt-1 truncate">${escapeHtml(u.display)}</div>`;
-                        return `
-                            <div class="border border-white/10 bg-zinc-950/40 p-3">
-                                <div class="flex items-center gap-3">
-                                    <img src="${escapeHtml(u.avatar)}" alt="" width="28" height="28" style="width:28px;height:28px;border-radius:999px;object-fit:cover;border:1px solid rgba(0,255,65,0.25);" />
-                                    <div class="min-w-0 flex-1">
-                                        <div class="flex justify-between gap-3">
-                                            <div class="text-white font-bold truncate">${escapeHtml(String(type).toUpperCase())}</div>
-                                            <div class="text-[10px] text-zinc-500 truncate">${escapeHtml(loc)}</div>
-                                        </div>
-                                        ${nameHtml}
-                                    </div>
-                                </div>
-                            </div>
-                        `;
-                    })
-                    .join('');
+                // 按人格类型聚合，得到 [{ type, count }]，与人格分布排行一致
+                const countByType = {};
+                records.forEach((r) => {
+                    const type = String(
+                        r.personality_type ??
+                        r.p_type ??
+                        r.type ??
+                        (r.personality && (r.personality.type || r.personality['type'])) ??
+                        'UNKNOWN'
+                    ).toUpperCase();
+                    countByType[type] = (countByType[type] || 0) + 1;
+                });
+                const distribution = Object.entries(countByType)
+                    .map(([type, count]) => ({ type, count }))
+                    .sort((a, b) => (b.count - a.count));
+                const total = distribution.reduce((s, it) => s + it.count, 0);
+                const maxPct = total > 0 ? Math.max(...distribution.map((it) => (it.count / total) * 100)) : 0;
+                box.className = 'personality-vbar-chart';
+                box.innerHTML = distribution.map((item) => {
+                    const type = (item.type || 'UNKNOWN').toUpperCase();
+                    const pctVal = total > 0 ? (item.count / total) * 100 : 0;
+                    const pct = pctVal.toFixed(1);
+                    const heightPct = maxPct > 0 ? Math.max(4, (pctVal / maxPct) * 100) : 0;
+                    const name = getPersonalityTypeName(type, currentLang);
+                    return `<div class="personality-vbar-col"><div class="personality-vbar-bar-wrap"><div class="personality-vbar-fill" style="height: ${heightPct}%;"></div></div><span class="personality-vbar-label">${escapeHtml(type)}</span><span class="personality-vbar-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span><span class="personality-vbar-pct">${pct}%</span></div>`;
+                }).join('');
             };
 
             const renderErrorState = (message) => {
@@ -4297,7 +4650,7 @@
                 'badge.connect': '连接',
                 'badge.syncing': '同步',
                 'top-title': 'Cursor行为报告全球分布图',
-                'sub-title': '实时远程监测状态 // 节点：太平洋中部',
+                'sub-title': '',
                 'total-victims': '已诊断开发者',
                 'total-analysis': '全网扫描次数',
                 'total-roast': '累计吐槽字数',
@@ -4305,7 +4658,7 @@
                 'radar-title': '全网平均开发者画像',
                 'personality-dist': '人格分布排行',
                 'active-nodes': '活跃节点',
-                'threat-level': '风险评级',
+                'threat-level': '体检人数',
                 'top-hotspot': '最密集热区',
                 'sys-days': '运行天数',
                 'city-coverage': '城市覆盖',
@@ -4320,7 +4673,7 @@
             },
             en: {
                 'top-title': 'Cursor Behavior Report · Global Distribution Map',
-                'sub-title': 'Telemetry Status // Node: Central_Pacific',
+                'sub-title': '',
                 'total-victims': 'Total Developers',
                 'total-analysis': 'Total Scans',
                 'total-roast': 'Total Roast Words',
@@ -4328,7 +4681,7 @@
                 'radar-title': 'Global Developer Persona',
                 'personality-dist': 'Personality Distribution',
                 'active-nodes': 'Active Nodes',
-                'threat-level': 'Threat Level',
+                'threat-level': 'Physical Exam Count',
                 'top-hotspot': 'Primary Hotspot',
                 'sys-days': 'Days Online',
                 'city-coverage': 'City Coverage',
@@ -7273,24 +7626,26 @@
                 `;
                 rightCards.push(locationCard);
 
-                // 人格分布排行
+                // 人格分布排行：竖向柱状图 + 人格文字名称
                 const personalityCard = document.createElement('div');
                 personalityCard.className = 'drawer-item';
-                const personalityListHtml = data.personalityRank && Array.isArray(data.personalityRank)
-                    ? data.personalityRank.map((item, i) => {
-                        const type = item.type || 'UNKNOWN';
+                let personalityListHtml = '';
+                if (data.personalityRank && Array.isArray(data.personalityRank)) {
+                    const total = data.personalityRank.reduce((s, it) => s + (Number(it.count) || 0), 0);
+                    const maxPct = total > 0 ? Math.max(...data.personalityRank.map((it) => (Number(it.count) || 0) / total * 100)) : 0;
+                    personalityListHtml = data.personalityRank.map((item) => {
+                        const type = (item.type || 'UNKNOWN').toUpperCase();
                         const count = Number(item.count) || 0;
-                        return `
-                            <div class="flex justify-between items-center text-[10px] border-b border-[#00ff41]/10 pb-2">
-                                <span class="text-zinc-500 font-mono">0${i+1}</span>
-                                <span class="font-bold uppercase tracking-tighter text-white">${type}</span>
-                                <span class="text-[#00ff41] font-bold">${count}</span>
-                            </div>`;
-                    }).join('')
-                    : '';
+                        const pctVal = total > 0 ? (count / total) * 100 : 0;
+                        const pct = pctVal.toFixed(1);
+                        const heightPct = maxPct > 0 ? Math.max(4, (pctVal / maxPct) * 100) : 0;
+                        const name = getPersonalityTypeName(type, currentLang);
+                        return `<div class="personality-vbar-col"><div class="personality-vbar-bar-wrap"><div class="personality-vbar-fill" style="height: ${heightPct}%;"></div></div><span class="personality-vbar-label">${escapeHtml(type)}</span><span class="personality-vbar-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span><span class="personality-vbar-pct">${pct}%</span></div>`;
+                    }).join('');
+                }
                 personalityCard.innerHTML = `
                     <div class="drawer-item-label mb-3">${escapeHtml((i18n[currentLang] && i18n[currentLang]['personality-dist']) ? i18n[currentLang]['personality-dist'] : (currentLang === 'en' ? 'Personality Distribution' : '人格分布排行'))}</div>
-                    <div id="drawer-personalityDistribution" class="space-y-2">${personalityListHtml}</div>
+                    <div id="drawer-personalityDistribution" class="personality-vbar-chart">${personalityListHtml}</div>
                 `;
                 rightCards.push(personalityCard);
                 
@@ -7314,19 +7669,21 @@
                     }, 600);
                 }
                 
-                // 渲染人格分布
+                // 渲染人格分布：竖向柱状图 + 人格文字名称（与主页面一致）
                 if (data.personalityRank && Array.isArray(data.personalityRank)) {
                     const drawerPersonalityList = document.getElementById('drawer-personalityDistribution');
                     if (drawerPersonalityList) {
-                        drawerPersonalityList.innerHTML = data.personalityRank.map((item, i) => {
-                            const type = item.type || 'UNKNOWN';
+                        const total = data.personalityRank.reduce((s, it) => s + (Number(it.count) || 0), 0);
+                        const maxPct = total > 0 ? Math.max(...data.personalityRank.map((it) => (Number(it.count) || 0) / total * 100)) : 0;
+                        drawerPersonalityList.className = 'personality-vbar-chart';
+                        drawerPersonalityList.innerHTML = data.personalityRank.map((item) => {
+                            const type = (item.type || 'UNKNOWN').toUpperCase();
                             const count = Number(item.count) || 0;
-                            return `
-                                <div class="flex justify-between items-center text-[10px] border-b border-[#00ff41]/10 pb-2">
-                                    <span class="text-zinc-500 font-mono">0${i+1}</span>
-                                    <span class="font-bold uppercase tracking-tighter text-white">${type}</span>
-                                    <span class="text-[#00ff41] font-bold">${count}</span>
-                                </div>`;
+                            const pctVal = total > 0 ? (count / total) * 100 : 0;
+                            const pct = pctVal.toFixed(1);
+                            const heightPct = maxPct > 0 ? Math.max(4, (pctVal / maxPct) * 100) : 0;
+                            const name = getPersonalityTypeName(type, currentLang);
+                            return `<div class="personality-vbar-col"><div class="personality-vbar-bar-wrap"><div class="personality-vbar-fill" style="height: ${heightPct}%;"></div></div><span class="personality-vbar-label">${escapeHtml(type)}</span><span class="personality-vbar-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span><span class="personality-vbar-pct">${pct}%</span></div>`;
                         }).join('');
                     }
                 }
@@ -7420,7 +7777,7 @@
                     : (cc === 'CN' || name === 'China' || name === '中国')
                         ? '🇨🇳'
                         : (countryCodeToFlagEmoji(code) || '🏳️'),
-                nodeName: `${String(name || 'REGION').toUpperCase()}_NODE`,
+                nodeName: (currentLang === 'zh' && countryNameMap && countryNameMap[cc]) ? (countryNameMap[cc].zh || name) : (name || (countryNameMap && countryNameMap[cc] ? countryNameMap[cc].en : code) || '--'),
                 diagnosedTotal: '--',
                 scanTotal: '--',
                 pk: {
@@ -7580,6 +7937,15 @@
             
             // 如果点击在抽屉内部，不处理
             if (isClickInsideDrawer) return;
+            
+            // 【修复】检查是否点击了用户头像或弹窗
+            const isUserAvatarClick = e.target.closest('.user-avatar-compact') || 
+                                      e.target.closest('.user-popup') ||
+                                      e.target.closest('#live-nodes-drawer');
+            if (isUserAvatarClick) {
+                // 用户头像点击由 toggleUserPopup 处理，不关闭抽屉
+                return;
+            }
             
             // 【修复地图点击】检查是否点击了地图容器（包括 ECharts canvas 元素）
             // ECharts 渲染后，点击目标可能是 canvas 元素，需要检查其父容器
@@ -9233,19 +9599,27 @@
                     return;
                 }
 
-                // 渲染国家列表
+                // 渲染国家列表（支持候选选中后按国家码/名称过滤）
                 const renderCountryList = (searchQuery = '') => {
                     const countries = getAllCountries();
-                    const query = String(searchQuery || '').trim().toLowerCase();
+                    const rawQuery = String(searchQuery || '').trim();
+                    const query = rawQuery.toLowerCase();
                     
-                    // 过滤国家
-                    const filtered = countries.filter(country => {
-                        if (!query) return true;
-                        const nameZh = (country.nameZh || '').toLowerCase();
-                        const nameEn = (country.nameEn || '').toLowerCase();
-                        const code = (country.code || '').toLowerCase();
-                        return nameZh.includes(query) || nameEn.includes(query) || code.includes(query);
-                    });
+                    // 过滤国家：若输入含 (XX) 则优先按国家码精确匹配，再按名称部分匹配
+                    let filtered = countries;
+                    if (query) {
+                        const codeMatch = rawQuery.match(/\(([A-Za-z]{2})\)\s*$/);
+                        const codePart = codeMatch ? codeMatch[1].toLowerCase() : null;
+                        const namePart = rawQuery.replace(/\s*\([A-Za-z]{2}\)\s*$/, '').trim().toLowerCase();
+                        filtered = countries.filter(country => {
+                            const nameZh = (country.nameZh || '').toLowerCase();
+                            const nameEn = (country.nameEn || '').toLowerCase();
+                            const code = (country.code || '').toLowerCase();
+                            if (codePart && code === codePart) return true;
+                            if (namePart && (nameZh.includes(namePart) || nameEn.includes(namePart))) return true;
+                            return nameZh.includes(query) || nameEn.includes(query) || code.includes(query);
+                        });
+                    }
 
                     // 清空并填充列表
                     listContainer.innerHTML = '';
@@ -9310,59 +9684,33 @@
                             }
                         });
                         
-                        // 点击选择国家
-                        item.addEventListener('click', async () => {
-                            // 保存选择
+                        // 点击选择国家（先更新 UI 再异步保存，减少卡顿）
+                        item.addEventListener('click', () => {
+                            const displayName = (currentLang === 'zh' && country.nameZh) ? country.nameZh + ' (' + country.code + ')' : country.nameEn + ' (' + country.code + ')';
+                            searchInput.value = displayName;
+                            listContainer.classList.remove('left-drawer-country-list-visible');
+                            searchInput.blur();
+                            renderCountryList(displayName);
+
                             try {
                                 localStorage.setItem('user_selected_country', country.code);
                             } catch (e) {
                                 console.warn('[LeftDrawerCountry] ⚠️ 保存到 localStorage 失败:', e);
                             }
-
-                            // 更新顶部下拉菜单（不触发 change 事件，避免打开抽屉）
                             const dropdown = document.getElementById('country-select-dropdown');
-                            if (dropdown) {
-                                dropdown.value = country.code;
-                            }
-                            
-                            // 显示光标
+                            if (dropdown) dropdown.value = country.code;
                             setOrUpdateCurrentLocationCursor(country.code);
-                            
-                            // 保存到 Supabase
-                            await saveCountryToSupabase(country.code);
-
-                            // 高亮选中的国家
-                            if (typeof window.highlightSelectedCountry === 'function') {
-                                window.highlightSelectedCountry();
-                            }
-
-                            // 更新左侧抽屉中的用户校准国家显示
-                            const countryName = (currentLang === 'zh' && country.nameZh) 
-                                ? country.nameZh 
-                                : country.nameEn;
-                            if (typeof updateUserCountryFlag === 'function') {
-                                updateUserCountryFlag(country.code, countryName, true);
-                            }
-
-                            // 触发国家切换：右侧抽屉透视该国 + 拉取该国数据
-                            if (typeof onCountrySwitch === 'function') {
-                                onCountrySwitch(country.code, { source: 'left-drawer-country-list', name: countryName });
-                            }
-                            // 确保左右抽屉打开并显示该国视角
+                            const countryName = (currentLang === 'zh' && country.nameZh) ? country.nameZh : country.nameEn;
+                            if (typeof window.highlightSelectedCountry === 'function') window.highlightSelectedCountry();
+                            if (typeof updateUserCountryFlag === 'function') updateUserCountryFlag(country.code, countryName, true);
+                            if (typeof onCountrySwitch === 'function') onCountrySwitch(country.code, { source: 'left-drawer-country-list', name: countryName });
                             const leftDrawer = document.getElementById('left-drawer');
                             const rightDrawer = document.getElementById('right-drawer');
                             if (leftDrawer) leftDrawer.classList.add('active');
                             if (rightDrawer) rightDrawer.classList.add('active');
                             try { localStorage.setItem('left_drawer_open', 'true'); localStorage.setItem('right_drawer_open', 'true'); } catch (e) { /* ignore */ }
-                            
-                            // 重新渲染列表以更新高亮
-                            renderCountryList(searchInput.value);
-                            // 选择后收起列表，并显示当前国家在搜索框
-                            const displayName = (currentLang === 'zh' && country.nameZh) ? country.nameZh + ' (' + country.code + ')' : country.nameEn + ' (' + country.code + ')';
-                            searchInput.value = displayName;
-                            listContainer.classList.remove('left-drawer-country-list-visible');
-                            searchInput.blur();
-                            
+
+                            saveCountryToSupabase(country.code).catch(() => {});
                             console.log('[LeftDrawerCountry] ✅ 已选择国家:', country.code);
                         });
                         
@@ -10948,8 +11296,19 @@
             }
         }
 
+        /** 16 型人格缩写 → 中文/英文名称（用于柱状图下方文字） */
+        const PERSONALITY_TYPE_NAMES = {
+            zh: { INTJ: '建筑师', INTP: '逻辑学家', ENTJ: '指挥官', ENTP: '辩论家', INFJ: '提倡者', INFP: '调停者', ENFJ: '主人公', ENFP: '竞选者', ISTJ: '物流师', ISFJ: '守卫者', ESTJ: '总经理', ESFJ: '执政官', ISTP: '鉴赏家', ISFP: '探险家', ESTP: '企业家', ESFP: '表演者' },
+            en: { INTJ: 'Architect', INTP: 'Logician', ENTJ: 'Commander', ENTP: 'Debater', INFJ: 'Advocate', INFP: 'Mediator', ENFJ: 'Protagonist', ENFP: 'Campaigner', ISTJ: 'Logistician', ISFJ: 'Defender', ESTJ: 'Executive', ESFJ: 'Consul', ISTP: 'Virtuoso', ISFP: 'Adventurer', ESTP: 'Entrepreneur', ESFP: 'Entertainer' }
+        };
+        function getPersonalityTypeName(type, lang) {
+            const key = String(type || '').toUpperCase();
+            const L = (lang === 'en' ? 'en' : 'zh');
+            return (PERSONALITY_TYPE_NAMES[L] && PERSONALITY_TYPE_NAMES[L][key]) ? PERSONALITY_TYPE_NAMES[L][key] : key;
+        }
+
         /**
-         * 渲染人格分布排行
+         * 渲染人格分布：竖向柱状图，每人格带缩写 + 文字名称 + 百分比
          * @param {Array} distribution - 人格分布数据 [{type: string, count: number}]
          */
         function renderPersonalityDistribution(distribution) {
@@ -10961,14 +11320,25 @@
                 return;
             }
             
-            list.innerHTML = distribution.map((item, i) => {
-                const type = item.type || 'UNKNOWN';
+            const total = distribution.reduce((sum, item) => sum + (Number(item.count) || 0), 0);
+            const maxPct = total > 0 ? Math.max(...distribution.map((item) => (Number(item.count) || 0) / total * 100)) : 0;
+            
+            list.className = 'personality-vbar-chart';
+            list.innerHTML = distribution.map((item) => {
+                const type = (item.type || 'UNKNOWN').toUpperCase();
                 const count = Number(item.count) || 0;
+                const pctVal = total > 0 ? (count / total) * 100 : 0;
+                const pct = pctVal.toFixed(1);
+                const heightPct = maxPct > 0 ? Math.max(4, (pctVal / maxPct) * 100) : 0;
+                const name = getPersonalityTypeName(type, currentLang);
                 return `
-                <div class="flex justify-between items-center text-[11px] border-b border-zinc-800 pb-2">
-                    <span class="text-zinc-500 font-mono">0${i+1}</span>
-                    <span class="font-bold uppercase tracking-tighter">${type}</span>
-                    <span class="text-[var(--accent-terminal)] font-bold">${count}</span>
+                <div class="personality-vbar-col">
+                    <div class="personality-vbar-bar-wrap">
+                        <div class="personality-vbar-fill" style="height: ${heightPct}%;"></div>
+                    </div>
+                    <span class="personality-vbar-label">${escapeHtml(type)}</span>
+                    <span class="personality-vbar-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
+                    <span class="personality-vbar-pct">${pct}%</span>
                 </div>`;
             }).join('');
         }
@@ -11871,8 +12241,30 @@
                 }
             });
             
-            // 立即同步状态到Presence
-            syncPresenceState();
+            // 立即同步状态到Presence（异步）
+            syncPresenceState().then(() => {
+                // 同步完成后立即更新用户列表
+                if (presenceChannel) {
+                    const state = presenceChannel.presenceState();
+                    renderOnlineUsersList(state);
+                }
+            }).catch(() => {
+                // 即使同步失败，也尝试更新列表
+                if (presenceChannel) {
+                    const state = presenceChannel.presenceState();
+                    renderOnlineUsersList(state);
+                }
+            });
+            
+            // 如果是切换到离线状态，立即更新列表（不等待同步完成）
+            if (status === 'sprint') {
+                setTimeout(() => {
+                    if (presenceChannel) {
+                        const state = presenceChannel.presenceState();
+                        renderOnlineUsersList(state);
+                    }
+                }, 100);
+            }
             
             console.log('[Status] ✅ 用户状态已更新:', status, USER_STATUSES[status]);
         }
@@ -11941,6 +12333,18 @@
                 
                 // 获取经纬度
                 const location = await getUserLocation();
+                
+                // 如果用户状态是离线（sprint），不跟踪到 Presence（完全隐身）
+                if (status === 'sprint') {
+                    console.log('[Presence] ⚠️ 用户状态为离线，不跟踪到 Presence（完全隐身）');
+                    // 如果之前有跟踪，先取消跟踪
+                    try {
+                        await presenceChannel.untrack();
+                    } catch (e) {
+                        // 忽略错误
+                    }
+                    return;
+                }
                 
                 // 构建 Presence 数据
                 const myPresence = {
@@ -12143,7 +12547,7 @@
         }
         
         /**
-         * 渲染在线用户列表（分类显示：已实名/匿名）
+         * 渲染在线用户列表（紧凑排列：图标式）
          * @param {Object} presenceState - Presence状态对象
          */
         function renderOnlineUsersList(presenceState) {
@@ -12183,104 +12587,342 @@
                 });
             }
             
-            // 注意：不排除当前用户自己，因为用户要求在列表中可见
-            
-            // 转换为数组并分类
+            // 转换为数组
             const allUsers = Array.from(userMap.values());
             
-            // 分类：已实名用户（有 github_id 且不为默认值）和匿名用户
-            const verifiedUsers = allUsers.filter(user => {
-                const githubId = user.github_id || user.github_username;
-                return githubId && isValidGitHubUsername(githubId) && !githubId.startsWith('Guest_');
+            // 过滤掉离线用户（sprint状态）
+            const visibleUsers = allUsers.filter(user => {
+                const status = user.status || 'idle';
+                return status !== 'sprint'; // 完全隐藏离线用户
             });
-            
-            const anonymousUsers = allUsers.filter(user => {
-                const githubId = user.github_id || user.github_username;
-                return !githubId || !isValidGitHubUsername(githubId) || githubId.startsWith('Guest_');
-            });
-            
-            // 排序：按在线时间倒序
-            verifiedUsers.sort((a, b) => new Date(b.online_at) - new Date(a.online_at));
-            anonymousUsers.sort((a, b) => new Date(b.online_at) - new Date(a.online_at));
             
             // 如果没有用户，显示空状态
-            if (verifiedUsers.length === 0 && anonymousUsers.length === 0) {
-                listContainer.innerHTML = '<div class="text-zinc-500 text-center py-8 text-[10px]">Scanning for nearby nodes...</div>';
+            if (visibleUsers.length === 0) {
+                listContainer.innerHTML = '<div class="text-zinc-500 text-center py-8 text-[10px] w-full">Scanning for nearby nodes...</div>';
                 return;
             }
             
-            // 渲染已实名用户（排在最前）
-            let html = '';
+            // 排序：按在线时间倒序
+            visibleUsers.sort((a, b) => new Date(b.online_at) - new Date(a.online_at));
             
-            if (verifiedUsers.length > 0) {
-                html += verifiedUsers.map(user => {
-                    const userName = user.user_name || user.github_id || user.github_username || 'Guest';
-                    const githubId = user.github_id || user.github_username || userName;
-                    const avatarUrl = user.avatar_url || DEFAULT_AVATAR;
-                    const status = user.status || 'idle';
-                    const statusConfig = USER_STATUSES[status] || USER_STATUSES.idle;
-                    const statusLabel = statusConfig.label;
-                    
-                    // 使用用户要求的 HTML 结构，包裹 <a> 标签，链接指向 GitHub
-                    // 添加 onclick="event.stopPropagation()" 防止触发抽屉折叠
-                    return `
-                        <a 
-                            href="https://github.com/${userName}" 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            class="flex items-center gap-3 p-2 hover:bg-white/10 rounded-lg transition-all group"
-                            onclick="event.stopPropagation(); openMessageInput('${userName}'); return false;"
-                        >
-                            <img 
-                                src="${avatarUrl}" 
-                                alt="${userName}" 
-                                class="w-8 h-8 rounded-full border border-[var(--accent-terminal)]"
-                                loading="lazy"
-                                referrerpolicy="no-referrer"
-                                onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
-                            />
-                            <div class="flex flex-col flex-1 min-w-0">
-                                <span class="text-xs text-white font-mono group-hover:text-[var(--accent-terminal)] truncate">${userName}</span>
-                                <span class="text-[10px] text-[var(--text-dim)] uppercase">${statusLabel}</span>
-                            </div>
-                            <i class="ml-auto opacity-0 group-hover:opacity-100 transition-opacity text-[var(--accent-terminal)]">🔗</i>
-                        </a>
-                    `;
-                }).join('');
-            }
-            
-            // 渲染匿名用户
-            if (anonymousUsers.length > 0) {
-                html += anonymousUsers.map(user => {
-                    const userName = user.user_name || 'Guest';
-                    const avatarUrl = user.avatar_url || DEFAULT_AVATAR;
-                    const status = user.status || 'idle';
-                    const statusConfig = USER_STATUSES[status] || USER_STATUSES.idle;
-                    const statusLabel = statusConfig.label;
-                    
-                    return `
-                        <div 
-                            class="flex items-center gap-3 p-2 hover:bg-white/5 rounded-lg transition-all opacity-70"
-                            onclick="openMessageInput('${userName}')"
-                        >
-                            <img 
-                                src="${avatarUrl}" 
-                                alt="${userName}" 
-                                class="w-8 h-8 rounded-full border border-zinc-700"
-                                loading="lazy"
-                                referrerpolicy="no-referrer"
-                                onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
-                            />
-                            <div class="flex flex-col flex-1 min-w-0">
-                                <span class="text-xs text-zinc-400 font-mono truncate">${userName}</span>
-                                <span class="text-[10px] text-zinc-600 uppercase">${statusLabel}</span>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-            }
+            // 渲染紧凑排列的头像
+            const html = visibleUsers.map((user, index) => {
+                const userName = user.user_name || user.github_id || user.github_username || 'Guest';
+                const githubId = user.github_id || user.github_username || userName;
+                const avatarUrl = user.avatar_url || DEFAULT_AVATAR;
+                const status = user.status || 'idle';
+                const statusConfig = USER_STATUSES[status] || USER_STATUSES.idle;
+                const isBusy = status === 'busy';
+                const currentUserId = localStorage.getItem('github_username') || null;
+                const isCurrentUser = userName === currentUserId || githubId === currentUserId;
+                
+                // 忙碌状态：其他用户无法点击发送消息
+                const canSendMessage = !isBusy || isCurrentUser;
+                
+                return `
+                    <div 
+                        class="user-avatar-compact ${isBusy ? 'busy' : ''}" 
+                        data-user-index="${index}"
+                        data-user-name="${escapeHtml(userName)}"
+                        data-github-id="${escapeHtml(githubId)}"
+                        data-avatar-url="${escapeHtml(avatarUrl)}"
+                        data-status="${status}"
+                        data-status-label="${statusConfig.label}"
+                        onclick="toggleUserPopup(event, ${index})"
+                    >
+                        <img 
+                            src="${avatarUrl}" 
+                            alt="${userName}" 
+                            loading="lazy"
+                            referrerpolicy="no-referrer"
+                            onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
+                        />
+                    </div>
+                `;
+            }).join('');
             
             listContainer.innerHTML = html;
+        }
+        
+        // 全局变量：当前显示的弹窗
+        let currentPopupElement = null;
+        
+        /**
+         * 切换用户弹窗显示/隐藏（点击触发）
+         */
+        function toggleUserPopup(event, userIndex) {
+            if (event) {
+                event.stopPropagation();
+                event.preventDefault();
+                
+                // 【修复】如果点击的是弹窗内部，不进行切换（防止点击弹窗导致弹窗关闭）
+                if (event.target.closest('.user-popup')) {
+                    return;
+                }
+            }
+            
+            const avatarElement = event ? event.currentTarget : document.querySelector(`[data-user-index="${userIndex}"]`);
+            if (!avatarElement) {
+                console.warn('[Popup] ⚠️ 找不到头像元素');
+                return;
+            }
+            
+            const userName = avatarElement.getAttribute('data-user-name');
+            
+            // 检查当前弹窗是否属于这个用户
+            if (currentPopupElement && currentPopupElement.getAttribute('data-user-name') === userName) {
+                if (currentPopupElement._cleanup) currentPopupElement._cleanup();
+                currentPopupElement.remove();
+                currentPopupElement = null;
+                return;
+            }
+            
+            const allPopups = document.querySelectorAll('.user-popup');
+            allPopups.forEach(popup => {
+                if (popup._cleanup) popup._cleanup();
+                popup.remove();
+            });
+            const githubId = avatarElement.getAttribute('data-github-id');
+            const avatarUrl = avatarElement.getAttribute('data-avatar-url');
+            const status = avatarElement.getAttribute('data-status');
+            const statusLabel = avatarElement.getAttribute('data-status-label');
+            const statusConfig = USER_STATUSES[status] || USER_STATUSES.idle;
+            const isBusy = status === 'busy';
+            const currentUserId = localStorage.getItem('github_username') || null;
+            const isCurrentUser = userName === currentUserId || githubId === currentUserId;
+            const canSendMessage = !isBusy || isCurrentUser;
+            
+            // 创建弹窗
+            const popup = document.createElement('div');
+            popup.className = 'user-popup';
+            popup.setAttribute('data-user-name', userName);
+            popup.style.display = 'block';
+            popup.style.visibility = 'visible';
+            
+            // 先显示加载状态的内容（点击头像可跳转用户 GitHub）
+            popup.innerHTML = `
+                <div class="user-popup-header">
+                    <a href="https://github.com/${escapeHtml(githubId)}" target="_blank" rel="noopener" class="user-popup-avatar-link" title="跳转 GitHub">
+                        <img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(userName)}" class="user-popup-avatar" onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';" />
+                    </a>
+                    <div class="user-popup-info">
+                        <div class="user-popup-name">${escapeHtml(userName)}</div>
+                        <div class="user-popup-status">${escapeHtml(statusLabel)}</div>
+                    </div>
+                </div>
+                <div class="user-popup-repo">
+                    <div class="user-popup-repo-title">仓库预览</div>
+                    <div class="user-popup-repo-list" id="repo-list-${userIndex}">
+                        <div class="user-popup-repo-item" style="color: rgba(255,255,255,0.4);">加载中...</div>
+                    </div>
+                </div>
+                <div class="user-popup-actions">
+                    <button 
+                        class="user-popup-btn" 
+                        data-action="message"
+                        ${!canSendMessage ? 'disabled' : ''}
+                    >
+                        ${canSendMessage ? '发送消息' : '忙碌中'}
+                    </button>
+                    <button 
+                        class="user-popup-btn repo-btn"
+                        data-action="repo"
+                        data-github-id="${escapeHtml(githubId)}"
+                    >
+                        跳转仓库
+                    </button>
+                </div>
+            `;
+            
+            // 弹窗挂载到 body，自适应屏幕、不遮挡关键区域，且处于活跃节点框外
+            document.body.appendChild(popup);
+            currentPopupElement = popup;
+            
+            const GAP = 10;
+            const SAFE_MARGIN = 12;
+            
+            const updatePosition = () => {
+                const avatarRect = avatarElement.getBoundingClientRect();
+                const pw = popup.offsetWidth;
+                const ph = popup.offsetHeight;
+                const vw = window.innerWidth;
+                const vh = window.innerHeight;
+                const drawer = document.getElementById('live-nodes-drawer');
+                const drawerRect = drawer ? drawer.getBoundingClientRect() : null;
+                
+                // 水平：与头像中心对齐，超出视口则贴边
+                let centerX = avatarRect.left + avatarRect.width / 2;
+                let leftPx = centerX - pw / 2;
+                if (leftPx < SAFE_MARGIN) {
+                    leftPx = SAFE_MARGIN;
+                    popup.style.left = leftPx + 'px';
+                    popup.style.transform = 'none';
+                } else if (leftPx + pw > vw - SAFE_MARGIN) {
+                    leftPx = vw - SAFE_MARGIN - pw;
+                    popup.style.left = leftPx + 'px';
+                    popup.style.transform = 'none';
+                } else {
+                    popup.style.left = centerX + 'px';
+                    popup.style.transform = 'translateX(-50%)';
+                }
+                
+                // 垂直：弹窗整体置于活跃节点框上方，不遮挡头像与列表
+                let top;
+                if (drawerRect && ph + GAP <= drawerRect.top - SAFE_MARGIN) {
+                    top = drawerRect.top - ph - GAP;
+                    popup.classList.remove('top-position');
+                } else {
+                    top = avatarRect.top - GAP - ph;
+                }
+                if (top < SAFE_MARGIN) {
+                    top = avatarRect.bottom + GAP;
+                    popup.classList.add('top-position');
+                    if (top + ph > vh - SAFE_MARGIN) {
+                        top = Math.max(SAFE_MARGIN, vh - SAFE_MARGIN - ph);
+                    }
+                } else {
+                    if (top < SAFE_MARGIN) top = SAFE_MARGIN;
+                }
+                popup.style.top = top + 'px';
+                
+                // 箭头对准头像中心：在弹窗内的水平偏移，并限制在弹窗内
+                const popupRect = popup.getBoundingClientRect();
+                const avatarCenterX = avatarRect.left + avatarRect.width / 2;
+                let arrowLeftPx = avatarCenterX - popupRect.left;
+                arrowLeftPx = Math.max(16, Math.min(pw - 16, arrowLeftPx));
+                popup.style.setProperty('--arrow-left', arrowLeftPx + 'px');
+            };
+            
+            updatePosition();
+            const onUpdate = () => updatePosition();
+            window.addEventListener('resize', onUpdate);
+            window.addEventListener('scroll', onUpdate, true);
+            
+            // 弹窗内滚轮不冒泡到大地图，避免影响地图缩放；弹窗内列表仍可正常滚动
+            const stopWheel = (e) => {
+                e.stopPropagation();
+            };
+            popup.addEventListener('wheel', stopWheel, { passive: true });
+            
+            popup._cleanup = () => {
+                window.removeEventListener('resize', onUpdate);
+                window.removeEventListener('scroll', onUpdate, true);
+                popup.removeEventListener('wheel', stopWheel);
+            };
+            
+            // 为按钮添加事件监听器
+            const messageBtn = popup.querySelector('[data-action="message"]');
+            const repoBtn = popup.querySelector('[data-action="repo"]');
+            
+            if (messageBtn) {
+                messageBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    if (popup._cleanup) popup._cleanup();
+                    popup.remove();
+                    currentPopupElement = null;
+                    openMessageInput(userName);
+                });
+            }
+            
+            if (repoBtn) {
+                repoBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    if (popup._cleanup) popup._cleanup();
+                    popup.remove();
+                    currentPopupElement = null;
+                    const githubIdForRepo = repoBtn.getAttribute('data-github-id');
+                    if (githubIdForRepo) {
+                        window.open(`https://github.com/${githubIdForRepo}`, '_blank');
+                    }
+                });
+            }
+            
+            // 获取五个仓库并渲染：悬浮显示介绍，最后更新、star 数，点击跳转
+            function formatRepoUpdatedAt(isoStr) {
+                if (!isoStr) return '';
+                try {
+                    const d = new Date(isoStr);
+                    const now = new Date();
+                    const diffMs = now - d;
+                    const diffDays = Math.floor(diffMs / 86400000);
+                    if (diffDays === 0) return '今天更新';
+                    if (diffDays === 1) return '昨天更新';
+                    if (diffDays < 7) return diffDays + ' 天前';
+                    if (diffDays < 30) return Math.floor(diffDays / 7) + ' 周前';
+                    return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
+                } catch { return ''; }
+            }
+            fetchUserRepos(githubId).then(repos => {
+                const repoListEl = popup.querySelector(`#repo-list-${userIndex}`);
+                if (!repoListEl) return;
+                if (repos.length === 0) {
+                    repoListEl.innerHTML = '<div class="user-popup-repo-item" style="color: rgba(255,255,255,0.4); cursor: default;">暂无公开仓库</div>';
+                    return;
+                }
+                const repoHtml = repos.slice(0, 3).map(repo => {
+                    const desc = repo.description ? escapeHtml(repo.description) : '';
+                    const tooltipClass = desc ? '' : ' no-desc';
+                    const tooltipText = desc || '暂无介绍';
+                    const updatedStr = formatRepoUpdatedAt(repo.updatedAt);
+                    const starStr = (repo.stargazersCount != null) ? (repo.stargazersCount + ' ★') : '';
+                    const metaHtml = (starStr || updatedStr) ? `<div class="user-popup-repo-item-meta">${starStr}${starStr && updatedStr ? '<span class="user-popup-repo-meta-gap"></span>' : ''}${escapeHtml(updatedStr)}</div>` : '';
+                    return `<a class="user-popup-repo-item" href="${escapeHtml(repo.url)}" target="_blank" rel="noopener" data-repo-url="${escapeHtml(repo.url)}">${escapeHtml(repo.name)}${metaHtml}<span class="user-popup-repo-item-tooltip${tooltipClass}">${tooltipText}</span></a>`;
+                }).join('');
+                repoListEl.innerHTML = repoHtml;
+            }).catch(() => {
+                const repoListEl = popup.querySelector(`#repo-list-${userIndex}`);
+                if (repoListEl) {
+                    repoListEl.innerHTML = '<div class="user-popup-repo-item" style="color: rgba(255,255,255,0.4); cursor: default;">加载失败</div>';
+                }
+            });
+            
+            // 点击外部关闭弹窗
+            setTimeout(() => {
+                const closePopupOnClickOutside = (e) => {
+                    if (popup.contains(e.target) || avatarElement.contains(e.target)) return;
+                    if (popup._cleanup) popup._cleanup();
+                    popup.remove();
+                    currentPopupElement = null;
+                    document.removeEventListener('click', closePopupOnClickOutside, true);
+                };
+                document.addEventListener('click', closePopupOnClickOutside, true);
+            }, 200);
+        }
+        
+        /**
+         * 获取用户仓库列表
+         */
+        async function fetchUserRepos(githubId) {
+            if (!githubId || !isValidGitHubUsername(githubId)) {
+                return [];
+            }
+            
+            try {
+                const response = await fetch(`https://api.github.com/users/${githubId}/repos?sort=stars&per_page=3`, {
+                    headers: {
+                        'Accept': 'application/vnd.github.v3+json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    return [];
+                }
+                
+                const repos = await response.json();
+                return repos.map(repo => ({
+                    name: repo.name,
+                    fullName: repo.full_name,
+                    url: repo.html_url,
+                    description: repo.description || '',
+                    updatedAt: repo.updated_at || '',
+                    stargazersCount: typeof repo.stargazers_count === 'number' ? repo.stargazers_count : 0
+                }));
+            } catch (error) {
+                console.warn('[UserPopup] ⚠️ 获取仓库列表失败:', error);
+                return [];
+            }
         }
         
         /**
@@ -12288,6 +12930,36 @@
          * @param {string} targetUserId - 目标用户ID
          */
         function openMessageInput(targetUserId) {
+            // 检查目标用户是否忙碌
+            const presenceState = presenceChannel ? presenceChannel.presenceState() : {};
+            let targetUserBusy = false;
+            
+            Object.keys(presenceState).forEach((key) => {
+                const presenceEntries = presenceState[key];
+                const entries = Array.isArray(presenceEntries) ? presenceEntries : [presenceEntries];
+                entries.forEach(entry => {
+                    const userName = entry.user_name || entry.github_id || entry.github_username || '';
+                    if (userName === targetUserId && entry.status === 'busy') {
+                        targetUserBusy = true;
+                    }
+                });
+            });
+            
+            if (targetUserBusy) {
+                const currentUserId = localStorage.getItem('github_username') || null;
+                if (targetUserId !== currentUserId) {
+                    alert('该用户当前忙碌，无法接收消息');
+                    return;
+                }
+            }
+            
+            // 隐藏弹窗
+            const popup = document.querySelector('.user-popup');
+            if (popup) {
+                if (popup._cleanup) popup._cleanup();
+                popup.remove();
+                currentPopupElement = null;
+            }
             // 创建遮罩层
             const overlay = document.createElement('div');
             overlay.className = 'message-input-overlay';
@@ -14075,13 +14747,11 @@
                     if (leftTitle) {
                         const currentTitle = leftTitle.textContent || '';
                         if (!currentTitle.includes(normalizedUsername)) {
-                            // 移除"当前设备/This Device"标识（如果存在），然后添加新的（按语言）
-                            const cleanTitle = currentTitle
+                            const cleanTitle = (currentTitle || '')
                                 .replace(/\s*（当前设备）\s*$/g, '')
                                 .replace(/\s*\(This Device\)\s*$/gi, '')
                                 .trim();
-                            const suffix = getI18nText('common.current_device') || (currentLang === 'en' ? ' (This Device)' : '（当前设备）');
-                            leftTitle.textContent = (cleanTitle && cleanTitle.includes(normalizedUsername) ? cleanTitle : normalizedUsername) + suffix;
+                            leftTitle.textContent = (cleanTitle && cleanTitle.includes(normalizedUsername) ? cleanTitle : normalizedUsername);
                             console.log('[GitHub] ✅ 已更新抽屉标题:', leftTitle.textContent);
                         }
                     }
@@ -14598,6 +15268,15 @@
             if (totalUsers !== undefined) {
                 animateValue('totalUsers', totalUsers, 1400, { decimals: 0, useThousands: true });
             }
+            // 体检人数：与已上传聊天记录人数一致
+            const physicalExamEl = document.getElementById('physical-exam-count');
+            if (physicalExamEl) {
+                if (totalUsers !== undefined) {
+                    animateValue('physical-exam-count', totalUsers, 1400, { decimals: 0, useThousands: true });
+                } else {
+                    physicalExamEl.textContent = '--';
+                }
+            }
 
             // 2. 扫描次数 (totalAnalysis)
             const totalAnalysis = data.totalAnalysis !== undefined && data.totalAnalysis !== null ? Number(data.totalAnalysis) : undefined;
@@ -14747,6 +15426,17 @@
             
             window.allData = allDataArray;
             console.log(`[LPDEF] 📦 已初始化 window.allData，共 ${allDataArray.length} 条数据（用于选拔最强王者）`);
+
+            // 刷新后预填左侧抽屉「我的数据统计」，避免未点击地图时左侧无数据
+            try {
+                const code = localStorage.getItem('user_selected_country') || 'CN';
+                const name = (typeof countryNameMap !== 'undefined' && countryNameMap[code])
+                    ? (typeof currentLang !== 'undefined' && currentLang === 'zh' ? countryNameMap[code].zh : countryNameMap[code].en)
+                    : code;
+                if (typeof showDrawersWithCountryData === 'function') {
+                    showDrawersWithCountryData(code, name);
+                }
+            } catch (e) { /* ignore */ }
 
             // 注意：LPDEF 专家卡片将在 window.onload 的身份检查后渲染
             // 这里不调用 renderLPDEFExperts，避免覆盖身份检查的结果
@@ -14964,6 +15654,8 @@
                     // 显示空状态或错误提示
                     document.getElementById('totalUsers').textContent = '-';
                     document.getElementById('totalAnalysis').textContent = '-';
+                    const pec = document.getElementById('physical-exam-count');
+                    if (pec) pec.textContent = '-';
                 }
             } finally {
                 // 确保异常情况下也关闭加载过场
@@ -16367,7 +17059,6 @@
                                 ${realEvalTraits.map((t) => `<div class="text-[11px] text-[#00ff41]/70">- ${esc(t)}</div>`).join('')}
                             </div>
                         ` : ''}
-                        <div class="drawer-item-desc text-[8px] mt-2">${currentLang === 'en' ? 'From index.html final report' : '来自 index.html 最终报告'}</div>
                     </div>
                     ` : ''}
                     
@@ -16735,24 +17426,6 @@
             // 数据判别：定义变量 const isGlobalTopMode = !userData
             const isGlobalTopMode = !userData;
             
-            // UI 反馈优化：如果识别到是本地指纹匹配的用户，在抽屉标题增加"当前设备/This Device"标识
-            if (userData && window.currentUserMatchedByFingerprint) {
-                try {
-                    const leftTitle = document.getElementById('left-drawer-title');
-                    if (leftTitle) {
-                        // 检查标题是否已经包含"当前设备/This Device"，避免重复添加
-                        const currentText = leftTitle.textContent || '';
-                        if (!currentText.includes('（当前设备）') && !/\(This Device\)/i.test(currentText)) {
-                            const suffix = getI18nText('common.current_device') || (currentLang === 'en' ? ' (This Device)' : '（当前设备）');
-                            leftTitle.textContent = currentText + suffix;
-                            console.log('[Rank] ✅ 已更新左侧抽屉标题，添加"（当前设备）"标识');
-                        }
-                    }
-                } catch (e) {
-                    console.warn('[Rank] ⚠️ 更新抽屉标题失败:', e);
-                }
-            }
-
             // 维度配置（名称/单位随语言切换）
             const dimensionConfig = {
                 ai: { name: translateDimensionName('ai'), icon: DIMENSION_NAME_I18N.ai?.icon || '💬', suffix: translateDimensionSuffix('ai') },
@@ -18064,9 +18737,8 @@
                 const intensity = Math.min(1, (Number(value) || 0) / (maxVal || 1));
                 const a = 0.65 + intensity * 0.35;
                 return {
-                    // 提高对比度：避免黑底“糊成一坨”
-                    color: `rgba(192, 132, 252, ${a})`,           // #C084FC
-                    glow: `rgba(192, 132, 252, ${0.35 + intensity * 0.35})`,
+                    color: `rgba(0, 255, 65, ${a})`,
+                    glow: `rgba(0, 255, 65, ${0.35 + intensity * 0.35})`,
                 };
             };
 
