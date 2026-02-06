@@ -1689,7 +1689,7 @@
             border-radius: 50%; /* 确保图片本身也是圆形的 */
         }
         
-        /* 拟态风格弹窗 - 在头像正上方、活跃节点框外（fixed 定位由 JS 计算） */
+        /* 拟态风格弹窗 - 从活跃节点框上边缘推出，不遮挡抽屉（fixed 定位由 JS 计算） */
         .user-popup {
             position: fixed;
             font-size: 13px;
@@ -1708,6 +1708,20 @@
             white-space: normal;
             overflow-x: hidden;
             overflow-y: hidden;
+        }
+        /* 从活跃节点框上边缘推出：自下而上滑出，拟物感 */
+        .user-popup.emerged-from-drawer {
+            animation: popup-emerge-from-drawer 0.28s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+        }
+        @keyframes popup-emerge-from-drawer {
+            from {
+                opacity: 0;
+                transform: translateX(-50%) translateY(18px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
         }
         
         /* 箭头水平位置由 JS 设置 --arrow-left，对准头像中心 */
@@ -1741,6 +1755,14 @@
                 opacity: 1;
                 transform: translateX(-50%) translateY(0);
             }
+        }
+        /* 贴边时无 translateX，仅淡入 */
+        .user-popup.edge-position {
+            animation: popup-appear-edge 0.22s ease-out forwards;
+        }
+        @keyframes popup-appear-edge {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
         }
         
         .user-popup-header {
@@ -3752,12 +3774,11 @@
                 const maxPct = total > 0 ? Math.max(...distribution.map((it) => (it.count / total) * 100)) : 0;
                 box.className = 'personality-vbar-chart';
                 box.innerHTML = distribution.map((item) => {
-                    const type = (item.type || 'UNKNOWN').toUpperCase();
                     const pctVal = total > 0 ? (item.count / total) * 100 : 0;
                     const pct = pctVal.toFixed(1);
                     const heightPct = maxPct > 0 ? Math.max(4, (pctVal / maxPct) * 100) : 0;
-                    const name = getPersonalityTypeName(type, currentLang);
-                    return `<div class="personality-vbar-col"><div class="personality-vbar-bar-wrap"><div class="personality-vbar-fill" style="height: ${heightPct}%;"></div></div><span class="personality-vbar-label">${escapeHtml(type)}</span><span class="personality-vbar-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span><span class="personality-vbar-pct">${pct}%</span></div>`;
+                    const title = getPersonalityTitle(item, currentLang);
+                    return `<div class="personality-vbar-col"><div class="personality-vbar-bar-wrap"><div class="personality-vbar-fill" style="height: ${heightPct}%;"></div></div><span class="personality-vbar-name" title="${escapeHtml(title)}">${escapeHtml(title)}</span><span class="personality-vbar-pct">${pct}%</span></div>`;
                 }).join('');
             };
 
@@ -4951,6 +4972,12 @@
                     './personality-names-en.json',
                     './src/personality-names-en.json'
                 ]);
+                const personalityNamesZh = await tryFetchJson([
+                    './personalityNames.json',
+                    './src/personalityNames.json',
+                    './personality-names.json',
+                    './src/personality-names.json'
+                ]);
 
                 // 答案之书：中英文共用同一份 JSON（{[vibeIndex]: {title_zh,content_zh,title_en,content_en}}）
                 const answerBookByVibeIndex = await tryFetchJson([
@@ -4960,7 +4987,7 @@
                     './src/answer-book-by-vibe-index.json'
                 ]);
 
-                window.__LANG_CONFIG = { rankEn, personalityNamesEn, answerBookByVibeIndex };
+                window.__LANG_CONFIG = { rankEn, personalityNamesEn, personalityNamesZh, answerBookByVibeIndex };
             } catch { /* ignore */ }
         }
 
@@ -6685,8 +6712,20 @@
          * @param {string} countryName - 国家名称
          * @param {Object} [overrideRightData] - 可选，校准后拉取的国家摘要，用于右侧抽屉 10 项核心指标
          */
+        // 请求去重：避免同一国家的多个并发请求导致重复刷新
+        if (!window.__drawerFetchInProgress) window.__drawerFetchInProgress = new Map();
+        
         function showDrawersWithCountryData(countryCode, countryName, overrideRightData, options) {
             const opts = (options && typeof options === 'object') ? options : {};
+            const summaryOnly = !!(opts.summaryOnly && overrideRightData != null);
+            const ccUpper = String(countryCode || '').trim().toUpperCase();
+            
+            // 请求去重：如果已有相同国家的请求在进行中，且不是 summaryOnly 模式，则跳过
+            if (!summaryOnly && window.__drawerFetchInProgress.has(ccUpper)) {
+                console.log('[Drawer] ⏭️ 跳过重复请求:', ccUpper, '（已有请求进行中）');
+                return;
+            }
+            
             // 保存当前国家信息
             currentDrawerCountry.code = countryCode;
             currentDrawerCountry.name = countryName;
@@ -6725,36 +6764,37 @@
             if (rightTitle) rightTitle.textContent = countryDisplayName;
 
             // ============================================
-            // 骨架屏：先显示加载占位
+            // 骨架屏：仅完整打开时显示，summary 回调仅刷新右侧不闪骨架
             // ============================================
-            const skeletonHTML = `
-                <div class="drawer-skeleton-card">
-                    <div class="drawer-skeleton-header"></div>
-                    <div class="drawer-skeleton-line long"></div>
-                    <div class="drawer-skeleton-line medium"></div>
-                    <div class="drawer-skeleton-line short"></div>
-                </div>
-                <div class="drawer-skeleton-card">
-                    <div class="drawer-skeleton-header"></div>
-                    <div class="drawer-skeleton-line long"></div>
-                    <div class="drawer-skeleton-line medium"></div>
-                </div>
-                <div class="drawer-skeleton-card">
-                    <div class="drawer-skeleton-header"></div>
-                    <div class="drawer-skeleton-line long"></div>
-                    <div class="drawer-skeleton-line short"></div>
-                </div>
-            `;
-            
-            if (leftBody) {
-                leftBody.innerHTML = skeletonHTML;
-                leftBody.classList.add('drawer-loading');
+            if (!summaryOnly) {
+                const skeletonHTML = `
+                    <div class="drawer-skeleton-card">
+                        <div class="drawer-skeleton-header"></div>
+                        <div class="drawer-skeleton-line long"></div>
+                        <div class="drawer-skeleton-line medium"></div>
+                        <div class="drawer-skeleton-line short"></div>
+                    </div>
+                    <div class="drawer-skeleton-card">
+                        <div class="drawer-skeleton-header"></div>
+                        <div class="drawer-skeleton-line long"></div>
+                        <div class="drawer-skeleton-line medium"></div>
+                    </div>
+                    <div class="drawer-skeleton-card">
+                        <div class="drawer-skeleton-header"></div>
+                        <div class="drawer-skeleton-line long"></div>
+                        <div class="drawer-skeleton-line short"></div>
+                    </div>
+                `;
+                if (leftBody) {
+                    leftBody.innerHTML = skeletonHTML;
+                    leftBody.classList.add('drawer-loading');
+                }
+                if (rightBody) {
+                    rightBody.innerHTML = skeletonHTML + skeletonHTML;
+                    rightBody.classList.add('drawer-loading');
+                }
             }
-            if (rightBody) {
-                rightBody.innerHTML = skeletonHTML + skeletonHTML;
-                rightBody.classList.add('drawer-loading');
-            }
-            
+
             // ============================================
             // 辅助函数：渐进式渲染卡片
             // ============================================
@@ -6780,7 +6820,6 @@
             };
 
             // 右侧抽屉数据源：校准后传入的国家摘要优先；否则缓存优先；最后才用全局 lastData 兜底
-            const ccUpper = String(countryCode || '').trim().toUpperCase();
             if (!window.__countrySummaryCache) window.__countrySummaryCache = new Map();
             const cachedSummary = (() => {
                 try {
@@ -6796,26 +6835,34 @@
                     : (cachedSummary != null ? cachedSummary : (window.lastData || {}));
             
             // 若没有传入国家摘要，则异步拉取“国家汇总(10项核心指标)”用于右侧抽屉汇总卡片
-            // 不阻塞当前抽屉渲染：先用全局 lastData 兜底展示，拉取完成后自动刷新为国家口径
+            // 不阻塞当前抽屉渲染：先用全局 lastData 兜底展示，拉取完成后自动刷新为国家口径（仅刷新右侧，不重绘左侧）
             try {
                 const cc = ccUpper;
                 const shouldFetchSummary =
+                    !summaryOnly &&
                     overrideRightData == null &&
                     cc.length === 2 &&
                     typeof fetchCountrySummaryV3 === 'function';
                 if (shouldFetchSummary) {
+                    // 标记请求进行中
+                    window.__drawerFetchInProgress.set(cc, true);
                     fetchCountrySummaryV3(cc)
                         .then((summary) => {
+                            // 清除请求标记
+                            window.__drawerFetchInProgress.delete(cc);
                             // 避免竞态：只在用户仍停留在同一国家时刷新
                             if (!summary) return;
                             try { window.__countrySummaryCache.set(cc, { summary, ts: Date.now() }); } catch { /* ignore */ }
                             if (!currentDrawerCountry || String(currentDrawerCountry.code || '').toUpperCase() !== cc) return;
                             // 关键保护：若当前处于国家透视（COUNTRY）模式，不允许这条“全球流面板”的刷新覆盖右抽屉
-                            // 否则会出现“美区统计闪一下又被切回全球”的现象
                             if (typeof currentViewState === 'string' && currentViewState === 'COUNTRY') return;
-                            showDrawersWithCountryData(cc, countryName, summary);
+                            // 仅刷新右侧抽屉数据，不重设骨架、不重建左侧，避免反复叠加与错乱
+                            showDrawersWithCountryData(cc, countryName, summary, { summaryOnly: true });
                         })
-                        .catch(() => {});
+                        .catch(() => {
+                            // 清除请求标记（即使失败也要清除）
+                            window.__drawerFetchInProgress.delete(cc);
+                        });
                 }
             } catch (e) {
                 // ignore
@@ -6838,8 +6885,20 @@
             const rightDrawerDimensions = ['ai', 'word', 'day', 'no', 'say', 'please']; // 所有维度卡片
 
             // 获取当前用户数据（用于判断是否为全球最强模式）
-            // 尝试从多个来源获取用户数据（与 window.onload 逻辑一致）
             let currentUser = null;
+            if (summaryOnly) {
+                currentUser = window.currentUser || null;
+                if (!currentUser && Array.isArray(window.allData) && window.allData.length > 0) {
+                    const norm = (fp) => String(fp || '').trim().toLowerCase();
+                    const localFp = (localStorage.getItem('user_fingerprint') || '').trim();
+                    const localGh = (localStorage.getItem('github_username') || '').trim();
+                    currentUser = window.allData.find(item => {
+                        const ifp = norm(item.fingerprint || item.user_fingerprint);
+                        const iid = norm(item.user_identity);
+                        return (ifp && (ifp === norm(localFp) || iid === norm(localFp))) || (iid && iid === norm(localFp)) || (localGh && norm(String(item.github_username || item.user_name || '')) === norm(localGh));
+                    }) || null;
+                }
+            } else {
             try {
                 // 方法1: 从全局变量获取
                 if (window.currentUser) {
@@ -7476,6 +7535,7 @@
                     }
                 }
             }
+            }
 
             // 填充右侧抽屉 - 维度卡片和统计卡片
             const rightCards = []; // 收集所有右侧卡片用于渐进式渲染
@@ -7634,13 +7694,12 @@
                     const total = data.personalityRank.reduce((s, it) => s + (Number(it.count) || 0), 0);
                     const maxPct = total > 0 ? Math.max(...data.personalityRank.map((it) => (Number(it.count) || 0) / total * 100)) : 0;
                     personalityListHtml = data.personalityRank.map((item) => {
-                        const type = (item.type || 'UNKNOWN').toUpperCase();
                         const count = Number(item.count) || 0;
                         const pctVal = total > 0 ? (count / total) * 100 : 0;
                         const pct = pctVal.toFixed(1);
                         const heightPct = maxPct > 0 ? Math.max(4, (pctVal / maxPct) * 100) : 0;
-                        const name = getPersonalityTypeName(type, currentLang);
-                        return `<div class="personality-vbar-col"><div class="personality-vbar-bar-wrap"><div class="personality-vbar-fill" style="height: ${heightPct}%;"></div></div><span class="personality-vbar-label">${escapeHtml(type)}</span><span class="personality-vbar-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span><span class="personality-vbar-pct">${pct}%</span></div>`;
+                        const title = getPersonalityTitle(item, currentLang);
+                        return `<div class="personality-vbar-col"><div class="personality-vbar-bar-wrap"><div class="personality-vbar-fill" style="height: ${heightPct}%;"></div></div><span class="personality-vbar-name" title="${escapeHtml(title)}">${escapeHtml(title)}</span><span class="personality-vbar-pct">${pct}%</span></div>`;
                     }).join('');
                 }
                 personalityCard.innerHTML = `
@@ -7677,29 +7736,26 @@
                         const maxPct = total > 0 ? Math.max(...data.personalityRank.map((it) => (Number(it.count) || 0) / total * 100)) : 0;
                         drawerPersonalityList.className = 'personality-vbar-chart';
                         drawerPersonalityList.innerHTML = data.personalityRank.map((item) => {
-                            const type = (item.type || 'UNKNOWN').toUpperCase();
                             const count = Number(item.count) || 0;
                             const pctVal = total > 0 ? (count / total) * 100 : 0;
                             const pct = pctVal.toFixed(1);
                             const heightPct = maxPct > 0 ? Math.max(4, (pctVal / maxPct) * 100) : 0;
-                            const name = getPersonalityTypeName(type, currentLang);
-                            return `<div class="personality-vbar-col"><div class="personality-vbar-bar-wrap"><div class="personality-vbar-fill" style="height: ${heightPct}%;"></div></div><span class="personality-vbar-label">${escapeHtml(type)}</span><span class="personality-vbar-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span><span class="personality-vbar-pct">${pct}%</span></div>`;
+                            const title = getPersonalityTitle(item, currentLang);
+                            return `<div class="personality-vbar-col"><div class="personality-vbar-bar-wrap"><div class="personality-vbar-fill" style="height: ${heightPct}%;"></div></div><span class="personality-vbar-name" title="${escapeHtml(title)}">${escapeHtml(title)}</span><span class="personality-vbar-pct">${pct}%</span></div>`;
                         }).join('');
                     }
                 }
             }
 
-            // 显示抽屉（确保打开）
-            if (leftDrawer) {
-                leftDrawer.classList.add('active');
+            // 显示抽屉（仅完整打开时，summary 仅刷新右侧不重复打开）
+            if (!summaryOnly) {
+                if (leftDrawer) leftDrawer.classList.add('active');
+                if (rightDrawer) rightDrawer.classList.add('active');
+                try {
+                    localStorage.setItem('left_drawer_open', 'true');
+                    localStorage.setItem('right_drawer_open', 'true');
+                } catch (e) { /* ignore */ }
             }
-            if (rightDrawer) {
-                rightDrawer.classList.add('active');
-            }
-
-            // 【修复】保存抽屉打开状态和选中国家到 localStorage
-            localStorage.setItem('left_drawer_open', 'true');
-            localStorage.setItem('right_drawer_open', 'true');
             localStorage.setItem('selected_country', countryCode);
             console.log('[Drawer] 抽屉已打开:', countryDisplayName);
         }
@@ -10553,7 +10609,8 @@
                     try { window.refreshVibeCard && window.refreshVibeCard(String(countryCode).toUpperCase()); } catch { /* ignore */ }
                     if (countryCode && typeof fetchCountrySummaryV3 === 'function') {
                         fetchCountrySummaryV3(countryCode).then((summary) => {
-                            if (summary) showDrawersWithCountryData(countryCode, countryName || countryCode, summary);
+                            // 仅刷新右侧抽屉数据，不重设骨架、不重建左侧，避免反复叠加与错乱
+                            if (summary) showDrawersWithCountryData(countryCode, countryName || countryCode, summary, { summaryOnly: true });
                         }).catch(() => {});
                     } else if (countryCode) {
                         showDrawersWithCountryData(countryCode, countryName || countryCode);
@@ -11296,7 +11353,7 @@
             }
         }
 
-        /** 16 型人格缩写 → 中文/英文名称（用于柱状图下方文字） */
+        /** 16 型人格缩写 → 中文/英文短名（仅作称号缺失时的回退） */
         const PERSONALITY_TYPE_NAMES = {
             zh: { INTJ: '建筑师', INTP: '逻辑学家', ENTJ: '指挥官', ENTP: '辩论家', INFJ: '提倡者', INFP: '调停者', ENFJ: '主人公', ENFP: '竞选者', ISTJ: '物流师', ISFJ: '守卫者', ESTJ: '总经理', ESFJ: '执政官', ISTP: '鉴赏家', ISFP: '探险家', ESTP: '企业家', ESFP: '表演者' },
             en: { INTJ: 'Architect', INTP: 'Logician', ENTJ: 'Commander', ENTP: 'Debater', INFJ: 'Advocate', INFP: 'Mediator', ENFJ: 'Protagonist', ENFP: 'Campaigner', ISTJ: 'Logistician', ISFJ: 'Defender', ESTJ: 'Executive', ESFJ: 'Consul', ISTP: 'Virtuoso', ISFP: 'Adventurer', ESTP: 'Entrepreneur', ESFP: 'Entertainer' }
@@ -11305,6 +11362,22 @@
             const key = String(type || '').toUpperCase();
             const L = (lang === 'en' ? 'en' : 'zh');
             return (PERSONALITY_TYPE_NAMES[L] && PERSONALITY_TYPE_NAMES[L][key]) ? PERSONALITY_TYPE_NAMES[L][key] : key;
+        }
+        /** 人格分布图显示名称：优先接口/称号表的中英文称号，避免 LPDEF 字母 */
+        function getPersonalityTitle(item, lang) {
+            const L = (lang === 'en' ? 'en' : 'zh');
+            const nameZh = item.name_zh || item.personality_name_zh || item.title_zh || item.name || item.personality_name || item.title;
+            const nameEn = item.name_en || item.personality_name_en || item.title_en || item.name || item.personality_name || item.title;
+            const direct = L === 'en' ? (nameEn || nameZh) : (nameZh || nameEn);
+            if (typeof direct === 'string' && direct.trim()) return direct.trim();
+            const idx = String(item.vibe_index_str || item.vibe_index || item.vibeIndexStr || item.vibeIndex || '').trim();
+            if (idx.length === 5) {
+                const cfg = window.__LANG_CONFIG || {};
+                const names = L === 'en' ? (cfg.personalityNamesEn || {}) : (cfg.personalityNamesZh || {});
+                const hit = names[idx];
+                if (typeof hit === 'string' && hit.trim()) return hit.trim();
+            }
+            return getPersonalityTypeName(item.type || item.personality_type, lang);
         }
 
         /**
@@ -11325,19 +11398,17 @@
             
             list.className = 'personality-vbar-chart';
             list.innerHTML = distribution.map((item) => {
-                const type = (item.type || 'UNKNOWN').toUpperCase();
                 const count = Number(item.count) || 0;
                 const pctVal = total > 0 ? (count / total) * 100 : 0;
                 const pct = pctVal.toFixed(1);
                 const heightPct = maxPct > 0 ? Math.max(4, (pctVal / maxPct) * 100) : 0;
-                const name = getPersonalityTypeName(type, currentLang);
+                const title = getPersonalityTitle(item, currentLang);
                 return `
                 <div class="personality-vbar-col">
                     <div class="personality-vbar-bar-wrap">
                         <div class="personality-vbar-fill" style="height: ${heightPct}%;"></div>
                     </div>
-                    <span class="personality-vbar-label">${escapeHtml(type)}</span>
-                    <span class="personality-vbar-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
+                    <span class="personality-vbar-name" title="${escapeHtml(title)}">${escapeHtml(title)}</span>
                     <span class="personality-vbar-pct">${pct}%</span>
                 </div>`;
             }).join('');
@@ -12753,35 +12824,43 @@
                 // 水平：与头像中心对齐，超出视口则贴边
                 let centerX = avatarRect.left + avatarRect.width / 2;
                 let leftPx = centerX - pw / 2;
+                let useTranslateX = true;
                 if (leftPx < SAFE_MARGIN) {
                     leftPx = SAFE_MARGIN;
-                    popup.style.left = leftPx + 'px';
-                    popup.style.transform = 'none';
+                    useTranslateX = false;
                 } else if (leftPx + pw > vw - SAFE_MARGIN) {
                     leftPx = vw - SAFE_MARGIN - pw;
-                    popup.style.left = leftPx + 'px';
-                    popup.style.transform = 'none';
-                } else {
-                    popup.style.left = centerX + 'px';
-                    popup.style.transform = 'translateX(-50%)';
+                    useTranslateX = false;
                 }
+                popup.style.left = (useTranslateX ? centerX : leftPx) + 'px';
+                popup.style.transform = useTranslateX ? 'translateX(-50%)' : 'none';
+                if (useTranslateX) popup.classList.remove('edge-position'); else popup.classList.add('edge-position');
                 
-                // 垂直：弹窗整体置于活跃节点框上方，不遮挡头像与列表
+                // 垂直：从活跃节点框上边缘推出，弹窗整体在抽屉上方，不遮挡抽屉
                 let top;
-                if (drawerRect && ph + GAP <= drawerRect.top - SAFE_MARGIN) {
+                const aboveDrawerTop = drawerRect ? (drawerRect.top - GAP - ph) : (avatarRect.top - GAP - ph);
+                const fitsAboveDrawer = drawerRect && (aboveDrawerTop >= SAFE_MARGIN);
+                if (fitsAboveDrawer) {
                     top = drawerRect.top - ph - GAP;
+                    if (useTranslateX) popup.classList.add('emerged-from-drawer');
+                    else popup.classList.remove('emerged-from-drawer');
                     popup.classList.remove('top-position');
-                } else {
-                    top = avatarRect.top - GAP - ph;
-                }
-                if (top < SAFE_MARGIN) {
+                } else if (drawerRect) {
+                    // 上方空间不足时放在头像下方，避免遮挡活跃节点框
+                    popup.classList.remove('emerged-from-drawer');
                     top = avatarRect.bottom + GAP;
+                    if (top + ph > vh - SAFE_MARGIN) top = Math.max(SAFE_MARGIN, vh - SAFE_MARGIN - ph);
                     popup.classList.add('top-position');
-                    if (top + ph > vh - SAFE_MARGIN) {
-                        top = Math.max(SAFE_MARGIN, vh - SAFE_MARGIN - ph);
-                    }
                 } else {
-                    if (top < SAFE_MARGIN) top = SAFE_MARGIN;
+                    top = aboveDrawerTop;
+                    if (top < SAFE_MARGIN) {
+                        top = avatarRect.bottom + GAP;
+                        popup.classList.add('top-position');
+                        if (top + ph > vh - SAFE_MARGIN) top = Math.max(SAFE_MARGIN, vh - SAFE_MARGIN - ph);
+                    } else {
+                        popup.classList.remove('top-position');
+                    }
+                    popup.classList.remove('emerged-from-drawer');
                 }
                 popup.style.top = top + 'px';
                 
