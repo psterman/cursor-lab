@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- CSP：页面由 Worker 提供时 _headers 不生效，用 meta 保证 IP/地理位置、ISO 映射、Rank 等请求不被拦截 -->
+    <!-- CSP：connect-src 需包含 https://api.github.com（仓库预览）、https://api.ipify.org / https://ipapi.co（IP/地理位置） -->
      <script data-cfasync="false" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://html2canvas.hertzen.com https://cdn.tailwindcss.com; connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://cursor-clinical-analysis.psterman.workers.dev https://*.workers.dev https://psterman.supabase.co https://dtcplfhcgnxdzpigmotb.supabase.co wss://dtcplfhcgnxdzpigmotb.supabase.co https://raw.githubusercontent.com https://api.ipify.org https://ip-api.com https://ipapi.co https://api.github.com https://www.google.com wss://*.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com https://r2cdn.perplexity.ai;">
     <title>Global Statistics Dashboard - Vibe Coding</title>
@@ -13195,6 +13195,7 @@
             }
             function renderRepoList(repos, repoListEl) {
                 if (!repoListEl) return;
+                try { if (window.myRadarChart) window.myRadarChart.destroy(); window.myRadarChart = null; } catch (e) { /* ignore */ }
                 if (!repos || repos.length === 0) {
                     var emptyMsg = (typeof isValidGitHubUsername === 'function' && isValidGitHubUsername(githubId))
                         ? '该用户暂无公开仓库'
@@ -13271,32 +13272,33 @@
         }
         
         /**
-         * 获取用户仓库列表
+         * 获取用户仓库列表（优先缓存，否则请求后端代理 /api/github-proxy/:username 避免 403/CSP）
          */
         async function fetchUserRepos(githubId) {
             if (!githubId || !isValidGitHubUsername(githubId)) {
                 return [];
             }
-            
-            const url = `https://api.github.com/users/${encodeURIComponent(githubId)}/repos?sort=stars&per_page=10`;
-            const response = await fetch(url, {
-                headers: { 'Accept': 'application/vnd.github.v3+json' }
+            var base = (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content) || '';
+            if (base && !base.endsWith('/')) base = base + '/';
+            var proxyUrl = base ? (base + 'api/github-proxy/' + encodeURIComponent(githubId)) : ('/api/github-proxy/' + encodeURIComponent(githubId));
+            const response = await fetch(proxyUrl, {
+                headers: { 'Accept': 'application/json' }
             });
-            
             if (!response.ok) {
-                throw new Error('GitHub API ' + response.status);
+                throw new Error('GitHub proxy ' + response.status);
             }
-            
             const repos = await response.json();
             if (!Array.isArray(repos)) throw new Error('Invalid response');
-            return repos.map(repo => ({
-                name: repo.name,
-                fullName: repo.full_name,
-                url: repo.html_url,
-                description: repo.description || '',
-                updatedAt: repo.updated_at || '',
-                stargazersCount: typeof repo.stargazers_count === 'number' ? repo.stargazers_count : 0
-            }));
+            return repos.map(function (repo) {
+                return {
+                    name: repo.name,
+                    fullName: repo.full_name,
+                    url: repo.html_url,
+                    description: repo.description || '',
+                    updatedAt: repo.updated_at || '',
+                    stargazersCount: typeof repo.stargazers_count === 'number' ? repo.stargazers_count : 0
+                };
+            });
         }
         
         /**

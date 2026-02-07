@@ -54,6 +54,7 @@ export type Env = {
   STATS_STORE?: KVNamespace; // KV 存储（第二阶段使用）
   CONTENT_STORE?: KVNamespace; // KV 存储（第三阶段：文案库）
   prompts_library?: D1Database; // D1 数据库：答案之书
+  GITHUB_TOKEN?: string; // 可选，用于 GitHub API 代理提升限流额度
 };
 
 async function refreshCountryStatsCurrent(env: Env): Promise<{ success: boolean; error?: string }> {
@@ -2914,6 +2915,41 @@ app.get('/api/rank-resources', async (c) => {
 });
 
 /**
+ * GET /api/github-proxy/:username
+ * 代理 GitHub 用户仓库列表，解决前端 403 限流与 CSP 限制。请求头带 User-Agent（GitHub 必需），可选 GITHUB_TOKEN 提升限额。
+ */
+app.get('/api/github-proxy/:username', async (c) => {
+  const username = c.req.param('username');
+  if (!username || !/^[a-zA-Z0-9_-]+$/.test(username)) {
+    return c.json({ error: 'Invalid username' }, 400);
+  }
+  const env = c.env as Env;
+  const url = `https://api.github.com/users/${encodeURIComponent(username)}/repos?sort=stars&per_page=10`;
+  const headers: Record<string, string> = {
+    'Accept': 'application/vnd.github.v3+json',
+    'User-Agent': 'Hono-Worker',
+  };
+  if (env.GITHUB_TOKEN && env.GITHUB_TOKEN.trim()) {
+    headers['Authorization'] = `Bearer ${env.GITHUB_TOKEN.trim()}`;
+  }
+  try {
+    const resp = await fetch(url, { headers });
+    if (!resp.ok) {
+      const text = await resp.text();
+      return c.json({ error: 'GitHub API error', status: resp.status, details: text.slice(0, 200) }, 502);
+    }
+    const data = await resp.json();
+    if (!Array.isArray(data)) {
+      return c.json({ error: 'Invalid GitHub response' }, 502);
+    }
+    return c.json(data, 200, { 'Cache-Control': 'public, max-age=300' });
+  } catch (e: any) {
+    console.error('[Worker] /api/github-proxy 错误:', e);
+    return c.json({ error: e?.message || 'Proxy error' }, 502);
+  }
+});
+
+/**
  * 路由：/api/fingerprint/identify
  * 功能：根据指纹识别用户（On Load）
  * 当页面加载时，前端调用此接口查询用户信息
@@ -3025,27 +3061,23 @@ app.post('/api/fingerprint/bind', async (c) => {
 app.post('/api/fingerprint/migrate', async (c) => {
   try {
     const env = c.env;
-    const body = await c.req.json();
-    const { fingerprint: oldFingerprint, sourceFp, userId: githubUserId, username: githubUsername, claimToken } = body;
+    let body: any = {};
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ status: 'skipped', message: '参数缺失，已跳过' }, 200);
+    }
+    const { fingerprint: oldFingerprint, sourceFp, userId: githubUserId, username: githubUsername, claimToken } = body || {};
 
-    if (!githubUserId) {
-      return c.json({
-        status: 'error',
-        error: 'userId 参数必填',
-        errorCode: 'MISSING_PARAMETERS',
-      }, 400);
+    if (!githubUserId || String(githubUserId).trim() === '') {
+      return c.json({ status: 'skipped', message: 'userId 缺失，已跳过' }, 200);
     }
 
-    // 【支持两种迁移方式】claimToken 或 fingerprint
+    // 【支持两种迁移方式】claimToken 或 fingerprint；缺失时静默跳过，不返回 400
     const hasClaimToken = claimToken && String(claimToken).trim() !== '';
-    const hasFingerprint = oldFingerprint && String(oldFingerprint).trim() !== '';
-    
+    const hasFingerprint = (oldFingerprint && String(oldFingerprint).trim() !== '') || (sourceFp && String(sourceFp).trim() !== '');
     if (!hasClaimToken && !hasFingerprint) {
-      return c.json({
-        status: 'error',
-        error: '必须提供 claimToken 或 fingerprint 参数',
-        errorCode: 'MISSING_MIGRATION_KEY',
-      }, 400);
+      return c.json({ status: 'skipped', message: 'claimToken 或 fingerprint 缺失，已跳过' }, 200);
     }
 
     if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
