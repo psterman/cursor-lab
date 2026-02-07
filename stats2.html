@@ -12925,6 +12925,11 @@
                 if (popup._cleanup) popup._cleanup();
                 popup.remove();
             });
+            // 渲染用户弹窗前先 destroy 旧雷达图实例，防止报错中断
+            if (window.myRadarChart) {
+                try { window.myRadarChart.destroy(); } catch (e) { /* ignore */ }
+                window.myRadarChart = null;
+            }
             const githubId = avatarElement.getAttribute('data-github-id');
             const avatarUrl = avatarElement.getAttribute('data-avatar-url');
             const status = avatarElement.getAttribute('data-status');
@@ -13102,7 +13107,7 @@
                 });
             }
             
-            // 获取五个仓库并渲染：悬浮显示介绍，最后更新、star 数，点击跳转
+            // 从 window.allRankResources 中通过 github_username 检索仓库列表，有则渲染，无则请求 API 并写入缓存
             function formatRepoUpdatedAt(isoStr) {
                 if (!isoStr) return '';
                 try {
@@ -13117,10 +13122,9 @@
                     return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
                 } catch { return ''; }
             }
-            fetchUserRepos(githubId).then(repos => {
-                const repoListEl = popup.querySelector(`#repo-list-${userIndex}`);
+            function renderRepoList(repos, repoListEl) {
                 if (!repoListEl) return;
-                if (repos.length === 0) {
+                if (!repos || repos.length === 0) {
                     var emptyMsg = (typeof isValidGitHubUsername === 'function' && isValidGitHubUsername(githubId))
                         ? '该用户暂无公开仓库'
                         : '该用户为访客或未绑定 GitHub，无仓库信息';
@@ -13137,12 +13141,24 @@
                     return `<a class="user-popup-repo-item" href="${escapeHtml(repo.url)}" target="_blank" rel="noopener" data-repo-url="${escapeHtml(repo.url)}">${escapeHtml(repo.name)}${metaHtml}<span class="user-popup-repo-item-tooltip${tooltipClass}">${tooltipText}</span></a>`;
                 }).join('');
                 repoListEl.innerHTML = repoHtml;
-            }).catch(() => {
-                const repoListEl = popup.querySelector(`#repo-list-${userIndex}`);
-                if (repoListEl) {
-                    repoListEl.innerHTML = '<div class="user-popup-repo-item" style="color: rgba(255,255,255,0.4); cursor: default;">加载失败</div>';
+            }
+            (function () {
+                var repoListEl = popup.querySelector('#repo-list-' + userIndex);
+                if (!repoListEl) return;
+                if (!window.allRankResources) window.allRankResources = {};
+                var cached = githubId && window.allRankResources[githubId];
+                if (cached !== undefined && Array.isArray(cached)) {
+                    renderRepoList(cached, repoListEl);
+                    return;
                 }
-            });
+                fetchUserRepos(githubId).then(function (repos) {
+                    if (githubId) window.allRankResources[githubId] = repos;
+                    renderRepoList(repos, popup.querySelector('#repo-list-' + userIndex));
+                }).catch(function () {
+                    var el = popup.querySelector('#repo-list-' + userIndex);
+                    if (el) el.innerHTML = '<div class="user-popup-repo-item" style="color: rgba(255,255,255,0.4); cursor: default;">加载失败</div>';
+                });
+            })();
             
             // 点击外部关闭弹窗
             setTimeout(() => {
