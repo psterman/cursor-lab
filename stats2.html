@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- CSP：页面由 Worker 提供时 _headers 不生效，用 meta 保证 IP/地理位置、ISO 映射、Rank 等请求不被拦截 -->
      <script data-cfasync="false" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://html2canvas.hertzen.com https://cdn.tailwindcss.com; connect-src 'self' https://cursor-clinical-analysis.psterman.workers.dev https://psterman.supabase.co https://dtcplfhcgnxdzpigmotb.supabase.co wss://dtcplfhcgnxdzpigmotb.supabase.co https://raw.githubusercontent.com https://api.ipify.org https://ip-api.com https://api.github.com wss://*.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src 'self' https://fonts.gstatic.com;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://html2canvas.hertzen.com https://cdn.tailwindcss.com; connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://cursor-clinical-analysis.psterman.workers.dev https://*.workers.dev https://psterman.supabase.co https://dtcplfhcgnxdzpigmotb.supabase.co wss://dtcplfhcgnxdzpigmotb.supabase.co https://raw.githubusercontent.com https://api.ipify.org https://ip-api.com https://ipapi.co https://api.github.com https://www.google.com wss://*.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com https://r2cdn.perplexity.ai;">
     <title>Global Statistics Dashboard - Vibe Coding</title>
     <!-- 
     ============================================
@@ -96,26 +96,21 @@
             'https://raw.githubusercontent.com/github/fetch/master/favicon.ico'
         ],
         
-        // 检测是否有代理
+        // 检测是否有代理（需 CSP connect-src 允许 https://www.google.com）
         async detect(timeout = 1500) {
             console.log('[ProxyDetect] 🔍 检测网络环境...');
-            
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), timeout);
-            
             try {
-                // 尝试访问 Google（被墙，有代理才能访问）
                 const start = performance.now();
                 await fetch('https://www.google.com/generate_204', {
                     mode: 'no-cors',
                     signal: controller.signal
                 });
                 clearTimeout(timer);
-                
                 const latency = Math.round(performance.now() - start);
                 console.log(`[ProxyDetect] ✅ 检测到代理 (${latency}ms)`);
                 return { hasProxy: true, latency };
-                
             } catch (err) {
                 clearTimeout(timer);
                 console.log('[ProxyDetect] ❌ 无代理或代理未生效');
@@ -1616,6 +1611,8 @@
         .inbox-item-info { font-size: 11px; color: #a1a1aa; }
         .inbox-item-btn { padding: 4px 10px; font-size: 10px; border: 1px solid rgba(0, 255, 65, 0.5); color: #00ff41; background: transparent; cursor: pointer; border-radius: 4px; transition: all 0.2s; }
         .inbox-item-btn:hover { background: rgba(0, 255, 65, 0.15); }
+        .inbox-indicator { position: relative; }
+        .inbox-indicator.has-new::after { content: ''; position: absolute; top: 2px; right: 2px; width: 6px; height: 6px; background: #ef4444; border-radius: 50%; }
 
         /* 阅后即焚阅读器 - 模糊渐显动画 */
         .burn-reader-overlay {
@@ -3510,7 +3507,9 @@
             try {
                 const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content || 
                                    'https://cursor-clinical-analysis.psterman.workers.dev/';
-                const url = `${apiEndpoint}api/v2/country-average?countryCode=${countryCode}`;
+                var _fp = '';
+                try { _fp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+                const url = `${apiEndpoint}api/v2/country-average?countryCode=${countryCode}&fingerprint=${encodeURIComponent(_fp)}&_t=${Date.now()}`;
                 
                 const response = await fetch(url);
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -4057,7 +4056,9 @@
                 // 国家模式下，需要重新获取全网数据用于占比计算
                 // (因为上面的 globalTotalUsers 实际是该国数据)
                     try {
-                        const gResp = await fetch(`${API_ENDPOINT}api/global-average`);
+                        var _gfp = '';
+                        try { _gfp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+                        const gResp = await fetch(`${API_ENDPOINT}api/global-average?fingerprint=${encodeURIComponent(_gfp)}&_t=${Date.now()}`);
                         if (gResp.ok) {
                             const gPayload = await gResp.json();
                         // 与主请求一致：合并 root + data（避免只取到部分字段）
@@ -4142,7 +4143,7 @@
                         if (ranksBox && !String(ranksBox.innerHTML || '').trim()) ranksBox.innerHTML = '<div class="text-zinc-500 text-xs">加载中...</div>';
 
                         // 并发保护：复用 updateCountryDashboard 的 requestSeq / isStaleRequest
-                        const resp2 = await fetch(url2, { cache: 'no-cache' });
+                        const resp2 = await fetch(url2 + (url2.indexOf('?') >= 0 ? '&' : '?') + '_t=' + Date.now());
                         if (!resp2.ok) throw new Error(`HTTP ${resp2.status}`);
                         const payload2 = await resp2.json().catch(() => null);
                         if (!payload2 || typeof payload2 !== 'object') throw new Error('bad payload');
@@ -5061,7 +5062,7 @@
                 const tryFetchJson = async (paths) => {
                     for (const p of paths) {
                         try {
-                            const resp = await fetch(p, { cache: 'no-cache' });
+                            const resp = await fetch(p + (p.indexOf('?') >= 0 ? '&' : '?') + '_t=' + Date.now());
                             if (!resp.ok) continue;
                             const ct = resp.headers.get('content-type') || '';
                             if (!ct.includes('json')) continue;
@@ -5731,6 +5732,7 @@
         let mapChart, radarChart;
         let currentViewState = 'GLOBAL'; // GLOBAL 或 COUNTRY（右侧抽屉：实时动态流 / 国家透视）
         let selectedCountry = null; // 当前选中的国家
+        let isGlobalTopMode = false; // 全球最强模式，容错用全局兜底
         let currentChampionInfo = null; // 当前选中的冠军信息（用于地图 tooltip 展示）
         /** 校准模式：点击「Current Location」光标后为 true，停止操作 1.5 秒后恢复 false */
         let isCalibrating = false;
@@ -6013,7 +6015,9 @@
             try {
                 const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content || '';
                 const base = apiEndpoint.endsWith('/') ? apiEndpoint : (apiEndpoint ? `${apiEndpoint}/` : '');
-                const url = base ? `${base}api/v2/update_location` : '/api/v2/update_location';
+                var _ufp = '';
+                try { _ufp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+                const url = base ? `${base}api/v2/update_location?fingerprint=${encodeURIComponent(_ufp)}&_t=${Date.now()}` : '/api/v2/update_location?fingerprint=' + encodeURIComponent(_ufp) + '&_t=' + Date.now();
                 const fp = (() => {
                     try { return localStorage.getItem('user_fingerprint') || window.fpId || null; } catch { return null; }
                 })();
@@ -6753,6 +6757,7 @@
         function createDimensionCard(dimId, config, maxValue, targetUserName, targetIpLocation, feedback, isGlobalTopMode) {
             const displayVal = new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN').format(maxValue);
             const unit = config.suffix || '';
+            const safeIsGlobal = typeof isGlobalTopMode !== 'undefined' ? isGlobalTopMode : false;
 
             const card = document.createElement('div');
             card.className = `drawer-item cursor-pointer`;
@@ -6768,7 +6773,7 @@
                 <div class="flex items-center justify-between mb-2">
                     <span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">${config.icon}</span>
                     <span class="text-[8px] leading-none text-[#00ff41] border border-[#00ff41]/40 px-1 py-0.5 tracking-widest uppercase bg-[#00ff41]/5">
-                        ${isGlobalTopMode ? 'TOP' : 'MINE'}
+                        ${safeIsGlobal ? 'TOP' : 'MINE'}
                     </span>
                 </div>
                 <div class="drawer-item-label">${config.name}</div>
@@ -6839,8 +6844,11 @@
         function showDrawersWithCountryData(countryCode, countryName, overrideRightData, options) {
             const opts = (options && typeof options === 'object') ? options : {};
             const summaryOnly = !!(opts.summaryOnly && overrideRightData != null);
+            if (!summaryOnly && (countryCode == null || countryCode === '')) return;
             const ccUpper = String(countryCode || '').trim().toUpperCase();
+            if (!ccUpper && !summaryOnly) return;
             
+            try {
             // 请求去重：如果已有相同国家的请求在进行中，且不是 summaryOnly 模式，则跳过
             if (!summaryOnly && window.__drawerFetchInProgress.has(ccUpper)) {
                 console.log('[Drawer] ⏭️ 跳过重复请求:', ccUpper, '（已有请求进行中）');
@@ -6873,9 +6881,11 @@
                 try { localStorage.setItem('left_drawer_open', 'true'); localStorage.setItem('right_drawer_open', 'true'); } catch (e) { /* ignore */ }
             }
             
-            // 保存当前国家信息
-            currentDrawerCountry.code = countryCode;
-            currentDrawerCountry.name = countryName;
+            // 保存当前国家信息（防御：仅当为对象时写入，避免 currentDrawerCountry 未定义报错）
+            if (typeof currentDrawerCountry === 'object' && currentDrawerCountry != null) {
+                currentDrawerCountry.code = countryCode;
+                currentDrawerCountry.name = countryName;
+            }
             const leftDrawer = document.getElementById('left-drawer');
             const rightDrawer = document.getElementById('right-drawer');
             const leftTitle = document.getElementById('left-drawer-title');
@@ -6886,6 +6896,7 @@
             const rightBody = globalFlowPanel || document.getElementById('right-drawer-body');
 
             if (!leftDrawer || !rightDrawer) return;
+            if (typeof currentDrawerCountry !== 'object' || currentDrawerCountry == null) return;
             // ✅ 关键：当用户正在看“国家透视”时，不允许 showDrawersWithCountryData 把右侧切回全网/实时流
             // 否则会出现“点 US/CN -> 立刻又回到全国/全网”的错觉。
             const ccUpperForPanel = String(countryCode || '').trim().toUpperCase();
@@ -6995,10 +7006,8 @@
                     window.__drawerFetchInProgress.set(cc, true);
                     fetchCountrySummaryV3(cc)
                         .then((summary) => {
-                            // 清除请求标记
                             window.__drawerFetchInProgress.delete(cc);
-                            // 避免竞态：只在用户仍停留在同一国家时刷新
-                            if (!summary) return;
+                            if (!summary || typeof summary !== 'object') return;
                             try { window.__countrySummaryCache.set(cc, { summary, ts: Date.now() }); } catch { /* ignore */ }
                             if (!currentDrawerCountry || String(currentDrawerCountry.code || '').toUpperCase() !== cc) return;
                             // 关键保护：若当前处于国家透视（COUNTRY）模式，不允许这条“全球流面板”的刷新覆盖右抽屉
@@ -7242,13 +7251,16 @@
                 console.error('[Drawer] ❌ 获取用户数据失败:', e);
             }
             
-            const isGlobalTopMode = !currentUser;
-            const userData = currentUser;
-            
+            const isGlobalTopMode = (typeof currentUser !== 'undefined') ? !currentUser : (typeof window.isGlobalTopMode !== 'undefined' ? window.isGlobalTopMode : false);
+            window.isGlobalTopMode = isGlobalTopMode;
+            var drawerCurrentUser = (typeof currentUser !== 'undefined' && currentUser != null) ? currentUser : null;
+            if (!drawerCurrentUser && !summaryOnly && leftBody) {
+                try { leftBody.classList.remove('drawer-loading'); } catch (_) {}
+            }
             if (!currentUser) {
                 console.log('[Drawer] ⚠️ 未找到当前用户数据，将显示全球最强模式');
             } else {
-                console.log('[Drawer] ✅ 找到当前用户数据，将显示个人统计:', userData.user_name || userData.name);
+                console.log('[Drawer] ✅ 找到当前用户数据，将显示个人统计:', drawerCurrentUser?.user_name || drawerCurrentUser?.name);
             }
 
             // 填充左侧抽屉 - user_identity_config 卡片
@@ -7331,7 +7343,7 @@
                             </div>
                             <button 
                                 onclick="typeof openInboxDrawer === 'function' && openInboxDrawer()"
-                                class="w-9 h-9 flex items-center justify-center bg-transparent border-none text-[#00ff41] hover:text-[#00ff41]/80 transition-colors flex-shrink-0 cursor-pointer p-0"
+                                class="inbox-indicator w-9 h-9 flex items-center justify-center bg-transparent border-none text-[#00ff41] hover:text-[#00ff41]/80 transition-colors flex-shrink-0 cursor-pointer p-0 relative"
                                 title="${currentLang === 'zh' ? '收件箱' : 'Inbox'}"
                             >✉</button>
                             ${githubUsername && isValidGitHubUsername(githubUsername, userIdentity)
@@ -7704,7 +7716,7 @@
                         let targetUserName = '';
                         let targetIpLocation = null;
 
-                        if (isGlobalTopMode) {
+                        if (typeof isGlobalTopMode !== 'undefined' && isGlobalTopMode) {
                             const allData = window.allData || [];
                             if (allData.length > 0) {
                                 targetData = allData.reduce((maxUser, currentUser) => {
@@ -7725,15 +7737,16 @@
                                 targetIpLocation = null;
                             }
                         } else {
-                            targetData = userData;
-                            const values = extractDimensionValues(userData);
+                            var item = (typeof drawerCurrentUser !== 'undefined' && drawerCurrentUser != null) ? drawerCurrentUser : null;
+                            targetData = item;
+                            const values = item ? extractDimensionValues(item) : {};
                             maxValue = values[dimId] || 0;
-                            targetUserName = userData.user_name || userData.name || userData.github_username || '我的数据';
-                            targetIpLocation = userData.ip_location || null;
+                            targetUserName = item ? (item.user_name || item.name || item.github_username || '我的数据') : '我的数据';
+                            targetIpLocation = item ? (item.ip_location || null) : null;
                         }
 
                         const feedback = getRankFeedback(dimId, maxValue);
-                        const card = createDimensionCard(dimId, config, maxValue, targetUserName, targetIpLocation, feedback, isGlobalTopMode);
+                        const card = createDimensionCard(dimId, config, maxValue, targetUserName, targetIpLocation, feedback, (typeof isGlobalTopMode !== 'undefined' ? isGlobalTopMode : false));
                         rightCards.push(card);
                     });
 
@@ -7911,6 +7924,9 @@
             }
             localStorage.setItem('selected_country', countryCode);
             console.log('[Drawer] 抽屉已打开:', countryDisplayName);
+            } catch (drawerErr) {
+                console.warn('[Drawer] showDrawersWithCountryData 异常:', drawerErr);
+            }
         }
 
         /**
@@ -9695,12 +9711,15 @@
 
                                 // 更新 UI
                                 updateUserCountryFlag(cc || '', cn || '', true);
-                                if (typeof renderRankCards === 'function' && window.currentUser) {
-                                    window.currentUser.manual_location = cc;
-                                    window.currentUser.country_code = cc;
-                                    window.currentUser.manual_lat = pendingCalibration.lat;
-                                    window.currentUser.manual_lng = pendingCalibration.lng;
-                                    renderRankCards(window.currentUser);
+                                if (typeof renderRankCards === 'function') {
+                                    var _cu = window.currentUser;
+                                    if (_cu && typeof _cu === 'object') {
+                                        _cu.manual_location = cc;
+                                        _cu.country_code = cc;
+                                        _cu.manual_lat = pendingCalibration.lat;
+                                        _cu.manual_lng = pendingCalibration.lng;
+                                    }
+                                    if (window.currentUser) renderRankCards(window.currentUser);
                                 }
 
                                 console.log('[Homeland] ✅ 已将', cn, '设置为母国');
@@ -10227,7 +10246,10 @@
                     // 尝试使用 API 接口
                     try {
                         const fingerprint = localStorage.getItem('user_fingerprint') || '';
-                        const response = await fetch('/api/v2/update_location', {
+                        var __ufp = '';
+                        try { __ufp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+                        const _updateUrl = (document.querySelector('meta[name="api-endpoint"]')?.content || '').replace(/\/$/, '') + '/api/v2/update_location?fingerprint=' + encodeURIComponent(__ufp) + '&_t=' + Date.now();
+                        const response = await fetch(_updateUrl, {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
@@ -10483,7 +10505,9 @@
             try {
                 const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content || '';
                 const base = apiEndpoint.endsWith('/') ? apiEndpoint.slice(0, -1) : apiEndpoint;
-                const analyzeUrl = base ? `${base}/api/v2/analyze` : '/api/v2/analyze';
+                var _afp = '';
+                try { _afp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+                const analyzeUrl = base ? `${base}/api/v2/analyze?fingerprint=${encodeURIComponent(_afp)}&_t=${Date.now()}` : '/api/v2/analyze?fingerprint=' + encodeURIComponent(_afp) + '&_t=' + Date.now();
                 
                 let fingerprint = null;
                 try {
@@ -10537,17 +10561,20 @@
                     // 更新退出锚定按钮的显示状态
                     updateResetButtonVisibility();
                     
-                    // 更新全局用户数据
+                    // 更新全局用户数据（防御：仅当 target 为对象时设置 location 等属性）
                     if (!window.currentUserData) window.currentUserData = window.currentUser || {};
-                    window.currentUserData.manual_lat = Number(formattedLat);
-                    window.currentUserData.manual_lng = Number(formattedLng);
-                    window.currentUserData.manual_location = countryCode;
-                    
-                    if (window.currentUser) {
-                        window.currentUser.manual_location = countryCode;
-                        window.currentUser.country_code = countryCode;
-                        window.currentUser.manual_lat = Number(formattedLat);
-                        window.currentUser.manual_lng = Number(formattedLng);
+                    var _cud = window.currentUserData;
+                    if (_cud && typeof _cud === 'object') {
+                        _cud.manual_lat = Number(formattedLat);
+                        _cud.manual_lng = Number(formattedLng);
+                        _cud.manual_location = countryCode;
+                    }
+                    var _cu = window.currentUser;
+                    if (_cu && typeof _cu === 'object') {
+                        _cu.manual_location = countryCode;
+                        _cu.country_code = countryCode;
+                        _cu.manual_lat = Number(formattedLat);
+                        _cu.manual_lng = Number(formattedLng);
                     }
                     
                     // 【UI 同步】立即更新光标显示
@@ -10705,11 +10732,11 @@
 
             const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content || '';
             const base = apiEndpoint.endsWith('/') ? apiEndpoint.slice(0, -1) : apiEndpoint;
-            const analyzeUrl = base ? `${base}/api/v2/analyze` : '/api/v2/analyze';
             let fingerprint = null;
             try {
                 fingerprint = localStorage.getItem('user_fingerprint') || window.fpId || null;
             } catch (e) {}
+            const analyzeUrl = base ? `${base}/api/v2/analyze?fingerprint=${encodeURIComponent(fingerprint || '')}&_t=${Date.now()}` : '/api/v2/analyze?fingerprint=' + encodeURIComponent(fingerprint || '') + '&_t=' + Date.now();
             const payload = {
                 chatData: [{ role: 'USER', text: '.' }],
                 manual_location: countryCode || null,
@@ -10733,25 +10760,25 @@
                     // 状态持久化：确认定居后立即写入锁定标记与坐标，并重绘地图光标为绿色
                     localStorage.setItem('loc_fixed', 'true');
                     if (!window.currentUserData) window.currentUserData = window.currentUser || {};
-                    window.currentUserData.manual_lat = lat;
-                    window.currentUserData.manual_lng = lng;
-                    window.currentUserData.manual_location = countryCode;
+                    var _cud2 = window.currentUserData;
+                    if (_cud2 && typeof _cud2 === 'object') {
+                        _cud2.manual_lat = lat;
+                        _cud2.manual_lng = lng;
+                        _cud2.manual_location = countryCode;
+                    }
                     localStorage.setItem('manual_lat', String(lat));
                     localStorage.setItem('manual_lng', String(lng));
                     if (countryCode && String(countryCode).trim() !== '') localStorage.setItem('manual_location', String(countryCode).trim());
-                    // 同步“锚定国家”：用于 report-vibe manual_region
                     try { _setAnchoredCountry(countryCode); } catch { /* ignore */ }
-                    updateCurrentLocationCursorColor('#00ff41'); // 立即重绘地图光标为绿色
-                    // 【新增】设置全局锁定标志
+                    updateCurrentLocationCursorColor('#00ff41');
                     window.__cursorLocked = true;
-                    // 【新增】立即恢复锁定的光标位置（确保一致性）
                     setTimeout(() => forceRestoreLockedCursor(), 100);
-                    // 视觉锁定：同步 currentUser，防止刷新前延迟导致跳动
-                    if (window.currentUser) {
-                        window.currentUser.manual_location = countryCode;
-                        window.currentUser.country_code = countryCode;
-                        window.currentUser.manual_lat = lat;
-                        window.currentUser.manual_lng = lng;
+                    var _cu2 = window.currentUser;
+                    if (_cu2 && typeof _cu2 === 'object') {
+                        _cu2.manual_location = countryCode;
+                        _cu2.country_code = countryCode;
+                        _cu2.manual_lat = lat;
+                        _cu2.manual_lng = lng;
                     }
                     updateUserCountryFlag(countryCode, countryName, true);
                     if (typeof renderRankCards === 'function' && window.currentUser) renderRankCards(window.currentUser);
@@ -10813,10 +10840,7 @@
             try {
                 const res = await fetch(url, { 
                     signal: controller.signal,
-                    headers: { 
-                        'Accept': 'application/json',
-                        'Cache-Control': 'no-cache'
-                    },
+                    headers: { 'Accept': 'application/json' },
                     mode: 'cors',
                     credentials: 'omit'
                 });
@@ -11861,28 +11885,30 @@
             //    console.log('[Realtime] ℹ️ Cloudflare 环境：不再强制跳过，尝试连接 Supabase Realtime...');
             // }
 
-            // 健壮性检查：确保 Supabase 客户端已初始化 (增加等待重试机制)
+            // 健壮性检查：确保 Supabase 客户端已初始化 (增加等待重试机制, 最多等待 15 秒)
             if (!supabaseClient) {
                 console.log('[Realtime] ⏳ Supabase 客户端尚未就绪，等待中...');
                 let attempts = 0;
-                // 最多等待 10 秒 (20 * 500ms)
-                while (!supabaseClient && attempts < 20) {
+                while (!supabaseClient && attempts < 30) {
                     await new Promise(r => setTimeout(r, 500));
                     attempts++;
                 }
                 
                 if (!supabaseClient) {
-                    console.warn('[Realtime] ⚠️ Supabase 客户端初始化超时，跳过 Realtime 监听');
-                    renderOnlineUsersListUnavailable();
-                    return;
+                    console.warn('[Realtime] ⚠️ Supabase 客户端初始化超时，虽然跳过 Realtime 监听，但尝试后续懒加载...');
+                    // 不直接 return，允许后续重试
                 }
             }
+            
+            // 每次启动前，记录启动时间
+            window.__realtimeStartedAt = Date.now();
 
             // 如果已有监听通道，先取消订阅
             if (realtimeChannel) {
                 try {
-                    supabaseClient.removeChannel(realtimeChannel);
-                    console.log('[Realtime] ✅ 已取消旧的监听通道');
+                    await supabaseClient.removeChannel(realtimeChannel);
+                    console.log('[Realtime] ✅ 已取消旧的监听通道 (重启)');
+                    realtimeChannel = null;
                 } catch (error) {
                     console.warn('[Realtime] ⚠️ 取消旧通道时出错:', error);
                 }
@@ -12396,12 +12422,18 @@
             }
 
             // 停止 Presence 监听
-            if (presenceChannel && supabaseClient) {
+                    if (presenceChannel) {
                 try {
                     // 先取消跟踪，然后移除频道
-                    presenceChannel.untrack();
-                    supabaseClient.removeChannel(presenceChannel);
-                    presenceChannel = null;
+                    const channelToRemove = presenceChannel;
+                    presenceChannel = null; // 立即置空防止竞态
+                    
+                    channelToRemove.untrack().then(() => {
+                        if (supabaseClient) supabaseClient.removeChannel(channelToRemove);
+                    }).catch(e => {
+                         if (supabaseClient) supabaseClient.removeChannel(channelToRemove);
+                    });
+                    
                     console.log('[Presence] ✅ 已停止 Presence 监听');
                 } catch (error) {
                     console.warn('[Presence] ⚠️ 停止 Presence 监听时出错:', error);
@@ -12474,29 +12506,31 @@
         }
         
         /**
-         * 获取用户地理位置（经纬度）
-         * @returns {Promise<Object>} 包含 lat, lng 的对象
+         * 获取用户地理位置（非阻塞，1.5 秒超时）。失败时静默返回空对象 {}，不抛错、不打印，保证 refreshUserStats 继续执行。
          */
-        async function getUserLocation() {
-            try {
-                // 使用 ip-api.com API 获取 IP 归属地信息
-                const ipResponse = await fetch('https://ip-api.com/json/', {
-                    method: 'GET',
-                    headers: { 'Accept': 'application/json' }
+        function getUserLocation() {
+            var ac = new AbortController();
+            var t = setTimeout(function() { ac.abort(); }, 1500);
+            var url = 'https://ip-api.com/json/?_t=' + Date.now();
+            return fetch(url, { headers: { 'Accept': 'application/json' }, signal: ac.signal })
+                .then(function(ipResponse) {
+                    clearTimeout(t);
+                    if (ipResponse && ipResponse.ok) {
+                        return ipResponse.json().catch(function() { return null; });
+                    }
+                    return null;
+                })
+                .then(function(ipInfo) {
+                    if (ipInfo && typeof ipInfo === 'object' && (ipInfo.lat != null || ipInfo.lon != null)) {
+                        return { lat: ipInfo.lat != null ? Number(ipInfo.lat) : null, lng: ipInfo.lon != null ? Number(ipInfo.lon) : null };
+                    }
+                    return {};
+                })
+                .catch(function() {
+                    clearTimeout(t);
+                    return {};
                 });
-
-                if (ipResponse.ok) {
-                    const ipInfo = await ipResponse.json();
-                    const lat = ipInfo.lat ? Number(ipInfo.lat) : null;
-                    const lng = ipInfo.lon ? Number(ipInfo.lon) : null; // 注意：ip-api.com 使用 lon
-                    return { lat, lng };
-                }
-            } catch (error) {
-                console.warn('[Location] ⚠️ 获取地理位置失败:', error);
-            }
-            return { lat: null, lng: null };
         }
-
         /**
          * 强制同步自身状态（trackSelf）
          * 在 SUBSCRIBED 回调中显式调用
@@ -12542,12 +12576,16 @@
                     return;
                 }
                 
-                // 构建 Presence 数据
+                // 构建 Presence 数据（含 fingerprint 供私信 toId 精准投递）
+                var myFp = '';
+                try { myFp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
                 const myPresence = {
                     user_name: userName,
                     avatar_url: avatarUrl,
                     github_id: ghUsername || null,
                     github_username: ghUsername || null,
+                    fingerprint: myFp || null,
+                    user_fingerprint: myFp || null,
                     status: status,
                     status_color: statusColor,
                     online_at: new Date().toISOString(),
@@ -12921,7 +12959,7 @@
                         title="${canSendMessage ? (currentLang === 'zh' ? '发送消息' : 'Send Message') : (currentLang === 'zh' ? '忙碌中' : 'Busy')}"
                         ${!canSendMessage ? 'disabled' : ''}
                     >✉</button>
-                    <button class="user-popup-btn user-popup-btn-icon" data-action="inbox" title="${currentLang === 'zh' ? '收件箱' : 'Inbox'}">📥</button>
+                    <button class="inbox-indicator user-popup-btn user-popup-btn-icon" data-action="inbox" title="${currentLang === 'zh' ? '收件箱' : 'Inbox'}">📥</button>
                     <button 
                         class="user-popup-btn user-popup-btn-icon repo-btn"
                         data-action="repo"
@@ -13027,7 +13065,7 @@
                     if (popup._cleanup) popup._cleanup();
                     popup.remove();
                     currentPopupElement = null;
-                    var toId = avatarElement.getAttribute('data-github-id') || avatarElement.getAttribute('data-to-id') || userName;
+                    var toId = avatarElement.getAttribute('data-to-id') || avatarElement.getAttribute('data-github-id') || userName;
                     openMessageSender(toId, userName);
                 });
             }
@@ -13188,13 +13226,13 @@
                     if (!content) { alert('请输入内容'); return; }
                     sendBtn.disabled = true;
                     var base = (typeof API_ENDPOINT_MANAGER !== 'undefined' && API_ENDPOINT_MANAGER.getCurrent && API_ENDPOINT_MANAGER.getCurrent()) || document.querySelector('meta[name="api-endpoint"]')?.content || '';
-                    var url = (base.replace(/\/$/, '') || '') + '/api/v2/message/send';
+                    var url = (base.replace(/\/$/, '') || '') + '/api/v2/message/send?fingerprint=' + encodeURIComponent(fp) + '&_t=' + Date.now();
                     try {
                         var res = await fetch(url, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
-                                toId: toId,
+                                toUserId: toId,
                                 toName: toName || toId,
                                 content: content,
                                 fingerprint: fp,
@@ -13206,6 +13244,7 @@
                             overlay.remove();
                             if (typeof showNotification === 'function') showNotification('暗号已送达，1小时后自毁');
                             else alert('暗号已送达，1小时后自毁');
+                            if (typeof window.refreshUserStats === 'function') window.refreshUserStats();
                         } else {
                             sendBtn.disabled = false;
                             alert(data.error || data.message || '发送失败');
@@ -13218,7 +13257,8 @@
             }
         }
 
-        /** 私信收件箱：本地缓存已读/已焚列表，用于刷新 hasNewMessage */
+        /** 私信收件箱：所有 await 置于 async IIFE 内，避免顶层 await 报错 */
+        (async function() {
         window.__inboxReadSecretIds = window.__inboxReadSecretIds || new Set();
 
         function closeInboxDrawer() {
@@ -13229,15 +13269,36 @@
             var el = document.getElementById('private-inbox-drawer');
             if (el) { el.classList.add('active'); loadInbox(); }
         }
+        window.closeInboxDrawer = closeInboxDrawer;
+        window.openInboxDrawer = openInboxDrawer;
+
         function refreshHasNewMessage() {
-            var trigger = document.getElementById('private-inbox-trigger');
-            if (!trigger) return;
             var hasNew = (window.__inboxLastList || []).some(function(item) {
                 return item.secretId && !window.__inboxReadSecretIds.has(item.secretId);
             });
-            if (hasNew) trigger.classList.add('has-new');
-            else trigger.classList.remove('has-new');
+            document.querySelectorAll('.inbox-indicator').forEach(function(el) {
+                if (hasNew) el.classList.add('has-new'); else el.classList.remove('has-new');
+            });
         }
+        function updateInboxRedDotFromApi(hasNew) {
+            try {
+                document.querySelectorAll('.inbox-indicator').forEach(function(el) {
+                    if (hasNew) {
+                        el.classList.add('has-new');
+                        el.classList.remove('hidden');
+                    } else {
+                        el.classList.remove('has-new', 'hidden');
+                    }
+                });
+                var msgDot = document.getElementById('msg-dot');
+                if (msgDot && typeof msgDot.classList !== 'undefined') {
+                    if (hasNew) msgDot.classList.remove('hidden');
+                    else msgDot.classList.add('hidden');
+                }
+            } catch (e) { /* 不阻塞主逻辑 */ }
+        }
+        window.updateInboxRedDotFromApi = updateInboxRedDotFromApi;
+
         async function loadInbox() {
             var body = document.getElementById('inbox-body');
             if (!body) return;
@@ -13249,7 +13310,7 @@
             }
             body.innerHTML = '<div class="text-zinc-500 text-center py-8 text-xs">加载中...</div>';
             var base = (typeof API_ENDPOINT_MANAGER !== 'undefined' && API_ENDPOINT_MANAGER.getCurrent && API_ENDPOINT_MANAGER.getCurrent()) || document.querySelector('meta[name="api-endpoint"]')?.content || '';
-            var url = (base.replace(/\/$/, '') || '') + '/api/v2/message/inbox?userId=' + encodeURIComponent(fp);
+            var url = (base.replace(/\/$/, '') || '') + '/api/v2/message/inbox?userId=' + encodeURIComponent(fp) + '&_t=' + Date.now();
             try {
                 var res = await fetch(url);
                 var data = res.ok ? (await res.json().catch(function() { return { list: [] }; })) : { list: [] };
@@ -13295,6 +13356,8 @@
                 body.innerHTML = '<div class="text-zinc-500 text-center py-8 text-xs">加载失败</div>';
             }
         }
+        window.loadInbox = loadInbox;
+
         function openBurnReader(secretId, onClose) {
             var overlay = document.createElement('div');
             overlay.className = 'burn-reader-overlay';
@@ -13308,7 +13371,7 @@
             var base = (typeof API_ENDPOINT_MANAGER !== 'undefined' && API_ENDPOINT_MANAGER.getCurrent && API_ENDPOINT_MANAGER.getCurrent()) || document.querySelector('meta[name="api-endpoint"]')?.content || '';
             var fp = '';
             try { fp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
-            var url = (base.replace(/\/$/, '') || '') + '/api/v2/message/read?secretId=' + encodeURIComponent(secretId) + (fp ? '&userId=' + encodeURIComponent(fp) : '');
+            var url = (base.replace(/\/$/, '') || '') + '/api/v2/message/read?secretId=' + encodeURIComponent(secretId) + (fp ? '&userId=' + encodeURIComponent(fp) : '') + '&_t=' + Date.now();
             fetch(url).then(function(res) { return res.json(); }).catch(function() { return {}; }).then(function(data) {
                 var text = data.content || data.message || data.text || (data.error || '无法加载');
                 if (contentEl) contentEl.textContent = text;
@@ -13327,12 +13390,29 @@
             tick();
         }
 
+        })();
 
         /**
          * 打开私信输入框（Broadcast 版，保留兼容）
          * @param {string} targetUserId - 目标用户ID
          */
         function openMessageInput(targetUserId) {
+                        if (!presenceChannel) {
+                 // 自动尝试重连
+                 console.log('[Message] ⚠️ Presence 未连接，正在尝试重连...');
+                 startRealtimeListener().then(() => {
+                     // 重连后延迟一点再打开，确保 channel ready
+                     setTimeout(() => {
+                         if (presenceChannel) {
+                            openMessageInput(targetUserId);
+                         } else {
+                            alert('无法连接到即时通讯服务，请刷新页面重试');
+                         }
+                     }, 1000);
+                 });
+                 return;
+            }
+
             // 检查目标用户是否忙碌
             const presenceState = presenceChannel ? presenceChannel.presenceState() : {};
             let targetUserBusy = false;
@@ -13434,10 +13514,9 @@
         }
 
         /**
-         * 发送私信（使用Broadcast）
-         * @param {string} targetUserId - 目标用户ID
+         * 发送私信（使用Broadcast）。async 作用域内调用 await startRealtimeListener()
          */
-        function sendMessage(targetUserId) {
+        async function sendMessage(targetUserId) {
             const textarea = document.getElementById('messageTextInput');
             const message = textarea?.value.trim();
             
@@ -13447,8 +13526,14 @@
             }
             
             if (!presenceChannel) {
-                alert('连接未建立，无法发送消息');
-                return;
+                console.warn('[Message] ⚠️ 发送时发现连接丢失，尝试重连...');
+                await startRealtimeListener();
+                if (!presenceChannel) {
+                    alert('连接断开，消息发送失败，请刷新页面后重试');
+                    return;
+                }
+                // 连接恢复，继续执行发送
+                console.log('[Message] ✅ 连接已恢复，重试发送');
             }
             
             const myId = localStorage.getItem('github_username') || null;
@@ -13917,7 +14002,9 @@
                             // 【Task 1】获取 API 基准地址
                             const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content || 
                                               'https://cursor-clinical-analysis.psterman.workers.dev/';
-                            const migrateUrl = `${apiEndpoint}api/fingerprint/migrate`;
+                            var _mfp = '';
+                            try { _mfp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+                            const migrateUrl = `${apiEndpoint}api/fingerprint/migrate?fingerprint=${encodeURIComponent(_mfp)}&_t=${Date.now()}`;
                             
                             console.log('[Auth] 📡 使用 API 地址:', migrateUrl);
                             
@@ -14290,8 +14377,9 @@
                                             // 【关键修复】对齐 index.html 提交链路：使用 /api/v2/analyze（会按 OAuth user_id 正确 upsert）
                                             const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content || 
                                                               'https://cursor-clinical-analysis.psterman.workers.dev/';
-                                            const analyzeUrl = `${apiEndpoint}api/v2/analyze`;
-                                            
+                                            var _authFp = currentFp || '';
+                                            try { if (!_authFp) _authFp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+                                            const analyzeUrl = `${apiEndpoint}api/v2/analyze?fingerprint=${encodeURIComponent(_authFp)}&_t=${Date.now()}`;
                                             // 兼容：若 last_analysis_data 里没有 lang/fingerprint，这里补齐
                                             const safeLang = (analysisData && analysisData.lang) ? analysisData.lang : (localStorage.getItem('appLanguage') || 'zh-CN');
                                             const safeFp = currentFp || (analysisData && analysisData.fingerprint) || null;
@@ -15333,6 +15421,7 @@
          * @returns {Promise<Object>} 上报结果
          */
         async function autoReportSelf() {
+            try {
             // 【拦截器机制】如果已锚定，禁止执行 IP 定位
             if (window.mapCursorManager && window.mapCursorManager.isAnchored) {
                 console.log('[AutoReport] 🔒 位置已锚定，跳过自动上报');
@@ -15380,56 +15469,32 @@
                 let countryCode = 'Unknown';
 
                 try {
-                    // 使用 ip-api.com API 获取 IP 归属地信息（更稳定的免费 API）
-                    // 返回字段：country, countryCode, city, lat, lon 等
-                    const ipResponse = await fetch('https://ip-api.com/json/', {
-                        method: 'GET',
-                        headers: {
-                            'Accept': 'application/json'
-                        }
-                    });
-
-                    if (ipResponse.ok) {
-                        ipInfo = await ipResponse.json();
-                        console.log('[AutoReport] 🌍 IP 信息已获取:', ipInfo);
-
-                        // ip-api.com 返回格式：{ country, countryCode, city, lat, lon, ... }
-                        // 提取关键信息
-                        countryCode = ipInfo.countryCode || ipInfo.country_code || 'Unknown';
-                        
-                        // 构建 ip_location 字符串（使用国家代码）
-                        if (countryCode && countryCode !== 'Unknown') {
-                            ipLocation = countryCode;
-                        } else {
-                            ipLocation = 'Unknown';
-                        }
-                        
-                        // 提取经纬度（注意：ip-api.com 使用 lon 而不是 longitude）
-                        if (ipInfo.lat && ipInfo.lon) {
-                            lat = Number(ipInfo.lat);
-                            lng = Number(ipInfo.lon);
-                        } else if (ipInfo.latitude && ipInfo.longitude) {
-                            // 兼容其他可能的字段名
-                            lat = Number(ipInfo.latitude);
-                            lng = Number(ipInfo.longitude);
-                        }
-                    } else {
-                        console.warn('[AutoReport] ⚠️ IP API 请求失败，尝试备用方案...');
-                        // 备用方案：使用 ipify 获取 IP
-                        try {
-                            const ipifyResponse = await fetch('https://api.ipify.org?format=json');
-                            if (ipifyResponse.ok) {
-                                const ipifyData = await ipifyResponse.json();
-                                console.log('[AutoReport] 📍 从 ipify 获取到 IP:', ipifyData.ip);
-                                ipLocation = 'Unknown';
+                    const ipUrl = 'https://ip-api.com/json/?_t=' + Date.now();
+                    const ac = new AbortController();
+                    const timeoutId = setTimeout(function() { ac.abort(); }, 3000);
+                    const ipResponse = await fetch(ipUrl, { headers: { 'Accept': 'application/json' }, signal: ac.signal });
+                    clearTimeout(timeoutId);
+                    if (ipResponse && ipResponse.ok) {
+                        ipInfo = await ipResponse.json().catch(function() { return null; });
+                        if (ipInfo && typeof ipInfo === 'object') {
+                            countryCode = ipInfo.countryCode || ipInfo.country_code || 'Unknown';
+                            ipLocation = (countryCode && countryCode !== 'Unknown') ? countryCode : 'Unknown';
+                            if (ipInfo.lat != null && ipInfo.lon != null) {
+                                lat = Number(ipInfo.lat);
+                                lng = Number(ipInfo.lon);
+                            } else if (ipInfo.latitude != null && ipInfo.longitude != null) {
+                                lat = Number(ipInfo.latitude);
+                                lng = Number(ipInfo.longitude);
                             }
-                        } catch (err) {
-                            console.warn('[AutoReport] ⚠️ 备用 IP API 也失败:', err);
                         }
+                    } else if (ipResponse && ipResponse.status === 403) {
+                        countryCode = 'Unknown';
+                        ipLocation = 'Unknown';
                     }
                 } catch (error) {
-                    console.warn('[AutoReport] ⚠️ 获取 IP 信息失败:', error);
-                    // 继续执行，使用默认值
+                    if (error && error.name !== 'AbortError') console.warn('[AutoReport] ⚠️ 获取 IP 信息失败:', error?.message || error);
+                    countryCode = 'Unknown';
+                    ipLocation = 'Unknown';
                 }
 
                 // 3. VPN 判定逻辑
@@ -15584,6 +15649,10 @@
             } catch (error) {
                 console.error('[AutoReport] ❌ 自动上报过程出错:', error);
                 return { success: false, error: error.message };
+            }
+            } catch (outerErr) {
+                console.warn('[AutoReport] 外层容错:', outerErr);
+                return { success: false, error: outerErr?.message || 'autoReportSelf 异常' };
             }
         }
 
@@ -15998,7 +16067,9 @@
                 // 加载过场：骨架屏 + 扫描线
                 setLoadingState(true);
 
-                const requestUrl = `${apiEndpoint}/api/global-average`;
+                var _rfp = '';
+                try { _rfp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+                const requestUrl = `${apiEndpoint}/api/global-average?fingerprint=${encodeURIComponent(_rfp)}&_t=${Date.now()}`;
                 console.log(`[1/5] 正在请求: ${requestUrl}`);
                 
                 // 使用 apiFetch 包装器（支持自动端点切换）
@@ -16091,8 +16162,11 @@
                 const metaEndpoint = (document.querySelector('meta[name="api-endpoint"]')?.content || '').trim();
                 const base = apiEndpoint.endsWith('/') ? apiEndpoint : (apiEndpoint ? apiEndpoint + '/' : '');
                 const metaBase = metaEndpoint.endsWith('/') ? metaEndpoint : (metaEndpoint ? metaEndpoint + '/' : '');
-                const urlsToTry = base ? [base + 'api/rank-resources'] : [];
-                if (metaBase && metaBase !== base) urlsToTry.push(metaBase + 'api/rank-resources');
+                var _fp = '';
+                try { _fp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+                var _q = 'fingerprint=' + encodeURIComponent(_fp) + '&_t=' + Date.now();
+                const urlsToTry = base ? [base + 'api/rank-resources?' + _q] : [];
+                if (metaBase && metaBase !== base) urlsToTry.push(metaBase + 'api/rank-resources?' + _q);
                 for (const url of urlsToTry) {
                     try {
                         const res = await fetch(url, { cache: 'force-cache', signal: AbortSignal.timeout(8000) });
@@ -16432,19 +16506,19 @@
         /**
          * 渲染用户统计卡片到左侧抽屉（与 index 同步：无 answer_book 时按 vibe_index/lpdef 从 answerBookByVibeIndex.json 取今日箴言）
          * @param {HTMLElement} leftBody - 左侧抽屉容器
-         * @param {Object} userData - 当前用户数据对象
+         * @param {Object} currentUserData - 当前用户数据对象
          */
-        async function renderUserStatsCards(leftBody, userData) {
-            console.log('[UserStats] 🚀 开始渲染用户统计卡片，userData:', {
-                hasUserData: !!userData,
-                userName: userData?.user_name || userData?.name,
-                fingerprint: userData?.fingerprint ? userData.fingerprint.substring(0, 8) : null,
+        async function renderUserStatsCards(leftBody, currentUserData) {
+            console.log('[UserStats] 🚀 开始渲染用户统计卡片，currentUserData:', {
+                hasUserData: !!currentUserData,
+                userName: currentUserData?.user_name || currentUserData?.name,
+                fingerprint: currentUserData?.fingerprint ? currentUserData.fingerprint.substring(0, 8) : null,
                 hasLeftBody: !!leftBody,
-                hasVibeRank: !!(userData?.vibe_rank || userData?.vibeRank),
-                hasPersonalityName: !!(userData?.personality_name || userData?.personalityName),
-                hasAnswerBook: !!(userData?.answer_book || userData?.answerBook),
-                hasPersonality: !!userData?.personality,
-                hasPersonalityData: !!userData?.personality_data
+                hasVibeRank: !!(currentUserData?.vibe_rank || currentUserData?.vibeRank),
+                hasPersonalityName: !!(currentUserData?.personality_name || currentUserData?.personalityName),
+                hasAnswerBook: !!(currentUserData?.answer_book || currentUserData?.answerBook),
+                hasPersonality: !!currentUserData?.personality,
+                hasPersonalityData: !!currentUserData?.personality_data
             });
             
             if (!leftBody) {
@@ -16452,8 +16526,8 @@
                 return;
             }
             
-            if (!userData) {
-                console.warn('[UserStats] ⚠️ userData 不存在，跳过渲染');
+            if (!currentUserData) {
+                console.warn('[UserStats] ⚠️ currentUserData 不存在，跳过渲染');
                 return;
             }
             
@@ -16469,9 +16543,9 @@
                 // 【Task 4】检查是否为新用户（维度/统计为空或为默认值）
                 // 修复：统一视图/隐私裁剪可能不返回 l_score..f_score，但仍可能返回其它统计字段（total_messages 等）
                 const quickScoreKeys = ['l_score','p_score','d_score','e_score','f_score','l','p','d','e','f','L','P','D','E','F'];
-                const hasAnyScore = quickScoreKeys.some(k => userData[k] !== null && userData[k] !== undefined);
+                const hasAnyScore = quickScoreKeys.some(k => currentUserData[k] !== null && currentUserData[k] !== undefined);
 
-                const extracted = extractDimensionValues(userData);
+                const extracted = extractDimensionValues(currentUserData);
                 console.log('[UserStats] 📊 extractDimensionValues 结果:', extracted);
                 const hasAnyMetric =
                     (extracted.ai !== undefined && extracted.ai !== null && extracted.ai > 0) ||
@@ -16481,44 +16555,44 @@
                     (extracted.please !== undefined && extracted.please !== null && extracted.please > 0) ||
                     (extracted.day !== undefined && extracted.day !== null && extracted.day > 0);
 
-                const hasDimensions = !!userData.dimensions || hasAnyScore || hasAnyMetric;
+                const hasDimensions = !!currentUserData.dimensions || hasAnyScore || hasAnyMetric;
 
                 // 默认分只在“五维分都存在且都等于 50”时成立
                 const isDefaultScores =
-                    userData.l_score === 50 &&
-                    userData.p_score === 50 &&
-                    userData.d_score === 50 &&
-                    userData.e_score === 50 &&
-                    userData.f_score === 50;
+                    currentUserData.l_score === 50 &&
+                    currentUserData.p_score === 50 &&
+                    currentUserData.d_score === 50 &&
+                    currentUserData.e_score === 50 &&
+                    currentUserData.f_score === 50;
                 
                 // 【修复】GitHub 用户：即使 latestRecords 里字段不全，也不应一直卡在“同步中”
                 // 典型场景：/api/global-average 返回的 latestRecords 会做隐私裁剪，可能缺少 id/fingerprint/维度字段
                 const candidateUserName = String(
-                    userData?.user_name ||
-                    userData?.name ||
+                    currentUserData?.user_name ||
+                    currentUserData?.name ||
                     (() => {
                         try { return localStorage.getItem('github_username') || ''; } catch { return ''; }
                     })()
                 ).trim();
-                const candidateIdentity = userData?.user_identity || null;
+                const candidateIdentity = currentUserData?.user_identity || null;
                 const isGitHubUser = !!(candidateUserName && typeof isValidGitHubUsername === 'function' && isValidGitHubUsername(candidateUserName, candidateIdentity));
                 const canQuerySupabase = (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.from === 'function');
 
                 // 若是 GitHub 用户但数据不全：自动从统一视图拉完整记录后再渲染，避免无限 loading
-                // 兼容：userData 可能已有 id 但字段仍不全（例如登录后刚 upsert 的简略记录）
-                if ((!hasDimensions || isDefaultScores) && isGitHubUser && canQuerySupabase && !userData.__unifiedFetchAttempted) {
+                // 兼容：currentUserData 可能已有 id 但字段仍不全（例如登录后刚 upsert 的简略记录）
+                if ((!hasDimensions || isDefaultScores) && isGitHubUser && canQuerySupabase && !currentUserData.__unifiedFetchAttempted) {
                     try {
-                        userData.__unifiedFetchAttempted = true; // 标记：避免递归死循环
+                        currentUserData.__unifiedFetchAttempted = true; // 标记：避免递归死循环
                         console.log('[UserStats] 🔄 GitHub 用户数据不全，尝试从 v_unified_analysis_v2 拉取完整记录:', {
                             candidateUserName,
-                            hasId: !!userData.id
+                            hasId: !!currentUserData.id
                         });
                         let q = supabaseClient
                             .from('v_unified_analysis_v2')
                             .select('*');
                         // 优先用 id 精确匹配（最稳定），否则用 user_name（不区分大小写）
-                        if (userData.id) {
-                            q = q.eq('id', userData.id);
+                        if (currentUserData.id) {
+                            q = q.eq('id', currentUserData.id);
                         } else {
                             q = q.ilike('user_name', candidateUserName);
                         }
@@ -16527,7 +16601,7 @@
                                 if (!dbUser) {
                                     console.warn('[UserStats] ⚠️ v_unified_analysis_v2 未找到用户记录:', candidateUserName);
                                     // 继续走后续渲染（会显示“暂无云端数据”卡片）
-                                    renderUserStatsCards(leftBody, { ...userData, __unifiedFetchAttempted: true });
+                                    renderUserStatsCards(leftBody, { ...currentUserData, __unifiedFetchAttempted: true });
                                     return;
                                 }
                                 console.log('[UserStats] ✅ 已获取完整用户记录，刷新统计卡片:', dbUser.user_name || dbUser.name);
@@ -16536,7 +16610,7 @@
                             })
                             .catch((e) => {
                                 console.warn('[UserStats] ⚠️ v_unified_analysis_v2 查询失败:', e);
-                                renderUserStatsCards(leftBody, { ...userData, __unifiedFetchAttempted: true });
+                                renderUserStatsCards(leftBody, { ...currentUserData, __unifiedFetchAttempted: true });
                             });
                         return; // 异步拉取后会重渲染，这里先退出
                     } catch (e) {
@@ -16545,7 +16619,7 @@
                 }
 
                 // 只有在确定是“完全没有数据的匿名用户/占位记录”时才显示同步中
-                const isNewUser = (!hasDimensions || isDefaultScores) && !userData.id && !isGitHubUser;
+                const isNewUser = (!hasDimensions || isDefaultScores) && !currentUserData.id && !isGitHubUser;
                 
                 if (isNewUser) {
                     console.log('[UserStats] ⏳ 检测到新用户（数据同步中），显示加载占位符');
@@ -16570,7 +16644,7 @@
                             <div class="w-2 h-2 bg-[#00ff41] rounded-full animate-pulse" style="animation-delay: 0.4s"></div>
                         </div>
                         <div class="text-[8px] text-[#00ff41]/40 mt-2">
-                            ${escapeHtml(currentLang === 'en' ? 'User' : '用户')}: ${escapeHtml(userData.user_name || userData.name || (currentLang === 'en' ? 'Unknown' : '未知'))}
+                            ${escapeHtml(currentLang === 'en' ? 'User' : '用户')}: ${escapeHtml(currentUserData.user_name || currentUserData.name || (currentLang === 'en' ? 'Unknown' : '未知'))}
                         </div>
                     `;
                     
@@ -16596,15 +16670,15 @@
                 }
 
                 // GitHub 用户但 Supabase 客户端尚未就绪：先显示“连接中”，并稍后自动重试
-                if ((!hasDimensions || isDefaultScores) && isGitHubUser && !userData.id && !canQuerySupabase && !userData.__unifiedFetchAttempted) {
+                if ((!hasDimensions || isDefaultScores) && isGitHubUser && !currentUserData.id && !canQuerySupabase && !currentUserData.__unifiedFetchAttempted) {
                     try {
-                        const attempts = Number(userData.__supabaseWaitAttempts || 0);
+                        const attempts = Number(currentUserData.__supabaseWaitAttempts || 0);
                         if (attempts < 6) {
-                            userData.__supabaseWaitAttempts = attempts + 1;
+                            currentUserData.__supabaseWaitAttempts = attempts + 1;
                             const delayMs = 800 + attempts * 400;
                             setTimeout(() => {
                                 const lb = document.getElementById('left-drawer-body');
-                                if (lb) renderUserStatsCards(lb, userData);
+                                if (lb) renderUserStatsCards(lb, currentUserData);
                             }, delayMs);
                         }
                     } catch (e) { /* ignore */ }
@@ -16645,7 +16719,7 @@
                 }
 
                 // GitHub 用户仍无维度且已尝试补全：不要显示“同步中”，改为“暂无云端汇总数据”（提示用户先跑一次分析）
-                if ((!hasDimensions || isDefaultScores) && isGitHubUser && !userData.id && userData.__unifiedFetchAttempted) {
+                if ((!hasDimensions || isDefaultScores) && isGitHubUser && !currentUserData.id && currentUserData.__unifiedFetchAttempted) {
                     console.warn('[UserStats] ⚠️ GitHub 用户暂无云端汇总数据（可能尚未跑过分析或数据仍未入库）:', candidateUserName);
 
                     const emptyCard = document.createElement('div');
@@ -16685,21 +16759,21 @@
                 }
                 
                 // 提取维度值
-                const dimensionValues = extractDimensionValues(userData);
+                const dimensionValues = extractDimensionValues(currentUserData);
                 console.log('[UserStats] 📊 提取的维度值:', dimensionValues);
                 
                 // 1. 技术排名（使用平均排名或综合排名）
                 // 【Task 2】优先使用视图返回的 vibe_rank 和 vibe_percentile
-                const vibeRank = userData.vibe_rank || userData.vibeRank || null;
-                const vibePercentile = userData.vibe_percentile || userData.vibePercentile || null;
+                const vibeRank = currentUserData.vibe_rank || currentUserData.vibeRank || null;
+                const vibePercentile = currentUserData.vibe_percentile || currentUserData.vibePercentile || null;
                 // 尝试从多个来源获取排名：ranks 对象、avg_rank、或从 personality_data 中计算
-                let avgRank = userData.avg_rank || userData.avgRank || userData.ranks?.avgRank || vibePercentile || null;
+                let avgRank = currentUserData.avg_rank || currentUserData.avgRank || currentUserData.ranks?.avgRank || vibePercentile || null;
                 
                 // 如果还没有排名，尝试从 personality_data 或 personality JSONB 字段中获取
                 if (avgRank === null || avgRank === undefined) {
                     try {
-                        const personalityData = userData.personality_data || userData.personalityData;
-                        const personality = userData.personality;
+                        const personalityData = currentUserData.personality_data || currentUserData.personalityData;
+                        const personality = currentUserData.personality;
                         if (personalityData && Array.isArray(personalityData)) {
                             // 计算平均排名：从五个维度的排名中取平均值
                             const ranks = personalityData.map(d => d.rank || d.rankPercent || 50).filter(r => r !== null && r !== undefined);
@@ -16753,7 +16827,7 @@
                 // 【修复】定义：用户最早和 Cursor 开始对话 -> 现在 的实时天数（>= 1）
                 // 数据源优先级（与 extractDimensionValues 保持一致）：
                 // 1) 本地：last_analysis_data.stats.earliestFileTime（用户本地 workspacestorage 文件夹最早建立时间）
-                // 2) 云端：userData.first_chat_at / userData.stats.first_chat_at
+                // 2) 云端：currentUserData.first_chat_at / currentUserData.stats.first_chat_at
                 // 3) 兜底：dimensionValues.day（兼容旧字段，但避免硬编码的 1）
                 const _parseMaybeTs = (v) => {
                     if (v === null || v === undefined) return NaN;
@@ -16784,8 +16858,8 @@
                 let apiWorkDays = null; // 存储 API 返回的 work_days
                 
                 // 【权限分级】步骤0：优先检查 API 返回的 work_days（最高优先级）
-                const su = userData.stats && typeof userData.stats === 'object' ? userData.stats : null;
-                const apiWorkDaysValue = userData.work_days ?? (su ? su.work_days : null);
+                const su = currentUserData.stats && typeof currentUserData.stats === 'object' ? currentUserData.stats : null;
+                const apiWorkDaysValue = currentUserData.work_days ?? (su ? su.work_days : null);
                 if (apiWorkDaysValue !== null && apiWorkDaysValue !== undefined && Number(apiWorkDaysValue) > 0) {
                     apiWorkDays = Number(apiWorkDaysValue);
                     dayCount = nf.format(apiWorkDays);
@@ -16857,7 +16931,7 @@
                     if (dayCount === 'N/A' || dayCount === '1') {
                         try {
                             const firstChatAt =
-                                userData.first_chat_at ||
+                                currentUserData.first_chat_at ||
                                 (su ? (su.first_chat_at || su.firstChatAt) : null) ||
                                 null;
                             const tFirst = _parseMaybeTs(firstChatAt);
@@ -16895,15 +16969,15 @@
                     : 'N/A';
                 
                 // 7. 人格称号（参考 index.html 的获取方式：根据 5 位 vibe_index 从 personalityNames.json 获取）
-                const personalityType = userData.personality_type || userData.personalityType || userData.type || 'UNKNOWN';
-                let personalityName = userData.personality_name || userData.personalityName || null;
+                const personalityType = currentUserData.personality_type || currentUserData.personalityType || currentUserData.type || 'UNKNOWN';
+                let personalityName = currentUserData.personality_name || currentUserData.personalityName || null;
                 // 视图返回的 vibe_index 为数值（综合分），人格/答案之书需 5 位字符串：优先 vibe_index_str / vibeIndex / lpdef，否则从 detailedStats 或 l_score 等计算
-                const vibeIndexStr = (typeof userData.vibe_index_str === 'string' && userData.vibe_index_str.length === 5)
-                    ? userData.vibe_index_str
-                    : (typeof userData.vibe_index === 'string' && userData.vibe_index.length === 5 ? userData.vibe_index : null)
-                    || (typeof userData.vibeIndex === 'string' && userData.vibeIndex.length === 5 ? userData.vibeIndex : null)
-                    || lpdefToVibeIndex(userData.lpdef)
-                    || scoresToVibeIndexStr(userData);
+                const vibeIndexStr = (typeof currentUserData.vibe_index_str === 'string' && currentUserData.vibe_index_str.length === 5)
+                    ? currentUserData.vibe_index_str
+                    : (typeof currentUserData.vibe_index === 'string' && currentUserData.vibe_index.length === 5 ? currentUserData.vibe_index : null)
+                    || (typeof currentUserData.vibeIndex === 'string' && currentUserData.vibeIndex.length === 5 ? currentUserData.vibeIndex : null)
+                    || lpdefToVibeIndex(currentUserData.lpdef)
+                    || scoresToVibeIndexStr(currentUserData);
                 
                 // 如果还没有人格称号，尝试根据 5 位 vibe_index 从 personalityNames.json 获取（参考 index.html）
                 const loadPersonalityName = (vibeIndex) => {
@@ -16973,15 +17047,15 @@
                 
                 // 调试日志：输出所有可能包含人格称号的字段
                 console.log('[UserStats] 🎭 人格称号获取调试:', {
-                    personality_name: userData.personality_name,
-                    personalityName: userData.personalityName,
-                    personality: userData.personality,
-                    personality_data: userData.personality_data,
+                    personality_name: currentUserData.personality_name,
+                    personalityName: currentUserData.personalityName,
+                    personality: currentUserData.personality,
+                    personality_data: currentUserData.personality_data,
                     personalityType: personalityType,
-                    vibe_index_str: userData.vibe_index_str,
-                    vibe_index: userData.vibe_index,
-                    vibeIndex: userData.vibeIndex,
-                    lpdef: userData.lpdef,
+                    vibe_index_str: currentUserData.vibe_index_str,
+                    vibe_index: currentUserData.vibe_index,
+                    vibeIndex: currentUserData.vibeIndex,
+                    lpdef: currentUserData.lpdef,
                     vibeIndexStr: vibeIndexStr,
                     finalPersonalityName: personalityName
                 });
@@ -16997,7 +17071,7 @@
                 }
 
                 // 人格称号英文映射（示例：码农 -> Code Monkey/Architect）
-                personalityName = translatePersonalityName(personalityName, userData);
+                personalityName = translatePersonalityName(personalityName, currentUserData);
                 
                 // 8. 答案之书说明（answer_book 对象）
                 let answerBookTitle = currentLang === 'en' ? 'N/A' : '暂无';
@@ -17006,12 +17080,12 @@
                 
                 try {
                     // 尝试解析 answer_book 字段（可能是 JSON 字符串或对象）
-                    let answerBook = userData.answer_book || userData.answerBook;
+                    let answerBook = currentUserData.answer_book || currentUserData.answerBook;
                     
                     // 如果 answer_book 不存在，尝试从 personality JSONB 字段中获取
                     if (!answerBook) {
                         try {
-                            const personality = userData.personality;
+                            const personality = currentUserData.personality;
                             if (personality && typeof personality === 'object') {
                                 answerBook = personality.answer_book || personality.answerBook;
                             }
@@ -17542,7 +17616,7 @@
                         if (name) {
                             const personalityNameElement = statsCard.querySelector('[data-stat="personality-name"]');
                             if (personalityNameElement) {
-                                personalityNameElement.textContent = translatePersonalityName(name, userData);
+                                personalityNameElement.textContent = translatePersonalityName(name, currentUserData);
                                 console.log('[UserStats] ✅ 已从 personalityNames.json 更新人格称号:', name);
                             }
                         }
@@ -17778,9 +17852,9 @@
 
         /**
          * 渲染 6 个维度排名卡片
-         * @param {Object} userData - 用户数据对象（从 Supabase 返回），如果为 null 则显示默认值
+         * @param {Object} currentUserData - 用户数据对象（从 Supabase 返回），如果为 null 则显示默认值
          */
-        function renderRankCards(userData) {
+        function renderRankCards(currentUserData) {
             const container = document.getElementById('rank-cards-container');
             if (!container) {
                 console.warn('[Rank] ⚠️ rank-cards-container 容器不存在');
@@ -17793,8 +17867,8 @@
                 return;
             }
 
-            // 数据判别：定义变量 const isGlobalTopMode = !userData
-            const isGlobalTopMode = !userData;
+            // 数据判别：定义变量 const isGlobalTopMode = !currentUserData
+            const isGlobalTopMode = !currentUserData;
             
             // 维度配置（名称/单位随语言切换）
             const dimensionConfig = {
@@ -17922,15 +17996,15 @@
                         }
                     }
                 } else {
-                    // 如果 userData 存在，则 targetData 始终为当前用户
-                    targetData = userData;
-                    const values = extractDimensionValues(userData);
+                    // 如果 currentUserData 存在，则 targetData 始终为当前用户
+                    targetData = currentUserData;
+                    const values = extractDimensionValues(currentUserData);
                     maxValue = values[dimId] !== undefined && values[dimId] !== null ? values[dimId] : undefined;
                     
                     // 确定显示的用户名：如果是纯指纹用户（无 GitHub ID），显示"匿名专家 [指纹前6位]"
-                    const userFingerprint = userData.fingerprint || userData.user_fingerprint || userData.user_identity;
-                    const userGithubId = userData.github_username || userData.github_id;
-                    const userName = userData.user_name || userData.name;
+                    const userFingerprint = currentUserData.fingerprint || currentUserData.user_fingerprint || currentUserData.user_identity;
+                    const userGithubId = currentUserData.github_username || currentUserData.github_id;
+                    const userName = currentUserData.user_name || currentUserData.name;
                     
                     if (!userGithubId && !userName && userFingerprint) {
                         // 纯指纹用户：显示"匿名专家 [指纹前6位]"
@@ -17941,7 +18015,7 @@
                         targetUserName = userName || userGithubId || '我的数据';
                     }
                     
-                    targetIpLocation = userData.ip_location || null;
+                    targetIpLocation = currentUserData.ip_location || null;
                 }
 
                 // 调用 getRankFeedback(dimId, maxValue) 获取对应的等级 label 和吐槽 content
@@ -18104,7 +18178,7 @@
             console.log(`[Rank] ✅ 维度排名卡片渲染完成 (模式: ${isGlobalTopMode ? '全球最强' : '个人数据'})`);
             
             // 如果检测到用户数据且左侧抽屉已打开，自动刷新用户统计卡片
-            if (userData && !isGlobalTopMode) {
+            if (currentUserData && !isGlobalTopMode) {
                 try {
                     const leftDrawer = document.getElementById('left-drawer');
                     const leftBody = document.getElementById('left-drawer-body');
@@ -18115,7 +18189,7 @@
                         
                         if (isDrawerOpen) {
                             // 重新渲染用户统计卡片（优先使用 allData 中的完整记录）
-                            renderUserStatsCards(leftBody, getBestUserRecordForStats(userData));
+                            renderUserStatsCards(leftBody, getBestUserRecordForStats(currentUserData));
                             console.log('[Rank] ✅ 已自动刷新左侧抽屉的用户统计卡片');
                         }
                     }
@@ -18184,11 +18258,9 @@
         window.PERF_MONITOR.measureTiming('page_start');
 
 
-        window.onload = async () => {
-            // 加载保存的GitHub用户名（兼容旧代码）
+        window.onload = function() {
+            (async function() {
             loadGitHubUsername();
-
-            // 初始化语言配置（可选外部 JSON）并刷新语言上下文
             try { await loadLanguageConfig(); } catch { /* ignore */ }
             try { updateLanguageContext(); } catch { /* ignore */ }
 
@@ -18642,6 +18714,7 @@
              setTimeout(() => {
                  forceRestoreLockedCursor();
              }, 1500);
+            })();
          };
 
         // ==========================================
@@ -19807,9 +19880,9 @@
 
             try {
                 // 查询该关键词的地理分布
-                const resp = await fetch(`${API_ENDPOINT}api/v2/keyword-location?keyword=${encodeURIComponent(keyword)}`, {
-                    cache: 'no-cache'
-                });
+                var _kfp = '';
+                try { _kfp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+                const resp = await fetch(`${API_ENDPOINT}api/v2/keyword-location?keyword=${encodeURIComponent(keyword)}&fingerprint=${encodeURIComponent(_kfp)}&_t=${Date.now()}`);
                 const json = await resp.json().catch(() => null);
 
                 if (json && json.status === 'success' && json.data) {
@@ -20135,7 +20208,9 @@
                 }
                 
                 // fetch keepalive 兜底
-                await fetch(`${API_ENDPOINT}api/v2/report-vibe`, {
+                var _vfp = '';
+                try { _vfp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+                await fetch(`${API_ENDPOINT}api/v2/report-vibe?fingerprint=${encodeURIComponent(_vfp)}&_t=${Date.now()}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     keepalive: true,
@@ -20219,7 +20294,9 @@
                     }
                 }
 
-                await fetch(`${API_ENDPOINT}api/report-sentences`, {
+                var _sfp = '';
+                try { _sfp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+                await fetch(`${API_ENDPOINT}api/report-sentences?fingerprint=${encodeURIComponent(_sfp)}&_t=${Date.now()}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     keepalive: true,
@@ -20301,8 +20378,30 @@
             
             console.log('[Refresh] 🔄 收到刷新请求，重新加载数据...');
             try {
-                // 重新获取数据（添加 signal 支持取消）
-                // 注意：fetchData 可能不支持 signal，这里先尝试调用
+                // 【私信检测前置】fetch 成功后最先更新红点 UI，不依赖后续 fetchData/地图/排名渲染，避免后续报错影响红点
+                var hasNewMessageHandled = false;
+                try {
+                    var fp = '';
+                    try { fp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+                    var base = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : document.querySelector('meta[name="api-endpoint"]')?.content || '') || '';
+                    base = (base && base.replace && base.replace(/\/$/, '')) ? base.replace(/\/$/, '') : base;
+                    var statsUrl = base ? (base + '/api/v2/stats?fingerprint=' + encodeURIComponent(fp || '') + '&_t=' + Date.now()) : '';
+                    if (statsUrl) {
+                        var statsRes = await fetch(statsUrl);
+                        var statsJson = statsRes.ok ? (await statsRes.json().catch(function() { return {}; })) : {};
+                        var hasNew = !!(statsJson && statsJson.hasNewMessage === true);
+                        if (typeof window.updateInboxRedDotFromApi === 'function') window.updateInboxRedDotFromApi(hasNew);
+                        hasNewMessageHandled = true;
+                        if (hasNew && (typeof presenceChannel === 'undefined' || presenceChannel == null) && typeof startRealtimeListener === 'function') {
+                            startRealtimeListener().catch(function() {});
+                        }
+                    }
+                } catch (statsErr) { /* 不阻塞主流程 */ }
+                if (!hasNewMessageHandled && typeof window.updateInboxRedDotFromApi === 'function') {
+                    window.updateInboxRedDotFromApi(false);
+                }
+
+                // 红点已更新，再执行可能出错的地图/排名渲染（不等待地图渲染）
                 try {
                     await fetchData();
                 } catch (fetchDataError) {
@@ -20420,10 +20519,12 @@
                         const mlat = data?.manual_lat ?? (localStorage.getItem('manual_lat') ? Number(localStorage.getItem('manual_lat')) : undefined);
                         const mlng = data?.manual_lng ?? (localStorage.getItem('manual_lng') ? Number(localStorage.getItem('manual_lng')) : undefined);
                         const mloc = (data?.manual_location ?? currentUser.manual_location ?? (localStorage.getItem('manual_location') || '').trim()) || '';
-                        if (mlat != null && !isNaN(mlat)) currentUser.manual_lat = mlat;
-                        if (mlng != null && !isNaN(mlng)) currentUser.manual_lng = mlng;
-                        if (mloc && String(mloc).trim() !== '') currentUser.manual_location = String(mloc).trim();
-                        currentUser.country_code = currentUser.manual_location || currentUser.ip_location;
+                        if (currentUser && typeof currentUser === 'object') {
+                            if (mlat != null && !isNaN(mlat)) currentUser.manual_lat = mlat;
+                            if (mlng != null && !isNaN(mlng)) currentUser.manual_lng = mlng;
+                            if (mloc && String(mloc).trim() !== '') currentUser.manual_location = String(mloc).trim();
+                            currentUser.country_code = currentUser.manual_location || currentUser.ip_location;
+                        }
                         console.log('[Refresh] 🔒 检测到地理锁，优先使用本地坐标:', { mlat, mlng, mloc });
                     }
                     window.currentUser = currentUser;

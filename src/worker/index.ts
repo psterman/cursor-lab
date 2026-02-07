@@ -1210,12 +1210,12 @@ const ALLOWED_ORIGINS = [
 ];
 
 app.use('/*', cors({
-  origin: '*', // 允许所有来源（公开 API）
+  origin: '*',
   allowMethods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'],
-  allowHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowHeaders: ['Content-Type', 'X-Fingerprint', 'Cache-Control', 'Authorization', 'X-Requested-With', 'cache-control', 'x-fingerprint'],
   exposeHeaders: ['Content-Length', 'Content-Type'],
-  credentials: false, // 不允许携带凭证（因为允许所有来源）
-  maxAge: 86400, // Access-Control-Max-Age: 86400
+  credentials: false,
+  maxAge: 86400,
 }));
 
 /**
@@ -2899,8 +2899,8 @@ app.get('/api/random_prompt', async (c) => {
 });
 
 /**
- * 路由：GET /api/rank-resources
- * 功能：返回 rank-content 维度排名配置（供前端 Cloudflare 部署时加载，避免请求 /src/rank-content.ts 或 rank-data.json 404）
+ * GET /api/rank-resources
+ * 返回常量 RANK_RESOURCES，前端初始化不报错的前提（避免 /src/rank-content.ts 等 404）
  */
 app.get('/api/rank-resources', async (c) => {
   try {
@@ -4355,7 +4355,7 @@ function setStatsCacheHeaders(c: any, cacheStatus: WorkerCacheStatus, errorMode 
   }
   c.header('Cache-Control', cacheVal);
   c.header('Cloudflare-CDN-Cache-Control', `max-age=${cdnMax}`);
-  c.header('Vary', 'Accept-Encoding, X-Fingerprint');
+  c.header('Vary', 'X-Fingerprint');
   c.header('X-Worker-Cache', cacheStatus);
 }
 
@@ -4364,9 +4364,8 @@ const INBOX_PREFIX = 'inbox:';
 
 /**
  * GET /api/v2/stats
- * 返回 stats 统计数据，用于独立缓存
- * KV 缓存：命中则直接返回；未命中则查库并异步写入 KV（Cache Busting 时跳过写入）
- * 防御：未预期 Query 参数用短缓存；容错返回 200 + 短缓存
+ * - 从 Query 获取 fingerprint，探测 KV inbox:${fingerprint}，在返回 JSON 根部注入 hasNewMessage: !!(inbox && inbox.length > 0)
+ * - 响应头 Vary: X-Fingerprint（由 setStatsCacheHeaders 设置）
  */
 app.get('/api/v2/stats', async (c) => {
   const env = c.env;
@@ -4386,14 +4385,14 @@ app.get('/api/v2/stats', async (c) => {
             const cached = JSON.parse(raw);
             if (cached && typeof cached === 'object') {
               cacheStatus = 'HIT';
-              const fp = url.searchParams.get('fingerprint') || c.req.header('X-Fingerprint') || '';
               let hasNewMessage = false;
-              if (fp.trim() && env.STATS_STORE) {
-                try {
-                  const inbox = await env.STATS_STORE.get(INBOX_PREFIX + fp.trim(), 'json');
+              try {
+                const fingerprint = (url.searchParams.get('fingerprint') ?? c.req.header('X-Fingerprint') ?? '').trim();
+                if (fingerprint && env.STATS_STORE) {
+                  const inbox = await env.STATS_STORE.get('inbox:' + fingerprint, 'json');
                   hasNewMessage = !!(inbox && Array.isArray(inbox) && inbox.length > 0);
-                } catch (_) { /* 不阻塞主逻辑 */ }
-              }
+                }
+              } catch (_) { /* KV 故障静默，不影响缓存命中返回 */ }
               cached.hasNewMessage = hasNewMessage;
               setStatsCacheHeaders(c, cacheStatus, false, hasUnexpectedQuery);
               return c.json(cached);
@@ -4435,14 +4434,14 @@ app.get('/api/v2/stats', async (c) => {
       recentVictims: Array.isArray(extRow.recent_victims) ? extRow.recent_victims : [],
     };
 
-    const fp = url.searchParams.get('fingerprint') || c.req.header('X-Fingerprint') || '';
     let hasNewMessage = false;
-    if (fp.trim() && env.STATS_STORE) {
-      try {
-        const inbox = await env.STATS_STORE.get(INBOX_PREFIX + fp.trim(), 'json');
+    try {
+      const fingerprint = (url.searchParams.get('fingerprint') ?? c.req.header('X-Fingerprint') ?? '').trim();
+      if (fingerprint && env.STATS_STORE) {
+        const inbox = await env.STATS_STORE.get('inbox:' + fingerprint, 'json');
         hasNewMessage = !!(inbox && Array.isArray(inbox) && inbox.length > 0);
-      } catch (_) { /* 不阻塞主逻辑 */ }
-    }
+      }
+    } catch (_) { /* KV 故障静默，不影响基础数据 */ }
     (result as any).hasNewMessage = hasNewMessage;
 
     if (!hasUnexpectedQuery && env.STATS_STORE && cacheStatus !== 'ERROR') {
@@ -4468,6 +4467,7 @@ app.get('/api/v2/stats', async (c) => {
       averages: { L: 50, P: 50, D: 50, E: 50, F: 50 },
       locationRank: [],
       recentVictims: [],
+      hasNewMessage: false,
     }, 200);
   }
 });
@@ -4526,68 +4526,73 @@ interface InboxItem {
 
 /**
  * POST /api/v2/message/send
- * 阅后即焚私信发送：写入消息正文 + 更新收件人收件箱
+ * 接收 toUserId, content, fromUser, score。异步写入消息体与收件箱索引，TTL 3600。
  */
 app.post('/api/v2/message/send', async (c) => {
-  const env = c.env;
-  if (!env.STATS_STORE) {
-    return c.json({ success: false, error: 'KV 未配置' }, 500);
-  }
-  let body: any = null;
   try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ success: false, error: 'Invalid JSON' }, 400);
+    const env = c.env;
+    if (!env.STATS_STORE) {
+      return c.json({ success: false, error: 'KV 未配置' }, 500);
+    }
+    let body: any = null;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ success: false, error: 'Invalid JSON' }, 400);
+    }
+    const toId = String(body?.toUserId ?? body?.toId ?? '').trim();
+    const fromUser = String(body?.fromUser ?? body?.fingerprint ?? '').trim();
+    const content = sanitizeBurnContent(body?.content ?? '');
+    const score = Number(body?.score);
+    const safeScore = Number.isFinite(score) ? Math.round(score) : 0;
+
+    if (!toId || !content) {
+      return c.json({ success: false, error: '缺少 toId 或 content' }, 400);
+    }
+
+    const secretId = crypto.randomUUID();
+    const msgKey = BURN_MSG_PREFIX + secretId;
+    const inboxKey = `${INBOX_PREFIX}${toId}`;
+    const item: InboxItem = { from: fromUser || '匿名', secretId, time: Date.now(), score: safeScore };
+
+    const ctx = c.executionCtx;
+    if (ctx && typeof ctx.waitUntil === 'function') {
+      ctx.waitUntil((async () => {
+        try {
+          await env.STATS_STORE!.put(msgKey, content, { expirationTtl: BURN_TTL });
+          const raw = await env.STATS_STORE!.get(inboxKey, 'json');
+          const arr: InboxItem[] = Array.isArray(raw) ? raw : [];
+          arr.push(item);
+          const trimmed = arr.slice(-INBOX_MAX_LEN);
+          await env.STATS_STORE!.put(inboxKey, JSON.stringify(trimmed), { expirationTtl: BURN_TTL });
+        } catch (e) {
+          console.error('[BurnMsg] send waitUntil failed:', (e as Error)?.message);
+        }
+      })());
+    }
+
+    return c.json({ success: true, secretId });
+  } catch (e: any) {
+    console.error('[BurnMsg] send error:', e?.message);
+    return c.json({ success: false, error: e?.message || '发送失败' }, 500);
   }
-  const toUserId = String(body?.toUserId ?? body?.toId ?? '').trim();
-  const fromUser = String(body?.fromUser ?? body?.fingerprint ?? '').trim();
-  const content = sanitizeBurnContent(body?.content ?? '');
-  const score = Number(body?.score);
-  const safeScore = Number.isFinite(score) ? Math.round(score) : 0;
-
-  if (!toUserId || !content) {
-    return c.json({ success: false, error: '缺少 toUserId/toId 或 content' }, 400);
-  }
-
-  const secretId = crypto.randomUUID();
-  const msgKey = BURN_MSG_PREFIX + secretId;
-  const inboxKey = INBOX_PREFIX + toUserId;
-  const item: InboxItem = { from: fromUser || '匿名', secretId, time: Date.now(), score: safeScore };
-
-  const ctx = c.executionCtx;
-  if (ctx && typeof ctx.waitUntil === 'function') {
-    ctx.waitUntil((async () => {
-      try {
-        await env.STATS_STORE!.put(msgKey, content, { expirationTtl: BURN_TTL });
-        const raw = await env.STATS_STORE!.get(inboxKey, 'json');
-        const arr: InboxItem[] = Array.isArray(raw) ? raw : [];
-        arr.push(item);
-        const trimmed = arr.slice(-INBOX_MAX_LEN);
-        await env.STATS_STORE!.put(inboxKey, JSON.stringify(trimmed), { expirationTtl: BURN_TTL });
-      } catch (e) {
-        console.error('[BurnMsg] send waitUntil failed:', (e as Error)?.message);
-      }
-    })());
-  }
-
-  return c.json({ success: true, secretId });
 });
 
 /**
  * GET /api/v2/message/inbox
- * 收件箱列表：返回 inbox:{userId} 数组
+ * 返回 inbox:${userId} 数组（字段 list）。
  */
 app.get('/api/v2/message/inbox', async (c) => {
-  const env = c.env;
-  const userId = c.req.query('userId') ?? '';
-  if (!userId.trim()) {
-    return c.json({ list: [] });
-  }
-  if (!env.STATS_STORE) {
-    return c.json({ list: [] });
-  }
   try {
-    const raw = await env.STATS_STORE.get(INBOX_PREFIX + userId.trim(), 'json');
+    const env = c.env;
+    const userId = (c.req.query('userId') ?? '').trim();
+    if (!userId) {
+      return c.json({ list: [] });
+    }
+    if (!env.STATS_STORE) {
+      return c.json({ list: [] });
+    }
+    const raw = await env.STATS_STORE.get(INBOX_PREFIX + userId, 'json');
     const arr: InboxItem[] = Array.isArray(raw) ? raw : [];
     const list = arr.map((x) => ({
       from: x.from,
@@ -4602,59 +4607,64 @@ app.get('/api/v2/message/inbox', async (c) => {
       created_at: new Date(x.time).toISOString(),
     }));
     return c.json({ list });
-  } catch {
+  } catch (e: any) {
+    console.warn('[BurnMsg] inbox error:', e?.message);
     return c.json({ list: [] });
   }
 });
 
 /**
  * GET /api/v2/message/read
- * 阅后即焚读取：获取内容后立即删除，并清理收件箱索引
+ * 读取 burn:msg:${secretId} 后，立即 ctx.waitUntil 删除消息体并清理收件箱索引。
  */
 app.get('/api/v2/message/read', async (c) => {
-  const env = c.env;
-  const secretId = c.req.query('secretId') ?? '';
-  const userId = c.req.query('userId') ?? '';
-  if (!secretId.trim()) {
-    return c.json({ content: '', error: '缺少 secretId' }, 200);
-  }
-
-  if (!env.STATS_STORE) {
-    return c.json({ content: '', error: 'KV 未配置' }, 200);
-  }
-
-  let content: string | null = null;
   try {
-    const raw = await env.STATS_STORE.get(BURN_MSG_PREFIX + secretId.trim(), 'text');
-    content = raw != null ? String(raw) : null;
-  } catch {
-    content = null;
-  }
+    const env = c.env;
+    const secretId = (c.req.query('secretId') ?? '').trim();
+    const userId = (c.req.query('userId') ?? '').trim();
+    if (!secretId) {
+      return c.json({ content: '', error: '缺少 secretId' }, 200);
+    }
+    if (!env.STATS_STORE) {
+      return c.json({ content: '', error: 'KV 未配置' }, 200);
+    }
 
-  const ctx = c.executionCtx;
-  if (ctx && typeof ctx.waitUntil === 'function') {
-    ctx.waitUntil((async () => {
-      try {
-        await env.STATS_STORE!.delete(BURN_MSG_PREFIX + secretId.trim());
-        if (userId.trim()) {
-          const inboxKey = INBOX_PREFIX + userId.trim();
-          const raw = await env.STATS_STORE!.get(inboxKey, 'json');
-          const arr: InboxItem[] = Array.isArray(raw) ? raw : [];
-          const next = arr.filter((x) => x.secretId !== secretId.trim());
-          if (next.length !== arr.length) {
-            await env.STATS_STORE!.put(inboxKey, JSON.stringify(next), { expirationTtl: BURN_TTL });
+    let content: string | null = null;
+    try {
+      const raw = await env.STATS_STORE.get(BURN_MSG_PREFIX + secretId, 'text');
+      content = raw != null ? String(raw) : null;
+    } catch {
+      content = null;
+    }
+
+    const ctx = c.executionCtx;
+    if (ctx && typeof ctx.waitUntil === 'function') {
+      ctx.waitUntil((async () => {
+        try {
+          await env.STATS_STORE!.delete(BURN_MSG_PREFIX + secretId);
+          if (userId) {
+            const inboxKey = INBOX_PREFIX + userId;
+            const raw = await env.STATS_STORE!.get(inboxKey, 'json');
+            const arr: InboxItem[] = Array.isArray(raw) ? raw : [];
+            const next = arr.filter((x) => x.secretId !== secretId);
+            if (next.length !== arr.length) {
+              await env.STATS_STORE!.put(inboxKey, JSON.stringify(next), { expirationTtl: BURN_TTL });
+            }
           }
+        } catch (e) {
+          console.error('[BurnMsg] read waitUntil failed:', (e as Error)?.message);
         }
-      } catch (e) {
-        console.error('[BurnMsg] read waitUntil failed:', (e as Error)?.message);
-      }
-    })());
-  }
+      })());
+    }
 
-  if (content == null || content === '') {
-    return c.json({ content: '消息已自毁或过期', error: '消息已自毁或过期' }, 200);
+    if (content == null || content === '') {
+      return c.json({ content: '消息已自毁或过期', error: '消息已自毁或过期' }, 200);
+    }
+    return c.json({ content });
+  } catch (e: any) {
+    console.warn('[BurnMsg] read error:', e?.message);
+    return c.json({ content: '', error: e?.message || '读取失败' }, 200);
   }
-  return c.json({ content });
 });
 
 /**
