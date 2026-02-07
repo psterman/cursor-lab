@@ -1936,6 +1936,54 @@
             display: block;
         }
         
+        /* 单仓库星标卡片（仅展示 Star 最高的一个） */
+        .user-popup-repo-star-card {
+            display: block;
+            text-decoration: none;
+            color: inherit;
+            padding: 12px 14px;
+            margin: 0;
+            border-radius: 10px;
+            border: 1px solid rgba(0, 255, 65, 0.25);
+            background: linear-gradient(145deg, rgba(0, 255, 65, 0.06) 0%, rgba(0, 0, 0, 0.3) 100%);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+            transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+            word-break: break-word;
+        }
+        .user-popup-repo-star-card:hover {
+            border-color: rgba(0, 255, 65, 0.5);
+            box-shadow: 0 6px 16px rgba(0, 255, 65, 0.15);
+            transform: translateY(-1px);
+        }
+        .user-popup-repo-star-card .repo-card-name {
+            font-weight: 600;
+            font-size: 1em;
+            color: #00ff41;
+            margin-bottom: 4px;
+        }
+        .user-popup-repo-star-card .repo-card-desc {
+            font-size: 0.85em;
+            color: rgba(255, 255, 255, 0.7);
+            line-height: 1.35;
+            margin-bottom: 8px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .user-popup-repo-star-card .repo-card-meta {
+            font-size: 0.8em;
+            color: rgba(255, 255, 255, 0.5);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .user-popup-repo-star-card .repo-card-stars {
+            color: #fbbf24;
+            font-weight: 600;
+        }
+        
         /* 仓库项悬浮预览（介绍） */
         .user-popup-repo-item-tooltip {
             position: absolute;
@@ -13131,28 +13179,45 @@
                     repoListEl.innerHTML = '<div class="user-popup-repo-item" style="color: rgba(255,255,255,0.4); cursor: default;">' + emptyMsg + '</div>';
                     return;
                 }
-                const repoHtml = repos.slice(0, 3).map(repo => {
-                    const desc = repo.description ? escapeHtml(repo.description) : '';
-                    const tooltipClass = desc ? '' : ' no-desc';
-                    const tooltipText = desc || '暂无介绍';
-                    const updatedStr = formatRepoUpdatedAt(repo.updatedAt);
-                    const starStr = (repo.stargazersCount != null) ? (repo.stargazersCount + ' ★') : '';
-                    const metaHtml = (starStr || updatedStr) ? `<div class="user-popup-repo-item-meta">${starStr}${starStr && updatedStr ? '<span class="user-popup-repo-meta-gap"></span>' : ''}${escapeHtml(updatedStr)}</div>` : '';
-                    return `<a class="user-popup-repo-item" href="${escapeHtml(repo.url)}" target="_blank" rel="noopener" data-repo-url="${escapeHtml(repo.url)}">${escapeHtml(repo.name)}${metaHtml}<span class="user-popup-repo-item-tooltip${tooltipClass}">${tooltipText}</span></a>`;
-                }).join('');
-                repoListEl.innerHTML = repoHtml;
+                var star = function (r) { return r.stargazersCount != null ? r.stargazersCount : (r.stargazers_count != null ? r.stargazers_count : 0); };
+                var sorted = repos.slice().sort(function (a, b) { return star(b) - star(a); });
+                var top = sorted[0];
+                var starsNum = star(top);
+                var desc = (top.description || '').trim();
+                var updatedStr = formatRepoUpdatedAt(top.updatedAt || top.updated_at);
+                repoListEl.innerHTML = '<a class="user-popup-repo-star-card" href="' + escapeHtml(top.url || top.html_url || '#') + '" target="_blank" rel="noopener">' +
+                    '<div class="repo-card-name">' + escapeHtml(top.name || '') + '</div>' +
+                    (desc ? '<div class="repo-card-desc">' + escapeHtml(desc) + '</div>' : '') +
+                    '<div class="repo-card-meta">' +
+                    '<span class="repo-card-stars">' + starsNum + ' ★</span>' +
+                    (updatedStr ? '<span>' + escapeHtml(updatedStr) + '</span>' : '') +
+                    '</div></a>';
+            }
+            function getCachedReposByUsername(username) {
+                if (!window.allRankResources || !username) return undefined;
+                var lower = String(username).toLowerCase();
+                if (window.allRankResources[lower] !== undefined) return window.allRankResources[lower];
+                var key = Object.keys(window.allRankResources).find(function (k) {
+                    return String(k).toLowerCase() === lower;
+                });
+                return key ? window.allRankResources[key] : undefined;
+            }
+            function setCachedReposByUsername(username, repos) {
+                if (!username) return;
+                if (!window.allRankResources) window.allRankResources = {};
+                window.allRankResources[String(username).toLowerCase()] = repos;
             }
             (function () {
                 var repoListEl = popup.querySelector('#repo-list-' + userIndex);
                 if (!repoListEl) return;
                 if (!window.allRankResources) window.allRankResources = {};
-                var cached = githubId && window.allRankResources[githubId];
+                var cached = getCachedReposByUsername(githubId);
                 if (cached !== undefined && Array.isArray(cached)) {
                     renderRepoList(cached, repoListEl);
                     return;
                 }
                 fetchUserRepos(githubId).then(function (repos) {
-                    if (githubId) window.allRankResources[githubId] = repos;
+                    setCachedReposByUsername(githubId, repos);
                     renderRepoList(repos, popup.querySelector('#repo-list-' + userIndex));
                 }).catch(function () {
                     var el = popup.querySelector('#repo-list-' + userIndex);
