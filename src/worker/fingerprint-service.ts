@@ -371,7 +371,7 @@ export async function bindFingerprintToUser(
 /**
  * 根据指纹更新用户信息（如果用户已存在）
  * @param fingerprint - 浏览器生成的指纹
- * @param updates - 要更新的字段
+ * @param updates - 要更新的字段（total_messages、total_chars 等必须为直接覆盖值，禁止传入“旧值+增量”的累加结果）
  * @param env - 环境变量
  * @returns 更新后的用户数据或 null
  */

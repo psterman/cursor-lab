@@ -4804,6 +4804,24 @@
             // 阻止默认行为（控制台报错），但记录错误
             event.preventDefault();
         });
+
+        // 【与 index 同步】接收 index 分析完成后的本地结果，左侧抽屉优先显示本地数据
+        try {
+            if (typeof BroadcastChannel !== 'undefined') {
+                const vibeSyncChannel = new BroadcastChannel('vibe-stats-sync');
+                vibeSyncChannel.onmessage = function (e) {
+                    const msg = e && e.data;
+                    if (msg && msg.type === 'local_analysis_complete' && msg.payload) {
+                        window.last_local_stats = { ts: msg.ts || Date.now(), payload: msg.payload };
+                        console.log('[Stats2] ✅ 收到 index 本地分析完成广播，已设置 last_local_stats');
+                        var lb = document.getElementById('left-drawer-body');
+                        if (lb && window.currentUser && typeof renderUserStatsCards === 'function') {
+                            renderUserStatsCards(lb, getBestUserRecordForStats(window.currentUser));
+                        }
+                    }
+                };
+            }
+        } catch (_) { /* ignore */ }
         
         // ============================================
         // 初始化 Supabase 客户端（全局作用域直接执行）
@@ -16665,11 +16683,52 @@
         }
 
         /**
+         * 将 index 广播的 /api/v2/analyze 返回结果转换为左侧抽屉使用的 user 记录形状
+         */
+        function buildUserDataFromLocalAnalysis(serverUser, localPayload) {
+            if (!localPayload || localPayload.status !== 'success') return serverUser;
+            var d = localPayload.dimensions || {};
+            var st = localPayload.stats || {};
+            return Object.assign({}, serverUser, {
+                total_messages: st.totalMessages ?? serverUser.total_messages,
+                total_chars: st.totalChars ?? serverUser.total_chars,
+                work_days: st.work_days ?? serverUser.work_days,
+                stats: st,
+                roast_text: localPayload.roastText ?? serverUser.roast_text,
+                dimensions: d,
+                personality_type: localPayload.personalityType ?? serverUser.personality_type,
+                personality_name: localPayload.personalityName ?? serverUser.personality_name,
+                vibe_index: localPayload.vibeIndex ?? serverUser.vibe_index,
+                lpdef: localPayload.lpdef ?? serverUser.lpdef,
+                personality: localPayload.personality ?? serverUser.personality,
+                l_score: d.L != null ? Math.round(d.L) : serverUser.l_score,
+                p_score: d.P != null ? Math.round(d.P) : serverUser.p_score,
+                d_score: d.D != null ? Math.round(d.D) : serverUser.d_score,
+                e_score: d.E != null ? Math.round(d.E) : serverUser.e_score,
+                f_score: d.F != null ? Math.round(d.F) : serverUser.f_score
+            });
+        }
+
+        /**
          * 渲染用户统计卡片到左侧抽屉（与 index 同步：无 answer_book 时按 vibe_index/lpdef 从 answerBookByVibeIndex.json 取今日箴言）
          * @param {HTMLElement} leftBody - 左侧抽屉容器
          * @param {Object} currentUserData - 当前用户数据对象
          */
         async function renderUserStatsCards(leftBody, currentUserData) {
+            if (!leftBody) {
+                console.error('[UserStats] ❌ leftBody 不存在');
+                return;
+            }
+            if (!currentUserData) {
+                console.warn('[UserStats] ⚠️ currentUserData 不存在，跳过渲染');
+                return;
+            }
+            // 【侧边栏拦截】若存在刚完成的本地分析（last_local_stats），优先用本地数据覆盖，忽略服务器可能延迟或累加错误的旧数据
+            var localStats = window.last_local_stats;
+            if (localStats && localStats.payload && (Date.now() - (localStats.ts || 0)) < 300000) {
+                currentUserData = buildUserDataFromLocalAnalysis(currentUserData, localStats.payload);
+                console.log('[UserStats] ✅ 使用 index 本地分析结果覆盖侧边栏数据');
+            }
             console.log('[UserStats] 🚀 开始渲染用户统计卡片，currentUserData:', {
                 hasUserData: !!currentUserData,
                 userName: currentUserData?.user_name || currentUserData?.name,
@@ -16681,16 +16740,6 @@
                 hasPersonality: !!currentUserData?.personality,
                 hasPersonalityData: !!currentUserData?.personality_data
             });
-            
-            if (!leftBody) {
-                console.error('[UserStats] ❌ leftBody 不存在');
-                return;
-            }
-            
-            if (!currentUserData) {
-                console.warn('[UserStats] ⚠️ currentUserData 不存在，跳过渲染');
-                return;
-            }
             
             try {
                 const esc = (s) =>

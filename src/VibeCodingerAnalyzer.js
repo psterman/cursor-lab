@@ -3558,6 +3558,15 @@ export class VibeCodingerAnalyzer {
           }
         } catch { /* ignore */ }
 
+        // 【与 stats2 同步】分析完成后通过 BroadcastChannel 通知 stats2，左侧抽屉可优先显示本次本地结果
+        try {
+          if (typeof BroadcastChannel !== 'undefined') {
+            const ch = new BroadcastChannel('vibe-stats-sync');
+            ch.postMessage({ type: 'local_analysis_complete', ts: Date.now(), payload: result });
+            ch.close();
+          }
+        } catch (_) { /* ignore */ }
+
         return result;
         } finally {
           try {

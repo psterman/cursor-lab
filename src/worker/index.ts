@@ -2443,8 +2443,8 @@ app.post('/api/v2/analyze', async (c) => {
           // 【数据一致性】确保独立字段和 JSONB 字段的 work_days 值完全同步
           const finalWorkDays = workDays;
 
+          // 【强制覆盖 / 最新快照】本次请求的 stats 与顶层统计字段（total_messages、total_chars 等）均以当前上传的本地解析结果为唯一来源，禁止与库中旧值累加；stats JSON 与外层字段保持绝对同步，供侧边栏直接读取（含 roast_text）。
           // 【V6 协议】构建完整的数据负载（包含 jsonb 字段存储完整 stats）
-          // 注意：created_at 和 updated_at 由数据库自动生成，不需要手动设置
           // 核心：fingerprint 作为幂等 Upsert 的业务主键
           // 【V6 协议】使用 v6Stats 或从 finalStats 构建
           // 【数据一致性】确保 work_days 独立字段与 JSONB stats.work_days 完全同步
@@ -2526,7 +2526,7 @@ app.post('/api/v2/analyze', async (c) => {
             // 【保护创建时间】禁止更新 created_at，让数据库保持原有值
             // 注意：不包含 created_at 字段，Supabase 的 upsert 不会更新已存在的 created_at
             
-            // 【V6 架构】保存从 answer_book 获取的合并吐槽文案
+            // 【废话文学一致性】后端生成后直接入库，侧边栏只读存储的 roast_text，不再由前端推算
             roast_text: combinedRoastText || null,
             
             // 【V6 协议】将完整的 stats 存入 jsonb 字段（确保未来维度增加到 100 个时也不需要改数据库 Schema）
