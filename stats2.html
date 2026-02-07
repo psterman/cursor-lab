@@ -13121,7 +13121,10 @@
                 const repoListEl = popup.querySelector(`#repo-list-${userIndex}`);
                 if (!repoListEl) return;
                 if (repos.length === 0) {
-                    repoListEl.innerHTML = '<div class="user-popup-repo-item" style="color: rgba(255,255,255,0.4); cursor: default;">暂无公开仓库</div>';
+                    var emptyMsg = (typeof isValidGitHubUsername === 'function' && isValidGitHubUsername(githubId))
+                        ? '该用户暂无公开仓库'
+                        : '该用户为访客或未绑定 GitHub，无仓库信息';
+                    repoListEl.innerHTML = '<div class="user-popup-repo-item" style="color: rgba(255,255,255,0.4); cursor: default;">' + emptyMsg + '</div>';
                     return;
                 }
                 const repoHtml = repos.slice(0, 3).map(repo => {
@@ -20428,10 +20431,7 @@
                         }
                     }
                 } catch (statsErr) { /* 不阻塞主流程 */ }
-                if (!hasNewMessageHandled) {
-                    if (typeof window.updateMsgDot === 'function') window.updateMsgDot(false);
-                    else if (typeof window.updateInboxRedDotFromApi === 'function') window.updateInboxRedDotFromApi(false);
-                }
+                // 有私信时红点保持亮：未请求或请求失败时不调用 updateMsgDot(false)，避免误关红点
 
                 // 红点已更新，再执行可能出错的地图/排名渲染（不等待地图渲染）
                 try {
