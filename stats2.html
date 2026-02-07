@@ -11316,9 +11316,8 @@
             if (trimmed.startsWith('Guest_')) {
                 return false;
             }
-            // 检查是否包含中文字符（GitHub用户名不支持中文）
+            // 检查是否包含中文字符（GitHub 用户名不支持中文，不弹警告，由 sanitizeGitHubIdForApi 做 API 清洗）
             if (/[\u4e00-\u9fa5]/.test(trimmed)) {
-                console.warn('[GitHub] ⚠️ GitHub用户名不能包含中文字符:', trimmed);
                 return false;
             }
             // GitHub用户名只能包含字母、数字、连字符和下划线
@@ -11329,6 +11328,23 @@
                 return false;
             }
             return true;
+        }
+
+        /**
+         * 将显示名清洗为可请求 GitHub API 的 ID：若含中文或非法字符，则转为 Anonymous- + 指纹前 4 位（无指纹时用名称哈希前 4 位）。
+         * 仅用于请求 GitHub 代理等 API，界面 Display Name 仍保留原文。
+         */
+        function sanitizeGitHubIdForApi(displayId, fingerprint) {
+            if (!displayId || typeof displayId !== 'string') return 'Anonymous-0000';
+            var trimmed = displayId.trim();
+            if (trimmed === '') return 'Anonymous-0000';
+            if (typeof isValidGitHubUsername === 'function' && isValidGitHubUsername(trimmed)) return trimmed;
+            var fp = (fingerprint && typeof fingerprint === 'string') ? fingerprint.trim() : '';
+            if (fp.length >= 4) return 'Anonymous-' + fp.substring(0, 4);
+            var hash = 0;
+            for (var i = 0; i < trimmed.length; i++) { hash = ((hash << 5) - hash) + trimmed.charCodeAt(i); hash |= 0; }
+            var hex = (hash < 0 ? 0x100000000 + hash : hash).toString(16);
+            return 'Anonymous-' + (hex.substring(0, 4) || '0000');
         }
 
         /**
@@ -12932,12 +12948,14 @@
                 const canSendMessage = !isBusy || isCurrentUser;
                 
                 var toId = user.fingerprint || user.user_fingerprint || user.user_identity || githubId;
+                var userFp = (user.fingerprint || user.user_fingerprint || '').toString();
                 return `
                     <div 
                         class="user-avatar-trigger user-avatar-compact ${isBusy ? 'busy' : ''}" 
                         data-user-index="${index}"
                         data-user-name="${escapeHtml(userName)}"
                         data-github-id="${escapeHtml(githubId)}"
+                        data-fingerprint="${escapeHtml(userFp)}"
                         data-to-id="${escapeHtml(toId)}"
                         data-avatar-url="${escapeHtml(avatarUrl)}"
                         data-status="${status}"
@@ -13243,14 +13261,16 @@
             (function () {
                 var repoListEl = popup.querySelector('#repo-list-' + userIndex);
                 if (!repoListEl) return;
+                var fingerprint = (avatarElement && avatarElement.getAttribute('data-fingerprint')) || '';
+                var githubIdForApi = (typeof sanitizeGitHubIdForApi === 'function') ? sanitizeGitHubIdForApi(githubId, fingerprint) : githubId;
                 if (!window.allRankResources) window.allRankResources = {};
-                var cached = getCachedReposByUsername(githubId);
+                var cached = getCachedReposByUsername(githubIdForApi);
                 if (cached !== undefined && Array.isArray(cached)) {
                     renderRepoList(cached, repoListEl);
                     return;
                 }
-                fetchUserRepos(githubId).then(function (repos) {
-                    setCachedReposByUsername(githubId, repos);
+                fetchUserRepos(githubIdForApi).then(function (repos) {
+                    setCachedReposByUsername(githubIdForApi, repos);
                     renderRepoList(repos, popup.querySelector('#repo-list-' + userIndex));
                 }).catch(function () {
                     var el = popup.querySelector('#repo-list-' + userIndex);
