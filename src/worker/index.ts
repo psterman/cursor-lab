@@ -4548,6 +4548,7 @@ app.post('/api/v2/message/send', async (c) => {
     const content = sanitizeBurnContent(body?.content ?? '');
     const score = Number(body?.score);
     const safeScore = Number.isFinite(score) ? Math.round(score) : 0;
+    // 将请求体里的 username 和 avatar 存入目标用户 inbox KV 数组条目中
     const senderName = String(body?.username ?? body?.senderName ?? body?.toName ?? fromUser ?? '').trim() || (fromUser || '匿名');
     const senderAvatar = String(body?.avatar ?? body?.senderAvatar ?? '').trim();
 

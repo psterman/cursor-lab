@@ -11059,9 +11059,9 @@
                 console.warn('[雷达图] ❌ 无法获取 Canvas 上下文');
                 return;
             }
-            // 修复 Canvas 残留：new Chart 前必须销毁旧实例，彻底消除 "Canvas is already in use" 报错
+            // 修复预览：创建新 Chart 前必须调用 window.myRadarChart.destroy()
             if (window.myRadarChart) {
-                try { window.myRadarChart.destroy(); } catch (e) { /* 忽略销毁异常 */ }
+                try { window.myRadarChart.destroy(); } catch (e) { /* 忽略 */ }
                 window.myRadarChart = null;
             }
             
@@ -13337,10 +13337,11 @@
                     return;
                 }
                 body.innerHTML = list.map(function(item) {
-                    var senderName = item.username || item.senderName || item.sender_name || item.from
+                    // 收件箱展示：优先读取 item.senderName 和 item.senderAvatar
+                    var senderName = item.senderName || item.sender_name || item.username || item.from
                         || (item.fromUserId || item.from ? String(item.fromUserId || item.from).substring(0, 8) : null)
                         || '匿名';
-                    var senderAvatar = item.senderAvatar || item.avatar || item.sender_avatar || '';
+                    var senderAvatar = item.senderAvatar || item.sender_avatar || item.avatar || '';
                     if (!senderName && (item.fromUserId || item.from)) senderName = String(item.fromUserId || item.from).substring(0, 8);
                     if (!senderName) senderName = '匿名';
                     var score = item.score != null ? item.score : (item.senderScore != null ? item.senderScore : '-');
@@ -20417,10 +20418,11 @@
                         var statsRes = await fetch(statsUrl);
                         var statsJson = statsRes.ok ? (await statsRes.json().catch(function() { return {}; })) : {};
                         var hasNew = !!(statsJson && statsJson.hasNewMessage === true);
-                        // 自动红点：拿到响应后第一时间更新 #msg-dot，hasNew 为真时红点必须亮起
+                        // 零功耗红点：拿到数据后立刻更新 #msg-dot
                         if (typeof window.updateMsgDot === 'function') window.updateMsgDot(hasNew);
                         else if (typeof window.updateInboxRedDotFromApi === 'function') window.updateInboxRedDotFromApi(hasNew);
                         hasNewMessageHandled = true;
+                        // hasNewMessage 为真且连接断开时，静默调用 startRealtimeListener()
                         if (hasNew && (typeof presenceChannel === 'undefined' || presenceChannel == null) && typeof startRealtimeListener === 'function') {
                             startRealtimeListener().catch(function() {});
                         }
