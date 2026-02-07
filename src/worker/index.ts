@@ -2516,10 +2516,12 @@ app.post('/api/v2/analyze', async (c) => {
             ketao_count: v6StatsForStorage.ketao_count || basicAnalysis.please || 0,
             
             vibe_index: vibeIndex,
-            total_messages: v6StatsForStorage.totalMessages || basicAnalysis.totalMessages,
-            total_chars: v6StatsForStorage.totalChars || basicAnalysis.totalChars,
+            // 【覆盖写入】total_messages / total_chars 必须直接等于当前 stats，禁止与数据库中旧值相加；便于前端 refreshUserStats 拉取到准确覆盖值
+            total_messages: (v6StatsForStorage.totalMessages ?? basicAnalysis.totalMessages ?? 0),
+            total_chars: (v6StatsForStorage.totalChars ?? basicAnalysis.totalChars ?? 0),
             lpdef: lpdef,
             lang: body.lang || 'zh-CN',
+            // 【必须更新】updated_at 写入当前时间，确保前端 refreshUserStats 能拉取到最新记录
             updated_at: new Date().toISOString(),
             // 【保护创建时间】禁止更新 created_at，让数据库保持原有值
             // 注意：不包含 created_at 字段，Supabase 的 upsert 不会更新已存在的 created_at
