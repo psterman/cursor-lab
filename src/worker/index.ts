@@ -4389,7 +4389,7 @@ app.get('/api/v2/stats', async (c) => {
               try {
                 const fingerprint = (url.searchParams.get('fingerprint') ?? c.req.header('X-Fingerprint') ?? '').trim();
                 if (fingerprint && env.STATS_STORE) {
-                  const inbox = await env.STATS_STORE.get('inbox:' + fingerprint, 'json');
+                  const inbox = await env.STATS_STORE.get(INBOX_PREFIX + fingerprint, 'json');
                   hasNewMessage = !!(inbox && Array.isArray(inbox) && inbox.length > 0);
                 }
               } catch (_) { /* KV 故障静默，不影响缓存命中返回 */ }
@@ -4434,11 +4434,12 @@ app.get('/api/v2/stats', async (c) => {
       recentVictims: Array.isArray(extRow.recent_victims) ? extRow.recent_victims : [],
     };
 
+    // 根据请求中的 fingerprint 返回对应该用户的 hasNewMessage 状态（KV key: inbox:${fingerprint}）
     let hasNewMessage = false;
     try {
       const fingerprint = (url.searchParams.get('fingerprint') ?? c.req.header('X-Fingerprint') ?? '').trim();
       if (fingerprint && env.STATS_STORE) {
-        const inbox = await env.STATS_STORE.get('inbox:' + fingerprint, 'json');
+        const inbox = await env.STATS_STORE.get(INBOX_PREFIX + fingerprint, 'json');
         hasNewMessage = !!(inbox && Array.isArray(inbox) && inbox.length > 0);
       }
     } catch (_) { /* KV 故障静默，不影响基础数据 */ }

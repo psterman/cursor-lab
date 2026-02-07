@@ -11059,6 +11059,9 @@
                 console.warn('[雷达图] ❌ 无法获取 Canvas 上下文');
                 return;
             }
+            // 修复 Canvas 冲突：渲染前必须销毁旧实例，避免 Chart.js 脚本中断
+            if (window.myRadarChart) window.myRadarChart.destroy();
+            window.myRadarChart = null;
             
             const labels = currentLang === 'zh' ? ['语言', '模式', '深度', '效率', '频率'] : ['Lang', 'Pattern', 'Depth', 'Effi', 'Freq'];
             const targetData = [
@@ -11070,7 +11073,7 @@
             ];
             const zeroData = [0, 0, 0, 0, 0];
 
-            const chart = new Chart(ctx, {
+            window.myRadarChart = new Chart(ctx, {
                 type: 'radar',
                 data: {
                     labels: labels,
@@ -11105,13 +11108,13 @@
 
             // 触发一次 update，让雷达图从中心扩张到真实值
             try {
-                chart.data.datasets[0].data = targetData;
-                chart.update();
+                window.myRadarChart.data.datasets[0].data = targetData;
+                window.myRadarChart.update();
             } catch (e) {
                 console.warn('[雷达图] ⚠️ update 动画触发失败:', e);
             }
             
-            return chart;
+            return window.myRadarChart;
         }
 
         function renderRadarChart(averages) {
@@ -12345,8 +12348,9 @@
                                 const content = payload.content || payload.message || '';
                                 const fromId = payload.from || 'Unknown';
                                 const statusColor = payload.status_color || '#00ff41';
-                                
-                                showBurnMsg(content, fromId, statusColor);
+                                const displayName = payload.username || (fromId && fromId.length > 8 ? fromId.substring(0, 8) : fromId) || '匿名';
+                                const avatar = payload.avatar || '';
+                                showBurnMsg(content, displayName, statusColor, avatar);
                             } else {
                                 console.log('[Message] ⚠️ 消息不是发给我的:', { targetId, myId, githubUsername });
                             }
@@ -12368,8 +12372,9 @@
                                 const content = payload.content || payload.message || '';
                                 const fromId = payload.from || 'Unknown';
                                 const statusColor = payload.status_color || '#00ff41';
-                                
-                                showBurnMsg(content, fromId, statusColor);
+                                const displayName = payload.username || (fromId && fromId.length > 8 ? fromId.substring(0, 8) : fromId) || '匿名';
+                                const avatar = payload.avatar || '';
+                                showBurnMsg(content, displayName, statusColor, avatar);
                             }
                         })
                         .on('presence', { event: 'join' }, ({ key, newPresences }) => {
@@ -13236,7 +13241,9 @@
                                 toName: toName || toId,
                                 content: content,
                                 fingerprint: fp,
-                                score: score
+                                score: score,
+                                username: (window.currentUser && (window.currentUser.user_name || window.currentUser.name)) || (typeof localStorage !== 'undefined' ? localStorage.getItem('github_username') : '') || '',
+                                avatar: (window.currentUser && (window.currentUser.user_metadata && window.currentUser.user_metadata.avatar_url || window.currentUser.avatar_url)) || (typeof getGitHubAvatarUrl === 'function' ? getGitHubAvatarUrl((window.currentUser && (window.currentUser.user_name || window.currentUser.name)) || (typeof localStorage !== 'undefined' ? localStorage.getItem('github_username') : '') || '') : '') || ''
                             })
                         });
                         var data = res.ok ? (await res.json().catch(function() { return {}; })) : {};
@@ -13298,6 +13305,7 @@
             } catch (e) { /* 不阻塞主逻辑 */ }
         }
         window.updateInboxRedDotFromApi = updateInboxRedDotFromApi;
+        window.updateMsgDot = updateInboxRedDotFromApi;
 
         async function loadInbox() {
             var body = document.getElementById('inbox-body');
@@ -13326,7 +13334,10 @@
                     return;
                 }
                 body.innerHTML = list.map(function(item) {
-                    var sender = item.senderName || item.sender_name || item.from || '匿名';
+                    // 优先显示用户名，无用户名时显示 ID 前 8 位
+                    var sender = item.username || item.senderName || item.sender_name || item.from
+                        || (item.fromUserId || item.from ? String(item.fromUserId || item.from).substring(0, 8) : null)
+                        || '匿名';
                     var score = item.score != null ? item.score : (item.senderScore != null ? item.senderScore : '-');
                     var time = item.sentAt || item.sent_at || item.createdAt || item.created_at || '';
                     if (time && /^\d{4}/.test(time)) {
@@ -13539,8 +13550,9 @@
             const myId = localStorage.getItem('github_username') || null;
             const githubUsername = myId || 'Guest';
             const statusConfig = USER_STATUSES[currentUserStatus];
+            const avatarUrl = (typeof getGitHubAvatarUrl === 'function' ? getGitHubAvatarUrl(githubUsername) : null) || (window.currentUser && (window.currentUser.user_metadata && window.currentUser.user_metadata.avatar_url || window.currentUser.avatar_url)) || '';
             
-            // 使用Broadcast发送消息
+            // 使用Broadcast发送消息（含 username、avatar 便于接收方展示）
             presenceChannel.send({
                 type: 'broadcast',
                 event: 'burn_msg',
@@ -13549,7 +13561,9 @@
                     to: targetUserId,
                     target_id: targetUserId,
                     content: message,
-                    message: message, // 兼容旧字段名
+                    message: message,
+                    username: (window.currentUser && (window.currentUser.user_name || window.currentUser.name)) || githubUsername,
+                    avatar: avatarUrl,
                     timestamp: new Date().toISOString(),
                     status_color: statusConfig.status_color
                 }
@@ -13579,10 +13593,11 @@
         /**
          * 统一消息显示函数（阅后即焚弹窗）
          * @param {string} content - 消息内容
-         * @param {string} fromId - 发送者ID
+         * @param {string} displayName - 发送者显示名（优先用户名，无则 ID 前 8 位）
          * @param {string} statusColor - 状态颜色（可选）
+         * @param {string} avatarUrl - 头像 URL（可选）
          */
-        function showBurnMsg(content, fromId, statusColor = '#00ff41') {
+        function showBurnMsg(content, displayName, statusColor = '#00ff41', avatarUrl = '') {
             // 如果已有弹窗，先清除旧的倒计时
             if (currentBurnMsgInterval) {
                 clearInterval(currentBurnMsgInterval);
@@ -13606,18 +13621,19 @@
             
             let countdown = 5;
             
-            // 判断是否为自传消息
             const myId = localStorage.getItem('github_username') || null;
-            const isSelf = fromId === myId || fromId === '系统 (自传)';
-            const fromLabel = isSelf ? '系统 (自传)' : fromId;
+            const isSelf = displayName === myId || displayName === '系统 (自传)';
+            const fromLabel = isSelf ? '系统 (自传)' : (displayName || '匿名');
             
+            const avatarHtml = avatarUrl ? `<img src="${escapeHtml(avatarUrl)}" alt="" class="w-6 h-6 rounded-full object-cover mr-2" onerror="this.style.display='none'">` : '';
             popup.innerHTML = `
                 <div class="flex items-center gap-3 mb-3">
-                    <div class="text-[10px] text-zinc-500 uppercase tracking-widest">From: ${fromLabel}</div>
+                    ${avatarHtml}
+                    <div class="text-[10px] text-zinc-500 uppercase tracking-widest">From: ${escapeHtml(fromLabel)}</div>
                     <div class="flex-1"></div>
                     <div class="text-[10px] font-bold" style="color: ${statusColor};" id="countdown-${Date.now()}">5秒</div>
                 </div>
-                <div class="text-white text-sm mb-3 font-mono" style="min-height: 60px; word-break: break-word;">${content}</div>
+                <div class="text-white text-sm mb-3 font-mono" style="min-height: 60px; word-break: break-word;">${escapeHtml(content)}</div>
                 <div class="text-[9px] text-zinc-600 font-mono">阅后即焚 // 自动销毁</div>
             `;
             
@@ -13658,8 +13674,8 @@
             const content = messageData.content || messageData.message || '';
             const fromId = messageData.from || 'Unknown';
             const statusColor = messageData.status_color || '#00ff41';
-            
-            showBurnMsg(content, fromId, statusColor);
+            const displayName = messageData.username || (fromId && fromId.length > 8 ? fromId.substring(0, 8) : fromId) || '匿名';
+            showBurnMsg(content, displayName, statusColor, messageData.avatar || '');
         }
         
         /**
@@ -17027,13 +17043,13 @@
                 if (!personalityName || personalityName === '未知人格' || personalityName === '未知') {
                     try {
                         // 方法1: 从 personality JSONB 字段中获取（同步方式，立即显示）
-                        const personality = userData.personality;
+                        const personality = currentUserData.personality;
                         if (personality && typeof personality === 'object') {
                             personalityName = personality.name || personality.personalityName || personality.personality_name || null;
                             
                             // 如果还没有，尝试从 personality_data 或 detailedStats 中获取
                             if (!personalityName) {
-                                const personalityData = userData.personality_data || userData.personalityData || personality.detailedStats || personality.detailed_stats;
+                                const personalityData = currentUserData.personality_data || currentUserData.personalityData || personality.detailedStats || personality.detailed_stats;
                                 if (personalityData && Array.isArray(personalityData) && personalityData.length > 0) {
                                     const firstDim = personalityData[0];
                                     personalityName = firstDim.personalityName || firstDim.personality_name || null;
@@ -20378,7 +20394,7 @@
             
             console.log('[Refresh] 🔄 收到刷新请求，重新加载数据...');
             try {
-                // 【私信检测前置】fetch 成功后最先更新红点 UI，不依赖后续 fetchData/地图/排名渲染，避免后续报错影响红点
+                // 数据优先级：先执行 updateMsgDot（更新私信红点），再执行易报错的地图/图表渲染，防止 UI 熔断
                 var hasNewMessageHandled = false;
                 try {
                     var fp = '';
@@ -20390,15 +20406,17 @@
                         var statsRes = await fetch(statsUrl);
                         var statsJson = statsRes.ok ? (await statsRes.json().catch(function() { return {}; })) : {};
                         var hasNew = !!(statsJson && statsJson.hasNewMessage === true);
-                        if (typeof window.updateInboxRedDotFromApi === 'function') window.updateInboxRedDotFromApi(hasNew);
+                        if (typeof window.updateMsgDot === 'function') window.updateMsgDot(hasNew);
+                        else if (typeof window.updateInboxRedDotFromApi === 'function') window.updateInboxRedDotFromApi(hasNew);
                         hasNewMessageHandled = true;
                         if (hasNew && (typeof presenceChannel === 'undefined' || presenceChannel == null) && typeof startRealtimeListener === 'function') {
                             startRealtimeListener().catch(function() {});
                         }
                     }
                 } catch (statsErr) { /* 不阻塞主流程 */ }
-                if (!hasNewMessageHandled && typeof window.updateInboxRedDotFromApi === 'function') {
-                    window.updateInboxRedDotFromApi(false);
+                if (!hasNewMessageHandled) {
+                    if (typeof window.updateMsgDot === 'function') window.updateMsgDot(false);
+                    else if (typeof window.updateInboxRedDotFromApi === 'function') window.updateInboxRedDotFromApi(false);
                 }
 
                 // 红点已更新，再执行可能出错的地图/排名渲染（不等待地图渲染）
