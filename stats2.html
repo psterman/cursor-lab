@@ -411,6 +411,7 @@
         html{line-height:1.5;-webkit-text-size-adjust:100%}
         body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
         .flex{display:flex}.grid{display:grid}.hidden{display:none}.block{display:block}
+        #user-modal.hidden{display:none!important}
         .h-full{height:100%}.w-full{width:100%}.max-w-\[1600px\]{max-width:1600px}
         .flex-1{flex:1 1 0%}.flex-col{flex-direction:column}
         .items-center{align-items:center}.justify-center{justify-content:center}.justify-between{justify-content:space-between}
@@ -2845,6 +2846,35 @@
             </div>
         </div>
     </div>
+    
+    <!-- 用户详情浮层（预留在 HTML 中，由事件委托打开；内容可由 JS 填充） -->
+    <div id="user-modal" class="hidden" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 180; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; pointer-events: auto;">
+        <div class="user-modal-content" style="background: rgba(5, 5, 5, 0.95); border: 1px solid rgba(0, 255, 65, 0.45); border-radius: 8px; padding: 24px; max-width: 90%; max-height: 85vh; overflow: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h3 style="color: #00ff41; font-family: 'JetBrains Mono', monospace; font-size: 14px; margin: 0;">用户详情</h3>
+                <button type="button" id="user-modal-close" style="background: none; border: none; color: #00ff41; font-size: 20px; cursor: pointer;">✕</button>
+            </div>
+            <div id="user-modal-body"><!-- 由 JS 填充 --></div>
+        </div>
+    </div>
+    <script>
+    // 事件委托：头像点击打开 user-modal，避免动态节点绑定失效
+    document.addEventListener('click', function(e) {
+        var avatarTrigger = e.target.closest('.user-avatar-trigger');
+        if (avatarTrigger) {
+            var modal = document.getElementById('user-modal');
+            if (modal) modal.classList.remove('hidden');
+        }
+    });
+    document.addEventListener('DOMContentLoaded', function() {
+        var closeBtn = document.getElementById('user-modal-close');
+        var modal = document.getElementById('user-modal');
+        if (closeBtn && modal) {
+            closeBtn.addEventListener('click', function() { modal.classList.add('hidden'); });
+            modal.addEventListener('click', function(ev) { if (ev.target === modal) modal.classList.add('hidden'); });
+        }
+    });
+    </script>
     
     <!-- 左右赛博朋克抽屉 -->
     <div id="left-drawer" class="cyber-drawer left-drawer">
@@ -5968,6 +5998,11 @@
                     const d = ev?.detail || {};
                     const cc = String(d.code || '').trim().toUpperCase();
                     if (!/^[A-Z]{2}$/.test(cc)) return;
+                    // 防抖：同国家 500ms 内不重复刷新，避免光标拖拽/地图交互导致一直刷新
+                    const now = Date.now();
+                    if (window.__lastCountrySwitchCc === cc && (now - (window.__lastCountrySwitchTs || 0)) < 500) return;
+                    window.__lastCountrySwitchCc = cc;
+                    window.__lastCountrySwitchTs = now;
 
                     const leftDrawer = document.getElementById('left-drawer');
                     const rightDrawer = document.getElementById('right-drawer');
@@ -6723,7 +6758,33 @@
             // 请求去重：如果已有相同国家的请求在进行中，且不是 summaryOnly 模式，则跳过
             if (!summaryOnly && window.__drawerFetchInProgress.has(ccUpper)) {
                 console.log('[Drawer] ⏭️ 跳过重复请求:', ccUpper, '（已有请求进行中）');
+                const leftDrawer = document.getElementById('left-drawer');
+                const rightDrawer = document.getElementById('right-drawer');
+                if (leftDrawer) leftDrawer.classList.add('active');
+                if (rightDrawer) rightDrawer.classList.add('active');
+                try { localStorage.setItem('left_drawer_open', 'true'); localStorage.setItem('right_drawer_open', 'true'); } catch (e) { /* ignore */ }
                 return;
+            }
+            // 防抖：同国家 500ms 内不重复全量刷新，避免一直刷新无法加载数据
+            if (!summaryOnly) {
+                const now = Date.now();
+                if (window.__lastDrawerOpenCc === ccUpper && (now - (window.__lastDrawerOpenTs || 0)) < 500) {
+                    const leftDrawer = document.getElementById('left-drawer');
+                    const rightDrawer = document.getElementById('right-drawer');
+                    if (leftDrawer) leftDrawer.classList.add('active');
+                    if (rightDrawer) rightDrawer.classList.add('active');
+                    return;
+                }
+                window.__lastDrawerOpenCc = ccUpper;
+                window.__lastDrawerOpenTs = now;
+            }
+            // 【立即打开抽屉】在异步逻辑前先显示
+            if (!summaryOnly) {
+                const leftDrawer = document.getElementById('left-drawer');
+                const rightDrawer = document.getElementById('right-drawer');
+                if (leftDrawer) leftDrawer.classList.add('active');
+                if (rightDrawer) rightDrawer.classList.add('active');
+                try { localStorage.setItem('left_drawer_open', 'true'); localStorage.setItem('right_drawer_open', 'true'); } catch (e) { /* ignore */ }
             }
             
             // 保存当前国家信息
@@ -11100,50 +11161,21 @@
          * @returns {string} 头像HTML字符串
          */
         function createAvatarHtml(avatarUrl, username, size = 32, userIdentity = null) {
+            var dataUserId = String(username || userIdentity || '').trim() || 'unknown';
+            var wrap = function(img) {
+                return '<div class="user-avatar-trigger cursor-pointer inline-block" data-user-id="' + escapeHtml(dataUserId) + '">' + img + '</div>';
+            };
             // 【修复】如果没有有效的头像URL，直接使用默认头像
             // 如果 username 为 null 或无效，也使用默认头像（不进行严格校验）
             if (!avatarUrl) {
-                return `<img 
-                    src="${DEFAULT_AVATAR}" 
-                    alt="avatar" 
-                    class="rounded-full" 
-                    width="${size}" 
-                    height="${size}" 
-                    loading="lazy" 
-                    style="object-fit: cover;"
-                    onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
-                />`;
+                return wrap('<img src="' + DEFAULT_AVATAR + '" alt="avatar" class="rounded-full" width="' + size + '" height="' + size + '" loading="lazy" style="object-fit: cover;" onerror="this.onerror=null; this.src=\'' + DEFAULT_AVATAR + '\';" />');
             }
-            
             // 只有当 username 存在且需要校验时才进行校验
-            // 如果 username 为 null，说明是匿名用户，直接使用提供的 avatarUrl
             if (username && !isValidGitHubUsername(username, userIdentity)) {
-                // 用户名无效，使用默认头像
-                return `<img 
-                    src="${DEFAULT_AVATAR}" 
-                    alt="avatar" 
-                    class="rounded-full" 
-                    width="${size}" 
-                    height="${size}" 
-                    loading="lazy" 
-                    style="object-fit: cover;"
-                    onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
-                />`;
+                return wrap('<img src="' + DEFAULT_AVATAR + '" alt="avatar" class="rounded-full" width="' + size + '" height="' + size + '" loading="lazy" style="object-fit: cover;" onerror="this.onerror=null; this.src=\'' + DEFAULT_AVATAR + '\';" />');
             }
-
-            // 如果有有效的头像URL，使用它，但onerror时回退到DEFAULT_AVATAR
-            // referrerPolicy="no-referrer" 避免 Cloudflare 等环境下 GitHub 头像被拦截
-            return `<img 
-                src="${avatarUrl}" 
-                alt="avatar" 
-                class="rounded-full" 
-                width="${size}" 
-                height="${size}" 
-                loading="lazy" 
-                style="object-fit: cover;"
-                referrerpolicy="no-referrer"
-                onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
-            />`;
+            // 有效头像URL，referrerPolicy="no-referrer" 避免 Cloudflare 拦截
+            return wrap('<img src="' + avatarUrl + '" alt="avatar" class="rounded-full" width="' + size + '" height="' + size + '" loading="lazy" style="object-fit: cover;" referrerpolicy="no-referrer" onerror="this.onerror=null; this.src=\'' + DEFAULT_AVATAR + '\';" />');
         }
 
         function renderRecentActivity(victims) {
@@ -11600,6 +11632,7 @@
                     [],
                 globalAverage: globalAverage,
                 averages: averages,
+                // 兼容后端 snake_case (location_rank) 与 camelCase (locationRank)
                 locationRank: data.locationRank || data.location_rank || [],
                 recentVictims:
                     data.recentVictims ||
@@ -12692,7 +12725,7 @@
                 
                 return `
                     <div 
-                        class="user-avatar-compact ${isBusy ? 'busy' : ''}" 
+                        class="user-avatar-trigger user-avatar-compact ${isBusy ? 'busy' : ''}" 
                         data-user-index="${index}"
                         data-user-name="${escapeHtml(userName)}"
                         data-github-id="${escapeHtml(githubId)}"
@@ -15651,13 +15684,18 @@
          * 基于 index.ts 的接口返回格式（数据直接返回，不包裹在 data 字段中）
          */
         async function fetchData() {
-            // 【修复】防止 fetchData 并发/重复调用导致多次渲染、重复触发 autoReportSelf
+            // 【性能保护】锁定标志，防止网络慢时用户多次触发刷新导致请求堆积
+            if (window.__globalStatsUpdating) {
+                if (window.__fetchDataPromise) return await window.__fetchDataPromise;
+                return;
+            }
             try {
                 if (window.__fetchDataPromise) {
                     return await window.__fetchDataPromise;
                 }
             } catch { /* ignore */ }
 
+            window.__globalStatsUpdating = true;
             window.__fetchDataPromise = (async () => {
             try {
                 let apiEndpoint = window.getApiEndpoint ? window.getApiEndpoint() : document.querySelector('meta[name="api-endpoint"]')?.content;
@@ -15740,6 +15778,7 @@
                 // 确保异常情况下也关闭加载过场
                 setLoadingState(false);
                 console.groupEnd();
+                window.__globalStatsUpdating = false;
             }
             })();
 
@@ -17290,115 +17329,76 @@
                 word = Math.round(chars / messages);
             }
             
-            // day (上岗天数)：定义为「最早与 Cursor 开始对话 -> 现在」的时长（按天）
-            // 【修复】优先级调整：云端数据优先，本地数据作为兜底
-            // 1) 云端：userData.work_days / userData.stats.work_days（最高优先级）
-            // 2) 云端：userData.stats.usageDays / usage_days / workDays / days
-            // 3) 云端：userData.first_chat_at / userData.stats.first_chat_at
-            // 4) 云端：userData.earliestFileTime / userData.stats.earliestFileTime
-            // 5) 兜底：userData.work_days/usage_days/days（兼容旧字段，但避免使用硬编码的 1）
-            // 6) 本地：localStorage.last_analysis_data.stats.earliestFileTime（仅当云端数据完全不存在时）
+            // day (上岗天数)：云端绝对优先，严禁本地覆盖
+            // 【优先级】1) 云端 usage_days/work_days > 0 → 直接采用，不再进入 localStorage
+            // 2) 云端 first_chat_at/earliestFileTime 推算
+            // 3) 仅当云端完全无数据时，才使用 localStorage
             let day = undefined;
-            let daySource = null; // 用于调试：记录数据来源
+            let daySource = null;
             
-            // 【步骤1】优先尝试从云端数据获取（userData 及其嵌套的 stats 对象）
-            try {
-                const su = userData.stats && typeof userData.stats === 'object' ? userData.stats : null;
-                
-                // 1a) 优先尝试云端 work_days（最高优先级，>=1 即用）
-                const cloudWorkDays = userData.work_days ?? (su ? su.work_days : null);
-                if (cloudWorkDays != null && cloudWorkDays !== undefined && Number(cloudWorkDays) >= 1) {
-                    day = Number(cloudWorkDays);
-                    daySource = 'cloud.work_days';
-                } else {
-                    // 1b) 尝试云端 usageDays（含 usage_days、workDays、days）
-                    const usageDays = su && (su.usageDays ?? su.usage_days ?? su.workDays ?? su.days);
-                    if (usageDays != null && Number(usageDays) >= 1) {
-                        day = Number(usageDays);
-                        daySource = 'cloud.usageDays';
-                    } else {
-                        // 1c) 尝试云端 first_chat_at
-                        const firstChatAt =
-                            userData.first_chat_at ||
-                            (su ? (su.first_chat_at || su.firstChatAt) : null) ||
-                            null;
-                        if (firstChatAt != null && firstChatAt !== undefined) {
-                            const t = firstChatAt ? Date.parse(String(firstChatAt)) : NaN;
-                            if (Number.isFinite(t)) {
-                                const diff = Math.floor((Date.now() - t) / (1000 * 60 * 60 * 24));
-                                day = Math.max(1, diff);
-                                daySource = 'cloud.first_chat_at';
-                            }
-                        } else {
-                            // 1d) 尝试云端 earliestFileTime
-                            const earliestFileTime =
-                                (su ? (su.earliestFileTime ?? su.earliest_file_time) : null) ??
-                                userData.earliestFileTime ??
-                                userData.earliest_file_time ??
-                                null;
-                            if (earliestFileTime != null && earliestFileTime !== undefined) {
-                                const earliestTs = Number(earliestFileTime);
-                                if (Number.isFinite(earliestTs) && earliestTs > 0) {
-                                    const diff = Math.floor((Date.now() - earliestTs) / (1000 * 60 * 60 * 24));
-                                    day = Math.max(1, diff);
-                                    daySource = 'cloud.earliestFileTime';
-                                }
-                            }
-                        }
-                    }
-                }
-            } catch (e) { 
-                console.warn('[extractDimensionValues] 云端数据读取失败:', e);
-            }
-            
-            // 【步骤2】最后兜底：使用 userData 根级别的 work_days/usage_days/days（>=1 即用）
-            if (day === undefined || day === null || !(Number(day) > 0)) {
-                const fallbackFields = ['work_days', 'usage_days', 'days'];
-                for (const field of fallbackFields) {
-                    const val = userData[field];
-                    if (val !== undefined && val !== null) {
-                        const num = Number(val);
-                        if (Number.isFinite(num) && num >= 1) {
-                            day = num;
-                            daySource = `cloud.${field}`;
-                            break;
-                        }
-                    }
-                }
-            }
-            
-            // 【步骤3】严格降级：只有当云端数据完全不存在时，才使用本地 localStorage
-            // 检查云端是否真的没有任何有效数据
+            // 【步骤1】云端绝对优先：work_days / usage_days 存在且 > 0 则直接采用，严禁再进 localStorage
             const su = userData.stats && typeof userData.stats === 'object' ? userData.stats : null;
-            const hasCloudWorkDays = (userData.work_days != null && userData.work_days !== undefined) || 
-                                     (su && su.work_days != null && su.work_days !== undefined);
-            const hasCloudUsageDays = su && (su.usageDays != null || su.usage_days != null || su.workDays != null || su.days != null);
-            const hasCloudFirstChatAt = userData.first_chat_at != null || (su && (su.first_chat_at != null || su.firstChatAt != null));
-            const hasCloudEarliestFileTime = userData.earliestFileTime != null || userData.earliest_file_time != null || 
-                                            (su && (su.earliestFileTime != null || su.earliest_file_time != null));
-            const hasCloudData = hasCloudWorkDays || hasCloudUsageDays || hasCloudFirstChatAt || hasCloudEarliestFileTime;
+            const cloudWorkDays = userData.work_days ?? (su ? su.work_days : null);
+            const cloudUsageDays = su && (su.usageDays ?? su.usage_days ?? su.workDays ?? su.days);
             
-            if ((day === undefined || day === null || !(Number(day) > 0)) && !hasCloudData) {
-                // 只有当云端完全没有数据时，才使用本地数据
+            if (cloudWorkDays != null && Number(cloudWorkDays) > 0) {
+                day = Number(cloudWorkDays);
+                daySource = 'cloud.work_days';
+            } else if (cloudUsageDays != null && Number(cloudUsageDays) > 0) {
+                day = Number(cloudUsageDays);
+                daySource = 'cloud.usage_days';
+            } else {
+                // 【步骤2】云端无 work_days/usage_days 时，尝试 first_chat_at / earliestFileTime 推算
+                try {
+                    const firstChatAt = userData.first_chat_at || (su ? (su.first_chat_at || su.firstChatAt) : null) || null;
+                    if (firstChatAt != null) {
+                        const t = Date.parse(String(firstChatAt));
+                        if (Number.isFinite(t)) {
+                            day = Math.max(1, Math.floor((Date.now() - t) / (1000 * 60 * 60 * 24)));
+                            daySource = 'cloud.first_chat_at';
+                        }
+                    }
+                    if ((day == null || !(Number(day) > 0)) && !daySource) {
+                        const earliestFileTime = (su ? (su.earliestFileTime ?? su.earliest_file_time) : null) ??
+                            userData.earliestFileTime ?? userData.earliest_file_time ?? null;
+                        if (earliestFileTime != null) {
+                            const earliestTs = Number(earliestFileTime);
+                            if (Number.isFinite(earliestTs) && earliestTs > 0) {
+                                day = Math.max(1, Math.floor((Date.now() - earliestTs) / (1000 * 60 * 60 * 24)));
+                                daySource = 'cloud.earliestFileTime';
+                            }
+                        }
+                    }
+                    if ((day == null || !(Number(day) > 0)) && !daySource) {
+                        const fallbackFields = ['work_days', 'usage_days', 'days'];
+                        for (const field of fallbackFields) {
+                            const val = userData[field];
+                            if (val != null && Number(val) >= 1) {
+                                day = Number(val);
+                                daySource = `cloud.${field}`;
+                                break;
+                            }
+                        }
+                    }
+                } catch (e) { 
+                    console.warn('[extractDimensionValues] 云端数据读取失败:', e);
+                }
+            }
+            
+            // 【步骤3】仅当云端完全无任何有效数据时，才使用 localStorage（严禁云端有值时进入）
+            const hasCloudDayValue = (cloudWorkDays != null && Number(cloudWorkDays) > 0) || 
+                                    (cloudUsageDays != null && Number(cloudUsageDays) > 0);
+            if ((day == null || !(Number(day) > 0)) && !hasCloudDayValue) {
                 try {
                     const raw = localStorage.getItem('last_analysis_data');
                     if (raw) {
                         const obj = JSON.parse(raw);
                         const st = obj && obj.stats ? obj.stats : null;
-                        
-                        // 3a) 优先使用 earliestFileTime 计算天数
                         const earliest = st ? (st.earliestFileTime ?? st.earliest_file_time) : null;
-                        if (earliest != null && earliest !== undefined) {
-                            const ts = Number(earliest);
-                            if (Number.isFinite(ts) && ts > 0) {
-                                const diff = Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24));
-                                day = Math.max(1, diff);
-                                daySource = 'localStorage.earliestFileTime';
-                            }
-                        }
-                        
-                        // 3b) 如果没有 earliestFileTime，但有 usageDays/work_days，直接使用
-                        if (day === undefined || day === null || !(Number(day) > 0)) {
+                        if (earliest != null && Number(earliest) > 0) {
+                            day = Math.max(1, Math.floor((Date.now() - Number(earliest)) / (1000 * 60 * 60 * 24)));
+                            daySource = 'localStorage.earliestFileTime';
+                        } else {
                             const usageDays = st ? (st.usageDays ?? st.usage_days ?? st.work_days ?? null) : null;
                             if (usageDays != null && Number(usageDays) > 0) {
                                 day = Number(usageDays);

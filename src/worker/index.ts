@@ -84,6 +84,28 @@ const KV_CACHE_TTL = 3600; // 缓存有效期：1小时（秒）
 // 右侧抽屉大盘缓存 TTL（秒）
 const KV_GLOBAL_STATS_V6_VIEW_TTL = 300;
 
+/**
+ * 【止血】脏检查保护：仅当值发生变化时才执行 KV 写入，减少免费额度消耗
+ */
+async function secureKVPut(
+  env: Env,
+  key: string,
+  newValue: string,
+  ttl?: number
+): Promise<void> {
+  const kv = env.STATS_STORE;
+  if (!kv) return;
+  try {
+    const oldValue = await kv.get(key, 'text');
+    const newStr = String(newValue);
+    if (oldValue !== null && oldValue === newStr) return;
+    const opts = ttl != null ? { expirationTtl: ttl } : undefined;
+    await kv.put(key, newStr, opts);
+  } catch (e) {
+    console.warn('[Worker] ⚠️ secureKVPut 失败:', key, e);
+  }
+}
+
 // 【V6.0 新增】词云缓冲区配置
 const KV_KEY_WORDCLOUD_BUFFER = 'WORDCLOUD_BUFFER'; // 词云计数缓冲区
 const KV_KEY_WORDCLOUD_AGGREGATED = 'WORDCLOUD_AGGREGATED'; // 已聚合的词云数据
@@ -303,11 +325,7 @@ async function initWordCloudBuffer(env: Env): Promise<void> {
         lastFlush: Date.now(),
         items: [],
       };
-      await env.STATS_STORE.put(
-        KV_KEY_WORDCLOUD_BUFFER,
-        JSON.stringify(initialBuffer),
-        { expirationTtl: 86400 } // 24 小时过期
-      );
+      await secureKVPut(env, KV_KEY_WORDCLOUD_BUFFER, JSON.stringify(initialBuffer), 86400);
       console.log('[Worker] ✅ 词云缓冲区已初始化');
     }
   } catch (error) {
@@ -369,11 +387,7 @@ async function appendToWordCloudBuffer(
     }
 
     // 6. 保存回 KV
-    await env.STATS_STORE.put(
-      KV_KEY_WORDCLOUD_BUFFER,
-      JSON.stringify(buffer),
-      { expirationTtl: 86400 }
-    );
+    await secureKVPut(env, KV_KEY_WORDCLOUD_BUFFER, JSON.stringify(buffer), 86400);
 
     return shouldFlush;
   } catch (error) {
@@ -451,11 +465,7 @@ async function flushWordCloudBuffer(env: Env, buffer: WordCloudBuffer): Promise<
       }));
 
     if (globalCloudData.length > 0) {
-      await env.STATS_STORE.put(
-        KV_KEY_WORDCLOUD_AGGREGATED,
-        JSON.stringify(globalCloudData),
-        { expirationTtl: 3600 } // 1 小时过期
-      );
+      await secureKVPut(env, KV_KEY_WORDCLOUD_AGGREGATED, JSON.stringify(globalCloudData), 3600);
     }
   } catch (error) {
     console.warn('[Worker] ⚠️ 词云缓冲区刷新失败:', error);
@@ -503,11 +513,7 @@ async function getAggregatedWordCloud(env: Env): Promise<Array<{name: string; va
 
     // 3. 写回 KV 缓存
     if (cloudData.length > 0) {
-      await env.STATS_STORE.put(
-        KV_KEY_WORDCLOUD_AGGREGATED,
-        JSON.stringify(cloudData),
-        { expirationTtl: 3600 }
-      );
+      await secureKVPut(env, KV_KEY_WORDCLOUD_AGGREGATED, JSON.stringify(cloudData), 3600);
     }
 
     return cloudData;
@@ -2723,8 +2729,9 @@ app.post('/api/v2/analyze', async (c) => {
                   // ignore
                 }
               })(),
-              // 【V6 协议】增量更新 KV 全局统计
+              // 【V6 协议】增量更新 KV 全局统计（5% 采样，减少 KV 写入）
               (async () => {
+                if (Math.random() >= 0.05) return;
                 try {
                   await updateGlobalStatsV6(env, finalStats, dimensions);
                 } catch (err: any) {
@@ -4140,15 +4147,9 @@ app.get('/api/global-average', async (c) => {
         baseRow = (Array.isArray(data) ? data[0] : null) || {};
       }
 
-      // 3) 写回 KV（300s）
+      // 3) 写回 KV（300s，脏检查保护）
       if (env.STATS_STORE) {
-        try {
-          await (env.STATS_STORE.put as any)(kvKey, JSON.stringify(baseRow), {
-            expirationTtl: KV_GLOBAL_STATS_V6_VIEW_TTL,
-          });
-        } catch (err) {
-          console.warn('[Worker] ⚠️ /api/global-average KV 写入失败（不影响返回）:', err);
-        }
+        await secureKVPut(env, kvKey, JSON.stringify(baseRow), KV_GLOBAL_STATS_V6_VIEW_TTL);
       }
     } catch (err: any) {
       console.warn('[Worker] ❌ /api/global-average Supabase 回源失败:', err?.message || String(err));
@@ -4334,9 +4335,152 @@ app.get('/api/global-average', async (c) => {
     (finalRow as any).top10 = [];
     (finalRow as any).cloud50 = [];
   }
+  c.header('Cache-Control', 'public, max-age=600');
   return c.json(finalRow);
 });
 
+const ALLOWED_V2_STATS_QUERY_KEYS = new Set<string>([]);
+type WorkerCacheStatus = 'HIT' | 'MISS' | 'ERROR';
+function setStatsCacheHeaders(c: any, cacheStatus: WorkerCacheStatus, errorMode = false, cacheBusting = false): void {
+  let cacheVal: string;
+  let cdnMax = 600;
+  if (errorMode) {
+    cacheVal = 'public, max-age=10, s-maxage=10';
+    cdnMax = 10;
+  } else if (cacheBusting) {
+    cacheVal = 'public, max-age=60, s-maxage=60';
+    cdnMax = 60;
+  } else {
+    cacheVal = 'public, max-age=600, s-maxage=600';
+  }
+  c.header('Cache-Control', cacheVal);
+  c.header('Cloudflare-CDN-Cache-Control', `max-age=${cdnMax}`);
+  c.header('Vary', 'Accept-Encoding');
+  c.header('X-Worker-Cache', cacheStatus);
+}
+
+const KV_CACHE_KEY_V2_STATS = 'cache:v2:stats';
+
+/**
+ * GET /api/v2/stats
+ * 返回 stats 统计数据，用于独立缓存
+ * KV 缓存：命中则直接返回；未命中则查库并异步写入 KV（Cache Busting 时跳过写入）
+ * 防御：未预期 Query 参数用短缓存；容错返回 200 + 短缓存
+ */
+app.get('/api/v2/stats', async (c) => {
+  const env = c.env;
+  const url = new URL(c.req.url);
+  const hasUnexpectedQuery = Array.from(url.searchParams.keys()).some((k) => !ALLOWED_V2_STATS_QUERY_KEYS.has(k));
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+    setStatsCacheHeaders(c, 'MISS', true, false);
+    return c.json({ status: 'error', error: 'Supabase 未配置', totalUsers: 0, averages: {}, locationRank: [], recentVictims: [] }, 200);
+  }
+  try {
+    let cacheStatus: WorkerCacheStatus = 'MISS';
+    if (env.STATS_STORE) {
+      try {
+        const raw = await env.STATS_STORE.get(KV_CACHE_KEY_V2_STATS, 'text');
+        if (raw) {
+          try {
+            const cached = JSON.parse(raw);
+            if (cached && typeof cached === 'object') {
+              cacheStatus = 'HIT';
+              setStatsCacheHeaders(c, cacheStatus, false, hasUnexpectedQuery);
+              return c.json(cached);
+            }
+          } catch (parseErr) {
+            console.error('[KV] 数据解析失败，疑似脏数据:', (parseErr as Error)?.message);
+          }
+        }
+      } catch (getErr) {
+        cacheStatus = 'ERROR';
+      }
+    }
+
+    const [statsRes, extendedRes] = await Promise.all([
+      fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/v_global_stats_v6?select=*`),
+      fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/extended_stats_view?select=*`),
+    ]);
+    const statsData = statsRes.ok ? await statsRes.json() : [];
+    const extendedData = extendedRes.ok ? await extendedRes.json() : [];
+    const row = (Array.isArray(statsData) ? statsData[0] : statsData) || {};
+    const extRow = (Array.isArray(extendedData) ? extendedData[0] : extendedData) || {};
+    const result = {
+      status: 'success',
+      totalUsers: Number(row.totalUsers ?? row.total_users ?? 1),
+      averages: {
+        L: Number(row.avg_l ?? row.avg_L ?? row.L ?? 50),
+        P: Number(row.avg_p ?? row.avg_P ?? row.P ?? 50),
+        D: Number(row.avg_d ?? row.avg_D ?? row.D ?? 50),
+        E: Number(row.avg_e ?? row.avg_E ?? row.E ?? 50),
+        F: Number(row.avg_f ?? row.avg_F ?? row.F ?? 50),
+      },
+      totalAnalysis: Number(row.totalAnalysis ?? row.total_analysis ?? 0),
+      totalChars: Number(row.totalChars ?? row.total_chars ?? 0),
+      locationRank: Array.isArray(extRow.location_rank)
+        ? extRow.location_rank
+        : typeof extRow.location_rank === 'object'
+          ? Object.entries(extRow.location_rank).map(([name, v]: [string, any]) => ({ name, value: Number(v) || 0 }))
+          : [],
+      recentVictims: Array.isArray(extRow.recent_victims) ? extRow.recent_victims : [],
+    };
+
+    if (!hasUnexpectedQuery && env.STATS_STORE && cacheStatus !== 'ERROR') {
+      try {
+        // 并发 MISS 时多请求会同时触发 put，Cloudflare KV 会处理，属预期行为
+        const ctx = c.executionCtx;
+        if (ctx && typeof ctx.waitUntil === 'function') {
+          ctx.waitUntil(
+            env.STATS_STORE!.put(KV_CACHE_KEY_V2_STATS, JSON.stringify(result), { expirationTtl: 600 })
+          );
+        }
+      } catch (_) { /* 写入失败静默，不影响响应 */ }
+    }
+
+    setStatsCacheHeaders(c, cacheStatus === 'ERROR' ? 'ERROR' : 'MISS', false, hasUnexpectedQuery);
+    return c.json(result);
+  } catch (e: any) {
+    setStatsCacheHeaders(c, 'MISS', true, false);
+    return c.json({
+      status: 'error',
+      error: e?.message || '查询失败',
+      totalUsers: 0,
+      averages: { L: 50, P: 50, D: 50, E: 50, F: 50 },
+      locationRank: [],
+      recentVictims: [],
+    }, 200);
+  }
+});
+
+/**
+ * GET /api/v2/location-rank
+ * 返回地理位置排行，用于独立缓存
+ * 防御：未预期 Query 参数用短缓存；容错返回 200 + 短缓存
+ */
+app.get('/api/v2/location-rank', async (c) => {
+  const env = c.env;
+  const url = new URL(c.req.url);
+  const hasUnexpectedQuery = Array.from(url.searchParams.keys()).some((k) => !ALLOWED_V2_STATS_QUERY_KEYS.has(k));
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+    setStatsCacheHeaders(c, 'MISS', true, false);
+    return c.json({ status: 'error', error: 'Supabase 未配置', location_rank: [] }, 200);
+  }
+  try {
+    const res = await fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/extended_stats_view?select=location_rank`);
+    const data = res.ok ? await res.json() : [];
+    const row = Array.isArray(data) ? data[0] : data;
+    const locationRank = row?.location_rank
+      ? (Array.isArray(row.location_rank)
+          ? row.location_rank
+          : Object.entries(row.location_rank).map(([name, v]: [string, any]) => ({ name, value: Number(v) || 0 })))
+      : [];
+    setStatsCacheHeaders(c, 'MISS', false, hasUnexpectedQuery);
+    return c.json({ status: 'success', location_rank: locationRank });
+  } catch (e: any) {
+    setStatsCacheHeaders(c, 'MISS', true, false);
+    return c.json({ status: 'error', error: e?.message || '查询失败', location_rank: [] }, 200);
+  }
+});
 
 /**
  * POST /api/report-slang
@@ -5933,9 +6077,11 @@ app.get('/api/stats/dashboard', async (c) => {
       recentCount: recent.length,
     });
 
+    c.header('Cache-Control', 'public, max-age=600');
     return c.json(result);
   } catch (error: any) {
     console.error('[Worker] ❌ /api/stats/dashboard 错误:', error);
+    c.header('Cache-Control', 'public, max-age=600');
     return c.json({
       status: 'error',
       error: error.message || '未知错误',
@@ -6470,8 +6616,8 @@ async function fetchFromSupabase(
     // totalRoastWords 和 cityCount 已在视图 A 处理中获取，这里不再重复处理
 
     // 如果启用 KV 更新，写入缓存（包含 dimensions 字段，用于版本校验）
-    // 【KV 缓存原子性】将所有统计指标打包成一个 JSON 对象存入 KV，保证数据的"时间点"一致
-    if (updateKV && env.STATS_STORE) {
+    // 【止血】采样 5% 触发，避免每次请求都全量更新 KV
+    if (updateKV && env.STATS_STORE && Math.random() < 0.05) {
       try {
         const now = Math.floor(Date.now() / 1000);
         
@@ -6506,8 +6652,8 @@ async function fetchFromSupabase(
           cachedAt: now,
         };
         
-        // 原子性写入：将所有统计数据打包成一个 JSON 对象存入 KV
-        await env.STATS_STORE.put(KV_KEY_GLOBAL_STATS_CACHE, JSON.stringify(globalStatsCache));
+        // 原子性写入：将所有统计数据打包成一个 JSON 对象存入 KV（脏检查在 secureKVPut 内）
+        await secureKVPut(env, KV_KEY_GLOBAL_STATS_CACHE, JSON.stringify(globalStatsCache));
         
         // 兼容旧版本：同时写入 global_average（保持向后兼容）
         const cachePayload = {
@@ -6516,8 +6662,8 @@ async function fetchFromSupabase(
           totalAnalysis: Number(totalAnalysis) || 0,
           totalChars: Number(totalCharsSum) || 0,
         };
-        await env.STATS_STORE.put(KV_KEY_GLOBAL_AVERAGE, JSON.stringify(cachePayload));
-        await env.STATS_STORE.put(KV_KEY_LAST_UPDATE, now.toString());
+        await secureKVPut(env, KV_KEY_GLOBAL_AVERAGE, JSON.stringify(cachePayload));
+        await secureKVPut(env, KV_KEY_LAST_UPDATE, now.toString());
         
         console.log('[Worker] ✅ 已更新 KV 缓存（原子性写入，包含所有统计数据）:', {
           totalUsers: globalStatsCache.totalUsers,
@@ -6760,8 +6906,8 @@ async function performAggregation(env: Env): Promise<{ success: boolean; globalA
       ...globalAverage,
       dimensions: defaultDimensions, // 添加 dimensions 到缓存，用于版本校验
     };
-    await env.STATS_STORE.put(KV_KEY_GLOBAL_AVERAGE, JSON.stringify(cachePayload));
-    await env.STATS_STORE.put(KV_KEY_LAST_UPDATE, now.toString());
+    await secureKVPut(env, KV_KEY_GLOBAL_AVERAGE, JSON.stringify(cachePayload));
+    await secureKVPut(env, KV_KEY_LAST_UPDATE, now.toString());
 
     console.log('[Worker] ✅ 汇总任务完成，已写入 KV:', {
       globalAverage,
@@ -6826,7 +6972,7 @@ async function updateGlobalStatsV6(
         lastUpdate: now,
       };
 
-      await env.STATS_STORE.put(KV_KEY_GLOBAL_STATS_V6, JSON.stringify(newGlobalStats));
+      await secureKVPut(env, KV_KEY_GLOBAL_STATS_V6, JSON.stringify(newGlobalStats));
       console.log('[Worker] ✅ V6 全局统计已增量更新:', {
         totalUsers: newGlobalStats.totalUsers,
         avgDimensions: newGlobalStats.avgDimensions,
@@ -6850,7 +6996,7 @@ async function updateGlobalStatsV6(
         lastUpdate: now,
       };
 
-      await env.STATS_STORE.put(KV_KEY_GLOBAL_STATS_V6, JSON.stringify(initialStats));
+      await secureKVPut(env, KV_KEY_GLOBAL_STATS_V6, JSON.stringify(initialStats));
       console.log('[Worker] ✅ V6 全局统计已初始化');
     }
   } catch (error) {
@@ -6970,7 +7116,7 @@ async function performV6Aggregation(env: Env): Promise<{ success: boolean; error
       lastUpdate: Math.floor(Date.now() / 1000),
     };
 
-    await env.STATS_STORE.put(KV_KEY_GLOBAL_STATS_V6, JSON.stringify(globalStats));
+    await secureKVPut(env, KV_KEY_GLOBAL_STATS_V6, JSON.stringify(globalStats));
     console.log('[Worker] ✅ V6 全量聚合完成:', {
       totalUsers: globalStats.totalUsers,
       topBlackwords: globalStats.topBlackwords.length,
