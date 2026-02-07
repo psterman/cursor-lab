@@ -11059,9 +11059,11 @@
                 console.warn('[雷达图] ❌ 无法获取 Canvas 上下文');
                 return;
             }
-            // 修复 Canvas 冲突：渲染前必须销毁旧实例，避免 Chart.js 脚本中断
-            if (window.myRadarChart) window.myRadarChart.destroy();
-            window.myRadarChart = null;
+            // 修复 Canvas 残留：new Chart 前必须销毁旧实例，彻底消除 "Canvas is already in use" 报错
+            if (window.myRadarChart) {
+                try { window.myRadarChart.destroy(); } catch (e) { /* 忽略销毁异常 */ }
+                window.myRadarChart = null;
+            }
             
             const labels = currentLang === 'zh' ? ['语言', '模式', '深度', '效率', '频率'] : ['Lang', 'Pattern', 'Depth', 'Effi', 'Freq'];
             const targetData = [
@@ -13289,6 +13291,12 @@
         }
         function updateInboxRedDotFromApi(hasNew) {
             try {
+                // 自动红点：第一时间更新 #msg-dot，hasNew 为真时无需用户点击红点必须亮起
+                var msgDot = document.getElementById('msg-dot');
+                if (msgDot && typeof msgDot.classList !== 'undefined') {
+                    if (hasNew) { msgDot.classList.remove('hidden'); msgDot.style.display = ''; }
+                    else { msgDot.classList.add('hidden'); msgDot.style.display = 'none'; }
+                }
                 document.querySelectorAll('.inbox-indicator').forEach(function(el) {
                     if (hasNew) {
                         el.classList.add('has-new');
@@ -13297,11 +13305,6 @@
                         el.classList.remove('has-new', 'hidden');
                     }
                 });
-                var msgDot = document.getElementById('msg-dot');
-                if (msgDot && typeof msgDot.classList !== 'undefined') {
-                    if (hasNew) msgDot.classList.remove('hidden');
-                    else msgDot.classList.add('hidden');
-                }
             } catch (e) { /* 不阻塞主逻辑 */ }
         }
         window.updateInboxRedDotFromApi = updateInboxRedDotFromApi;
@@ -13334,10 +13337,12 @@
                     return;
                 }
                 body.innerHTML = list.map(function(item) {
-                    // 优先显示用户名，无用户名时显示 ID 前 8 位
-                    var sender = item.username || item.senderName || item.sender_name || item.from
+                    var senderName = item.username || item.senderName || item.sender_name || item.from
                         || (item.fromUserId || item.from ? String(item.fromUserId || item.from).substring(0, 8) : null)
                         || '匿名';
+                    var senderAvatar = item.senderAvatar || item.avatar || item.sender_avatar || '';
+                    if (!senderName && (item.fromUserId || item.from)) senderName = String(item.fromUserId || item.from).substring(0, 8);
+                    if (!senderName) senderName = '匿名';
                     var score = item.score != null ? item.score : (item.senderScore != null ? item.senderScore : '-');
                     var time = item.sentAt || item.sent_at || item.createdAt || item.created_at || '';
                     if (time && /^\d{4}/.test(time)) {
@@ -13348,8 +13353,14 @@
                     }
                     var secretId = item.secretId || item.secret_id || item.id || '';
                     var read = window.__inboxReadSecretIds.has(secretId);
-                    return '<div class="inbox-item" data-secret-id="' + escapeHtml(secretId) + '">' +
-                        '<div class="inbox-item-info">' + escapeHtml(sender) + ' · ' + escapeHtml(String(score)) + ' · ' + escapeHtml(time) + '</div>' +
+                    var avatarHtml = senderAvatar
+                        ? '<img src="' + escapeHtml(senderAvatar) + '" alt="" class="w-8 h-8 rounded-full object-cover flex-shrink-0" onerror="this.style.display=\'none\'">'
+                        : '<div class="w-8 h-8 rounded-full bg-zinc-700 flex-shrink-0 flex items-center justify-center text-[10px] text-zinc-400">' + escapeHtml(senderName.substring(0, 1)) + '</div>';
+                    return '<div class="inbox-item flex items-center gap-3" data-secret-id="' + escapeHtml(secretId) + '">' +
+                        avatarHtml +
+                        '<div class="flex-1 min-w-0">' +
+                        '<div class="inbox-item-info">' + escapeHtml(senderName) + ' · ' + escapeHtml(String(score)) + ' · ' + escapeHtml(time) + '</div>' +
+                        '</div>' +
                         '<button type="button" class="inbox-item-btn" data-action="view" data-secret-id="' + escapeHtml(secretId) + '">' + (read ? '已阅' : '查看') + '</button>' +
                         '</div>';
                 }).join('');
@@ -20406,6 +20417,7 @@
                         var statsRes = await fetch(statsUrl);
                         var statsJson = statsRes.ok ? (await statsRes.json().catch(function() { return {}; })) : {};
                         var hasNew = !!(statsJson && statsJson.hasNewMessage === true);
+                        // 自动红点：拿到响应后第一时间更新 #msg-dot，hasNew 为真时红点必须亮起
                         if (typeof window.updateMsgDot === 'function') window.updateMsgDot(hasNew);
                         else if (typeof window.updateInboxRedDotFromApi === 'function') window.updateInboxRedDotFromApi(hasNew);
                         hasNewMessageHandled = true;

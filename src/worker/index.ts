@@ -4523,6 +4523,8 @@ interface InboxItem {
   secretId: string;
   time: number;
   score: number;
+  senderName?: string;
+  senderAvatar?: string;
 }
 
 /**
@@ -4546,6 +4548,8 @@ app.post('/api/v2/message/send', async (c) => {
     const content = sanitizeBurnContent(body?.content ?? '');
     const score = Number(body?.score);
     const safeScore = Number.isFinite(score) ? Math.round(score) : 0;
+    const senderName = String(body?.username ?? body?.senderName ?? body?.toName ?? fromUser ?? '').trim() || (fromUser || '匿名');
+    const senderAvatar = String(body?.avatar ?? body?.senderAvatar ?? '').trim();
 
     if (!toId || !content) {
       return c.json({ success: false, error: '缺少 toId 或 content' }, 400);
@@ -4554,7 +4558,7 @@ app.post('/api/v2/message/send', async (c) => {
     const secretId = crypto.randomUUID();
     const msgKey = BURN_MSG_PREFIX + secretId;
     const inboxKey = `${INBOX_PREFIX}${toId}`;
-    const item: InboxItem = { from: fromUser || '匿名', secretId, time: Date.now(), score: safeScore };
+    const item: InboxItem = { from: fromUser || '匿名', secretId, time: Date.now(), score: safeScore, senderName, senderAvatar: senderAvatar || undefined };
 
     const ctx = c.executionCtx;
     if (ctx && typeof ctx.waitUntil === 'function') {
@@ -4597,8 +4601,12 @@ app.get('/api/v2/message/inbox', async (c) => {
     const arr: InboxItem[] = Array.isArray(raw) ? raw : [];
     const list = arr.map((x) => ({
       from: x.from,
-      senderName: x.from,
-      sender_name: x.from,
+      username: x.senderName ?? x.from,
+      senderName: x.senderName ?? x.from,
+      sender_name: x.senderName ?? x.from,
+      senderAvatar: x.senderAvatar ?? '',
+      sender_avatar: x.senderAvatar ?? '',
+      avatar: x.senderAvatar ?? '',
       secretId: x.secretId,
       secret_id: x.secretId,
       score: x.score,
