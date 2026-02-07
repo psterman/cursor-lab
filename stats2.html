@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- CSP：connect-src 需包含 https://api.github.com（仓库预览）、https://api.ipify.org / https://ipapi.co（IP/地理位置） -->
+    <!-- CSP：script-src 含 Cloudflare Insights；connect-src 含 cdn.jsdelivr.net / unpkg.com（Source Map 等） -->
      <script data-cfasync="false" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://html2canvas.hertzen.com https://cdn.tailwindcss.com; connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://cursor-clinical-analysis.psterman.workers.dev https://*.workers.dev https://psterman.supabase.co https://dtcplfhcgnxdzpigmotb.supabase.co wss://dtcplfhcgnxdzpigmotb.supabase.co https://raw.githubusercontent.com https://api.ipify.org https://ip-api.com https://ipapi.co https://api.github.com https://www.google.com wss://*.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com https://r2cdn.perplexity.ai;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://html2canvas.hertzen.com https://cdn.tailwindcss.com https://static.cloudflareinsights.com; connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://cursor-clinical-analysis.psterman.workers.dev https://*.workers.dev https://psterman.supabase.co https://dtcplfhcgnxdzpigmotb.supabase.co wss://dtcplfhcgnxdzpigmotb.supabase.co https://raw.githubusercontent.com https://api.ipify.org https://ip-api.com https://ipapi.co https://api.github.com https://www.google.com wss://*.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com https://r2cdn.perplexity.ai;">
     <title>Global Statistics Dashboard - Vibe Coding</title>
     <!-- 
     ============================================
@@ -284,32 +284,31 @@
         'use strict';
         const RESOURCE_CONFIG = {
             echarts: {
-                local: './lib/echarts.min.js',
+                local: null,
                 cdn: [
                     'https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js',
-                    'https://cdn.staticfile.net/echarts/5.4.3/echarts.min.js',
                     'https://unpkg.com/echarts@5.4.3/dist/echarts.min.js'
                 ],
                 globalCheck: 'echarts'
             },
             echartsWordCloud: {
-                local: './lib/echarts-wordcloud.min.js',
+                local: null,
                 cdn: ['https://cdn.jsdelivr.net/npm/echarts-wordcloud@2/dist/echarts-wordcloud.min.js'],
                 globalCheck: 'echarts'
             },
             world: {
-                local: './lib/world.js',
+                local: null,
                 cdn: [
-                    'https://cdn.jsdelivr.net/npm/echarts@4.9.0/map/js/world.js',
-                    'https://unpkg.com/echarts@4.9.0/map/js/world.js'
+                    'https://cdn.jsdelivr.net/npm/echarts@5.4.3/map/js/world.js',
+                    'https://unpkg.com/echarts@5.4.3/map/js/world.js'
                 ],
                 globalCheck: null
             },
             chartjs: {
-                local: './lib/chart.umd.min.js',
+                local: null,
                 cdn: [
-                    'https://cdn.jsdelivr.net/npm/chart.js',
-                    'https://cdn.staticfile.net/Chart.js/4.4.1/chart.umd.min.js'
+                    'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js',
+                    'https://unpkg.com/chart.js@4.4.1/dist/chart.umd.min.js'
                 ],
                 globalCheck: 'Chart'
             },
