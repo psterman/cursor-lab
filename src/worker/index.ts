@@ -4339,7 +4339,7 @@ app.get('/api/global-average', async (c) => {
   return c.json(finalRow);
 });
 
-const ALLOWED_V2_STATS_QUERY_KEYS = new Set<string>([]);
+const ALLOWED_V2_STATS_QUERY_KEYS = new Set<string>(['fingerprint']);
 type WorkerCacheStatus = 'HIT' | 'MISS' | 'ERROR';
 function setStatsCacheHeaders(c: any, cacheStatus: WorkerCacheStatus, errorMode = false, cacheBusting = false): void {
   let cacheVal: string;
@@ -4355,11 +4355,12 @@ function setStatsCacheHeaders(c: any, cacheStatus: WorkerCacheStatus, errorMode 
   }
   c.header('Cache-Control', cacheVal);
   c.header('Cloudflare-CDN-Cache-Control', `max-age=${cdnMax}`);
-  c.header('Vary', 'Accept-Encoding');
+  c.header('Vary', 'Accept-Encoding, X-Fingerprint');
   c.header('X-Worker-Cache', cacheStatus);
 }
 
 const KV_CACHE_KEY_V2_STATS = 'cache:v2:stats';
+const INBOX_PREFIX = 'inbox:';
 
 /**
  * GET /api/v2/stats
@@ -4385,6 +4386,15 @@ app.get('/api/v2/stats', async (c) => {
             const cached = JSON.parse(raw);
             if (cached && typeof cached === 'object') {
               cacheStatus = 'HIT';
+              const fp = url.searchParams.get('fingerprint') || c.req.header('X-Fingerprint') || '';
+              let hasNewMessage = false;
+              if (fp.trim() && env.STATS_STORE) {
+                try {
+                  const inbox = await env.STATS_STORE.get(INBOX_PREFIX + fp.trim(), 'json');
+                  hasNewMessage = !!(inbox && Array.isArray(inbox) && inbox.length > 0);
+                } catch (_) { /* 不阻塞主逻辑 */ }
+              }
+              cached.hasNewMessage = hasNewMessage;
               setStatsCacheHeaders(c, cacheStatus, false, hasUnexpectedQuery);
               return c.json(cached);
             }
@@ -4424,6 +4434,16 @@ app.get('/api/v2/stats', async (c) => {
           : [],
       recentVictims: Array.isArray(extRow.recent_victims) ? extRow.recent_victims : [],
     };
+
+    const fp = url.searchParams.get('fingerprint') || c.req.header('X-Fingerprint') || '';
+    let hasNewMessage = false;
+    if (fp.trim() && env.STATS_STORE) {
+      try {
+        const inbox = await env.STATS_STORE.get(INBOX_PREFIX + fp.trim(), 'json');
+        hasNewMessage = !!(inbox && Array.isArray(inbox) && inbox.length > 0);
+      } catch (_) { /* 不阻塞主逻辑 */ }
+    }
+    (result as any).hasNewMessage = hasNewMessage;
 
     if (!hasUnexpectedQuery && env.STATS_STORE && cacheStatus !== 'ERROR') {
       try {
@@ -4480,6 +4500,161 @@ app.get('/api/v2/location-rank', async (c) => {
     setStatsCacheHeaders(c, 'MISS', true, false);
     return c.json({ status: 'error', error: e?.message || '查询失败', location_rank: [] }, 200);
   }
+});
+
+// ========== 阅后即焚私信 KV 常量 ==========
+const BURN_MSG_PREFIX = 'burn:msg:';
+const BURN_TTL = 3600;
+const INBOX_MAX_LEN = 10;
+
+function sanitizeBurnContent(raw: string): string {
+  const s = String(raw || '').slice(0, 200);
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+interface InboxItem {
+  from: string;
+  secretId: string;
+  time: number;
+  score: number;
+}
+
+/**
+ * POST /api/v2/message/send
+ * 阅后即焚私信发送：写入消息正文 + 更新收件人收件箱
+ */
+app.post('/api/v2/message/send', async (c) => {
+  const env = c.env;
+  if (!env.STATS_STORE) {
+    return c.json({ success: false, error: 'KV 未配置' }, 500);
+  }
+  let body: any = null;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: 'Invalid JSON' }, 400);
+  }
+  const toUserId = String(body?.toUserId ?? body?.toId ?? '').trim();
+  const fromUser = String(body?.fromUser ?? body?.fingerprint ?? '').trim();
+  const content = sanitizeBurnContent(body?.content ?? '');
+  const score = Number(body?.score);
+  const safeScore = Number.isFinite(score) ? Math.round(score) : 0;
+
+  if (!toUserId || !content) {
+    return c.json({ success: false, error: '缺少 toUserId/toId 或 content' }, 400);
+  }
+
+  const secretId = crypto.randomUUID();
+  const msgKey = BURN_MSG_PREFIX + secretId;
+  const inboxKey = INBOX_PREFIX + toUserId;
+  const item: InboxItem = { from: fromUser || '匿名', secretId, time: Date.now(), score: safeScore };
+
+  const ctx = c.executionCtx;
+  if (ctx && typeof ctx.waitUntil === 'function') {
+    ctx.waitUntil((async () => {
+      try {
+        await env.STATS_STORE!.put(msgKey, content, { expirationTtl: BURN_TTL });
+        const raw = await env.STATS_STORE!.get(inboxKey, 'json');
+        const arr: InboxItem[] = Array.isArray(raw) ? raw : [];
+        arr.push(item);
+        const trimmed = arr.slice(-INBOX_MAX_LEN);
+        await env.STATS_STORE!.put(inboxKey, JSON.stringify(trimmed), { expirationTtl: BURN_TTL });
+      } catch (e) {
+        console.error('[BurnMsg] send waitUntil failed:', (e as Error)?.message);
+      }
+    })());
+  }
+
+  return c.json({ success: true, secretId });
+});
+
+/**
+ * GET /api/v2/message/inbox
+ * 收件箱列表：返回 inbox:{userId} 数组
+ */
+app.get('/api/v2/message/inbox', async (c) => {
+  const env = c.env;
+  const userId = c.req.query('userId') ?? '';
+  if (!userId.trim()) {
+    return c.json({ list: [] });
+  }
+  if (!env.STATS_STORE) {
+    return c.json({ list: [] });
+  }
+  try {
+    const raw = await env.STATS_STORE.get(INBOX_PREFIX + userId.trim(), 'json');
+    const arr: InboxItem[] = Array.isArray(raw) ? raw : [];
+    const list = arr.map((x) => ({
+      from: x.from,
+      senderName: x.from,
+      sender_name: x.from,
+      secretId: x.secretId,
+      secret_id: x.secretId,
+      score: x.score,
+      sentAt: new Date(x.time).toISOString(),
+      sent_at: new Date(x.time).toISOString(),
+      createdAt: new Date(x.time).toISOString(),
+      created_at: new Date(x.time).toISOString(),
+    }));
+    return c.json({ list });
+  } catch {
+    return c.json({ list: [] });
+  }
+});
+
+/**
+ * GET /api/v2/message/read
+ * 阅后即焚读取：获取内容后立即删除，并清理收件箱索引
+ */
+app.get('/api/v2/message/read', async (c) => {
+  const env = c.env;
+  const secretId = c.req.query('secretId') ?? '';
+  const userId = c.req.query('userId') ?? '';
+  if (!secretId.trim()) {
+    return c.json({ content: '', error: '缺少 secretId' }, 200);
+  }
+
+  if (!env.STATS_STORE) {
+    return c.json({ content: '', error: 'KV 未配置' }, 200);
+  }
+
+  let content: string | null = null;
+  try {
+    const raw = await env.STATS_STORE.get(BURN_MSG_PREFIX + secretId.trim(), 'text');
+    content = raw != null ? String(raw) : null;
+  } catch {
+    content = null;
+  }
+
+  const ctx = c.executionCtx;
+  if (ctx && typeof ctx.waitUntil === 'function') {
+    ctx.waitUntil((async () => {
+      try {
+        await env.STATS_STORE!.delete(BURN_MSG_PREFIX + secretId.trim());
+        if (userId.trim()) {
+          const inboxKey = INBOX_PREFIX + userId.trim();
+          const raw = await env.STATS_STORE!.get(inboxKey, 'json');
+          const arr: InboxItem[] = Array.isArray(raw) ? raw : [];
+          const next = arr.filter((x) => x.secretId !== secretId.trim());
+          if (next.length !== arr.length) {
+            await env.STATS_STORE!.put(inboxKey, JSON.stringify(next), { expirationTtl: BURN_TTL });
+          }
+        }
+      } catch (e) {
+        console.error('[BurnMsg] read waitUntil failed:', (e as Error)?.message);
+      }
+    })());
+  }
+
+  if (content == null || content === '') {
+    return c.json({ content: '消息已自毁或过期', error: '消息已自毁或过期' }, 200);
+  }
+  return c.json({ content });
 });
 
 /**

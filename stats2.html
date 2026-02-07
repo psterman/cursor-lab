@@ -1589,6 +1589,68 @@
             min-width: 400px;
             z-index: 1000;
         }
+
+        /* 私信收件箱抽屉 */
+        #private-inbox-drawer {
+            position: fixed;
+            top: 0;
+            right: 0;
+            width: 50%;
+            max-width: 420px;
+            height: 100%;
+            background: rgba(5, 5, 5, 0.98);
+            border-left: 1px solid rgba(0, 255, 65, 0.45);
+            box-shadow: -4px 0 24px rgba(0, 0, 0, 0.5);
+            z-index: 1002;
+            transform: translateX(100%);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            flex-direction: column;
+        }
+        #private-inbox-drawer.active { transform: translateX(0); }
+        .inbox-header { padding: 16px 20px; border-bottom: 1px solid rgba(0, 255, 65, 0.2); display: flex; justify-content: space-between; align-items: center; }
+        .inbox-title { color: #00ff41; font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; }
+        .inbox-close { background: none; border: none; color: #00ff41; font-size: 18px; cursor: pointer; }
+        .inbox-body { flex: 1; overflow-y: auto; padding: 12px; }
+        .inbox-item { background: rgba(0, 255, 65, 0.05); border: 1px solid rgba(0, 255, 65, 0.2); border-radius: 6px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+        .inbox-item-info { font-size: 11px; color: #a1a1aa; }
+        .inbox-item-btn { padding: 4px 10px; font-size: 10px; border: 1px solid rgba(0, 255, 65, 0.5); color: #00ff41; background: transparent; cursor: pointer; border-radius: 4px; transition: all 0.2s; }
+        .inbox-item-btn:hover { background: rgba(0, 255, 65, 0.15); }
+
+        /* 阅后即焚阅读器 - 模糊渐显动画 */
+        .burn-reader-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 1005;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+        .burn-reader-box {
+            background: rgba(5, 5, 5, 0.98);
+            border: 1px solid rgba(0, 255, 65, 0.45);
+            border-radius: 8px;
+            padding: 24px;
+            max-width: 400px;
+            width: 100%;
+        }
+        .burn-reader-content {
+            filter: blur(12px);
+            opacity: 0;
+            animation: burn-reveal 1.2s ease-out forwards;
+        }
+        @keyframes burn-reveal {
+            0% { filter: blur(12px); opacity: 0; }
+            100% { filter: blur(0); opacity: 1; }
+        }
+        .burn-reader-countdown {
+            margin-top: 12px;
+            font-size: 11px;
+            color: #71717a;
+            font-family: 'JetBrains Mono', monospace;
+        }
         
         /* 悬浮抽屉式列表样式 */
         .live-nodes-drawer {
@@ -1914,6 +1976,17 @@
             display: flex;
             gap: 8px;
             margin-top: 12px;
+        }
+        
+        .user-popup-btn-icon {
+            flex: none;
+            width: 36px;
+            height: 36px;
+            padding: 0;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         
         .user-popup-btn {
@@ -3301,6 +3374,16 @@
     </div>
     
     <!-- 悬浮抽屉式在线用户列表 -->
+    <div id="private-inbox-drawer">
+        <div class="inbox-header">
+            <span class="inbox-title">私信收件箱</span>
+            <button type="button" class="inbox-close" onclick="closeInboxDrawer()">✕</button>
+        </div>
+        <div class="inbox-body" id="inbox-body">
+            <div class="text-zinc-500 text-center py-8 text-xs">加载中...</div>
+        </div>
+    </div>
+
     <div id="live-nodes-drawer" class="live-nodes-drawer expanded">
         <div class="live-nodes-header" onclick="toggleDrawer()">
             <div class="flex items-center gap-3">
@@ -6024,6 +6107,9 @@
                     // 非 ISO2（兜底展示）：用短延迟结束 loading
                     if (!/^[A-Z]{2}$/.test(cc)) {
                         setTimeout(() => setRightDrawerLoading(false), 220);
+                    } else {
+                        // 安全兜底：15 秒后强制清除 loading，避免 fetch 挂起时一直卡在骨架
+                        setTimeout(() => setRightDrawerLoading(false), 15000);
                     }
 
                     // 抽屉实时上下文切换：只要是 ISO2，就进入“国家透视（右侧模板）”
@@ -7243,6 +7329,11 @@
                                 <div class="drawer-item-value text-sm truncate">${displayName}</div>
                                 <div class="drawer-item-desc text-[8px]">${displayLabel}</div>
                             </div>
+                            <button 
+                                onclick="typeof openInboxDrawer === 'function' && openInboxDrawer()"
+                                class="w-9 h-9 flex items-center justify-center bg-transparent border-none text-[#00ff41] hover:text-[#00ff41]/80 transition-colors flex-shrink-0 cursor-pointer p-0"
+                                title="${currentLang === 'zh' ? '收件箱' : 'Inbox'}"
+                            >✉</button>
                             ${githubUsername && isValidGitHubUsername(githubUsername, userIdentity)
                                 ? `
                                 <button 
@@ -7771,6 +7862,7 @@
                 
                 // 渐进式渲染右侧卡片
                 renderCardsStaggered(rightBody, rightCards, 100);
+                try { setRightDrawerLoading(false); } catch { /* ignore */ }
                 
                 // 渲染雷达图（在卡片渲染完成后）
                 if (radarData) {
@@ -12723,12 +12815,14 @@
                 // 忙碌状态：其他用户无法点击发送消息
                 const canSendMessage = !isBusy || isCurrentUser;
                 
+                var toId = user.fingerprint || user.user_fingerprint || user.user_identity || githubId;
                 return `
                     <div 
                         class="user-avatar-trigger user-avatar-compact ${isBusy ? 'busy' : ''}" 
                         data-user-index="${index}"
                         data-user-name="${escapeHtml(userName)}"
                         data-github-id="${escapeHtml(githubId)}"
+                        data-to-id="${escapeHtml(toId)}"
                         data-avatar-url="${escapeHtml(avatarUrl)}"
                         data-status="${status}"
                         data-status-label="${statusConfig.label}"
@@ -12822,19 +12916,18 @@
                 </div>
                 <div class="user-popup-actions">
                     <button 
-                        class="user-popup-btn" 
+                        class="user-popup-btn user-popup-btn-icon" 
                         data-action="message"
+                        title="${canSendMessage ? (currentLang === 'zh' ? '发送消息' : 'Send Message') : (currentLang === 'zh' ? '忙碌中' : 'Busy')}"
                         ${!canSendMessage ? 'disabled' : ''}
-                    >
-                        ${canSendMessage ? '发送消息' : '忙碌中'}
-                    </button>
+                    >✉</button>
+                    <button class="user-popup-btn user-popup-btn-icon" data-action="inbox" title="${currentLang === 'zh' ? '收件箱' : 'Inbox'}">📥</button>
                     <button 
-                        class="user-popup-btn repo-btn"
+                        class="user-popup-btn user-popup-btn-icon repo-btn"
                         data-action="repo"
                         data-github-id="${escapeHtml(githubId)}"
-                    >
-                        跳转仓库
-                    </button>
+                        title="${currentLang === 'zh' ? '跳转仓库' : 'Open Repo'}"
+                    >↗</button>
                 </div>
             `;
             
@@ -12924,6 +13017,7 @@
             
             // 为按钮添加事件监听器
             const messageBtn = popup.querySelector('[data-action="message"]');
+            const inboxBtn = popup.querySelector('[data-action="inbox"]');
             const repoBtn = popup.querySelector('[data-action="repo"]');
             
             if (messageBtn) {
@@ -12933,7 +13027,19 @@
                     if (popup._cleanup) popup._cleanup();
                     popup.remove();
                     currentPopupElement = null;
-                    openMessageInput(userName);
+                    var toId = avatarElement.getAttribute('data-github-id') || avatarElement.getAttribute('data-to-id') || userName;
+                    openMessageSender(toId, userName);
+                });
+            }
+            
+            if (inboxBtn) {
+                inboxBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    if (popup._cleanup) popup._cleanup();
+                    popup.remove();
+                    currentPopupElement = null;
+                    if (typeof openInboxDrawer === 'function') openInboxDrawer();
                 });
             }
             
@@ -13038,7 +13144,192 @@
         }
         
         /**
-         * 打开私信输入框
+         * 打开私信发送模态框（API 版：POST /api/v2/message/send）
+         * @param {string} toId - 目标用户 ID（fingerprint 或 github_id）
+         * @param {string} toName - 目标用户显示名
+         */
+        function openMessageSender(toId, toName) {
+            var overlay = document.createElement('div');
+            overlay.className = 'message-input-overlay';
+            overlay.style.zIndex = '1001';
+            overlay.onclick = function(e) {
+                if (e.target === overlay) overlay.remove();
+            };
+            var fp = '';
+            try { fp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+            var score = 0;
+            try {
+                var cu = window.currentUser || {};
+                var vs = cu.vibe_index || cu.vibeIndex || (cu.detailedStats && cu.detailedStats[0] && cu.detailedStats[0].vibe_index);
+                if (typeof vs === 'number' && !isNaN(vs)) score = Math.round(vs);
+                else if (typeof vs === 'string') score = parseInt(vs, 10) || 0;
+            } catch (_) {}
+            overlay.innerHTML = `
+                <div class="message-input-box" onclick="event.stopPropagation()">
+                    <div class="text-[10px] text-zinc-500 mb-2 uppercase tracking-widest">发送暗号给 ${escapeHtml(toName || toId || '')}</div>
+                    <textarea id="msgSenderText" maxlength="200" rows="4" placeholder="输入内容（限200字）" class="w-full bg-zinc-900/50 border border-zinc-800 px-3 py-2 rounded text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-[var(--accent-terminal)] resize-none"></textarea>
+                    <div class="text-[10px] text-zinc-600 mt-1 text-right"><span id="msgCharCount">0</span>/200</div>
+                    <div class="flex gap-2 mt-3">
+                        <button id="msgSenderSendBtn" class="flex-1 px-4 py-2 bg-[var(--accent-terminal)]/20 border border-[var(--accent-terminal)] text-[var(--accent-terminal)] text-xs font-bold uppercase tracking-wider hover:bg-[var(--accent-terminal)]/30 transition-colors">发送</button>
+                        <button class="px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-400 text-xs font-bold uppercase tracking-wider hover:bg-zinc-700 transition-colors" onclick="this.closest('.message-input-overlay').remove()">取消</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            var ta = document.getElementById('msgSenderText');
+            var sendBtn = document.getElementById('msgSenderSendBtn');
+            var charCount = document.getElementById('msgCharCount');
+            if (ta) ta.focus();
+            function updateCount() { if (charCount) charCount.textContent = (ta && ta.value ? ta.value.length : 0); }
+            if (ta) { ta.addEventListener('input', updateCount); updateCount(); }
+            if (sendBtn) {
+                sendBtn.addEventListener('click', async function() {
+                    var content = (ta && ta.value || '').trim();
+                    if (!content) { alert('请输入内容'); return; }
+                    sendBtn.disabled = true;
+                    var base = (typeof API_ENDPOINT_MANAGER !== 'undefined' && API_ENDPOINT_MANAGER.getCurrent && API_ENDPOINT_MANAGER.getCurrent()) || document.querySelector('meta[name="api-endpoint"]')?.content || '';
+                    var url = (base.replace(/\/$/, '') || '') + '/api/v2/message/send';
+                    try {
+                        var res = await fetch(url, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                toId: toId,
+                                toName: toName || toId,
+                                content: content,
+                                fingerprint: fp,
+                                score: score
+                            })
+                        });
+                        var data = res.ok ? (await res.json().catch(function() { return {}; })) : {};
+                        if (res.ok && (data.success !== false && data.status !== 'error')) {
+                            overlay.remove();
+                            if (typeof showNotification === 'function') showNotification('暗号已送达，1小时后自毁');
+                            else alert('暗号已送达，1小时后自毁');
+                        } else {
+                            sendBtn.disabled = false;
+                            alert(data.error || data.message || '发送失败');
+                        }
+                    } catch (err) {
+                        sendBtn.disabled = false;
+                        alert('发送失败: ' + (err && err.message || '网络错误'));
+                    }
+                });
+            }
+        }
+
+        /** 私信收件箱：本地缓存已读/已焚列表，用于刷新 hasNewMessage */
+        window.__inboxReadSecretIds = window.__inboxReadSecretIds || new Set();
+
+        function closeInboxDrawer() {
+            var el = document.getElementById('private-inbox-drawer');
+            if (el) el.classList.remove('active');
+        }
+        function openInboxDrawer() {
+            var el = document.getElementById('private-inbox-drawer');
+            if (el) { el.classList.add('active'); loadInbox(); }
+        }
+        function refreshHasNewMessage() {
+            var trigger = document.getElementById('private-inbox-trigger');
+            if (!trigger) return;
+            var hasNew = (window.__inboxLastList || []).some(function(item) {
+                return item.secretId && !window.__inboxReadSecretIds.has(item.secretId);
+            });
+            if (hasNew) trigger.classList.add('has-new');
+            else trigger.classList.remove('has-new');
+        }
+        async function loadInbox() {
+            var body = document.getElementById('inbox-body');
+            if (!body) return;
+            var fp = '';
+            try { fp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+            if (!fp) {
+                body.innerHTML = '<div class="text-zinc-500 text-center py-8 text-xs">请先完成分析以获取收件箱</div>';
+                return;
+            }
+            body.innerHTML = '<div class="text-zinc-500 text-center py-8 text-xs">加载中...</div>';
+            var base = (typeof API_ENDPOINT_MANAGER !== 'undefined' && API_ENDPOINT_MANAGER.getCurrent && API_ENDPOINT_MANAGER.getCurrent()) || document.querySelector('meta[name="api-endpoint"]')?.content || '';
+            var url = (base.replace(/\/$/, '') || '') + '/api/v2/message/inbox?userId=' + encodeURIComponent(fp);
+            try {
+                var res = await fetch(url);
+                var data = res.ok ? (await res.json().catch(function() { return { list: [] }; })) : { list: [] };
+                var list = Array.isArray(data.list) ? data.list : (data.items || data.messages || []);
+                window.__inboxLastList = list;
+                list = list.filter(function(item) {
+                    var sid = item.secretId || item.secret_id || item.id || '';
+                    return !window.__inboxReadSecretIds.has(sid);
+                });
+                refreshHasNewMessage();
+                if (list.length === 0) {
+                    body.innerHTML = '<div class="text-zinc-500 text-center py-8 text-xs">暂无私信</div>';
+                    return;
+                }
+                body.innerHTML = list.map(function(item) {
+                    var sender = item.senderName || item.sender_name || item.from || '匿名';
+                    var score = item.score != null ? item.score : (item.senderScore != null ? item.senderScore : '-');
+                    var time = item.sentAt || item.sent_at || item.createdAt || item.created_at || '';
+                    if (time && /^\d{4}/.test(time)) {
+                        try {
+                            var d = new Date(time);
+                            time = d.getMonth() + 1 + '/' + d.getDate() + ' ' + (d.getHours() < 10 ? '0' : '') + d.getHours() + ':' + (d.getMinutes() < 10 ? '0' : '') + d.getMinutes();
+                        } catch (_) {}
+                    }
+                    var secretId = item.secretId || item.secret_id || item.id || '';
+                    var read = window.__inboxReadSecretIds.has(secretId);
+                    return '<div class="inbox-item" data-secret-id="' + escapeHtml(secretId) + '">' +
+                        '<div class="inbox-item-info">' + escapeHtml(sender) + ' · ' + escapeHtml(String(score)) + ' · ' + escapeHtml(time) + '</div>' +
+                        '<button type="button" class="inbox-item-btn" data-action="view" data-secret-id="' + escapeHtml(secretId) + '">' + (read ? '已阅' : '查看') + '</button>' +
+                        '</div>';
+                }).join('');
+                body.querySelectorAll('[data-action="view"]').forEach(function(btn) {
+                    btn.addEventListener('click', function() {
+                        var sid = btn.getAttribute('data-secret-id');
+                        if (sid) openBurnReader(sid, function() {
+                            window.__inboxReadSecretIds.add(sid);
+                            loadInbox();
+                            refreshHasNewMessage();
+                        });
+                    });
+                });
+            } catch (err) {
+                body.innerHTML = '<div class="text-zinc-500 text-center py-8 text-xs">加载失败</div>';
+            }
+        }
+        function openBurnReader(secretId, onClose) {
+            var overlay = document.createElement('div');
+            overlay.className = 'burn-reader-overlay';
+            overlay.innerHTML = '<div class="burn-reader-box"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><span class="inbox-title" style="margin:0">阅后即焚</span><button type="button" class="inbox-close" data-burn-close>✕</button></div><div class="burn-reader-content">加载中...</div><div class="burn-reader-countdown">15 秒后自毁</div></div>';
+            overlay.onclick = function(e) { if (e.target === overlay) { overlay.remove(); if (onClose) onClose(); } };
+            overlay.querySelector('[data-burn-close]').addEventListener('click', function() { overlay.remove(); if (onClose) onClose(); });
+            document.body.appendChild(overlay);
+            var box = overlay.querySelector('.burn-reader-box');
+            var contentEl = overlay.querySelector('.burn-reader-content');
+            var countEl = overlay.querySelector('.burn-reader-countdown');
+            var base = (typeof API_ENDPOINT_MANAGER !== 'undefined' && API_ENDPOINT_MANAGER.getCurrent && API_ENDPOINT_MANAGER.getCurrent()) || document.querySelector('meta[name="api-endpoint"]')?.content || '';
+            var fp = '';
+            try { fp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+            var url = (base.replace(/\/$/, '') || '') + '/api/v2/message/read?secretId=' + encodeURIComponent(secretId) + (fp ? '&userId=' + encodeURIComponent(fp) : '');
+            fetch(url).then(function(res) { return res.json(); }).catch(function() { return {}; }).then(function(data) {
+                var text = data.content || data.message || data.text || (data.error || '无法加载');
+                if (contentEl) contentEl.textContent = text;
+            });
+            var sec = 15;
+            function tick() {
+                if (countEl) countEl.textContent = sec + ' 秒后自毁';
+                if (sec <= 0) {
+                    overlay.remove();
+                    if (onClose) onClose();
+                    return;
+                }
+                sec--;
+                setTimeout(tick, 1000);
+            }
+            tick();
+        }
+
+
+        /**
+         * 打开私信输入框（Broadcast 版，保留兼容）
          * @param {string} targetUserId - 目标用户ID
          */
         function openMessageInput(targetUserId) {
