@@ -1972,6 +1972,27 @@
             -webkit-box-orient: vertical;
             overflow: hidden;
         }
+        .user-popup-repo-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 0.85em;
+        }
+        .user-popup-repo-loading::before {
+            content: '';
+            width: 18px;
+            height: 18px;
+            margin-right: 8px;
+            border: 2px solid rgba(0, 255, 65, 0.3);
+            border-top-color: #00ff41;
+            border-radius: 50%;
+            animation: user-popup-repo-spin 0.7s linear infinite;
+        }
+        @keyframes user-popup-repo-spin {
+            to { transform: rotate(360deg); }
+        }
         .user-popup-repo-star-card .repo-card-meta {
             font-size: 0.8em;
             color: rgba(255, 255, 255, 0.5);
@@ -4755,6 +4776,8 @@
 
         // 维度排名数据资源（从 rank-content.ts 加载）
         let RANK_RESOURCES = null;
+        /** 状态锁：rank-resources 是否已就绪，未就绪时弹窗仓库区显示加载动画而非「暂无」 */
+        window.isRankResourcesLoaded = false;
 
         // ============================================
         // 【全局错误捕获】防止单个模块崩溃导致整个页面无法加载
@@ -12973,7 +12996,7 @@
                 if (popup._cleanup) popup._cleanup();
                 popup.remove();
             });
-            // 渲染用户弹窗前先 destroy 旧雷达图实例，防止报错中断
+            // 渲染前强制执行 destroy() 旧 Chart 实例，防止脚本静默崩溃
             if (window.myRadarChart) {
                 try { window.myRadarChart.destroy(); } catch (e) { /* ignore */ }
                 window.myRadarChart = null;
@@ -13155,74 +13178,78 @@
                 });
             }
             
-            // 从 window.allRankResources 中通过 github_username 检索仓库列表，有则渲染，无则请求 API 并写入缓存
-            function formatRepoUpdatedAt(isoStr) {
-                if (!isoStr) return '';
-                try {
-                    const d = new Date(isoStr);
-                    const now = new Date();
-                    const diffMs = now - d;
-                    const diffDays = Math.floor(diffMs / 86400000);
-                    if (diffDays === 0) return '今天更新';
-                    if (diffDays === 1) return '昨天更新';
-                    if (diffDays < 7) return diffDays + ' 天前';
-                    if (diffDays < 30) return Math.floor(diffDays / 7) + ' 周前';
-                    return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
-                } catch { return ''; }
-            }
-            function renderRepoList(repos, repoListEl) {
+            /** 使用 line-clamp 的精美单仓库卡片；仅展示 Star 最高的一个。username 大小写不敏感。 */
+            function renderTopRepoCard(username, repoListEl) {
                 if (!repoListEl) return;
-                if (!repos || repos.length === 0) {
-                    var emptyMsg = (typeof isValidGitHubUsername === 'function' && isValidGitHubUsername(githubId))
-                        ? '该用户暂无公开仓库'
-                        : '该用户为访客或未绑定 GitHub，无仓库信息';
-                    repoListEl.innerHTML = '<div class="user-popup-repo-item" style="color: rgba(255,255,255,0.4); cursor: default;">' + emptyMsg + '</div>';
+                if (!window.isRankResourcesLoaded) {
+                    repoListEl.innerHTML = '<div class="user-popup-repo-loading">加载中...</div>';
                     return;
                 }
-                var star = function (r) { return r.stargazersCount != null ? r.stargazersCount : (r.stargazers_count != null ? r.stargazers_count : 0); };
-                var sorted = repos.slice().sort(function (a, b) { return star(b) - star(a); });
-                var top = sorted[0];
-                var starsNum = star(top);
-                var desc = (top.description || '').trim();
-                var updatedStr = formatRepoUpdatedAt(top.updatedAt || top.updated_at);
-                repoListEl.innerHTML = '<a class="user-popup-repo-star-card" href="' + escapeHtml(top.url || top.html_url || '#') + '" target="_blank" rel="noopener">' +
-                    '<div class="repo-card-name">' + escapeHtml(top.name || '') + '</div>' +
-                    (desc ? '<div class="repo-card-desc">' + escapeHtml(desc) + '</div>' : '') +
-                    '<div class="repo-card-meta">' +
-                    '<span class="repo-card-stars">' + starsNum + ' ★</span>' +
-                    (updatedStr ? '<span>' + escapeHtml(updatedStr) + '</span>' : '') +
-                    '</div></a>';
-            }
-            function getCachedReposByUsername(username) {
-                if (!window.allRankResources || !username) return undefined;
-                var lower = String(username).toLowerCase();
-                if (window.allRankResources[lower] !== undefined) return window.allRankResources[lower];
-                var key = Object.keys(window.allRankResources).find(function (k) {
-                    return String(k).toLowerCase() === lower;
+                function formatRepoUpdatedAt(isoStr) {
+                    if (!isoStr) return '';
+                    try {
+                        var d = new Date(isoStr);
+                        var now = new Date();
+                        var diffDays = Math.floor((now - d) / 86400000);
+                        if (diffDays === 0) return '今天更新';
+                        if (diffDays === 1) return '昨天更新';
+                        if (diffDays < 7) return diffDays + ' 天前';
+                        if (diffDays < 30) return Math.floor(diffDays / 7) + ' 周前';
+                        return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
+                    } catch (e) { return ''; }
+                }
+                function getCachedRepos(u) {
+                    if (!window.allRankResources || !u) return undefined;
+                    var lower = String(u).toLowerCase();
+                    if (window.allRankResources[lower] !== undefined) return window.allRankResources[lower];
+                    var key = Object.keys(window.allRankResources).find(function (k) { return String(k).toLowerCase() === lower; });
+                    return key ? window.allRankResources[key] : undefined;
+                }
+                function setCachedRepos(u, repos) {
+                    if (!u) return;
+                    if (!window.allRankResources) window.allRankResources = {};
+                    window.allRankResources[String(u).toLowerCase()] = repos;
+                }
+                var cached = getCachedRepos(username);
+                if (cached !== undefined && Array.isArray(cached)) {
+                    var repos = cached;
+                    if (!repos || repos.length === 0) {
+                        var emptyMsg = (typeof isValidGitHubUsername === 'function' && isValidGitHubUsername(username))
+                            ? '该用户暂无公开仓库'
+                            : '该用户为访客或未绑定 GitHub，无仓库信息';
+                        repoListEl.innerHTML = '<div class="user-popup-repo-item" style="color: rgba(255,255,255,0.4); cursor: default;">' + emptyMsg + '</div>';
+                        return;
+                    }
+                    var star = function (r) { return r.stargazersCount != null ? r.stargazersCount : (r.stargazers_count != null ? r.stargazers_count : 0); };
+                    var sorted = repos.slice().sort(function (a, b) { return star(b) - star(a); });
+                    var top = sorted[0];
+                    var starsNum = star(top);
+                    var desc = (top.description || '').trim();
+                    var updatedStr = formatRepoUpdatedAt(top.updatedAt || top.updated_at);
+                    repoListEl.innerHTML = '<a class="user-popup-repo-star-card" href="' + escapeHtml(top.url || top.html_url || '#') + '" target="_blank" rel="noopener">' +
+                        '<div class="repo-card-name">' + escapeHtml(top.name || '') + '</div>' +
+                        (desc ? '<div class="repo-card-desc">' + escapeHtml(desc) + '</div>' : '') +
+                        '<div class="repo-card-meta">' +
+                        '<span class="repo-card-stars">' + starsNum + ' ★</span>' +
+                        (updatedStr ? '<span>' + escapeHtml(updatedStr) + '</span>' : '') +
+                        '</div></a>';
+                    return;
+                }
+                repoListEl.innerHTML = '<div class="user-popup-repo-loading">加载中...</div>';
+                fetchUserRepos(username).then(function (repos) {
+                    setCachedRepos(username, repos);
+                    var el = popup.querySelector('#repo-list-' + userIndex);
+                    if (el) renderTopRepoCard(username, el);
+                }).catch(function () {
+                    var el = popup.querySelector('#repo-list-' + userIndex);
+                    if (el) el.innerHTML = '<div class="user-popup-repo-item" style="color: rgba(255,255,255,0.4); cursor: default;">加载失败</div>';
                 });
-                return key ? window.allRankResources[key] : undefined;
-            }
-            function setCachedReposByUsername(username, repos) {
-                if (!username) return;
-                if (!window.allRankResources) window.allRankResources = {};
-                window.allRankResources[String(username).toLowerCase()] = repos;
             }
             (function () {
                 var repoListEl = popup.querySelector('#repo-list-' + userIndex);
                 if (!repoListEl) return;
                 if (!window.allRankResources) window.allRankResources = {};
-                var cached = getCachedReposByUsername(githubId);
-                if (cached !== undefined && Array.isArray(cached)) {
-                    renderRepoList(cached, repoListEl);
-                    return;
-                }
-                fetchUserRepos(githubId).then(function (repos) {
-                    setCachedReposByUsername(githubId, repos);
-                    renderRepoList(repos, popup.querySelector('#repo-list-' + userIndex));
-                }).catch(function () {
-                    var el = popup.querySelector('#repo-list-' + userIndex);
-                    if (el) el.innerHTML = '<div class="user-popup-repo-item" style="color: rgba(255,255,255,0.4); cursor: default;">加载失败</div>';
-                });
+                renderTopRepoCard(githubId, repoListEl);
             })();
             
             // 点击外部关闭弹窗
@@ -16268,6 +16295,7 @@
          * 线上（Cloudflare）：优先从 Worker /api/rank-resources 拉取，避免 /src/rank-content.ts 等静态路径 404
          */
         async function loadRankResources() {
+            window.isRankResourcesLoaded = false;
             try {
                 // 优先从 Worker API 拉取（线上部署时静态文件路径可能 404）
                 const apiEndpoint = (window.getApiEndpoint ? window.getApiEndpoint() : document.querySelector('meta[name="api-endpoint"]')?.content) || '';
@@ -16286,6 +16314,7 @@
                             const json = await res.json();
                             if (json && typeof json === 'object' && Object.keys(json).length > 0) {
                                 RANK_RESOURCES = json;
+                                window.isRankResourcesLoaded = true;
                                 console.log('[Rank] ✅ 从 Worker API 加载 rank-resources 成功');
                                 return true;
                             }
@@ -16355,6 +16384,7 @@
                     // 尝试解析为 JSON
                     try {
                         RANK_RESOURCES = JSON.parse(cleaned);
+                        window.isRankResourcesLoaded = true;
                         console.log('[Rank] ✅ 维度排名数据加载成功（从 TS 文件 JSON 解析）');
                         return true;
                     } catch (e) {
@@ -16382,6 +16412,7 @@
                             if (contentType.includes('application/json') || contentType.includes('text/json')) {
                                 const jsonData = await response.json();
                                 RANK_RESOURCES = jsonData;
+                                window.isRankResourcesLoaded = true;
                                 console.log(`[Rank] ✅ 成功从 ${path} 加载 JSON 数据`);
                                 return true;
                             } else {
