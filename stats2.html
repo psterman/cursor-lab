@@ -2945,6 +2945,7 @@
     
     <!-- 全屏地图背景 -->
     <div id="map-container"></div>
+    <div id="map-updated-at" class="fixed bottom-3 right-3 text-[10px] text-zinc-500 font-mono z-[5] pointer-events-none" style="display:none;"></div>
     <!-- 地图光标工具：用于手动校准（避免光标消失时无法进入校准） -->
     <div id="map-cursor-tools" aria-live="polite">
         <button type="button" id="btn-anchor-location" class="tool-btn">
@@ -4220,62 +4221,103 @@
                         if (!payload2 || typeof payload2 !== 'object') throw new Error('bad payload');
                         if (isStaleRequest()) return;
 
+                        const userCountry = String(countryCode || '').trim().toUpperCase();
+                        console.log('[Stats2] 国家累计 API 全量数据:', { payload: payload2, userCountry });
                         const totals = payload2.countryTotals || payload2.data?.countryTotals || null;
                         const totalsRanks = payload2.countryTotalsRanks || payload2.data?.countryTotalsRanks || null;
+                        const countryDataByCode = payload2.countryDataByCode || payload2.data?.countryDataByCode || {};
+                        const totalCountriesFromData = payload2.total_countries ?? payload2._meta?.total_countries ?? 195;
                         const ranks = payload2.myCountryRanks || payload2.data?.myCountryRanks || null;
-                        const meVals = payload2.myCountryValues || payload2.data?.myCountryValues || null;
+                        var remoteVals = payload2.myCountryValues || payload2.data?.myCountryValues || {};
+                        // 数据优先权：分子以 last_local_stats 为准；清理缓存/换设备时 last_local_stats 不存在，兜底用 API（remoteVals）或 0
+                        var localStats = window.last_local_stats;
+                        var st = (localStats && localStats.payload && (Date.now() - (localStats.ts || 0)) < 300000) ? (localStats.payload.stats || {}) : null;
+                        var meVals = {
+                            total_messages: (st?.totalMessages ?? remoteVals?.total_messages ?? 0),
+                            total_chars: (st?.totalChars ?? remoteVals?.total_chars ?? 0),
+                            total_user_chars: (st?.total_user_chars ?? st?.totalUserChars ?? remoteVals?.total_user_chars ?? 0),
+                            avg_user_message_length: (st && st.totalMessages > 0 && (st.totalUserChars != null || st.total_user_chars != null)) ? ((st.totalUserChars || st.total_user_chars || 0) / st.totalMessages) : (remoteVals?.avg_user_message_length ?? 0),
+                            jiafang_count: (st?.jiafang_count ?? st?.no ?? remoteVals?.jiafang_count ?? 0),
+                            ketao_count: (st?.ketao_count ?? st?.please ?? remoteVals?.ketao_count ?? 0)
+                        };
                         // 关键：高分图谱的数据源来自 country-summary，而不是 global-average
                         try {
                             data.topByMetrics = payload2.topByMetrics || payload2.data?.topByMetrics || [];
                         } catch { /* ignore */ }
 
-                        const rowTotals = (label, totalVal, r) => {
-                            const hasRank = r && (r.rank !== null && r.rank !== undefined) && Number.isFinite(Number(r.rank));
-                            const rankText = hasRank ? `#${Number(r.rank)}/${Number(r.total) || ''}` : '--';
+                        const totalCountriesCount = totalCountriesFromData;
+                        const MEDALS = { 1: '🥇', 2: '🥈', 3: '🥉' };
+                        const DIM_TO_LETTER = { total_messages:'L', total_chars:'P', total_user_chars:'D', avg_user_message_length:'E', jiafang_count:'F', ketao_count:'G' };
+                        const rowTotals = (label, totalVal, r, dimKey) => {
+                            const letter = DIM_TO_LETTER[dimKey] || dimKey;
+                            const rankFromRanks = (countryDataByCode[userCountry]?.ranks || {})[letter];
+                            const rankNum = (r && r.rank != null && Number.isFinite(Number(r.rank))) ? Number(r.rank) : (rankFromRanks != null && Number.isFinite(Number(rankFromRanks)) ? Number(rankFromRanks) : null);
+                            const hasRank = rankNum != null;
+                            const denom = totalCountriesCount;
+                            const rankText = hasRank ? `#${rankNum}/${denom}` : (r || rankFromRanks !== undefined) ? '#-- / --' : '...';
+                            const medal = rankNum != null && MEDALS[rankNum] ? ' ' + MEDALS[rankNum] : '';
+                            const ice = (rankNum != null && denom > 0 && rankNum >= Math.ceil(denom * 0.9)) ? ' 🧊' : '';
+                            const displayVal = (totalVal === undefined || totalVal === null) ? '...' : fmt(totalVal);
                             return `
                                 <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
                                     <div class="text-zinc-200">${label}</div>
                                     <div class="flex items-center gap-3 min-w-0">
-                                        <span class="text-[10px] text-zinc-500">Σ ${fmt(totalVal)}</span>
-                                        <span class="text-[10px] text-[var(--accent-terminal)] font-bold tabular-nums">${rankText}</span>
+                                        <span class="text-[10px] text-zinc-500">Σ ${displayVal}</span>
+                                        <span class="text-[10px] text-[var(--accent-terminal)] font-bold tabular-nums">${rankText}${medal}${ice}</span>
                                     </div>
                                 </div>
                             `;
                         };
-                        const fmtMe = (v) => (v === undefined || v === null || Number.isNaN(Number(v))) ? '--' : fmt(v);
-                        const rowRanks = (label, myVal, r) => {
-                            const hasRank = r && (r.rank !== null && r.rank !== undefined) && Number.isFinite(Number(r.rank));
-                            const rankText = hasRank ? `#${Number(r.rank)}/${Number(r.total) || ''}` : '--';
+                        const fmtMe = (v) => (v === undefined || v === null || Number.isNaN(Number(v))) ? '0' : fmt(v);
+                        const pioneerLabel = currentLang === 'en' ? 'Pioneer' : '该国先锋';
+                        const DIM_KEYS = ['total_messages','total_chars','total_user_chars','avg_user_message_length','jiafang_count','ketao_count'];
+                        const gRanks = payload2.global_user_ranks || payload2.data?.global_user_ranks || {};
+                        const cRanks = payload2.country_user_ranks || payload2.data?.country_user_ranks || ranks || {};
+                        const rowRanks = (label, myVal, dimKey) => {
+                            const cr = ranks?.[dimKey] ?? cRanks[dimKey] ?? (dimKey === 'total_chars' ? (ranks?.total_user_chars ?? cRanks?.total_user_chars) : null);
+                            const gr = gRanks[dimKey] ?? (dimKey === 'total_chars' ? gRanks?.total_user_chars : null);
+                            const rankCountry = cr && (cr.rank != null) && Number.isFinite(Number(cr.rank)) ? Number(cr.rank) : null;
+                            const totalCountry = cr && (cr.total != null) ? Number(cr.total) : null;
+                            const rankGlobal = gr && gr.rank != null ? Number(gr.rank) : null;
+                            const totalGlobal = gr && gr.total != null ? Number(gr.total) : null;
+                            const countryText = (rankCountry != null && totalCountry != null && totalCountry > 0) ? `本国：#${rankCountry}/${totalCountry}` : '...';
+                            const globalText = (rankGlobal != null && totalGlobal != null && totalGlobal > 0) ? `全球：#${rankGlobal}/${totalGlobal}` : '...';
+                            const medal = rankCountry != null && MEDALS[rankCountry] ? ' ' + MEDALS[rankCountry] : (rankGlobal != null && MEDALS[rankGlobal] ? ' ' + MEDALS[rankGlobal] : '');
+                            const isPioneer = rankCountry === 1 && totalCountry != null && totalCountry <= 5;
+                            const pioneerBadge = isPioneer ? ` <span class="text-[9px] text-amber-400" title="${pioneerLabel}">🏅</span>` : '';
+                            const localLabel = currentLang === 'en' ? '(country)' : '（本国）';
+                            const globalLabel = currentLang === 'en' ? '(global)' : '（全球）';
                             return `
                                 <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
                                     <div class="text-zinc-200">${label}</div>
-                                    <div class="flex items-center gap-3 min-w-0">
-                                        <span class="text-[10px] text-zinc-400">me ${fmtMe(myVal)}</span>
-                                        <span class="text-[10px] text-[var(--accent-terminal)] font-bold tabular-nums">${rankText}</span>
+                                    <div class="flex flex-col items-end gap-0.5 min-w-0">
+                                        <span class="text-[10px] text-zinc-400">${fmtMe(myVal)}</span>
+                                        <span class="text-[10px] text-[var(--accent-terminal)] font-bold tabular-nums">${countryText}${medal}${pioneerBadge} | ${globalText}</span>
                                     </div>
                                 </div>
                             `;
                         };
 
+                        // 去掉硬编码“暂无竞技”，始终展示该国真实排名数据；循环访问 data[userCountry].ranks[dimensionKey]
                         const totalsHtml = totals
                             ? [
-                                rowTotals(getI18nText('countryTotals.messages') || 'Messages', totals.total_messages, totalsRanks?.total_messages),
-                                rowTotals(getI18nText('countryTotals.totalChars') || 'Total Chars', totals.total_chars, totalsRanks?.total_chars),
-                                rowTotals(getI18nText('countryTotals.userChars') || 'User Chars', totals.total_user_chars, totalsRanks?.total_user_chars),
-                                rowTotals(getI18nText('countryTotals.avgLen') || 'Avg Len', Math.round(Number(totals.avg_user_message_length) || 0), totalsRanks?.avg_user_message_length),
-                                rowTotals(getI18nText('countryTotals.jiafang') || 'Jiafang', totals.jiafang_count, totalsRanks?.jiafang_count),
-                                rowTotals(getI18nText('countryTotals.ketao') || 'Ketao', totals.ketao_count, totalsRanks?.ketao_count),
+                                rowTotals(getI18nText('countryTotals.messages') || 'Messages', totals.total_messages, totalsRanks?.total_messages, 'total_messages'),
+                                rowTotals(getI18nText('countryTotals.totalChars') || 'Total Chars', totals.total_chars, totalsRanks?.total_chars, 'total_chars'),
+                                rowTotals(getI18nText('countryTotals.userChars') || '废话输出', totals.total_user_chars, totalsRanks?.total_user_chars, 'total_user_chars'),
+                                rowTotals(getI18nText('countryTotals.avgLen') || 'Avg Len', Math.round(Number(totals.avg_user_message_length) || 0), totalsRanks?.avg_user_message_length, 'avg_user_message_length'),
+                                rowTotals(getI18nText('countryTotals.jiafang') || 'Jiafang', totals.jiafang_count, totalsRanks?.jiafang_count, 'jiafang_count'),
+                                rowTotals(getI18nText('countryTotals.ketao') || 'Ketao', totals.ketao_count, totalsRanks?.ketao_count, 'ketao_count'),
                               ].join('')
                             : `<div class="text-zinc-500 text-xs">${currentLang === 'en' ? 'No data' : '暂无数据'}</div>`;
 
                         const ranksHtml = totals
                             ? [
-                                rowRanks(getI18nText('countryTotals.messages') || 'Messages', meVals?.total_messages, ranks?.total_messages),
-                                rowRanks(getI18nText('countryTotals.totalChars') || 'Total Chars', meVals?.total_chars, ranks?.total_chars),
-                                rowRanks(getI18nText('countryTotals.userChars') || 'User Chars', meVals?.total_user_chars, ranks?.total_user_chars),
-                                rowRanks(getI18nText('countryTotals.avgLen') || 'Avg Len', Math.round(Number(meVals?.avg_user_message_length) || 0), ranks?.avg_user_message_length),
-                                rowRanks(getI18nText('countryTotals.jiafang') || 'Jiafang', meVals?.jiafang_count, ranks?.jiafang_count),
-                                rowRanks(getI18nText('countryTotals.ketao') || 'Ketao', meVals?.ketao_count, ranks?.ketao_count),
+                                rowRanks(getI18nText('countryTotals.messages') || 'Messages', meVals?.total_messages, 'total_messages'),
+                                rowRanks(getI18nText('countryTotals.totalChars') || 'Total Chars', meVals?.total_chars, 'total_chars'),
+                                rowRanks(getI18nText('countryTotals.userChars') || '废话输出', meVals?.total_chars ?? meVals?.total_user_chars, 'total_chars'),
+                                rowRanks(getI18nText('countryTotals.avgLen') || 'Avg Len', Math.round(Number(meVals?.avg_user_message_length) || 0), 'avg_user_message_length'),
+                                rowRanks(getI18nText('countryTotals.jiafang') || 'Jiafang', meVals?.jiafang_count, 'jiafang_count'),
+                                rowRanks(getI18nText('countryTotals.ketao') || 'Ketao', meVals?.ketao_count, 'ketao_count'),
                               ].join('')
                             : `<div class="text-zinc-500 text-xs">${currentLang === 'en' ? 'No data' : '暂无数据'}</div>`;
 
@@ -4284,13 +4326,15 @@
                         try { window.__countryTotalsCache.set(cacheKey2, { totalsHtml, ranksHtml, ts: Date.now() }); } catch { /* ignore */ }
                     }
                 } catch (e) {
-                    // 不阻断主面板
+                    // 不阻断主面板；国家数据加载失败时显示 #-- / --
                     try {
                         const totalsBox = document.getElementById('rtCountryTotals');
                         const ranksBox = document.getElementById('rtMyCountryRanks');
-                        const noData = escapeHtml(getI18nText('common.no_data') || 'No data');
-                        if (totalsBox && !totalsBox.innerHTML.trim()) totalsBox.innerHTML = `<div class="text-zinc-500 text-xs">${noData}</div>`;
-                        if (ranksBox && !ranksBox.innerHTML.trim()) ranksBox.innerHTML = `<div class="text-zinc-500 text-xs">${noData}</div>`;
+                        const failRank = '<span class="text-[10px] text-zinc-500 font-bold tabular-nums">#-- / --</span>';
+                        const dimLabels = ['Messages','Total Chars','废话输出','Avg Len','Jiafang','Ketao'];
+                        const fallback = dimLabels.map(l => `<div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2"><div class="text-zinc-200">${l}</div><div>${failRank}</div></div>`).join('');
+                        if (totalsBox && !totalsBox.innerHTML.trim()) totalsBox.innerHTML = fallback;
+                        if (ranksBox && !ranksBox.innerHTML.trim()) ranksBox.innerHTML = fallback;
                     } catch { /* ignore */ }
                 }
 
@@ -5102,13 +5146,15 @@
         };
 
         const getI18nText = (key, fallback = '') => {
-            const lang = currentLang === 'en' ? 'en' : 'zh';
-            return (
-                (I18N_MAP[lang] && I18N_MAP[lang][key]) ||
-                (i18n[lang] && i18n[lang][key]) ||
-                fallback ||
-                ''
-            );
+            try {
+                const lang = currentLang === 'en' ? 'en' : 'zh';
+                const fallbackLang = lang === 'zh' ? 'en' : 'zh';
+                const fromMap = (I18N_MAP && I18N_MAP[lang] && I18N_MAP[lang][key]) || (I18N_MAP && I18N_MAP[fallbackLang] && I18N_MAP[fallbackLang][key]);
+                const fromI18n = (i18n && i18n[lang] && i18n[lang][key]) || (i18n && i18n[fallbackLang] && i18n[fallbackLang][key]);
+                return fromMap || fromI18n || (fallback != null ? String(fallback) : '') || '';
+            } catch (e) {
+                return (fallback != null ? String(fallback) : '') || '';
+            }
         };
 
         // 全局 HTML 转义（历史代码里有多处引用 escapeHtml）
@@ -5300,7 +5346,9 @@
                     const activityData = window.lastData.latestRecords || window.lastData.recentVictims || [];
                     renderRecentActivity(activityData);
                     renderPersonalityDistribution(window.lastData.personalityDistribution);
-                    initGlobalMap(window.lastData.locationRank).catch(() => {});
+                    const ld = window.lastData;
+                    const opts = (ld.countryStats && ld.countryStats.length > 0) ? { countryStats: ld.countryStats, updatedAt: ld.countryStatsUpdatedAt } : {};
+                    initGlobalMap(ld.locationRank || [], opts).catch(() => {});
                 }
             } catch { /* ignore */ }
 
@@ -8317,10 +8365,39 @@
         let globalLocationData = [];
 
         /**
-         * 初始化全球 2D 地图（支持缩放与拖动）
-         * @param {Array} locationData - 地理位置数据 [{name: string, value: number}]
+         * ISO2 国家代码 -> ECharts world.js 地图名称映射（确保后端 CN 等能精准对应地图）
+         * ISO_NAME_MAP 之外的由 Intl.DisplayNames 补全
          */
-        async function initGlobalMap(locationData) {
+        const ISO_NAME_MAP = {
+            'CN': 'China', 'US': 'United States of America', 'GB': 'United Kingdom', 'UK': 'United Kingdom',
+            'JP': 'Japan', 'KR': 'South Korea', 'DE': 'Germany', 'FR': 'France', 'IN': 'India', 'BR': 'Brazil',
+            'RU': 'Russia', 'IT': 'Italy', 'CA': 'Canada', 'AU': 'Australia', 'ES': 'Spain', 'MX': 'Mexico',
+            'ID': 'Indonesia', 'NL': 'Netherlands', 'PL': 'Poland', 'TR': 'Turkey', 'SA': 'Saudi Arabia',
+            'TW': 'Taiwan', 'HK': 'Hong Kong', 'SG': 'Singapore', 'MY': 'Malaysia', 'TH': 'Thailand',
+            'VN': 'Vietnam', 'PH': 'Philippines', 'PK': 'Pakistan', 'BD': 'Bangladesh', 'EG': 'Egypt',
+            'ZA': 'South Africa', 'AR': 'Argentina', 'CL': 'Chile', 'CO': 'Colombia', 'SE': 'Sweden',
+            'CH': 'Switzerland', 'BE': 'Belgium', 'AT': 'Austria', 'PT': 'Portugal', 'IL': 'Israel',
+            'UA': 'Ukraine', 'RO': 'Romania', 'CZ': 'Czech Republic', 'HU': 'Hungary', 'GR': 'Greece',
+            'IE': 'Ireland', 'NZ': 'New Zealand', 'NO': 'Norway', 'FI': 'Finland', 'DK': 'Denmark',
+        };
+        const RANK_DENOMINATOR = 195;
+        function getMapNameFromIso2(code) {
+            if (!code || !/^[A-Z]{2}$/.test(String(code).toUpperCase())) return code || '';
+            const upper = String(code).toUpperCase();
+            if (ISO_NAME_MAP[upper]) return ISO_NAME_MAP[upper];
+            try {
+                var dn = typeof Intl !== 'undefined' && Intl.DisplayNames ? new Intl.DisplayNames(['en'], { type: 'region' }) : null;
+                if (dn) return dn.of(upper) || upper;
+            } catch (_) { /* ignore */ }
+            return upper;
+        }
+
+        /**
+         * 初始化全球 2D 地图（支持缩放与拖动）
+         * @param {Array} locationData - 地理位置数据 [{name: string, value: number}]（兼容旧 API）
+         * @param {Object} opts - 可选 { countryStats: Array, updatedAt: string } 国家累积排名（GLOBAL_COUNTRY_STATS）
+         */
+        async function initGlobalMap(locationData, opts) {
             // 【优先判断】在地图初始化时检查 localStorage 锁定状态
             try {
                 if (window.mapCursorManager) {
@@ -8421,16 +8498,42 @@
                     console.log('[Map] ✅ world 地图数据已加载');
                 }
 
-                // 处理地理位置数据（2D 世界地图名称需与 world.js 的英文国家名匹配）
-                // 约定：locationData 的 value = 该国「已提交聊天记录的用户数」（非在线人数），由 API /api/global-average 的 location_rank 提供
-                const processedData = (locationData || []).map(item => ({
-                    name: (countryNameMap[item.name]
-                        ? countryNameMap[item.name].en
-                        : (item.name === 'USA' ? 'United States' : item.name)),
-                    value: item.value || 0
-                }));
-
+                // 数据源优先级：countryStats（GLOBAL_COUNTRY_STATS）> locationData（兼容旧 API）
+                const countryStats = opts && opts.countryStats;
+                const mapUpdatedAt = opts && opts.updatedAt;
+                let processedData;
+                if (countryStats && Array.isArray(countryStats) && countryStats.length > 0) {
+                    const totalCnt = countryStats.length;
+                    const top10Pct = Math.max(3, Math.ceil(totalCnt * 0.1));
+                    processedData = countryStats.map(item => {
+                        const code = String(item.country_code || item.code || '').trim().toUpperCase();
+                        const mapName = getMapNameFromIso2(code) || (countryNameMap && countryNameMap[code] && countryNameMap[code].en) || code;
+                        const totalMessages = Number(item.total_messages_sum ?? item.total_messages ?? 0) || 0;
+                        const rank = Number(item.rank_total_messages ?? item.rank ?? 0) || null;
+                        let rankCategory = 0;
+                        if (rank === 1) rankCategory = 3;
+                        else if (rank >= 2 && rank <= 3) rankCategory = 2;
+                        else if (rank >= 4 && rank <= top10Pct) rankCategory = 1;
+                        return {
+                            name: mapName,
+                            value: rankCategory,
+                            rankCategory: rankCategory,
+                            totalMessages: totalMessages,
+                            rank: rank,
+                            countryCode: code
+                        };
+                    }).filter(d => d.name && (d.totalMessages > 0 || d.rank));
+                } else {
+                    processedData = (locationData || []).map(item => ({
+                        name: (countryNameMap && countryNameMap[item.name] ? countryNameMap[item.name].en : (item.name === 'USA' ? 'United States of America' : item.name)),
+                        value: item.value || 0,
+                        totalMessages: item.value || 0,
+                        rank: item.rank || null
+                    }));
+                }
+                const useRankColors = !!(countryStats && countryStats.length > 0);
                 const maxVal = Math.max(20, ...processedData.map(d => d.value || 0));
+                const totalCountries = processedData.length;
 
                 const option2D = {
                     backgroundColor: 'transparent',
@@ -8445,55 +8548,40 @@
                         borderColor: '#27272a',
                         textStyle: { color: '#00ff41', fontFamily: 'JetBrains Mono' },
                         formatter: function(params) {
-                            // 防御性检查：确保 params 存在
-                            if (!params) {
-                                return '<div class="font-mono text-xs">未知区域</div>';
-                            }
-                            
-                            // 如果是地图国家数据，显示国家信息（必须包含该国家活跃节点数）
+                            if (!params) return '<div class="font-mono text-xs">未知区域</div>';
                             if (params.seriesType === 'map') {
                                 const name = params.name || params.data?.name || '未知区域';
-                                const value = Number(params.value ?? params.data?.value ?? 0) || 0;
-                                // 安全获取中文名称
-                                const code = typeof resolveCountryCodeFromMapName === 'function'
-                                    ? resolveCountryCodeFromMapName(name)
-                                    : null;
-                                const label =
-                                    (code && countryNameMap && countryNameMap[code] && countryNameMap[code].zh)
-                                        ? countryNameMap[code].zh
-                                        : name;
-                                
-                                // Proxy 提示：判断 is_proxy 字段，若为 true，在地理位置后增加 [Proxy] 红色警告标签
                                 const dataItem = params.data || {};
+                                const totalMessages = Number(dataItem.totalMessages ?? dataItem.value ?? 0) || 0;
+                                const rank = dataItem.rank;
+                                const code = dataItem.countryCode || (typeof resolveCountryCodeFromMapName === 'function' ? resolveCountryCodeFromMapName(name) : null);
+                                var label = (code && countryNameMap && countryNameMap[code] && countryNameMap[code].zh) ? countryNameMap[code].zh : name;
+                                if (code && label === name && typeof Intl !== 'undefined' && Intl.DisplayNames) {
+                                    try {
+                                        var dnLabel = new Intl.DisplayNames([currentLang === 'en' ? 'en' : 'zh-CN'], { type: 'region' }).of(String(code).toUpperCase());
+                                        if (dnLabel) label = dnLabel;
+                                    } catch (_) { /* ignore */ }
+                                }
                                 const isProxy = dataItem.is_proxy || dataItem.isProxy || false;
                                 const proxyLabel = isProxy ? '<span style="color: #ef4444; font-weight: bold;"> [Proxy]</span>' : '';
-                                
-                                // 数据展示：在地图弹窗（Tooltip）中同步展示该冠军的称号和战绩
+                                const msgsLabel = currentLang === 'en' ? 'Total Messages' : '累计吐槽能量';
+                                const rankLabel = currentLang === 'en' ? 'Global Rank' : '全球排名';
+                                const dimLabel = currentLang === 'en' ? 'Top Dimension' : '最突出维度';
                                 const activeNodesLabel = getI18nText('tooltip.active_nodes') || (currentLang === 'en' ? 'Active Nodes' : '活跃节点');
-                                let tooltipContent = `<div class="font-mono text-xs">${label}${proxyLabel}<br/>${escapeHtml(activeNodesLabel)}: ${value}</div>`;
-                                
-                                // 如果当前有选中的冠军信息，且国家名称匹配，显示冠军信息（同时必须保留活跃节点数）
+                                let tooltipContent;
                                 if (currentChampionInfo && currentChampionInfo.countryName === name) {
                                     const feedback = currentChampionInfo.feedback ? JSON.parse(currentChampionInfo.feedback) : null;
                                     const recordLabel = getI18nText('tooltip.record') || (currentLang === 'en' ? 'Record' : '战绩');
                                     const roastLabel = getI18nText('tooltip.roast') || (currentLang === 'en' ? 'Roast' : '吐槽');
                                     const translatedFbLabel = feedback ? translateRankFeedbackLabel(currentChampionInfo.dimId, feedback.label, currentChampionInfo.championValue) : '';
-                                    tooltipContent = `
-                                        <div class="font-mono text-xs">
-                                            <div class="text-[#00ff41] font-bold mb-1">🏆 ${currentChampionInfo.championName}</div>
-                                            <div class="text-white mb-1">${label}${proxyLabel}</div>
-                                            <div class="text-zinc-400 text-[10px] mb-1">${escapeHtml(activeNodesLabel)}: ${value}</div>
-                                            <div class="text-zinc-400 text-[10px] mb-1">${escapeHtml(recordLabel)}: ${currentChampionInfo.championValue}</div>
-                                            ${feedback ? `
-                                                <div class="text-zinc-500 text-[9px] mt-2 pt-2 border-t border-zinc-700">
-                                                    <div class="text-[#00ff41]">${escapeHtml(roastLabel)}${translatedFbLabel ? ` · ${escapeHtml(translatedFbLabel)}` : ''}</div>
-                                                    <div class="text-white">${escapeHtml(String(feedback.title || '').trim())}</div>
-                                                </div>
-                                            ` : ''}
-                                        </div>
-                                    `;
+                                    tooltipContent = `<div class="font-mono text-xs"><div class="text-[#00ff41] font-bold mb-1">🏆 ${currentChampionInfo.championName}</div><div class="text-white mb-1">${label}${proxyLabel}</div><div class="text-zinc-400 text-[10px] mb-1">${escapeHtml(activeNodesLabel)}: ${totalMessages}</div><div class="text-zinc-400 text-[10px] mb-1">${escapeHtml(recordLabel)}: ${currentChampionInfo.championValue}</div>${feedback ? `<div class="text-zinc-500 text-[9px] mt-2 pt-2 border-t border-zinc-700"><div class="text-[#00ff41]">${escapeHtml(roastLabel)}${translatedFbLabel ? ' · ' + escapeHtml(translatedFbLabel) : ''}</div><div class="text-white">${escapeHtml(String(feedback.title || '').trim())}</div></div>` : ''}</div>`;
+                                } else if (useRankColors) {
+                                    tooltipContent = `<div class="font-mono text-xs"><b>${label}</b>${proxyLabel}<br/>${msgsLabel}: ${new Intl.NumberFormat().format(totalMessages)}`;
+                                    if (rank != null && rank > 0) tooltipContent += `<br/>${rankLabel}: #${rank}/${RANK_DENOMINATOR}`;
+                                    tooltipContent += `<br/>${dimLabel}: --</div>`;
+                                } else {
+                                    tooltipContent = `<div class="font-mono text-xs">${label}${proxyLabel}<br/>${escapeHtml(activeNodesLabel)}: ${totalMessages}</div>`;
                                 }
-                                
                                 return tooltipContent;
                             }
                             // 如果是脉冲点（effectScatter），显示用户信息（包含头像预览）
@@ -8546,13 +8634,25 @@
                         // 启用HTML渲染模式
                         extraCssText: 'box-shadow: 0 0 10px rgba(0, 255, 65, 0.2);'
                     },
-                    visualMap: {
+                    visualMap: useRankColors ? {
+                        type: 'piecewise',
+                        show: true,
+                        orient: 'horizontal',
+                        left: 'center',
+                        bottom: 8,
+                        pieces: [
+                            { min: 3, max: 3, label: (currentLang === 'en' ? 'Champion' : '冠军'), color: '#ffd700' },
+                            { min: 2, max: 2, label: (currentLang === 'en' ? 'Top 3' : '前三强'), color: '#c0c0c0' },
+                            { min: 1, max: 1, label: (currentLang === 'en' ? 'Top 10%' : '前10%'), color: '#7021d2' },
+                            { min: 0, max: 0, label: (currentLang === 'en' ? 'Others' : '其他地区'), color: '#a0aec0' }
+                        ],
+                        textStyle: { color: '#94a3b8', fontSize: 10 },
+                        dimension: 'rankCategory'
+                    } : {
                         min: 0,
                         max: maxVal,
                         show: false,
-                        inRange: {
-                            color: ['#064e3b', '#065f46', '#00ff41', '#34d399']
-                        }
+                        inRange: { color: ['#064e3b', '#065f46', '#00ff41', '#34d399'] }
                     },
                     geo: {
                         map: 'world',
@@ -8593,6 +8693,16 @@
 
                 // notMerge: true 彻底替换，避免残留旧配置
                 mapChart.setOption(option2D, { notMerge: true, lazyUpdate: false });
+                // 显示数据更新时间（每小时快照）
+                const updatedEl = document.getElementById('map-updated-at');
+                if (updatedEl && mapUpdatedAt) {
+                    try {
+                        const d = new Date(mapUpdatedAt);
+                        const fmt = isNaN(d.getTime()) ? mapUpdatedAt : d.toLocaleString(currentLang === 'en' ? 'en-US' : 'zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+                        updatedEl.textContent = (currentLang === 'en' ? 'Data updated: ' : '数据更新于：') + fmt;
+                        updatedEl.style.display = '';
+                    } catch (_) { updatedEl.style.display = 'none'; }
+                } else if (updatedEl) updatedEl.style.display = 'none';
 
                 // 添加鼠标悬浮高亮效果
                 mapChart.off('mouseover');
@@ -9119,21 +9229,40 @@
          */
         /**
          * 根据选择的国家显示光标（固定位置，不可移动，带脉动闪光效果）
-         * @param {string} countryCode - 国家代码（如 'CN', 'US'）
+         * @param {string|number} countryCodeOrLng - 国家代码（如 'CN','US'）或经度（当与 lat 一起传入时）
+         * @param {number} [lat] - 纬度（仅当第一参为经度时有效）
          */
-        function setOrUpdateCurrentLocationCursor(countryCode = null) {
-            // 优先使用 ECharts（当前项目使用 ECharts）
+        function setOrUpdateCurrentLocationCursor(countryCodeOrLng = null, lat = null) {
+            // 防御：地图实例尚未创建时静默退出，不阻断后续逻辑
+            const hasMap = (mapChart && typeof mapChart.setOption === 'function' && !(typeof mapChart.isDisposed === 'function' && mapChart.isDisposed()))
+                || (window.map && typeof L !== 'undefined' && window.map && typeof window.map.removeLayer === 'function');
+            if (!hasMap) {
+                console.log('[MapCursor] 地图实例尚未就绪，跳过光标更新');
+                return;
+            }
+            let countryCode = countryCodeOrLng;
+            if (typeof countryCodeOrLng === 'number' && typeof lat === 'number' && Number.isFinite(countryCodeOrLng) && Number.isFinite(lat)) {
+                countryCode = typeof getCountryByCoords === 'function' ? getCountryByCoords(countryCodeOrLng, lat) : null;
+                if (!countryCode) {
+                    try { countryCode = (localStorage.getItem('manual_location') || '').trim().toUpperCase(); } catch { /* ignore */ }
+                    if (!countryCode || !/^[A-Z]{2}$/.test(countryCode)) {
+                        console.warn('[MapCursor] ⚠️ 无法从坐标解析国家码，跳过光标:', { lng: countryCodeOrLng, lat });
+                        return;
+                    }
+                }
+            } else if (typeof countryCodeOrLng === 'number' || (typeof countryCodeOrLng === 'string' && /^-?\d+(\.\d+)?$/.test(String(countryCodeOrLng)))) {
+                console.warn('[MapCursor] ⚠️ 传入的可能是经纬度，请使用 ISO 国家代码（如 CN, US）:', countryCodeOrLng);
+                return;
+            }
+            countryCode = countryCode ? String(countryCode).trim().toUpperCase() : null;
+            if (countryCode && !/^[A-Z]{2}$/.test(countryCode)) countryCode = null;
             if (mapChart && typeof mapChart.setOption === 'function' && !(typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) {
                 return setOrUpdateCurrentLocationCursorECharts(countryCode);
             }
-
-            // 降级：检查 Leaflet map 实例是否存在
             const map = window.map;
             if (map && typeof L !== 'undefined' && typeof map.removeLayer === 'function') {
                 return setOrUpdateCurrentLocationCursorLeaflet(countryCode, map);
             }
-
-            console.warn('[MapCursor] ⚠️ 地图实例不存在或无效');
         }
 
         /**
@@ -12496,6 +12625,8 @@
                                 
                                 // 强制同步自身状态（必须显式调用）
                                 await trackSelf();
+                                // 在 Presence 订阅成功后再初始化状态按钮，避免与 subscribe 逻辑冲突
+                                try { initStatusButtons(); } catch (e) { console.log('[Presence] initStatusButtons:', e); }
                             } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
                                 // 与 Realtime 一致：降级为警告，避免控制台刷红
                                 console.warn('[Presence] ⚠️ 订阅未就绪（' + status + '），详情:', err);
@@ -12618,12 +12749,14 @@
         }
         
         /**
-         * 获取用户地理位置（非阻塞，1.5 秒超时）。失败时静默返回空对象 {}，不抛错、不打印，保证 refreshUserStats 继续执行。
+         * 获取用户地理位置（非阻塞，1.5 秒超时）。使用 https://ipapi.co/json/（支持 HTTPS）。
+         * 失败时返回 { countryCode: 'CN' } 作为默认，防止页面白屏或功能中断。
          */
         function getUserLocation() {
             var ac = new AbortController();
             var t = setTimeout(function() { ac.abort(); }, 1500);
-            var url = 'https://ip-api.com/json/?_t=' + Date.now();
+            var url = 'https://ipapi.co/json/?_t=' + Date.now();
+            var defaultResult = { lat: null, lng: null, countryCode: 'CN' };
             return fetch(url, { headers: { 'Accept': 'application/json' }, signal: ac.signal })
                 .then(function(ipResponse) {
                     clearTimeout(t);
@@ -12633,14 +12766,21 @@
                     return null;
                 })
                 .then(function(ipInfo) {
-                    if (ipInfo && typeof ipInfo === 'object' && (ipInfo.lat != null || ipInfo.lon != null)) {
-                        return { lat: ipInfo.lat != null ? Number(ipInfo.lat) : null, lng: ipInfo.lon != null ? Number(ipInfo.lon) : null };
-                    }
-                    return {};
+                    if (!ipInfo || typeof ipInfo !== 'object') return defaultResult;
+                    // ipapi.co 返回: country_code, latitude, longitude, city
+                    var cc = (ipInfo.country_code || ipInfo.countryCode || '').trim().toUpperCase();
+                    if (cc && !/^[A-Z]{2}$/.test(cc)) cc = '';
+                    var lat = (ipInfo.latitude != null ? Number(ipInfo.latitude) : (ipInfo.lat != null ? Number(ipInfo.lat) : null));
+                    var lng = (ipInfo.longitude != null ? Number(ipInfo.longitude) : (ipInfo.lon != null ? Number(ipInfo.lon) : null));
+                    return {
+                        lat: lat,
+                        lng: lng,
+                        countryCode: cc || 'CN'
+                    };
                 })
                 .catch(function() {
                     clearTimeout(t);
-                    return {};
+                    return defaultResult;
                 });
         }
         /**
@@ -12706,7 +12846,12 @@
                     last_vibe: new Date().toISOString()
                 };
                 
-                // 显式调用 track
+                // 显式调用 track 前再次检查实例（防止异步竞态导致 presenceChannel 已被置空）
+                if (!presenceChannel) {
+                    if (window.__PRESENCE_SKIPPED) return;
+                    console.warn('[Presence] ⚠️ presenceChannel 实例已失效，跳过 track');
+                    return;
+                }
                 await presenceChannel.track(myPresence);
                 
                 console.log('[Presence] ✅ 自身状态已同步:', myPresence);
@@ -14101,6 +14246,10 @@
                     
                     // 【迁移优先】在检测到 GitHub 登录后，先调用 /api/fingerprint/migrate 接口
                     if (currentFp && githubUserId) {
+                        const token = localStorage.getItem('user_fingerprint');
+                        if (!token) {
+                            console.log('[Auth] 纯净登录，无匿名数据需迁移');
+                        } else {
                         console.log('[Auth] 🔄 检测到指纹和 GitHub 用户，开始数据迁移...');
                         console.log('[Auth] 📋 迁移信息:', {
                             currentFp: currentFp.substring(0, 8) + '...',
@@ -14118,7 +14267,7 @@
                         if (!claimToken) {
                             // 【修复】无 claim_token 时不弹“无用弹窗”，直接静默跳过迁移
                             // 说明：用户可能只是想登录查看数据；没有待认领数据并不需要阻塞交互。
-                            console.warn('[Auth] ℹ️ 本地无 claim_token，跳过数据认领（静默，无弹窗）');
+                            console.info('[Auth] ℹ️ 本地无 claim_token，跳过数据认领（静默，无弹窗）');
                             migrationSuccess = false;
                             // 继续后续正常流程（更新 UI / 尝试拉取用户数据）
                         } else
@@ -14289,8 +14438,9 @@
                                     localStorage.removeItem('vibe_claim_token');
                                     localStorage.removeItem('user_fingerprint'); // 同时清除指纹
                                 } else {
-                                    // 其他错误，记录但不中断流程
-                                    console.warn('[Auth] ⚠️ 数据迁移失败，继续正常流程:', errorMsg);
+                                    // 其他错误，记录但不中断流程（确保不输出 undefined）
+                                    const msg = (errorMsg != null && errorMsg !== '') ? String(errorMsg) : '未知';
+                                    console.warn('[Auth] ⚠️ 数据迁移失败，继续正常流程:', msg);
                                 }
                                 
                                 // 无论什么错误，都继续正常流程（不迁移）
@@ -14386,20 +14536,21 @@
                                 console.log('[Auth] ℹ️ 未找到需要迁移的数据，继续正常流程');
                                 hideSyncingOverlay();
                             } else {
-                                console.warn('[Auth] ⚠️ 数据迁移失败，继续正常流程:', migrateResult?.error);
+                                const errMsg = (migrateResult && migrateResult.error != null) ? String(migrateResult.error) : '未知';
+                                console.warn('[Auth] ⚠️ 数据迁移失败，继续正常流程:', errMsg);
                                 hideSyncingOverlay();
                             }
                         } catch (migrateError) {
                             migrationCompleted = true;
-                            
+                            const errMsg = (migrateError && (migrateError.message || migrateError.toString?.())) || String(migrateError) || '未知';
                             // 【修复 AbortError】特殊处理 AbortError
-                            if (migrateError.name === 'AbortError' || migrateError.message?.includes('aborted')) {
-                                console.warn('[Auth] ⚠️ 迁移请求被取消（可能是页面刷新导致）:', migrateError);
+                            if (migrateError && (migrateError.name === 'AbortError' || (migrateError.message && migrateError.message.includes('aborted')))) {
+                                console.warn('[Auth] ⚠️ 迁移请求被取消（可能是页面刷新导致）:', errMsg);
                             } else {
-                                console.error('[Auth] ❌ 数据迁移异常，继续正常流程:', migrateError);
+                                console.error('[Auth] ❌ 数据迁移异常，继续正常流程:', errMsg);
                             }
-                            
                             hideSyncingOverlay();
+                        }
                         }
                     } else {
                         console.log('[Auth] ℹ️ 未检测到指纹或 GitHub 用户 ID，跳过迁移');
@@ -15642,13 +15793,13 @@
 
                 // 2. 获取 IP 和归属地信息
                 let ipInfo = null;
-                let ipLocation = 'Unknown';
+                let ipLocation = 'CN';
                 let lat = null;
                 let lng = null;
-                let countryCode = 'Unknown';
+                let countryCode = 'CN';
 
                 try {
-                    const ipUrl = 'https://ip-api.com/json/?_t=' + Date.now();
+                    const ipUrl = 'https://ipapi.co/json/?_t=' + Date.now();
                     const ac = new AbortController();
                     const timeoutId = setTimeout(function() { ac.abort(); }, 3000);
                     const ipResponse = await fetch(ipUrl, { headers: { 'Accept': 'application/json' }, signal: ac.signal });
@@ -15656,24 +15807,17 @@
                     if (ipResponse && ipResponse.ok) {
                         ipInfo = await ipResponse.json().catch(function() { return null; });
                         if (ipInfo && typeof ipInfo === 'object') {
-                            countryCode = ipInfo.countryCode || ipInfo.country_code || 'Unknown';
-                            ipLocation = (countryCode && countryCode !== 'Unknown') ? countryCode : 'Unknown';
-                            if (ipInfo.lat != null && ipInfo.lon != null) {
-                                lat = Number(ipInfo.lat);
-                                lng = Number(ipInfo.lon);
-                            } else if (ipInfo.latitude != null && ipInfo.longitude != null) {
-                                lat = Number(ipInfo.latitude);
-                                lng = Number(ipInfo.longitude);
-                            }
+                            var raw = (ipInfo.country_code || ipInfo.countryCode || 'CN').trim().toUpperCase();
+                            countryCode = /^[A-Z]{2}$/.test(raw) ? raw : 'CN';
+                            ipLocation = countryCode;
+                            lat = (ipInfo.latitude != null) ? Number(ipInfo.latitude) : (ipInfo.lat != null ? Number(ipInfo.lat) : null);
+                            lng = (ipInfo.longitude != null) ? Number(ipInfo.longitude) : (ipInfo.lon != null ? Number(ipInfo.lon) : null);
                         }
-                    } else if (ipResponse && ipResponse.status === 403) {
-                        countryCode = 'Unknown';
-                        ipLocation = 'Unknown';
                     }
                 } catch (error) {
-                    if (error && error.name !== 'AbortError') console.warn('[AutoReport] ⚠️ 获取 IP 信息失败:', error?.message || error);
-                    countryCode = 'Unknown';
-                    ipLocation = 'Unknown';
+                    if (error && error.name !== 'AbortError') console.warn('[AutoReport] ⚠️ 获取 IP 信息失败，使用默认 CN:', error?.message || error);
+                    countryCode = 'CN';
+                    ipLocation = 'CN';
                 }
 
                 // 3. VPN 判定逻辑
@@ -15976,16 +16120,18 @@
             renderPersonalityRank(data.personalityRank, data.recentVictims);
 
             // --- 渲染图表组件 ---
-            // 渲染地理位置热力排行和地图
-            if (data.locationRank && Array.isArray(data.locationRank) && data.locationRank.length > 0) {
-                // 检查 ECharts 是否已加载
+            // 渲染地理位置热力排行和地图（优先使用 countryStats 国家累积，否则 locationRank）
+            const mapOpts = (data.countryStats && data.countryStats.length > 0)
+                ? { countryStats: data.countryStats, updatedAt: data.countryStatsUpdatedAt }
+                : {};
+            const mapData = (data.countryStats && data.countryStats.length > 0) ? [] : (data.locationRank || []);
+            if (mapData.length > 0 || (mapOpts.countryStats && mapOpts.countryStats.length > 0)) {
                 if (typeof echarts === 'undefined') {
                     console.warn('[fetchData] ⚠️ ECharts 未加载，延迟初始化地图...');
-                    // 延迟重试地图初始化
                     setTimeout(async () => {
                         if (typeof echarts !== 'undefined') {
                             try {
-                                await initGlobalMap(data.locationRank);
+                                await initGlobalMap(mapData.length > 0 ? mapData : [], mapOpts);
                             } catch (mapError) {
                                 console.error('[fetchData] ❌ 延迟地图初始化失败:', mapError);
                             }
@@ -15995,13 +16141,12 @@
                     }, 1000);
                 } else {
                     try {
-                        await initGlobalMap(data.locationRank);
+                        await initGlobalMap(mapData.length > 0 ? mapData : [], mapOpts);
                     } catch (mapError) {
                         console.error('[fetchData] ❌ 地图初始化失败:', mapError);
-                        // 即使地图初始化失败，也继续渲染位置列表
                     }
                     try {
-                        renderLocationList(data.locationRank);
+                        renderLocationList(data.locationRank || []);
                     } catch (listError) {
                         console.error('[fetchData] ❌ 位置列表渲染失败:', listError);
                     }
@@ -16011,10 +16156,9 @@
                 if (locationListEl) {
                     locationListEl.innerHTML = '<div class="text-center text-zinc-500 py-4 text-[10px]">暂无数据</div>';
                 }
-                // 即使没有数据，也尝试初始化空地图
                 if (typeof echarts !== 'undefined') {
                     try {
-                        await initGlobalMap([]);
+                        await initGlobalMap([], {});
                     } catch (mapError) {
                         console.warn('[fetchData] ⚠️ 空地图初始化失败:', mapError);
                     }
@@ -16249,25 +16393,30 @@
                 var _rfp = '';
                 try { _rfp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
                 const requestUrl = `${apiEndpoint}/api/global-average?fingerprint=${encodeURIComponent(_rfp)}&_t=${Date.now()}`;
-                console.log(`[1/5] 正在请求: ${requestUrl}`);
-                
-                // 使用 apiFetch 包装器（支持自动端点切换）
-                let response;
-                try {
-                    // 快速失败：4秒超时（国内网络优化）
-                    response = await (window.apiFetch ? window.apiFetch('/api/global-average', { timeout: 4000 }) : fetch(requestUrl));
-                } catch (fetchErr) {
-                    console.warn('[API] 请求失败，尝试直接fetch:', fetchErr.message);
-                    response = await fetch(requestUrl);
+                const countryStatsUrl = `${apiEndpoint}/api/v2/country-stats-global?_t=${Date.now()}`;
+                console.log(`[1/5] 并行请求: global-average + country-stats-global`);
+
+                // Promise.all 同时请求两个 API
+                const fetchGlobal = window.apiFetch ? window.apiFetch('/api/global-average', { timeout: 4000 }) : fetch(requestUrl);
+                const fetchCountry = fetch(countryStatsUrl).catch(() => null);
+                const [globalResp, countryResp] = await Promise.all([fetchGlobal, fetchCountry]);
+
+                if (!globalResp.ok) throw new Error(`HTTP Error! Status: ${globalResp.status}`);
+                const result = await globalResp.json();
+
+                let countryStatsResp = { data: [], updated_at: null };
+                if (countryResp && countryResp.ok) {
+                    try {
+                        const j = await countryResp.json();
+                        countryStatsResp = { data: (j && j.data) ? j.data : [], updated_at: (j && j.updated_at) ? j.updated_at : null };
+                    } catch (_) { /* ignore */ }
                 }
-                
-                if (!response.ok) throw new Error(`HTTP Error! Status: ${response.status}`);
-                
-                const result = await response.json();
                 console.log('[2/5] 收到原始响应:', result);
 
                 // 【适配层重写】使用强制映射层标准化数据
                 const data = normalizeData(result);
+                data.countryStats = countryStatsResp.data;
+                data.countryStatsUpdatedAt = countryStatsResp.updated_at;
                 console.log('[3/5] 数据适配完成:', data);
 
                 // 渲染 Dashboard
@@ -18488,8 +18637,7 @@
                 }
             }, 500);
             
-            // 初始化状态按钮
-            initStatusButtons();
+            // 初始化状态按钮：仅在 Presence on('SUBSCRIBED') 回调中执行，不在页面加载时立即执行（避免订阅未就绪时报错）
             
             // 初始化抽屉状态
             initDrawerState();

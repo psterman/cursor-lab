@@ -73,6 +73,128 @@ async function refreshCountryStatsCurrent(env: Env): Promise<{ success: boolean;
   }
 }
 
+/** 从 KV payload 提取 data[countryCode] 形态，供前端 data[userCountry].ranks[dimensionKey] 使用 */
+function buildCountryDataByCode(kv: GlobalCountryStatsPayload | null): Record<string, { ranks: Record<string, number>; [k: string]: any }> | undefined {
+  if (!kv || typeof kv !== 'object') return undefined;
+  const out: Record<string, any> = {};
+  const reserved = new Set(['country_level', 'updated_at', '_meta']);
+  for (const [k, v] of Object.entries(kv)) {
+    if (reserved.has(k) || !v || typeof v !== 'object') continue;
+    if (/^[A-Z]{2}$/.test(k)) out[k] = v;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** 从 KV 读取国家累积排行（冷数据）；无则返回 null，严禁在接口内做 GROUP BY */
+async function getGlobalCountryStatsFromKV(env: Env): Promise<GlobalCountryStatsPayload | null> {
+  if (!env.STATS_STORE) return null;
+  try {
+    const raw = await env.STATS_STORE.get(KV_KEY_GLOBAL_COUNTRY_STATS, 'json');
+    if (!raw || typeof raw !== 'object') return null;
+    const r = raw as any;
+    if (!Array.isArray(r.country_level)) return null;
+    return r as GlobalCountryStatsPayload;
+  } catch {
+    return null;
+  }
+}
+
+/** 国家累积 KV 结构：country_level 为各国 6 维累积 + 全球排名；[countryCode] 为 byCountry 形态，含 ranks 对象 */
+interface GlobalCountryStatsPayload {
+  _meta?: { total_countries?: number; updated_at?: string };
+  country_level: Array<{
+    country_code: string;
+    total_messages_sum?: number;
+    total_chars_sum?: number;
+    total_user_chars_sum?: number;
+    jiafang_count_sum?: number;
+    ketao_count_sum?: number;
+    avg_user_message_length_sum?: number;
+    total_users?: number;
+    rank_total_messages?: number;
+    rank_total_chars?: number;
+    rank_total_user_chars?: number;
+    rank_jiafang?: number;
+    rank_ketao?: number;
+    rank_avg_len?: number;
+    total_countries?: number;
+    no_competition?: boolean; // 人数极少时标注“该地区暂无竞争”
+  }>;
+  updated_at?: string;
+}
+
+/** 窗口函数 RPC：一次获取用户国家内/全球排名与总数，修复 1/1 */
+async function getUserRankV2(
+  env: Env,
+  fingerprint: string | null,
+  userId: string | null
+): Promise<{ rank_in_country: number; total_in_country: number; rank_global: number; total_global: number; ip_location: string | null } | null> {
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) return null;
+  if (!fingerprint && !userId) return null;
+  try {
+    const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_user_rank_v2`;
+    const body: { p_fingerprint?: string; p_user_id?: string } = {};
+    if (userId) body.p_user_id = userId;
+    if (fingerprint) body.p_fingerprint = fingerprint;
+    const rows = await fetchSupabaseJson<any[]>(env, rpcUrl, {
+      method: 'POST',
+      headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(body),
+    }, SUPABASE_FETCH_TIMEOUT_MS);
+    const row = Array.isArray(rows) ? rows[0] : rows;
+    if (!row || row.rank_in_country == null) return null;
+    return {
+      rank_in_country: Number(row.rank_in_country) || 0,
+      total_in_country: Number(row.total_in_country) || 0,
+      rank_global: Number(row.rank_global) || 0,
+      total_global: Number(row.total_global) || 0,
+      ip_location: row.ip_location ?? null,
+    };
+  } catch (e: any) {
+    console.warn('[Worker] get_user_rank_v2 RPC 失败:', e?.message);
+    return null;
+  }
+}
+
+/** 6 维度双排名 RPC：返回全球 + 本国排名（total_messages, total_chars, total_user_chars, avg_user_message_length, jiafang_count, ketao_count） */
+async function getUserRanks6d(
+  env: Env,
+  fingerprint: string | null,
+  userId: string | null
+): Promise<Record<string, { rank_global: number; total_global: number; rank_country: number; total_country: number }> | null> {
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) return null;
+  if (!fingerprint && !userId) return null;
+  try {
+    const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_user_ranks_6d`;
+    const body: { p_fingerprint?: string; p_user_id?: string } = {};
+    if (userId) body.p_user_id = userId;
+    if (fingerprint) body.p_fingerprint = fingerprint;
+    const raw = await fetchSupabaseJson<any>(env, rpcUrl, {
+      method: 'POST',
+      headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(body),
+    }, SUPABASE_FETCH_TIMEOUT_MS);
+    if (!raw || typeof raw !== 'object') return null;
+    const DIMS = ['total_messages', 'total_chars', 'total_user_chars', 'avg_user_message_length', 'jiafang_count', 'ketao_count'] as const;
+    const out: Record<string, { rank_global: number; total_global: number; rank_country: number; total_country: number }> = {};
+    for (const k of DIMS) {
+      const v = raw[k];
+      if (v && typeof v === 'object') {
+        out[k] = {
+          rank_global: Number(v.rank_global) || 0,
+          total_global: Number(v.total_global) || 0,
+          rank_country: Number(v.rank_country) || 0,
+          total_country: Number(v.total_country) || 0,
+        };
+      }
+    }
+    return Object.keys(out).length ? out : null;
+  } catch (e: any) {
+    console.warn('[Worker] get_user_ranks_6d RPC 失败:', e?.message);
+    return null;
+  }
+}
+
 // KV 存储的键名
 const KV_KEY_GLOBAL_AVERAGE = 'global_average';
 const KV_KEY_LAST_UPDATE = 'global_average_last_update';
@@ -80,6 +202,7 @@ const KV_KEY_GLOBAL_AVERAGES = 'GLOBAL_AVERAGES'; // 大盘汇总数据键名
 const KV_KEY_GLOBAL_STATS_CACHE = 'GLOBAL_STATS_CACHE'; // 完整统计数据缓存（原子性）
 const KV_KEY_GLOBAL_STATS_V6 = 'GLOBAL_STATS_V6'; // V6 协议全局统计（用于动态排名）
 const KV_KEY_GLOBAL_DASHBOARD_DATA = 'GLOBAL_DASHBOARD_DATA'; // 右侧抽屉：大盘数据缓存（v_global_stats_v6）
+const KV_KEY_GLOBAL_COUNTRY_STATS = 'GLOBAL_COUNTRY_STATS'; // 国家维度累积排行（冷数据，仅定时任务写入，接口只读 KV）
 const KV_CACHE_TTL = 3600; // 缓存有效期：1小时（秒）
 
 // 右侧抽屉大盘缓存 TTL（秒）
@@ -2771,6 +2894,40 @@ app.post('/api/v2/analyze', async (c) => {
       }
     }
 
+    // 个人实时排名（窗口函数 RPC）：国家内/全球 rank 与 total，修复 1/1
+    try {
+      const authHeader = c.req.header('Authorization');
+      let userId: string | null = null;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        try {
+          const payload = JSON.parse(atob(authHeader.substring(7).split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+          userId = payload.sub || null;
+        } catch (_) { /* ignore */ }
+      }
+      const fp = (body.fingerprint && String(body.fingerprint).trim()) ? String(body.fingerprint).trim() : null;
+      if (fp || userId) {
+        const [rankRow, ranks6d] = await Promise.all([
+          getUserRankV2(c.env, fp, userId),
+          getUserRanks6d(c.env, fp, userId),
+        ]);
+        if (rankRow) {
+          result.rank_in_country = rankRow.rank_in_country;
+          result.total_in_country = rankRow.total_in_country;
+          result.rank_global = rankRow.rank_global;
+          result.total_global = rankRow.total_global;
+        }
+        if (ranks6d) {
+          result.global_user_ranks = {} as Record<string, { rank: number; total: number }>;
+          result.country_user_ranks = {} as Record<string, { rank: number; total: number }>;
+          for (const [k, v] of Object.entries(ranks6d)) {
+            const val = v as { rank_global: number; total_global: number; rank_country: number; total_country: number };
+            result.global_user_ranks[k] = { rank: val.rank_global, total: val.total_global };
+            result.country_user_ranks[k] = { rank: val.rank_country, total: val.total_country };
+          }
+        }
+      }
+    } catch (_) { /* ignore */ }
+
     // 返回结果（不阻塞数据库写入）
     // 写入 5 秒缓存：防止前端重复触发导致出现第二次 /api/v2/analyze 调用与重复入库
     if (cacheKey) {
@@ -4508,6 +4665,70 @@ app.get('/api/v2/stats', async (c) => {
 });
 
 /**
+ * GET /api/v2/country-stats-global
+ * 从 env.STATS_STORE 读取 GLOBAL_COUNTRY_STATS，供 stats2 地图热力图使用
+ * 响应：{ data: [...], updated_at: "..." }
+ */
+app.get('/api/v2/country-stats-global', async (c) => {
+  const env = c.env;
+  if (!env.STATS_STORE) {
+    return c.json({ status: 'success', data: [], updated_at: null });
+  }
+  try {
+    const kv = await getGlobalCountryStatsFromKV(env);
+    if (!kv) {
+      return c.json({ status: 'success', data: [], updated_at: null });
+    }
+    return c.json({
+      status: 'success',
+      data: kv.country_level || [],
+      updated_at: kv.updated_at || null,
+    });
+  } catch (e: any) {
+    return c.json({ status: 'error', error: e?.message || '查询失败', data: [], updated_at: null }, 500);
+  }
+});
+
+/**
+ * GET /api/v2/user-stats
+ * 个人实时排名：通过窗口函数 RPC 返回 rank_in_country/total_in_country、rank_global/total_global
+ * Query: fingerprint=xxx 或 user_id=xxx（二者至少传一）
+ */
+app.get('/api/v2/user-stats', async (c) => {
+  const env = c.env;
+  const fingerprint = (c.req.query('fingerprint') ?? '').trim() || null;
+  const userId = (c.req.query('user_id') ?? c.req.query('userId') ?? '').trim() || null;
+  if (!fingerprint && !userId) {
+    return c.json({ status: 'error', error: '请提供 fingerprint 或 user_id' }, 400);
+  }
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+    return c.json({ status: 'error', error: 'Supabase 未配置' }, 500);
+  }
+  try {
+    const rankRow = await getUserRankV2(env, fingerprint, userId);
+    if (!rankRow) {
+      return c.json({
+        status: 'success',
+        rank_in_country: null,
+        total_in_country: null,
+        rank_global: null,
+        total_global: null,
+      });
+    }
+    return c.json({
+      status: 'success',
+      rank_in_country: rankRow.rank_in_country,
+      total_in_country: rankRow.total_in_country,
+      rank_global: rankRow.rank_global,
+      total_global: rankRow.total_global,
+      ip_location: rankRow.ip_location,
+    });
+  } catch (e: any) {
+    return c.json({ status: 'error', error: e?.message || '查询失败' }, 500);
+  }
+});
+
+/**
  * GET /api/v2/location-rank
  * 返回地理位置排行，用于独立缓存
  * 防御：未预期 Query 参数用短缓存；容错返回 200 + 短缓存
@@ -5461,74 +5682,6 @@ app.get('/api/country-summary', async (c) => {
     // ✅ 简化筛选逻辑：只用 ISO2 country_code
     const cc = String(country || '').toUpperCase();
 
-    // ----------------------------
-    // ✅ 新方案：一次 RPC 返回“国家总额 + 排名”
-    // Supabase 禁止对视图做 sum()/avg() 时，必须走数据库函数
-    // ----------------------------
-    const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_country_ranks_v2`;
-    const rpcRows = await fetchSupabaseJson<any>(env, rpcUrl, {
-      method: 'POST',
-      headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
-      body: JSON.stringify({}),
-    }, SUPABASE_FETCH_TIMEOUT_MS);
-    const rpcList: any[] = Array.isArray(rpcRows) ? rpcRows : (rpcRows ? [rpcRows] : []);
-    const row = rpcList.find((it) => String(it?.country_code || '').trim().toUpperCase() === cc) || null;
-
-    // ✅ 彻底修复顶层统计：不再依赖 user_analysis，改为直接基于 v_unified_analysis_v2 统计
-    // - totalUsers: 优先按 DISTINCT fingerprint（view 中 fingerprint 非空时天然唯一），若为 0 则回退到该国总记录数
-    // - totalAnalysis: 该国总记录数（count(*)）
-    let countryTotalUsers = 0;
-    let countryTotalAnalysis = 0;
-    const readCountFromContentRange = (cr: string | null) => {
-      if (!cr) return null;
-      const parts = cr.split('/');
-      if (parts.length !== 2) return null;
-      const nAll = parseInt(parts[1]);
-      return (!Number.isNaN(nAll) && nAll >= 0) ? nAll : null;
-    };
-    try {
-      // totalAnalysis = count(*) from v_unified_analysis_v2 (按国家过滤)
-      const countUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
-      countUrl.searchParams.set('select', 'id');
-      countUrl.searchParams.set('country_code', `eq.${cc}`);
-      const res = await fetch(countUrl.toString(), {
-        headers: {
-          ...buildSupabaseHeaders(env),
-          'Prefer': 'count=exact',
-          'Range': '0-0',
-        },
-      });
-      if (res.ok) {
-        const nAll = readCountFromContentRange(res.headers.get('content-range'));
-        if (typeof nAll === 'number') countryTotalAnalysis = nAll;
-      }
-    } catch {
-      countryTotalAnalysis = 0;
-    }
-    try {
-      // totalUsers = count(DISTINCT fingerprint) from v_unified_analysis_v2
-      // 由于 v_unified_analysis_v2 已对 fingerprint 去重，因此这里用 fingerprint not null 的行数即可近似 distinct(fingerprint)
-      const countUrl2 = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
-      countUrl2.searchParams.set('select', 'fingerprint');
-      countUrl2.searchParams.set('country_code', `eq.${cc}`);
-      countUrl2.searchParams.set('fingerprint', 'not.is.null');
-      const res2 = await fetch(countUrl2.toString(), {
-        headers: {
-          ...buildSupabaseHeaders(env),
-          'Prefer': 'count=exact',
-          'Range': '0-0',
-        },
-      });
-      if (res2.ok) {
-        const nFp = readCountFromContentRange(res2.headers.get('content-range'));
-        if (typeof nFp === 'number') countryTotalUsers = nFp;
-      }
-      // 回退：如果该国没有 fingerprint（纯 GitHub 身份），避免显示 0
-      if (!countryTotalUsers && countryTotalAnalysis) countryTotalUsers = countryTotalAnalysis;
-    } catch {
-      if (!countryTotalUsers && countryTotalAnalysis) countryTotalUsers = countryTotalAnalysis;
-    }
-
     const n = (v: any) => {
       const x = Number(v ?? 0);
       return Number.isFinite(x) ? x : 0;
@@ -5537,51 +5690,86 @@ app.get('/api/country-summary', async (c) => {
       const x = Math.round(Number(v ?? NaN));
       return Number.isFinite(x) && x > 0 ? x : null;
     };
-
-    const tm = n(row?.tm ?? row?.total_messages ?? row?.total_messages_sum);
-    const tuc = n(row?.tuc ?? row?.total_user_chars ?? row?.total_user_chars_sum);
-    const tc = n(row?.tc ?? row?.total_chars ?? row?.total_chars_sum);
-    const jc = n(row?.jc ?? row?.jiafang_count ?? row?.jiafang_count_sum);
-    const kc = n(row?.kc ?? row?.ketao_count ?? row?.ketao_count_sum);
-    const avgLen = n(row?.avg_user_message_length ?? row?.avg_len ?? (tm > 0 ? (tuc / tm) : 0));
-
-    // 国家口径（用于 countryTotals / 排名换算）
-    const totalUsersCountry = countryTotalUsers > 0 ? countryTotalUsers : n(row?.total_users ?? row?.users ?? row?.totalUsers ?? 0);
-    const totalCountries = Math.max(0, ni(row?.total_countries ?? row?.totalCountries) || rpcList.length || 0);
-
-    const mkRank = (rankVal: any) => {
+    const mkRank = (rankVal: any, totalVal: number) => {
       const r = ni(rankVal);
-      if (!r || !totalCountries) return null;
-      return { rank: r, total: totalCountries };
+      if (!r || totalVal <= 0) return null;
+      return { rank: r, total: totalVal };
     };
 
-    const totals = {
-      totalUsers: totalUsersCountry,
-      total_messages_sum: tm,
-      total_user_chars_sum: tuc,
-      total_chars_sum: tc,
-      jiafang_count_sum: jc,
-      ketao_count_sum: kc,
-      avg_user_message_length_sum: avgLen,
-      source: 'rpc_get_country_ranks_v2',
-    };
+    // ----------------------------
+    // 【异步聚合 + KV 缓存】国家累积：优先从 KV 读取，严禁在接口内 GROUP BY
+    // ----------------------------
+    const kvCountry = await getGlobalCountryStatsFromKV(env);
+    let row: any = null;
+    let countryTotalUsers = 0;
+    let totalCountries = 0;
+    let totals: any;
+    let countryTotalsRanks: any;
 
-    // total_chars 的排名：若 RPC 未提供，退回使用 rank_user_chars（两者在现有口径常一致）
-    const rankUserChars = row?.rank_user_chars ?? row?.rank_total_user_chars;
-    const countryTotalsRanks: any = {
-      total_messages: mkRank(row?.rank_messages ?? row?.rank_total_messages),
-      total_user_chars: mkRank(rankUserChars),
-      total_chars: mkRank(row?.rank_total_chars ?? row?.rank_chars ?? rankUserChars),
-      jiafang_count: mkRank(row?.rank_jiafang ?? row?.rank_jiafang_count),
-      ketao_count: mkRank(row?.rank_ketao ?? row?.rank_ketao_count),
-      avg_user_message_length: mkRank(row?.rank_avg_len ?? row?.rank_avg_user_message_length),
-      _meta: { totalCountries: totalCountries || 0 },
-    };
+    if (kvCountry?.country_level?.length) {
+      const countryRow = kvCountry.country_level.find((it: any) => String(it?.country_code || '').trim().toUpperCase() === cc);
+      if (countryRow) {
+        row = countryRow;
+        countryTotalUsers = n(countryRow.total_users);
+        totalCountries = n(countryRow.total_countries) || Math.max(1, kvCountry.country_level.length);
+        const tm = n(countryRow.total_messages_sum);
+        const tuc = n(countryRow.total_user_chars_sum);
+        const tc = n(countryRow.total_chars_sum);
+        const jc = n(countryRow.jiafang_count_sum);
+        const kc = n(countryRow.ketao_count_sum);
+        const avgLen = n(countryRow.avg_user_message_length_sum) || (tm > 0 ? (tuc / tm) : 0);
+        totals = {
+          totalUsers: countryTotalUsers,
+          total_messages_sum: tm,
+          total_user_chars_sum: tuc,
+          total_chars_sum: tc,
+          jiafang_count_sum: jc,
+          ketao_count_sum: kc,
+          avg_user_message_length_sum: avgLen,
+          source: 'GLOBAL_COUNTRY_STATS',
+        };
+        countryTotalsRanks = {
+          total_messages: mkRank(countryRow.rank_total_messages, totalCountries),
+          total_user_chars: mkRank(countryRow.rank_total_user_chars, totalCountries),
+          total_chars: mkRank(countryRow.rank_total_chars, totalCountries),
+          jiafang_count: mkRank(countryRow.rank_jiafang, totalCountries),
+          ketao_count: mkRank(countryRow.rank_ketao, totalCountries),
+          avg_user_message_length: mkRank(countryRow.rank_avg_len, totalCountries),
+          _meta: { totalCountries, no_competition: !!countryRow.no_competition },
+        };
+      }
+    }
+
+    // 降级：KV 无数据时返回预设快照，严禁 GROUP BY
+    if (!totals) {
+      const noCompetition = row?.no_competition ?? true;
+      countryTotalUsers = 0;
+      totalCountries = 0;
+      totals = {
+        totalUsers: 0,
+        total_messages_sum: 0,
+        total_user_chars_sum: 0,
+        total_chars_sum: 0,
+        jiafang_count_sum: 0,
+        ketao_count_sum: 0,
+        avg_user_message_length_sum: 0,
+        source: 'preset_no_group_by',
+      };
+      countryTotalsRanks = {
+        total_messages: null,
+        total_user_chars: null,
+        total_chars: null,
+        jiafang_count: null,
+        ketao_count: null,
+        avg_user_message_length: null,
+        _meta: { totalCountries: 0, no_competition: noCompetition },
+      };
+    }
 
     const totalMessages = Number(totals?.total_messages_sum) || 0;
     const totalChars = Number(totals?.total_chars_sum) || 0;
     const totalUserChars = Number(totals?.total_user_chars_sum) || totalChars;
-    const avgPerUser = totalUsersCountry > 0 ? Math.round(totalChars / totalUsersCountry) : 0;
+    const avgPerUser = countryTotalUsers > 0 ? Math.round(totalChars / countryTotalUsers) : 0;
     const avgPerScan = totalMessages > 0 ? Math.round(totalChars / totalMessages) : 0;
 
     // ✅ 支持全站平均分计算：从 v_unified_analysis_v2 聚合全站 l/p/d/e/f 平均值
@@ -5611,51 +5799,36 @@ app.get('/api/country-summary', async (c) => {
     }
 
     // ----------------------------
-    // my record + country ranks (按需)
+    // my record + country ranks：一条窗口函数 RPC 获取 rank_in_country/total_in_country，修复 1/1
     // ----------------------------
     const myOut: any = { id: null, user_name: null, github_username: null };
     let myValues: any = null;
     let myRanks: any = null;
+    let globalUserRanks: Record<string, { rank: number; total: number }> | null = null;
+    let countryUserRanks: Record<string, { rank: number; total: number }> | null = null;
 
     const canIdentify = !!(userId || fingerprint);
-    if (canIdentify && totalUsersCountry > 0) {
+    if (canIdentify) {
       try {
-        // 优先用完整字段集合（V2 视图），失败则回退最小集合
-        const fetchMe = async (selectCols: string) => {
-          const meUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
-          meUrl.searchParams.set('select', selectCols);
-          if (userId) meUrl.searchParams.set('id', `eq.${encodeURIComponent(userId)}`);
-          else meUrl.searchParams.set('fingerprint', `eq.${encodeURIComponent(fingerprint)}`);
-          meUrl.searchParams.set('limit', '1');
-          return await fetchSupabaseJson<any[]>(env, meUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS);
-        };
-
-        let meRows: any[] = [];
-        try {
-          meRows = await fetchMe([
-            'id',
-            'user_name',
-            'fingerprint',
-            'user_identity',
-            'total_messages',
-            'total_user_chars',
-            'total_chars',
-            'avg_user_message_length',
-            'jiafang_count',
-            'ketao_count',
-          ].join(','));
-        } catch {
-          meRows = await fetchMe([
-            'id',
-            'user_name',
-            'fingerprint',
-            'user_identity',
-            'total_messages',
-            'total_chars',
-            'jiafang_count',
-            'ketao_count',
-          ].join(',')).catch(() => []);
-        }
+        const [rankRow, ranks6d, meRows] = await Promise.all([
+          getUserRankV2(env, fingerprint || null, userId || null),
+          getUserRanks6d(env, fingerprint || null, userId || null),
+          (async () => {
+            const fetchMe = async (selectCols: string) => {
+              const meUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
+              meUrl.searchParams.set('select', selectCols);
+              if (userId) meUrl.searchParams.set('id', `eq.${encodeURIComponent(userId)}`);
+              else meUrl.searchParams.set('fingerprint', `eq.${encodeURIComponent(fingerprint)}`);
+              meUrl.searchParams.set('limit', '1');
+              return await fetchSupabaseJson<any[]>(env, meUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS);
+            };
+            try {
+              return await fetchMe('id,user_name,fingerprint,user_identity,total_messages,total_user_chars,total_chars,avg_user_message_length,jiafang_count,ketao_count');
+            } catch {
+              return await fetchMe('id,user_name,fingerprint,user_identity,total_messages,total_chars,jiafang_count,ketao_count').catch(() => []);
+            }
+          })(),
+        ]);
         const me = Array.isArray(meRows) ? (meRows[0] || null) : null;
         if (me) {
           myOut.id = me.id ?? null;
@@ -5666,8 +5839,7 @@ app.get('/api/country-summary', async (c) => {
           const avgLen = Number(me.avg_user_message_length) || (msg > 0 ? (userChars / msg) : 0);
           const jia = Number(me.jiafang_count) || 0;
           const ket = Number(me.ketao_count) || 0;
-
-          const values = {
+          myValues = {
             total_messages: msg,
             total_user_chars: userChars,
             total_chars: chars,
@@ -5675,60 +5847,28 @@ app.get('/api/country-summary', async (c) => {
             jiafang_count: jia,
             ketao_count: ket,
           };
-
-          const getGreaterCount = async (col: string, value: number): Promise<number | null> => {
-            if (!Number.isFinite(value) || value <= 0) return 0;
-            const qUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
-            qUrl.searchParams.set('select', 'id');
-            qUrl.searchParams.set('country_code', `eq.${cc}`);
-            qUrl.searchParams.set(col, `gt.${value}`);
-            const res = await fetch(qUrl.toString(), {
-              headers: {
-                'apikey': env.SUPABASE_KEY,
-                'Authorization': `Bearer ${env.SUPABASE_KEY}`,
-                'Prefer': 'count=exact',
-                'Range': '0-0',
-              },
-            });
-            // 如果列不存在/表达式不支持，让该项排名降级为 null（前端显示 --）
-            if (!res.ok) return null;
-            const cr = res.headers.get('content-range');
-            if (cr) {
-              const parts = cr.split('/');
-              if (parts.length === 2) {
-                const n = parseInt(parts[1]);
-                if (!Number.isNaN(n) && n >= 0) return n;
+          const DIMS = ['total_messages', 'total_chars', 'total_user_chars', 'avg_user_message_length', 'jiafang_count', 'ketao_count'] as const;
+          if (ranks6d) {
+            myRanks = {} as any;
+            globalUserRanks = {};
+            countryUserRanks = {};
+            for (const k of DIMS) {
+              const v = ranks6d[k];
+              if (v) {
+                const rc = v.rank_country > 0 && v.total_country > 0 ? { rank: v.rank_country, total: v.total_country, percentile: Math.max(0, Math.min(100, (1 - (v.rank_country - 1) / v.total_country) * 100)) } : null;
+                myRanks[k] = rc;
+                globalUserRanks[k] = { rank: v.rank_global || 0, total: v.total_global || 0 };
+                countryUserRanks[k] = { rank: v.rank_country || 0, total: v.total_country || 0 };
               }
             }
-            return 0;
-          };
-
-          const cols: Array<[string, string]> = [
-            ['total_messages', 'total_messages'],
-            ['total_chars', 'total_chars'],
-            ['total_user_chars', 'total_user_chars'],
-            // avg_user_message_length 依赖数据库视图是否提供该列；没有则会降级为 --
-            ['avg_user_message_length', 'avg_user_message_length'],
-            ['jiafang_count', 'jiafang_count'],
-            ['ketao_count', 'ketao_count'],
-          ];
-          const greaterCounts = await Promise.all(cols.map(([_, col]) => getGreaterCount(col, Number(values[col]))));
-
-          const ranks: any = {};
-          cols.forEach(([key, col], idx) => {
-            const raw = greaterCounts[idx];
-            if (raw == null) {
-              ranks[key] = null;
-              return;
-            }
-            const gt = Number(raw) || 0;
-            const rank = totalUsersCountry > 0 ? (gt + 1) : null;
-            const percentile = totalUsersCountry > 0 ? Math.max(0, Math.min(100, (1 - (rank - 1) / totalUsersCountry) * 100)) : null;
-            ranks[key] = { rank, total: totalUsersCountry, percentile };
-          });
-
-          myRanks = ranks;
-          myValues = values;
+          } else {
+            const totalInCountry = rankRow ? rankRow.total_in_country : countryTotalUsers;
+            const rankInCountry = rankRow ? rankRow.rank_in_country : null;
+            const totalVal = totalInCountry > 0 ? totalInCountry : countryTotalUsers;
+            const rankVal = (rankInCountry != null && rankInCountry > 0) ? rankInCountry : null;
+            const one = totalVal > 0 && rankVal != null ? { rank: rankVal, total: totalVal, percentile: totalVal > 0 ? Math.max(0, Math.min(100, (1 - (rankVal - 1) / totalVal) * 100)) : null } : null;
+            myRanks = { total_messages: one, total_chars: one, total_user_chars: one, avg_user_message_length: one, jiafang_count: one, ketao_count: one };
+          }
         }
       } catch {
         // ignore
@@ -5995,7 +6135,7 @@ app.get('/api/country-summary', async (c) => {
       // 保持兼容：country-summary 仍返回这两个字段（stats2 右侧雷达使用）
       globalAverage: avgDims,
       averages: avgDims,
-      locationRank: [{ name: country, value: totalUsersCountry }],
+      locationRank: [{ name: country, value: countryTotalUsers }],
       personalityRank: [],
       personalityDistribution: [],
       latestRecords,
@@ -6003,7 +6143,7 @@ app.get('/api/country-summary', async (c) => {
       // 新增：国家累计与个人国家排名
       countryTotals: {
         country,
-        totalUsers: totalUsersCountry,
+        totalUsers: countryTotalUsers,
         total_messages: totalMessages,
         total_user_chars: totalUserChars, // 兼容：与 total_chars 同口径时也可用
         total_chars: totalChars,
@@ -6016,20 +6156,25 @@ app.get('/api/country-summary', async (c) => {
       myCountry: myOut,
       myCountryValues: myValues,
       myCountryRanks: myRanks,
+      global_user_ranks: globalUserRanks ?? undefined,
+      country_user_ranks: countryUserRanks ?? undefined,
       _meta: {
         totalsSource: totals?.source || null,
         countryName: (countryNameRaw || null),
         countDebug: null,
         at: new Date().toISOString(),
       },
+      country_level: kvCountry?.country_level ?? undefined,
+      no_competition: countryTotalsRanks?._meta?.no_competition ?? false,
+      countryDataByCode: buildCountryDataByCode(kvCountry),
+      total_countries: (kvCountry as any)?._meta?.total_countries ?? totalCountries ?? 195,
     };
 
     if (includeDebug) {
       out._debug = {
         country,
         countryName: countryNameRaw || null,
-        rpcUrl,
-        rpcRows: rpcList.length,
+        kvHit: !!kvCountry,
         found: !!row,
       };
       c.header('Cache-Control', 'no-store');
@@ -7358,6 +7503,90 @@ async function performV6Aggregation(env: Env): Promise<{ success: boolean; error
   }
 }
 
+/** rank_l..rank_g 映射为大写 L,P,D,E,F,G 存入 ranks 对象 */
+const RANK_V3_TO_LETTER: Record<string, string> = {
+  rank_l: 'L', rank_m: 'P', rank_n: 'D', rank_o: 'E', rank_p: 'F', rank_g: 'G',
+};
+const RANK_V3_FIELDS = ['rank_l', 'rank_m', 'rank_n', 'rank_o', 'rank_p', 'rank_g'] as const;
+
+/** 仅限 Cron 调用：计算各国 6 维累积并写入 KV GLOBAL_COUNTRY_STATS，接口只读不写。调用 get_country_ranks_v3，以国家代码为 Top Key 存入 ranks 对象。 */
+async function writeGlobalCountryStatsToKV(env: Env): Promise<{ success: boolean; error?: string }> {
+  if (!env.STATS_STORE || !env.SUPABASE_URL || !env.SUPABASE_KEY) {
+    return { success: false, error: 'STATS_STORE 或 Supabase 未配置' };
+  }
+  try {
+    let rpcList: any[] = [];
+    try {
+      const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_country_ranks_v3`;
+      const rpcRows = await fetchSupabaseJson<any>(env, rpcUrl, {
+        method: 'POST',
+        headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({}),
+      }, SUPABASE_FETCH_TIMEOUT_MS);
+      rpcList = Array.isArray(rpcRows) ? rpcRows : (rpcRows ? [rpcRows] : []);
+    } catch (v3Err) {
+      const fallbackUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_country_ranks_v2`;
+      const fallbackRows = await fetchSupabaseJson<any>(env, fallbackUrl, {
+        method: 'POST',
+        headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({}),
+      }, SUPABASE_FETCH_TIMEOUT_MS);
+      rpcList = Array.isArray(fallbackRows) ? fallbackRows : (fallbackRows ? [fallbackRows] : []);
+    }
+    const totalCountries = Math.max(1, rpcList.length);
+    const n = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    const byCountry: Record<string, any> = {};
+    const country_level: any[] = [];
+    for (const it of rpcList) {
+      const cc = String(it?.country_code ?? it?.ip_location ?? '').trim().toUpperCase() || 'XX';
+      const total_users = n(it.total_users ?? it.users ?? it.totalUsers);
+      const ranks: Record<string, number> = {};
+      const v2Map: Record<string, string> = {
+        rank_l: 'rank_messages', rank_m: 'rank_total_chars', rank_n: 'rank_total_user_chars',
+        rank_o: 'rank_avg_len', rank_p: 'rank_jiafang', rank_g: 'rank_ketao',
+      };
+      for (const v3f of RANK_V3_FIELDS) {
+        const rv3 = it[v3f];
+        const rv2 = it[v2Map[v3f]];
+        const val = n(rv3 ?? rv2 ?? 0);
+        const letter = RANK_V3_TO_LETTER[v3f] || v3f;
+        ranks[letter] = val > 0 ? val : 0;
+      }
+      const level = {
+        country_code: cc,
+        total_messages_sum: n(it.tm ?? it.total_messages ?? it.total_messages_sum),
+        total_chars_sum: n(it.tc ?? it.total_chars ?? it.total_chars_sum),
+        total_user_chars_sum: n(it.tuc ?? it.total_user_chars ?? it.total_user_chars_sum),
+        jiafang_count_sum: n(it.jc ?? it.jiafang_count ?? it.jiafang_count_sum),
+        ketao_count_sum: n(it.kc ?? it.ketao_count ?? it.ketao_count_sum),
+        avg_user_message_length_sum: n(it.avg_user_message_length ?? it.avg_len) || 0,
+        total_users: total_users,
+        rank_total_messages: ranks.L || n(it.rank_messages ?? it.rank_total_messages),
+        rank_total_chars: ranks.P || n(it.rank_total_chars ?? it.rank_chars),
+        rank_total_user_chars: ranks.D || n(it.rank_user_chars ?? it.rank_total_user_chars),
+        rank_jiafang: ranks.F || n(it.rank_jiafang ?? it.rank_jiafang_count),
+        rank_ketao: ranks.G || n(it.rank_ketao ?? it.rank_ketao_count),
+        rank_avg_len: ranks.E || n(it.rank_avg_len ?? it.rank_avg_user_message_length),
+        total_countries: totalCountries,
+        no_competition: total_users <= 1,
+      };
+      byCountry[cc] = { ranks, total_countries: totalCountries, user_count: total_users, ...level };
+      country_level.push(level);
+    }
+    const payload = {
+      ...byCountry,
+      _meta: { total_countries: totalCountries, updated_at: new Date().toISOString() },
+      country_level,
+      updated_at: new Date().toISOString(),
+    };
+    await env.STATS_STORE.put(KV_KEY_GLOBAL_COUNTRY_STATS, JSON.stringify(payload), { expirationTtl: KV_CACHE_TTL * 2 });
+    console.log('[Worker] ✅ GLOBAL_COUNTRY_STATS 已写入 KV，国家数:', country_level.length);
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: e?.message || String(e) };
+  }
+}
+
 /**
  * 【第二阶段新增】定期汇总任务（Cron Trigger）
  * 每小时执行一次，从 Supabase 汇总平均分并存入 KV
@@ -7372,9 +7601,16 @@ export async function scheduled(event: ScheduledEvent, env: Env, ctx: any) {
   });
 
   // 多 Cron 支持：
-  // - 0 * * * *：全网聚合（较重）
-  // - */10 * * * *：国家累计 rollup（更轻，保证“动态感”）
+  // - 0 * * * *：国家累积写入 KV（GLOBAL_COUNTRY_STATS），全球排行每小时更新
+  // - */10 * * * *：国家累计 rollup（refresh_country_stats_current）
   const cron = String(event.cron || '').trim();
+
+  if (cron === '0 * * * *') {
+    const r = await writeGlobalCountryStatsToKV(env);
+    if (r.success) console.log('[Worker] ✅ 国家累积 KV 写入完成');
+    else console.warn('[Worker] ⚠️ 国家累积 KV 写入失败:', r.error);
+    return;
+  }
 
   if (cron === '*/10 * * * *') {
     const r = await refreshCountryStatsCurrent(env);
@@ -7387,9 +7623,10 @@ export async function scheduled(event: ScheduledEvent, env: Env, ctx: any) {
   const result = await performAggregation(env);
   const v6Result = await performV6Aggregation(env);
   const countryRollup = await refreshCountryStatsCurrent(env);
+  const kvWrite = await writeGlobalCountryStatsToKV(env);
 
   if (result.success && v6Result.success && countryRollup.success) {
-    console.log('[Worker] ✅ 定期汇总任务完成（包含 V6 + 国家 rollup）');
+    console.log('[Worker] ✅ 定期汇总任务完成（包含 V6 + 国家 rollup）', kvWrite.success ? '+ KV 国家累积' : '');
   } else {
     console.error('[Worker] ❌ 定期汇总任务失败:', {
       aggregation: result.error,
@@ -7452,6 +7689,20 @@ app.get('/cdn-cgi/handler/refresh-country-rollup', async (c) => {
   }
 });
 
+/** 预热接口：将国家累积写入 KV GLOBAL_COUNTRY_STATS */
+app.get('/api/v2/internal/refresh-kv', async (c) => {
+  try {
+    const env = c.env;
+    const r = await writeGlobalCountryStatsToKV(env);
+    if (r.success) {
+      return c.json({ status: 'success', message: 'GLOBAL_COUNTRY_STATS 已写入 KV', at: new Date().toISOString() });
+    }
+    return c.json({ status: 'error', error: r.error || '写入失败', at: new Date().toISOString() }, 500);
+  } catch (e: any) {
+    return c.json({ status: 'error', error: e?.message || '未知错误', at: new Date().toISOString() }, 500);
+  }
+});
+
 /**
  * 路由：存活检查 & 状态（兼容原有 worker.js）
  * 功能：返回总用户数和 API 状态
@@ -7479,6 +7730,7 @@ app.get('/', async (c) => {
             v2Analyze: '/api/v2/analyze',
             globalAverage: '/api/global-average',
             randomPrompt: '/api/random_prompt',
+            refreshKv: '/api/v2/internal/refresh-kv',
           },
         });
       } catch (error) {
@@ -7495,6 +7747,7 @@ app.get('/', async (c) => {
         v2Analyze: '/api/v2/analyze',
         globalAverage: '/api/global-average',
         randomPrompt: '/api/random_prompt',
+        refreshKv: '/api/v2/internal/refresh-kv',
       },
     });
   } catch (error: any) {

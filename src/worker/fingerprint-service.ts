@@ -370,8 +370,11 @@ export async function bindFingerprintToUser(
 
 /**
  * 根据指纹更新用户信息（如果用户已存在）
+ * 【止血】覆盖式更新：total_messages、total_chars 等统计字段必须为“当前快照值”，
+ * 禁止传入“旧值+增量”。否则会导致数据翻倍（1/1 问题）。语义等同 SQL：SET column = EXCLUDED.column。
+ *
  * @param fingerprint - 浏览器生成的指纹
- * @param updates - 要更新的字段（total_messages、total_chars 等必须为直接覆盖值，禁止传入“旧值+增量”的累加结果）
+ * @param updates - 要更新的字段（均为覆盖值，禁止累加）
  * @param env - 环境变量
  * @returns 更新后的用户数据或 null
  */
@@ -386,7 +389,7 @@ export async function updateUserByFingerprint(
 
   try {
     const updateUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?fingerprint=eq.${encodeURIComponent(fingerprint)}`;
-    
+    // 覆盖式：直接使用 updates 中的值，不参与任何累加（PATCH 语义即 SET col = 传入值）
     const payload = {
       ...updates,
       updated_at: new Date().toISOString(),
