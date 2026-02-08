@@ -156,12 +156,12 @@ async function getUserRankV2(
   }
 }
 
-/** 6 维度双排名 RPC：返回全球 + 本国排名（total_messages, total_chars, total_user_chars, avg_user_message_length, jiafang_count, ketao_count） */
+/** 6 维度双排名 RPC：返回全球 + 本国排名（贝叶斯平滑）及 user_total_messages（置信度展示） */
 async function getUserRanks6d(
   env: Env,
   fingerprint: string | null,
   userId: string | null
-): Promise<Record<string, { rank_global: number; total_global: number; rank_country: number; total_country: number }> | null> {
+): Promise<{ ranks: Record<string, { rank_global: number; total_global: number; rank_country: number; total_country: number }>; user_total_messages?: number } | null> {
   if (!env.SUPABASE_URL || !env.SUPABASE_KEY) return null;
   if (!fingerprint && !userId) return null;
   try {
@@ -188,7 +188,8 @@ async function getUserRanks6d(
         };
       }
     }
-    return Object.keys(out).length ? out : null;
+    const user_total_messages = raw.user_total_messages != null ? Number(raw.user_total_messages) : undefined;
+    return Object.keys(out).length ? { ranks: out, user_total_messages } : null;
   } catch (e: any) {
     console.warn('[Worker] get_user_ranks_6d RPC 失败:', e?.message);
     return null;
@@ -2716,6 +2717,14 @@ app.post('/api/v2/analyze', async (c) => {
             payload.ip_location = normalizedIpLocation;
           }
 
+          // 【地理位置一致性】确保 manual_location 与 ip_location 口径一致：无用户校准时用 ip_location（ISO2）补全
+          const ipIso2 = payload.ip_location && /^[A-Za-z]{2}$/.test(String(payload.ip_location).trim())
+            ? String(payload.ip_location).trim().toUpperCase()
+            : null;
+          if (ipIso2 && !payload.manual_location) {
+            payload.manual_location = ipIso2;
+          }
+
           // ============================
           // 行为快照：snapshot_country（用于“国别聚合”而非用户当前国籍）
           // 优先级：前端显式 snapshot_country/manual_region > manual_location > ip_location > Global
@@ -2882,6 +2891,30 @@ app.post('/api/v2/analyze', async (c) => {
 
             // 刷新触发：写入完成后异步调用 RPC 刷新视图
             executionCtx.waitUntil(refreshGlobalStatsV6Rpc(env));
+
+            // 【接口优化】写入后查询 v_user_analysis_extended，将实时排名合并到返回结果
+            try {
+              const viewSelect = `${env.SUPABASE_URL}/rest/v1/v_user_analysis_extended?select=jiafang_rank,ketao_rank,days_rank,country_code,vibe_rank,vibe_percentile`;
+              const viewBy = useUserIdForUpsert && authenticatedUserId
+                ? `id=eq.${encodeURIComponent(authenticatedUserId)}`
+                : `fingerprint=eq.${encodeURIComponent(payload.fingerprint || '')}`;
+              const viewUrl = `${viewSelect}&${viewBy}&limit=1`;
+              const viewRes = await fetchSupabase(env, viewUrl, { headers: buildSupabaseHeaders(env) });
+              if (viewRes.ok) {
+                const viewData = await viewRes.json();
+                const row = Array.isArray(viewData) ? viewData[0] : viewData;
+                if (row && typeof row === 'object') {
+                  if (row.jiafang_rank != null) result.jiafang_rank = Number(row.jiafang_rank);
+                  if (row.ketao_rank != null) result.ketao_rank = Number(row.ketao_rank);
+                  if (row.days_rank != null) result.days_rank = Number(row.days_rank);
+                  if (row.country_code != null) result.country_code = String(row.country_code);
+                  if (row.vibe_rank != null) result.vibe_rank = Number(row.vibe_rank);
+                  if (row.vibe_percentile != null) result.vibe_percentile = Number(row.vibe_percentile);
+                }
+              }
+            } catch (viewErr: any) {
+              console.warn('[Worker] ⚠️ 查询 v_user_analysis_extended 失败:', viewErr?.message);
+            }
           } catch (err: any) {
             console.error('[Worker] ❌ 数据库同步任务失败:', err.message);
           }
@@ -2919,10 +2952,14 @@ app.post('/api/v2/analyze', async (c) => {
         if (ranks6d) {
           result.global_user_ranks = {} as Record<string, { rank: number; total: number }>;
           result.country_user_ranks = {} as Record<string, { rank: number; total: number }>;
-          for (const [k, v] of Object.entries(ranks6d)) {
+          const ranks = ranks6d.ranks;
+          for (const [k, v] of Object.entries(ranks)) {
             const val = v as { rank_global: number; total_global: number; rank_country: number; total_country: number };
             result.global_user_ranks[k] = { rank: val.rank_global, total: val.total_global };
             result.country_user_ranks[k] = { rank: val.rank_country, total: val.total_country };
+          }
+          if (ranks6d.user_total_messages != null) {
+            result.user_total_messages = ranks6d.user_total_messages;
           }
         }
       }
@@ -3222,19 +3259,25 @@ app.post('/api/fingerprint/migrate', async (c) => {
     const env = c.env;
     let body: any = {};
     try {
-      body = await c.req.json();
+      body = (await c.req.json()) || {};
     } catch {
-      return c.json({ status: 'skipped', message: '参数缺失，已跳过' }, 200);
+      body = {};
     }
-    const { fingerprint: oldFingerprint, sourceFp, userId: githubUserId, username: githubUsername, claimToken } = body || {};
+    const q = c.req.query();
+    // 从 req.query 或 req.body 提取 fingerprint、userId（消除 404/参数缺失；兼容 targetUserId）
+    const oldFingerprint = String(body.fingerprint ?? body.sourceFp ?? q.fingerprint ?? q.fp ?? '').trim();
+    const sourceFp = String(body.sourceFp ?? body.fingerprint ?? q.fingerprint ?? q.fp ?? '').trim();
+    let githubUserId = String(body.userId ?? body.user_id ?? body.targetUserId ?? body.target_user_id ?? q.userId ?? q.user_id ?? '').trim();
+    const githubUsername = body.username ?? body.githubUsername ?? q.username ?? undefined;
+    const claimToken = body.claimToken ?? q.claimToken ?? undefined;
 
-    if (!githubUserId || String(githubUserId).trim() === '') {
+    if (!githubUserId) {
       return c.json({ status: 'skipped', message: 'userId 缺失，已跳过' }, 200);
     }
 
     // 【支持两种迁移方式】claimToken 或 fingerprint；缺失时静默跳过，不返回 400
     const hasClaimToken = claimToken && String(claimToken).trim() !== '';
-    const hasFingerprint = (oldFingerprint && String(oldFingerprint).trim() !== '') || (sourceFp && String(sourceFp).trim() !== '');
+    const hasFingerprint = oldFingerprint !== '' || sourceFp !== '';
     if (!hasClaimToken && !hasFingerprint) {
       return c.json({ status: 'skipped', message: 'claimToken 或 fingerprint 缺失，已跳过' }, 200);
     }
@@ -3298,14 +3341,15 @@ app.post('/api/fingerprint/migrate', async (c) => {
       }, 401);
     }
 
-    // 验证 userId 格式（UUID）
+    // 验证 userId 格式（UUID）；非 UUID 时返回 200 跳过，避免前端 400 导致无限重试
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(githubUserId)) {
+      console.warn('[Worker] ⚠️ userId 非 UUID 格式，已跳过迁移');
       return c.json({
-        status: 'error',
-        error: '无效的 userId 格式',
+        status: 'skipped',
+        message: '无效的 userId 格式，已跳过',
         errorCode: 'INVALID_USER_ID',
-      }, 400);
+      }, 200);
     }
 
     // 【步骤 2：执行迁移】使用 claimToken 或 fingerprint 执行迁移
@@ -3315,26 +3359,28 @@ app.post('/api/fingerprint/migrate', async (c) => {
       userId: githubUserId.substring(0, 8) + '...',
       fingerprint: fingerprintToMigrate ? fingerprintToMigrate.substring(0, 8) + '...' : 'none',
     });
-    
+
     const result = await migrateFingerprintToUserId(fingerprintToMigrate, githubUserId, claimToken, env);
-    
+
     if (result) {
       console.log('[Worker] ✅ 数据认领成功');
+      // result 已由 migrateFingerprintToUserId 内查询 v_user_analysis_extended 返回完整记录
       return c.json({
         status: 'success',
         data: result,
         message: '数据认领成功',
         requiresRefresh: true,
       });
-    } else {
-      console.log('[Worker] ⚠️ 数据认领失败');
-      return c.json({
-        status: 'error',
-        error: 'claim_token 无效或已过期，或数据已被认领',
-        errorCode: 'CLAIM_FAILED',
-      }, 400);
     }
-    
+
+    // 【防止死循环】无需迁移或认领失败时统一返回 200 + status skipped，阻止前端无限重试
+    console.log('[Worker] ℹ️ 无需迁移或已关联，返回 skipped');
+    return c.json({
+      status: 'skipped',
+      message: '无需迁移或已关联',
+      errorCode: 'NO_ACTION_NEEDED',
+    }, 200);
+
     // 传统迁移流程（保持向后兼容）
     let sourceRecord = null;
     let successfulFp = null;
@@ -5697,7 +5743,7 @@ app.get('/api/country-summary', async (c) => {
     };
 
     // ----------------------------
-    // 【异步聚合 + KV 缓存】国家累积：优先从 KV 读取，严禁在接口内 GROUP BY
+    // 【异步聚合 + KV 缓存】国家累积：优先从 KV 读取，KV 无数据时降级调用 RPC
     // ----------------------------
     const kvCountry = await getGlobalCountryStatsFromKV(env);
     let row: any = null;
@@ -5740,7 +5786,56 @@ app.get('/api/country-summary', async (c) => {
       }
     }
 
-    // 降级：KV 无数据时返回预设快照，严禁 GROUP BY
+    // 降级：KV 无数据时调用 RPC get_country_ranks_v3 实时获取排名
+    if (!totals) {
+      try {
+        const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_country_ranks_v3`;
+        const rpcRows = await fetchSupabaseJson<any[]>(env, rpcUrl, {
+          method: 'POST',
+          headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+          body: JSON.stringify({}),
+        }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
+        const rpcList = Array.isArray(rpcRows) ? rpcRows : [];
+        const countryRow = rpcList.find((it: any) => String(it?.country_code || '').trim().toUpperCase() === cc);
+        totalCountries = Math.max(1, rpcList.length);
+
+        if (countryRow) {
+          row = countryRow;
+          countryTotalUsers = n(countryRow.total_users);
+          const tm = n(countryRow.tm ?? countryRow.total_messages);
+          const tuc = n(countryRow.tuc ?? countryRow.total_user_chars);
+          const tc = n(countryRow.tc ?? countryRow.total_chars);
+          const jc = n(countryRow.jc ?? countryRow.jiafang_count);
+          const kc = n(countryRow.kc ?? countryRow.ketao_count);
+          const avgLen = n(countryRow.avg_len ?? countryRow.avg_user_message_length) || (tm > 0 ? (tuc / tm) : 0);
+          totals = {
+            totalUsers: countryTotalUsers,
+            total_messages_sum: tm,
+            total_user_chars_sum: tuc,
+            total_chars_sum: tc,
+            jiafang_count_sum: jc,
+            ketao_count_sum: kc,
+            avg_user_message_length_sum: avgLen,
+            source: 'RPC_FALLBACK',
+          };
+          // RPC 返回的排名字段：rank_l(total_messages), rank_m(total_chars), rank_n(total_user_chars),
+          // rank_o(avg_len), rank_p(jiafang), rank_g(ketao)
+          countryTotalsRanks = {
+            total_messages: mkRank(countryRow.rank_l, totalCountries),
+            total_user_chars: mkRank(countryRow.rank_n, totalCountries),
+            total_chars: mkRank(countryRow.rank_m, totalCountries),
+            jiafang_count: mkRank(countryRow.rank_p, totalCountries),
+            ketao_count: mkRank(countryRow.rank_g, totalCountries),
+            avg_user_message_length: mkRank(countryRow.rank_o, totalCountries),
+            _meta: { totalCountries, no_competition: countryTotalUsers <= 1 },
+          };
+        }
+      } catch (rpcErr) {
+        console.warn('[Worker] get_country_ranks_v3 RPC 降级失败:', rpcErr);
+      }
+    }
+
+    // 最终降级：RPC 也失败时返回预设空值
     if (!totals) {
       const noCompetition = row?.no_competition ?? true;
       countryTotalUsers = 0;
@@ -5848,12 +5943,12 @@ app.get('/api/country-summary', async (c) => {
             ketao_count: ket,
           };
           const DIMS = ['total_messages', 'total_chars', 'total_user_chars', 'avg_user_message_length', 'jiafang_count', 'ketao_count'] as const;
-          if (ranks6d) {
+          if (ranks6d && ranks6d.ranks) {
             myRanks = {} as any;
             globalUserRanks = {};
             countryUserRanks = {};
             for (const k of DIMS) {
-              const v = ranks6d[k];
+              const v = ranks6d.ranks[k];
               if (v) {
                 const rc = v.rank_country > 0 && v.total_country > 0 ? { rank: v.rank_country, total: v.total_country, percentile: Math.max(0, Math.min(100, (1 - (v.rank_country - 1) / v.total_country) * 100)) } : null;
                 myRanks[k] = rc;
@@ -6166,7 +6261,21 @@ app.get('/api/country-summary', async (c) => {
       },
       country_level: kvCountry?.country_level ?? undefined,
       no_competition: countryTotalsRanks?._meta?.no_competition ?? false,
-      countryDataByCode: buildCountryDataByCode(kvCountry),
+      // 优先使用 KV 中的 countryDataByCode，如果 KV 无数据但 RPC 降级成功，则手动构建当前国家的数据
+      countryDataByCode: buildCountryDataByCode(kvCountry) ?? (totals?.source === 'RPC_FALLBACK' && countryTotalsRanks ? {
+        [cc]: {
+          ranks: {
+            L: countryTotalsRanks.total_messages?.rank ?? 0,
+            P: countryTotalsRanks.total_chars?.rank ?? 0,
+            D: countryTotalsRanks.total_user_chars?.rank ?? 0,
+            E: countryTotalsRanks.avg_user_message_length?.rank ?? 0,
+            F: countryTotalsRanks.jiafang_count?.rank ?? 0,
+            G: countryTotalsRanks.ketao_count?.rank ?? 0,
+          },
+          total_countries: totalCountries,
+          user_count: countryTotalUsers,
+        },
+      } : undefined),
       total_countries: (kvCountry as any)?._meta?.total_countries ?? totalCountries ?? 195,
     };
 
@@ -6578,7 +6687,7 @@ async function fetchFromSupabase(
         }),
         // 3) 获取所有 personality_type（用于统计人格分布）
         fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/user_analysis?select=personality_type`),
-        // 4) 获取最新记录（含 work_days、github_username，供 stats2 抽屉「上岗天数」正确显示）
+        // 4) 获取最新记录（含 work_days、github_username；若已创建 v_user_analysis_extended 可改为查该视图以带出 jiafang_rank/ketao_rank/days_rank）
         fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/user_analysis?select=personality_type,ip_location,created_at,user_name,work_days,github_username,user_identity,fingerprint,updated_at&order=updated_at.desc&limit=20`),
       ]),
     ]);
@@ -6856,7 +6965,11 @@ async function fetchFromSupabase(
                   user_identity: item.user_identity || null,
                   fingerprint: item.fingerprint || null,
                   user_name: item.user_name || null,
-                }));
+                  jiafang_rank: item.jiafang_rank != null ? Number(item.jiafang_rank) : null,
+                  ketao_rank: item.ketao_rank != null ? Number(item.ketao_rank) : null,
+                  days_rank: item.days_rank != null ? Number(item.days_rank) : null,
+                  country_code: item.country_code != null ? String(item.country_code) : null,
+                } as any));
                 
                 console.log('[Worker] ✅ 最新记录获取完成:', latestRecords.length);
               }

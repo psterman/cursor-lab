@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- CSP：地理由后端 CF 接管，无需 ipapi.co/ip-api.com -->
+    <!-- CSP：connect-src 需包含 https://api.github.com（仓库预览）、https://api.ipify.org / https://ipapi.co（IP/地理位置） -->
      <script data-cfasync="false" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://html2canvas.hertzen.com https://cdn.tailwindcss.com; connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://cursor-clinical-analysis.psterman.workers.dev https://*.workers.dev https://psterman.supabase.co https://dtcplfhcgnxdzpigmotb.supabase.co wss://dtcplfhcgnxdzpigmotb.supabase.co https://raw.githubusercontent.com https://api.github.com https://www.google.com wss://*.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com https://r2cdn.perplexity.ai;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://html2canvas.hertzen.com https://cdn.tailwindcss.com; connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://cursor-clinical-analysis.psterman.workers.dev https://*.workers.dev https://psterman.supabase.co https://dtcplfhcgnxdzpigmotb.supabase.co wss://dtcplfhcgnxdzpigmotb.supabase.co https://raw.githubusercontent.com https://api.ipify.org https://ip-api.com https://ipapi.co https://api.github.com https://www.google.com wss://*.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com https://r2cdn.perplexity.ai;">
     <title>Global Statistics Dashboard - Vibe Coding</title>
     <!-- 
     ============================================
@@ -81,24 +81,6 @@
           console.log('[Auth] ✅ 已清理地址栏 Hash');
         }
       } catch (_) {}
-    })();
-    </script>
-    <script>
-    /**
-     * 全局错误处理：屏蔽 eval5 等第三方插件产生的报错，避免污染控制台
-     */
-    (function () {
-        var _onerror = window.onerror;
-        window.onerror = function (msg, url, line, col, err) {
-            var str = (msg || '') + (url || '') + (err && err.stack ? err.stack : '');
-            if (/eval5|third.?party|extension|plugin/i.test(str)) return true;
-            if (typeof _onerror === 'function') return _onerror.apply(this, arguments);
-            return false;
-        };
-        window.addEventListener('error', function (ev) {
-            var str = (ev.message || '') + (ev.filename || '') + (ev.error && ev.error.stack ? ev.error.stack : '');
-            if (/eval5|third.?party|extension|plugin/i.test(str)) { ev.preventDefault(); ev.stopPropagation(); }
-        }, true);
     })();
     </script>
     <script>
@@ -290,24 +272,6 @@
         }
         
         throw lastError || new Error('API request failed');
-    };
-
-    /** 缓存策略：若本地存在 manual_location 则上报，否则由后端 CF 自动识别 */
-    window.reportManualLocationIfCached = async function() {
-        try {
-            var ml = (typeof localStorage !== 'undefined' && localStorage.getItem('manual_location')) || '';
-            ml = (ml && String(ml).trim()).toUpperCase();
-            if (!ml || !/^[A-Z]{2}$/.test(ml)) return;
-            var fp = (typeof localStorage !== 'undefined' && (localStorage.getItem('user_fingerprint') || window.fpId)) || '';
-            var base = (window.getApiEndpoint && window.getApiEndpoint()) || (document.querySelector('meta[name="api-endpoint"]')?.content || '');
-            if (base && base.endsWith('/')) base = base.slice(0, -1);
-            var url = (base || '') + '/api/v2/analyze?fingerprint=' + encodeURIComponent(fp) + '&_t=' + Date.now();
-            await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ chatData: [{ role: 'USER', text: '.' }], manual_location: ml, fingerprint: fp || null })
-            });
-        } catch (e) { /* ignore */ }
     };
     </script>
     <!-- 
@@ -2981,7 +2945,6 @@
     
     <!-- 全屏地图背景 -->
     <div id="map-container"></div>
-    <div id="map-updated-at" class="fixed bottom-3 right-3 text-[10px] text-zinc-500 font-mono z-[5] pointer-events-none" style="display:none;"></div>
     <!-- 地图光标工具：用于手动校准（避免光标消失时无法进入校准） -->
     <div id="map-cursor-tools" aria-live="polite">
         <button type="button" id="btn-anchor-location" class="tool-btn">
@@ -3157,9 +3120,6 @@
                         <span id="rtMeritBoard" class="inline-block text-[11px] text-[var(--accent-terminal)] border border-[var(--accent-terminal)]/40 bg-[var(--accent-terminal)]/5 px-2 py-1">
                             已累计分析 -- 万字
                         </span>
-                        <span id="rtJiafangCount" class="ml-2 text-[10px] text-zinc-400" title="加方词数">--</span>
-                        <span id="rtKetaoCount" class="ml-2 text-[10px] text-zinc-400" title="客套词数">--</span>
-                        <span id="rtWorkDays" class="ml-2 text-[10px] text-zinc-400" title="工作天数">--</span>
                     </div>
                     <div class="text-[11px] mt-3 text-zinc-500 flex justify-between uppercase">
                         <span id="rtCoord">COORD: --</span>
@@ -3358,7 +3318,7 @@
                     </div>
                     <div id="rtTopTalentsHeroes" class="flex flex-wrap gap-2 mb-3"></div>
                     <div class="scrolling-wrapper" id="rtEliteList">
-                        <div id="rtTopTalentsList" class="vibe-index-leaderboard space-y-2"></div>
+                        <div id="rtTopTalentsList" class="space-y-2"></div>
                     </div>
                     <div class="text-[10px] text-zinc-500 mt-2 text-center uppercase tracking-tighter" id="rtEliteHint">
                         &lt;--- Swipe to view Top Agents ---&gt;
@@ -3513,152 +3473,6 @@
     <script>
         let calibrationDebounceTimer = null; // 脚本最顶部声明，彻底拦截定位漂移，避免 ReferenceError
 
-        // 高分图谱全局：容器显示 + 榜单渲染（可被全局访问）
-        function ensureLeaderboardParentVisible(containerEl) {
-            if (!containerEl) return;
-            var wrapper = containerEl.closest('.scrolling-wrapper');
-            var card = containerEl.closest('.clinic-card');
-            [wrapper, card].forEach(function (el) {
-                if (el) { el.classList.remove('hidden'); el.style.removeProperty('display'); }
-            });
-        }
-
-        function drawHighScores(topBy) {
-            window.drawHighScores = drawHighScores;
-            var _resolveUserMeta = window.__resolveUserMeta;
-            if (typeof _resolveUserMeta !== 'function') {
-                _resolveUserMeta = function (r) {
-                    var u = (r && (r.user_name || r.userName || r.username || r.user)) ? String(r.user_name || r.userName || r.username || r.user).trim() : '';
-                    var gh = (r && (r.github_username || r.githubUsername || r.gh || r.github)) ? String(r.github_username || r.githubUsername || r.gh || r.github).trim() : '';
-                    var display = (gh || u) ? '@' + (gh || u) : (typeof currentLang !== 'undefined' && currentLang === 'en' ? 'unknown' : '未知');
-                    var avatar = gh ? 'https://github.com/' + encodeURIComponent(gh) + '.png?size=64' : (typeof DEFAULT_AVATAR !== 'undefined' ? DEFAULT_AVATAR : '');
-                    var profileUrl = gh ? 'https://github.com/' + encodeURIComponent(gh) : '';
-                    return { display: display, avatar: avatar || '', profileUrl: profileUrl };
-                };
-            }
-            var topTalentsHeroesEl = document.getElementById('rtTopTalentsHeroes');
-            var eliteHintEl = document.getElementById('rtEliteHint');
-            var container = document.querySelector('.vibe-index-leaderboard');
-            if (topTalentsHeroesEl) { topTalentsHeroesEl.innerHTML = ''; try { topTalentsHeroesEl.style.display = 'none'; } catch (_) {} }
-            if (eliteHintEl) { try { eliteHintEl.style.display = 'none'; } catch (_) {} }
-            if (!container) return;
-            var metricOrder = ['total_messages', 'total_chars', 'total_user_chars', 'avg_message_length', 'jiafang_count', 'ketao_count'];
-            var sorted = (Array.isArray(topBy) ? topBy.slice() : []).sort(function (a, b) { return metricOrder.indexOf(String((a && a.key) || '')) - metricOrder.indexOf(String((b && b.key) || '')); });
-            if (!sorted.length) {
-                container.innerHTML = '<div class="text-zinc-500 text-xs text-center">' + (typeof escapeHtml === 'function' ? escapeHtml(typeof getI18nText === 'function' ? getI18nText('lpdef.none') || '暂无高分图谱数据' : '暂无高分图谱数据') : '暂无高分图谱数据') + '</div>';
-                ensureLeaderboardParentVisible(container);
-                return;
-            }
-            var formatMetricValue = function (value, key) {
-                var n = Number(value);
-                if (!Number.isFinite(n)) return '--';
-                var k = String(key || '').toLowerCase();
-                if (k.indexOf('chars') !== -1) {
-                    if (Math.abs(n) >= 1000) return (n / 1000).toFixed(1) + 'k';
-                    return new Intl.NumberFormat(typeof currentLang !== 'undefined' && currentLang === 'en' ? 'en-US' : 'zh-CN').format(Math.round(n));
-                }
-                if (k === 'avg_message_length') return n.toFixed(1);
-                return new Intl.NumberFormat(typeof currentLang !== 'undefined' && currentLang === 'en' ? 'en-US' : 'zh-CN').format(Math.round(n));
-            };
-            var labelForMetric = function (it) {
-                return (typeof currentLang !== 'undefined' && currentLang === 'en') ? (it && (it.labelEn || it.key)) || '--' : (it && (it.labelZh || it.key)) || '--';
-            };
-            var _resolveDailyDelta = function (row) {
-                try {
-                    var currRank = Number(row && (row.rn !== undefined ? row.rn : row.rank !== undefined ? row.rank : row.position !== undefined ? row.position : row.pos));
-                    var prevRank = Number(row && (row.prev_rank !== undefined ? row.prev_rank : row.prevRank !== undefined ? row.prevRank : row.yesterday_rank !== undefined ? row.yesterday_rank : row.yesterdayRank !== undefined ? row.yesterdayRank : row.rank_prev !== undefined ? row.rank_prev : row.rankPrev));
-                    if (Number.isFinite(currRank) && Number.isFinite(prevRank)) return prevRank - currRank;
-                    var d = Number(row && (row.delta_rank !== undefined ? row.delta_rank : row.deltaRank !== undefined ? row.deltaRank : row.rank_delta !== undefined ? row.rank_delta : row.rankDelta !== undefined ? row.rankDelta : row.rank_change !== undefined ? row.rank_change : row.rankChange !== undefined ? row.rankChange : row.daily_delta_rank !== undefined ? row.daily_delta_rank : row.dailyDeltaRank !== undefined ? row.dailyDeltaRank : row.dailyChange !== undefined ? row.dailyChange : row.daily_change));
-                    return Number.isFinite(d) ? d : null;
-                } catch (_) { return null; }
-            };
-            var _renderDelta = function (delta) {
-                if (delta === null || delta === undefined || !Number.isFinite(Number(delta))) return '<span class="lpdef-rank-delta na">--</span>';
-                var d = Number(delta) || 0;
-                if (d > 0) return '<span class="lpdef-rank-delta up">▲ ' + Math.abs(d) + '</span>';
-                if (d < 0) return '<span class="lpdef-rank-delta down">▼ ' + Math.abs(d) + '</span>';
-                return '<span class="lpdef-rank-delta flat">—</span>';
-            };
-            var _headerRow = function () {
-                var rankText = typeof currentLang !== 'undefined' && currentLang === 'en' ? 'Rank' : '名次';
-                var userText = typeof currentLang !== 'undefined' && currentLang === 'en' ? 'User' : '用户';
-                var scoreText = typeof currentLang !== 'undefined' && currentLang === 'en' ? 'Score' : '分数';
-                var dailyText = typeof currentLang !== 'undefined' && currentLang === 'en' ? 'Daily' : '日变';
-                var esc = typeof escapeHtml === 'function' ? escapeHtml : function (s) { return String(s == null ? '' : s); };
-                return '<div class="lpdef-rank-row lpdef-rank-header-row"><div class="lpdef-rank-left"><span class="lpdef-rank-rn">' + esc(rankText) + '</span><span class="lpdef-rank-name" style="min-width:0;flex:1 1 auto;">' + esc(userText) + '</span></div><div class="lpdef-rank-right"><span class="lpdef-rank-score">' + esc(scoreText) + '</span><span class="lpdef-rank-delta">' + esc(dailyText) + '</span></div></div>';
-            };
-            var esc = typeof escapeHtml === 'function' ? escapeHtml : function (s) { return String(s == null ? '' : s); };
-            var getText = typeof getI18nText === 'function' ? getI18nText : function () { return ''; };
-            var cardsHtml = sorted.map(function (it, idx) {
-                var label = (labelForMetric(it) || '').trim() || ('M' + (idx + 1));
-                var leaders = Array.isArray(it && it.leaders) ? it.leaders : (it && it.user ? [{ rank: 1, score: it.score, user: it.user }] : []);
-                if (!leaders.length) return '';
-                leaders = leaders.slice().map(function (row) {
-                    var pData = {};
-                    if (typeof row.personality === 'string') {
-                        try { pData = JSON.parse(row.personality); } catch (_) {}
-                    } else if (row.personality && typeof row.personality === 'object') {
-                        pData = row.personality;
-                    }
-                    if (!pData || !Object.keys(pData).length) {
-                        if (typeof row.personality_data === 'string') {
-                            try { pData = JSON.parse(row.personality_data); } catch (_) {}
-                        } else if (row.personality_data && typeof row.personality_data === 'object') {
-                            pData = Array.isArray(row.personality_data) ? { detailedStats: row.personality_data } : row.personality_data;
-                        }
-                    }
-                    return Object.assign({}, row, { personality: pData, user: Object.assign({}, row.user || {}, { personality: pData }) });
-                });
-                leaders.sort(function (a, b) {
-                    var scoreA = Number((a && (a.vibe_index_num ?? a.vibe_index)) != null ? (a.vibe_index_num ?? a.vibe_index) : 0);
-                    var scoreB = Number((b && (b.vibe_index_num ?? b.vibe_index)) != null ? (b.vibe_index_num ?? b.vibe_index) : 0);
-                    return scoreB - scoreA;
-                });
-                var metricKey = String((it && it.key) || (it && it.col) || '').trim();
-                var rows = leaders.slice(0, 10).map(function (row) {
-                    var user = row && row.user ? row.user : {};
-                    var meta = _resolveUserMeta(user);
-                    var scoreText = formatMetricValue(row && (row.score ?? row.vibe_index_num ?? row.vibe_index), metricKey);
-                    var rn = Number((row && (row.rn ?? row.rank ?? row._rank)) !== undefined ? (row.rn ?? row.rank ?? row._rank) : '') || 0;
-                    var rankText = rn > 0 ? '#' + rn : (row && (row.rank ?? row._rank) ? '#' + (row.rank ?? row._rank) : '#--');
-                    var lpdefText = String((user && user.lpdef) || (user && user.lpDef) || '').trim();
-                    var pData = {};
-                    if (typeof row.personality === 'string') {
-                        try { pData = JSON.parse(row.personality); } catch (_) {}
-                    } else if (row.personality && typeof row.personality === 'object') {
-                        pData = row.personality;
-                    }
-                    var badgeTitle = (pData && pData.answer_book && pData.answer_book.title) ? String(pData.answer_book.title) : '赛博打工人';
-                    var personaTag = '';
-                    try {
-                        if (lpdefText && typeof lpdefToVibeIndex === 'function') {
-                            var idx5 = lpdefToVibeIndex(lpdefText);
-                            if (idx5 && String(idx5).length === 5) {
-                                if (typeof currentLang !== 'undefined' && currentLang === 'en' && window.__LANG_CONFIG && window.__LANG_CONFIG.personalityNamesEn && typeof window.__LANG_CONFIG.personalityNamesEn[idx5] === 'string') {
-                                    personaTag = String(window.__LANG_CONFIG.personalityNamesEn[idx5]).trim();
-                                } else {
-                                    personaTag = 'V' + idx5;
-                                }
-                            }
-                        }
-                    } catch (_) {}
-                    var displayTag = personaTag || badgeTitle;
-                    var nameHtml = meta.profileUrl
-                        ? '<a href="' + esc(meta.profileUrl) + '" target="_blank" rel="noopener noreferrer" class="lpdef-rank-name hover:underline">' + esc(meta.display) + '</a>'
-                        : '<span class="lpdef-rank-name" style="color: rgba(229,231,235,0.75)">' + esc(meta.display) + '</span>';
-                    var delta = _resolveDailyDelta(row);
-                    var defAvatar = typeof DEFAULT_AVATAR !== 'undefined' ? DEFAULT_AVATAR : '';
-                    return '<div class="lpdef-rank-row"><div class="lpdef-rank-left"><span class="lpdef-rank-rn">' + esc(rankText) + '</span><img class="lpdef-rank-avatar" src="' + esc(meta.avatar) + '" alt="" onerror="this.onerror=null; this.src=\'' + esc(defAvatar) + '\';" /><div class="lpdef-name-wrap">' + nameHtml + (displayTag ? '<span class="lpdef-persona-tag" title="' + esc(badgeTitle) + '">' + esc(displayTag) + '</span>' : '') + '</div></div><div class="lpdef-rank-right"><div class="lpdef-rank-score">' + esc(String(scoreText)) + '</div>' + _renderDelta(delta) + '</div></div>';
-                }).join('');
-                var noData = getText('common.no_data') || 'No data';
-                return '<div class="lpdef-metric-card" data-metric-index="' + idx + '"><div class="lpdef-metric-title">' + esc(label) + '</div><div class="lpdef-rank-list">' + _headerRow() + (rows || '<div class="text-zinc-500 text-xs text-center">' + esc(noData) + '</div>') + '</div></div>';
-            }).join('');
-            var html = '<div class="lpdef-metric-cards">' + cardsHtml + '</div>';
-            console.log('✅ 准备渲染榜单，数据样本:', topBy[0] && topBy[0].leaders && topBy[0].leaders[0]);
-            container.innerHTML = html;
-            ensureLeaderboardParentVisible(container);
-        }
-
         // ==========================================
         // ==========================================
         // 【v4.0 示例】VibeCodingerAnalyzer 全球各国数据切换示例
@@ -3794,11 +3608,6 @@
         
         // 辅助函数：更新国家仪表板UI
         async function updateCountryDashboard(countryNameOrCode, maybeData) {
-            // 强制清理 Loading：即便出错也隐藏转圈，让用户看到「暂无数据」而非一直转圈
-            try {
-                document.querySelectorAll('.loading-spinner').forEach(function(el) { el.classList.add('hidden'); });
-            } catch (e) { /* ignore */ }
-
             // 兼容旧示例调用：updateCountryDashboard(countryCode, { result, ... })
             if (maybeData && typeof maybeData === 'object' && maybeData.result) {
                 const countryCode = countryNameOrCode;
@@ -3837,11 +3646,7 @@
             }
 
             // 新逻辑：用于右侧抽屉国家透视（支持任意国家代码）
-            // 【兜底】若入参为空但处于国家视角，使用 window.currentUserCountry 确保 fetch 使用最新国家码
-            const rawCountry = String(countryNameOrCode || '').trim() ||
-                ((typeof currentViewState === 'string' && currentViewState === 'COUNTRY' && (currentDrawerCountry?.code || window.currentUserCountry))
-                    ? String(currentDrawerCountry?.code || window.currentUserCountry || '').trim()
-                    : '');
+            const rawCountry = String(countryNameOrCode || '').trim();
             const isGlobal =
                 !rawCountry ||
                 rawCountry.toUpperCase() === 'GLOBAL' ||
@@ -3864,16 +3669,11 @@
             }
             const effectiveIsGlobal = isGlobal || !/^[A-Z]{2}$/.test(countryCode);
 
-            // RPC/API 参数 target_country 严格等于当前选择的国家码（与后端 get_country_* 一致）
-            const target_country = effectiveIsGlobal ? '' : String(countryCode).toUpperCase();
-            const selectedCountry = effectiveIsGlobal ? 'GLOBAL' : target_country;
-            console.log('[updateCountryDashboard] Requesting Country:', selectedCountry);
-
             const base = (document.querySelector('meta[name="api-endpoint"]')?.content || '').trim();
             const API_ENDPOINT = base.endsWith('/') ? base : `${base}/`;
             const url = effectiveIsGlobal
                 ? `${API_ENDPOINT}api/global-average`
-                : `${API_ENDPOINT}api/global-average?country_code=${encodeURIComponent(target_country)}`;
+                : `${API_ENDPOINT}api/global-average?country_code=${encodeURIComponent(countryCode)}`;
 
             // DOM 绑定点
             const usersValEl = document.getElementById('rtDiagnosedTotal');
@@ -4213,14 +4013,10 @@
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 const payload = await resp.json();
                 // 后端返回可能是“顶层完整字段 + data(兼容包装)”的结构。
+                // 不能直接取 payload.data（它可能只包含部分字段），否则会导致 totalAnalysis/totalChars 等变成 N/A。
                 const root = (payload && typeof payload === 'object') ? payload : {};
                 const nested = (root && typeof root.data === 'object' && root.data) ? root.data : {};
                 const data = { ...root, ...nested };
-                console.log('[Debug] 统计原始数据:', data);
-                if (data.latest_records && data.latest_records.length > 0) {
-                    console.log('[Debug] 第一人数据（检查字段名）:', data.latest_records[0]);
-                }
-                console.log('[updateCountryDashboard] Requesting Country (response received):', selectedCountry);
                 if (isStaleRequest()) return;
 
                 // 写入缓存（供下次“秒切换”使用）
@@ -4299,19 +4095,6 @@
                     }
                 }
 
-                // 数据字段补全：从响应提取 jiafang_count, ketao_count, work_days 并赋值给对应 UI
-                const firstRecord = Array.isArray(data.latest_records) && data.latest_records[0] ? data.latest_records[0] : null;
-                const stats = data.statistics || data.stats || (firstRecord && (firstRecord.statistics || firstRecord.stats)) || {};
-                const jiafangVal = data.jiafang_count ?? stats.jiafang_count ?? firstRecord?.jiafang_count ?? null;
-                const ketaoVal = data.ketao_count ?? stats.ketao_count ?? firstRecord?.ketao_count ?? null;
-                const workDaysVal = data.work_days ?? stats.work_days ?? firstRecord?.work_days ?? null;
-                const rtJiafang = document.getElementById('rtJiafangCount');
-                const rtKetao = document.getElementById('rtKetaoCount');
-                const rtWorkDays = document.getElementById('rtWorkDays');
-                if (rtJiafang) rtJiafang.textContent = (jiafangVal !== null && jiafangVal !== undefined) ? String(Number(jiafangVal)) : '--';
-                if (rtKetao) rtKetao.textContent = (ketaoVal !== null && ketaoVal !== undefined) ? String(Number(ketaoVal)) : '--';
-                if (rtWorkDays) rtWorkDays.textContent = (workDaysVal !== null && workDaysVal !== undefined) ? String(Number(workDaysVal)) : '--';
-
                 // 如果是美国，需要同时拿到：本地区 totalUsers / totalAnalysis 和全球 totalUsers（用于 Ratio）
                 // 【修复】根据请求类型判断数据结构:
                 // - 全网请求 (isGlobal=true): data.totalUsers 是全网数据
@@ -4376,7 +4159,7 @@
                     [];
 
                 // =========================
-                // 国家累计 & 我的排名（数据来源统一：登录后用视图 v_unified_analysis_v2 / currentUser.id）
+                // 国家累计 & 我的排名（来自 /api/country-summary 扩展字段）
                 // - 拆分成两张卡：#rtCountryTotals（Σ）与 #rtMyCountryRanks（me + rank）
                 // =========================
                 try {
@@ -4387,7 +4170,7 @@
                         const fp = (() => { try { return localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch { return ''; } })();
                         const uid = (() => {
                             try {
-                                // 我的排名：优先用视图/登录身份 id，登录后不再依赖 fingerprint
+                                // GitHub 登录后通常清掉 fingerprint，此时必须带 user_id 才能算“我的排名”
                                 const fromWindow = (window.currentUser && window.currentUser.id) ||
                                     (window.currentUserData && window.currentUserData.id) ||
                                     (window.supabaseAuthUser && window.supabaseAuthUser.id) ||
@@ -4417,7 +4200,7 @@
                             }
                         })();
                         // 加时间戳：避免 edge cache/中间层缓存导致“永远是 0”
-                        const url2 = `${API_ENDPOINT}api/country-summary?country=${encodeURIComponent(String(target_country || countryCode || '').toUpperCase())}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${uid ? `&user_id=${encodeURIComponent(uid)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}&_ts=${Date.now()}`;
+                        const url2 = `${API_ENDPOINT}api/country-summary?country=${encodeURIComponent(String(countryCode || '').toUpperCase())}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${uid ? `&user_id=${encodeURIComponent(uid)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}&_ts=${Date.now()}`;
 
                         // cache-first：避免切换抖动
                         if (!window.__countryTotalsCache) window.__countryTotalsCache = new Map();
@@ -4437,106 +4220,62 @@
                         if (!payload2 || typeof payload2 !== 'object') throw new Error('bad payload');
                         if (isStaleRequest()) return;
 
-                        const userCountry = String(countryCode || '').trim().toUpperCase();
-                        console.log('[Stats2] 国家累计 API 全量数据:', { payload: payload2, userCountry });
                         const totals = payload2.countryTotals || payload2.data?.countryTotals || null;
                         const totalsRanks = payload2.countryTotalsRanks || payload2.data?.countryTotalsRanks || null;
-                        const countryDataByCode = payload2.countryDataByCode || payload2.data?.countryDataByCode || {};
-                        const totalCountriesFromData = payload2.total_countries ?? payload2._meta?.total_countries ?? 195;
                         const ranks = payload2.myCountryRanks || payload2.data?.myCountryRanks || null;
-                        var remoteVals = payload2.myCountryValues || payload2.data?.myCountryValues || {};
-                        // 数据优先权：分子以 last_local_stats 为准；清理缓存/换设备时 last_local_stats 不存在，兜底用 API（remoteVals）或 0
-                        var localStats = window.last_local_stats;
-                        var st = (localStats && localStats.payload && (Date.now() - (localStats.ts || 0)) < 300000) ? (localStats.payload.stats || {}) : null;
-                        var meVals = {
-                            total_messages: (st?.totalMessages ?? remoteVals?.total_messages ?? 0),
-                            total_chars: (st?.total_chars ?? st?.totalUserChars ?? remoteVals?.total_chars ?? remoteVals?.['total_user_chars'] ?? 0),
-                            total_user_chars: (st?.total_chars ?? st?.totalUserChars ?? remoteVals?.total_chars ?? remoteVals?.['total_user_chars'] ?? 0),
-                            avg_message_length: (st && st.totalMessages > 0 && (st.totalUserChars != null || st.total_chars != null)) ? ((st.totalUserChars || st.total_chars || 0) / st.totalMessages) : (remoteVals?.avg_message_length ?? remoteVals?.['avg_user_message_length'] ?? 0),
-                            jiafang_count: (st?.jiafang_count ?? st?.no ?? remoteVals?.jiafang_count ?? 0),
-                            ketao_count: (st?.ketao_count ?? st?.please ?? remoteVals?.ketao_count ?? 0),
-                            work_days: (st?.work_days ?? st?.usage_days ?? remoteVals?.work_days ?? remoteVals?.usage_days ?? 0)
-                        };
+                        const meVals = payload2.myCountryValues || payload2.data?.myCountryValues || null;
                         // 关键：高分图谱的数据源来自 country-summary，而不是 global-average
                         try {
                             data.topByMetrics = payload2.topByMetrics || payload2.data?.topByMetrics || [];
                         } catch { /* ignore */ }
 
-                        const totalCountriesCount = totalCountriesFromData;
-                        const MEDALS = { 1: '🥇', 2: '🥈', 3: '🥉' };
-                        const DIM_TO_LETTER = { total_messages:'L', total_chars:'P', total_user_chars:'D', avg_message_length:'E', jiafang_count:'F', ketao_count:'G' };
-                        const rowTotals = (label, totalVal, r, dimKey) => {
-                            const letter = DIM_TO_LETTER[dimKey] || dimKey;
-                            const rankFromRanks = (countryDataByCode[userCountry]?.ranks || {})[letter];
-                            const rankNum = (r && (r.rank ?? r._rank) != null && Number.isFinite(Number(r.rank ?? r._rank))) ? Number(r.rank ?? r._rank) : (rankFromRanks != null && Number.isFinite(Number(rankFromRanks)) ? Number(rankFromRanks) : null);
-                            const hasRank = rankNum != null && rankNum > 0;
-                            const denom = totalCountriesCount;
-                            const rankText = hasRank ? `#${rankNum}/${denom}` : (r || rankFromRanks !== undefined) ? '#-- / --' : (currentLang === 'en' ? 'N/A' : '计算中...');
-                            const medal = rankNum != null && MEDALS[rankNum] ? ' ' + MEDALS[rankNum] : '';
-                            const ice = (rankNum != null && denom > 0 && rankNum >= Math.ceil(denom * 0.9)) ? ' 🧊' : '';
-                            const displayVal = (totalVal === undefined || totalVal === null) ? '...' : fmt(totalVal);
+                        const rowTotals = (label, totalVal, r) => {
+                            const hasRank = r && (r.rank !== null && r.rank !== undefined) && Number.isFinite(Number(r.rank));
+                            const rankText = hasRank ? `#${Number(r.rank)}/${Number(r.total) || ''}` : '--';
                             return `
                                 <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
                                     <div class="text-zinc-200">${label}</div>
                                     <div class="flex items-center gap-3 min-w-0">
-                                        <span class="text-[10px] text-zinc-500">Σ ${displayVal}</span>
-                                        <span class="text-[10px] text-[var(--accent-terminal)] font-bold tabular-nums">${rankText}${medal}${ice}</span>
+                                        <span class="text-[10px] text-zinc-500">Σ ${fmt(totalVal)}</span>
+                                        <span class="text-[10px] text-[var(--accent-terminal)] font-bold tabular-nums">${rankText}</span>
                                     </div>
                                 </div>
                             `;
                         };
-                        const fmtMe = (v) => (v === undefined || v === null || Number.isNaN(Number(v))) ? '0' : fmt(v);
-                        const pioneerLabel = currentLang === 'en' ? 'Pioneer' : '该国先锋';
-                        const DIM_KEYS = ['total_messages','total_chars','total_user_chars','avg_message_length','jiafang_count','ketao_count'];
-                        const gRanks = payload2.global_user_ranks || payload2.data?.global_user_ranks || {};
-                        const cRanks = payload2.country_user_ranks || payload2.data?.country_user_ranks || ranks || {};
-                        const rowRanks = (label, myVal, dimKey) => {
-                            const cr = ranks?.[dimKey] ?? cRanks[dimKey] ?? (dimKey === 'total_chars' ? (ranks?.total_chars ?? cRanks?.total_chars) : null);
-                            const gr = gRanks[dimKey] ?? (dimKey === 'total_chars' ? gRanks?.total_chars : null);
-                            const rankCountry = cr && ((cr.rank ?? cr._rank) != null) && Number.isFinite(Number(cr.rank ?? cr._rank)) ? Number(cr.rank ?? cr._rank) : null;
-                            const totalCountry = cr && (cr.total != null) ? Number(cr.total) : 0;
-                            const rankGlobal = gr && (gr.rank ?? gr._rank) != null ? Number(gr.rank ?? gr._rank) : null;
-                            const totalGlobal = gr && gr.total != null ? Number(gr.total) : 0;
-                            const naText = currentLang === 'en' ? 'N/A' : '计算中...';
-                            const countryText = (rankCountry != null && totalCountry != null && totalCountry > 0) ? `本国：#${rankCountry}/${totalCountry}` : naText;
-                            const globalText = (rankGlobal != null && totalGlobal != null && totalGlobal > 0) ? `全球：#${rankGlobal}/${totalGlobal}` : naText;
-                            const medal = rankCountry != null && MEDALS[rankCountry] ? ' ' + MEDALS[rankCountry] : (rankGlobal != null && MEDALS[rankGlobal] ? ' ' + MEDALS[rankGlobal] : '');
-                            const isPioneer = rankCountry === 1 && totalCountry != null && totalCountry <= 5;
-                            const pioneerBadge = isPioneer ? ` <span class="text-[9px] text-amber-400" title="${pioneerLabel}">🏅</span>` : '';
-                            const localLabel = currentLang === 'en' ? '(country)' : '（本国）';
-                            const globalLabel = currentLang === 'en' ? '(global)' : '（全球）';
+                        const fmtMe = (v) => (v === undefined || v === null || Number.isNaN(Number(v))) ? '--' : fmt(v);
+                        const rowRanks = (label, myVal, r) => {
+                            const hasRank = r && (r.rank !== null && r.rank !== undefined) && Number.isFinite(Number(r.rank));
+                            const rankText = hasRank ? `#${Number(r.rank)}/${Number(r.total) || ''}` : '--';
                             return `
                                 <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
                                     <div class="text-zinc-200">${label}</div>
-                                    <div class="flex flex-col items-end gap-0.5 min-w-0">
-                                        <span class="text-[10px] text-zinc-400">${fmtMe(myVal)}</span>
-                                        <span class="text-[10px] text-[var(--accent-terminal)] font-bold tabular-nums">${countryText}${medal}${pioneerBadge} | ${globalText}</span>
+                                    <div class="flex items-center gap-3 min-w-0">
+                                        <span class="text-[10px] text-zinc-400">me ${fmtMe(myVal)}</span>
+                                        <span class="text-[10px] text-[var(--accent-terminal)] font-bold tabular-nums">${rankText}</span>
                                     </div>
                                 </div>
                             `;
                         };
 
-                        // 国家累计：字段对齐 total_chars、jiafang_count，null 视为 0
-                        // 注意：后端 countryTotalsRanks 键名是 avg_user_message_length，需要兼容
                         const totalsHtml = totals
                             ? [
-                                rowTotals(getI18nText('countryTotals.messages') || 'Messages', totals.total_messages ?? 0, totalsRanks?.total_messages, 'total_messages'),
-                                rowTotals(getI18nText('countryTotals.totalChars') || 'Total Chars', totals.total_chars ?? 0, totalsRanks?.total_chars, 'total_chars'),
-                                rowTotals(getI18nText('countryTotals.userChars') || '废话输出', totals.total_chars ?? totals['total_user_chars'] ?? 0, totalsRanks?.total_user_chars ?? totalsRanks?.total_chars, 'total_user_chars'),
-                                rowTotals(getI18nText('countryTotals.avgLen') || 'Avg Len', Math.round(Number(totals.avg_message_length ?? totals['avg_user_message_length'] ?? 0) || 0), totalsRanks?.avg_user_message_length ?? totalsRanks?.avg_message_length, 'avg_message_length'),
-                                rowTotals(getI18nText('countryTotals.jiafang') || 'Jiafang', totals.jiafang_count ?? 0, totalsRanks?.jiafang_count, 'jiafang_count'),
-                                rowTotals(getI18nText('countryTotals.ketao') || 'Ketao', totals.ketao_count ?? 0, totalsRanks?.ketao_count, 'ketao_count'),
+                                rowTotals(getI18nText('countryTotals.messages') || 'Messages', totals.total_messages, totalsRanks?.total_messages),
+                                rowTotals(getI18nText('countryTotals.totalChars') || 'Total Chars', totals.total_chars, totalsRanks?.total_chars),
+                                rowTotals(getI18nText('countryTotals.userChars') || 'User Chars', totals.total_user_chars, totalsRanks?.total_user_chars),
+                                rowTotals(getI18nText('countryTotals.avgLen') || 'Avg Len', Math.round(Number(totals.avg_user_message_length) || 0), totalsRanks?.avg_user_message_length),
+                                rowTotals(getI18nText('countryTotals.jiafang') || 'Jiafang', totals.jiafang_count, totalsRanks?.jiafang_count),
+                                rowTotals(getI18nText('countryTotals.ketao') || 'Ketao', totals.ketao_count, totalsRanks?.ketao_count),
                               ].join('')
                             : `<div class="text-zinc-500 text-xs">${currentLang === 'en' ? 'No data' : '暂无数据'}</div>`;
 
                         const ranksHtml = totals
                             ? [
-                                rowRanks(getI18nText('countryTotals.messages') || 'Messages', meVals?.total_messages, 'total_messages'),
-                                rowRanks(getI18nText('countryTotals.totalChars') || 'Total Chars', meVals?.total_chars, 'total_chars'),
-                                rowRanks(getI18nText('countryTotals.userChars') || '废话输出', meVals?.total_chars ?? meVals?.['total_user_chars'], 'total_user_chars'),
-                                rowRanks(getI18nText('countryTotals.avgLen') || 'Avg Len', Math.round(Number(meVals?.avg_message_length ?? meVals?.['avg_user_message_length']) || 0), 'avg_message_length'),
-                                rowRanks(getI18nText('countryTotals.jiafang') || 'Jiafang', meVals?.jiafang_count, 'jiafang_count'),
-                                rowRanks(getI18nText('countryTotals.ketao') || 'Ketao', meVals?.ketao_count, 'ketao_count'),
+                                rowRanks(getI18nText('countryTotals.messages') || 'Messages', meVals?.total_messages, ranks?.total_messages),
+                                rowRanks(getI18nText('countryTotals.totalChars') || 'Total Chars', meVals?.total_chars, ranks?.total_chars),
+                                rowRanks(getI18nText('countryTotals.userChars') || 'User Chars', meVals?.total_user_chars, ranks?.total_user_chars),
+                                rowRanks(getI18nText('countryTotals.avgLen') || 'Avg Len', Math.round(Number(meVals?.avg_user_message_length) || 0), ranks?.avg_user_message_length),
+                                rowRanks(getI18nText('countryTotals.jiafang') || 'Jiafang', meVals?.jiafang_count, ranks?.jiafang_count),
+                                rowRanks(getI18nText('countryTotals.ketao') || 'Ketao', meVals?.ketao_count, ranks?.ketao_count),
                               ].join('')
                             : `<div class="text-zinc-500 text-xs">${currentLang === 'en' ? 'No data' : '暂无数据'}</div>`;
 
@@ -4545,15 +4284,13 @@
                         try { window.__countryTotalsCache.set(cacheKey2, { totalsHtml, ranksHtml, ts: Date.now() }); } catch { /* ignore */ }
                     }
                 } catch (e) {
-                    // 不阻断主面板；国家数据加载失败时显示 #-- / --
+                    // 不阻断主面板
                     try {
                         const totalsBox = document.getElementById('rtCountryTotals');
                         const ranksBox = document.getElementById('rtMyCountryRanks');
-                        const failRank = '<span class="text-[10px] text-zinc-500 font-bold tabular-nums">#-- / --</span>';
-                        const dimLabels = ['Messages','Total Chars','废话输出','Avg Len','Jiafang','Ketao'];
-                        const fallback = dimLabels.map(l => `<div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2"><div class="text-zinc-200">${l}</div><div>${failRank}</div></div>`).join('');
-                        if (totalsBox && !totalsBox.innerHTML.trim()) totalsBox.innerHTML = fallback;
-                        if (ranksBox && !ranksBox.innerHTML.trim()) ranksBox.innerHTML = fallback;
+                        const noData = escapeHtml(getI18nText('common.no_data') || 'No data');
+                        if (totalsBox && !totalsBox.innerHTML.trim()) totalsBox.innerHTML = `<div class="text-zinc-500 text-xs">${noData}</div>`;
+                        if (ranksBox && !ranksBox.innerHTML.trim()) ranksBox.innerHTML = `<div class="text-zinc-500 text-xs">${noData}</div>`;
                     } catch { /* ignore */ }
                 }
 
@@ -4616,16 +4353,179 @@
                 setBar('ratio-bar', metrics.ratio);
 
                 // =========================
-                // 高分图谱：由 drawHighScores 统一渲染到 .vibe-index-leaderboard（data.topByMetrics -> it.leaders，字段 vibe_index_num）
+                // 需求：高分图谱 (#rtTopTalentsList)
+                // 新口径：该国 6 项指标 TopN（/api/country-summary.topByMetrics[].leaders）
+                // - 新版 UI：6 个标签 -> 6 张纵向卡片（每张卡片：标题 + TopN）
+                // - 行字段：名次 / 用户（头像+用户名）/ 分数 / 每日晋级（▲/▼，无数据则 --）
                 // =========================
+                const topTalentsEl = document.getElementById('rtTopTalentsList');
+                const topTalentsHeroesEl = document.getElementById('rtTopTalentsHeroes');
                 let topBy = Array.isArray(data.topByMetrics) ? data.topByMetrics : [];
+                const eliteHintEl = document.getElementById('rtEliteHint');
+
                 const metricOrder = [
-                    'total_messages', 'total_chars', 'total_user_chars',
-                    'avg_message_length', 'jiafang_count', 'ketao_count'
+                    'total_messages',
+                    'total_chars',
+                    'total_user_chars',
+                    'avg_user_message_length',
+                    'jiafang_count',
+                    'ketao_count'
                 ];
-                topBy = topBy.slice().sort((a, b) => metricOrder.indexOf(String(a?.key || '')) - metricOrder.indexOf(String(b?.key || '')));
-                window.__resolveUserMeta = _resolveUserMeta;
-                if (typeof drawHighScores === 'function') drawHighScores(topBy);
+                topBy = topBy
+                    .slice()
+                    .sort((a, b) => metricOrder.indexOf(String(a?.key || '')) - metricOrder.indexOf(String(b?.key || '')));
+
+                // 旧 UI：顶部指示器 + “Swipe” 提示 -> 新 UI 不再需要
+                if (topTalentsHeroesEl) {
+                    topTalentsHeroesEl.innerHTML = '';
+                    try { topTalentsHeroesEl.style.display = 'none'; } catch { /* ignore */ }
+                }
+                if (eliteHintEl) {
+                    try { eliteHintEl.style.display = 'none'; } catch { /* ignore */ }
+                }
+                if (topTalentsEl) {
+                    if (!topBy || topBy.length === 0) {
+                        topTalentsEl.innerHTML = `<div class="text-zinc-500 text-xs text-center">${escapeHtml(getI18nText('lpdef.none') || 'No data')}</div>`;
+                    } else {
+                        const formatMetricValue = (value, key) => {
+                            const n = Number(value);
+                            if (!Number.isFinite(n)) return '--';
+                            const k = String(key || '').toLowerCase();
+                            // chars: 超过 1000 => k（如 275.3k）
+                            if (k.includes('chars')) {
+                                if (Math.abs(n) >= 1000) return `${(n / 1000).toFixed(1)}k`;
+                                return new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN').format(Math.round(n));
+                            }
+                            // avg_user_message_length：保留 1 位小数
+                            if (k === 'avg_user_message_length') return n.toFixed(1);
+                            // 其余整数：直接显示（带分隔符）
+                            return new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN').format(Math.round(n));
+                        };
+                        const labelForMetric = (it) => {
+                            return (currentLang === 'en')
+                                ? (it?.labelEn || it?.key || '--')
+                                : (it?.labelZh || it?.key || '--');
+                        };
+
+                        // “日变”字段兼容：后端未来可返回任一字段名即可直接显示
+                        const _resolveDailyDelta = (row) => {
+                            try {
+                                const currRank = Number(row?.rn ?? row?.rank ?? row?.position ?? row?.pos ?? NaN);
+                                const prevRank = Number(row?.prev_rank ?? row?.prevRank ?? row?.yesterday_rank ?? row?.yesterdayRank ?? row?.rank_prev ?? row?.rankPrev ?? NaN);
+                                if (Number.isFinite(currRank) && Number.isFinite(prevRank)) {
+                                    // 约定：prev - curr > 0 表示名次上升（更靠前）
+                                    return prevRank - currRank;
+                                }
+                                const d = Number(
+                                    row?.delta_rank ??
+                                    row?.deltaRank ??
+                                    row?.rank_delta ??
+                                    row?.rankDelta ??
+                                    row?.rank_change ??
+                                    row?.rankChange ??
+                                    row?.daily_delta_rank ??
+                                    row?.dailyDeltaRank ??
+                                    row?.dailyChange ??
+                                    row?.daily_change ??
+                                    NaN
+                                );
+                                return Number.isFinite(d) ? d : null;
+                            } catch {
+                                return null;
+                            }
+                        };
+                        const _renderDelta = (delta) => {
+                            if (delta === null || delta === undefined || !Number.isFinite(Number(delta))) {
+                                return `<span class="lpdef-rank-delta na">--</span>`;
+                            }
+                            const d = Number(delta) || 0;
+                            if (d > 0) return `<span class="lpdef-rank-delta up">▲ ${Math.abs(d)}</span>`;
+                            if (d < 0) return `<span class="lpdef-rank-delta down">▼ ${Math.abs(d)}</span>`;
+                            return `<span class="lpdef-rank-delta flat">—</span>`;
+                        };
+                        const _headerRow = () => {
+                            return `
+                                <div class="lpdef-rank-row lpdef-rank-header-row">
+                                    <div class="lpdef-rank-left">
+                                        <span class="lpdef-rank-rn">${escapeHtml(currentLang === 'en' ? 'Rank' : '名次')}</span>
+                                        <span class="lpdef-rank-name" style="min-width:0;flex:1 1 auto;">${escapeHtml(currentLang === 'en' ? 'User' : '用户')}</span>
+                                    </div>
+                                    <div class="lpdef-rank-right">
+                                        <span class="lpdef-rank-score">${escapeHtml(currentLang === 'en' ? 'Score' : '分数')}</span>
+                                        <span class="lpdef-rank-delta">${escapeHtml(currentLang === 'en' ? 'Daily' : '日变')}</span>
+                                    </div>
+                                </div>
+                            `;
+                        };
+
+                        const cardsHtml = topBy.map((it, idx) => {
+                            const label = String(labelForMetric(it) || '').trim() || `M${idx + 1}`;
+                            const leaders = Array.isArray(it?.leaders) ? it.leaders : (it?.user ? [{ rank: 1, score: it.score, user: it.user }] : []);
+                            const rows = leaders.slice(0, 10).map((row) => {
+                                const user = row?.user || {};
+                                const meta = _resolveUserMeta(user);
+                                const metricKey = String(it?.key || it?.col || '').trim();
+                                const scoreText = formatMetricValue(row?.score, metricKey);
+                                const rn = Number(row?.rn ?? row?.rank ?? '') || 0;
+                                const rankText = rn > 0 ? `#${rn}` : (row?.rank ? `#${row.rank}` : '#--');
+                                const lpdefText = (() => {
+                                    const v = user?.lpdef ?? user?.lpDef ?? '';
+                                    const s = String(v || '').trim();
+                                    return s ? s : '';
+                                })();
+                                // 可选但推荐：基于 lpdef 的简短性格标签（优先用 personalityNamesEn，否则用 5 位 vibe_index）
+                                const personaTag = (() => {
+                                    try {
+                                        const idx5 = lpdefText ? lpdefToVibeIndex(lpdefText) : null;
+                                        if (!idx5 || String(idx5).length !== 5) return '';
+                                        if (currentLang === 'en') {
+                                            const cfg = window.__LANG_CONFIG;
+                                            const namesEn = cfg && cfg.personalityNamesEn ? cfg.personalityNamesEn : null;
+                                            if (namesEn && typeof namesEn[idx5] === 'string' && String(namesEn[idx5]).trim()) {
+                                                return String(namesEn[idx5]).trim();
+                                            }
+                                        }
+                                        return `V${idx5}`;
+                                    } catch {
+                                        return '';
+                                    }
+                                })();
+                                const nameHtml = meta.profileUrl
+                                    ? `<a href="${escapeHtml(meta.profileUrl)}" target="_blank" rel="noopener noreferrer" class="lpdef-rank-name hover:underline">${escapeHtml(meta.display)}</a>`
+                                    : `<span class="lpdef-rank-name" style="color: rgba(229,231,235,0.75)">${escapeHtml(meta.display)}</span>`;
+                                const delta = _resolveDailyDelta(row);
+                                return `
+                                    <div class="lpdef-rank-row">
+                                        <div class="lpdef-rank-left">
+                                            <span class="lpdef-rank-rn">${escapeHtml(rankText)}</span>
+                                            <img class="lpdef-rank-avatar" src="${escapeHtml(meta.avatar)}" alt="" onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';" />
+                                            <div class="lpdef-name-wrap">
+                                                ${nameHtml}
+                                                ${personaTag ? `<span class="lpdef-persona-tag">${escapeHtml(personaTag)}</span>` : ``}
+                                            </div>
+                                        </div>
+                                        <div class="lpdef-rank-right">
+                                            <div class="lpdef-rank-score">${escapeHtml(String(scoreText))}</div>
+                                            ${_renderDelta(delta)}
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('');
+
+                            return `
+                                <div class="lpdef-metric-card" data-metric-index="${idx}">
+                                    <div class="lpdef-metric-title">${escapeHtml(label)}</div>
+                                    <div class="lpdef-rank-list">
+                                        ${_headerRow()}
+                                        ${rows || `<div class="text-zinc-500 text-xs text-center">${escapeHtml(getI18nText('common.no_data') || 'No data')}</div>`}
+                                    </div>
+                                </div>
+                            `;
+                        }).join('');
+
+                        topTalentsEl.innerHTML = `<div class="lpdef-metric-cards">${cardsHtml}</div>`;
+                    }
+                }
 
                 // 语义爆发词云卡片：仅保留词云形态（ECharts wordCloud），不再渲染 slang/merit/sv_slang 文本区
                 // 词云数据由 loadWordCloud() 通过 /api/v2/wordcloud-data 动态拉取
@@ -4940,11 +4840,11 @@
                 try {
                     // 实例化客户端（直接赋值给全局变量）
                     supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-                    window.supabase = supabaseClient;
+                    
                     // 挂载到全局 window，供控制台脚本使用
                     window.supabaseClient = supabaseClient;
                     
-                    console.log('[Init] ✅ Supabase 客户端已成功挂载至 window.supabaseClient / window.supabase');
+                    console.log('[Init] ✅ Supabase 客户端已成功挂载至 window.supabaseClient');
                     console.log('[Init] 💡 可在控制台使用 window.supabaseClient 访问客户端');
                 } catch (err) {
                     console.error('[Init] ❌ 初始化失败:', err);
@@ -5202,15 +5102,13 @@
         };
 
         const getI18nText = (key, fallback = '') => {
-            try {
-                const lang = currentLang === 'en' ? 'en' : 'zh';
-                const fallbackLang = lang === 'zh' ? 'en' : 'zh';
-                const fromMap = (I18N_MAP && I18N_MAP[lang] && I18N_MAP[lang][key]) || (I18N_MAP && I18N_MAP[fallbackLang] && I18N_MAP[fallbackLang][key]);
-                const fromI18n = (i18n && i18n[lang] && i18n[lang][key]) || (i18n && i18n[fallbackLang] && i18n[fallbackLang][key]);
-                return fromMap || fromI18n || (fallback != null ? String(fallback) : '') || '';
-            } catch (e) {
-                return (fallback != null ? String(fallback) : '') || '';
-            }
+            const lang = currentLang === 'en' ? 'en' : 'zh';
+            return (
+                (I18N_MAP[lang] && I18N_MAP[lang][key]) ||
+                (i18n[lang] && i18n[lang][key]) ||
+                fallback ||
+                ''
+            );
         };
 
         // 全局 HTML 转义（历史代码里有多处引用 escapeHtml）
@@ -5402,9 +5300,7 @@
                     const activityData = window.lastData.latestRecords || window.lastData.recentVictims || [];
                     renderRecentActivity(activityData);
                     renderPersonalityDistribution(window.lastData.personalityDistribution);
-                    const ld = window.lastData;
-                    const opts = (ld.countryStats && ld.countryStats.length > 0) ? { countryStats: ld.countryStats, updatedAt: ld.countryStatsUpdatedAt } : {};
-                    initGlobalMap(ld.locationRank || [], opts).catch(() => {});
+                    initGlobalMap(window.lastData.locationRank).catch(() => {});
                 }
             } catch { /* ignore */ }
 
@@ -6256,142 +6152,6 @@
             } catch { /* ignore */ }
         }
 
-        /**
-         * 全局调度：国家切换唯一入口。UI、缓存、数据请求三位一体。
-         * 无论从左上角下拉、侧边栏、地图点击触发，均执行：localStorage -> 更新 UI -> POST /api/v2/analyze -> 800ms -> refreshUserStats + 右侧抽屉刷新。
-         * @param {string} countryCode - ISO 2 位国家码（会 toUpperCase）
-         * @param {string} source - 'select' | 'map' | 'left-drawer-country-list' | 'country-select-dropdown' 等
-         * @param {Object} [opts] - { showLoading?: boolean } 可选，默认 select 为 true
-         */
-        window.switchGlobalCountry = async function(countryCode, source, opts) {
-            const code = String(countryCode || '').trim().toUpperCase();
-            if (!/^[A-Z]{2}$/.test(code)) return;
-            source = source || 'unknown';
-            const showLoading = (opts && opts.showLoading !== undefined) ? opts.showLoading : (source === 'select' || source === 'country-select-dropdown');
-
-            const COUNTRY_CODE_TO_ZH = {
-                CN: '中国', US: '美国', JP: '日本', GB: '英国', DE: '德国', FR: '法国',
-                SG: '新加坡', HK: '中国香港', TW: '中国台湾', AU: '澳大利亚', KR: '韩国',
-                IN: '印度', CA: '加拿大', RU: '俄罗斯', BR: '巴西', IT: '意大利', ES: '西班牙'
-            };
-            const getDisplayName = () => {
-                if (typeof countryNameMap === 'object' && countryNameMap && countryNameMap[code]) {
-                    return (currentLang === 'zh' ? countryNameMap[code].zh : countryNameMap[code].en) || code;
-                }
-                return (currentLang === 'zh' ? COUNTRY_CODE_TO_ZH[code] : null) || code;
-            };
-            const displayName = getDisplayName();
-
-            // Step A：缓存 + UI 即时反馈（状态同步中心：user_manual_location 必须为 toUpperCase）
-            try {
-                window.currentUserCountry = code;
-                localStorage.setItem('user_manual_location', code.toUpperCase());
-                localStorage.setItem('user_selected_country', code);
-                localStorage.setItem('manual_location', code);
-            } catch (e) { console.warn('[CountrySwitch] localStorage 写入失败:', e); }
-
-            const leftTitle = document.getElementById('left-drawer-title');
-            const rightTitle = document.getElementById('right-drawer-title');
-            const rtNodeName = document.getElementById('rtNodeName');
-            if (leftTitle) leftTitle.textContent = displayName;
-            if (rightTitle) rightTitle.textContent = displayName;
-            if (rtNodeName) rtNodeName.textContent = displayName;
-
-            const dropdown = document.getElementById('country-select-dropdown');
-            if (dropdown) dropdown.value = code;
-
-            const dropdownParent = dropdown?.closest('.top-header-card');
-            const dropdownLabel = dropdownParent?.querySelector('.top-header-card-label');
-            const originalLabelText = dropdownLabel ? dropdownLabel.textContent : '';
-            if (showLoading && dropdown) {
-                dropdown.disabled = true;
-                if (dropdownLabel) dropdownLabel.textContent = (currentLang === 'zh' ? '切换中...' : 'Switching...');
-            }
-            setRightDrawerLoading(true);
-
-            // 关键容错：调用 migrate 时 try/catch，即使 404 也必须继续执行 updateCountryDashboard
-            try {
-                const userId = localStorage.getItem('github_username') || 'anonymous';
-                const base = (document.querySelector('meta[name="api-endpoint"]')?.content || '').replace(/\/$/, '');
-                const _fp = localStorage.getItem('user_fingerprint') || window.fpId || '';
-                const session = (typeof supabaseClient !== 'undefined' && supabaseClient) ? (await supabaseClient.auth.getSession()).data?.session : null;
-                const migrateUrl = (base || '') + '/api/fingerprint/migrate';
-                await fetch(migrateUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...(session?.access_token ? { 'Authorization': 'Bearer ' + session.access_token } : {}) },
-                    body: JSON.stringify({ fingerprint: _fp || '', userId: session?.user?.id || userId })
-                });
-            } catch (migrateErr) {
-                if (migrateErr?.message || String(migrateErr)) console.warn('[CountrySwitch] migrate 忽略（含 404）:', migrateErr?.message || migrateErr);
-            }
-
-            try {
-                if (typeof setOrUpdateCurrentLocationCursor === 'function') setOrUpdateCurrentLocationCursor(code);
-                if (typeof saveCountryToSupabase === 'function') await saveCountryToSupabase(code);
-
-                const base = (document.querySelector('meta[name="api-endpoint"]')?.content || '').replace(/\/$/, '');
-                const _fp = localStorage.getItem('user_fingerprint') || window.fpId || '';
-                const analyzeUrl = base ? base + '/api/v2/analyze?fingerprint=' + encodeURIComponent(_fp) + '&_t=' + Date.now() : '/api/v2/analyze?fingerprint=' + encodeURIComponent(_fp) + '&_t=' + Date.now();
-                const authHeader = supabaseClient ? (await supabaseClient.auth.getSession()).data?.session?.access_token : null;
-                const res = await fetch(analyzeUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...(authHeader ? { 'Authorization': 'Bearer ' + authHeader } : {}) },
-                    body: JSON.stringify({
-                        chatData: [{ role: 'USER', text: '.' }],
-                        manual_location: code,
-                        fingerprint: _fp || null
-                    })
-                });
-                if (!res.ok) console.warn('[CountrySwitch] analyze 上报非 2xx:', res.status);
-                await new Promise(r => setTimeout(r, 800));
-            } catch (reportErr) {
-                console.warn('[CountrySwitch] 上报或延时失败:', reportErr);
-                await new Promise(r => setTimeout(r, 500));
-            }
-
-            try {
-                if (typeof window.refreshUserStats === 'function') await window.refreshUserStats();
-                // 显式刷新右侧抽屉：国家累计 / 高分图谱等（get_country_stats、get_high_scores 逻辑由 updateCountryDashboard 拉取）
-                if (typeof updateCountryDashboard === 'function') {
-                    await updateCountryDashboard(code, null, { preferCache: false, silent: false });
-                }
-                const eventSource = (source === 'map') ? 'map-country-click' : source;
-                if (typeof onCountrySwitch === 'function') {
-                    onCountrySwitch(code, { source: eventSource, name: displayName, silent: true });
-                }
-                if (typeof window.highlightSelectedCountry === 'function') window.highlightSelectedCountry();
-                if (typeof updateUserCountryFlag === 'function') {
-                    const countries = typeof getAllCountries === 'function' ? getAllCountries() : [];
-                    const c = countries.find(x => (x.code || '').toUpperCase() === code);
-                    if (c) {
-                        const cn = (currentLang === 'zh' && c.nameZh) ? c.nameZh : c.nameEn;
-                        updateUserCountryFlag(code, cn, true);
-                    }
-                }
-                const leftSearch = document.getElementById('left-drawer-country-search');
-                if (leftSearch && typeof window.__leftDrawerCountryRender === 'function') {
-                    window.__leftDrawerCountryRender(leftSearch.value);
-                }
-            } catch (e) {
-                console.warn('[CountrySwitch] 刷新失败:', e);
-            } finally {
-                setRightDrawerLoading(false);
-                if (dropdown) dropdown.disabled = false;
-                if (dropdownLabel) dropdownLabel.textContent = originalLabelText;
-            }
-        };
-
-        /**
-         * 手动国家切换统一处理：委托给 switchGlobalCountry，保持旧调用方兼容。
-         * @param {string} newCode - ISO 2 位国家码
-         * @param {Object} [opts] - { source?: string, showLoading?: boolean }
-         */
-        window.handleManualLocationChange = async function(newCode, opts = {}) {
-            const code = String(newCode || '').trim().toUpperCase();
-            if (!/^[A-Z]{2}$/.test(code)) return;
-            await window.switchGlobalCountry(code, opts?.source || 'unknown', { showLoading: opts?.showLoading !== false });
-        };
-
         // Geo-Fencing：移动光标时 300ms 防抖
         let __geoFenceDebounceTimer = null;
         function scheduleGeoFenceByCoords(lng, lat, meta = {}) {
@@ -7001,7 +6761,6 @@
                     try { updateLanguageContext(); } catch { /* ignore */ }
                     syncTopHeaderHeight();
                     setTimeout(syncTopHeaderHeight, 60);
-                    if (typeof window.reportManualLocationIfCached === 'function') window.reportManualLocationIfCached().catch(function() {});
                 });
             } else {
                 try {
@@ -7020,7 +6779,6 @@
                 try { loadLanguageConfig().then(() => updateLanguageContext()).catch(() => updateLanguageContext()); } catch { /* ignore */ }
                 syncTopHeaderHeight();
                 setTimeout(syncTopHeaderHeight, 60);
-                if (typeof window.reportManualLocationIfCached === 'function') window.reportManualLocationIfCached().catch(function() {});
             }
             // resize 适配
             let __topHeaderResizeTimer = null;
@@ -7484,7 +7242,7 @@
                             try {
                                 if (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.from === 'function') {
                                     supabaseClient
-                                        .from('v_user_analysis_extended')
+                                        .from('v_unified_analysis_v2')
                                         .select('*')
                                         // GitHub 用户名大小写不敏感：避免 user_name 大小写不一致导致查不到
                                         .ilike('user_name', String(localGitHubName).trim())
@@ -7559,7 +7317,7 @@
                         try {
                             if (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.from === 'function') {
                                 supabaseClient
-                                    .from('v_user_analysis_extended')
+                                    .from('v_unified_analysis_v2')
                                     .select('*')
                                     // GitHub 用户名大小写不敏感：避免 user_name 大小写不一致导致查不到
                                     .ilike('user_name', String(localGitHubName).trim())
@@ -7640,14 +7398,6 @@
                     if (leftTitle) leftTitle.textContent = displayName || '我的数据';
                 } catch (e) { /* ignore */ }
                 
-                // 赛博病理勋章：病入膏肓(>=500) / 病情可控(<10)
-                const totalMsgsForBadge = Number(currentUser?.total_messages ?? currentUser?.totalMessages ?? 0) || 0;
-                const badgeHtml = totalMsgsForBadge >= 500
-                    ? `<span class="inline-flex items-center ml-1 animate-pulse" style="filter: drop-shadow(0 0 5px rgba(255,0,0,0.6));" title="病入膏肓">🏆</span>`
-                    : (totalMsgsForBadge < 10 && totalMsgsForBadge > 0)
-                        ? `<span class="inline-flex items-center ml-1 text-[#00ff41]/50" title="病情可控">🌱</span>`
-                        : '';
-                
                 // 获取当前状态
                 const currentStatus = localStorage.getItem('user_status') || 'idle';
                 const statusConfig = USER_STATUSES[currentStatus] || USER_STATUSES.idle;
@@ -7677,7 +7427,7 @@
                                 />
                             </div>
                             <div class="flex-1 min-w-0">
-                                <div class="drawer-item-value text-sm truncate flex items-center">${displayName}${badgeHtml}</div>
+                                <div class="drawer-item-value text-sm truncate">${displayName}</div>
                                 <div class="drawer-item-desc text-[8px]">${displayLabel}</div>
                             </div>
                             <button 
@@ -8002,7 +7752,7 @@
                                 // 1) 按 fingerprint 查
                                 if (currentFingerprint) {
                                     supabaseClient
-                                        .from('v_user_analysis_extended')
+                                        .from('v_unified_analysis_v2')
                                         .select('*')
                                         .eq('fingerprint', currentFingerprint)
                                         .maybeSingle()
@@ -8012,7 +7762,7 @@
                                 // 2) 未命中时按 GitHub 用户名查（已上传过且已登录时，可跨设备看到数据）
                                 if (localGh && !window.currentUser) {
                                     supabaseClient
-                                        .from('v_user_analysis_extended')
+                                        .from('v_unified_analysis_v2')
                                         .select('*')
                                         .ilike('user_name', localGh)
                                         .limit(1)
@@ -8260,34 +8010,6 @@
                     localStorage.setItem('left_drawer_open', 'true');
                     localStorage.setItem('right_drawer_open', 'true');
                 } catch (e) { /* ignore */ }
-                // UI 刷新：抽屉打开后 1) 从 v_user_analysis_extended 重新拉取当前用户最新排名 2) 图谱重绘与 ECharts 尺寸自适应
-                setTimeout(function () {
-                    try {
-                        var cu = window.currentUser || window.currentUserData;
-                        if (supabaseClient && cu && (cu.id || cu.fingerprint)) {
-                            var q = supabaseClient.from('v_user_analysis_extended').select('*');
-                            if (cu.id) q = q.eq('id', cu.id); else q = q.eq('fingerprint', cu.fingerprint);
-                            q.maybeSingle().then(function (r) {
-                                if (r && r.data) {
-                                    window.currentUser = r.data;
-                                    window.currentUserData = r.data;
-                                    if (typeof renderRankCards === 'function') renderRankCards(r.data);
-                                }
-                            }).catch(function () {});
-                        }
-                        if (typeof drawHighScores === 'function') {
-                            var topBy = (window.lastData && window.lastData.topByMetrics) ? window.lastData.topByMetrics : [];
-                            if (Array.isArray(topBy) && topBy.length > 0) drawHighScores(topBy);
-                        }
-                        if (typeof echarts !== 'undefined') {
-                            var charts = document.querySelectorAll('#right-drawer [data-_ec_instance_]');
-                            charts.forEach(function (el) {
-                                var inst = echarts.getInstanceByDom(el);
-                                if (inst && typeof inst.resize === 'function') inst.resize();
-                            });
-                        }
-                    } catch (e) { /* ignore */ }
-                }, 150);
             }
             localStorage.setItem('selected_country', countryCode);
             console.log('[Drawer] 抽屉已打开:', countryDisplayName);
@@ -8595,39 +8317,10 @@
         let globalLocationData = [];
 
         /**
-         * ISO2 国家代码 -> ECharts world.js 地图名称映射（确保后端 CN 等能精准对应地图）
-         * ISO_NAME_MAP 之外的由 Intl.DisplayNames 补全
-         */
-        const ISO_NAME_MAP = {
-            'CN': 'China', 'US': 'United States of America', 'GB': 'United Kingdom', 'UK': 'United Kingdom',
-            'JP': 'Japan', 'KR': 'South Korea', 'DE': 'Germany', 'FR': 'France', 'IN': 'India', 'BR': 'Brazil',
-            'RU': 'Russia', 'IT': 'Italy', 'CA': 'Canada', 'AU': 'Australia', 'ES': 'Spain', 'MX': 'Mexico',
-            'ID': 'Indonesia', 'NL': 'Netherlands', 'PL': 'Poland', 'TR': 'Turkey', 'SA': 'Saudi Arabia',
-            'TW': 'Taiwan', 'HK': 'Hong Kong', 'SG': 'Singapore', 'MY': 'Malaysia', 'TH': 'Thailand',
-            'VN': 'Vietnam', 'PH': 'Philippines', 'PK': 'Pakistan', 'BD': 'Bangladesh', 'EG': 'Egypt',
-            'ZA': 'South Africa', 'AR': 'Argentina', 'CL': 'Chile', 'CO': 'Colombia', 'SE': 'Sweden',
-            'CH': 'Switzerland', 'BE': 'Belgium', 'AT': 'Austria', 'PT': 'Portugal', 'IL': 'Israel',
-            'UA': 'Ukraine', 'RO': 'Romania', 'CZ': 'Czech Republic', 'HU': 'Hungary', 'GR': 'Greece',
-            'IE': 'Ireland', 'NZ': 'New Zealand', 'NO': 'Norway', 'FI': 'Finland', 'DK': 'Denmark',
-        };
-        // 动态分母：由 initGlobalMap 内 processedData.length 提供，禁止硬编码 195
-        function getMapNameFromIso2(code) {
-            if (!code || !/^[A-Z]{2}$/.test(String(code).toUpperCase())) return code || '';
-            const upper = String(code).toUpperCase();
-            if (ISO_NAME_MAP[upper]) return ISO_NAME_MAP[upper];
-            try {
-                var dn = typeof Intl !== 'undefined' && Intl.DisplayNames ? new Intl.DisplayNames(['en'], { type: 'region' }) : null;
-                if (dn) return dn.of(upper) || upper;
-            } catch (_) { /* ignore */ }
-            return upper;
-        }
-
-        /**
          * 初始化全球 2D 地图（支持缩放与拖动）
-         * @param {Array} locationData - 地理位置数据 [{name: string, value: number}]（兼容旧 API）
-         * @param {Object} opts - 可选 { countryStats: Array, updatedAt: string } 国家累积排名（GLOBAL_COUNTRY_STATS）
+         * @param {Array} locationData - 地理位置数据 [{name: string, value: number}]
          */
-        async function initGlobalMap(locationData, opts) {
+        async function initGlobalMap(locationData) {
             // 【优先判断】在地图初始化时检查 localStorage 锁定状态
             try {
                 if (window.mapCursorManager) {
@@ -8728,42 +8421,16 @@
                     console.log('[Map] ✅ world 地图数据已加载');
                 }
 
-                // 数据源优先级：countryStats（GLOBAL_COUNTRY_STATS）> locationData（兼容旧 API）
-                const countryStats = opts && opts.countryStats;
-                const mapUpdatedAt = opts && opts.updatedAt;
-                let processedData;
-                if (countryStats && Array.isArray(countryStats) && countryStats.length > 0) {
-                    const totalCnt = countryStats.length;
-                    const top10Pct = Math.max(3, Math.ceil(totalCnt * 0.1));
-                    processedData = countryStats.map(item => {
-                        const code = String(item.country_code || item.code || '').trim().toUpperCase();
-                        const mapName = getMapNameFromIso2(code) || (countryNameMap && countryNameMap[code] && countryNameMap[code].en) || code;
-                        const totalMessages = Number(item.total_messages_sum ?? item.total_messages ?? 0) || 0;
-                        const rank = Number(item.rank_total_messages ?? item.rank ?? 0) || null;
-                        let rankCategory = 0;
-                        if (rank === 1) rankCategory = 3;
-                        else if (rank >= 2 && rank <= 3) rankCategory = 2;
-                        else if (rank >= 4 && rank <= top10Pct) rankCategory = 1;
-                        return {
-                            name: mapName,
-                            value: rankCategory,
-                            rankCategory: rankCategory,
-                            totalMessages: totalMessages,
-                            rank: rank,
-                            countryCode: code
-                        };
-                    }).filter(d => d.name && (d.totalMessages > 0 || d.rank));
-                } else {
-                    processedData = (locationData || []).map(item => ({
-                        name: (countryNameMap && countryNameMap[item.name] ? countryNameMap[item.name].en : (item.name === 'USA' ? 'United States of America' : item.name)),
-                        value: item.value || 0,
-                        totalMessages: item.value || 0,
-                        rank: item.rank || null
-                    }));
-                }
-                const useRankColors = !!(countryStats && countryStats.length > 0);
+                // 处理地理位置数据（2D 世界地图名称需与 world.js 的英文国家名匹配）
+                // 约定：locationData 的 value = 该国「已提交聊天记录的用户数」（非在线人数），由 API /api/global-average 的 location_rank 提供
+                const processedData = (locationData || []).map(item => ({
+                    name: (countryNameMap[item.name]
+                        ? countryNameMap[item.name].en
+                        : (item.name === 'USA' ? 'United States' : item.name)),
+                    value: item.value || 0
+                }));
+
                 const maxVal = Math.max(20, ...processedData.map(d => d.value || 0));
-                const totalCountries = processedData.length;
 
                 const option2D = {
                     backgroundColor: 'transparent',
@@ -8778,41 +8445,55 @@
                         borderColor: '#27272a',
                         textStyle: { color: '#00ff41', fontFamily: 'JetBrains Mono' },
                         formatter: function(params) {
-                            if (!params) return '<div class="font-mono text-xs">未知区域</div>';
+                            // 防御性检查：确保 params 存在
+                            if (!params) {
+                                return '<div class="font-mono text-xs">未知区域</div>';
+                            }
+                            
+                            // 如果是地图国家数据，显示国家信息（必须包含该国家活跃节点数）
                             if (params.seriesType === 'map') {
                                 const name = params.name || params.data?.name || '未知区域';
+                                const value = Number(params.value ?? params.data?.value ?? 0) || 0;
+                                // 安全获取中文名称
+                                const code = typeof resolveCountryCodeFromMapName === 'function'
+                                    ? resolveCountryCodeFromMapName(name)
+                                    : null;
+                                const label =
+                                    (code && countryNameMap && countryNameMap[code] && countryNameMap[code].zh)
+                                        ? countryNameMap[code].zh
+                                        : name;
+                                
+                                // Proxy 提示：判断 is_proxy 字段，若为 true，在地理位置后增加 [Proxy] 红色警告标签
                                 const dataItem = params.data || {};
-                                const totalMessages = Number(dataItem.totalMessages ?? dataItem.value ?? 0) || 0;
-                                const rank = dataItem.rank;
-                                const code = dataItem.countryCode || (typeof resolveCountryCodeFromMapName === 'function' ? resolveCountryCodeFromMapName(name) : null);
-                                var label = (code && countryNameMap && countryNameMap[code] && countryNameMap[code].zh) ? countryNameMap[code].zh : name;
-                                if (code && label === name && typeof Intl !== 'undefined' && Intl.DisplayNames) {
-                                    try {
-                                        var dnLabel = new Intl.DisplayNames([currentLang === 'en' ? 'en' : 'zh-CN'], { type: 'region' }).of(String(code).toUpperCase());
-                                        if (dnLabel) label = dnLabel;
-                                    } catch (_) { /* ignore */ }
-                                }
                                 const isProxy = dataItem.is_proxy || dataItem.isProxy || false;
                                 const proxyLabel = isProxy ? '<span style="color: #ef4444; font-weight: bold;"> [Proxy]</span>' : '';
-                                const msgsLabel = currentLang === 'en' ? 'Total Messages' : '累计吐槽能量';
-                                const rankLabel = currentLang === 'en' ? 'Global Rank' : '全球排名';
-                                const dimLabel = currentLang === 'en' ? 'Top Dimension' : '最突出维度';
+                                
+                                // 数据展示：在地图弹窗（Tooltip）中同步展示该冠军的称号和战绩
                                 const activeNodesLabel = getI18nText('tooltip.active_nodes') || (currentLang === 'en' ? 'Active Nodes' : '活跃节点');
-                                let tooltipContent;
+                                let tooltipContent = `<div class="font-mono text-xs">${label}${proxyLabel}<br/>${escapeHtml(activeNodesLabel)}: ${value}</div>`;
+                                
+                                // 如果当前有选中的冠军信息，且国家名称匹配，显示冠军信息（同时必须保留活跃节点数）
                                 if (currentChampionInfo && currentChampionInfo.countryName === name) {
                                     const feedback = currentChampionInfo.feedback ? JSON.parse(currentChampionInfo.feedback) : null;
                                     const recordLabel = getI18nText('tooltip.record') || (currentLang === 'en' ? 'Record' : '战绩');
                                     const roastLabel = getI18nText('tooltip.roast') || (currentLang === 'en' ? 'Roast' : '吐槽');
                                     const translatedFbLabel = feedback ? translateRankFeedbackLabel(currentChampionInfo.dimId, feedback.label, currentChampionInfo.championValue) : '';
-                                    tooltipContent = `<div class="font-mono text-xs"><div class="text-[#00ff41] font-bold mb-1">🏆 ${currentChampionInfo.championName}</div><div class="text-white mb-1">${label}${proxyLabel}</div><div class="text-zinc-400 text-[10px] mb-1">${escapeHtml(activeNodesLabel)}: ${totalMessages}</div><div class="text-zinc-400 text-[10px] mb-1">${escapeHtml(recordLabel)}: ${currentChampionInfo.championValue}</div>${feedback ? `<div class="text-zinc-500 text-[9px] mt-2 pt-2 border-t border-zinc-700"><div class="text-[#00ff41]">${escapeHtml(roastLabel)}${translatedFbLabel ? ' · ' + escapeHtml(translatedFbLabel) : ''}</div><div class="text-white">${escapeHtml(String(feedback.title || '').trim())}</div></div>` : ''}</div>`;
-                                } else if (useRankColors) {
-                                    tooltipContent = `<div class="font-mono text-xs"><b>${label}</b>${proxyLabel}<br/>${msgsLabel}: ${new Intl.NumberFormat().format(totalMessages)}`;
-                                    const denom = (typeof totalCountries !== 'undefined' && totalCountries > 0) ? totalCountries : 195;
-                                    if (rank != null && rank > 0) tooltipContent += `<br/>${rankLabel}: #${rank}/${denom}`;
-                                    tooltipContent += `<br/>${dimLabel}: --</div>`;
-                                } else {
-                                    tooltipContent = `<div class="font-mono text-xs">${label}${proxyLabel}<br/>${escapeHtml(activeNodesLabel)}: ${totalMessages}</div>`;
+                                    tooltipContent = `
+                                        <div class="font-mono text-xs">
+                                            <div class="text-[#00ff41] font-bold mb-1">🏆 ${currentChampionInfo.championName}</div>
+                                            <div class="text-white mb-1">${label}${proxyLabel}</div>
+                                            <div class="text-zinc-400 text-[10px] mb-1">${escapeHtml(activeNodesLabel)}: ${value}</div>
+                                            <div class="text-zinc-400 text-[10px] mb-1">${escapeHtml(recordLabel)}: ${currentChampionInfo.championValue}</div>
+                                            ${feedback ? `
+                                                <div class="text-zinc-500 text-[9px] mt-2 pt-2 border-t border-zinc-700">
+                                                    <div class="text-[#00ff41]">${escapeHtml(roastLabel)}${translatedFbLabel ? ` · ${escapeHtml(translatedFbLabel)}` : ''}</div>
+                                                    <div class="text-white">${escapeHtml(String(feedback.title || '').trim())}</div>
+                                                </div>
+                                            ` : ''}
+                                        </div>
+                                    `;
                                 }
+                                
                                 return tooltipContent;
                             }
                             // 如果是脉冲点（effectScatter），显示用户信息（包含头像预览）
@@ -8865,25 +8546,13 @@
                         // 启用HTML渲染模式
                         extraCssText: 'box-shadow: 0 0 10px rgba(0, 255, 65, 0.2);'
                     },
-                    visualMap: useRankColors ? {
-                        type: 'piecewise',
-                        show: true,
-                        orient: 'horizontal',
-                        left: 'center',
-                        bottom: 8,
-                        pieces: [
-                            { min: 3, max: 3, label: (currentLang === 'en' ? 'Champion' : '冠军'), color: '#ffd700' },
-                            { min: 2, max: 2, label: (currentLang === 'en' ? 'Top 3' : '前三强'), color: '#c0c0c0' },
-                            { min: 1, max: 1, label: (currentLang === 'en' ? 'Top 10%' : '前10%'), color: '#7021d2' },
-                            { min: 0, max: 0, label: (currentLang === 'en' ? 'Others' : '其他地区'), color: '#a0aec0' }
-                        ],
-                        textStyle: { color: '#94a3b8', fontSize: 10 },
-                        dimension: 'rankCategory'
-                    } : {
+                    visualMap: {
                         min: 0,
                         max: maxVal,
                         show: false,
-                        inRange: { color: ['#064e3b', '#065f46', '#00ff41', '#34d399'] }
+                        inRange: {
+                            color: ['#064e3b', '#065f46', '#00ff41', '#34d399']
+                        }
                     },
                     geo: {
                         map: 'world',
@@ -8924,16 +8593,6 @@
 
                 // notMerge: true 彻底替换，避免残留旧配置
                 mapChart.setOption(option2D, { notMerge: true, lazyUpdate: false });
-                // 显示数据更新时间（每小时快照）
-                const updatedEl = document.getElementById('map-updated-at');
-                if (updatedEl && mapUpdatedAt) {
-                    try {
-                        const d = new Date(mapUpdatedAt);
-                        const fmt = isNaN(d.getTime()) ? mapUpdatedAt : d.toLocaleString(currentLang === 'en' ? 'en-US' : 'zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-                        updatedEl.textContent = (currentLang === 'en' ? 'Data updated: ' : '数据更新于：') + fmt;
-                        updatedEl.style.display = '';
-                    } catch (_) { updatedEl.style.display = 'none'; }
-                } else if (updatedEl) updatedEl.style.display = 'none';
 
                 // 添加鼠标悬浮高亮效果
                 mapChart.off('mouseover');
@@ -9150,7 +8809,7 @@
 
                   // 添加地图点击事件处理 - 重新设计逻辑（含校准模式）
                 mapChart.off('click'); // 移除旧的事件监听器
-                mapChart.on('click', async (params) => {
+                mapChart.on('click', (params) => {
                     console.log('[Map] ✅ 地图点击事件已触发:', params);
                     
                      // ========== 点击「Current Location」光标：进入校准模式或解除固定 ==========
@@ -9320,27 +8979,70 @@
                         if (!countryCode) countryCode = countryName;
                         console.log(`[Map] 🗺️ 点击国家: ${countryName} (${countryCode})`);
                         selectedCountry = countryCode;
+                        // ✅ 统一事件流：
+                        // - 解析到 ISO2：进入“国家透视右侧抽屉”（非全局面板），并做锚定/迁移
+                        // - 解析不到 ISO2：兜底只打开抽屉（无法进入国家透视）
+                        // 更新国家选择（同步到下拉菜单、左侧抽屉、Supabase）
+                        try {
+                            localStorage.setItem('user_selected_country', countryCode);
+                            const dropdown = document.getElementById('country-select-dropdown');
+                            if (dropdown) {
+                                dropdown.value = countryCode;
+                            }
+                            // 更新左侧抽屉选择
+                            const leftSearch = document.getElementById('left-drawer-country-search');
+                            if (leftSearch) {
+                                const renderFn = window.__leftDrawerCountryRender;
+                                if (typeof renderFn === 'function') {
+                                    renderFn(leftSearch.value);
+                                }
+                            }
+                            // 显示光标
+                            setOrUpdateCurrentLocationCursor(countryCode);
+                            // 高亮选中的国家
+                            if (typeof window.highlightSelectedCountry === 'function') {
+                                window.highlightSelectedCountry();
+                            }
+                            // 同步到 Supabase（与下拉列表选择一致）
+                            if (typeof saveCountryToSupabase === 'function') {
+                                saveCountryToSupabase(countryCode).catch(function () {});
+                            }
+                            // 更新左侧抽屉用户校准显示
+                            if (typeof updateUserCountryFlag === 'function') {
+                                const countries = typeof getAllCountries === 'function' ? getAllCountries() : [];
+                                const c = countries.find(function (x) { return (x.code || '').toUpperCase() === (countryCode || '').toUpperCase(); });
+                                if (c) {
+                                    const countryName = (currentLang === 'zh' && c.nameZh) ? c.nameZh : c.nameEn;
+                                    updateUserCountryFlag(countryCode, countryName, true);
+                                }
+                            }
+                        } catch (e) {
+                            console.warn('[Map] ⚠️ 更新国家选择失败:', e);
+                        }
+
                         const ccUpper = String(countryCode || '').trim().toUpperCase();
                         if (/^[A-Z]{2}$/.test(ccUpper)) {
-                            // 统一走全局调度：switchGlobalCountry 内完成 localStorage/UI/analyze/800ms/refreshUserStats/右侧抽屉；country:switch 会打开抽屉并进入国家透视
-                            try {
-                                if (typeof window.switchGlobalCountry === 'function') {
-                                    await window.switchGlobalCountry(ccUpper, 'map');
-                                } else {
-                                    onCountrySwitch(ccUpper, { source: 'map-country-click', name: countryName });
-                                    if (typeof showDrawersWithCountryData === 'function') showDrawersWithCountryData(ccUpper, countryName);
+                            try { 
+                                onCountrySwitch(ccUpper, { source: 'map-country-click', name: countryName });
+                                // 确保打开抽屉
+                                if (typeof showDrawersWithCountryData === 'function') {
+                                    showDrawersWithCountryData(ccUpper, countryName);
                                 }
                             } catch (e) {
-                                console.warn('[Map] ⚠️ 切换失败，尝试直接打开抽屉:', e);
-                                try {
-                                    onCountrySwitch(ccUpper, { source: 'map-country-click', name: countryName });
-                                    if (typeof showDrawersWithCountryData === 'function') showDrawersWithCountryData(ccUpper, countryName);
+                                console.warn('[Map] ⚠️ onCountrySwitch 失败，尝试直接打开抽屉:', e);
+                                try { 
+                                    if (typeof showDrawersWithCountryData === 'function') {
+                                        showDrawersWithCountryData(ccUpper, countryName);
+                                    }
                                 } catch { /* ignore */ }
                             }
                         } else {
                             console.warn('[Map] ⚠️ 无法解析 ISO2 国家码，暂无法进入国家透视右抽屉:', { countryName, countryCode });
-                            try {
-                                if (typeof showDrawersWithCountryData === 'function') showDrawersWithCountryData(countryCode, countryName);
+                            // 兜底：仍允许任意国家弹出抽屉（但不进入国家透视/不触发后端国籍更新）
+                            try { 
+                                if (typeof showDrawersWithCountryData === 'function') {
+                                    showDrawersWithCountryData(countryCode, countryName);
+                                }
                             } catch { /* ignore */ }
                         }
                         return;
@@ -9417,40 +9119,21 @@
          */
         /**
          * 根据选择的国家显示光标（固定位置，不可移动，带脉动闪光效果）
-         * @param {string|number} countryCodeOrLng - 国家代码（如 'CN','US'）或经度（当与 lat 一起传入时）
-         * @param {number} [lat] - 纬度（仅当第一参为经度时有效）
+         * @param {string} countryCode - 国家代码（如 'CN', 'US'）
          */
-        function setOrUpdateCurrentLocationCursor(countryCodeOrLng = null, lat = null) {
-            // 防御：地图实例尚未创建时静默退出，不阻断后续逻辑
-            const hasMap = (mapChart && typeof mapChart.setOption === 'function' && !(typeof mapChart.isDisposed === 'function' && mapChart.isDisposed()))
-                || (window.map && typeof L !== 'undefined' && window.map && typeof window.map.removeLayer === 'function');
-            if (!hasMap) {
-                console.log('[MapCursor] 地图实例尚未就绪，跳过光标更新');
-                return;
-            }
-            let countryCode = countryCodeOrLng;
-            if (typeof countryCodeOrLng === 'number' && typeof lat === 'number' && Number.isFinite(countryCodeOrLng) && Number.isFinite(lat)) {
-                countryCode = typeof getCountryByCoords === 'function' ? getCountryByCoords(countryCodeOrLng, lat) : null;
-                if (!countryCode) {
-                    try { countryCode = (localStorage.getItem('manual_location') || '').trim().toUpperCase(); } catch { /* ignore */ }
-                    if (!countryCode || !/^[A-Z]{2}$/.test(countryCode)) {
-                        console.warn('[MapCursor] ⚠️ 无法从坐标解析国家码，跳过光标:', { lng: countryCodeOrLng, lat });
-                        return;
-                    }
-                }
-            } else if (typeof countryCodeOrLng === 'number' || (typeof countryCodeOrLng === 'string' && /^-?\d+(\.\d+)?$/.test(String(countryCodeOrLng)))) {
-                console.warn('[MapCursor] ⚠️ 传入的可能是经纬度，请使用 ISO 国家代码（如 CN, US）:', countryCodeOrLng);
-                return;
-            }
-            countryCode = countryCode ? String(countryCode).trim().toUpperCase() : null;
-            if (countryCode && !/^[A-Z]{2}$/.test(countryCode)) countryCode = null;
+        function setOrUpdateCurrentLocationCursor(countryCode = null) {
+            // 优先使用 ECharts（当前项目使用 ECharts）
             if (mapChart && typeof mapChart.setOption === 'function' && !(typeof mapChart.isDisposed === 'function' && mapChart.isDisposed())) {
                 return setOrUpdateCurrentLocationCursorECharts(countryCode);
             }
+
+            // 降级：检查 Leaflet map 实例是否存在
             const map = window.map;
             if (map && typeof L !== 'undefined' && typeof map.removeLayer === 'function') {
                 return setOrUpdateCurrentLocationCursorLeaflet(countryCode, map);
             }
+
+            console.warn('[MapCursor] ⚠️ 地图实例不存在或无效');
         }
 
         /**
@@ -10318,35 +10001,33 @@
                             }
                         });
                         
-                        // 点击选择国家（UI 即时反馈 + handleManualLocationChange 全量流程）
-                        item.addEventListener('click', async () => {
+                        // 点击选择国家（先更新 UI 再异步保存，减少卡顿）
+                        item.addEventListener('click', () => {
                             const displayName = (currentLang === 'zh' && country.nameZh) ? country.nameZh + ' (' + country.code + ')' : country.nameEn + ' (' + country.code + ')';
                             searchInput.value = displayName;
                             listContainer.classList.remove('left-drawer-country-list-visible');
                             searchInput.blur();
                             renderCountryList(displayName);
+
+                            try {
+                                localStorage.setItem('user_selected_country', country.code);
+                            } catch (e) {
+                                console.warn('[LeftDrawerCountry] ⚠️ 保存到 localStorage 失败:', e);
+                            }
                             const dropdown = document.getElementById('country-select-dropdown');
                             if (dropdown) dropdown.value = country.code;
+                            setOrUpdateCurrentLocationCursor(country.code);
                             const countryName = (currentLang === 'zh' && country.nameZh) ? country.nameZh : country.nameEn;
+                            if (typeof window.highlightSelectedCountry === 'function') window.highlightSelectedCountry();
+                            if (typeof updateUserCountryFlag === 'function') updateUserCountryFlag(country.code, countryName, true);
+                            if (typeof onCountrySwitch === 'function') onCountrySwitch(country.code, { source: 'left-drawer-country-list', name: countryName });
                             const leftDrawer = document.getElementById('left-drawer');
                             const rightDrawer = document.getElementById('right-drawer');
                             if (leftDrawer) leftDrawer.classList.add('active');
                             if (rightDrawer) rightDrawer.classList.add('active');
                             try { localStorage.setItem('left_drawer_open', 'true'); localStorage.setItem('right_drawer_open', 'true'); } catch (e) { /* ignore */ }
-                            try {
-                                if (typeof window.switchGlobalCountry === 'function') {
-                                    await window.switchGlobalCountry(country.code, 'left-drawer-country-list', { showLoading: false });
-                                } else if (typeof window.handleManualLocationChange === 'function') {
-                                    await window.handleManualLocationChange(country.code, { source: 'left-drawer-country-list', showLoading: false });
-                                } else {
-                                    try { localStorage.setItem('user_selected_country', country.code); } catch (e) {}
-                                    if (typeof setOrUpdateCurrentLocationCursor === 'function') setOrUpdateCurrentLocationCursor(country.code);
-                                    if (typeof updateUserCountryFlag === 'function') updateUserCountryFlag(country.code, countryName, true);
-                                    if (typeof onCountrySwitch === 'function') onCountrySwitch(country.code, { source: 'left-drawer-country-list', name: countryName });
-                                    await (typeof saveCountryToSupabase === 'function' ? saveCountryToSupabase(country.code) : Promise.resolve());
-                                }
-                            } catch (e) { console.warn('[LeftDrawerCountry] ⚠️ 切换失败:', e); }
-                            if (typeof window.highlightSelectedCountry === 'function') window.highlightSelectedCountry();
+
+                            saveCountryToSupabase(country.code).catch(() => {});
                             console.log('[LeftDrawerCountry] ✅ 已选择国家:', country.code);
                         });
                         
@@ -10569,25 +10250,43 @@
                         return;
                     }
 
-                    // 监听器统一指向 window.switchGlobalCountry（左上角下拉框）
+                    // 保存到 localStorage
                     try {
-                        if (typeof window.switchGlobalCountry === 'function') {
-                            await window.switchGlobalCountry(countryCode, 'country-select-dropdown', { showLoading: true });
-                        } else if (typeof window.handleManualLocationChange === 'function') {
-                            await window.handleManualLocationChange(countryCode, { source: 'country-select-dropdown', showLoading: true });
-                        } else {
-                            try {
-                                localStorage.setItem('user_selected_country', countryCode);
-                                if (countryCode && /^[A-Z]{2}$/i.test(countryCode)) {
-                                    localStorage.setItem('manual_location', countryCode.toUpperCase());
-                                }
-                            } catch (e) {}
-                            setOrUpdateCurrentLocationCursor(countryCode);
-                            await saveCountryToSupabase(countryCode);
-                            if (typeof window.refreshUserStats === 'function') await window.refreshUserStats();
+                        localStorage.setItem('user_selected_country', countryCode);
+                    } catch (e) {
+                        console.warn('[CountrySelect] ⚠️ 保存到 localStorage 失败:', e);
+                    }
+
+                    // 显示光标
+                    setOrUpdateCurrentLocationCursor(countryCode);
+
+                    // 保存到 Supabase（绑定到 GitHub 账户）
+                    await saveCountryToSupabase(countryCode);
+
+                    // 高亮选中的国家
+                    if (typeof window.highlightSelectedCountry === 'function') {
+                        window.highlightSelectedCountry();
+                    }
+
+                    // 更新左侧抽屉中的用户校准国家显示
+                    if (typeof updateUserCountryFlag === 'function') {
+                        const countries = getAllCountries();
+                        const selectedCountry = countries.find(c => c.code.toUpperCase() === countryCode.toUpperCase());
+                        if (selectedCountry) {
+                            const countryName = (currentLang === 'zh' && selectedCountry.nameZh) 
+                                ? selectedCountry.nameZh 
+                                : selectedCountry.nameEn;
+                            updateUserCountryFlag(countryCode, countryName, true);
                         }
-                    } catch (err) {
-                        console.warn('[CountrySelect] ⚠️ 切换失败:', err);
+                    }
+
+                    // 同步更新左侧抽屉
+                    const leftSearch = document.getElementById('left-drawer-country-search');
+                    if (leftSearch) {
+                        const renderFn = window.__leftDrawerCountryRender;
+                        if (typeof renderFn === 'function') {
+                            renderFn(leftSearch.value);
+                        }
                     }
 
                     // 注意：不自动打开抽屉，只保存选择
@@ -10605,10 +10304,7 @@
          */
         async function saveCountryToSupabase(countryCode) {
             try {
-                // 传递给 Supabase 的参数永远是 toUpperCase() 后的 2 位代码
-                const code = String(countryCode || '').trim().toUpperCase();
-                if (!/^[A-Z]{2}$/.test(code)) return;
-
+                // 检查是否有 GitHub 登录会话
                 if (!supabaseClient) {
                     console.warn('[CountrySelect] ⚠️ Supabase 客户端未初始化');
                     return;
@@ -10621,13 +10317,13 @@
                 }
 
                 const userId = session.user.id;
-                console.log('[CountrySelect] 💾 保存国家选择到 Supabase:', { userId, countryCode: code });
+                console.log('[CountrySelect] 💾 保存国家选择到 Supabase:', { userId, countryCode });
 
-                // 更新 user_analysis 表（始终使用 2 位大写代码）
+                // 更新 user_analysis 表
                 const { data, error } = await supabaseClient
                     .from('user_analysis')
                     .update({
-                        current_location: code,
+                        current_location: countryCode.toUpperCase(),
                         location_switched_at: new Date().toISOString(),
                         updated_at: new Date().toISOString()
                     })
@@ -12800,8 +12496,6 @@
                                 
                                 // 强制同步自身状态（必须显式调用）
                                 await trackSelf();
-                                // 在 Presence 订阅成功后再初始化状态按钮，避免与 subscribe 逻辑冲突
-                                try { initStatusButtons(); } catch (e) { console.log('[Presence] initStatusButtons:', e); }
                             } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
                                 // 与 Realtime 一致：降级为警告，避免控制台刷红
                                 console.warn('[Presence] ⚠️ 订阅未就绪（' + status + '），详情:', err);
@@ -12924,12 +12618,30 @@
         }
         
         /**
-         * 获取用户地理位置（由后端 CF 接管，前端不再请求 ipapi.co/ip-api.com，避免 429）。
-         * 返回默认结构，实际国家由后端 /api/v2/analyze 根据 CF 或 manual_location 写入。
+         * 获取用户地理位置（非阻塞，1.5 秒超时）。失败时静默返回空对象 {}，不抛错、不打印，保证 refreshUserStats 继续执行。
          */
         function getUserLocation() {
-            var defaultResult = { lat: null, lng: null, countryCode: 'US' };
-            return Promise.resolve(defaultResult);
+            var ac = new AbortController();
+            var t = setTimeout(function() { ac.abort(); }, 1500);
+            var url = 'https://ip-api.com/json/?_t=' + Date.now();
+            return fetch(url, { headers: { 'Accept': 'application/json' }, signal: ac.signal })
+                .then(function(ipResponse) {
+                    clearTimeout(t);
+                    if (ipResponse && ipResponse.ok) {
+                        return ipResponse.json().catch(function() { return null; });
+                    }
+                    return null;
+                })
+                .then(function(ipInfo) {
+                    if (ipInfo && typeof ipInfo === 'object' && (ipInfo.lat != null || ipInfo.lon != null)) {
+                        return { lat: ipInfo.lat != null ? Number(ipInfo.lat) : null, lng: ipInfo.lon != null ? Number(ipInfo.lon) : null };
+                    }
+                    return {};
+                })
+                .catch(function() {
+                    clearTimeout(t);
+                    return {};
+                });
         }
         /**
          * 强制同步自身状态（trackSelf）
@@ -12994,12 +12706,7 @@
                     last_vibe: new Date().toISOString()
                 };
                 
-                // 显式调用 track 前再次检查实例（防止异步竞态导致 presenceChannel 已被置空）
-                if (!presenceChannel) {
-                    if (window.__PRESENCE_SKIPPED) return;
-                    console.warn('[Presence] ⚠️ presenceChannel 实例已失效，跳过 track');
-                    return;
-                }
+                // 显式调用 track
                 await presenceChannel.track(myPresence);
                 
                 console.log('[Presence] ✅ 自身状态已同步:', myPresence);
@@ -14394,10 +14101,6 @@
                     
                     // 【迁移优先】在检测到 GitHub 登录后，先调用 /api/fingerprint/migrate 接口
                     if (currentFp && githubUserId) {
-                        const token = localStorage.getItem('user_fingerprint');
-                        if (!token) {
-                            console.log('[Auth] 纯净登录，无匿名数据需迁移');
-                        } else {
                         console.log('[Auth] 🔄 检测到指纹和 GitHub 用户，开始数据迁移...');
                         console.log('[Auth] 📋 迁移信息:', {
                             currentFp: currentFp.substring(0, 8) + '...',
@@ -14410,7 +14113,16 @@
                         const hasLocalData = claimToken || currentFp;
                         const localDataExists = localStorage.getItem('last_analysis_data') || claimToken;
                         
-                        // 【认领备选】有 claimToken 用认领，无则用本地 fingerprint 作为备选，确保匿名数据能合并到 GitHub
+                        // 【严格校验迁移逻辑】检查是否有影子令牌
+                        // 注意:新的强制认领机制只认 claimToken,不再支持纯指纹迁移
+                        if (!claimToken) {
+                            // 【修复】无 claim_token 时不弹“无用弹窗”，直接静默跳过迁移
+                            // 说明：用户可能只是想登录查看数据；没有待认领数据并不需要阻塞交互。
+                            console.warn('[Auth] ℹ️ 本地无 claim_token，跳过数据认领（静默，无弹窗）');
+                            migrationSuccess = false;
+                            // 继续后续正常流程（更新 UI / 尝试拉取用户数据）
+                        } else
+                        
                         // 如果需要确认，先显示弹窗
                         if (hasLocalData && localDataExists) {
                             const shouldMerge = await new Promise((resolve) => {
@@ -14484,20 +14196,25 @@
                             let migrateResponse;
                             try {
                                 // 调用后端接口迁移数据
-                                // Body：userId 必选；claimToken 优先，无则用 fingerprint 作为备选认领
-                                const userId = localStorage.getItem('github_username') || 'anonymous';
+                                // 【必须在 Body 中携带：{ userId, claimToken }】
                                 const migrateBody = {
-                                    userId: githubUserId || userId
+                                    userId: githubUserId
                                 };
+                                
+                                // 【影子令牌优先】如果存在 claimToken，优先使用它
                                 if (claimToken) {
-                                    migrateBody.claimToken = claimToken;
-                                    console.log('[Auth] 🔑 使用 vibe_claim_token 认领:', claimToken.substring(0, 8) + '...');
+                                    migrateBody.claimToken = claimToken; // 后端接收 claimToken（驼峰命名）
+                                    console.log('[Auth] 🔑 检测到 vibe_claim_token，执行强行认领:', claimToken.substring(0, 8) + '...');
                                 } else {
-                                    migrateBody.fingerprint = currentFp;
-                                    migrateBody.sourceFp = currentFp;
-                                    console.log('[Auth] 🔑 无 claimToken，使用本地 fingerprint 认领:', currentFp.substring(0, 8) + '...');
+                                    // 【修复】没有 claimToken 也允许继续登录并加载 GitHub 用户数据
+                                    // 迁移/认领只是“把匿名战绩合并到账号”，不应阻断“查看自己数据”。
+                                    console.warn('[Auth] ⚠️ 无 claimToken，跳过迁移（仅跳过认领，不阻断登录）');
+                                    migrationSuccess = false;
+                                    // 跳过迁移请求，继续后续流程（会走 user_id 同步 + 刷新抽屉）
+                                    migrateResponse = null;
                                 }
 
+                                
                                 migrateResponse = await fetch(migrateUrl, {
                                     method: 'POST',
                                     headers: {
@@ -14572,9 +14289,8 @@
                                     localStorage.removeItem('vibe_claim_token');
                                     localStorage.removeItem('user_fingerprint'); // 同时清除指纹
                                 } else {
-                                    // 其他错误，记录但不中断流程（确保不输出 undefined）
-                                    const msg = (errorMsg != null && errorMsg !== '') ? String(errorMsg) : '未知';
-                                    console.warn('[Auth] ⚠️ 数据迁移失败，继续正常流程:', msg);
+                                    // 其他错误，记录但不中断流程
+                                    console.warn('[Auth] ⚠️ 数据迁移失败，继续正常流程:', errorMsg);
                                 }
                                 
                                 // 无论什么错误，都继续正常流程（不迁移）
@@ -14582,21 +14298,18 @@
                             }
                             
                             migrationCompleted = true;
-                            // migrate 返回 200 后立即刷新带排名的数据（skipped 时也拉取最新排名）
-                            if (migrateResponse.ok && migrateResult?.status !== 'success' && typeof window.refreshUserStats === 'function') {
-                                try { await window.refreshUserStats(); } catch (_) {}
-                            }
+                            
                             if (migrateResult && migrateResult.status === 'success') {
                                 console.log('[Auth] ✅ Step A: 数据迁移成功:', migrateResult.data);
                                 migrationSuccess = true;
                                 
-                                // 【认领后】清除本地匿名缓存，确保后续数据统一来自视图 v_unified_analysis_v2
+                                // 【场景 A：先分析后登录】清除 claim_token 和 fingerprint 缓存
                                 localStorage.removeItem('vibe_claim_token');
                                 localStorage.removeItem('user_fingerprint');
-                                if (window.fpId) delete window.fpId;
-                                if (window.__countryTotalsCache) window.__countryTotalsCache.clear();
-                                try { localStorage.removeItem('last_analysis_data'); } catch (_) {}
-                                console.log('[Auth] ✅ 已清除匿名缓存，将强制刷新视图数据');
+                                if (window.fpId) {
+                                    delete window.fpId;
+                                }
+                                console.log('[Auth] ✅ 已清除本地 fingerprint 和 claim_token 缓存');
                                 
                                 // 迁移成功后，更新 window.allData
                                 const allData = window.allData || [];
@@ -14644,31 +14357,18 @@
                                     console.log('[Auth] ℹ️ Step B: 已在本页执行过自动上报，跳过');
                                 }
                                 
-                                // 【迁移优先】清除匿名缓存后强制刷新，使“我的排名”等数据统一来自 v_unified_analysis_v2
-                                console.log('[Auth] 🔄 Step C: 强制刷新视图数据（fetchData + refreshUserStats）...');
-                                try {
-                                    if (typeof fetchData === 'function') {
-                                        await fetchData();
-                                        console.log('[Auth] ✅ Step C: fetchData 执行完成');
-                                    }
-                                } catch (e) {
-                                    if (e?.name !== 'AbortError' && !e?.message?.includes('aborted')) console.warn('[Auth] ⚠️ fetchData 失败:', e);
-                                }
+                                // 【迁移优先】只有在迁移请求结束后，才调用 refreshUserStats() 加载数据
+                                console.log('[Auth] 🔄 Step C: 开始刷新用户统计数据...');
                                 if (typeof window.refreshUserStats === 'function') {
                                     try {
                                         await window.refreshUserStats();
                                         console.log('[Auth] ✅ Step C: refreshUserStats 执行完成');
                                     } catch (refreshError) {
+                                        // 【修复 AbortError】特殊处理 AbortError
                                         if (refreshError.name === 'AbortError' || refreshError.message?.includes('aborted')) {
                                             console.log('[Auth] ℹ️ refreshUserStats 被取消（可能是页面刷新导致）');
                                         } else {
-                                            const sm = (refreshError?.message || '').match(/Status:\s*(\d+)/);
-                                            const st = sm ? sm[1] : (refreshError?.status ?? refreshError?.response?.status ?? 'N/A');
-                                            console.error('[Auth] ❌ Step C: refreshUserStats 执行失败 - 完整错误:', {
-                                                name: refreshError?.name, message: refreshError?.message,
-                                                httpStatus: st, hint: st === '404' ? '（函数/路由可能不存在）' : (st === '403' ? '（可能无权限）' : ''),
-                                                fullError: refreshError
-                                            });
+                                            console.error('[Auth] ❌ Step C: refreshUserStats 执行失败:', refreshError);
                                         }
                                     }
                                 } else {
@@ -14686,26 +14386,20 @@
                                 console.log('[Auth] ℹ️ 未找到需要迁移的数据，继续正常流程');
                                 hideSyncingOverlay();
                             } else {
-                                const errMsg = (migrateResult && migrateResult.error != null) ? String(migrateResult.error) : '未知';
-                                console.warn('[Auth] ⚠️ 数据迁移失败，继续正常流程:', errMsg);
+                                console.warn('[Auth] ⚠️ 数据迁移失败，继续正常流程:', migrateResult?.error);
                                 hideSyncingOverlay();
                             }
                         } catch (migrateError) {
                             migrationCompleted = true;
-                            const errMsg = (migrateError && (migrateError.message || migrateError.toString?.())) || String(migrateError) || '未知';
+                            
                             // 【修复 AbortError】特殊处理 AbortError
-                            if (migrateError && (migrateError.name === 'AbortError' || (migrateError.message && migrateError.message.includes('aborted')))) {
-                                console.warn('[Auth] ⚠️ 迁移请求被取消（可能是页面刷新导致）:', errMsg);
+                            if (migrateError.name === 'AbortError' || migrateError.message?.includes('aborted')) {
+                                console.warn('[Auth] ⚠️ 迁移请求被取消（可能是页面刷新导致）:', migrateError);
                             } else {
-                                console.error('[Auth] ❌ 数据迁移异常，继续正常流程:', errMsg);
+                                console.error('[Auth] ❌ 数据迁移异常，继续正常流程:', migrateError);
                             }
+                            
                             hideSyncingOverlay();
-                        } finally {
-                            // 容错：无论迁移成功、400 或其他错误，都执行刷新，避免身份迁移阻塞界面
-                            try {
-                                if (typeof window.refreshUserStats === 'function') window.refreshUserStats();
-                            } catch (e) { /* ignore */ }
-                        }
                         }
                     } else {
                         console.log('[Auth] ℹ️ 未检测到指纹或 GitHub 用户 ID，跳过迁移');
@@ -14990,13 +14684,7 @@
                                 if (refreshError.name === 'AbortError' || refreshError.message?.includes('aborted')) {
                                     console.log('[Auth] ℹ️ refreshUserStats 被取消（可能是页面刷新导致）');
                                 } else {
-                                    const sm = (refreshError?.message || '').match(/Status:\s*(\d+)/);
-                                    const st = sm ? sm[1] : (refreshError?.status ?? refreshError?.response?.status ?? 'N/A');
-                                    console.error('[Auth] ❌ Step C: refreshUserStats 执行失败 - 完整错误:', {
-                                        name: refreshError?.name, message: refreshError?.message,
-                                        httpStatus: st, hint: st === '404' ? '（函数/路由可能不存在）' : (st === '403' ? '（可能无权限）' : ''),
-                                        fullError: refreshError
-                                    });
+                                    console.error('[Auth] ❌ Step C: refreshUserStats 执行失败:', refreshError);
                                 }
                             }
                             
@@ -15952,12 +15640,41 @@
                 const systemFeatures = await getUserSystemFeatures();
                 console.log('[AutoReport] 📊 系统特征已获取:', systemFeatures);
 
-                // 2. 地理由后端 CF 识别，前端不再请求 ipapi.co/ip-api.com
+                // 2. 获取 IP 和归属地信息
                 let ipInfo = null;
-                let ipLocation = 'US';
+                let ipLocation = 'Unknown';
                 let lat = null;
                 let lng = null;
-                let countryCode = 'US';
+                let countryCode = 'Unknown';
+
+                try {
+                    const ipUrl = 'https://ip-api.com/json/?_t=' + Date.now();
+                    const ac = new AbortController();
+                    const timeoutId = setTimeout(function() { ac.abort(); }, 3000);
+                    const ipResponse = await fetch(ipUrl, { headers: { 'Accept': 'application/json' }, signal: ac.signal });
+                    clearTimeout(timeoutId);
+                    if (ipResponse && ipResponse.ok) {
+                        ipInfo = await ipResponse.json().catch(function() { return null; });
+                        if (ipInfo && typeof ipInfo === 'object') {
+                            countryCode = ipInfo.countryCode || ipInfo.country_code || 'Unknown';
+                            ipLocation = (countryCode && countryCode !== 'Unknown') ? countryCode : 'Unknown';
+                            if (ipInfo.lat != null && ipInfo.lon != null) {
+                                lat = Number(ipInfo.lat);
+                                lng = Number(ipInfo.lon);
+                            } else if (ipInfo.latitude != null && ipInfo.longitude != null) {
+                                lat = Number(ipInfo.latitude);
+                                lng = Number(ipInfo.longitude);
+                            }
+                        }
+                    } else if (ipResponse && ipResponse.status === 403) {
+                        countryCode = 'Unknown';
+                        ipLocation = 'Unknown';
+                    }
+                } catch (error) {
+                    if (error && error.name !== 'AbortError') console.warn('[AutoReport] ⚠️ 获取 IP 信息失败:', error?.message || error);
+                    countryCode = 'Unknown';
+                    ipLocation = 'Unknown';
+                }
 
                 // 3. VPN 判定逻辑
                 // 判定条件：如果 timezone 是 'Asia/Shanghai' 且 IP 位置不在中国，标记为 VPN
@@ -16259,18 +15976,16 @@
             renderPersonalityRank(data.personalityRank, data.recentVictims);
 
             // --- 渲染图表组件 ---
-            // 渲染地理位置热力排行和地图（优先使用 countryStats 国家累积，否则 locationRank）
-            const mapOpts = (data.countryStats && data.countryStats.length > 0)
-                ? { countryStats: data.countryStats, updatedAt: data.countryStatsUpdatedAt }
-                : {};
-            const mapData = (data.countryStats && data.countryStats.length > 0) ? [] : (data.locationRank || []);
-            if (mapData.length > 0 || (mapOpts.countryStats && mapOpts.countryStats.length > 0)) {
+            // 渲染地理位置热力排行和地图
+            if (data.locationRank && Array.isArray(data.locationRank) && data.locationRank.length > 0) {
+                // 检查 ECharts 是否已加载
                 if (typeof echarts === 'undefined') {
                     console.warn('[fetchData] ⚠️ ECharts 未加载，延迟初始化地图...');
+                    // 延迟重试地图初始化
                     setTimeout(async () => {
                         if (typeof echarts !== 'undefined') {
                             try {
-                                await initGlobalMap(mapData.length > 0 ? mapData : [], mapOpts);
+                                await initGlobalMap(data.locationRank);
                             } catch (mapError) {
                                 console.error('[fetchData] ❌ 延迟地图初始化失败:', mapError);
                             }
@@ -16280,12 +15995,13 @@
                     }, 1000);
                 } else {
                     try {
-                        await initGlobalMap(mapData.length > 0 ? mapData : [], mapOpts);
+                        await initGlobalMap(data.locationRank);
                     } catch (mapError) {
                         console.error('[fetchData] ❌ 地图初始化失败:', mapError);
+                        // 即使地图初始化失败，也继续渲染位置列表
                     }
                     try {
-                        renderLocationList(data.locationRank || []);
+                        renderLocationList(data.locationRank);
                     } catch (listError) {
                         console.error('[fetchData] ❌ 位置列表渲染失败:', listError);
                     }
@@ -16295,9 +16011,10 @@
                 if (locationListEl) {
                     locationListEl.innerHTML = '<div class="text-center text-zinc-500 py-4 text-[10px]">暂无数据</div>';
                 }
+                // 即使没有数据，也尝试初始化空地图
                 if (typeof echarts !== 'undefined') {
                     try {
-                        await initGlobalMap([], {});
+                        await initGlobalMap([]);
                     } catch (mapError) {
                         console.warn('[fetchData] ⚠️ 空地图初始化失败:', mapError);
                     }
@@ -16532,30 +16249,25 @@
                 var _rfp = '';
                 try { _rfp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
                 const requestUrl = `${apiEndpoint}/api/global-average?fingerprint=${encodeURIComponent(_rfp)}&_t=${Date.now()}`;
-                const countryStatsUrl = `${apiEndpoint}/api/v2/country-stats-global?_t=${Date.now()}`;
-                console.log(`[1/5] 并行请求: global-average + country-stats-global`);
-
-                // Promise.all 同时请求两个 API
-                const fetchGlobal = window.apiFetch ? window.apiFetch('/api/global-average', { timeout: 4000 }) : fetch(requestUrl);
-                const fetchCountry = fetch(countryStatsUrl).catch(() => null);
-                const [globalResp, countryResp] = await Promise.all([fetchGlobal, fetchCountry]);
-
-                if (!globalResp.ok) throw new Error(`HTTP Error! Status: ${globalResp.status}`);
-                const result = await globalResp.json();
-
-                let countryStatsResp = { data: [], updated_at: null };
-                if (countryResp && countryResp.ok) {
-                    try {
-                        const j = await countryResp.json();
-                        countryStatsResp = { data: (j && j.data) ? j.data : [], updated_at: (j && j.updated_at) ? j.updated_at : null };
-                    } catch (_) { /* ignore */ }
+                console.log(`[1/5] 正在请求: ${requestUrl}`);
+                
+                // 使用 apiFetch 包装器（支持自动端点切换）
+                let response;
+                try {
+                    // 快速失败：4秒超时（国内网络优化）
+                    response = await (window.apiFetch ? window.apiFetch('/api/global-average', { timeout: 4000 }) : fetch(requestUrl));
+                } catch (fetchErr) {
+                    console.warn('[API] 请求失败，尝试直接fetch:', fetchErr.message);
+                    response = await fetch(requestUrl);
                 }
+                
+                if (!response.ok) throw new Error(`HTTP Error! Status: ${response.status}`);
+                
+                const result = await response.json();
                 console.log('[2/5] 收到原始响应:', result);
 
                 // 【适配层重写】使用强制映射层标准化数据
                 const data = normalizeData(result);
-                data.countryStats = countryStatsResp.data;
-                data.countryStatsUpdatedAt = countryStatsResp.updated_at;
                 console.log('[3/5] 数据适配完成:', data);
 
                 // 渲染 Dashboard
@@ -16604,12 +16316,8 @@
                     if (pec) pec.textContent = '-';
                 }
             } finally {
-                // 确保异常情况下也关闭加载过场；排名计算中状态隐藏：强制关掉加载层
+                // 确保异常情况下也关闭加载过场
                 setLoadingState(false);
-                try {
-                    var lo = document.getElementById('loading-overlay');
-                    if (lo) lo.classList.add('hidden');
-                } catch (e) { /* ignore */ }
                 console.groupEnd();
                 window.__globalStatsUpdating = false;
             }
@@ -16927,8 +16635,8 @@
                     'l','p','d','e','f',
                     'L','P','D','E','F',
                     'question_message_count','total_messages',
-                    'total_chars','total_chars','totalUserChars',
-                    'avg_message_length','avgMessageLength','avgUserMessageLength',
+                    'total_user_chars','total_chars','totalUserChars',
+                    'avg_user_message_length','avgMessageLength','avgUserMessageLength',
                     'work_days','usage_days','days',
                     'jiafang_count','ketao_count',
                     'vibe_rank','vibe_percentile','avg_rank'
@@ -17090,7 +16798,7 @@
                             hasId: !!currentUserData.id
                         });
                         let q = supabaseClient
-                            .from('v_user_analysis_extended')
+                            .from('v_unified_analysis_v2')
                             .select('*');
                         // 优先用 id 精确匹配（最稳定），否则用 user_name（不区分大小写）
                         if (currentUserData.id) {
@@ -17265,13 +16973,11 @@
                 console.log('[UserStats] 📊 提取的维度值:', dimensionValues);
                 
                 // 1. 技术排名（使用平均排名或综合排名）
-                // 【字段映射】优先视图 jiafang_rank_percent/ketao_rank_percent/days_rank_percent，兜底 jiafang_rank 等
-                const vibeRank = currentUserData.vibe_rank ?? currentUserData.vibeRank ?? null;
-                const vibePercentile = currentUserData.vibe_percentile ?? currentUserData.vibePercentile ?? null;
-                const jiafangRank = Math.floor(currentUserData.jiafang_rank_percent ?? currentUserData.jiafang_rank ?? currentUserData.jiafangRank ?? 0);
-                const ketaoRank = Math.floor(currentUserData.ketao_rank_percent ?? currentUserData.ketao_rank ?? currentUserData.ketaoRank ?? 0);
-                const daysRank = Math.floor(currentUserData.days_rank_percent ?? currentUserData.days_rank ?? currentUserData.daysRank ?? 0);
-                let avgRank = currentUserData.avg_rank ?? currentUserData.avgRank ?? currentUserData.ranks?.avgRank ?? vibePercentile ?? (jiafangRank != null && ketaoRank != null && daysRank != null ? (jiafangRank + ketaoRank + daysRank) / 3 : null);
+                // 【Task 2】优先使用视图返回的 vibe_rank 和 vibe_percentile
+                const vibeRank = currentUserData.vibe_rank || currentUserData.vibeRank || null;
+                const vibePercentile = currentUserData.vibe_percentile || currentUserData.vibePercentile || null;
+                // 尝试从多个来源获取排名：ranks 对象、avg_rank、或从 personality_data 中计算
+                let avgRank = currentUserData.avg_rank || currentUserData.avgRank || currentUserData.ranks?.avgRank || vibePercentile || null;
                 
                 // 如果还没有排名，尝试从 personality_data 或 personality JSONB 字段中获取
                 if (avgRank === null || avgRank === undefined) {
@@ -17300,35 +17006,21 @@
                 }
                 
                 const totalUsers = window.lastData?.totalUsers || 1;
-                const userTotalMsgs = Number(currentUserData?.total_messages ?? currentUserData?.totalMessages ?? dimensionValues?.ai ?? 0) || 0;
                 let techRankText = 'N/A';
-                const pct = (v) => Math.floor(Number(v) ?? 0) + '%';
-                const jiafangPct = pct(currentUserData.jiafang_rank_percent ?? currentUserData.jiafang_rank ?? 0);
-                const ketaoPct = pct(currentUserData.ketao_rank_percent ?? currentUserData.ketao_rank ?? 0);
-                const daysPct = pct(currentUserData.days_rank_percent ?? currentUserData.days_rank ?? 0);
-
-                // 技术排名来源：后端 v_user_analysis_extended 的 vibe_rank（1-based 名次）或由 _percent 推算
-                // 公平性：名次始终为 1-based，至少为 1，避免出现「第 0 名」
-                const rankForDisplay = (r) => Math.min(totalUsers, Math.max(1, Number(r) || 1));
+                
+                // 优先使用 vibe_rank（如果存在）
                 if (vibeRank !== null && vibeRank !== undefined && totalUsers > 0) {
-                    const r = rankForDisplay(vibeRank);
                     techRankText = currentLang === 'en'
-                        ? `#${r} / ${totalUsers}`
-                        : `第 ${r} 名 / ${totalUsers} 人`;
+                        ? `#${vibeRank} / ${totalUsers}`
+                        : `第 ${vibeRank} 名 / ${totalUsers} 人`;
                 } else if (avgRank !== null && avgRank !== undefined && totalUsers > 0) {
-                    // avgRank 为百分比 0-100（越大越强），(1-avgRank/100)*totalUsers = 人数在你前面，+1 为 1-based 名次
-                    const peopleAhead = Math.round((1 - avgRank / 100) * totalUsers);
-                    const r = rankForDisplay(peopleAhead + 1);
+                    // avgRank 是百分比（0-100），需要转换为排名
+                    const rankPercent = Math.round((1 - avgRank / 100) * totalUsers);
                     techRankText = currentLang === 'en'
-                        ? `#${r} / ${totalUsers}`
-                        : `第 ${r} 名 / ${totalUsers} 人`;
+                        ? `#${rankPercent} / ${totalUsers}`
+                        : `第 ${rankPercent} 名 / ${totalUsers} 人`;
                 }
-                const isLowConfidence = userTotalMsgs > 0 && userTotalMsgs < 10;
-                const techRankClass = isLowConfidence ? 'text-gray-600' : '';
-                const confidenceHint = isLowConfidence
-                    ? `<div class="text-[9px] text-zinc-500 mt-1">${currentLang === 'en' ? 'Low confidence (early stage)' : '当前处于病患初期，置信度较低'}</div>`
-                    : '';
-                console.log('[UserStats] 🏆 技术排名:', { vibeRank, vibePercentile, avgRank, totalUsers, techRankText, userTotalMsgs });
+                console.log('[UserStats] 🏆 技术排名:', { vibeRank, vibePercentile, avgRank, totalUsers, techRankText });
                 
                 const nf = new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN');
 
@@ -17995,9 +17687,9 @@
                     } catch { /* ignore */ }
                 }
                 
-                // 创建用户统计卡片容器（赛博病理风格：border-white/10 bg-[#0a0a0a]/80 backdrop-blur）
+                // 创建用户统计卡片容器
                 const statsCard = document.createElement('div');
-                statsCard.className = 'drawer-item bg-[#0a0a0a]/80 backdrop-blur border border-white/10';
+                statsCard.className = 'drawer-item';
                 statsCard.innerHTML = `
                     <div class="flex items-center justify-between mb-3">
                         <span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">📊</span>
@@ -18008,12 +17700,10 @@
                     
                     <div class="drawer-item-label mb-3">${getI18nText('drawer.my_stats') || 'My Stats'}</div>
                     
-                    <!-- 技术排名（赛博病理置信度：<10 条消息时半透明提示；百分比兜底 jiafang_rank_percent 等） -->
+                    <!-- 技术排名 -->
                     <div class="mb-3 pb-3 border-b border-[#00ff41]/10">
                         <div class="drawer-item-label mb-1">${getI18nText('drawer.tech_rank') || (currentLang === 'en' ? 'Tech Rank' : '技术排名')}</div>
-                        <div class="drawer-item-value text-lg ${techRankClass}">${techRankText}</div>
-                        <div class="text-[10px] text-zinc-500 mt-1">${currentLang === 'en' ? 'Top' : '前'} ${jiafangPct} ${currentLang === 'en' ? 'Boss' : '甲方'} | ${currentLang === 'en' ? 'Top' : '前'} ${ketaoPct} ${currentLang === 'en' ? 'Kowtow' : '磕头'} | ${currentLang === 'en' ? 'Top' : '前'} ${daysPct} ${currentLang === 'en' ? 'Days' : '天数'}</div>
-                        ${confidenceHint}
+                        <div class="drawer-item-value text-lg">${techRankText}</div>
                         <div class="drawer-item-desc text-[8px]">TECH_RANK</div>
                     </div>
                     
@@ -18181,11 +17871,14 @@
                 messages = Number(userData.L);
             }
             
-            // say (总字数/累计字数)：优先 total_chars（与 DB 列名一致），回退 total_user_chars / totalUserChars
+            // say (总字数/累计字数)：优先取 total_user_chars（v_top_records 视图使用），其次 total_chars
+            // 字段回退：total_user_chars -> total_chars -> totalUserChars -> p_score -> p -> P
+            // 关键：v_top_records 视图使用 total_user_chars 字段
             let chars = undefined;
-            const rawChars = userData.total_chars ?? userData['total_user_chars'];
-            if (rawChars !== undefined && rawChars !== null && Number(rawChars) > 0) {
-                chars = Number(rawChars);
+            if (userData.total_user_chars !== undefined && userData.total_user_chars !== null && Number(userData.total_user_chars) > 0) {
+                chars = Number(userData.total_user_chars);
+            } else if (userData.total_chars !== undefined && userData.total_chars !== null && Number(userData.total_chars) > 0) {
+                chars = Number(userData.total_chars);
             } else if (userData.totalUserChars !== undefined && userData.totalUserChars !== null && Number(userData.totalUserChars) > 0) {
                 chars = Number(userData.totalUserChars);
             } else if (userData.p_score !== undefined && userData.p_score !== null && Number(userData.p_score) > 0) {
@@ -18196,11 +17889,11 @@
                 chars = Number(userData.P);
             }
             
-            // word (平均长度)：与 DB 列名一致 avg_message_length，回退 avg_user_message_length
+            // word (平均长度)：若 avg_user_message_length 为 0 或无效，必须执行 Math.round(total_chars / total_messages)
+            // 字段回退：avg_user_message_length -> avgMessageLength -> avgUserMessageLength -> 公式计算
             let word = undefined;
-            const rawAvgLen = userData.avg_message_length ?? userData['avg_user_message_length'];
-            if (rawAvgLen !== undefined && rawAvgLen !== null && Number(rawAvgLen) > 0) {
-                word = Number(rawAvgLen);
+            if (userData.avg_user_message_length !== undefined && userData.avg_user_message_length !== null && Number(userData.avg_user_message_length) > 0) {
+                word = Number(userData.avg_user_message_length);
             } else if (userData.avgMessageLength !== undefined && userData.avgMessageLength !== null && Number(userData.avgMessageLength) > 0) {
                 word = Number(userData.avgMessageLength);
             } else if (userData.avgUserMessageLength !== undefined && userData.avgUserMessageLength !== null && Number(userData.avgUserMessageLength) > 0) {
@@ -18584,7 +18277,7 @@
                 // 赛博风格：背景 bg-[#050505]/60 配合 backdrop-blur-xl
                 // 悬浮时上移 hover:-translate-y-2，边框由暗绿变为亮绿，并出现赛博转角扫描线
                 const card = document.createElement('div');
-                card.className = `cursor-pointer flex-1 min-w-0 bg-[#0a0a0a]/80 backdrop-blur border border-white/10 p-3 rounded-sm transition-all duration-300 hover:-translate-y-2 hover:border-[#00ff41] hover:shadow-[0_0_20px_rgba(0,255,65,0.4)] relative group pointer-events-auto overflow-visible`;
+                card.className = `cursor-pointer flex-1 min-w-0 bg-[#050505]/60 backdrop-blur-xl border border-[#00ff41]/20 p-3 rounded-sm transition-all duration-300 hover:-translate-y-2 hover:border-[#00ff41] hover:shadow-[0_0_20px_rgba(0,255,65,0.4)] relative group pointer-events-auto overflow-visible`;
                 
                 // 存储维度ID和国家代码，用于地图联动
                 card.setAttribute('data-dim-id', dimId);
@@ -18795,7 +18488,8 @@
                 }
             }, 500);
             
-            // 初始化状态按钮：仅在 Presence on('SUBSCRIBED') 回调中执行，不在页面加载时立即执行（避免订阅未就绪时报错）
+            // 初始化状态按钮
+            initStatusButtons();
             
             // 初始化抽屉状态
             initDrawerState();
@@ -19006,7 +18700,7 @@
                         
                         // 【Task 2】使用统一视图 v_unified_analysis_v2
                         const { data: dbUser, error: queryError } = await supabaseClient
-                            .from('v_user_analysis_extended')
+                            .from('v_unified_analysis_v2')
                             .select('*')
                             .eq('fingerprint', currentFingerprint)
                             .maybeSingle();
@@ -20957,10 +20651,10 @@
                                 console.log('[Refresh] ✅ 通过 GitHub User ID 找到用户:', currentUser.user_name || currentUser.name);
                             } else {
                             // 如果 allData 中没有，尝试从 Supabase 直接查询
-                            // 【数据源迁移】使用带实时排名的视图 v_user_analysis_extended
-                            console.log('[Refresh] 🔍 allData 中未找到，尝试从 Supabase 查询（v_user_analysis_extended）...');
+                            // 【Task 2】使用统一视图 v_unified_analysis_v2
+                            console.log('[Refresh] 🔍 allData 中未找到，尝试从 Supabase 查询（使用统一视图）...');
                             const { data: dbUser, error: queryError } = await supabaseClient
-                                .from('v_user_analysis_extended')
+                                .from('v_unified_analysis_v2')
                                 .select('*')
                                 .eq('id', githubUserId)
                                 .maybeSingle();
@@ -21135,24 +20829,9 @@
                 if (error.name === 'AbortError' || error.message?.includes('aborted')) {
                     console.log('[Refresh] ℹ️ 刷新请求被取消（可能是页面刷新导致）');
                 } else {
-                    // 【核心诊断】输出完整错误对象，便于区分 404（函数不存在）vs 403（无权限）
-                    const statusMatch = (error?.message || '').match(/Status:\s*(\d+)/);
-                    const httpStatus = statusMatch ? statusMatch[1] : (error?.status ?? error?.response?.status ?? 'N/A');
-                    console.error('[Refresh] ❌ 刷新失败 - 完整错误对象:', {
-                        name: error?.name,
-                        message: error?.message,
-                        httpStatus: httpStatus,
-                        hint: httpStatus === '404' ? '（函数/路由可能不存在）' : (httpStatus === '403' ? '（可能无权限）' : ''),
-                        stack: error?.stack,
-                        fullError: error
-                    });
+                    console.error('[Refresh] ❌ 刷新失败:', error);
                 }
             } finally {
-                // 排名计算中状态隐藏：强制关掉加载层
-                try {
-                    var loadingOverlay = document.getElementById('loading-overlay');
-                    if (loadingOverlay) loadingOverlay.classList.add('hidden');
-                } catch (e) { /* ignore */ }
                 // 重置标志
                 isRefreshingUserStats = false;
                 refreshUserStatsAbortController = null;

@@ -46,10 +46,24 @@ unified AS (
         COALESCE(manual_lat, raw_lat) AS lat,
         COALESCE(manual_lng, raw_lng) AS lng,
         manual_location, manual_lat, manual_lng,
-        -- 国家口径强约束：只接受 ISO2（避免 legacy 写入 IP/未知/国家全名导致国家聚合为 0）
+        -- 国家口径：ISO2 或全名映射（manual_location 优先 > ip_location；支持 United States/China 等全名）
         CASE
           WHEN manual_location ~ '^[A-Za-z]{2}$' THEN UPPER(manual_location)
           WHEN ip_location ~ '^[A-Za-z]{2}$' THEN UPPER(ip_location)
+          WHEN UPPER(TRIM(ip_location)) IN ('CHINA', 'CN', 'ZH') THEN 'CN'
+          WHEN UPPER(TRIM(ip_location)) IN ('UNITED STATES', 'USA', 'US', 'UNITED STATES OF AMERICA') THEN 'US'
+          WHEN UPPER(TRIM(ip_location)) IN ('JAPAN', 'JP') THEN 'JP'
+          WHEN UPPER(TRIM(ip_location)) IN ('SOUTH KOREA', 'KOREA', 'KR') THEN 'KR'
+          WHEN UPPER(TRIM(ip_location)) IN ('UNITED KINGDOM', 'UK', 'GB') THEN 'GB'
+          WHEN UPPER(TRIM(ip_location)) IN ('GERMANY', 'DE') THEN 'DE'
+          WHEN UPPER(TRIM(ip_location)) IN ('FRANCE', 'FR') THEN 'FR'
+          WHEN UPPER(TRIM(ip_location)) IN ('INDIA', 'IN') THEN 'IN'
+          WHEN UPPER(TRIM(ip_location)) IN ('CANADA', 'CA') THEN 'CA'
+          WHEN UPPER(TRIM(ip_location)) IN ('AUSTRALIA', 'AU') THEN 'AU'
+          WHEN UPPER(TRIM(ip_location)) IN ('BRAZIL', 'BR') THEN 'BR'
+          WHEN UPPER(TRIM(ip_location)) IN ('RUSSIAN FEDERATION', 'RUSSIA', 'RU') THEN 'RU'
+          WHEN UPPER(TRIM(manual_location)) IN ('CHINA', 'CN') THEN 'CN'
+          WHEN UPPER(TRIM(manual_location)) IN ('UNITED STATES', 'USA', 'US') THEN 'US'
           ELSE NULL
         END AS country_code,
         created_at, updated_at,

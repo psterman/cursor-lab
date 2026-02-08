@@ -477,12 +477,36 @@ export async function identifyUserByClaimToken(
 }
 
 /**
+ * 迁移成功后从 v_user_analysis_extended 查询该用户完整记录（含排名等），供前端立即同步
+ */
+async function fetchUserFromExtendedView(userId: string, env: Env): Promise<any | null> {
+  if (!env?.SUPABASE_URL || !env?.SUPABASE_KEY) return null;
+  try {
+    const url = `${env.SUPABASE_URL}/rest/v1/v_user_analysis_extended?id=eq.${encodeURIComponent(userId)}&limit=1`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        apikey: env.SUPABASE_KEY,
+        Authorization: `Bearer ${env.SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const row = Array.isArray(data) && data.length > 0 ? data[0] : data;
+    return row && typeof row === 'object' ? row : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 将匿名数据迁移到 GitHub User ID (支持 claim_token 和 fingerprint 两种方式)
  * @param fingerprint - 浏览器指纹 (用于基于 fingerprint 的迁移)
  * @param userId - 新的 GitHub User ID (UUID)
  * @param claimToken - 影子令牌 (可选,如果提供则优先使用 claim_token 方式)
  * @param env - 环境变量
- * @returns 迁移后的用户数据或 null
+ * @returns 迁移后该用户在 v_user_analysis_extended 中的完整记录，或 null
  */
 export async function migrateFingerprintToUserId(
   fingerprint: string,
@@ -652,7 +676,9 @@ export async function migrateFingerprintToUserId(
       // 【步骤 5: 销毁令牌】删除源记录
       await deleteSourceRecord(sourceRecord.id, env);
       
-      return result;
+      // 逻辑闭环：返回视图中完整记录，便于后端同步给前端
+      const viewRow = await fetchUserFromExtendedView(userId, env);
+      return viewRow ?? result;
     } else {
       // 【禁止创建新行】直接更新源记录的 id 和 user_identity，不创建新行
       console.log('[Migrate] 🔄 更新源记录的 user_id，不创建新行...');
@@ -710,7 +736,9 @@ export async function migrateFingerprintToUserId(
       
       console.log('[Migrate] ✅ 源记录更新成功，user_id 已更新为 GitHub ID');
       
-      return result;
+      // 逻辑闭环：返回视图中完整记录，便于后端同步给前端
+      const viewRow = await fetchUserFromExtendedView(userId, env);
+      return viewRow ?? result;
     }
   } catch (error: any) {
     console.error('[Migrate] ❌ 迁移失败:', error);
