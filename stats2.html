@@ -3125,10 +3125,19 @@
                     <span class="drawer-icon">🔍</span>
                     <span class="drawer-title-text" id="right-drawer-title">详细信息</span>
                 </div>
-                <div class="drawer-close-btn" onclick="closeDrawers()">✕</div>
+                <div class="flex items-center gap-2">
+                    <!-- 【新增】视图切换按钮 - 根据当前视图状态动态显示 -->
+                    <button type="button" id="headerViewToggleBtn" onclick="toggleGlobalCountryView()" class="px-2 py-1 text-[10px] border border-[#00ff41]/50 text-[#00ff41] hover:bg-[#00ff41]/10 transition-colors uppercase tracking-wider">
+                        [国家透视]
+                    </button>
+                    <div class="drawer-close-btn" onclick="closeDrawers()">✕</div>
+                </div>
             </div>
             <div class="drawer-body" id="right-drawer-body">
                 <div id="globalFlowPanel">
+                    <div class="flex items-center gap-2 mb-3" id="globalFlowPanelButtons">
+                        <button type="button" id="switchToCountryBtn" data-t="btn.switch_country" onclick="switchToCountryViewFromGlobal()" class="px-3 py-1.5 text-xs border border-[#00ff41]/50 text-[#00ff41] hover:bg-[#00ff41]/10 transition-colors">[国家透视]</button>
+                    </div>
                     <!-- 实时动态流：内容将通过 JavaScript 动态填充 -->
                 </div>
                 <div id="countryPanel" style="display: none;">
@@ -5050,6 +5059,7 @@
             zh: {
                 // Buttons / panel header / hotlist / PK
                 'btn.back_global': '[返回全网]',
+                'btn.switch_country': '[国家透视]',
                 'btn.refresh': '[刷新]',
                 'panel.country_panel': '国家透视',
                 'pk.domineering': '霸道值',
@@ -5234,6 +5244,7 @@
 
                 // Buttons / panel header / hotlist / PK
                 'btn.back_global': '[Back to Global]',
+                'btn.switch_country': '[Country Panel]',
                 'btn.refresh': '[REFRESH]',
                 'panel.country_panel': 'Country Panel',
                 'pk.domineering': 'Dominance',
@@ -5488,6 +5499,9 @@
                 if (sub) sub.innerText = (i18n[currentLang] && i18n[currentLang]['sub-title']) ? i18n[currentLang]['sub-title'] : (sub.innerText || '');
             } catch { /* ignore */ }
             translatePage();
+            
+            // 【新增】语言切换时更新顶部视图切换按钮
+            updateHeaderViewToggleBtn();
 
             // 重新渲染：依赖 currentLang 的列表/地图/抽屉内容
             try {
@@ -6018,6 +6032,42 @@
 
         let mapChart, radarChart;
         let currentViewState = 'GLOBAL'; // GLOBAL 或 COUNTRY（右侧抽屉：实时动态流 / 国家透视）
+        
+        // 【初始化】确保 global 视图按钮在页面加载时正确显示
+        function initGlobalFlowPanelButtons() {
+            try {
+                const globalFlowPanelButtons = document.getElementById('globalFlowPanelButtons');
+                const globalFlowPanel = document.getElementById('globalFlowPanel');
+                const countryPanelEl = document.getElementById('countryPanel');
+                if (globalFlowPanelButtons && globalFlowPanel && countryPanelEl) {
+                    // 检查当前视图状态
+                    const isCountryVisible = countryPanelEl.style.display !== 'none' && 
+                                            (countryPanelEl.style.display === '' || countryPanelEl.style.display === 'block');
+                    const isGlobalVisible = !isCountryVisible && 
+                                           (globalFlowPanel.style.display !== 'none');
+                    
+                    // 如果当前是 GLOBAL 视图或 countryPanel 隐藏，显示按钮
+                    if (currentViewState === 'GLOBAL' || (!isCountryVisible && isGlobalVisible)) {
+                        globalFlowPanelButtons.style.display = '';
+                    } else {
+                        globalFlowPanelButtons.style.display = 'none';
+                    }
+                }
+            } catch (e) {
+                console.warn('[Init] 初始化 globalFlowPanelButtons 失败:', e);
+            }
+        }
+        
+        // 页面加载完成后初始化
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                setTimeout(initGlobalFlowPanelButtons, 200);
+                setTimeout(updateHeaderViewToggleBtn, 250); // 【新增】初始化顶部视图切换按钮
+            });
+        } else {
+            setTimeout(initGlobalFlowPanelButtons, 200);
+            setTimeout(updateHeaderViewToggleBtn, 250); // 【新增】初始化顶部视图切换按钮
+        }
         let selectedCountry = null; // 当前选中的国家
         let isGlobalTopMode = false; // 全球最强模式，容错用全局兜底
         let currentChampionInfo = null; // 当前选中的冠军信息（用于地图 tooltip 展示）
@@ -7330,12 +7380,21 @@
                 (typeof currentViewState === 'string' &&
                     currentViewState === 'COUNTRY' &&
                     /^[A-Z]{2}$/.test(ccUpperForPanel));
+            const globalFlowPanelButtons = document.getElementById('globalFlowPanelButtons');
             if (preserveCountryPanel) {
                 if (globalFlowPanel) globalFlowPanel.style.display = 'none';
+                if (globalFlowPanelButtons) globalFlowPanelButtons.style.display = 'none';
                 if (countryPanelEl) countryPanelEl.style.display = '';
             } else {
+                // 显示 global 视图
                 if (globalFlowPanel) globalFlowPanel.style.display = '';
                 if (countryPanelEl) countryPanelEl.style.display = 'none';
+                // 【关键修复】确保 global 视图按钮显示
+                if (globalFlowPanelButtons) {
+                    globalFlowPanelButtons.style.display = '';
+                    // 确保按钮容器可见
+                    globalFlowPanelButtons.style.visibility = 'visible';
+                }
             }
 
             // 获取国家显示名称
@@ -8402,8 +8461,10 @@
             const rightDrawer = document.getElementById('right-drawer');
             const globalFlowPanel = document.getElementById('globalFlowPanel');
             const countryPanelEl = document.getElementById('countryPanel');
+            const globalFlowPanelButtons = document.getElementById('globalFlowPanelButtons');
             if (!rightDrawer || !countryPanelEl) return;
             if (globalFlowPanel) globalFlowPanel.style.display = 'none';
+            if (globalFlowPanelButtons) globalFlowPanelButtons.style.display = 'none';
             countryPanelEl.style.display = '';
 
             const leftTitle = document.getElementById('left-drawer-title');
@@ -8423,6 +8484,8 @@
             selectedCountry = code === 'US' ? 'US' : code;
             currentDrawerCountry.code = code;
             currentDrawerCountry.name = displayName;
+            // 【新增】更新顶部视图切换按钮
+            updateHeaderViewToggleBtn();
             console.log('[Drawer] 国家透视已打开:', name);
         }
 
@@ -8565,12 +8628,99 @@
             currentViewState = 'GLOBAL';
             const globalFlowPanel = document.getElementById('globalFlowPanel');
             const countryPanelEl = document.getElementById('countryPanel');
+            const globalFlowPanelButtons = document.getElementById('globalFlowPanelButtons');
             if (globalFlowPanel) globalFlowPanel.style.display = '';
             if (countryPanelEl) countryPanelEl.style.display = 'none';
+            // 显示 global 视图的按钮
+            if (globalFlowPanelButtons) globalFlowPanelButtons.style.display = '';
             if (currentDrawerCountry.code && currentDrawerCountry.name) {
                 showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);
             }
+            // 【新增】更新顶部视图切换按钮
+            updateHeaderViewToggleBtn();
             console.log('[Drawer] 已切回全球/实时动态流');
+        }
+
+        /**
+         * 从「实时动态流」视图切换到「国家数据透视」模式
+         * 优先使用 currentDrawerCountry，其次使用当前用户的国家代码
+         */
+        function switchToCountryViewFromGlobal() {
+            // 优先使用 currentDrawerCountry 中保存的国家信息
+            let countryCode = null;
+            let countryName = null;
+
+            if (currentDrawerCountry && currentDrawerCountry.code && currentDrawerCountry.name) {
+                countryCode = String(currentDrawerCountry.code).trim().toUpperCase();
+                countryName = currentDrawerCountry.name;
+            } else {
+                // 尝试从全局变量获取用户国家代码
+                const userCountry = window.currentUserCountry || 
+                    (window.currentUser && (window.currentUser.country_code || window.currentUser.ip_location)) ||
+                    (window.currentUserData && (window.currentUserData.country_code || window.currentUserData.ip_location));
+                
+                if (userCountry && /^[A-Z]{2}$/.test(String(userCountry).trim().toUpperCase())) {
+                    countryCode = String(userCountry).trim().toUpperCase();
+                    // 从 countryNameMap 获取国家名称
+                    const countryInfo = countryNameMap[countryCode];
+                    countryName = countryInfo 
+                        ? (currentLang === 'zh' ? countryInfo.zh : countryInfo.en)
+                        : countryCode;
+                }
+            }
+
+            // 如果仍然没有国家代码，使用默认值或提示用户
+            if (!countryCode || !/^[A-Z]{2}$/.test(countryCode)) {
+                // 如果没有国家信息，可以提示用户选择国家，或者使用默认值
+                console.warn('[Drawer] ⚠️ 无法获取国家代码，无法切换到国家透视');
+                // 可以在这里添加一个选择国家的 UI，或者使用默认值
+                // 暂时使用 US 作为默认值
+                countryCode = 'US';
+                const countryInfo = countryNameMap[countryCode];
+                countryName = countryInfo 
+                    ? (currentLang === 'zh' ? countryInfo.zh : countryInfo.en)
+                    : 'United States';
+            }
+
+            // 调用 switchToCountryView 切换到国家透视
+            if (typeof switchToCountryView === 'function') {
+                switchToCountryView(countryCode, countryName);
+            } else {
+                console.error('[Drawer] ❌ switchToCountryView 函数不存在');
+            }
+        }
+
+        /**
+         * 【新增】切换 Global 和 Country 视图
+         * 根据当前视图状态自动判断执行哪个切换
+         */
+        function toggleGlobalCountryView() {
+            if (currentViewState === 'GLOBAL') {
+                // 当前是 Global 视图，切换到 Country 视图
+                switchToCountryViewFromGlobal();
+            } else {
+                // 当前是 Country 视图，切换回 Global 视图
+                switchBackToGlobalView();
+            }
+        }
+
+        /**
+         * 【新增】更新顶部视图切换按钮的文本
+         * 在视图切换时自动调用以更新按钮显示
+         */
+        function updateHeaderViewToggleBtn() {
+            const btn = document.getElementById('headerViewToggleBtn');
+            if (!btn) return;
+            
+            if (currentViewState === 'GLOBAL') {
+                // Global 视图时显示"国家透视"
+                btn.textContent = currentLang === 'en' ? '[Country Panel]' : '[国家透视]';
+                btn.title = currentLang === 'en' ? 'Switch to Country Panel' : '切换到国家透视';
+            } else {
+                // Country 视图时显示"返回全网"
+                btn.textContent = currentLang === 'en' ? '[Back to Global]' : '[返回全网]';
+                btn.title = currentLang === 'en' ? 'Back to Global View' : '返回全网视图';
+            }
         }
 
         /**
