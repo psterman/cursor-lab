@@ -477,12 +477,12 @@ export async function identifyUserByClaimToken(
 }
 
 /**
- * 迁移成功后从 v_user_analysis_extended 查询该用户完整记录（含排名等），供前端立即同步
+ * 迁移成功后从 v_unified_analysis_v2 查询该用户完整记录（含 vibe_rank、vibe_percentile 等），供前端立即同步
  */
 async function fetchUserFromExtendedView(userId: string, env: Env): Promise<any | null> {
   if (!env?.SUPABASE_URL || !env?.SUPABASE_KEY) return null;
   try {
-    const url = `${env.SUPABASE_URL}/rest/v1/v_user_analysis_extended?id=eq.${encodeURIComponent(userId)}&limit=1`;
+    const url = `${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2?id=eq.${encodeURIComponent(userId)}&limit=1`;
     const res = await fetch(url, {
       method: 'GET',
       headers: {

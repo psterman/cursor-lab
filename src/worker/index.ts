@@ -109,6 +109,7 @@ interface GlobalCountryStatsPayload {
     total_user_chars_sum?: number;
     jiafang_count_sum?: number;
     ketao_count_sum?: number;
+    work_days_sum?: number;
     avg_user_message_length_sum?: number;
     total_users?: number;
     rank_total_messages?: number;
@@ -117,6 +118,7 @@ interface GlobalCountryStatsPayload {
     rank_jiafang?: number;
     rank_ketao?: number;
     rank_avg_len?: number;
+    rank_work_days?: number;
     total_countries?: number;
     no_competition?: boolean; // 人数极少时标注“该地区暂无竞争”
   }>;
@@ -175,7 +177,7 @@ async function getUserRanks6d(
       body: JSON.stringify(body),
     }, SUPABASE_FETCH_TIMEOUT_MS);
     if (!raw || typeof raw !== 'object') return null;
-    const DIMS = ['total_messages', 'total_chars', 'total_user_chars', 'avg_user_message_length', 'jiafang_count', 'ketao_count'] as const;
+    const DIMS = ['total_messages', 'total_chars', 'avg_user_message_length', 'jiafang_count', 'ketao_count', 'work_days'] as const;
     const out: Record<string, { rank_global: number; total_global: number; rank_country: number; total_country: number }> = {};
     for (const k of DIMS) {
       const v = raw[k];
@@ -5764,6 +5766,7 @@ app.get('/api/country-summary', async (c) => {
         const jc = n(countryRow.jiafang_count_sum);
         const kc = n(countryRow.ketao_count_sum);
         const avgLen = n(countryRow.avg_user_message_length_sum) || (tm > 0 ? (tuc / tm) : 0);
+        const wd = n(countryRow.work_days_sum);
         totals = {
           totalUsers: countryTotalUsers,
           total_messages_sum: tm,
@@ -5772,15 +5775,16 @@ app.get('/api/country-summary', async (c) => {
           jiafang_count_sum: jc,
           ketao_count_sum: kc,
           avg_user_message_length_sum: avgLen,
+          work_days_sum: wd,
           source: 'GLOBAL_COUNTRY_STATS',
         };
         countryTotalsRanks = {
           total_messages: mkRank(countryRow.rank_total_messages, totalCountries),
-          total_user_chars: mkRank(countryRow.rank_total_user_chars, totalCountries),
           total_chars: mkRank(countryRow.rank_total_chars, totalCountries),
           jiafang_count: mkRank(countryRow.rank_jiafang, totalCountries),
           ketao_count: mkRank(countryRow.rank_ketao, totalCountries),
           avg_user_message_length: mkRank(countryRow.rank_avg_len, totalCountries),
+          work_days: mkRank(countryRow.rank_work_days, totalCountries),
           _meta: { totalCountries, no_competition: !!countryRow.no_competition },
         };
       }
@@ -5808,6 +5812,7 @@ app.get('/api/country-summary', async (c) => {
           const jc = n(countryRow.jc ?? countryRow.jiafang_count);
           const kc = n(countryRow.kc ?? countryRow.ketao_count);
           const avgLen = n(countryRow.avg_len ?? countryRow.avg_user_message_length) || (tm > 0 ? (tuc / tm) : 0);
+          const wd = n(countryRow.wd ?? countryRow.work_days_sum);
           totals = {
             totalUsers: countryTotalUsers,
             total_messages_sum: tm,
@@ -5816,17 +5821,18 @@ app.get('/api/country-summary', async (c) => {
             jiafang_count_sum: jc,
             ketao_count_sum: kc,
             avg_user_message_length_sum: avgLen,
+            work_days_sum: wd,
             source: 'RPC_FALLBACK',
           };
           // RPC 返回的排名字段：rank_l(total_messages), rank_m(total_chars), rank_n(total_user_chars),
           // rank_o(avg_len), rank_p(jiafang), rank_g(ketao)
           countryTotalsRanks = {
             total_messages: mkRank(countryRow.rank_l, totalCountries),
-            total_user_chars: mkRank(countryRow.rank_n, totalCountries),
             total_chars: mkRank(countryRow.rank_m, totalCountries),
             jiafang_count: mkRank(countryRow.rank_p, totalCountries),
             ketao_count: mkRank(countryRow.rank_g, totalCountries),
             avg_user_message_length: mkRank(countryRow.rank_o, totalCountries),
+            work_days: mkRank(countryRow.rank_h, totalCountries),
             _meta: { totalCountries, no_competition: countryTotalUsers <= 1 },
           };
         }
@@ -5852,11 +5858,11 @@ app.get('/api/country-summary', async (c) => {
       };
       countryTotalsRanks = {
         total_messages: null,
-        total_user_chars: null,
         total_chars: null,
         jiafang_count: null,
         ketao_count: null,
         avg_user_message_length: null,
+        work_days: null,
         _meta: { totalCountries: 0, no_competition: noCompetition },
       };
     }
@@ -5918,9 +5924,9 @@ app.get('/api/country-summary', async (c) => {
               return await fetchSupabaseJson<any[]>(env, meUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS);
             };
             try {
-              return await fetchMe('id,user_name,fingerprint,user_identity,total_messages,total_user_chars,total_chars,avg_user_message_length,jiafang_count,ketao_count');
+              return await fetchMe('id,user_name,fingerprint,user_identity,total_messages,total_user_chars,total_chars,avg_user_message_length,jiafang_count,ketao_count,work_days');
             } catch {
-              return await fetchMe('id,user_name,fingerprint,user_identity,total_messages,total_chars,jiafang_count,ketao_count').catch(() => []);
+              return await fetchMe('id,user_name,fingerprint,user_identity,total_messages,total_chars,jiafang_count,ketao_count,work_days').catch(() => []);
             }
           })(),
         ]);
@@ -5934,6 +5940,7 @@ app.get('/api/country-summary', async (c) => {
           const avgLen = Number(me.avg_user_message_length) || (msg > 0 ? (userChars / msg) : 0);
           const jia = Number(me.jiafang_count) || 0;
           const ket = Number(me.ketao_count) || 0;
+          const wd = Number(me.work_days) ?? 0;
           myValues = {
             total_messages: msg,
             total_user_chars: userChars,
@@ -5941,8 +5948,9 @@ app.get('/api/country-summary', async (c) => {
             avg_user_message_length: avgLen,
             jiafang_count: jia,
             ketao_count: ket,
+            work_days: wd,
           };
-          const DIMS = ['total_messages', 'total_chars', 'total_user_chars', 'avg_user_message_length', 'jiafang_count', 'ketao_count'] as const;
+          const DIMS = ['total_messages', 'total_chars', 'avg_user_message_length', 'jiafang_count', 'ketao_count', 'work_days'] as const;
           if (ranks6d && ranks6d.ranks) {
             myRanks = {} as any;
             globalUserRanks = {};
@@ -5961,8 +5969,17 @@ app.get('/api/country-summary', async (c) => {
             const rankInCountry = rankRow ? rankRow.rank_in_country : null;
             const totalVal = totalInCountry > 0 ? totalInCountry : countryTotalUsers;
             const rankVal = (rankInCountry != null && rankInCountry > 0) ? rankInCountry : null;
+            const totalGlobal = rankRow ? rankRow.total_global : 0;
+            const rankGlobal = rankRow ? rankRow.rank_global : null;
             const one = totalVal > 0 && rankVal != null ? { rank: rankVal, total: totalVal, percentile: totalVal > 0 ? Math.max(0, Math.min(100, (1 - (rankVal - 1) / totalVal) * 100)) : null } : null;
-            myRanks = { total_messages: one, total_chars: one, total_user_chars: one, avg_user_message_length: one, jiafang_count: one, ketao_count: one };
+            const oneGlobal = totalGlobal > 0 && rankGlobal != null && rankGlobal > 0 ? { rank: rankGlobal, total: totalGlobal } : null;
+            myRanks = { total_messages: one, total_chars: one, avg_user_message_length: one, jiafang_count: one, ketao_count: one, work_days: one };
+            globalUserRanks = {};
+            countryUserRanks = {};
+            for (const k of DIMS) {
+              globalUserRanks[k] = oneGlobal ? { rank: oneGlobal.rank, total: oneGlobal.total } : { rank: 0, total: 0 };
+              countryUserRanks[k] = one ? { rank: one.rank, total: one.total } : { rank: 0, total: 0 };
+            }
           }
         }
       } catch {
@@ -6008,10 +6025,10 @@ app.get('/api/country-summary', async (c) => {
       const metrics: Array<{ key: string; col: string; labelZh: string; labelEn: string; format?: 'int' | 'float' }> = [
           { key: 'total_messages', col: 'total_messages', labelZh: '调戏AI次数', labelEn: 'Messages', format: 'int' },
           { key: 'total_chars', col: 'total_chars', labelZh: '对话字符数', labelEn: 'Total Chars', format: 'int' },
-          { key: 'total_user_chars', col: 'total_user_chars', labelZh: '废话输出', labelEn: 'User Chars', format: 'int' },
           { key: 'avg_user_message_length', col: 'avg_user_message_length', labelZh: '平均长度', labelEn: 'Avg Len', format: 'float' },
           { key: 'jiafang_count', col: 'jiafang_count', labelZh: '甲方上身', labelEn: 'Jiafang', format: 'int' },
           { key: 'ketao_count', col: 'ketao_count', labelZh: '磕头', labelEn: 'Ketao', format: 'int' },
+          { key: 'work_days', col: 'work_days', labelZh: '上岗天数', labelEn: 'Work Days', format: 'int' },
       ];
 
       // 无论是否有数据，都返回 6 个条目，前端才能稳定显示 6 个排行榜 + 指示器
@@ -6077,10 +6094,10 @@ app.get('/api/country-summary', async (c) => {
           'country_code',
           'total_messages',
           'total_chars',
-          'total_user_chars',
           'avg_user_message_length',
           'jiafang_count',
           'ketao_count',
+          'work_days',
         ].join(',');
         // 注意：部分环境的视图可能尚未包含 lpdef 列。这里先尝试带 lpdef，失败则回退到不带 lpdef，
         // 避免整项榜单因 select 列不存在而变成空数据。
@@ -6240,12 +6257,12 @@ app.get('/api/country-summary', async (c) => {
         country,
         totalUsers: countryTotalUsers,
         total_messages: totalMessages,
-        total_user_chars: totalUserChars, // 兼容：与 total_chars 同口径时也可用
         total_chars: totalChars,
         jiafang_count: Number(totals?.jiafang_count_sum) || 0,
         ketao_count: Number(totals?.ketao_count_sum) || 0,
         // 与 rollup 口径一致：加权平均长度
         avg_user_message_length: totalMessages > 0 ? (totalUserChars / totalMessages) : 0,
+        work_days: Number(totals?.work_days_sum) || 0,
       },
       countryTotalsRanks,
       myCountry: myOut,
@@ -6267,10 +6284,10 @@ app.get('/api/country-summary', async (c) => {
           ranks: {
             L: countryTotalsRanks.total_messages?.rank ?? 0,
             P: countryTotalsRanks.total_chars?.rank ?? 0,
-            D: countryTotalsRanks.total_user_chars?.rank ?? 0,
             E: countryTotalsRanks.avg_user_message_length?.rank ?? 0,
             F: countryTotalsRanks.jiafang_count?.rank ?? 0,
             G: countryTotalsRanks.ketao_count?.rank ?? 0,
+            H: countryTotalsRanks.work_days?.rank ?? 0,
           },
           total_countries: totalCountries,
           user_count: countryTotalUsers,
@@ -7616,11 +7633,11 @@ async function performV6Aggregation(env: Env): Promise<{ success: boolean; error
   }
 }
 
-/** rank_l..rank_g 映射为大写 L,P,D,E,F,G 存入 ranks 对象 */
+/** rank_l..rank_h 映射为大写 L,P,D,E,F,G,H 存入 ranks 对象 */
 const RANK_V3_TO_LETTER: Record<string, string> = {
-  rank_l: 'L', rank_m: 'P', rank_n: 'D', rank_o: 'E', rank_p: 'F', rank_g: 'G',
+  rank_l: 'L', rank_m: 'P', rank_n: 'D', rank_o: 'E', rank_p: 'F', rank_g: 'G', rank_h: 'H',
 };
-const RANK_V3_FIELDS = ['rank_l', 'rank_m', 'rank_n', 'rank_o', 'rank_p', 'rank_g'] as const;
+const RANK_V3_FIELDS = ['rank_l', 'rank_m', 'rank_n', 'rank_o', 'rank_p', 'rank_g', 'rank_h'] as const;
 
 /** 仅限 Cron 调用：计算各国 6 维累积并写入 KV GLOBAL_COUNTRY_STATS，接口只读不写。调用 get_country_ranks_v3，以国家代码为 Top Key 存入 ranks 对象。 */
 async function writeGlobalCountryStatsToKV(env: Env): Promise<{ success: boolean; error?: string }> {
@@ -7656,7 +7673,7 @@ async function writeGlobalCountryStatsToKV(env: Env): Promise<{ success: boolean
       const ranks: Record<string, number> = {};
       const v2Map: Record<string, string> = {
         rank_l: 'rank_messages', rank_m: 'rank_total_chars', rank_n: 'rank_total_user_chars',
-        rank_o: 'rank_avg_len', rank_p: 'rank_jiafang', rank_g: 'rank_ketao',
+        rank_o: 'rank_avg_len', rank_p: 'rank_jiafang', rank_g: 'rank_ketao', rank_h: 'rank_work_days',
       };
       for (const v3f of RANK_V3_FIELDS) {
         const rv3 = it[v3f];
@@ -7672,6 +7689,7 @@ async function writeGlobalCountryStatsToKV(env: Env): Promise<{ success: boolean
         total_user_chars_sum: n(it.tuc ?? it.total_user_chars ?? it.total_user_chars_sum),
         jiafang_count_sum: n(it.jc ?? it.jiafang_count ?? it.jiafang_count_sum),
         ketao_count_sum: n(it.kc ?? it.ketao_count ?? it.ketao_count_sum),
+        work_days_sum: n(it.wd ?? it.work_days_sum),
         avg_user_message_length_sum: n(it.avg_user_message_length ?? it.avg_len) || 0,
         total_users: total_users,
         rank_total_messages: ranks.L || n(it.rank_messages ?? it.rank_total_messages),
@@ -7680,6 +7698,7 @@ async function writeGlobalCountryStatsToKV(env: Env): Promise<{ success: boolean
         rank_jiafang: ranks.F || n(it.rank_jiafang ?? it.rank_jiafang_count),
         rank_ketao: ranks.G || n(it.rank_ketao ?? it.rank_ketao_count),
         rank_avg_len: ranks.E || n(it.rank_avg_len ?? it.rank_avg_user_message_length),
+        rank_work_days: ranks.H || n(it.rank_h ?? it.rank_work_days),
         total_countries: totalCountries,
         no_competition: total_users <= 1,
       };

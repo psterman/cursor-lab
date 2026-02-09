@@ -3542,7 +3542,7 @@
             if (topTalentsHeroesEl) { topTalentsHeroesEl.innerHTML = ''; try { topTalentsHeroesEl.style.display = 'none'; } catch (_) {} }
             if (eliteHintEl) { try { eliteHintEl.style.display = 'none'; } catch (_) {} }
             if (!container) return;
-            var metricOrder = ['total_messages', 'total_chars', 'total_user_chars', 'avg_message_length', 'jiafang_count', 'ketao_count'];
+            var metricOrder = ['total_messages', 'total_chars', 'avg_message_length', 'jiafang_count', 'ketao_count', 'work_days'];
             var sorted = (Array.isArray(topBy) ? topBy.slice() : []).sort(function (a, b) { return metricOrder.indexOf(String((a && a.key) || '')) - metricOrder.indexOf(String((b && b.key) || '')); });
             if (!sorted.length) {
                 container.innerHTML = '<div class="text-zinc-500 text-xs text-center">' + (typeof escapeHtml === 'function' ? escapeHtml(typeof getI18nText === 'function' ? getI18nText('lpdef.none') || '暂无高分图谱数据' : '暂无高分图谱数据') : '暂无高分图谱数据') + '</div>';
@@ -3601,10 +3601,14 @@
                         pData = row.personality;
                     }
                     if (!pData || !Object.keys(pData).length) {
-                        if (typeof row.personality_data === 'string') {
-                            try { pData = JSON.parse(row.personality_data); } catch (_) {}
-                        } else if (row.personality_data && typeof row.personality_data === 'object') {
-                            pData = Array.isArray(row.personality_data) ? { detailedStats: row.personality_data } : row.personality_data;
+                        var raw = row.personality_data ?? row.personalityData;
+                        if (typeof raw === 'string') {
+                            try {
+                                pData = JSON.parse(raw);
+                                if (typeof pData === 'string') { try { pData = JSON.parse(pData); } catch (_) {} }
+                            } catch (_) {}
+                        } else if (raw && typeof raw === 'object') {
+                            pData = Array.isArray(raw) ? { detailedStats: raw } : raw;
                         }
                     }
                     return Object.assign({}, row, { personality: pData, user: Object.assign({}, row.user || {}, { personality: pData }) });
@@ -4464,7 +4468,7 @@
 
                         const totalCountriesCount = totalCountriesFromData;
                         const MEDALS = { 1: '🥇', 2: '🥈', 3: '🥉' };
-                        const DIM_TO_LETTER = { total_messages:'L', total_chars:'P', total_user_chars:'D', avg_message_length:'E', jiafang_count:'F', ketao_count:'G' };
+                        const DIM_TO_LETTER = { total_messages:'L', total_chars:'P', total_user_chars:'D', avg_message_length:'E', jiafang_count:'F', ketao_count:'G', work_days:'H' };
                         const rowTotals = (label, totalVal, r, dimKey) => {
                             const letter = DIM_TO_LETTER[dimKey] || dimKey;
                             const rankFromRanks = (countryDataByCode[userCountry]?.ranks || {})[letter];
@@ -4487,16 +4491,25 @@
                         };
                         const fmtMe = (v) => (v === undefined || v === null || Number.isNaN(Number(v))) ? '0' : fmt(v);
                         const pioneerLabel = currentLang === 'en' ? 'Pioneer' : '该国先锋';
-                        const DIM_KEYS = ['total_messages','total_chars','total_user_chars','avg_message_length','jiafang_count','ketao_count'];
+                        const DIM_KEYS = ['total_messages','total_chars','avg_message_length','jiafang_count','ketao_count','work_days'];
                         const gRanks = payload2.global_user_ranks || payload2.data?.global_user_ranks || {};
                         const cRanks = payload2.country_user_ranks || payload2.data?.country_user_ranks || ranks || {};
                         const rowRanks = (label, myVal, dimKey) => {
-                            const cr = ranks?.[dimKey] ?? cRanks[dimKey] ?? (dimKey === 'total_chars' ? (ranks?.total_chars ?? cRanks?.total_chars) : null);
-                            const gr = gRanks[dimKey] ?? (dimKey === 'total_chars' ? gRanks?.total_chars : null);
-                            const rankCountry = cr && ((cr.rank ?? cr._rank) != null) && Number.isFinite(Number(cr.rank ?? cr._rank)) ? Number(cr.rank ?? cr._rank) : null;
-                            const totalCountry = cr && (cr.total != null) ? Number(cr.total) : 0;
-                            const rankGlobal = gr && (gr.rank ?? gr._rank) != null ? Number(gr.rank ?? gr._rank) : null;
-                            const totalGlobal = gr && gr.total != null ? Number(gr.total) : 0;
+                            const dimKeyAlt = dimKey === 'avg_message_length' ? 'avg_user_message_length' : dimKey;
+                            const cr = ranks?.[dimKey] ?? cRanks[dimKey] ?? ranks?.[dimKeyAlt] ?? cRanks[dimKeyAlt] ?? (dimKey === 'total_chars' ? (ranks?.total_chars ?? cRanks?.total_chars) : null);
+                            const gr = gRanks[dimKey] ?? gRanks[dimKeyAlt] ?? (dimKey === 'total_chars' ? gRanks?.total_chars : null);
+                            let rankCountry = cr && ((cr.rank ?? cr._rank) != null) && Number.isFinite(Number(cr.rank ?? cr._rank)) ? Number(cr.rank ?? cr._rank) : null;
+                            let totalCountry = cr && (cr.total != null) ? Number(cr.total) : 0;
+                            let rankGlobal = gr && (gr.rank ?? gr._rank) != null ? Number(gr.rank ?? gr._rank) : null;
+                            let totalGlobal = gr && gr.total != null ? Number(gr.total) : 0;
+                            // 【vibe_rank 兜底】当 per-dimension 排名为空时，使用 vibe_rank / vibe_percentile 显示全球综合排名
+                            const userData = window.currentUserData || window.currentUser || {};
+                            const vibeRank = Number(userData?.vibe_rank ?? userData?.vibeRank ?? NaN);
+                            const totalUsersFallback = payload2.totalUsers ?? globalTotalUsers ?? 0;
+                            if ((rankGlobal == null || totalGlobal <= 0) && Number.isFinite(vibeRank) && totalUsersFallback > 0) {
+                                rankGlobal = Math.min(totalUsersFallback, Math.max(1, Math.round(vibeRank)));
+                                totalGlobal = totalUsersFallback;
+                            }
                             const naText = currentLang === 'en' ? 'N/A' : '计算中...';
                             const countryText = (rankCountry != null && totalCountry != null && totalCountry > 0) ? `本国：#${rankCountry}/${totalCountry}` : naText;
                             const globalText = (rankGlobal != null && totalGlobal != null && totalGlobal > 0) ? `全球：#${rankGlobal}/${totalGlobal}` : naText;
@@ -4516,16 +4529,16 @@
                             `;
                         };
 
-                        // 国家累计：字段对齐 total_chars、jiafang_count，null 视为 0
+                        // 国家累计：移除冗余「废话输出」（与对话字符数同源），新增「上岗天数」
                         // 注意：后端 countryTotalsRanks 键名是 avg_user_message_length，需要兼容
                         const totalsHtml = totals
                             ? [
                                 rowTotals(getI18nText('countryTotals.messages') || 'Messages', totals.total_messages ?? 0, totalsRanks?.total_messages, 'total_messages'),
                                 rowTotals(getI18nText('countryTotals.totalChars') || 'Total Chars', totals.total_chars ?? 0, totalsRanks?.total_chars, 'total_chars'),
-                                rowTotals(getI18nText('countryTotals.userChars') || '废话输出', totals.total_chars ?? totals['total_user_chars'] ?? 0, totalsRanks?.total_user_chars ?? totalsRanks?.total_chars, 'total_user_chars'),
                                 rowTotals(getI18nText('countryTotals.avgLen') || 'Avg Len', Math.round(Number(totals.avg_message_length ?? totals['avg_user_message_length'] ?? 0) || 0), totalsRanks?.avg_user_message_length ?? totalsRanks?.avg_message_length, 'avg_message_length'),
                                 rowTotals(getI18nText('countryTotals.jiafang') || 'Jiafang', totals.jiafang_count ?? 0, totalsRanks?.jiafang_count, 'jiafang_count'),
                                 rowTotals(getI18nText('countryTotals.ketao') || 'Ketao', totals.ketao_count ?? 0, totalsRanks?.ketao_count, 'ketao_count'),
+                                rowTotals(getI18nText('countryTotals.workDays') || '上岗天数', totals.work_days ?? totals.work_days_sum ?? 0, totalsRanks?.work_days, 'work_days'),
                               ].join('')
                             : `<div class="text-zinc-500 text-xs">${currentLang === 'en' ? 'No data' : '暂无数据'}</div>`;
 
@@ -4533,10 +4546,10 @@
                             ? [
                                 rowRanks(getI18nText('countryTotals.messages') || 'Messages', meVals?.total_messages, 'total_messages'),
                                 rowRanks(getI18nText('countryTotals.totalChars') || 'Total Chars', meVals?.total_chars, 'total_chars'),
-                                rowRanks(getI18nText('countryTotals.userChars') || '废话输出', meVals?.total_chars ?? meVals?.['total_user_chars'], 'total_user_chars'),
                                 rowRanks(getI18nText('countryTotals.avgLen') || 'Avg Len', Math.round(Number(meVals?.avg_message_length ?? meVals?.['avg_user_message_length']) || 0), 'avg_message_length'),
                                 rowRanks(getI18nText('countryTotals.jiafang') || 'Jiafang', meVals?.jiafang_count, 'jiafang_count'),
                                 rowRanks(getI18nText('countryTotals.ketao') || 'Ketao', meVals?.ketao_count, 'ketao_count'),
+                                rowRanks(getI18nText('countryTotals.workDays') || '上岗天数', meVals?.work_days ?? meVals?.usage_days ?? 0, 'work_days'),
                               ].join('')
                             : `<div class="text-zinc-500 text-xs">${currentLang === 'en' ? 'No data' : '暂无数据'}</div>`;
 
@@ -4550,7 +4563,7 @@
                         const totalsBox = document.getElementById('rtCountryTotals');
                         const ranksBox = document.getElementById('rtMyCountryRanks');
                         const failRank = '<span class="text-[10px] text-zinc-500 font-bold tabular-nums">#-- / --</span>';
-                        const dimLabels = ['Messages','Total Chars','废话输出','Avg Len','Jiafang','Ketao'];
+                        const dimLabels = ['Messages','Total Chars','Avg Len','Jiafang','Ketao','上岗天数'];
                         const fallback = dimLabels.map(l => `<div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2"><div class="text-zinc-200">${l}</div><div>${failRank}</div></div>`).join('');
                         if (totalsBox && !totalsBox.innerHTML.trim()) totalsBox.innerHTML = fallback;
                         if (ranksBox && !ranksBox.innerHTML.trim()) ranksBox.innerHTML = fallback;
@@ -4620,8 +4633,8 @@
                 // =========================
                 let topBy = Array.isArray(data.topByMetrics) ? data.topByMetrics : [];
                 const metricOrder = [
-                    'total_messages', 'total_chars', 'total_user_chars',
-                    'avg_message_length', 'jiafang_count', 'ketao_count'
+                    'total_messages', 'total_chars', 'avg_message_length',
+                    'jiafang_count', 'ketao_count', 'work_days'
                 ];
                 topBy = topBy.slice().sort((a, b) => metricOrder.indexOf(String(a?.key || '')) - metricOrder.indexOf(String(b?.key || '')));
                 window.__resolveUserMeta = _resolveUserMeta;
@@ -5082,6 +5095,7 @@
                 'countryTotals.avgLen': '平均长度',
                 'countryTotals.jiafang': '甲方上身',
                 'countryTotals.ketao': '磕头',
+                'countryTotals.workDays': '上岗天数',
 
                 // Radar / states
                 'radar.loading': '数据加载中...',
@@ -5174,6 +5188,7 @@
                 'countryTotals.avgLen': 'Avg Len',
                 'countryTotals.jiafang': 'Client Mode',
                 'countryTotals.ketao': 'Humble Mode',
+                'countryTotals.workDays': 'Work Days',
 
                 // Radar / states
                 'radar.loading': 'Loading...',
@@ -7999,10 +8014,10 @@
                                     const lb = document.getElementById('left-drawer-body');
                                     if (lb) renderUserStatsCards(lb, getBestUserRecordForStats(dbUser));
                                 };
-                                // 1) 按 fingerprint 查
+                                // 1) 按 fingerprint 查（使用 v_unified_analysis_v2 获取 vibe_rank）
                                 if (currentFingerprint) {
                                     supabaseClient
-                                        .from('v_user_analysis_extended')
+                                        .from('v_unified_analysis_v2')
                                         .select('*')
                                         .eq('fingerprint', currentFingerprint)
                                         .maybeSingle()
@@ -8012,7 +8027,7 @@
                                 // 2) 未命中时按 GitHub 用户名查（已上传过且已登录时，可跨设备看到数据）
                                 if (localGh && !window.currentUser) {
                                     supabaseClient
-                                        .from('v_user_analysis_extended')
+                                        .from('v_unified_analysis_v2')
                                         .select('*')
                                         .ilike('user_name', localGh)
                                         .limit(1)
@@ -20957,10 +20972,10 @@
                                 console.log('[Refresh] ✅ 通过 GitHub User ID 找到用户:', currentUser.user_name || currentUser.name);
                             } else {
                             // 如果 allData 中没有，尝试从 Supabase 直接查询
-                            // 【数据源迁移】使用带实时排名的视图 v_user_analysis_extended
-                            console.log('[Refresh] 🔍 allData 中未找到，尝试从 Supabase 查询（v_user_analysis_extended）...');
+                            // 【数据源迁移】使用统一视图 v_unified_analysis_v2（含 vibe_rank、vibe_percentile）
+                            console.log('[Refresh] 🔍 allData 中未找到，尝试从 Supabase 查询（v_unified_analysis_v2）...');
                             const { data: dbUser, error: queryError } = await supabaseClient
-                                .from('v_user_analysis_extended')
+                                .from('v_unified_analysis_v2')
                                 .select('*')
                                 .eq('id', githubUserId)
                                 .maybeSingle();
