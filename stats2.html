@@ -4435,16 +4435,61 @@
                         if (ranksBox && !String(ranksBox.innerHTML || '').trim()) ranksBox.innerHTML = '<div class="text-zinc-500 text-xs">加载中...</div>';
 
                         // 并发保护：复用 updateCountryDashboard 的 requestSeq / isStaleRequest
-                        const resp2 = await fetch(url2 + (url2.indexOf('?') >= 0 ? '&' : '?') + '_t=' + Date.now());
-                        if (!resp2.ok) throw new Error(`HTTP ${resp2.status}`);
-                        const payload2 = await resp2.json().catch(() => null);
-                        if (!payload2 || typeof payload2 !== 'object') throw new Error('bad payload');
-                        if (isStaleRequest()) return;
+                        // 添加超时控制，防止请求挂起导致一直显示"加载中..."
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
+                        let resp2, payload2;
+                        try {
+                            resp2 = await fetch(url2 + (url2.indexOf('?') >= 0 ? '&' : '?') + '_t=' + Date.now(), { signal: controller.signal });
+                            clearTimeout(timeoutId);
+                            if (!resp2.ok) throw new Error(`HTTP ${resp2.status}`);
+                            payload2 = await resp2.json().catch(() => null);
+                            if (!payload2 || typeof payload2 !== 'object') throw new Error('bad payload');
+                        } catch (fetchErr) {
+                            clearTimeout(timeoutId);
+                            if (fetchErr.name === 'AbortError') {
+                                console.warn('[Stats2] 国家累计 API 请求超时:', url2);
+                                throw new Error('请求超时');
+                            }
+                            throw fetchErr;
+                        }
+                        if (isStaleRequest()) {
+                            console.warn('[Stats2] 国家累计请求已过期，跳过渲染');
+                            // 即使请求过期，也要清除"加载中..."状态
+                            try {
+                                const totalsBox = document.getElementById('rtCountryTotals');
+                                const ranksBox = document.getElementById('rtMyCountryRanks');
+                                if (totalsBox && totalsBox.innerHTML.includes('加载中')) {
+                                    totalsBox.innerHTML = `<div class="text-zinc-500 text-xs">${currentLang === 'en' ? 'No data' : '暂无数据'}</div>`;
+                                }
+                                if (ranksBox && ranksBox.innerHTML.includes('加载中')) {
+                                    ranksBox.innerHTML = `<div class="text-zinc-500 text-xs">${currentLang === 'en' ? 'No data' : '暂无数据'}</div>`;
+                                }
+                            } catch { /* ignore */ }
+                            return;
+                        }
 
                         const userCountry = String(countryCode || '').trim().toUpperCase();
                         console.log('[Stats2] 国家累计 API 全量数据:', { payload: payload2, userCountry });
                         const totals = payload2.countryTotals || payload2.data?.countryTotals || null;
                         const totalsRanks = payload2.countryTotalsRanks || payload2.data?.countryTotalsRanks || null;
+                        // 【调试】验证 work_days 字段读取
+                        if (totals) {
+                            console.log('[Stats2] ✅ 国家累计数据 work_days:', {
+                                work_days: totals.work_days,
+                                work_days_sum: totals.work_days_sum,
+                                rank_h: totalsRanks?.work_days
+                            });
+                        }
+                        // 【修复】如果 totals 是空对象或所有关键字段都为0/null，视为无数据
+                        const hasValidTotals = totals && (
+                            totals.total_messages > 0 || 
+                            totals.total_chars > 0 || 
+                            totals.work_days > 0 || 
+                            totals.work_days_sum > 0 ||
+                            totals.jiafang_count > 0 ||
+                            totals.ketao_count > 0
+                        );
                         const countryDataByCode = payload2.countryDataByCode || payload2.data?.countryDataByCode || {};
                         const totalCountriesFromData = payload2.total_countries ?? payload2._meta?.total_countries ?? 195;
                         const ranks = payload2.myCountryRanks || payload2.data?.myCountryRanks || null;
@@ -4478,9 +4523,19 @@
                             const rankText = hasRank ? `#${rankNum}/${denom}` : (r || rankFromRanks !== undefined) ? '#-- / --' : (currentLang === 'en' ? 'N/A' : '计算中...');
                             const medal = rankNum != null && MEDALS[rankNum] ? ' ' + MEDALS[rankNum] : '';
                             const ice = (rankNum != null && denom > 0 && rankNum >= Math.ceil(denom * 0.9)) ? ' 🧊' : '';
-                            const displayVal = (totalVal === undefined || totalVal === null) ? '...' : fmt(totalVal);
+                            // 【健壮性处理】wd 为空或0时显示 "0" 而不是 "N/A" 或 "..."
+                            let displayVal;
+                            if (dimKey === 'work_days') {
+                                // 上岗天数特殊处理：确保显示数字，即使为0
+                                const workDaysVal = Number(totalVal ?? 0);
+                                displayVal = Number.isNaN(workDaysVal) ? '0' : String(workDaysVal);
+                            } else {
+                                displayVal = (totalVal === undefined || totalVal === null) ? '...' : fmt(totalVal);
+                            }
+                            // 【country-work-days 元素绑定】为上岗天数添加特殊 ID
+                            const workDaysIdAttr = dimKey === 'work_days' ? ' id="country-work-days"' : '';
                             return `
-                                <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
+                                <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2"${workDaysIdAttr}>
                                     <div class="text-zinc-200">${label}</div>
                                     <div class="flex items-center gap-3 min-w-0">
                                         <span class="text-[10px] text-zinc-500">Σ ${displayVal}</span>
@@ -4502,11 +4557,16 @@
                             let totalCountry = cr && (cr.total != null) ? Number(cr.total) : 0;
                             let rankGlobal = gr && (gr.rank ?? gr._rank) != null ? Number(gr.rank ?? gr._rank) : null;
                             let totalGlobal = gr && gr.total != null ? Number(gr.total) : 0;
-                            // 【vibe_rank 兜底】当 per-dimension 排名为空时，使用 vibe_rank / vibe_percentile 显示全球综合排名
+                            // 【双层 UI 方案 2】强制使用 vibe_rank 作为排名来源
                             const userData = window.currentUserData || window.currentUser || {};
                             const vibeRank = Number(userData?.vibe_rank ?? userData?.vibeRank ?? NaN);
                             const totalUsersFallback = payload2.totalUsers ?? globalTotalUsers ?? 0;
-                            if ((rankGlobal == null || totalGlobal <= 0) && Number.isFinite(vibeRank) && totalUsersFallback > 0) {
+                            // 强制使用 vibe_rank：如果 vibe_rank 存在且有效，优先使用它作为全球排名
+                            if (Number.isFinite(vibeRank) && vibeRank > 0 && totalUsersFallback > 0) {
+                                rankGlobal = Math.min(totalUsersFallback, Math.max(1, Math.round(vibeRank)));
+                                totalGlobal = totalUsersFallback;
+                            } else if ((rankGlobal == null || totalGlobal <= 0) && Number.isFinite(vibeRank) && totalUsersFallback > 0) {
+                                // 兜底：如果 per-dimension 排名为空，使用 vibe_rank
                                 rankGlobal = Math.min(totalUsersFallback, Math.max(1, Math.round(vibeRank)));
                                 totalGlobal = totalUsersFallback;
                             }
@@ -4518,11 +4578,18 @@
                             const pioneerBadge = isPioneer ? ` <span class="text-[9px] text-amber-400" title="${pioneerLabel}">🏅</span>` : '';
                             const localLabel = currentLang === 'en' ? '(country)' : '（本国）';
                             const globalLabel = currentLang === 'en' ? '(global)' : '（全球）';
+                            // 【上岗天数特殊处理】如果是 work_days 维度，显示个人已上岗天数标签
+                            let workDaysLabel = '';
+                            if (dimKey === 'work_days') {
+                                const userWorkDays = Number(userData?.work_days ?? userData?.usage_days ?? myVal ?? 0);
+                                const workDaysText = currentLang === 'en' ? 'Days On Duty' : '已上岗';
+                                workDaysLabel = userWorkDays > 0 ? ` <span class="text-[9px] text-zinc-500">${workDaysText}: ${userWorkDays}${currentLang === 'en' ? ' days' : '天'}</span>` : '';
+                            }
                             return `
                                 <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
                                     <div class="text-zinc-200">${label}</div>
                                     <div class="flex flex-col items-end gap-0.5 min-w-0">
-                                        <span class="text-[10px] text-zinc-400">${fmtMe(myVal)}</span>
+                                        <span class="text-[10px] text-zinc-400">${fmtMe(myVal)}${workDaysLabel}</span>
                                         <span class="text-[10px] text-[var(--accent-terminal)] font-bold tabular-nums">${countryText}${medal}${pioneerBadge} | ${globalText}</span>
                                     </div>
                                 </div>
@@ -4531,7 +4598,8 @@
 
                         // 国家累计：移除冗余「废话输出」（与对话字符数同源），新增「上岗天数」
                         // 注意：后端 countryTotalsRanks 键名是 avg_user_message_length，需要兼容
-                        const totalsHtml = totals
+                        // 【修复】使用 hasValidTotals 确保数据真正有效，而非仅判断对象存在
+                        const totalsHtml = hasValidTotals
                             ? [
                                 rowTotals(getI18nText('countryTotals.messages') || 'Messages', totals.total_messages ?? 0, totalsRanks?.total_messages, 'total_messages'),
                                 rowTotals(getI18nText('countryTotals.totalChars') || 'Total Chars', totals.total_chars ?? 0, totalsRanks?.total_chars, 'total_chars'),
@@ -4542,7 +4610,7 @@
                               ].join('')
                             : `<div class="text-zinc-500 text-xs">${currentLang === 'en' ? 'No data' : '暂无数据'}</div>`;
 
-                        const ranksHtml = totals
+                        const ranksHtml = hasValidTotals
                             ? [
                                 rowRanks(getI18nText('countryTotals.messages') || 'Messages', meVals?.total_messages, 'total_messages'),
                                 rowRanks(getI18nText('countryTotals.totalChars') || 'Total Chars', meVals?.total_chars, 'total_chars'),
@@ -4783,6 +4851,17 @@
             } catch (err) {
                 console.error('[CountryDashboard] ❌ 更新失败:', err);
                 renderErrorState(err && err.message ? String(err.message) : '网络异常或服务器错误');
+                
+                // 【修复】确保国家累计和排名卡片不会一直显示"加载中..."
+                try {
+                    const totalsBox = document.getElementById('rtCountryTotals');
+                    const ranksBox = document.getElementById('rtMyCountryRanks');
+                    const failRank = '<span class="text-[10px] text-zinc-500 font-bold tabular-nums">#-- / --</span>';
+                    const dimLabels = ['Messages','Total Chars','Avg Len','Jiafang','Ketao','上岗天数'];
+                    const fallback = dimLabels.map(l => `<div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2"><div class="text-zinc-200">${l}</div><div>${failRank}</div></div>`).join('');
+                    if (totalsBox && totalsBox.innerHTML.includes('加载中')) totalsBox.innerHTML = fallback;
+                    if (ranksBox && ranksBox.innerHTML.includes('加载中')) ranksBox.innerHTML = fallback;
+                } catch { /* ignore */ }
             } finally {
                 try { setRightDrawerLoading(false); } catch { /* ignore */ }
             }

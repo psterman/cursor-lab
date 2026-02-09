@@ -5854,6 +5854,7 @@ app.get('/api/country-summary', async (c) => {
         jiafang_count_sum: 0,
         ketao_count_sum: 0,
         avg_user_message_length_sum: 0,
+        work_days_sum: 0,
         source: 'preset_no_group_by',
       };
       countryTotalsRanks = {
