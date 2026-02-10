@@ -10553,14 +10553,16 @@
                 // 显示弹窗
                 modal.classList.add('active');
 
-                // ESC键关闭
+                // ESC键关闭（使用捕获阶段，确保优先执行）
                 const escHandler = function(e) {
                     if (e.key === 'Escape') {
+                        e.stopImmediatePropagation(); // 阻止同一元素上的其他监听器执行
+                        e.preventDefault(); // 阻止默认行为
                         closeUserRankingDetail();
-                        document.removeEventListener('keydown', escHandler);
+                        document.removeEventListener('keydown', escHandler, true);
                     }
                 };
-                document.addEventListener('keydown', escHandler);
+                document.addEventListener('keydown', escHandler, true); // 使用捕获阶段
 
                 // 点击背景关闭
                 modal.addEventListener('click', function(e) {
@@ -10956,9 +10958,19 @@
             console.log('[Drawer] 抽屉已关闭, selectedCountry =', selectedCountry);
         }
 
-        // 添加 ESC 键关闭抽屉
+        // 添加 ESC 键关闭抽屉（当没有弹窗打开时）
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
+                // 检查是否有弹窗打开，如果有则不关闭抽屉
+                const userDetailModal = document.getElementById('user-ranking-detail-modal');
+                const rankingDetailModal = document.getElementById('ranking-detail-modal');
+                // 检查弹窗是否存在且可见（active 类）
+                if (userDetailModal && userDetailModal.classList.contains('active')) {
+                    return; // 有弹窗打开时，不关闭抽屉
+                }
+                if (rankingDetailModal && rankingDetailModal.classList.contains('active')) {
+                    return; // 有弹窗打开时，不关闭抽屉
+                }
                 closeDrawers();
             }
         });
@@ -10988,6 +11000,16 @@
                                       e.target.closest('#live-nodes-drawer');
             if (isUserAvatarClick) {
                 // 用户头像点击由 toggleUserPopup 处理，不关闭抽屉
+                return;
+            }
+            
+            // 【修复】检查是否点击了用户详情弹窗或其他弹窗
+            const userDetailModal = document.getElementById('user-ranking-detail-modal');
+            const rankingDetailModal = document.getElementById('ranking-detail-modal');
+            const isModalClick = (userDetailModal && (userDetailModal.contains(e.target) || e.target === userDetailModal)) ||
+                                 (rankingDetailModal && (rankingDetailModal.contains(e.target) || e.target === rankingDetailModal));
+            if (isModalClick) {
+                // 点击弹窗时不关闭抽屉
                 return;
             }
             
