@@ -3825,17 +3825,17 @@
             
             <!-- 【新增】Tab 导航栏 -->
             <div class="drawer-tabs" id="right-drawer-tabs">
-                <button type="button" class="drawer-tab active" data-tab="global" onclick="switchView('global')">
+                <button type="button" class="drawer-tab active" data-tab="ranking" onclick="switchView('ranking')">
+                    <span class="tab-icon">🏆</span>
+                    <span class="tab-text" data-t="tab.ranking">排行榜</span>
+                </button>
+                <button type="button" class="drawer-tab" data-tab="global" onclick="switchView('global')">
                     <span class="tab-icon">🌍</span>
                     <span class="tab-text" data-t="tab.global">全球</span>
                 </button>
                 <button type="button" class="drawer-tab" data-tab="country" onclick="switchView('country')">
                     <span class="tab-icon">🏰</span>
                     <span class="tab-text" data-t="tab.country">国家</span>
-                </button>
-                <button type="button" class="drawer-tab" data-tab="ranking" onclick="switchView('ranking')">
-                    <span class="tab-icon">🏆</span>
-                    <span class="tab-text" data-t="tab.ranking">排行榜</span>
                 </button>
             </div>
             
@@ -6830,9 +6830,9 @@
         // 【重构】初始化右侧抽屉面板 - 支持三 Tab 结构
         function initRightDrawerPanels() {
             try {
-                // 默认显示全球视图
-                switchView('global');
-                console.log('[Init] 右侧抽屉已初始化为全球视图');
+                // 默认显示排行榜视图
+                switchView('ranking');
+                console.log('[Init] 右侧抽屉已初始化为排行榜视图');
             } catch (e) {
                 console.warn('[Init] 初始化右侧抽屉面板状态失败:', e);
             }
@@ -8174,13 +8174,25 @@
                 if (globalFlowPanelButtons) globalFlowPanelButtons.style.display = 'none';
             } else {
                 // 显示全球榜单视图
-                if (typeof switchView === 'function') {
+                // 【修复】避免重复渲染：如果已经在 global 视图且正在渲染，则不调用 switchView
+                if (typeof switchView === 'function' && currentViewState !== 'GLOBAL') {
                     switchView('global');
-                }
-                // 【关键修复】确保 global 视图按钮显示
-                if (globalFlowPanelButtons) {
-                    globalFlowPanelButtons.style.display = '';
-                    globalFlowPanelButtons.style.visibility = 'visible';
+                } else if (currentViewState === 'GLOBAL') {
+                    // 如果已经在 global 视图，只更新按钮显示，不重复调用 switchView
+                    if (globalFlowPanelButtons) {
+                        globalFlowPanelButtons.style.display = '';
+                        globalFlowPanelButtons.style.visibility = 'visible';
+                    }
+                } else {
+                    // 不在 global 视图时，正常切换
+                    if (typeof switchView === 'function') {
+                        switchView('global');
+                    }
+                    // 【关键修复】确保 global 视图按钮显示
+                    if (globalFlowPanelButtons) {
+                        globalFlowPanelButtons.style.display = '';
+                        globalFlowPanelButtons.style.visibility = 'visible';
+                    }
                 }
             }
 
@@ -8253,6 +8265,15 @@
                     targetContainer = document.getElementById('panel-global-content') || container;
                 }
                 
+                // 【修复】防止重复渲染：检查是否正在渲染
+                if (targetContainer.dataset.rendering === 'true') {
+                    console.log('[renderCardsStaggered] ⚠️ 容器正在渲染中，跳过重复渲染');
+                    return;
+                }
+                
+                // 标记开始渲染
+                targetContainer.dataset.rendering = 'true';
+                
                 // 清空容器内容
                 targetContainer.innerHTML = '';
                 targetContainer.classList.remove('drawer-loading');
@@ -8275,8 +8296,20 @@
                         // 移除可能存在的 margin-bottom，使用容器的 gap
                         card.style.marginBottom = '0';
                         targetContainer.appendChild(card);
+                        
+                        // 【修复】最后一张卡片渲染完成后，清除渲染标志
+                        if (index === cards.length - 1) {
+                            setTimeout(() => {
+                                targetContainer.dataset.rendering = 'false';
+                            }, 100);
+                        }
                     }, startDelay + (index * 80)); // 每张卡片延迟 80ms
                 });
+                
+                // 【修复】如果没有卡片，立即清除渲染标志
+                if (cards.length === 0) {
+                    targetContainer.dataset.rendering = 'false';
+                }
             };
             
             const appendCardStaggered = (container, card, index) => {
@@ -8297,20 +8330,31 @@
                     return null;
                 }
             })();
-            const rightDrawerData =
-                overrideRightData != null
-                    ? overrideRightData
-                    : (cachedSummary != null ? cachedSummary : (window.lastData || {}));
+            // 【修复】global 视图应使用当前选择国家的数据，而不是全球数据
+            // 如果是在 global 视图且没有 overrideRightData，优先使用国家摘要缓存
+            let rightDrawerData;
+            if (overrideRightData != null) {
+                rightDrawerData = overrideRightData;
+            } else if (cachedSummary != null) {
+                rightDrawerData = cachedSummary;
+            } else {
+                // 在 global 视图时，如果没有缓存，应该使用国家数据而不是 window.lastData（可能是全球数据）
+                // 这里先使用 window.lastData 作为兜底，但后续会通过 fetchCountrySummaryV3 获取正确的国家数据
+                rightDrawerData = window.lastData || {};
+            }
             
             // 若没有传入国家摘要，则异步拉取“国家汇总(10项核心指标)”用于右侧抽屉汇总卡片
             // 不阻塞当前抽屉渲染：先用全局 lastData 兜底展示，拉取完成后自动刷新为国家口径（仅刷新右侧，不重绘左侧）
             try {
                 const cc = ccUpper;
+                const isGlobalView = typeof currentViewState === 'string' && currentViewState === 'GLOBAL';
+                // 【修复】在 global 视图时，必须获取国家数据，确保卡片显示的是国家总数而不是全球总数
                 const shouldFetchSummary =
                     !summaryOnly &&
                     overrideRightData == null &&
                     cc.length === 2 &&
-                    typeof fetchCountrySummaryV3 === 'function';
+                    typeof fetchCountrySummaryV3 === 'function' &&
+                    (isGlobalView || cachedSummary == null); // global 视图或没有缓存时都要获取
                 if (shouldFetchSummary) {
                     // 标记请求进行中
                     window.__drawerFetchInProgress.set(cc, true);
@@ -9087,12 +9131,16 @@
                 `;
                 rightCards.push(totalUsersCard);
 
-                // 全网扫描次数
+                // 【修复】扫描次数：在 global 视图时显示的是国家扫描次数，不是全网扫描次数
                 const totalAnalysis = data.totalAnalysis !== undefined && data.totalAnalysis !== null ? Number(data.totalAnalysis) : undefined;
                 const totalAnalysisCard = document.createElement('div');
                 totalAnalysisCard.className = 'drawer-item stat-card';
+                const isGlobalViewForLabel = typeof currentViewState === 'string' && currentViewState === 'GLOBAL';
+                const analysisLabel = isGlobalViewForLabel 
+                    ? (currentLang === 'en' ? 'Country Scans' : '国家扫描次数')
+                    : ((i18n[currentLang] && i18n[currentLang]['total-analysis']) ? i18n[currentLang]['total-analysis'] : (currentLang === 'en' ? 'Total Scans' : '扫描次数'));
                 totalAnalysisCard.innerHTML = `
-                    <div class="drawer-item-label">${(i18n[currentLang] && i18n[currentLang]['total-analysis']) ? i18n[currentLang]['total-analysis'] : (currentLang === 'en' ? 'Total Scans' : '全网扫描次数')}</div>
+                    <div class="drawer-item-label">${analysisLabel}</div>
                     <div class="drawer-item-value text-3xl">${totalAnalysis !== undefined ? nfDrawer.format(totalAnalysis) : 'N/A'}</div>
                     <div class="drawer-item-desc">TOTAL_SCAN_COUNT</div>
                 `;
@@ -9499,28 +9547,37 @@
             switch(view) {
                 case 'global':
                     // 全球视图：加载全球数据
-                    // 【修复】如果没有选择国家，尝试使用用户所在国家或默认值
-                    let globalCode = currentDrawerCountry.code;
-                    let globalName = currentDrawerCountry.name;
+                    // 【修复】避免重复渲染：检查容器是否已有内容
+                    const globalContent = document.getElementById('panel-global-content');
+                    const hasContent = globalContent && globalContent.children.length > 0 && 
+                                      !globalContent.querySelector('.text-zinc-500') && 
+                                      !globalContent.classList.contains('drawer-loading');
                     
-                    if (!globalCode) {
-                        // 尝试从用户数据获取国家
-                        const userCountry = window.currentUserCountry || 
-                            (window.currentUser && (window.currentUser.country_code || window.currentUser.ip_location)) ||
-                            (window.currentUserData && (window.currentUserData.country_code || window.currentUserData.ip_location)) ||
-                            'US'; // 默认使用美国
+                    // 只有在容器为空或只有加载提示时才加载数据
+                    if (!hasContent) {
+                        // 【修复】如果没有选择国家，尝试使用用户所在国家或默认值
+                        let globalCode = currentDrawerCountry.code;
+                        let globalName = currentDrawerCountry.name;
                         
-                        if (userCountry && /^[A-Z]{2}$/.test(String(userCountry).trim().toUpperCase())) {
-                            globalCode = String(userCountry).trim().toUpperCase();
-                            const countryInfo = countryNameMap[globalCode];
-                            globalName = countryInfo 
-                                ? (currentLang === 'zh' ? countryInfo.zh : countryInfo.en)
-                                : globalCode;
+                        if (!globalCode) {
+                            // 尝试从用户数据获取国家
+                            const userCountry = window.currentUserCountry || 
+                                (window.currentUser && (window.currentUser.country_code || window.currentUser.ip_location)) ||
+                                (window.currentUserData && (window.currentUserData.country_code || window.currentUserData.ip_location)) ||
+                                'US'; // 默认使用美国
+                            
+                            if (userCountry && /^[A-Z]{2}$/.test(String(userCountry).trim().toUpperCase())) {
+                                globalCode = String(userCountry).trim().toUpperCase();
+                                const countryInfo = countryNameMap[globalCode];
+                                globalName = countryInfo 
+                                    ? (currentLang === 'zh' ? countryInfo.zh : countryInfo.en)
+                                    : globalCode;
+                            }
                         }
-                    }
-                    
-                    if (globalCode && globalName) {
-                        showDrawersWithCountryData(globalCode, globalName);
+                        
+                        if (globalCode && globalName) {
+                            showDrawersWithCountryData(globalCode, globalName);
+                        }
                     }
                     break;
                     
@@ -11792,24 +11849,27 @@
                             } catch (e) {}
                         }
                         if (!countryCode) countryCode = countryName;
-                        console.log(`[Map] 🗺️ 点击国家: ${countryName} (${countryCode})`);
+                        console.log(`[Map] 🗺️ 点击国家查看当地情况: ${countryName} (${countryCode})`);
                         selectedCountry = countryCode;
                         const ccUpper = String(countryCode || '').trim().toUpperCase();
+                        // 【修改】地图点击国家时只查看当地情况，不切换国籍
+                        // 只有从左抽屉选择国家时才切换国籍（identity）
                         if (/^[A-Z]{2}$/.test(ccUpper)) {
-                            // 统一走全局调度：switchGlobalCountry 内完成 localStorage/UI/analyze/800ms/refreshUserStats/右侧抽屉；country:switch 会打开抽屉并进入国家透视
                             try {
-                                if (typeof window.switchGlobalCountry === 'function') {
-                                    await window.switchGlobalCountry(ccUpper, 'map');
-                                } else {
-                                    onCountrySwitch(ccUpper, { source: 'map-country-click', name: countryName });
-                                    if (typeof showDrawersWithCountryData === 'function') showDrawersWithCountryData(ccUpper, countryName);
+                                // 只显示国家数据，不切换国籍
+                                if (typeof showDrawersWithCountryData === 'function') {
+                                    showDrawersWithCountryData(ccUpper, countryName);
+                                }
+                                // 进入国家透视视图（但不切换国籍）
+                                if (typeof switchToCountryView === 'function') {
+                                    switchToCountryView(ccUpper, countryName);
+                                }
+                                // 切换视图到国家透视
+                                if (typeof switchView === 'function') {
+                                    switchView('country');
                                 }
                             } catch (e) {
-                                console.warn('[Map] ⚠️ 切换失败，尝试直接打开抽屉:', e);
-                                try {
-                                    onCountrySwitch(ccUpper, { source: 'map-country-click', name: countryName });
-                                    if (typeof showDrawersWithCountryData === 'function') showDrawersWithCountryData(ccUpper, countryName);
-                                } catch { /* ignore */ }
+                                console.warn('[Map] ⚠️ 显示国家数据失败:', e);
                             }
                         } else {
                             console.warn('[Map] ⚠️ 无法解析 ISO2 国家码，暂无法进入国家透视右抽屉:', { countryName, countryCode });
