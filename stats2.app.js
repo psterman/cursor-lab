@@ -1,5 +1,6 @@
 
-        let calibrationDebounceTimer = null; // 脚本最顶部声明，彻底拦截定位漂移，避免 ReferenceError
+        // 使用 var 确保与 stats2.html 兼容（可能已声明）
+        var calibrationDebounceTimer = typeof calibrationDebounceTimer !== 'undefined' ? calibrationDebounceTimer : null;
 
         // ==========================================
         // ==========================================
@@ -11204,29 +11205,61 @@
          * 矩阵绿六大天梯榜配置
          */
         const MATRIX_LADDER_TYPES = [
-            { key: 'work_days', label: '上岗天数', field: 'work_days', desc: '工作天数' },
-            { key: 'total_chars', label: '产量', field: 'total_chars', desc: '对话字符总数' },
-            { key: 'jiafang_count', label: '甲方度', field: 'jiafang_count', desc: '甲方上身次数' },
-            { key: 'ketao_count', label: '受害度', field: 'ketao_count', desc: '磕头次数' },
-            { key: 'total_messages', label: '焦虑值', field: 'total_messages', desc: '对话次数' },
-            { key: 'avg_user_message_length', label: '战力', field: 'avg_user_message_length', desc: '平均长度' }
+            { key: 'ketao_count', label: '磕头榜', field: 'ketao_count', desc: '顶级礼貌大户' },
+            { key: 'jiafang_count', label: '霸总榜', field: 'jiafang_count', desc: '对 AI 极限否定' },
+            { key: 'work_days', label: '打工榜', field: 'work_days', desc: '上岗天数' },
+            { key: 'total_messages', label: '话痨榜', field: 'total_messages', desc: '对话回合' },
+            { key: 'avg_user_message_length', label: '纠结榜', field: 'avg_user_message_length', desc: '单次指令厚度' },
+            { key: 'total_chars', label: '社畜榜', field: 'total_chars', desc: 'Token 霸权' }
         ];
 
         /**
          * 渲染全局矩阵绿天梯榜（强制静态挂载，无条件执行）
+         * 优先写入右侧 Ranking 视图的 ladders-container，否则写入左侧 global-ranking-area
          */
         async function renderGlobalLadders() {
-            const container = document.getElementById('global-ranking-area');
-            if (!container) {
-                console.warn('[MatrixLadders] ⚠️ global-ranking-area 容器不存在，等待 DOM 就绪');
-                // 如果容器不存在，等待一下再重试
+            console.log('[MatrixLadders] 🚀 renderGlobalLadders 被调用');
+            let isRankingLoading = true;
+            const container = document.getElementById('ladders-container') || document.getElementById('global-ranking-area');
+            console.log('[MatrixLadders] container:', container?.id);
+            const contentTarget = (container && container.id === 'ladders-container')
+                ? (container.querySelector('#global-ranking-grids') || container)
+                : container;
+            console.log('[MatrixLadders] contentTarget:', contentTarget?.id || contentTarget?.className);
+
+            if (!container || !contentTarget) {
+                console.warn('[MatrixLadders] ⚠️ ladders-container / global-ranking-area 不存在，等待 DOM 就绪');
+                isRankingLoading = false;
                 setTimeout(() => {
                     renderGlobalLadders().catch(err => console.error('[MatrixLadders] 重试失败:', err));
                 }, 500);
                 return;
             }
+            console.log('[MatrixLadders] ✅ 找到容器，开始加载数据');
 
-            // 等待 Supabase 客户端初始化（最多等待 10 秒）
+            // 强制清空并显示加载态（点击刷新必须重新 fetch，不依赖已有内容）
+            contentTarget.innerHTML = '<div class="col-span-full text-green-500 animate-pulse">>> 正在同步全球数据流...</div>';
+
+            const useRankingPanel = (container.id === 'ladders-container');
+            if (useRankingPanel && typeof fetchGlobalRankings === 'function') {
+                try {
+                    const rankings = await fetchGlobalRankings(10, true);
+                    isRankingLoading = false;
+                    if (!rankings) {
+                        contentTarget.innerHTML = '<div class="col-span-full text-center text-red-400 text-sm">加载失败</div>';
+                        return;
+                    }
+                    renderGreenLaddersToContainer(contentTarget, rankings);
+                    console.log('[MatrixLadders] ✅ Ranking 视图六榜渲染完成');
+                } catch (err) {
+                    console.error('[MatrixLadders] ❌ Ranking 视图加载失败:', err);
+                    isRankingLoading = false;
+                    contentTarget.innerHTML = '<div class="col-span-full text-center text-red-400 text-sm">加载失败，请重试</div>';
+                }
+                return;
+            }
+
+            // 左侧抽屉：等待 Supabase 客户端初始化（最多 10 秒）
             let attempts = 0;
             while ((!supabaseClient || typeof supabaseClient.rpc !== 'function') && attempts < 100) {
                 await new Promise(resolve => setTimeout(resolve, 100));
@@ -11235,39 +11268,44 @@
 
             if (!supabaseClient || typeof supabaseClient.rpc !== 'function') {
                 console.warn('[MatrixLadders] ⚠️ Supabase 客户端初始化超时，使用直接查询');
-                // 降级：使用直接查询
-                await renderMatrixLaddersFromDirectQuery(container);
+                isRankingLoading = false;
+                await renderMatrixLaddersFromDirectQuery(contentTarget);
                 return;
             }
 
             try {
-                // 调用 RPC 获取全局 Top 10 数据（country_code 传 null 或空字符串表示全局）
+                // PostgREST 参数名与 SQL 函数一致：country_code / top_n；全局传 null
                 const { data, error } = await supabaseClient.rpc('get_country_top_metrics_v1', {
-                    country_code: '',
-                    top_n: 10
+                    p_country_code: null,
+                    p_top_n: 10
                 });
-
-                if (error) {
+                let rpcData = data;
+                if (error && (!rpcData || !rpcData.length)) {
+                    const alt = await supabaseClient.rpc('get_country_top_metrics_v1', { country_code: null, top_n: 10 });
+                    if (!alt.error && alt.data && alt.data.length) rpcData = alt.data;
+                }
+                if (error && (!rpcData || !rpcData.length)) {
                     console.error('[MatrixLadders] ❌ RPC 调用失败:', error);
-                    // 降级：直接查询
-                    await renderMatrixLaddersFromDirectQuery(container);
+                    isRankingLoading = false;
+                    await renderMatrixLaddersFromDirectQuery(contentTarget);
                     return;
                 }
-
-                if (!data || !Array.isArray(data) || data.length === 0) {
+                if (!rpcData || !Array.isArray(rpcData) || rpcData.length === 0) {
                     console.warn('[MatrixLadders] ⚠️ RPC 返回空数据，使用直接查询');
-                    await renderMatrixLaddersFromDirectQuery(container);
+                    isRankingLoading = false;
+                    await renderMatrixLaddersFromDirectQuery(contentTarget);
                     return;
                 }
-
-                // 渲染天梯榜
-                renderMatrixLaddersFromRPC(container, data);
+                renderMatrixLaddersFromRPC(contentTarget, rpcData);
+                isRankingLoading = false;
             } catch (err) {
                 console.error('[MatrixLadders] ❌ 初始化失败:', err);
-                // 降级：直接查询
-                await renderMatrixLaddersFromDirectQuery(container);
+                isRankingLoading = false;
+                contentTarget.innerHTML = '<div class="col-span-full text-center text-red-400 text-sm">加载失败，请重试</div>';
             }
         }
+        window.renderGlobalLadders = renderGlobalLadders;
+        console.log('[Stats2.App] ✅ renderGlobalLadders 已挂载到 window');
 
         /**
          * 从 RPC 返回的数据渲染矩阵绿天梯榜
@@ -11306,14 +11344,18 @@
          * 直接从 Supabase 查询渲染矩阵绿天梯榜（降级方案）
          */
         async function renderMatrixLaddersFromDirectQuery(container) {
-            container.innerHTML = '<div class="text-green-400 text-xs p-4">加载中...</div>';
+            container.innerHTML = '<div class="col-span-full text-green-500 animate-pulse text-center py-6">>> 正在同步全球数据流...</div>';
 
             try {
                 const promises = MATRIX_LADDER_TYPES.map(async (ladderType) => {
                     try {
+                        // 包含 country_code 和 vibe_index_str 字段以支持国旗和人格称号显示
+                        // 注意：github_username 字段在 user_analysis 表中不存在，使用 user_name 代替
+                        let selectFields = 'id, fingerprint, user_name, country_code, vibe_index_str, ' + ladderType.field;
+                        
                         let query = supabaseClient
                             .from('user_analysis')
-                            .select('id, fingerprint, user_name, github_username, ' + ladderType.field)
+                            .select(selectFields)
                             .not(ladderType.field, 'is', null)
                             .gt(ladderType.field, 0)
                             .order(ladderType.field, { ascending: false })
@@ -11324,15 +11366,23 @@
 
                         return {
                             type: ladderType,
-                            leaders: (data || []).map((item, idx) => ({
-                                rank: idx + 1,
-                                score: item[ladderType.field] || 0,
-                                user: {
-                                    fingerprint: item.fingerprint || '',
-                                    user_name: item.user_name || '',
-                                    github_username: item.github_username || ''
-                                }
-                            }))
+                            leaders: (data || []).map((item, idx) => {
+                                const countryCode = getRankingCountryCode(item.ip_location, item.country_code);
+                                const vibeIndexStr = item.vibe_index_str || '';
+                                const personalityTitle = getPersonalityTitle(vibeIndexStr, item.user_identity);
+                                return {
+                                    rank: idx + 1,
+                                    score: item[ladderType.field] || 0,
+                                    countryCode: countryCode,
+                                    vibe_index_str: vibeIndexStr,
+                                    personality_title: personalityTitle,
+                                    user: {
+                                        fingerprint: item.fingerprint || '',
+                                        user_name: item.user_name || ''
+                                        // 注意：github_username 字段在 user_analysis 表中不存在
+                                    }
+                                };
+                            })
                         };
                     } catch (err) {
                         console.error(`[MatrixLadders] ❌ 查询 ${ladderType.key} 失败:`, err);
@@ -11352,66 +11402,165 @@
                 });
             } catch (err) {
                 console.error('[MatrixLadders] ❌ 直接查询失败:', err);
-                container.innerHTML = '<div class="text-red-400 text-xs p-4">加载失败</div>';
+                container.innerHTML = '<div class="col-span-full text-center text-red-400 text-sm py-4">加载失败，请重试</div>';
             }
         }
 
         /**
-         * 渲染单个矩阵绿天梯榜表格
+         * 渲染单个矩阵绿天梯榜表格 - 重新设计的卡片排版
          */
         function renderMatrixLadderTable(container, ladderType, leaders) {
             const card = document.createElement('div');
             card.className = 'matrix-ladder-card';
+            card.style.cssText = `
+                border: 1px solid rgba(0, 255, 65, 0.3);
+                background: rgba(10, 10, 10, 0.95);
+                margin-bottom: 16px;
+                border-radius: 4px;
+                overflow: hidden;
+            `;
 
-            const rows = leaders.map(leader => {
+            // 卡片标题
+            const header = document.createElement('div');
+            header.style.cssText = `
+                background: rgba(0, 255, 65, 0.1);
+                border-bottom: 1px solid rgba(0, 255, 65, 0.2);
+                padding: 12px 16px;
+            `;
+            header.innerHTML = `
+                <div style="color: #00ff41; font-size: 14px; font-weight: bold; font-family: 'JetBrains Mono', monospace;">${ladderType.label}</div>
+                <div style="color: rgba(0, 255, 65, 0.7); font-size: 11px; font-family: 'JetBrains Mono', monospace; margin-top: 2px;">${ladderType.desc}</div>
+            `;
+            card.appendChild(header);
+
+            // 榜单列表
+            const listContainer = document.createElement('div');
+            listContainer.style.cssText = 'padding: 8px;';
+
+            leaders.forEach((leader, index) => {
                 const user = leader.user || {};
                 const fingerprint = user.fingerprint || '';
-                const github = user.github_username || '';
                 const username = user.user_name || '';
-                const display = github ? `@${github}` : (username ? `@${username}` : `user_${fingerprint.slice(0, 6)}`);
-                const avatar = github 
-                    ? `https://github.com/${encodeURIComponent(github)}.png?size=64`
+                const display = username ? `@${username}` : `user_${fingerprint.slice(0, 6)}`;
+                
+                // 头像使用 username 判断
+                const looksLikeGitHub = username && /^[a-zA-Z0-9-]+$/.test(username) && username.length <= 39;
+                const avatar = looksLikeGitHub 
+                    ? `https://github.com/${encodeURIComponent(username)}.png?size=64`
                     : DEFAULT_AVATAR;
 
                 const value = ladderType.key === 'avg_user_message_length' 
                     ? Number(leader.score || 0).toFixed(1)
                     : Number(leader.score || 0).toLocaleString();
 
-                return `
-                    <tr>
-                        <td>${leader.rank || ''}</td>
-                        <td>
-                            <img 
-                                src="${escapeHtml(avatar)}" 
-                                alt="" 
-                                class="matrix-avatar"
-                                onclick="handleMatrixAvatarClick('${escapeHtml(fingerprint)}')"
-                                onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
-                            />
-                        </td>
-                        <td class="truncate max-w-[100px]" title="${escapeHtml(display)}">${escapeHtml(display)}</td>
-                        <td class="text-right">${value}</td>
-                    </tr>
+                // 国旗和人格称号
+                const flagEmoji = (typeof countryCodeToFlagEmoji === 'function' && leader.countryCode) ? countryCodeToFlagEmoji(leader.countryCode) : '';
+                const personalityTitle = escapeHtml(leader.personality_title || leader.vibe_index_str || '--');
+
+                // 排名颜色：前三名使用特殊颜色
+                let rankColor = '#00ff41';
+                let rankBg = 'transparent';
+                if (leader.rank === 1) {
+                    rankColor = '#ffd700';
+                    rankBg = 'rgba(255, 215, 0, 0.1)';
+                } else if (leader.rank === 2) {
+                    rankColor = '#c0c0c0';
+                    rankBg = 'rgba(192, 192, 192, 0.1)';
+                } else if (leader.rank === 3) {
+                    rankColor = '#cd7f32';
+                    rankBg = 'rgba(205, 127, 50, 0.1)';
+                }
+
+                const row = document.createElement('div');
+                row.style.cssText = `
+                    display: flex;
+                    align-items: center;
+                    padding: 10px 12px;
+                    margin-bottom: 6px;
+                    background: ${rankBg};
+                    border: 1px solid rgba(0, 255, 65, 0.1);
+                    border-radius: 4px;
+                    transition: all 0.2s;
                 `;
-            }).join('');
+                row.onmouseenter = () => {
+                    row.style.background = 'rgba(0, 255, 65, 0.08)';
+                    row.style.borderColor = 'rgba(0, 255, 65, 0.3)';
+                };
+                row.onmouseleave = () => {
+                    row.style.background = rankBg;
+                    row.style.borderColor = 'rgba(0, 255, 65, 0.1)';
+                };
 
-            card.innerHTML = `
-                <div class="matrix-ladder-title">${ladderType.label}</div>
-                <table class="matrix-table">
-                    <thead>
-                        <tr>
-                            <th class="text-right w-10">排名</th>
-                            <th class="w-8">头像</th>
-                            <th>用户名</th>
-                            <th class="text-right">数值</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${rows}
-                    </tbody>
-                </table>
-            `;
+                row.innerHTML = `
+                    <!-- 排名 -->
+                    <div style="
+                        width: 28px;
+                        text-align: center;
+                        font-family: 'JetBrains Mono', monospace;
+                        font-size: 13px;
+                        font-weight: bold;
+                        color: ${rankColor};
+                        flex-shrink: 0;
+                    ">#${leader.rank}</div>
+                    
+                    <!-- 头像 -->
+                    <div style="margin: 0 10px; flex-shrink: 0;">
+                        <img 
+                            src="${escapeHtml(avatar)}" 
+                            alt="" 
+                            style="
+                                width: 36px;
+                                height: 36px;
+                                border-radius: 50%;
+                                border: 2px solid rgba(0, 255, 65, 0.3);
+                                object-fit: cover;
+                                cursor: pointer;
+                            "
+                            onclick="handleMatrixAvatarClick('${escapeHtml(fingerprint)}')"
+                            onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
+                        />
+                    </div>
+                    
+                    <!-- 用户信息区域 -->
+                    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;">
+                        <!-- 用户名 -->
+                        <div style="
+                            font-family: 'JetBrains Mono', monospace;
+                            font-size: 13px;
+                            color: #ffffff;
+                            white-space: nowrap;
+                            overflow: hidden;
+                            text-overflow: ellipsis;
+                        " title="${escapeHtml(display)}">${escapeHtml(display)}</div>
+                        <!-- 称号（国旗 + 人格） -->
+                        <div style="
+                            font-family: 'JetBrains Mono', monospace;
+                            font-size: 10px;
+                            color: rgba(255, 255, 255, 0.6);
+                            white-space: nowrap;
+                            overflow: hidden;
+                            text-overflow: ellipsis;
+                        " title="${personalityTitle}">
+                            ${flagEmoji ? `<span style="margin-right: 4px;">${flagEmoji}</span>` : ''}${personalityTitle}
+                        </div>
+                    </div>
+                    
+                    <!-- 数值 -->
+                    <div style="
+                        font-family: 'JetBrains Mono', monospace;
+                        font-size: 14px;
+                        font-weight: bold;
+                        color: #00ff41;
+                        text-align: right;
+                        margin-left: 10px;
+                        flex-shrink: 0;
+                    ">${value}</div>
+                `;
 
+                listContainer.appendChild(row);
+            });
+
+            card.appendChild(listContainer);
             container.appendChild(card);
         }
 
@@ -11420,11 +11569,33 @@
          */
         function renderEmptyMatrixLadder(container, ladderType) {
             const card = document.createElement('div');
-            card.className = 'matrix-ladder-card';
-            card.innerHTML = `
-                <div class="matrix-ladder-title">${ladderType.label}</div>
-                <div class="text-green-400/50 text-xs text-center py-4">暂无数据</div>
+            card.style.cssText = `
+                border: 1px solid rgba(0, 255, 65, 0.3);
+                background: rgba(10, 10, 10, 0.95);
+                margin-bottom: 16px;
+                border-radius: 4px;
+                overflow: hidden;
             `;
+            
+            // 卡片标题
+            const header = document.createElement('div');
+            header.style.cssText = `
+                background: rgba(0, 255, 65, 0.1);
+                border-bottom: 1px solid rgba(0, 255, 65, 0.2);
+                padding: 12px 16px;
+            `;
+            header.innerHTML = `
+                <div style="color: #00ff41; font-size: 14px; font-weight: bold; font-family: 'JetBrains Mono', monospace;">${ladderType.label}</div>
+                <div style="color: rgba(0, 255, 65, 0.7); font-size: 11px; font-family: 'JetBrains Mono', monospace; margin-top: 2px;">${ladderType.desc}</div>
+            `;
+            card.appendChild(header);
+            
+            // 空数据提示
+            const emptyDiv = document.createElement('div');
+            emptyDiv.style.cssText = 'padding: 16px; text-align: center; color: rgba(255, 255, 255, 0.5); font-size: 12px;';
+            emptyDiv.textContent = '暂无数据';
+            card.appendChild(emptyDiv);
+            
             container.appendChild(card);
         }
 
@@ -11607,9 +11778,10 @@
             try {
                 const promises = LADDER_TYPES.map(async (ladderType) => {
                     try {
+                        // 注意：github_username 字段在 user_analysis 表中不存在，使用 user_name 代替
                         let query = supabaseClient
                             .from('user_analysis')
-                            .select('id, fingerprint, user_name, github_username, ' + ladderType.field)
+                            .select('id, fingerprint, user_name, ' + ladderType.field)
                             .not(ladderType.field, 'is', null)
                             .gt(ladderType.field, 0)
                             .order(ladderType.field, { ascending: false })
@@ -11626,7 +11798,7 @@
                                 user: {
                                     fingerprint: item.fingerprint || '',
                                     user_name: item.user_name || '',
-                                    github_username: item.github_username || ''
+                                    github_username: item.user_name || '' // 使用 user_name 作为 github_username 的替代
                                 }
                             }))
                         };
@@ -11662,7 +11834,8 @@
             const rows = leaders.map(leader => {
                 const user = leader.user || {};
                 const fingerprint = user.fingerprint || '';
-                const github = user.github_username || '';
+                // 注意：github_username 字段在 user_analysis 表中不存在，使用 user_name 代替
+                const github = user.github_username || user.user_name || '';
                 const username = user.user_name || '';
                 const display = github ? `@${github}` : (username ? `@${username}` : `user_${fingerprint.slice(0, 6)}`);
                 const avatar = github 
@@ -12348,23 +12521,26 @@
          * @returns {Promise<Object>} 返回包含6个维度排行榜数据的对象
          */
         async function fetchGlobalRankings(topN = 10, forceRefresh = false) {
+            console.log('[GlobalRankings] 🚀 fetchGlobalRankings 被调用, topN:', topN, 'forceRefresh:', forceRefresh);
             try {
                 if (!forceRefresh && __globalRankingsCache.data && (Date.now() - __globalRankingsCache.ts) < __globalRankingsCacheTtlMs) {
+                    console.log('[GlobalRankings] ✅ 返回缓存数据');
                     return __globalRankingsCache.data;
                 }
                 if (!supabaseClient || typeof supabaseClient.from !== 'function') {
-                    console.warn('[GlobalRankings] ⚠️ Supabase 客户端未初始化');
+                    console.warn('[GlobalRankings] ⚠️ Supabase 客户端未初始化, supabaseClient:', typeof supabaseClient);
                     return null;
                 }
+                console.log('[GlobalRankings] ✅ Supabase 客户端已初始化，开始获取排行榜数据');
 
-                // 定义6个维度的配置
+                // 定义6个维度的配置（与 rank-content.ts 对齐：磕头榜，霸总榜，打工榜，话痨榜，纠结榜，社畜榜）
                 const dimensions = [
-                    { key: 'work_days', label: '脱发榜', field: 'work_days', desc: '上岗天数' },
-                    { key: 'total_chars', label: '抓狂榜', field: 'total_chars', desc: '对话字符总数' },
-                    { key: 'jiafang_count', label: '甲方榜', field: 'jiafang_count', desc: '甲方上身' },
-                    { key: 'ketao_count', label: '舔狗榜', field: 'ketao_count', desc: '磕头次数' },
-                    { key: 'total_messages', label: '话唠榜 (Stress)', field: 'total_messages', desc: '对话次数' },
-                    { key: 'avg_user_message_length', label: '话唠榜 (Power)', field: 'avg_user_message_length', desc: '平均长度' }
+                    { key: 'ketao_count', label: '磕头榜', field: 'ketao_count', desc: '顶级礼貌大户' },
+                    { key: 'jiafang_count', label: '霸总榜', field: 'jiafang_count', desc: '对 AI 极限否定' },
+                    { key: 'work_days', label: '打工榜', field: 'work_days', desc: '上岗天数' },
+                    { key: 'total_messages', label: '话痨榜', field: 'total_messages', desc: '对话回合' },
+                    { key: 'avg_user_message_length', label: '纠结榜', field: 'avg_user_message_length', desc: '单次指令厚度' },
+                    { key: 'total_chars', label: '社畜榜', field: 'total_chars', desc: 'Token 霸权' }
                 ];
 
                 const rankings = {};
@@ -12372,7 +12548,8 @@
                 // 并行获取所有维度的排行榜
                 const promises = dimensions.map(async (dim) => {
                     try {
-                        let selectFields = 'id, fingerprint, user_name, github_username, user_identity, ip_location, country_code, vibe_index_str';
+                        // 注意：github_username 字段在 user_analysis 表中不存在，使用 user_name 代替
+                        let selectFields = 'id, fingerprint, user_name, user_identity, ip_location, country_code, vibe_index_str';
                         
                         // 对于 avg_user_message_length，需要计算，所以需要 total_chars 和 total_messages
                         if (dim.key === 'avg_user_message_length') {
@@ -12410,11 +12587,13 @@
 
                         // 处理数据，添加排名和用户信息
                         let processedData = (data || []).map((item, index) => {
-                            const github = item.github_username || '';
+                            // 注意：github_username 字段在 user_analysis 表中不存在，使用 user_name 代替
                             const username = item.user_name || '';
-                            const display = github ? `@${github}` : (username ? `@${username}` : `user_${(item.fingerprint || '').slice(0, 6)}`);
-                            const avatar = github 
-                                ? `https://github.com/${encodeURIComponent(github)}.png?size=64`
+                            const display = username ? `@${username}` : `user_${(item.fingerprint || '').slice(0, 6)}`;
+                            // 头像使用 username 判断（如果是 GitHub 用户名格式则使用 GitHub 头像）
+                            const looksLikeGitHub = username && /^[a-zA-Z0-9-]+$/.test(username) && username.length <= 39;
+                            const avatar = looksLikeGitHub 
+                                ? `https://github.com/${encodeURIComponent(username)}.png?size=64`
                                 : DEFAULT_AVATAR;
 
                             // 计算 avg_user_message_length
@@ -12436,7 +12615,6 @@
                                 fingerprint: item.fingerprint || '',
                                 username: display,
                                 avatar: avatar,
-                                github_username: github,
                                 user_name: username,
                                 value: value,
                                 user_identity: item.user_identity || null,
@@ -12465,6 +12643,7 @@
                     rankings[result.key] = result;
                 });
                 __globalRankingsCache = { data: rankings, ts: Date.now() };
+                console.log('[GlobalRankings] ✅ 数据获取成功:', Object.keys(rankings));
                 return rankings;
             } catch (error) {
                 console.error('[GlobalRankings] ❌ 获取全局排行榜失败:', error);
@@ -12476,12 +12655,15 @@
          * 渲染六个绿色主题排行榜表格
          */
         async function renderGreenLadders(forceRefresh) {
+            console.log('[GreenLadders] 🚀 renderGreenLadders 被调用, forceRefresh:', forceRefresh);
             // 优先使用 ranking 标签内的容器，避免与其它面板冲突
             const container = document.querySelector('#panel-ranking-view #global-ranking-grids') || document.getElementById('global-ranking-grids');
+            console.log('[GreenLadders] container:', container);
             if (!container) {
                 console.warn('[GreenLadders] ⚠️ global-ranking-grids 容器不存在');
                 return;
             }
+            console.log('[GreenLadders] ✅ 找到容器');
 
             if (!forceRefresh && __globalRankingsCache.data && (Date.now() - __globalRankingsCache.ts) < __globalRankingsCacheTtlMs) {
                 renderGreenLaddersToContainer(container, __globalRankingsCache.data);
@@ -12506,82 +12688,186 @@
         }
 
         function renderGreenLaddersToContainer(container, rankings) {
+            console.log('[GreenLaddersToContainer] 🚀 渲染容器:', container?.id || container);
+            console.log('[GreenLaddersToContainer] rankings:', rankings ? Object.keys(rankings) : null);
+            // 六维与 rank-content 文案对齐：磕头榜，霸总榜，打工榜，话痨榜，纠结榜，社畜榜
             const dimensionOrder = [
-                { key: 'work_days', label: '脱发榜', desc: '上岗天数' },
-                { key: 'total_chars', label: '抓狂榜', desc: '对话字符总数' },
-                { key: 'jiafang_count', label: '甲方榜', desc: '甲方上身' },
-                { key: 'ketao_count', label: '舔狗榜', desc: '磕头次数' },
-                { key: 'total_messages', label: '话唠榜 (Stress)', desc: '对话次数' },
-                { key: 'avg_user_message_length', label: '话唠榜 (Power)', desc: '平均长度' }
+                { key: 'ketao_count', label: '磕头榜', desc: '顶级礼貌大户' },
+                { key: 'jiafang_count', label: '霸总榜', desc: '对 AI 极限否定' },
+                { key: 'work_days', label: '打工榜', desc: '上岗天数' },
+                { key: 'total_messages', label: '话痨榜', desc: '对话回合' },
+                { key: 'avg_user_message_length', label: '纠结榜', desc: '单次指令厚度' },
+                { key: 'total_chars', label: '社畜榜', desc: 'Token 霸权' }
             ];
-            let html = '';
-            const titleLabel = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Title' : '称号';
+            
+            // 强制清空容器，确保刷新时重新渲染
+            container.innerHTML = '';
+            
             dimensionOrder.forEach((dim) => {
                 const rankingData = rankings[dim.key];
+                
+                // 创建卡片容器
+                const card = document.createElement('div');
+                card.style.cssText = `
+                    border: 1px solid rgba(0, 255, 65, 0.3);
+                    background: rgba(10, 10, 10, 0.95);
+                    margin-bottom: 16px;
+                    border-radius: 4px;
+                    overflow: hidden;
+                `;
+                
+                // 卡片标题
+                const header = document.createElement('div');
+                header.style.cssText = `
+                    background: rgba(0, 255, 65, 0.1);
+                    border-bottom: 1px solid rgba(0, 255, 65, 0.2);
+                    padding: 12px 16px;
+                `;
+                header.innerHTML = `
+                    <div style="color: #00ff41; font-size: 14px; font-weight: bold; font-family: 'JetBrains Mono', monospace;">${dim.label}</div>
+                    <div style="color: rgba(0, 255, 65, 0.7); font-size: 11px; font-family: 'JetBrains Mono', monospace; margin-top: 2px;">${dim.desc}</div>
+                `;
+                card.appendChild(header);
+
+                // 如果没有数据
                 if (!rankingData || !rankingData.data || rankingData.data.length === 0) {
-                    html += `
-                        <div class="border border-[#00ff41]/30 bg-[#0a0a0a] p-3">
-                            <div class="text-[#00ff41] text-xs font-mono mb-2 bg-[#003b00]/50 px-2 py-1">${dim.label}</div>
-                            <div class="text-zinc-500 text-xs text-center py-4">暂无数据</div>
-                        </div>
-                    `;
+                    const emptyDiv = document.createElement('div');
+                    emptyDiv.style.cssText = 'padding: 16px; text-align: center; color: rgba(255, 255, 255, 0.5); font-size: 12px;';
+                    emptyDiv.textContent = '暂无数据';
+                    card.appendChild(emptyDiv);
+                    container.appendChild(card);
                     return;
                 }
-                const rows = rankingData.data.map((item) => {
+
+                // 榜单列表
+                const listContainer = document.createElement('div');
+                listContainer.style.cssText = 'padding: 8px;';
+
+                rankingData.data.forEach((item) => {
                     const value = dim.key === 'avg_user_message_length' 
                         ? Number(item.value).toFixed(1) 
                         : Number(item.value).toLocaleString();
+                    
                     // 国旗
                     const flagEmoji = (typeof countryCodeToFlagEmoji === 'function' && item.countryCode) ? countryCodeToFlagEmoji(item.countryCode) : '';
-                    // 人格称号（优先显示文字称号）
+                    // 人格称号
                     const personalityTitle = escapeHtml(item.personality_title || item.vibe_index_str || item.user_identity || '--');
-                    return `
-                        <tr class="border-b border-[#00ff41]/10 hover:bg-[#003b00]/20 transition-colors">
-                            <td class="px-2 py-1.5 text-[#00ff41] text-xs font-mono text-right">${item.rank}</td>
-                            <td class="px-2 py-1.5">
-                                <img 
-                                    src="${escapeHtml(item.avatar)}" 
-                                    alt="" 
-                                    width="24" 
-                                    height="24" 
-                                    class="rounded-full cursor-pointer border border-[#00ff41]/30 hover:border-[#00ff41] transition-colors"
-                                    onclick="toggleUserPreview('${escapeHtml(item.fingerprint)}')"
-                                    onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
-                                    style="object-fit: cover;"
-                                />
-                            </td>
-                            <td class="px-2 py-1.5 text-white text-xs font-mono truncate max-w-[100px]" title="${escapeHtml(item.username)}">${escapeHtml(item.username)}</td>
-                            <td class="px-2 py-1.5 text-[#00ff41]/90 text-[10px] font-mono truncate max-w-[100px]" title="${personalityTitle}">${flagEmoji ? flagEmoji + ' ' : ''}${personalityTitle}</td>
-                            <td class="px-2 py-1.5 text-[#00ff41] text-xs font-mono text-right">${value}</td>
-                        </tr>
+                    
+                    // 排名颜色
+                    let rankColor = '#00ff41';
+                    let rankBg = 'transparent';
+                    if (item.rank === 1) {
+                        rankColor = '#ffd700';
+                        rankBg = 'rgba(255, 215, 0, 0.1)';
+                    } else if (item.rank === 2) {
+                        rankColor = '#c0c0c0';
+                        rankBg = 'rgba(192, 192, 192, 0.1)';
+                    } else if (item.rank === 3) {
+                        rankColor = '#cd7f32';
+                        rankBg = 'rgba(205, 127, 50, 0.1)';
+                    }
+
+                    const row = document.createElement('div');
+                    row.style.cssText = `
+                        display: flex;
+                        align-items: center;
+                        padding: 10px 12px;
+                        margin-bottom: 6px;
+                        background: ${rankBg};
+                        border: 1px solid rgba(0, 255, 65, 0.1);
+                        border-radius: 4px;
+                        transition: all 0.2s;
                     `;
-                }).join('');
-                html += `
-                    <div class="border border-[#00ff41]/30 bg-[#0a0a0a]">
-                        <div class="bg-[#003b00]/50 px-3 py-2 border-b border-[#00ff41]/30">
-                            <div class="text-[#00ff41] text-xs font-mono font-bold">${dim.label}</div>
-                            <div class="text-[#00ff41]/70 text-[10px] font-mono mt-0.5">${dim.desc}</div>
+                    row.onmouseenter = () => {
+                        row.style.background = 'rgba(0, 255, 65, 0.08)';
+                        row.style.borderColor = 'rgba(0, 255, 65, 0.3)';
+                    };
+                    row.onmouseleave = () => {
+                        row.style.background = rankBg;
+                        row.style.borderColor = 'rgba(0, 255, 65, 0.1)';
+                    };
+
+                    row.innerHTML = `
+                        <!-- 排名 -->
+                        <div style="
+                            width: 28px;
+                            text-align: center;
+                            font-family: 'JetBrains Mono', monospace;
+                            font-size: 13px;
+                            font-weight: bold;
+                            color: ${rankColor};
+                            flex-shrink: 0;
+                        ">#${item.rank}</div>
+                        
+                        <!-- 头像 -->
+                        <div style="margin: 0 10px; flex-shrink: 0;">
+                            <img 
+                                src="${escapeHtml(item.avatar)}" 
+                                alt="" 
+                                style="
+                                    width: 36px;
+                                    height: 36px;
+                                    border-radius: 50%;
+                                    border: 2px solid rgba(0, 255, 65, 0.3);
+                                    object-fit: cover;
+                                    cursor: pointer;
+                                "
+                                onclick="toggleUserPreview('${escapeHtml(item.fingerprint)}')"
+                                onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
+                            />
                         </div>
-                        <table class="w-full text-left" style="font-family: 'JetBrains Mono', monospace;">
-                            <thead>
-                                <tr class="border-b border-[#00ff41]/30">
-                                    <th class="px-2 py-1.5 text-[#00ff41] text-[10px] font-mono text-right w-12">排名</th>
-                                    <th class="px-2 py-1.5 text-[#00ff41] text-[10px] font-mono w-10">头像</th>
-                                    <th class="px-2 py-1.5 text-[#00ff41] text-[10px] font-mono">用户名</th>
-                                    <th class="px-2 py-1.5 text-[#00ff41] text-[10px] font-mono">${titleLabel}</th>
-                                    <th class="px-2 py-1.5 text-[#00ff41] text-[10px] font-mono text-right">数值</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${rows}
-                            </tbody>
-                        </table>
+                        
+                        <!-- 用户信息区域 -->
+                        <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;">
+                            <!-- 用户名 -->
+                            <div style="
+                                font-family: 'JetBrains Mono', monospace;
+                                font-size: 13px;
+                                color: #ffffff;
+                                white-space: nowrap;
+                                overflow: hidden;
+                                text-overflow: ellipsis;
+                            " title="${escapeHtml(item.username)}">${escapeHtml(item.username)}</div>
+                            <!-- 称号（国旗 + 人格） -->
+                            <div style="
+                                font-family: 'JetBrains Mono', monospace;
+                                font-size: 10px;
+                                color: rgba(255, 255, 255, 0.6);
+                                white-space: nowrap;
+                                overflow: hidden;
+                                text-overflow: ellipsis;
+                            " title="${personalityTitle}">
+                                ${flagEmoji ? `<span style="margin-right: 4px;">${flagEmoji}</span>` : ''}${personalityTitle}
+                            </div>
+                        </div>
+                        
+                        <!-- 数值 -->
+                        <div style="
+                            font-family: 'JetBrains Mono', monospace;
+                            font-size: 14px;
+                            font-weight: bold;
+                            color: #00ff41;
+                            text-align: right;
+                            margin-left: 10px;
+                            flex-shrink: 0;
+                        ">${value}</div>
+                    `;
+
+                    listContainer.appendChild(row);
+                });
+
+                card.appendChild(listContainer);
+                container.appendChild(card)
                     </div>
                 `;
             });
             container.innerHTML = html;
+            console.log('[GreenLaddersToContainer] ✅ HTML 已渲染到容器');
         }
-        if (typeof window !== 'undefined') window.renderGreenLadders = renderGreenLadders;
+        if (typeof window !== 'undefined') {
+            window.renderGreenLadders = renderGreenLadders;
+            console.log('[Stats2.App] ✅ renderGreenLadders 已挂载到 window');
+        }
 
         /**
          * 切换用户预览弹窗
@@ -12607,9 +12893,10 @@
                     return;
                 }
 
+                // 注意：github_username 字段在 user_analysis 表中不存在，使用 user_name 代替
                 const { data, error } = await supabaseClient
                     .from('user_analysis')
-                    .select('id, fingerprint, user_name, github_username, user_identity, total_messages, total_chars, avg_user_message_length, jiafang_count, ketao_count, work_days')
+                    .select('id, fingerprint, user_name, user_identity, total_messages, total_chars, avg_user_message_length, jiafang_count, ketao_count, work_days')
                     .eq('fingerprint', fingerprint)
                     .limit(1)
                     .single();
@@ -12619,8 +12906,8 @@
                     return;
                 }
 
-                // 构建用户信息
-                const github = data.github_username || '';
+                // 构建用户信息（使用 user_name 作为 github_username 的替代）
+                const github = data.user_name || '';
                 const username = data.user_name || '';
                 const display = github ? `@${github}` : (username ? `@${username}` : `user_${fingerprint.slice(0, 6)}`);
                 const avatar = github 
@@ -14993,4 +15280,8 @@
         window.addEventListener('beforeunload', () => {
             stopRealtimeListener();
         });
+    
+        // ��ǽű��Ѽ������
+        window.stats2AppLoaded = true;
+        console.log('[Stats2.App] ? �ű�����ȫ����');
     
