@@ -1451,185 +1451,267 @@
         .ranking-list {
             display: flex;
             flex-direction: column;
-            gap: 12px;
-            padding: 12px;
+            gap: 0;
+            padding: 0;
             width: 100%;
         }
         
-        /* 单行排行榜项样式 - 使用 Grid 布局 */
+        /* 金融App榜单风格 - Grid布局：国旗、头像、用户信息、分值 */
         .ranking-item-row {
             display: grid;
-            grid-template-columns: 80px 1fr 60px 1.5fr 100px;
+            grid-template-columns: 50px 50px 1fr 100px;
             align-items: center;
             gap: 12px;
             padding: 12px 16px;
             background-color: rgba(0, 255, 65, 0.05);
-            border-radius: 6px;
-            border: 1px solid rgba(0, 255, 65, 0.1);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
             transition: all 0.2s;
             width: 100%;
+            position: relative;
+            min-height: 70px;
+            cursor: pointer;
         }
         .ranking-item-row:hover {
             background-color: rgba(0, 255, 65, 0.1);
-            border-color: rgba(0, 255, 65, 0.3);
         }
         
-        /* 排名/头像列 (80px) */
-        .ranking-rank-avatar {
+        /* 第一列：国旗（固定宽度 50px，居中显示，加大字号） */
+        .ranking-flag-column {
             display: flex;
             align-items: center;
-            gap: 8px;
-            width: 80px;
-        }
-        .ranking-rank {
-            min-width: 24px;
-            text-align: right;
-            color: rgba(0, 255, 65, 1);
-            font-size: 12px;
-            font-family: 'JetBrains Mono', monospace;
-            font-weight: 600;
-        }
-        .ranking-avatar {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            border: 1px solid rgba(0, 255, 65, 0.3);
-            object-fit: cover;
-            cursor: pointer;
-            transition: border-color 0.2s;
+            justify-content: center;
+            width: 50px;
             flex-shrink: 0;
         }
-        .ranking-avatar:hover {
-            border-color: rgba(0, 255, 65, 1);
+        .ranking-flag-large {
+            font-size: 24px; /* text-xl 大小 */
+            line-height: 1;
         }
         
-        /* 基本信息列 (1fr) - user_name + vibe_index_str */
+        /* 第二列：头像（固定宽度 50px，w-10 h-10 圆形） */
+        .ranking-avatar-wrapper {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 50px;
+            flex-shrink: 0;
+        }
+        .ranking-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 1px solid rgba(0, 255, 65, 0.3);
+            box-shadow: 0 0 4px rgba(0, 255, 65, 0.2);
+            object-fit: cover;
+            transition: all 0.2s;
+        }
+        .ranking-avatar:hover {
+            border-color: rgba(0, 255, 65, 0.8);
+            box-shadow: 0 0 8px rgba(0, 255, 65, 0.4);
+        }
+        
+        /* 第三列：用户信息区（flex flex-col 垂直排布） */
         .ranking-user-info {
             display: flex;
             flex-direction: column;
             gap: 4px;
             min-width: 0;
-            overflow: hidden;
+            overflow: visible;
+        }
+        /* 上行：user_name（绿色加粗，禁止 truncate 截断，允许自然伸展） */
+        .ranking-username-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
         }
         .ranking-username {
-            color: rgba(255, 255, 255, 1);
-            font-size: 12px;
+            color: rgba(74, 222, 128, 1); /* text-green-400 */
+            font-size: 14px;
             font-family: 'JetBrains Mono', monospace;
-            font-weight: 500;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+            font-weight: 700;
+            white-space: normal;
+            word-break: break-word;
+            overflow: visible;
+            text-overflow: clip;
+            line-height: 1.4;
         }
-        .ranking-title {
-            color: rgba(0, 255, 65, 0.8);
-            font-size: 10px;
-            font-family: 'JetBrains Mono', monospace;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        
-        /* 地理位置列 (60px) - 国旗居中 */
-        .ranking-location {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 60px;
-        }
-        .ranking-flag {
-            font-size: 20px;
-            line-height: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        /* GitHub 仓库列 (1.5fr) */
-        .ranking-github {
-            display: flex;
-            align-items: center;
-            min-width: 0;
-            overflow: hidden;
-        }
-        .ranking-github-link {
+        /* 下行：显示 user_identity 来源 */
+        .ranking-identity-row {
             display: flex;
             align-items: center;
             gap: 4px;
-            font-size: 10px;
-            color: rgba(0, 255, 65, 0.7);
-            text-decoration: none;
+            min-width: 0;
+        }
+        .ranking-identity-text {
+            color: rgba(107, 114, 128, 0.7);
+            font-size: 11px;
             font-family: 'JetBrains Mono', monospace;
-            transition: color 0.2s;
-            max-width: 100%;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            min-width: 0;
-        }
-        .ranking-github-link span {
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            min-width: 0;
-        }
-        .ranking-github-link:hover {
-            color: rgba(0, 255, 65, 1);
-            text-decoration: underline;
-        }
-        .ranking-github-icon {
-            width: 14px;
-            height: 14px;
-            flex-shrink: 0;
-            opacity: 0.8;
+            line-height: 1.3;
         }
         
-        /* 分数统计列 (100px) - 右对齐 */
+        /* 第四列：核心分值区（右对齐，flex flex-col items-end） */
+        .ranking-value-section {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            justify-content: center;
+            gap: 4px;
+            width: 100px;
+            flex-shrink: 0;
+        }
+        /* 上行：核心数值（等宽大字体 font-mono） */
         .ranking-value {
             text-align: right;
             color: rgba(0, 255, 65, 1);
-            font-size: 12px;
+            font-size: 16px;
             font-family: 'JetBrains Mono', monospace;
-            font-weight: 600;
-            width: 100px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            line-height: 1.2;
+        }
+        /* 下行：固定显示该维度的单位或标签 */
+        .ranking-value-label {
+            text-align: right;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 10px;
+            font-family: 'JetBrains Mono', monospace;
+            line-height: 1.2;
+        }
+        
+        /* 数据详情弹窗 */
+        .ranking-detail-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 10000;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .ranking-detail-modal.active {
+            display: flex;
+        }
+        .ranking-detail-card {
+            background-color: rgba(10, 10, 10, 0.98);
+            border: 1px solid rgba(0, 255, 65, 0.3);
+            border-radius: 8px;
+            padding: 24px;
+            max-width: 500px;
+            width: 100%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+        .ranking-detail-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(0, 255, 65, 0.2);
+        }
+        .ranking-detail-title {
+            color: rgba(0, 255, 65, 1);
+            font-size: 18px;
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 700;
+        }
+        .ranking-detail-close {
+            background: none;
+            border: none;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.2s;
+        }
+        .ranking-detail-close:hover {
+            color: rgba(255, 255, 255, 1);
+        }
+        .ranking-detail-content {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .ranking-detail-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .ranking-detail-label {
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 11px;
+            font-family: 'JetBrains Mono', monospace;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .ranking-detail-value {
+            color: rgba(255, 255, 255, 1);
+            font-size: 14px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .ranking-detail-link {
+            color: rgba(0, 255, 65, 1);
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: color 0.2s;
+        }
+        .ranking-detail-link:hover {
+            color: rgba(74, 222, 128, 1);
+            text-decoration: underline;
         }
         
         /* 移动端响应式 */
         @media (max-width: 768px) {
             .ranking-item-row {
-                grid-template-columns: 60px 1fr 40px 1fr 70px;
+                grid-template-columns: 40px 40px 1fr 80px;
                 gap: 8px;
                 padding: 10px 12px;
+                min-height: 60px;
             }
-            .ranking-rank-avatar {
-                width: 60px;
-                gap: 6px;
-            }
-            .ranking-rank {
-                min-width: 20px;
-                font-size: 11px;
-            }
-            .ranking-avatar {
-                width: 28px;
-                height: 28px;
-            }
-            .ranking-username {
-                font-size: 11px;
-            }
-            .ranking-title {
-                font-size: 9px;
-            }
-            .ranking-location {
+            .ranking-flag-column {
                 width: 40px;
             }
-            .ranking-flag {
-                font-size: 16px;
+            .ranking-flag-large {
+                font-size: 20px;
             }
-            .ranking-github-link {
-                font-size: 9px;
+            .ranking-avatar-wrapper {
+                width: 40px;
+            }
+            .ranking-avatar {
+                width: 32px;
+                height: 32px;
+            }
+            .ranking-username {
+                font-size: 12px;
+            }
+            .ranking-identity-text {
+                font-size: 10px;
+            }
+            .ranking-value-section {
+                width: 80px;
             }
             .ranking-value {
-                width: 70px;
-                font-size: 11px;
+                font-size: 14px;
+            }
+            .ranking-value-label {
+                font-size: 9px;
+            }
+            .ranking-detail-card {
+                padding: 16px;
+                max-width: 90%;
             }
         }
 
@@ -10075,13 +10157,20 @@
             console.log('[GreenLaddersToContainer] rankings:', rankings ? Object.keys(rankings) : null);
             // 六维与 rank-content 文案对齐：磕头榜，霸总榜，打工榜，话痨榜，纠结榜，社畜榜
             const dimensionOrder = [
-                { key: 'ketao_count', label: '磕头榜', desc: '顶级礼貌大户' },
-                { key: 'jiafang_count', label: '霸总榜', desc: '对 AI 极限否定' },
-                { key: 'work_days', label: '打工榜', desc: '上岗天数' },
-                { key: 'total_messages', label: '话痨榜', desc: '对话回合' },
-                { key: 'avg_user_message_length', label: '纠结榜', desc: '单次指令厚度' },
-                { key: 'total_chars', label: '社畜榜', desc: 'Token 霸权' }
+                { key: 'ketao_count', label: '磕头榜', desc: '顶级礼貌大户', unit: 'Total Pts' },
+                { key: 'jiafang_count', label: '霸总榜', desc: '对 AI 极限否定', unit: 'Total Pts' },
+                { key: 'work_days', label: '打工榜', desc: '上岗天数', unit: 'Days' },
+                { key: 'total_messages', label: '话痨榜', desc: '对话回合', unit: 'Messages' },
+                { key: 'avg_user_message_length', label: '纠结榜', desc: '单次指令厚度', unit: 'Chars/Msg' },
+                { key: 'total_chars', label: '社畜榜', desc: 'Token 霸权', unit: 'Total Chars' }
             ];
+            
+            // 用户身份显示文本映射
+            const identityLabelMap = {
+                'github': 'GitHub User',
+                'fingerprint': '匿名',
+                '': '匿名'
+            };
             
             // 强制清空容器，确保刷新时重新渲染
             container.innerHTML = '<div class="col-span-full text-green-500 animate-pulse text-center py-6">>> 正在同步全球数据流...</div>';
@@ -10097,98 +10186,116 @@
                     `;
                     return;
                 }
-                // 生成单行 flex 布局的列表项
-                const rows = rankingData.data.map((item) => {
-                    // 安全处理数值，容错处理
+                // 生成单行 Grid 布局的列表项（金融App榜单风格）
+                const rows = rankingData.data.map((item, index) => {
+                    // 安全处理数值，容错处理，确保每三位有逗号分隔
                     const itemValue = item.value !== null && item.value !== undefined ? Number(item.value) : 0;
-                    const value = dim.key === 'avg_user_message_length' 
-                        ? (isNaN(itemValue) ? '0.0' : itemValue.toFixed(1))
-                        : (isNaN(itemValue) ? '0' : itemValue.toLocaleString());
+                    let value = '';
+                    if (dim.key === 'avg_user_message_length') {
+                        value = isNaN(itemValue) ? '0.0' : itemValue.toFixed(1);
+                    } else {
+                        // 确保数字每三位有逗号分隔
+                        value = isNaN(itemValue) ? '0' : itemValue.toLocaleString('en-US');
+                    }
                     
                     // 安全处理用户名，容错处理（使用 user_name，不是 username）
                     const user_name = (item.user_name && String(item.user_name).trim()) || '';
-                    const username = user_name ? `@${user_name}` : '--';
-                    
-                    // 安全处理头像，容错处理
-                    const avatar = (item.avatar && String(item.avatar).trim()) || DEFAULT_AVATAR;
                     
                     // 安全处理指纹，容错处理
                     const fingerprint = (item.fingerprint && String(item.fingerprint).trim()) || '';
                     
                     // 安全处理排名，容错处理
-                    const rank = (item.rank !== null && item.rank !== undefined) ? Number(item.rank) : 0;
+                    const rank = (item.rank !== null && item.rank !== undefined) ? Number(item.rank) : (index + 1);
                     
                     // 用户身份
                     const user_identity = (item.user_identity && String(item.user_identity).trim()) || '';
                     
-                    // 国旗 Emoji：优先使用 item.flagEmoji，否则通过 countryCode 计算
-                    let flagEmoji = '';
-                    if (item.flagEmoji && String(item.flagEmoji).trim()) {
-                        flagEmoji = String(item.flagEmoji).trim();
-                    } else {
-                        const countryCode = (item.countryCode && String(item.countryCode).trim()) || '';
-                        if (countryCode && countryCode !== 'UN') {
-                            flagEmoji = typeof getFlagEmoji === 'function' 
-                                ? getFlagEmoji(countryCode) 
-                                : (typeof countryCodeToFlagEmoji === 'function' ? countryCodeToFlagEmoji(countryCode) : '');
-                        }
-                    }
-                    // 如果 countryCode 为 null，显示 "🏳️"
-                    if (!flagEmoji && (!item.countryCode || item.countryCode === 'UN' || item.countryCode === null)) {
-                        flagEmoji = '🏳️';
+                    // 头像逻辑：如果 user_identity === 'github'，使用 GitHub 头像
+                    let avatar = DEFAULT_AVATAR;
+                    if (user_identity === 'github' && user_name) {
+                        avatar = `https://github.com/${encodeURIComponent(user_name)}.png?size=64`;
+                    } else if (item.avatar && String(item.avatar).trim()) {
+                        avatar = String(item.avatar).trim();
                     }
                     
-                    // 人格称号：使用 vibe_index_str 作为称号/维度显示
-                    const personalityTitle = escapeHtml(
-                        (item.personality_title && String(item.personality_title).trim()) || 
-                        (item.vibe_index_str && String(item.vibe_index_str).trim()) || 
-                        (item.user_identity && String(item.user_identity).trim()) || 
-                        '--'
+                    // 国家代码：优先使用 country_code（小写下划线），确保从 v_unified_analysis_v2 查询的字段包含 country_code
+                    const country_code = (item.country_code && String(item.country_code).trim()) || 
+                                       (item.countryCode && String(item.countryCode).trim()) || 
+                                       null;
+                    const countryCode = country_code || 'UN';
+                    
+                    // 使用 getFlagEmoji 函数将 country_code 转换为国旗 Emoji
+                    // 调用 getFlagEmoji(item.country_code) 后的 Emoji
+                    const flagEmoji = typeof getFlagEmoji === 'function' 
+                        ? getFlagEmoji(countryCode) 
+                        : '🏳️';
+                    
+                    // 人格称号：使用 vibe_index_str 作为称号/维度显示（仅用于弹窗）
+                    const vibe_index_str = escapeHtml(
+                        (item.vibe_index_str && String(item.vibe_index_str).trim()) || ''
                     );
                     
-                    // GitHub 链接：如果 user_identity === 'github'，显示 GitHub 链接（带图标）
-                    let githubLinkHtml = '';
-                    if (user_identity === 'github' && user_name) {
-                        const githubUrl = `https://github.com/${encodeURIComponent(user_name)}`;
-                        githubLinkHtml = `
-                            <a href="${escapeHtml(githubUrl)}" target="_blank" rel="noopener noreferrer" class="ranking-github-link" title="github.com/${escapeHtml(user_name)}">
-                                <svg class="ranking-github-icon" viewBox="0 0 24 24" fill="currentColor">
-                                    <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-                                </svg>
-                                <span class="truncate">github.com/${escapeHtml(user_name)}</span>
-                            </a>
-                        `;
-                    }
+                    // 用户身份显示文本
+                    const identityLabel = identityLabelMap[user_identity] || '匿名';
                     
-                    // Grid 布局：5 列
-                    // 1. 排名/头像列 (80px)
-                    // 2. 基本信息列 (1fr) - user_name + vibe_index_str
-                    // 3. 地理位置列 (60px) - 国旗居中
-                    // 4. GitHub 仓库列 (1.5fr) - GitHub 链接
-                    // 5. 分数统计列 (100px) - 右对齐
+                    // GitHub 链接（仅用于弹窗）
+                    const githubUrl = (user_identity === 'github' && user_name) 
+                        ? `https://github.com/${user_name}` 
+                        : null;
+                    
+                    // 准备弹窗数据（JSON字符串，用于点击事件）
+                    // 弹窗化次要信息：将 github.com/用户名 链接和 vibe_index_str（代码称号）从主列表中移除
+                    const detailData = {
+                        fingerprint: fingerprint,
+                        user_name: user_name || '--',
+                        user_identity: user_identity || '匿名',
+                        avatar: avatar,
+                        country_code: country_code,
+                        flagEmoji: flagEmoji,
+                        githubUrl: githubUrl,
+                        vibe_index_str: item.vibe_index_str || '', // 原始值，用于转换称号
+                        currentDimension: dim.key,
+                        currentValue: value
+                    };
+                    
+                    // 金融App榜单风格 - Grid布局：50px 50px 1fr 100px（国旗、头像、用户信息、分值）
+                    // 名次已移除，国旗占据最左侧位置
                     return `
-                        <div class="ranking-item-row">
-                            <div class="ranking-rank-avatar">
-                                <div class="ranking-rank">${rank}</div>
+                        <div class="ranking-item-row" onclick="showUserRankingDetail(${escapeHtml(JSON.stringify(detailData))})">
+                            <!-- 第一列：国旗 Emoji（加大字号，最左侧） -->
+                            <div class="ranking-flag-column">
+                                <span class="ranking-flag-large">${flagEmoji}</span>
+                            </div>
+                            
+                            <!-- 第二列：用户头像（圆形，w-10 h-10） -->
+                            <div class="ranking-avatar-wrapper">
                                 <img 
                                     src="${escapeHtml(avatar)}" 
                                     alt="" 
                                     class="ranking-avatar"
-                                    onclick="toggleUserPreview('${escapeHtml(fingerprint)}')"
                                     onerror="this.onerror=null; this.src='${escapeHtml(DEFAULT_AVATAR)}';"
                                 />
                             </div>
+                            
+                            <!-- 第三列：用户信息区（flex-col 布局） -->
                             <div class="ranking-user-info">
-                                <div class="ranking-username" title="${escapeHtml(username)}">${escapeHtml(username)}</div>
-                                <div class="ranking-title" title="${personalityTitle}">${personalityTitle}</div>
+                                <!-- 上行：user_name（不截断，绿色加粗，允许换行） -->
+                                <div class="ranking-username-row">
+                                    <div class="ranking-username">${escapeHtml(user_name || '--')}</div>
+                                </div>
+                                <!-- 下行：身份来源 -->
+                                <div class="ranking-identity-row">
+                                    <span class="ranking-identity-text">${escapeHtml(identityLabel)}</span>
+                                </div>
                             </div>
-                            <div class="ranking-location">
-                                <span class="ranking-flag">${flagEmoji || '🏳️'}</span>
+                            
+                            <!-- 第四列：分值区（右对齐，flex-col items-end） -->
+                            <div class="ranking-value-section">
+                                <!-- 上行：大字号分值 -->
+                                <div class="ranking-value">${value}</div>
+                                <!-- 下行：维度标签 -->
+                                <div class="ranking-value-label">${escapeHtml(dim.unit)}</div>
                             </div>
-                            <div class="ranking-github">
-                                ${githubLinkHtml || '<span style="color: rgba(255,255,255,0.3); font-size: 10px;">--</span>'}
-                            </div>
-                            <div class="ranking-value">${value}</div>
                         </div>
                     `;
                 }).join('');
@@ -10208,8 +10315,508 @@
             container.innerHTML = html;
             console.log('[GreenLaddersToContainer] ✅ HTML 已渲染到容器');
         }
+        
+        /**
+         * 显示用户详情弹窗（包含用户头像、六个维度数据和排名）
+         * @param {Object} data - 排行榜项数据
+         */
+        async function showUserRankingDetail(data) {
+            if (!data || !data.fingerprint) {
+                console.warn('[UserRankingDetail] ⚠️ 缺少必要数据');
+                return;
+            }
+
+            // 检查是否已存在弹窗
+            let existingModal = document.getElementById('user-ranking-detail-modal');
+            if (existingModal) {
+                existingModal.remove();
+            }
+
+            try {
+                // 获取用户的所有六个维度数据
+                if (!supabaseClient || typeof supabaseClient.from !== 'function') {
+                    console.warn('[UserRankingDetail] ⚠️ Supabase 客户端未初始化');
+                    return;
+                }
+
+                // 从 v_unified_analysis_v2 获取用户数据
+                const { data: userData, error: userError } = await supabaseClient
+                    .from('v_unified_analysis_v2')
+                    .select('fingerprint, user_name, user_identity, country_code, vibe_index_str, ketao_count, jiafang_count, work_days, total_messages, avg_user_message_length, total_chars')
+                    .eq('fingerprint', data.fingerprint)
+                    .limit(1)
+                    .single();
+
+                if (userError || !userData) {
+                    console.error('[UserRankingDetail] ❌ 获取用户数据失败:', userError);
+                    return;
+                }
+
+                // 获取用户在所有六个维度中的排名
+                const dimensions = [
+                    { key: 'ketao_count', label: '磕头榜', desc: '顶级礼貌大户', field: 'ketao_count' },
+                    { key: 'jiafang_count', label: '霸总榜', desc: '对 AI 极限否定', field: 'jiafang_count' },
+                    { key: 'work_days', label: '打工榜', desc: '上岗天数', field: 'work_days' },
+                    { key: 'total_messages', label: '话痨榜', desc: '对话回合', field: 'total_messages' },
+                    { key: 'avg_user_message_length', label: '纠结榜', desc: '单次指令厚度', field: 'avg_user_message_length' },
+                    { key: 'total_chars', label: '社畜榜', desc: 'Token 霸权', field: 'total_chars' }
+                ];
+
+                // 并行获取所有维度的排名（优化：只查询比用户值大的记录数量）
+                const rankingPromises = dimensions.map(async (dim) => {
+                    try {
+                        // 计算用户在该维度的值
+                        const userValue = dim.field === 'avg_user_message_length' 
+                            ? (userData.total_chars && userData.total_messages ? userData.total_chars / userData.total_messages : 0)
+                            : (userData[dim.field] || 0);
+
+                        // 格式化数值
+                        let formattedValue = '';
+                        if (dim.key === 'avg_user_message_length') {
+                            formattedValue = isNaN(userValue) ? '0.0' : userValue.toFixed(1);
+                        } else {
+                            formattedValue = isNaN(userValue) ? '0' : userValue.toLocaleString('en-US');
+                        }
+
+                        // 如果用户值为0，排名为null
+                        if (userValue <= 0) {
+                            return { 
+                                key: dim.key, 
+                                label: dim.label, 
+                                desc: dim.desc,
+                                rank: null, 
+                                value: formattedValue,
+                                hasRanking: false
+                            };
+                        }
+
+                        // 查询比用户值大的记录数量（排名 = 数量 + 1）
+                        let countQuery = supabaseClient
+                            .from('v_unified_analysis_v2')
+                            .select('id', { count: 'exact', head: true });
+
+                        if (dim.field === 'avg_user_message_length') {
+                            // 对于平均长度，需要计算 total_chars / total_messages > userValue
+                            // 使用 PostgREST 的表达式：total_chars::numeric / NULLIF(total_messages, 0) > userValue
+                            countQuery = countQuery
+                                .not('total_chars', 'is', null)
+                                .not('total_messages', 'is', null)
+                                .gt('total_chars', 0)
+                                .gt('total_messages', 0);
+                            // 注意：PostgREST 不支持复杂的表达式查询，这里简化处理
+                            // 实际排名计算需要查询所有数据
+                        } else {
+                            countQuery = countQuery
+                                .not(dim.field, 'is', null)
+                                .gt(dim.field, userValue);
+                        }
+
+                        const { count, error: countError } = await countQuery;
+
+                        if (countError) {
+                            console.warn(`[UserRankingDetail] ⚠️ 获取 ${dim.key} 排名数量失败:`, countError);
+                            // 降级：查询前100条记录来计算排名
+                            let query = supabaseClient
+                                .from('v_unified_analysis_v2')
+                                .select(dim.field === 'avg_user_message_length' ? 'total_chars, total_messages' : dim.field)
+                                .not(dim.field === 'avg_user_message_length' ? 'total_chars' : dim.field, 'is', null)
+                                .gt(dim.field === 'avg_user_message_length' ? 'total_chars' : dim.field, 0)
+                                .order(dim.field === 'avg_user_message_length' ? 'total_chars' : dim.field, { ascending: false, nullsFirst: false })
+                                .limit(100);
+
+                            const { data: rankingData, error: rankingError } = await query;
+
+                            if (rankingError || !rankingData) {
+                                return { key: dim.key, rank: null, value: formattedValue, hasRanking: false };
+                            }
+
+                            let rank = 1;
+                            for (const item of rankingData) {
+                                const itemValue = dim.field === 'avg_user_message_length'
+                                    ? (item.total_chars && item.total_messages ? item.total_chars / item.total_messages : 0)
+                                    : (item[dim.field] || 0);
+                                
+                                if (itemValue > userValue) {
+                                    rank++;
+                                } else {
+                                    break;
+                                }
+                            }
+
+                            return { 
+                                key: dim.key, 
+                                label: dim.label, 
+                                desc: dim.desc,
+                                rank: rank, 
+                                value: formattedValue,
+                                hasRanking: rank <= 10
+                            };
+                        }
+
+                        // 排名 = 比用户值大的记录数 + 1
+                        const rank = (count || 0) + 1;
+
+                        return { 
+                            key: dim.key, 
+                            label: dim.label, 
+                            desc: dim.desc,
+                            rank: rank, 
+                            value: formattedValue,
+                            hasRanking: rank <= 10 // 标记是否在前10名
+                        };
+                    } catch (e) {
+                        console.error(`[UserRankingDetail] ❌ 获取 ${dim.key} 排名失败:`, e);
+                        // 返回用户值，但不显示排名
+                        const userValue = dim.field === 'avg_user_message_length' 
+                            ? (userData.total_chars && userData.total_messages ? userData.total_chars / userData.total_messages : 0)
+                            : (userData[dim.field] || 0);
+                        let formattedValue = '';
+                        if (dim.key === 'avg_user_message_length') {
+                            formattedValue = isNaN(userValue) ? '0.0' : userValue.toFixed(1);
+                        } else {
+                            formattedValue = isNaN(userValue) ? '0' : userValue.toLocaleString('en-US');
+                        }
+                        return { key: dim.key, label: dim.label, desc: dim.desc, rank: null, value: formattedValue, hasRanking: false };
+                    }
+                });
+
+                const rankings = await Promise.all(rankingPromises);
+
+                // 获取代码称号（转换为文字）
+                let personalityTitle = '--';
+                if (userData.vibe_index_str && typeof getPersonalityTitle === 'function') {
+                    try {
+                        const titleResult = getPersonalityTitle({ vibe_index_str: userData.vibe_index_str, user_identity: userData.user_identity }, currentLang || 'zh');
+                        if (titleResult && titleResult.trim()) {
+                            personalityTitle = titleResult.trim();
+                        }
+                    } catch (e) {
+                        console.warn('[UserRankingDetail] getPersonalityTitle 调用失败:', e);
+                    }
+                }
+
+                // 创建弹窗
+                const modal = document.createElement('div');
+                modal.id = 'user-ranking-detail-modal';
+                modal.className = 'ranking-detail-modal';
+                
+                // 构建六个维度数据HTML
+                const dimensionsHtml = rankings.map(r => {
+                    const isCurrent = r.key === data.currentDimension;
+                    const rankBadge = r.hasRanking ? `<span class="ranking-badge" style="display: inline-block; padding: 2px 6px; background: rgba(0, 255, 65, 0.2); border: 1px solid rgba(0, 255, 65, 0.5); border-radius: 3px; font-size: 9px; color: rgba(0, 255, 65, 1); margin-left: 6px;">#${r.rank}</span>` : '';
+                    const currentMark = isCurrent ? `<span style="color: rgba(0, 255, 65, 1); font-size: 10px; margin-left: 4px;">●</span>` : '';
+                    return `
+                        <div class="ranking-detail-item" style="${isCurrent ? 'background: rgba(0, 255, 65, 0.05); padding: 8px; border-radius: 4px;' : ''}">
+                            <div class="ranking-detail-label">${escapeHtml(r.label)}</div>
+                            <div class="ranking-detail-value" style="display: flex; align-items: center;">
+                                <span>${escapeHtml(r.value || '0')}</span>
+                                ${rankBadge}
+                                ${currentMark}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                modal.innerHTML = `
+                    <div class="ranking-detail-card" style="max-width: 600px;">
+                        <div class="ranking-detail-header">
+                            <div class="ranking-detail-title">用户详情</div>
+                            <button class="ranking-detail-close" onclick="closeUserRankingDetail()">×</button>
+                        </div>
+                        <div class="ranking-detail-content" id="user-ranking-detail-content">
+                            <!-- 用户头像和基本信息 -->
+                            <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid rgba(0, 255, 65, 0.2);">
+                                <img 
+                                    src="${escapeHtml(data.avatar || DEFAULT_AVATAR)}" 
+                                    alt="" 
+                                    style="width: 64px; height: 64px; border-radius: 50%; border: 2px solid rgba(0, 255, 65, 0.3); object-fit: cover;"
+                                    onerror="this.onerror=null; this.src='${escapeHtml(DEFAULT_AVATAR)}';"
+                                />
+                                <div style="flex: 1;">
+                                    <div style="color: rgba(74, 222, 128, 1); font-size: 16px; font-weight: 700; margin-bottom: 4px;">${escapeHtml(data.user_name || '--')}</div>
+                                    <div style="color: rgba(255, 255, 255, 0.5); font-size: 11px; margin-bottom: 4px;">${escapeHtml(data.user_identity || '匿名')}</div>
+                                    ${personalityTitle !== '--' ? `<div style="color: rgba(0, 255, 65, 0.8); font-size: 12px;">${escapeHtml(personalityTitle)}</div>` : ''}
+                                    ${data.githubUrl ? `<a href="${escapeHtml(data.githubUrl)}" target="_blank" rel="noopener noreferrer" class="ranking-detail-link" style="font-size: 11px; margin-top: 4px; display: inline-block;">🔗 ${escapeHtml(data.githubUrl)}</a>` : ''}
+                                </div>
+                            </div>
+                            
+                            <!-- 六个维度数据 -->
+                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;">
+                                ${dimensionsHtml}
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                document.body.appendChild(modal);
+
+                // 显示弹窗
+                modal.classList.add('active');
+
+                // ESC键关闭
+                const escHandler = function(e) {
+                    if (e.key === 'Escape') {
+                        closeUserRankingDetail();
+                        document.removeEventListener('keydown', escHandler);
+                    }
+                };
+                document.addEventListener('keydown', escHandler);
+
+                // 点击背景关闭
+                modal.addEventListener('click', function(e) {
+                    if (e.target === modal) {
+                        closeUserRankingDetail();
+                    }
+                });
+
+            } catch (error) {
+                console.error('[UserRankingDetail] ❌ 显示用户详情失败:', error);
+            }
+        }
+
+        /**
+         * 关闭用户详情弹窗（不影响抽屉状态）
+         */
+        function closeUserRankingDetail() {
+            const modal = document.getElementById('user-ranking-detail-modal');
+            if (modal) {
+                modal.classList.remove('active');
+                // 延迟移除，确保动画完成
+                setTimeout(() => {
+                    if (modal.parentNode) {
+                        modal.parentNode.removeChild(modal);
+                    }
+                }, 200);
+            }
+        }
+
+        /**
+         * 显示简单的排行榜详情弹窗（仅显示 GitHub 链接和代码称号）
+         * @param {Object} data - 排行榜项数据
+         */
+        function showRankingDetailSimple(data) {
+            // 创建或获取弹窗元素
+            let modal = document.getElementById('ranking-detail-modal');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'ranking-detail-modal';
+                modal.className = 'ranking-detail-modal';
+                modal.innerHTML = `
+                    <div class="ranking-detail-card">
+                        <div class="ranking-detail-header">
+                            <div class="ranking-detail-title">用户详情</div>
+                            <button class="ranking-detail-close" onclick="closeRankingDetail()">×</button>
+                        </div>
+                        <div class="ranking-detail-content" id="ranking-detail-content"></div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+                
+                // 点击背景关闭
+                modal.addEventListener('click', function(e) {
+                    if (e.target === modal) {
+                        closeRankingDetail();
+                    }
+                });
+            }
+            
+            // 填充内容（仅显示 GitHub 链接和代码称号）
+            const content = document.getElementById('ranking-detail-content');
+            let html = '';
+            
+            // 用户信息
+            html += `
+                <div class="ranking-detail-item">
+                    <div class="ranking-detail-label">用户名</div>
+                    <div class="ranking-detail-value">${escapeHtml(data.user_name || '--')}</div>
+                </div>
+            `;
+            
+            // GitHub链接（如果有）
+            if (data.githubUrl) {
+                html += `
+                    <div class="ranking-detail-item">
+                        <div class="ranking-detail-label">GitHub 链接</div>
+                        <div class="ranking-detail-value">
+                            <a href="${escapeHtml(data.githubUrl)}" target="_blank" rel="noopener noreferrer" class="ranking-detail-link">
+                                🔗 ${escapeHtml(data.githubUrl)}
+                            </a>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // 代码称号（如果有）
+            if (data.vibe_index_str) {
+                html += `
+                    <div class="ranking-detail-item">
+                        <div class="ranking-detail-label">代码称号</div>
+                        <div class="ranking-detail-value">${escapeHtml(data.vibe_index_str)}</div>
+                    </div>
+                `;
+            }
+            
+            // 如果没有额外信息
+            if (!data.githubUrl && !data.vibe_index_str) {
+                html += `
+                    <div class="ranking-detail-item">
+                        <div class="ranking-detail-value" style="color: rgba(255, 255, 255, 0.5);">暂无额外信息</div>
+                    </div>
+                `;
+            }
+            
+            content.innerHTML = html;
+            
+            // 显示弹窗
+            modal.classList.add('active');
+            
+            // ESC键关闭
+            const escHandler = function(e) {
+                if (e.key === 'Escape') {
+                    closeRankingDetail();
+                    document.removeEventListener('keydown', escHandler);
+                }
+            };
+            document.addEventListener('keydown', escHandler);
+        }
+        
+        /**
+         * 显示排行榜详情弹窗（完整版）
+         * @param {Object} data - 排行榜项数据
+         */
+        function showRankingDetail(data) {
+            // 创建或获取弹窗元素
+            let modal = document.getElementById('ranking-detail-modal');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'ranking-detail-modal';
+                modal.className = 'ranking-detail-modal';
+                modal.innerHTML = `
+                    <div class="ranking-detail-card">
+                        <div class="ranking-detail-header">
+                            <div class="ranking-detail-title">用户详情</div>
+                            <button class="ranking-detail-close" onclick="closeRankingDetail()">×</button>
+                        </div>
+                        <div class="ranking-detail-content" id="ranking-detail-content"></div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+                
+                // 点击背景关闭
+                modal.addEventListener('click', function(e) {
+                    if (e.target === modal) {
+                        closeRankingDetail();
+                    }
+                });
+            }
+            
+            // 填充内容
+            const content = document.getElementById('ranking-detail-content');
+            let html = '';
+            
+            // 用户信息
+            html += `
+                <div class="ranking-detail-item">
+                    <div class="ranking-detail-label">用户名</div>
+                    <div class="ranking-detail-value">${escapeHtml(data.user_name || '--')}</div>
+                </div>
+            `;
+            
+            // 用户身份
+            html += `
+                <div class="ranking-detail-item">
+                    <div class="ranking-detail-label">用户身份</div>
+                    <div class="ranking-detail-value">${escapeHtml(data.user_identity || '匿名')}</div>
+                </div>
+            `;
+            
+            // GitHub链接（如果有）
+            if (data.githubUrl) {
+                html += `
+                    <div class="ranking-detail-item">
+                        <div class="ranking-detail-label">GitHub 仓库</div>
+                        <div class="ranking-detail-value">
+                            <a href="${escapeHtml(data.githubUrl)}" target="_blank" rel="noopener noreferrer" class="ranking-detail-link">
+                                🔗 ${escapeHtml(data.githubUrl)}
+                            </a>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // 代码称号
+            if (data.vibe_index_str) {
+                html += `
+                    <div class="ranking-detail-item">
+                        <div class="ranking-detail-label">代码称号</div>
+                        <div class="ranking-detail-value">${escapeHtml(data.vibe_index_str)}</div>
+                    </div>
+                `;
+            }
+            
+            // 排名和分值
+            html += `
+                <div class="ranking-detail-item">
+                    <div class="ranking-detail-label">排名</div>
+                    <div class="ranking-detail-value">#${data.rank}</div>
+                </div>
+                <div class="ranking-detail-item">
+                    <div class="ranking-detail-label">${escapeHtml(data.dimension)}</div>
+                    <div class="ranking-detail-value">${escapeHtml(data.value)} ${escapeHtml(data.dimensionDesc || '')}</div>
+                </div>
+            `;
+            
+            // 国家信息
+            html += `
+                <div class="ranking-detail-item">
+                    <div class="ranking-detail-label">国家/地区</div>
+                    <div class="ranking-detail-value">${data.flagEmoji || '🏳️'} ${escapeHtml(data.countryCode || 'UN')}</div>
+                </div>
+            `;
+            
+            // 唯一识别码
+            if (data.fingerprint) {
+                html += `
+                    <div class="ranking-detail-item">
+                        <div class="ranking-detail-label">唯一识别码</div>
+                        <div class="ranking-detail-value" style="font-size: 11px; word-break: break-all;">${escapeHtml(data.fingerprint)}</div>
+                    </div>
+                `;
+            }
+            
+            content.innerHTML = html;
+            
+            // 显示弹窗
+            modal.classList.add('active');
+            
+            // ESC键关闭
+            const escHandler = function(e) {
+                if (e.key === 'Escape') {
+                    closeRankingDetail();
+                    document.removeEventListener('keydown', escHandler);
+                }
+            };
+            document.addEventListener('keydown', escHandler);
+        }
+        
+        /**
+         * 关闭排行榜详情弹窗
+         */
+        function closeRankingDetail() {
+            const modal = document.getElementById('ranking-detail-modal');
+            if (modal) {
+                modal.classList.remove('active');
+            }
+        }
+        
+        // 挂载到window对象
         if (typeof window !== 'undefined') {
             window.renderGreenLadders = renderGreenLadders;
+            window.showRankingDetail = showRankingDetail;
+            window.showRankingDetailSimple = showRankingDetailSimple;
+            window.showUserRankingDetail = showUserRankingDetail;
+            window.closeRankingDetail = closeRankingDetail;
+            window.closeUserRankingDetail = closeUserRankingDetail;
             console.log('[Stats2.App] ✅ renderGreenLadders 已挂载到 window');
         }
 
@@ -13162,9 +13769,32 @@
          * @param {string} code - 国家代码（如 'US', 'CN'）
          * @returns {string} 国旗 Emoji 或空字符串
          */
+        /**
+         * 使用 Unicode 偏移量逻辑将 country_code 转换为国旗 Emoji
+         * @param {string} code - 国家代码（如 "US", "CN"）
+         * @returns {string} - 国旗 Emoji
+         */
         function getFlagEmoji(code) {
-            if (!code || code === 'UN' || code === null) return '';
-            return countryCodeToFlagEmoji(code) || '';
+            if (!code || code === 'UN' || code === null || code === '') {
+                return '🏳️'; // 默认显示中立旗
+            }
+            
+            // 使用 Unicode 偏移量逻辑：String.fromCodePoint(...[...code].map(char => char.charCodeAt(0) + 127397))
+            const codeStr = String(code).toUpperCase().trim();
+            if (codeStr.length < 2) {
+                return '🏳️';
+            }
+            
+            try {
+                // 使用 map 方法处理每个字符
+                const codePoints = [...codeStr].map(char => char.charCodeAt(0) + 127397);
+                const flagEmoji = String.fromCodePoint(...codePoints);
+                return flagEmoji;
+            } catch (e) {
+                // 如果转换失败，fallback 到中立旗
+                console.warn('[getFlagEmoji] 转换失败:', code, e);
+                return '🏳️';
+            }
         }
 
         /**

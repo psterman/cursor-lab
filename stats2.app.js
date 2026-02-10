@@ -11407,7 +11407,9 @@
         }
 
         /**
-         * 渲染单个矩阵绿天梯榜表格 - 重新设计的卡片排版
+         * 渲染单个矩阵绿天梯榜表格 - 金融App风格排版
+         * 左：名次+头像（上）/用户名+国籍（下）
+         * 右：称号（上）/数据（下）
          */
         function renderMatrixLadderTable(container, ladderType, leaders) {
             const card = document.createElement('div');
@@ -11474,8 +11476,8 @@
                 const row = document.createElement('div');
                 row.style.cssText = `
                     display: flex;
-                    align-items: center;
-                    padding: 10px 12px;
+                    align-items: stretch;
+                    padding: 12px 16px;
                     margin-bottom: 6px;
                     background: ${rankBg};
                     border: 1px solid rgba(0, 255, 65, 0.1);
@@ -11492,69 +11494,84 @@
                 };
 
                 row.innerHTML = `
-                    <!-- 排名 -->
-                    <div style="
-                        width: 28px;
-                        text-align: center;
-                        font-family: 'JetBrains Mono', monospace;
-                        font-size: 13px;
-                        font-weight: bold;
-                        color: ${rankColor};
-                        flex-shrink: 0;
-                    ">#${leader.rank}</div>
-                    
-                    <!-- 头像 -->
-                    <div style="margin: 0 10px; flex-shrink: 0;">
-                        <img 
-                            src="${escapeHtml(avatar)}" 
-                            alt="" 
-                            style="
-                                width: 36px;
-                                height: 36px;
-                                border-radius: 50%;
-                                border: 2px solid rgba(0, 255, 65, 0.3);
-                                object-fit: cover;
-                                cursor: pointer;
-                            "
-                            onclick="handleMatrixAvatarClick('${escapeHtml(fingerprint)}')"
-                            onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
-                        />
-                    </div>
-                    
-                    <!-- 用户信息区域 -->
-                    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;">
-                        <!-- 用户名 -->
+                    <!-- 左侧区域：名次 + 头像/用户名 -->
+                    <div style="display: flex; align-items: center; flex: 1; min-width: 0;">
+                        <!-- 排名 -->
                         <div style="
+                            width: 32px;
+                            text-align: center;
                             font-family: 'JetBrains Mono', monospace;
-                            font-size: 13px;
-                            color: #ffffff;
-                            white-space: nowrap;
-                            overflow: hidden;
-                            text-overflow: ellipsis;
-                        " title="${escapeHtml(display)}">${escapeHtml(display)}</div>
-                        <!-- 称号（国旗 + 人格） -->
-                        <div style="
-                            font-family: 'JetBrains Mono', monospace;
-                            font-size: 10px;
-                            color: rgba(255, 255, 255, 0.6);
-                            white-space: nowrap;
-                            overflow: hidden;
-                            text-overflow: ellipsis;
-                        " title="${personalityTitle}">
-                            ${flagEmoji ? `<span style="margin-right: 4px;">${flagEmoji}</span>` : ''}${personalityTitle}
+                            font-size: 18px;
+                            font-weight: bold;
+                            color: ${rankColor};
+                            flex-shrink: 0;
+                            margin-right: 12px;
+                        ">${leader.rank}</div>
+                        
+                        <!-- 头像 + 用户名/国籍（两行） -->
+                        <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px;">
+                            <!-- 头像 -->
+                            <img 
+                                src="${escapeHtml(avatar)}" 
+                                alt="" 
+                                style="
+                                    width: 40px;
+                                    height: 40px;
+                                    border-radius: 50%;
+                                    border: 2px solid rgba(0, 255, 65, 0.3);
+                                    object-fit: cover;
+                                    cursor: pointer;
+                                "
+                                onclick="handleMatrixAvatarClick('${escapeHtml(fingerprint)}')"
+                                onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
+                            />
+                            <!-- 用户名 -->
+                            <div style="
+                                font-family: 'JetBrains Mono', monospace;
+                                font-size: 12px;
+                                color: #ffffff;
+                                white-space: nowrap;
+                                overflow: hidden;
+                                text-overflow: ellipsis;
+                                max-width: 80px;
+                            " title="${escapeHtml(display)}">${escapeHtml(display)}</div>
+                            <!-- 国籍 -->
+                            <div style="
+                                font-family: 'JetBrains Mono', monospace;
+                                font-size: 10px;
+                                color: rgba(255, 255, 255, 0.5);
+                            ">${flagEmoji || '🏳️'}</div>
                         </div>
                     </div>
                     
-                    <!-- 数值 -->
+                    <!-- 右侧区域：称号 + 数据（两行） -->
                     <div style="
-                        font-family: 'JetBrains Mono', monospace;
-                        font-size: 14px;
-                        font-weight: bold;
-                        color: #00ff41;
-                        text-align: right;
-                        margin-left: 10px;
-                        flex-shrink: 0;
-                    ">${value}</div>
+                        display: flex;
+                        flex-direction: column;
+                        align-items: flex-end;
+                        justify-content: center;
+                        gap: 6px;
+                        margin-left: 8px;
+                    ">
+                        <!-- 称号 -->
+                        <div style="
+                            font-family: 'JetBrains Mono', monospace;
+                            font-size: 10px;
+                            color: rgba(0, 255, 65, 0.8);
+                            background: rgba(0, 255, 65, 0.1);
+                            padding: 2px 8px;
+                            border-radius: 2px;
+                            border: 1px solid rgba(0, 255, 65, 0.2);
+                            white-space: nowrap;
+                        " title="${personalityTitle}">${personalityTitle}</div>
+                        <!-- 数据 -->
+                        <div style="
+                            font-family: 'JetBrains Mono', monospace;
+                            font-size: 18px;
+                            font-weight: bold;
+                            color: #00ff41;
+                        ">${value}</div>
+                    </div>
                 `;
 
                 listContainer.appendChild(row);
@@ -12770,8 +12787,8 @@
                     const row = document.createElement('div');
                     row.style.cssText = `
                         display: flex;
-                        align-items: center;
-                        padding: 10px 12px;
+                        align-items: stretch;
+                        padding: 12px 16px;
                         margin-bottom: 6px;
                         background: ${rankBg};
                         border: 1px solid rgba(0, 255, 65, 0.1);
@@ -12787,70 +12804,86 @@
                         row.style.borderColor = 'rgba(0, 255, 65, 0.1)';
                     };
 
+                    // 金融App风格排版
                     row.innerHTML = `
-                        <!-- 排名 -->
-                        <div style="
-                            width: 28px;
-                            text-align: center;
-                            font-family: 'JetBrains Mono', monospace;
-                            font-size: 13px;
-                            font-weight: bold;
-                            color: ${rankColor};
-                            flex-shrink: 0;
-                        ">#${item.rank}</div>
-                        
-                        <!-- 头像 -->
-                        <div style="margin: 0 10px; flex-shrink: 0;">
-                            <img 
-                                src="${escapeHtml(item.avatar)}" 
-                                alt="" 
-                                style="
-                                    width: 36px;
-                                    height: 36px;
-                                    border-radius: 50%;
-                                    border: 2px solid rgba(0, 255, 65, 0.3);
-                                    object-fit: cover;
-                                    cursor: pointer;
-                                "
-                                onclick="toggleUserPreview('${escapeHtml(item.fingerprint)}')"
-                                onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
-                            />
-                        </div>
-                        
-                        <!-- 用户信息区域 -->
-                        <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;">
-                            <!-- 用户名 -->
+                        <!-- 左侧区域：名次 + 头像/用户名 -->
+                        <div style="display: flex; align-items: center; flex: 1; min-width: 0;">
+                            <!-- 排名 -->
                             <div style="
+                                width: 32px;
+                                text-align: center;
                                 font-family: 'JetBrains Mono', monospace;
-                                font-size: 13px;
-                                color: #ffffff;
-                                white-space: nowrap;
-                                overflow: hidden;
-                                text-overflow: ellipsis;
-                            " title="${escapeHtml(item.username)}">${escapeHtml(item.username)}</div>
-                            <!-- 称号（国旗 + 人格） -->
-                            <div style="
-                                font-family: 'JetBrains Mono', monospace;
-                                font-size: 10px;
-                                color: rgba(255, 255, 255, 0.6);
-                                white-space: nowrap;
-                                overflow: hidden;
-                                text-overflow: ellipsis;
-                            " title="${personalityTitle}">
-                                ${flagEmoji ? `<span style="margin-right: 4px;">${flagEmoji}</span>` : ''}${personalityTitle}
+                                font-size: 18px;
+                                font-weight: bold;
+                                color: ${rankColor};
+                                flex-shrink: 0;
+                                margin-right: 12px;
+                            ">${item.rank}</div>
+                            
+                            <!-- 头像 + 用户名/国籍（两行） -->
+                            <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px;">
+                                <!-- 头像 -->
+                                <img 
+                                    src="${escapeHtml(item.avatar)}" 
+                                    alt="" 
+                                    style="
+                                        width: 40px;
+                                        height: 40px;
+                                        border-radius: 50%;
+                                        border: 2px solid rgba(0, 255, 65, 0.3);
+                                        object-fit: cover;
+                                        cursor: pointer;
+                                    "
+                                    onclick="toggleUserPreview('${escapeHtml(item.fingerprint)}')"
+                                    onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
+                                />
+                                <!-- 用户名 -->
+                                <div style="
+                                    font-family: 'JetBrains Mono', monospace;
+                                    font-size: 12px;
+                                    color: #ffffff;
+                                    white-space: nowrap;
+                                    overflow: hidden;
+                                    text-overflow: ellipsis;
+                                    max-width: 80px;
+                                " title="${escapeHtml(item.username)}">${escapeHtml(item.username)}</div>
+                                <!-- 国籍 -->
+                                <div style="
+                                    font-family: 'JetBrains Mono', monospace;
+                                    font-size: 10px;
+                                    color: rgba(255, 255, 255, 0.5);
+                                ">${flagEmoji || '🏳️'}</div>
                             </div>
                         </div>
                         
-                        <!-- 数值 -->
+                        <!-- 右侧区域：称号 + 数据（两行） -->
                         <div style="
-                            font-family: 'JetBrains Mono', monospace;
-                            font-size: 14px;
-                            font-weight: bold;
-                            color: #00ff41;
-                            text-align: right;
-                            margin-left: 10px;
-                            flex-shrink: 0;
-                        ">${value}</div>
+                            display: flex;
+                            flex-direction: column;
+                            align-items: flex-end;
+                            justify-content: center;
+                            gap: 6px;
+                            margin-left: 8px;
+                        ">
+                            <!-- 称号 -->
+                            <div style="
+                                font-family: 'JetBrains Mono', monospace;
+                                font-size: 10px;
+                                color: rgba(0, 255, 65, 0.8);
+                                background: rgba(0, 255, 65, 0.1);
+                                padding: 2px 8px;
+                                border-radius: 2px;
+                                border: 1px solid rgba(0, 255, 65, 0.2);
+                                white-space: nowrap;
+                            " title="${personalityTitle}">${personalityTitle}</div>
+                            <!-- 数据 -->
+                            <div style="
+                                font-family: 'JetBrains Mono', monospace;
+                                font-size: 18px;
+                                font-weight: bold;
+                                color: #00ff41;
+                            ">${value}</div>
+                        </div>
                     `;
 
                     listContainer.appendChild(row);
