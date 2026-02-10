@@ -1671,6 +1671,14 @@
                     './src/personality-names-en.json'
                 ]);
 
+                // 中文人格称号映射表（用于排行榜显示）
+                const personalityNamesZh = await tryFetchJson([
+                    './personalityNames.json',
+                    './src/personalityNames.json',
+                    './personality-names.json',
+                    './src/personality-names.json'
+                ]);
+
                 // 答案之书：中英文共用同一份 JSON（{[vibeIndex]: {title_zh,content_zh,title_en,content_en}}）
                 const answerBookByVibeIndex = await tryFetchJson([
                     './answerBookByVibeIndex.json',
@@ -1679,7 +1687,12 @@
                     './src/answer-book-by-vibe-index.json'
                 ]);
 
-                window.__LANG_CONFIG = { rankEn, personalityNamesEn, answerBookByVibeIndex };
+                window.__LANG_CONFIG = { rankEn, personalityNamesEn, personalityNamesZh, answerBookByVibeIndex };
+                
+                // 将中文人格称号映射表存储在全局变量中，供 getPersonalityTitle 使用
+                if (personalityNamesZh && typeof personalityNamesZh === 'object') {
+                    window.__PERSONALITY_NAMES = personalityNamesZh;
+                }
             } catch { /* ignore */ }
         }
 
@@ -2839,6 +2852,12 @@
             // 首次渲染
             if (document.readyState === 'loading') {
                 document.addEventListener('DOMContentLoaded', async () => {
+                    // 【强制静态挂载】立即执行 renderGlobalLadders，无论任何条件
+                    try {
+                        renderGlobalLadders().catch(err => console.error('[DOMContentLoaded] renderGlobalLadders 失败:', err));
+                    } catch (e) {
+                        console.error('[DOMContentLoaded] renderGlobalLadders 执行异常:', e);
+                    }
                     // 绑定国旗交互：点击写入 localStorage.lang，并刷新语言上下文
                     try {
                         const btnZh = document.getElementById('btn-zh');
@@ -3030,14 +3049,23 @@
             // 保存当前国家信息
             currentDrawerCountry.code = countryCode;
             currentDrawerCountry.name = countryName;
+            
+            // 【强制显示控制】更新 global-ranking-area 的显示状态
+            const rankingArea = document.getElementById('global-ranking-area');
+            if (rankingArea) {
+                // currentCountryCode 为 null 时显示（全球视图），否则隐藏
+                const currentCountryCode = countryCode && /^[A-Z]{2}$/.test(String(countryCode).trim().toUpperCase()) ? countryCode : null;
+                rankingArea.classList.toggle('hidden', currentCountryCode !== null);
+            }
             const leftDrawer = document.getElementById('left-drawer');
             const rightDrawer = document.getElementById('right-drawer');
             const leftTitle = document.getElementById('left-drawer-title');
             const rightTitle = document.getElementById('right-drawer-title');
             const leftBody = document.getElementById('left-drawer-body');
-            const globalFlowPanel = document.getElementById('globalFlowPanel');
-            const countryPanelEl = document.getElementById('countryPanel');
-            const rightBody = globalFlowPanel || document.getElementById('right-drawer-body');
+            const globalLadderPanel = document.getElementById('panel-global-view');
+            const countryDetailPanel = document.getElementById('panel-country-detail');
+            const panelGlobalLadderContent = document.getElementById('panel-global-content');
+            const rightBody = panelGlobalLadderContent || document.getElementById('right-drawer-body');
 
             if (!leftDrawer || !rightDrawer) return;
             // ✅ 关键：当用户正在看“国家透视”时，不允许 showDrawersWithCountryData 把右侧切回全网/实时流
@@ -3049,11 +3077,42 @@
                     currentViewState === 'COUNTRY' &&
                     /^[A-Z]{2}$/.test(ccUpperForPanel));
             if (preserveCountryPanel) {
-                if (globalFlowPanel) globalFlowPanel.style.display = 'none';
-                if (countryPanelEl) countryPanelEl.style.display = '';
+                // 切换到国家透视视图
+                if (globalLadderPanel) {
+                    globalLadderPanel.classList.add('hidden');
+                    globalLadderPanel.classList.remove('flex');
+                }
+                if (countryDetailPanel) {
+                    countryDetailPanel.classList.remove('hidden');
+                    countryDetailPanel.classList.add('flex');
+                }
             } else {
-                if (globalFlowPanel) globalFlowPanel.style.display = '';
-                if (countryPanelEl) countryPanelEl.style.display = 'none';
+                // 显示全球榜单视图
+                if (globalLadderPanel) {
+                    globalLadderPanel.classList.remove('hidden');
+                    globalLadderPanel.classList.add('flex');
+                }
+                if (countryDetailPanel) {
+                    countryDetailPanel.classList.add('hidden');
+                    countryDetailPanel.classList.remove('flex');
+                }
+                // 显示左侧抽屉的矩阵绿天梯榜区域
+                const rankingArea = leftBody ? leftBody.querySelector('#global-ranking-area') : null;
+                if (rankingArea) {
+                    rankingArea.classList.remove('hidden');
+                    // 延迟渲染天梯榜
+                    setTimeout(() => {
+                        renderGlobalLadders().catch(err => console.error('[Drawer] 渲染矩阵绿天梯榜失败:', err));
+                    }, 300);
+                }
+            }
+            
+            // 隐藏左侧抽屉的矩阵绿天梯榜区域（国家视图时）
+            if (preserveCountryPanel) {
+                const rankingArea = leftBody ? leftBody.querySelector('#global-ranking-area') : null;
+                if (rankingArea) {
+                    rankingArea.classList.add('hidden');
+                }
             }
 
             // 获取国家显示名称
@@ -3066,7 +3125,25 @@
 
             // 清空抽屉内容
             if (leftBody) leftBody.innerHTML = '';
-            if (rightBody) rightBody.innerHTML = '';
+            
+            // 对于右侧抽屉，需要特殊处理：
+            // 1. 如果切换到国家视图，清空 panel-global-content
+            // 2. 如果保持 Global 视图，只清空维度卡片区域，保留排行榜
+            if (preserveCountryPanel) {
+                // 国家视图：清空 global ladder 内容
+                if (panelGlobalLadderContent) {
+                    panelGlobalLadderContent.innerHTML = '';
+                } else if (rightBody) {
+                    rightBody.innerHTML = '';
+                }
+            } else {
+                // Global 视图：只清空全球视图内容（六个排行榜卡片已移至 ranking 标签内）
+                if (panelGlobalLadderContent) {
+                    panelGlobalLadderContent.innerHTML = '';
+                } else if (rightBody) {
+                    rightBody.innerHTML = '';
+                }
+            }
 
             // 右侧抽屉数据源：校准后传入的国家摘要优先；否则缓存优先；最后才用全局 lastData 兜底
             const ccUpper = String(countryCode || '').trim().toUpperCase();
@@ -3736,8 +3813,8 @@
                 }
             }
 
-            // 填充右侧抽屉 - 维度卡片和统计卡片
-            if (rightBody) {
+            // 填充右侧抽屉「全球」标签 - 仅维度卡片和统计卡片（六个全球排行榜在 ranking 标签内渲染）
+            if (rightBody && !preserveCountryPanel) {
                 // 先添加维度卡片
                 if (RANK_RESOURCES) {
                     rightDrawerDimensions.forEach((dimId) => {
@@ -3951,11 +4028,17 @@
             showDrawersWithCountryData(code, name);
             currentViewState = 'COUNTRY';
             const rightDrawer = document.getElementById('right-drawer');
-            const globalFlowPanel = document.getElementById('globalFlowPanel');
-            const countryPanelEl = document.getElementById('countryPanel');
-            if (!rightDrawer || !countryPanelEl) return;
-            if (globalFlowPanel) globalFlowPanel.style.display = 'none';
-            countryPanelEl.style.display = '';
+            const globalLadderPanel = document.getElementById('panel-global-view');
+            const countryDetailPanel = document.getElementById('panel-country-detail');
+            if (!rightDrawer || !countryDetailPanel) return;
+            if (globalLadderPanel) {
+                globalLadderPanel.classList.add('hidden');
+                globalLadderPanel.classList.remove('flex');
+            }
+            if (countryDetailPanel) {
+                countryDetailPanel.classList.remove('hidden');
+                countryDetailPanel.classList.add('flex');
+            }
 
             const leftTitle = document.getElementById('left-drawer-title');
             const rightTitle = document.getElementById('right-drawer-title');
@@ -4114,10 +4197,16 @@
          */
         function switchBackToGlobalView() {
             currentViewState = 'GLOBAL';
-            const globalFlowPanel = document.getElementById('globalFlowPanel');
-            const countryPanelEl = document.getElementById('countryPanel');
-            if (globalFlowPanel) globalFlowPanel.style.display = '';
-            if (countryPanelEl) countryPanelEl.style.display = 'none';
+            const globalLadderPanel = document.getElementById('panel-global-view');
+            const countryDetailPanel = document.getElementById('panel-country-detail');
+            if (globalLadderPanel) {
+                globalLadderPanel.classList.remove('hidden');
+                globalLadderPanel.classList.add('flex');
+            }
+            if (countryDetailPanel) {
+                countryDetailPanel.classList.add('hidden');
+                countryDetailPanel.classList.remove('flex');
+            }
             if (currentDrawerCountry.code && currentDrawerCountry.name) {
                 showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);
             }
@@ -11058,6 +11147,14 @@
                     leftBody.appendChild(statsCard);
                 }
                 
+                // 注意：global-ranking-area 容器已在 HTML 中静态挂载，不再动态创建
+                // 强制显示控制：在 Global 视图时显示天梯榜
+                const rankingArea = document.getElementById('global-ranking-area');
+                if (rankingArea) {
+                    const currentCountryCode = currentDrawerCountry?.code || null;
+                    rankingArea.classList.toggle('hidden', currentCountryCode !== null);
+                }
+                
                 // 人格称号与 index 一致：有 5 位 vibe_index（vibe_index_str/lpdef）时从 personalityNames.json 解析并更新
                 if (vibeIndexStr && typeof vibeIndexStr === 'string' && vibeIndexStr.length === 5) {
                     loadPersonalityName(vibeIndexStr).then(name => {
@@ -11072,9 +11169,559 @@
                 }
                 
                 console.log('[UserStats] ✅ 用户统计卡片已渲染');
+                
+                // 确保天梯榜容器存在
+                let laddersContainer = leftBody.querySelector('#global-ladders-container');
+                if (!laddersContainer) {
+                    laddersContainer = document.createElement('div');
+                    laddersContainer.id = 'global-ladders-container';
+                    laddersContainer.className = 'mt-8 grid grid-cols-1 gap-6';
+                    leftBody.appendChild(laddersContainer);
+                }
+                
+                // 初始化天梯榜（延迟执行，确保容器已添加）
+                setTimeout(() => {
+                    initGlobalLadders().catch(err => console.error('[Ladders] 初始化天梯榜失败:', err));
+                }, 300);
             } catch (error) {
                 console.error('[UserStats] ❌ 渲染用户统计卡片失败:', error);
             }
+        }
+
+        /**
+         * 六个天梯榜类型配置
+         */
+        const LADDER_TYPES = [
+            { key: 'work_days', label: '脱发榜', field: 'work_days' },
+            { key: 'total_chars', label: '抓狂榜', field: 'total_chars' },
+            { key: 'jiafang', label: '甲方榜', field: 'jiafang_count' },
+            { key: 'victim', label: '舔狗榜', field: 'ketao_count' },
+            { key: 'vibe_index', label: '话唠榜', field: 'total_messages' },
+            { key: 'rare_score', label: '话唠榜', field: 'avg_user_message_length' }
+        ];
+
+        /**
+         * 矩阵绿六大天梯榜配置
+         */
+        const MATRIX_LADDER_TYPES = [
+            { key: 'work_days', label: '上岗天数', field: 'work_days', desc: '工作天数' },
+            { key: 'total_chars', label: '产量', field: 'total_chars', desc: '对话字符总数' },
+            { key: 'jiafang_count', label: '甲方度', field: 'jiafang_count', desc: '甲方上身次数' },
+            { key: 'ketao_count', label: '受害度', field: 'ketao_count', desc: '磕头次数' },
+            { key: 'total_messages', label: '焦虑值', field: 'total_messages', desc: '对话次数' },
+            { key: 'avg_user_message_length', label: '战力', field: 'avg_user_message_length', desc: '平均长度' }
+        ];
+
+        /**
+         * 渲染全局矩阵绿天梯榜（强制静态挂载，无条件执行）
+         */
+        async function renderGlobalLadders() {
+            const container = document.getElementById('global-ranking-area');
+            if (!container) {
+                console.warn('[MatrixLadders] ⚠️ global-ranking-area 容器不存在，等待 DOM 就绪');
+                // 如果容器不存在，等待一下再重试
+                setTimeout(() => {
+                    renderGlobalLadders().catch(err => console.error('[MatrixLadders] 重试失败:', err));
+                }, 500);
+                return;
+            }
+
+            // 等待 Supabase 客户端初始化（最多等待 10 秒）
+            let attempts = 0;
+            while ((!supabaseClient || typeof supabaseClient.rpc !== 'function') && attempts < 100) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                attempts++;
+            }
+
+            if (!supabaseClient || typeof supabaseClient.rpc !== 'function') {
+                console.warn('[MatrixLadders] ⚠️ Supabase 客户端初始化超时，使用直接查询');
+                // 降级：使用直接查询
+                await renderMatrixLaddersFromDirectQuery(container);
+                return;
+            }
+
+            try {
+                // 调用 RPC 获取全局 Top 10 数据（country_code 传 null 或空字符串表示全局）
+                const { data, error } = await supabaseClient.rpc('get_country_top_metrics_v1', {
+                    country_code: '',
+                    top_n: 10
+                });
+
+                if (error) {
+                    console.error('[MatrixLadders] ❌ RPC 调用失败:', error);
+                    // 降级：直接查询
+                    await renderMatrixLaddersFromDirectQuery(container);
+                    return;
+                }
+
+                if (!data || !Array.isArray(data) || data.length === 0) {
+                    console.warn('[MatrixLadders] ⚠️ RPC 返回空数据，使用直接查询');
+                    await renderMatrixLaddersFromDirectQuery(container);
+                    return;
+                }
+
+                // 渲染天梯榜
+                renderMatrixLaddersFromRPC(container, data);
+            } catch (err) {
+                console.error('[MatrixLadders] ❌ 初始化失败:', err);
+                // 降级：直接查询
+                await renderMatrixLaddersFromDirectQuery(container);
+            }
+        }
+
+        /**
+         * 从 RPC 返回的数据渲染矩阵绿天梯榜
+         */
+        function renderMatrixLaddersFromRPC(container, rpcData) {
+            container.innerHTML = '';
+
+            MATRIX_LADDER_TYPES.forEach((ladderType) => {
+                // 从 RPC 数据中找到对应的维度数据
+                const keyMap = {
+                    'work_days': ['work_days'],
+                    'total_chars': ['total_chars'],
+                    'jiafang_count': ['jiafang_count'],
+                    'ketao_count': ['ketao_count'],
+                    'total_messages': ['total_messages'],
+                    'avg_user_message_length': ['avg_user_message_length']
+                };
+                
+                const possibleKeys = keyMap[ladderType.key] || [ladderType.field];
+                const metricData = rpcData.find(m => {
+                    const mKey = m.key || m.col || '';
+                    return possibleKeys.includes(mKey);
+                });
+
+                if (!metricData || !metricData.leaders || !Array.isArray(metricData.leaders) || metricData.leaders.length === 0) {
+                    renderEmptyMatrixLadder(container, ladderType);
+                    return;
+                }
+
+                const leaders = metricData.leaders.slice(0, 10);
+                renderMatrixLadderTable(container, ladderType, leaders);
+            });
+        }
+
+        /**
+         * 直接从 Supabase 查询渲染矩阵绿天梯榜（降级方案）
+         */
+        async function renderMatrixLaddersFromDirectQuery(container) {
+            container.innerHTML = '<div class="text-green-400 text-xs p-4">加载中...</div>';
+
+            try {
+                const promises = MATRIX_LADDER_TYPES.map(async (ladderType) => {
+                    try {
+                        let query = supabaseClient
+                            .from('user_analysis')
+                            .select('id, fingerprint, user_name, github_username, ' + ladderType.field)
+                            .not(ladderType.field, 'is', null)
+                            .gt(ladderType.field, 0)
+                            .order(ladderType.field, { ascending: false })
+                            .limit(10);
+
+                        const { data, error } = await query;
+                        if (error) throw error;
+
+                        return {
+                            type: ladderType,
+                            leaders: (data || []).map((item, idx) => ({
+                                rank: idx + 1,
+                                score: item[ladderType.field] || 0,
+                                user: {
+                                    fingerprint: item.fingerprint || '',
+                                    user_name: item.user_name || '',
+                                    github_username: item.github_username || ''
+                                }
+                            }))
+                        };
+                    } catch (err) {
+                        console.error(`[MatrixLadders] ❌ 查询 ${ladderType.key} 失败:`, err);
+                        return { type: ladderType, leaders: [] };
+                    }
+                });
+
+                const results = await Promise.all(promises);
+                container.innerHTML = '';
+
+                results.forEach(result => {
+                    if (result.leaders && result.leaders.length > 0) {
+                        renderMatrixLadderTable(container, result.type, result.leaders);
+                    } else {
+                        renderEmptyMatrixLadder(container, result.type);
+                    }
+                });
+            } catch (err) {
+                console.error('[MatrixLadders] ❌ 直接查询失败:', err);
+                container.innerHTML = '<div class="text-red-400 text-xs p-4">加载失败</div>';
+            }
+        }
+
+        /**
+         * 渲染单个矩阵绿天梯榜表格
+         */
+        function renderMatrixLadderTable(container, ladderType, leaders) {
+            const card = document.createElement('div');
+            card.className = 'matrix-ladder-card';
+
+            const rows = leaders.map(leader => {
+                const user = leader.user || {};
+                const fingerprint = user.fingerprint || '';
+                const github = user.github_username || '';
+                const username = user.user_name || '';
+                const display = github ? `@${github}` : (username ? `@${username}` : `user_${fingerprint.slice(0, 6)}`);
+                const avatar = github 
+                    ? `https://github.com/${encodeURIComponent(github)}.png?size=64`
+                    : DEFAULT_AVATAR;
+
+                const value = ladderType.key === 'avg_user_message_length' 
+                    ? Number(leader.score || 0).toFixed(1)
+                    : Number(leader.score || 0).toLocaleString();
+
+                return `
+                    <tr>
+                        <td>${leader.rank || ''}</td>
+                        <td>
+                            <img 
+                                src="${escapeHtml(avatar)}" 
+                                alt="" 
+                                class="matrix-avatar"
+                                onclick="handleMatrixAvatarClick('${escapeHtml(fingerprint)}')"
+                                onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
+                            />
+                        </td>
+                        <td class="truncate max-w-[100px]" title="${escapeHtml(display)}">${escapeHtml(display)}</td>
+                        <td class="text-right">${value}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            card.innerHTML = `
+                <div class="matrix-ladder-title">${ladderType.label}</div>
+                <table class="matrix-table">
+                    <thead>
+                        <tr>
+                            <th class="text-right w-10">排名</th>
+                            <th class="w-8">头像</th>
+                            <th>用户名</th>
+                            <th class="text-right">数值</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows}
+                    </tbody>
+                </table>
+            `;
+
+            container.appendChild(card);
+        }
+
+        /**
+         * 渲染空的矩阵绿天梯榜（无数据）
+         */
+        function renderEmptyMatrixLadder(container, ladderType) {
+            const card = document.createElement('div');
+            card.className = 'matrix-ladder-card';
+            card.innerHTML = `
+                <div class="matrix-ladder-title">${ladderType.label}</div>
+                <div class="text-green-400/50 text-xs text-center py-4">暂无数据</div>
+            `;
+            container.appendChild(card);
+        }
+
+        /**
+         * 处理矩阵绿天梯榜头像点击事件
+         * @param {string} fingerprint - 用户指纹
+         */
+        window.handleMatrixAvatarClick = async function(fingerprint) {
+            if (!fingerprint) {
+                console.warn('[MatrixLadders] ⚠️ 缺少 fingerprint 参数');
+                return;
+            }
+
+            try {
+                if (!supabaseClient || typeof supabaseClient.from !== 'function') {
+                    console.warn('[MatrixLadders] ⚠️ Supabase 客户端未初始化');
+                    return;
+                }
+
+                // 获取用户数据
+                const { data, error } = await supabaseClient
+                    .from('user_analysis')
+                    .select('*')
+                    .eq('fingerprint', fingerprint)
+                    .limit(1)
+                    .single();
+
+                if (error || !data) {
+                    console.error('[MatrixLadders] ❌ 获取用户数据失败:', error);
+                    // 降级：使用 toggleUserPreview
+                    if (typeof toggleUserPreview === 'function') {
+                        toggleUserPreview(fingerprint);
+                    }
+                    return;
+                }
+
+                // 更新左侧抽屉显示该用户的统计卡片
+                const leftBody = document.getElementById('left-drawer-body');
+                if (leftBody && typeof renderUserStatsCards === 'function') {
+                    renderUserStatsCards(leftBody, getBestUserRecordForStats(data));
+                    // 隐藏天梯榜区域，显示用户详情
+                    const rankingArea = document.getElementById('global-ranking-area');
+                    if (rankingArea) {
+                        rankingArea.classList.add('hidden');
+                    }
+                }
+
+                // 如果存在 updateDrawerUI 函数，调用它
+                if (typeof updateDrawerUI === 'function') {
+                    updateDrawerUI(data);
+                } else if (typeof toggleUserPreview === 'function') {
+                    // 降级：使用 toggleUserPreview
+                    toggleUserPreview(fingerprint);
+                }
+            } catch (error) {
+                console.error('[MatrixLadders] ❌ 处理头像点击失败:', error);
+                // 降级：使用 toggleUserPreview
+                if (typeof toggleUserPreview === 'function') {
+                    toggleUserPreview(fingerprint);
+                }
+            }
+        };
+
+        /**
+         * updateDrawerUI 函数（如果不存在则创建）
+         * 用于控制 global-ranking-area 的显示/隐藏
+         */
+        if (typeof window.updateDrawerUI === 'undefined') {
+            window.updateDrawerUI = function(userData) {
+                // 获取当前国家代码
+                const currentCountryCode = currentDrawerCountry?.code || null;
+                const rankingArea = document.getElementById('global-ranking-area');
+                if (rankingArea) {
+                    // currentCountryCode 为 null 时显示（全球视图），否则隐藏
+                    rankingArea.classList.toggle('hidden', currentCountryCode !== null);
+                }
+            };
+        } else {
+            // 如果 updateDrawerUI 已存在，增强它
+            const originalUpdateDrawerUI = window.updateDrawerUI;
+            window.updateDrawerUI = function(userData) {
+                // 调用原始函数
+                if (typeof originalUpdateDrawerUI === 'function') {
+                    originalUpdateDrawerUI(userData);
+                }
+                // 强制显示控制
+                const currentCountryCode = currentDrawerCountry?.code || null;
+                const rankingArea = document.getElementById('global-ranking-area');
+                if (rankingArea) {
+                    rankingArea.classList.toggle('hidden', currentCountryCode !== null);
+                }
+            };
+        }
+
+        /**
+         * 初始化全局天梯榜
+         */
+        async function initGlobalLadders() {
+            const container = document.getElementById('global-ladders-container');
+            if (!container) {
+                console.warn('[Ladders] ⚠️ global-ladders-container 容器不存在');
+                return;
+            }
+
+            if (!supabaseClient || typeof supabaseClient.rpc !== 'function') {
+                console.warn('[Ladders] ⚠️ Supabase 客户端未初始化');
+                return;
+            }
+
+            try {
+                // 尝试调用 RPC 获取全局 Top 10 数据
+                // 注意：如果 RPC 不支持 null country_code，则使用直接查询
+                let rpcData = null;
+                try {
+                    const { data, error } = await supabaseClient.rpc('get_country_top_metrics_v1', {
+                        country_code: '',
+                        top_n: 10
+                    });
+                    if (!error && data && Array.isArray(data) && data.length > 0) {
+                        rpcData = data;
+                    }
+                } catch (rpcErr) {
+                    console.log('[Ladders] RPC 调用失败，使用直接查询:', rpcErr.message);
+                }
+
+                if (rpcData) {
+                    // 使用 RPC 数据渲染
+                    renderLaddersFromRPC(container, rpcData);
+                } else {
+                    // 降级：直接查询
+                    await renderLaddersFromDirectQuery(container);
+                }
+            } catch (err) {
+                console.error('[Ladders] ❌ 初始化失败:', err);
+                // 降级：直接查询
+                await renderLaddersFromDirectQuery(container);
+            }
+        }
+
+        /**
+         * 从 RPC 返回的数据渲染天梯榜
+         */
+        function renderLaddersFromRPC(container, rpcData) {
+            container.innerHTML = '';
+
+            LADDER_TYPES.forEach((ladderType) => {
+                // 从 RPC 数据中找到对应的维度数据
+                // RPC 返回的 key 可能是：total_messages, total_chars, total_user_chars, avg_user_message_length, jiafang_count, ketao_count
+                const keyMap = {
+                    'work_days': ['work_days'],
+                    'total_chars': ['total_chars'],
+                    'jiafang': ['jiafang_count'],
+                    'victim': ['ketao_count'],
+                    'vibe_index': ['total_messages'],
+                    'rare_score': ['avg_user_message_length']
+                };
+                
+                const possibleKeys = keyMap[ladderType.key] || [ladderType.field];
+                const metricData = rpcData.find(m => {
+                    const mKey = m.key || m.col || '';
+                    return possibleKeys.includes(mKey);
+                });
+
+                if (!metricData || !metricData.leaders || !Array.isArray(metricData.leaders) || metricData.leaders.length === 0) {
+                    renderEmptyLadder(container, ladderType);
+                    return;
+                }
+
+                const leaders = metricData.leaders.slice(0, 10);
+                renderLadderTable(container, ladderType, leaders);
+            });
+        }
+
+        /**
+         * 直接从 Supabase 查询渲染天梯榜（降级方案）
+         */
+        async function renderLaddersFromDirectQuery(container) {
+            container.innerHTML = '<div class="text-green-400 text-xs p-4">加载中...</div>';
+
+            try {
+                const promises = LADDER_TYPES.map(async (ladderType) => {
+                    try {
+                        let query = supabaseClient
+                            .from('user_analysis')
+                            .select('id, fingerprint, user_name, github_username, ' + ladderType.field)
+                            .not(ladderType.field, 'is', null)
+                            .gt(ladderType.field, 0)
+                            .order(ladderType.field, { ascending: false })
+                            .limit(10);
+
+                        const { data, error } = await query;
+                        if (error) throw error;
+
+                        return {
+                            type: ladderType,
+                            leaders: (data || []).map((item, idx) => ({
+                                rank: idx + 1,
+                                score: item[ladderType.field] || 0,
+                                user: {
+                                    fingerprint: item.fingerprint || '',
+                                    user_name: item.user_name || '',
+                                    github_username: item.github_username || ''
+                                }
+                            }))
+                        };
+                    } catch (err) {
+                        console.error(`[Ladders] ❌ 查询 ${ladderType.key} 失败:`, err);
+                        return { type: ladderType, leaders: [] };
+                    }
+                });
+
+                const results = await Promise.all(promises);
+                container.innerHTML = '';
+
+                results.forEach(result => {
+                    if (result.leaders && result.leaders.length > 0) {
+                        renderLadderTable(container, result.type, result.leaders);
+                    } else {
+                        renderEmptyLadder(container, result.type);
+                    }
+                });
+            } catch (err) {
+                console.error('[Ladders] ❌ 直接查询失败:', err);
+                container.innerHTML = '<div class="text-red-400 text-xs p-4">加载失败</div>';
+            }
+        }
+
+        /**
+         * 渲染单个天梯榜表格
+         */
+        function renderLadderTable(container, ladderType, leaders) {
+            const card = document.createElement('div');
+            card.className = 'ladder-card';
+
+            const rows = leaders.map(leader => {
+                const user = leader.user || {};
+                const fingerprint = user.fingerprint || '';
+                const github = user.github_username || '';
+                const username = user.user_name || '';
+                const display = github ? `@${github}` : (username ? `@${username}` : `user_${fingerprint.slice(0, 6)}`);
+                const avatar = github 
+                    ? `https://github.com/${encodeURIComponent(github)}.png?size=64`
+                    : DEFAULT_AVATAR;
+
+                const value = ladderType.key === 'rare_score' 
+                    ? Number(leader.score || 0).toFixed(1)
+                    : Number(leader.score || 0).toLocaleString();
+
+                return `
+                    <tr>
+                        <td>${leader.rank || ''}</td>
+                        <td>
+                            <img 
+                                src="${escapeHtml(avatar)}" 
+                                alt="" 
+                                class="ladder-avatar"
+                                onclick="showUserPreview('${escapeHtml(fingerprint)}')"
+                                onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
+                            />
+                        </td>
+                        <td class="truncate max-w-[120px]" title="${escapeHtml(display)}">${escapeHtml(display)}</td>
+                        <td class="text-right">${value}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            card.innerHTML = `
+                <div class="ladder-card-title">${ladderType.label}</div>
+                <table class="green-table">
+                    <thead>
+                        <tr>
+                            <th class="text-right w-12">排名</th>
+                            <th class="w-10">头像</th>
+                            <th>用户名</th>
+                            <th class="text-right">数值</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows}
+                    </tbody>
+                </table>
+            `;
+
+            container.appendChild(card);
+        }
+
+        /**
+         * 渲染空的天梯榜（无数据）
+         */
+        function renderEmptyLadder(container, ladderType) {
+            const card = document.createElement('div');
+            card.className = 'ladder-card';
+            card.innerHTML = `
+                <div class="ladder-card-title">${ladderType.label}</div>
+                <div class="text-green-400/50 text-xs text-center py-4">暂无数据</div>
+            `;
+            container.appendChild(card);
         }
 
         /**
@@ -11636,8 +12283,428 @@
             }
         }
 
+        var __globalRankingsCache = { data: null, ts: 0 };
+        var __globalRankingsCacheTtlMs = 45000;
+
+        /**
+         * 解析为 ISO2 国家码（用于国旗 Emoji）。支持 2 位码、国家名（含 resolveCountryCodeFromMapName）
+         */
+        function getRankingCountryCode(ipLocation, countryCode) {
+            const raw = String(countryCode || ipLocation || '').trim();
+            if (!raw) return '';
+            if (/^[A-Za-z]{2}$/.test(raw)) return raw.toUpperCase();
+            if (typeof resolveCountryCodeFromMapName === 'function') {
+                const resolved = resolveCountryCodeFromMapName(raw);
+                if (resolved) return resolved;
+            }
+            return '';
+        }
+
+        /**
+         * 根据 vibe_index_str 获取人格称号（文字描述）
+         * @param {string} vibeIndexStr - 5位代码，如 "00020"
+         * @param {string} fallback - 回退值
+         * @returns {string} 人格称号文字，如 "迷路的极速掠夺者"
+         */
+        function getPersonalityTitle(vibeIndexStr, fallback) {
+            const idx = String(vibeIndexStr || '').trim();
+            if (idx.length === 5) {
+                // 尝试从 window.__PERSONALITY_NAMES 获取（异步加载的缓存）
+                if (typeof window !== 'undefined' && window.__PERSONALITY_NAMES && window.__PERSONALITY_NAMES[idx]) {
+                    return window.__PERSONALITY_NAMES[idx];
+                }
+                // 尝试从 personalityNames.json 同步获取（如果已加载）
+                try {
+                    const map = typeof personalityNames !== 'undefined' ? personalityNames : null;
+                    if (map && map[idx]) return map[idx];
+                } catch { /* ignore */ }
+                // 返回带 V 前缀的代码作为fallback
+                return 'V' + idx;
+            }
+            // 如果没有 vibe_index_str，尝试使用 user_identity
+            const identity = String(fallback || '').trim();
+            if (identity) return identity;
+            return '--';
+        }
+
+        /**
+         * 根据国家码或 ip_location 显示国家文案（国旗由调用方用 countryCodeToFlagEmoji 拼）
+         */
+        function getRankingCountryDisplay(ipLocation, countryCode) {
+            const code = getRankingCountryCode(ipLocation, countryCode);
+            const raw = String(ipLocation || countryCode || '').trim();
+            if (code && typeof countryNameMap !== 'undefined' && countryNameMap && countryNameMap[code]) {
+                return (currentLang === 'en' ? countryNameMap[code].en : countryNameMap[code].zh) || code;
+            }
+            if (code) return code;
+            if (!raw) return '--';
+            return raw.length > 12 ? raw.slice(0, 12) + '…' : raw;
+        }
+
+        /**
+         * 获取全局排行榜数据（6个维度）
+         * @param {number} topN - 每个维度返回前N名，默认10
+         * @param {boolean} forceRefresh - 是否跳过缓存
+         * @returns {Promise<Object>} 返回包含6个维度排行榜数据的对象
+         */
+        async function fetchGlobalRankings(topN = 10, forceRefresh = false) {
+            try {
+                if (!forceRefresh && __globalRankingsCache.data && (Date.now() - __globalRankingsCache.ts) < __globalRankingsCacheTtlMs) {
+                    return __globalRankingsCache.data;
+                }
+                if (!supabaseClient || typeof supabaseClient.from !== 'function') {
+                    console.warn('[GlobalRankings] ⚠️ Supabase 客户端未初始化');
+                    return null;
+                }
+
+                // 定义6个维度的配置
+                const dimensions = [
+                    { key: 'work_days', label: '脱发榜', field: 'work_days', desc: '上岗天数' },
+                    { key: 'total_chars', label: '抓狂榜', field: 'total_chars', desc: '对话字符总数' },
+                    { key: 'jiafang_count', label: '甲方榜', field: 'jiafang_count', desc: '甲方上身' },
+                    { key: 'ketao_count', label: '舔狗榜', field: 'ketao_count', desc: '磕头次数' },
+                    { key: 'total_messages', label: '话唠榜 (Stress)', field: 'total_messages', desc: '对话次数' },
+                    { key: 'avg_user_message_length', label: '话唠榜 (Power)', field: 'avg_user_message_length', desc: '平均长度' }
+                ];
+
+                const rankings = {};
+
+                // 并行获取所有维度的排行榜
+                const promises = dimensions.map(async (dim) => {
+                    try {
+                        let selectFields = 'id, fingerprint, user_name, github_username, user_identity, ip_location, country_code, vibe_index_str';
+                        
+                        // 对于 avg_user_message_length，需要计算，所以需要 total_chars 和 total_messages
+                        if (dim.key === 'avg_user_message_length') {
+                            selectFields += ', total_chars, total_messages';
+                        } else {
+                            selectFields += ', ' + dim.field;
+                        }
+
+                        let query = supabaseClient
+                            .from('user_analysis')
+                            .select(selectFields);
+
+                        // 对于 avg_user_message_length，需要过滤有有效数据的记录
+                        if (dim.key === 'avg_user_message_length') {
+                            query = query
+                                .not('total_messages', 'is', null)
+                                .gt('total_messages', 0)
+                                .not('total_chars', 'is', null)
+                                .gt('total_chars', 0);
+                        } else {
+                            query = query
+                                .not(dim.field, 'is', null)
+                                .gt(dim.field, 0);
+                        }
+
+                        query = query.order(dim.key === 'avg_user_message_length' ? 'total_chars' : dim.field, { ascending: false })
+                            .limit(topN);
+
+                        const { data, error } = await query;
+
+                        if (error) {
+                            console.error(`[GlobalRankings] ❌ 获取 ${dim.key} 排行榜失败:`, error);
+                            return { key: dim.key, data: [], label: dim.label, desc: dim.desc };
+                        }
+
+                        // 处理数据，添加排名和用户信息
+                        let processedData = (data || []).map((item, index) => {
+                            const github = item.github_username || '';
+                            const username = item.user_name || '';
+                            const display = github ? `@${github}` : (username ? `@${username}` : `user_${(item.fingerprint || '').slice(0, 6)}`);
+                            const avatar = github 
+                                ? `https://github.com/${encodeURIComponent(github)}.png?size=64`
+                                : DEFAULT_AVATAR;
+
+                            // 计算 avg_user_message_length
+                            let value = 0;
+                            if (dim.key === 'avg_user_message_length') {
+                                const totalMessages = Number(item.total_messages || 0);
+                                const totalChars = Number(item.total_chars || 0);
+                                value = totalMessages > 0 ? (totalChars / totalMessages) : 0;
+                            } else {
+                                value = item[dim.field] || 0;
+                            }
+
+                            const countryCode = getRankingCountryCode(item.ip_location, item.country_code);
+                            // 获取人格称号：优先使用 vibe_index_str 映射，其次使用 user_identity
+                            const vibeIndexStr = item.vibe_index_str || '';
+                            const personalityTitle = getPersonalityTitle(vibeIndexStr, item.user_identity);
+                            return {
+                                rank: index + 1,
+                                fingerprint: item.fingerprint || '',
+                                username: display,
+                                avatar: avatar,
+                                github_username: github,
+                                user_name: username,
+                                value: value,
+                                user_identity: item.user_identity || null,
+                                vibe_index_str: vibeIndexStr,
+                                personality_title: personalityTitle,
+                                countryCode: countryCode,
+                                countryDisplay: getRankingCountryDisplay(item.ip_location, item.country_code)
+                            };
+                        });
+
+                        // 对于 avg_user_message_length，需要重新排序
+                        if (dim.key === 'avg_user_message_length') {
+                            processedData = processedData.sort((a, b) => b.value - a.value);
+                            processedData = processedData.map((item, index) => ({ ...item, rank: index + 1 }));
+                        }
+
+                        return { key: dim.key, data: processedData, label: dim.label, desc: dim.desc };
+                    } catch (err) {
+                        console.error(`[GlobalRankings] ❌ 处理 ${dim.key} 时出错:`, err);
+                        return { key: dim.key, data: [], label: dim.label, desc: dim.desc };
+                    }
+                });
+
+                const results = await Promise.all(promises);
+                results.forEach(result => {
+                    rankings[result.key] = result;
+                });
+                __globalRankingsCache = { data: rankings, ts: Date.now() };
+                return rankings;
+            } catch (error) {
+                console.error('[GlobalRankings] ❌ 获取全局排行榜失败:', error);
+                return null;
+            }
+        }
+
+        /**
+         * 渲染六个绿色主题排行榜表格
+         */
+        async function renderGreenLadders(forceRefresh) {
+            // 优先使用 ranking 标签内的容器，避免与其它面板冲突
+            const container = document.querySelector('#panel-ranking-view #global-ranking-grids') || document.getElementById('global-ranking-grids');
+            if (!container) {
+                console.warn('[GreenLadders] ⚠️ global-ranking-grids 容器不存在');
+                return;
+            }
+
+            if (!forceRefresh && __globalRankingsCache.data && (Date.now() - __globalRankingsCache.ts) < __globalRankingsCacheTtlMs) {
+                renderGreenLaddersToContainer(container, __globalRankingsCache.data);
+                return;
+            }
+
+            // 显示加载状态
+            container.innerHTML = '<div class="col-span-full text-center text-[#00ff41] text-sm py-6">加载中...</div>';
+
+            try {
+                const rankings = await fetchGlobalRankings(10, !!forceRefresh);
+                if (!rankings) {
+                    container.innerHTML = '<div class="col-span-full text-center text-red-400 text-sm">加载失败</div>';
+                    return;
+                }
+                renderGreenLaddersToContainer(container, rankings);
+                console.log('[GreenLadders] ✅ 六个排行榜渲染完成');
+            } catch (error) {
+                console.error('[GreenLadders] ❌ 渲染排行榜失败:', error);
+                container.innerHTML = '<div class="col-span-full text-center text-red-400 text-sm">渲染失败</div>';
+            }
+        }
+
+        function renderGreenLaddersToContainer(container, rankings) {
+            const dimensionOrder = [
+                { key: 'work_days', label: '脱发榜', desc: '上岗天数' },
+                { key: 'total_chars', label: '抓狂榜', desc: '对话字符总数' },
+                { key: 'jiafang_count', label: '甲方榜', desc: '甲方上身' },
+                { key: 'ketao_count', label: '舔狗榜', desc: '磕头次数' },
+                { key: 'total_messages', label: '话唠榜 (Stress)', desc: '对话次数' },
+                { key: 'avg_user_message_length', label: '话唠榜 (Power)', desc: '平均长度' }
+            ];
+            let html = '';
+            const titleLabel = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Title' : '称号';
+            dimensionOrder.forEach((dim) => {
+                const rankingData = rankings[dim.key];
+                if (!rankingData || !rankingData.data || rankingData.data.length === 0) {
+                    html += `
+                        <div class="border border-[#00ff41]/30 bg-[#0a0a0a] p-3">
+                            <div class="text-[#00ff41] text-xs font-mono mb-2 bg-[#003b00]/50 px-2 py-1">${dim.label}</div>
+                            <div class="text-zinc-500 text-xs text-center py-4">暂无数据</div>
+                        </div>
+                    `;
+                    return;
+                }
+                const rows = rankingData.data.map((item) => {
+                    const value = dim.key === 'avg_user_message_length' 
+                        ? Number(item.value).toFixed(1) 
+                        : Number(item.value).toLocaleString();
+                    // 国旗
+                    const flagEmoji = (typeof countryCodeToFlagEmoji === 'function' && item.countryCode) ? countryCodeToFlagEmoji(item.countryCode) : '';
+                    // 人格称号（优先显示文字称号）
+                    const personalityTitle = escapeHtml(item.personality_title || item.vibe_index_str || item.user_identity || '--');
+                    return `
+                        <tr class="border-b border-[#00ff41]/10 hover:bg-[#003b00]/20 transition-colors">
+                            <td class="px-2 py-1.5 text-[#00ff41] text-xs font-mono text-right">${item.rank}</td>
+                            <td class="px-2 py-1.5">
+                                <img 
+                                    src="${escapeHtml(item.avatar)}" 
+                                    alt="" 
+                                    width="24" 
+                                    height="24" 
+                                    class="rounded-full cursor-pointer border border-[#00ff41]/30 hover:border-[#00ff41] transition-colors"
+                                    onclick="toggleUserPreview('${escapeHtml(item.fingerprint)}')"
+                                    onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
+                                    style="object-fit: cover;"
+                                />
+                            </td>
+                            <td class="px-2 py-1.5 text-white text-xs font-mono truncate max-w-[100px]" title="${escapeHtml(item.username)}">${escapeHtml(item.username)}</td>
+                            <td class="px-2 py-1.5 text-[#00ff41]/90 text-[10px] font-mono truncate max-w-[100px]" title="${personalityTitle}">${flagEmoji ? flagEmoji + ' ' : ''}${personalityTitle}</td>
+                            <td class="px-2 py-1.5 text-[#00ff41] text-xs font-mono text-right">${value}</td>
+                        </tr>
+                    `;
+                }).join('');
+                html += `
+                    <div class="border border-[#00ff41]/30 bg-[#0a0a0a]">
+                        <div class="bg-[#003b00]/50 px-3 py-2 border-b border-[#00ff41]/30">
+                            <div class="text-[#00ff41] text-xs font-mono font-bold">${dim.label}</div>
+                            <div class="text-[#00ff41]/70 text-[10px] font-mono mt-0.5">${dim.desc}</div>
+                        </div>
+                        <table class="w-full text-left" style="font-family: 'JetBrains Mono', monospace;">
+                            <thead>
+                                <tr class="border-b border-[#00ff41]/30">
+                                    <th class="px-2 py-1.5 text-[#00ff41] text-[10px] font-mono text-right w-12">排名</th>
+                                    <th class="px-2 py-1.5 text-[#00ff41] text-[10px] font-mono w-10">头像</th>
+                                    <th class="px-2 py-1.5 text-[#00ff41] text-[10px] font-mono">用户名</th>
+                                    <th class="px-2 py-1.5 text-[#00ff41] text-[10px] font-mono">${titleLabel}</th>
+                                    <th class="px-2 py-1.5 text-[#00ff41] text-[10px] font-mono text-right">数值</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${rows}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            });
+            container.innerHTML = html;
+        }
+        if (typeof window !== 'undefined') window.renderGreenLadders = renderGreenLadders;
+
+        /**
+         * 切换用户预览弹窗
+         * @param {string} fingerprint - 用户指纹
+         */
+        window.toggleUserPreview = async function(fingerprint) {
+            if (!fingerprint) {
+                console.warn('[UserPreview] ⚠️ 缺少 fingerprint 参数');
+                return;
+            }
+
+            // 检查是否已存在弹窗
+            let existingModal = document.getElementById('user-preview-modal');
+            if (existingModal) {
+                existingModal.remove();
+                return;
+            }
+
+            try {
+                // 获取用户数据
+                if (!supabaseClient || typeof supabaseClient.from !== 'function') {
+                    console.warn('[UserPreview] ⚠️ Supabase 客户端未初始化');
+                    return;
+                }
+
+                const { data, error } = await supabaseClient
+                    .from('user_analysis')
+                    .select('id, fingerprint, user_name, github_username, user_identity, total_messages, total_chars, avg_user_message_length, jiafang_count, ketao_count, work_days')
+                    .eq('fingerprint', fingerprint)
+                    .limit(1)
+                    .single();
+
+                if (error || !data) {
+                    console.error('[UserPreview] ❌ 获取用户数据失败:', error);
+                    return;
+                }
+
+                // 构建用户信息
+                const github = data.github_username || '';
+                const username = data.user_name || '';
+                const display = github ? `@${github}` : (username ? `@${username}` : `user_${fingerprint.slice(0, 6)}`);
+                const avatar = github 
+                    ? `https://github.com/${encodeURIComponent(github)}.png?size=64`
+                    : DEFAULT_AVATAR;
+                const profileUrl = github ? `https://github.com/${encodeURIComponent(github)}` : '';
+
+                // 创建弹窗
+                const modal = document.createElement('div');
+                modal.id = 'user-preview-modal';
+                modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm';
+                modal.style.fontFamily = "'JetBrains Mono', monospace";
+                modal.innerHTML = `
+                    <div class="bg-[#0a0a0a] border border-[#00ff41] p-6 max-w-md w-full mx-4 relative">
+                        <button 
+                            onclick="document.getElementById('user-preview-modal')?.remove()"
+                            class="absolute top-2 right-2 text-[#00ff41] hover:text-white text-xl font-bold w-6 h-6 flex items-center justify-center border border-[#00ff41]/50 hover:border-[#00ff41] transition-colors"
+                        >×</button>
+                        <div class="flex items-center gap-3 mb-4">
+                            <img 
+                                src="${escapeHtml(avatar)}" 
+                                alt="" 
+                                width="48" 
+                                height="48" 
+                                class="rounded-full border-2 border-[#00ff41]"
+                                onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
+                                style="object-fit: cover;"
+                            />
+                            <div>
+                                <div class="text-[#00ff41] text-sm font-bold">${escapeHtml(display)}</div>
+                                ${profileUrl ? `<a href="${escapeHtml(profileUrl)}" target="_blank" class="text-[#00ff41]/70 text-xs hover:underline">GitHub →</a>` : ''}
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3 text-xs">
+                            <div class="border border-[#00ff41]/30 p-2 bg-[#003b00]/20">
+                                <div class="text-[#00ff41]/70 text-[10px] mb-1">对话次数</div>
+                                <div class="text-white font-mono">${Number(data.total_messages || 0).toLocaleString()}</div>
+                            </div>
+                            <div class="border border-[#00ff41]/30 p-2 bg-[#003b00]/20">
+                                <div class="text-[#00ff41]/70 text-[10px] mb-1">对话字符</div>
+                                <div class="text-white font-mono">${Number(data.total_chars || 0).toLocaleString()}</div>
+                            </div>
+                            <div class="border border-[#00ff41]/30 p-2 bg-[#003b00]/20">
+                                <div class="text-[#00ff41]/70 text-[10px] mb-1">平均长度</div>
+                                <div class="text-white font-mono">${Number(data.avg_user_message_length || 0).toFixed(1)}</div>
+                            </div>
+                            <div class="border border-[#00ff41]/30 p-2 bg-[#003b00]/20">
+                                <div class="text-[#00ff41]/70 text-[10px] mb-1">甲方上身</div>
+                                <div class="text-white font-mono">${Number(data.jiafang_count || 0).toLocaleString()}</div>
+                            </div>
+                            <div class="border border-[#00ff41]/30 p-2 bg-[#003b00]/20">
+                                <div class="text-[#00ff41]/70 text-[10px] mb-1">磕头次数</div>
+                                <div class="text-white font-mono">${Number(data.ketao_count || 0).toLocaleString()}</div>
+                            </div>
+                            <div class="border border-[#00ff41]/30 p-2 bg-[#003b00]/20">
+                                <div class="text-[#00ff41]/70 text-[10px] mb-1">上岗天数</div>
+                                <div class="text-white font-mono">${Number(data.work_days || 0).toLocaleString()}</div>
+                            </div>
+                        </div>
+                        ${data.user_identity ? `<div class="mt-4 text-[#00ff41]/70 text-[10px]">身份: ${escapeHtml(String(data.user_identity))}</div>` : ''}
+                    </div>
+                `;
+
+                // 点击外部关闭
+                modal.addEventListener('click', (e) => {
+                    if (e.target === modal) {
+                        modal.remove();
+                    }
+                });
+
+                document.body.appendChild(modal);
+            } catch (error) {
+                console.error('[UserPreview] ❌ 显示用户预览失败:', error);
+            }
+        };
 
         window.onload = async () => {
+            // 【强制静态挂载】立即执行 renderGlobalLadders，无论任何条件
+            try {
+                renderGlobalLadders().catch(err => console.error('[Onload] renderGlobalLadders 失败:', err));
+            } catch (e) {
+                console.error('[Onload] renderGlobalLadders 执行异常:', e);
+            }
+
             // 加载保存的GitHub用户名（兼容旧代码）
             loadGitHubUsername();
 
@@ -11664,6 +12731,88 @@
                 console.error('[Window.onload] ❌ fetchData 失败:', fetchError);
                 // 即使数据加载失败，也继续执行后续初始化
             }
+
+            // 渲染六个绿色主题排行榜（延迟执行，确保 Supabase 客户端已初始化）
+            setTimeout(async () => {
+                try {
+                    // 等待 Supabase 客户端初始化
+                    let attempts = 0;
+                    while ((!supabaseClient || typeof supabaseClient.from !== 'function') && attempts < 50) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                        attempts++;
+                    }
+                    if (supabaseClient && typeof supabaseClient.from === 'function') {
+                        await renderGreenLadders();
+                    } else {
+                        console.warn('[Window.onload] ⚠️ Supabase 客户端初始化超时，排行榜将稍后加载');
+                        // 延迟重试
+                        setTimeout(async () => {
+                            try {
+                                await renderGreenLadders();
+                            } catch (e) {
+                                console.error('[Window.onload] ❌ renderGreenLadders 重试失败:', e);
+                            }
+                        }, 2000);
+                    }
+                } catch (ladderError) {
+                    console.error('[Window.onload] ❌ renderGreenLadders 失败:', ladderError);
+                }
+            }, 500);
+
+            // 初始化左侧抽屉的天梯榜（延迟执行，确保 Supabase 客户端已初始化）
+            setTimeout(async () => {
+                try {
+                    let attempts = 0;
+                    while ((!supabaseClient || typeof supabaseClient.rpc !== 'function') && attempts < 50) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                        attempts++;
+                    }
+                    if (supabaseClient && typeof supabaseClient.rpc === 'function') {
+                        await initGlobalLadders();
+                        // 设置每 5 分钟自动刷新
+                        setInterval(async () => {
+                            try {
+                                await initGlobalLadders();
+                            } catch (e) {
+                                console.error('[Ladders] ❌ 自动刷新失败:', e);
+                            }
+                        }, 5 * 60 * 1000); // 5 分钟
+                    }
+                } catch (ladderError) {
+                    console.error('[Window.onload] ❌ initGlobalLadders 失败:', ladderError);
+                }
+            }, 1000);
+
+            // 初始化矩阵绿天梯榜（延迟执行，确保 Supabase 客户端已初始化）
+            setTimeout(async () => {
+                try {
+                    let attempts = 0;
+                    while ((!supabaseClient || typeof supabaseClient.rpc !== 'function') && attempts < 50) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                        attempts++;
+                    }
+                    if (supabaseClient && typeof supabaseClient.rpc === 'function') {
+                        // 检查是否处于 Global 模式
+                        const rankingArea = document.getElementById('global-ranking-area');
+                        if (rankingArea && !rankingArea.classList.contains('hidden')) {
+                            await renderGlobalLadders();
+                        }
+                        // 设置每 5 分钟自动刷新
+                        setInterval(async () => {
+                            try {
+                                const area = document.getElementById('global-ranking-area');
+                                if (area && !area.classList.contains('hidden')) {
+                                    await renderGlobalLadders();
+                                }
+                            } catch (e) {
+                                console.error('[MatrixLadders] ❌ 自动刷新失败:', e);
+                            }
+                        }, 5 * 60 * 1000); // 5 分钟
+                    }
+                } catch (ladderError) {
+                    console.error('[Window.onload] ❌ renderGlobalLadders 失败:', ladderError);
+                }
+            }, 1500);
             
             // ============================================
             // 【新增】初始化 GitHub OAuth 认证监听
@@ -13155,8 +14304,8 @@
          * 显示关键词详细信息面板
          */
         function showKeywordDetails(keyword, category, locationData) {
-            const countryPanel = document.getElementById('countryPanel');
-            if (!countryPanel) return;
+            const countryDetailPanel = document.getElementById('panel-country-detail');
+            if (!countryDetailPanel) return;
 
             // 按出现频率排序
             const sortedLocations = (locationData || [])
@@ -13202,8 +14351,9 @@
                 </div>
             `;
 
-            countryPanel.innerHTML = html;
-            countryPanel.style.display = 'block';
+            countryDetailPanel.innerHTML = html;
+            countryDetailPanel.classList.remove('hidden');
+            countryDetailPanel.classList.add('flex');
 
             // 刷新 Lucide 图标
             if (typeof lucide !== 'undefined' && lucide.createIcons) {
