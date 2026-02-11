@@ -5796,6 +5796,15 @@ app.get('/api/country-summary', async (c) => {
       return { rank: r, total: totalVal };
     };
 
+    // total_countries 为 1 时所有排名字段都不能为 null，必须返回 { rank: 1, total: 1 }
+    const safeRank = (rankVal: any, totalVal: number): { rank: number; total: number } => {
+      const t = Math.max(1, totalVal <= 0 ? 1 : totalVal);
+      if (t <= 1) return { rank: 1, total: 1 };
+      const r = ni(rankVal);
+      if (r != null && r > 0) return { rank: Math.min(r, t), total: t };
+      return { rank: 1, total: t };
+    };
+
     // ----------------------------
     // 【暴力刷新缓存】如果 URL 包含 refresh=true，强制跳过 KV 读取并更新 KV
     // ----------------------------
@@ -5896,12 +5905,12 @@ app.get('/api/country-summary', async (c) => {
         source: 'GLOBAL_COUNTRY_STATS',
       };
       countryTotalsRanks = {
-        total_messages: mkRank(countryRow.rank_total_messages, totalCountries),
-        total_chars: mkRank(countryRow.rank_total_chars, totalCountries),
-        jiafang_count: mkRank(countryRow.rank_jiafang, totalCountries),
-        ketao_count: mkRank(countryRow.rank_ketao, totalCountries),
-        avg_user_message_length: mkRank(countryRow.rank_avg_len, totalCountries),
-        work_days: mkRank(countryRow.rank_work_days, totalCountries),
+        total_messages: safeRank(countryRow.rank_total_messages, totalCountries),
+        total_chars: safeRank(countryRow.rank_total_chars, totalCountries),
+        jiafang_count: safeRank(countryRow.rank_jiafang, totalCountries),
+        ketao_count: safeRank(countryRow.rank_ketao, totalCountries),
+        avg_user_message_length: safeRank(countryRow.rank_avg_len, totalCountries),
+        work_days: safeRank(countryRow.rank_work_days, totalCountries),
         _meta: { totalCountries, no_competition: !!countryRow.no_competition },
       };
     }
@@ -5942,15 +5951,14 @@ app.get('/api/country-summary', async (c) => {
             work_days_sum: wd,
             source: 'RPC_FALLBACK',
           };
-          // RPC 返回的排名字段：rank_l(total_messages), rank_m(total_chars), rank_n(total_user_chars),
-          // rank_o(avg_len), rank_p(jiafang), rank_g(ketao)
+          // RPC 返回的排名字段：rank_l(total_messages), rank_m(total_chars), rank_o(avg_len), rank_p(jiafang), rank_g(ketao), rank_h(work_days)
           countryTotalsRanks = {
-            total_messages: mkRank(countryRow.rank_l, totalCountries),
-            total_chars: mkRank(countryRow.rank_m, totalCountries),
-            jiafang_count: mkRank(countryRow.rank_p, totalCountries),
-            ketao_count: mkRank(countryRow.rank_g, totalCountries),
-            avg_user_message_length: mkRank(countryRow.rank_o, totalCountries),
-            work_days: mkRank(countryRow.rank_h, totalCountries),
+            total_messages: safeRank(countryRow.rank_l, totalCountries),
+            total_chars: safeRank(countryRow.rank_m, totalCountries),
+            jiafang_count: safeRank(countryRow.rank_p, totalCountries),
+            ketao_count: safeRank(countryRow.rank_g, totalCountries),
+            avg_user_message_length: safeRank(countryRow.rank_o, totalCountries),
+            work_days: safeRank(countryRow.rank_h, totalCountries),
             _meta: { totalCountries, no_competition: countryTotalUsers <= 1 },
           };
         }
@@ -6024,13 +6032,14 @@ app.get('/api/country-summary', async (c) => {
             source: 'DIRECT_QUERY_FALLBACK',
           };
           
+          // total_countries 为 1 时所有字段都不能为 null，必须返回 { rank: 1, total: 1 }
           countryTotalsRanks = {
-            total_messages: null,
-            total_chars: null,
-            jiafang_count: null,
-            ketao_count: null,
-            avg_user_message_length: null,
-            work_days: null,
+            total_messages: safeRank(1, 1),
+            total_chars: safeRank(1, 1),
+            jiafang_count: safeRank(1, 1),
+            ketao_count: safeRank(1, 1),
+            avg_user_message_length: safeRank(1, 1),
+            work_days: safeRank(1, 1),
             _meta: { totalCountries: 1, no_competition: countryTotalUsers <= 1 },
           };
         }
@@ -6039,11 +6048,11 @@ app.get('/api/country-summary', async (c) => {
       }
     }
 
-    // 最终降级：RPC 也失败时返回预设空值
+    // 最终降级：RPC 也失败时返回预设空值，排名字段仍返回 1/1 避免 null
     if (!totals) {
       const noCompetition = row?.no_competition ?? true;
       countryTotalUsers = 0;
-      totalCountries = 0;
+      totalCountries = 1;
       totals = {
         totalUsers: 0,
         total_messages_sum: 0,
@@ -6056,13 +6065,13 @@ app.get('/api/country-summary', async (c) => {
         source: 'preset_no_group_by',
       };
       countryTotalsRanks = {
-        total_messages: null,
-        total_chars: null,
-        jiafang_count: null,
-        ketao_count: null,
-        avg_user_message_length: null,
-        work_days: null,
-        _meta: { totalCountries: 0, no_competition: noCompetition },
+        total_messages: safeRank(1, 1),
+        total_chars: safeRank(1, 1),
+        jiafang_count: safeRank(1, 1),
+        ketao_count: safeRank(1, 1),
+        avg_user_message_length: safeRank(1, 1),
+        work_days: safeRank(1, 1),
+        _meta: { totalCountries: 1, no_competition: noCompetition },
       };
     }
 
@@ -6184,6 +6193,75 @@ app.get('/api/country-summary', async (c) => {
         }
       } catch {
         // ignore
+      }
+    }
+
+    // 【修复】myCountryRanks：按当前查看的国家(cc)计算用户排名，而非用户本国
+    // 当用户在该国列表中时，用 viewed-country 排名覆盖 myRanks/countryUserRanks；该国仅 1 人时返回各指标 1/1
+    const canIdentifyForCountry = !!(userId || fingerprint) && /^[A-Z]{2}$/.test(cc);
+    if (canIdentifyForCountry) {
+      try {
+        const countryUsersUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
+        countryUsersUrl.searchParams.set('select', 'id,fingerprint,total_messages,total_chars,avg_user_message_length,jiafang_count,ketao_count,work_days');
+        countryUsersUrl.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc})`);
+        countryUsersUrl.searchParams.set('limit', '10000');
+        const countryRows = await fetchSupabaseJson<any[]>(
+          env,
+          countryUsersUrl.toString(),
+          { headers: buildSupabaseHeaders(env) },
+          SUPABASE_FETCH_TIMEOUT_MS
+        ).catch(() => []);
+        const arr = Array.isArray(countryRows) ? countryRows : [];
+        const match = arr.find((r: any) =>
+          (userId && r?.id != null && String(r.id) === userId) ||
+          (fingerprint && r?.fingerprint != null && String(r.fingerprint) === fingerprint)
+        );
+        if (match && arr.length > 0) {
+          const totalInCountry = arr.length;
+          const DIMS = ['total_messages', 'total_chars', 'avg_user_message_length', 'jiafang_count', 'ketao_count', 'work_days'] as const;
+          const colMap: Record<string, string> = {
+            total_messages: 'total_messages',
+            total_chars: 'total_chars',
+            avg_user_message_length: 'avg_user_message_length',
+            jiafang_count: 'jiafang_count',
+            ketao_count: 'ketao_count',
+            work_days: 'work_days',
+          };
+          const getVal = (r: any, k: string) => {
+            const v = r[colMap[k]];
+            if (k === 'avg_user_message_length') {
+              const tm = Number(r.total_messages) || 0;
+              const tc = Number(r.total_chars) || 0;
+              return tm > 0 ? tc / tm : 0;
+            }
+            return Number(v) || 0;
+          };
+          const viewedRanks: Record<string, { rank: number; total: number }> = {};
+          const viewedMyRanks: Record<string, { rank: number; total: number; percentile?: number }> = {};
+          if (totalInCountry === 1) {
+            for (const k of DIMS) {
+              const one = { rank: 1, total: 1 };
+              viewedRanks[k] = one;
+              viewedMyRanks[k] = { ...one, percentile: 100 };
+            }
+          } else {
+            for (const k of DIMS) {
+              const sorted = [...arr].sort((a, b) => getVal(b, k) - getVal(a, k));
+              const idx = sorted.findIndex((r: any) => r === match);
+              const rank = idx >= 0 ? idx + 1 : totalInCountry;
+              viewedRanks[k] = { rank, total: totalInCountry };
+              viewedMyRanks[k] = {
+                rank,
+                total: totalInCountry,
+                percentile: totalInCountry > 0 ? Math.max(0, Math.min(100, (1 - (rank - 1) / totalInCountry) * 100)) : undefined,
+              };
+            }
+          }
+          myRanks = viewedMyRanks;
+          countryUserRanks = viewedRanks;
+        }
+      } catch (e: any) {
+        console.warn('[Worker] myCountryRanks 按查看国家计算失败:', e?.message);
       }
     }
 

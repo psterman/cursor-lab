@@ -5382,7 +5382,16 @@
                         const userCountry = String(countryCode || '').trim().toUpperCase();
                         console.log('[Stats2] 国家累计 API 全量数据:', { payload: payload2, userCountry });
                         const totals = payload2.countryTotals || payload2.data?.countryTotals || null;
-                        const totalsRanks = payload2.countryTotalsRanks || payload2.data?.countryTotalsRanks || null;
+                        var totalsRanks = payload2.countryTotalsRanks || payload2.data?.countryTotalsRanks || null;
+                        var totalCountriesFromData = payload2.total_countries ?? payload2._meta?.totalCountries ?? payload2._meta?.total_countries ?? (payload2.countryTotalsRanks?._meta?.totalCountries ?? payload2.countryTotalsRanks?._meta?.total_countries) ?? 195;
+                        if (!totalsRanks && totalCountriesFromData <= 1) {
+                            var oneOne = { rank: 1, total: 1 };
+                            totalsRanks = {
+                                total_messages: oneOne, total_chars: oneOne, jiafang_count: oneOne,
+                                ketao_count: oneOne, avg_user_message_length: oneOne, work_days: oneOne,
+                                _meta: { totalCountries: 1 }
+                            };
+                        }
                         // 【调试】验证 work_days 字段读取
                         if (totals) {
                             console.log('[Stats2] ✅ 国家累计数据 work_days:', {
@@ -5401,7 +5410,6 @@
                             totals.ketao_count > 0
                         );
                         const countryDataByCode = payload2.countryDataByCode || payload2.data?.countryDataByCode || {};
-                        const totalCountriesFromData = payload2.total_countries ?? payload2._meta?.total_countries ?? 195;
                         const ranks = payload2.myCountryRanks || payload2.data?.myCountryRanks || null;
                         var remoteVals = payload2.myCountryValues || payload2.data?.myCountryValues || {};
                         // 数据优先权：分子以 last_local_stats 为准；清理缓存/换设备时 last_local_stats 不存在，兜底用 API（remoteVals）或 0
@@ -5427,10 +5435,19 @@
                         const rowTotals = (label, totalVal, r, dimKey) => {
                             const letter = DIM_TO_LETTER[dimKey] || dimKey;
                             const rankFromRanks = (countryDataByCode[userCountry]?.ranks || {})[letter];
+                            const denom = (r && (r.total != null && Number.isFinite(Number(r.total)))) ? Number(r.total) : totalCountriesCount;
                             const rankNum = (r && (r.rank ?? r._rank) != null && Number.isFinite(Number(r.rank ?? r._rank))) ? Number(r.rank ?? r._rank) : (rankFromRanks != null && Number.isFinite(Number(rankFromRanks)) ? Number(rankFromRanks) : null);
                             const hasRank = rankNum != null && rankNum > 0;
-                            const denom = totalCountriesCount;
-                            const rankText = hasRank ? `#${rankNum}/${denom}` : (r || rankFromRanks !== undefined) ? '#-- / --' : (currentLang === 'en' ? 'N/A' : '计算中...');
+                            var rankText;
+                            if (hasRank) {
+                                rankText = '#' + rankNum + ' / ' + denom;
+                            } else if (denom === 1 || denom === '1') {
+                                rankText = '#1 / 1';
+                            } else if (r && typeof r === 'object' && (r.rank != null || r.total != null)) {
+                                rankText = '#-- / ' + (denom || '--');
+                            } else {
+                                rankText = 'N/A';
+                            }
                             const medal = rankNum != null && MEDALS[rankNum] ? ' ' + MEDALS[rankNum] : '';
                             const ice = (rankNum != null && denom > 0 && rankNum >= Math.ceil(denom * 0.9)) ? ' 🧊' : '';
                             // 【健壮性处理】wd 为空或0时显示 "0" 而不是 "N/A" 或 "..."
@@ -5480,8 +5497,18 @@
                                 rankGlobal = Math.min(totalUsersFallback, Math.max(1, Math.round(vibeRank)));
                                 totalGlobal = totalUsersFallback;
                             }
-                            const naText = currentLang === 'en' ? 'N/A' : '计算中...';
-                            const countryText = (rankCountry != null && totalCountry != null && totalCountry > 0) ? `本国：#${rankCountry}/${totalCountry}` : naText;
+                            const naText = currentLang === 'en' ? 'N/A' : 'N/A';
+                            var countryText;
+                            if (rankCountry != null && totalCountry != null && totalCountry > 0) {
+                                if (typeof currentViewState === 'string' && currentViewState === 'COUNTRY') {
+                                    countryText = currentLang === 'en' ? `#${rankCountry} in country` : `该国第 ${rankCountry} 名`;
+                                    if (totalCountry > 1) countryText += (currentLang === 'en' ? ` / ${totalCountry}` : ` / 共 ${totalCountry} 人`);
+                                } else {
+                                    countryText = `本国：#${rankCountry}/${totalCountry}`;
+                                }
+                            } else {
+                                countryText = naText;
+                            }
                             const globalText = (rankGlobal != null && totalGlobal != null && totalGlobal > 0) ? `全球：#${rankGlobal}/${totalGlobal}` : naText;
                             const medal = rankCountry != null && MEDALS[rankCountry] ? ' ' + MEDALS[rankCountry] : (rankGlobal != null && MEDALS[rankGlobal] ? ' ' + MEDALS[rankGlobal] : '');
                             const isPioneer = rankCountry === 1 && totalCountry != null && totalCountry <= 5;
@@ -8318,7 +8345,26 @@
             var please = pick(['please', 'totalplease', 'ketao_count', 'ketao_count_sum']) || 168;
             var word = pick(['word', 'avgPerScan', 'avg_user_message_length']) || 238;
 
-            return {
+            var totalCountries = Number(root.total_countries ?? root._meta?.totalCountries ?? root._meta?.total_countries ?? rawData?.total_countries ?? rawData?._meta?.totalCountries ?? 0) || 0;
+            var ranksRaw = root.countryTotalsRanks || rawData?.countryTotalsRanks || {};
+            var oneOne = { rank: 1, total: 1 };
+            function ensureRank(r, key) {
+                if (totalCountries <= 1) return oneOne;
+                var v = r[key];
+                if (v && typeof v === 'object' && (v.rank != null || v.total != null)) return { rank: Number(v.rank ?? v._rank ?? 1) || 1, total: Number(v.total ?? 1) || 1 };
+                return oneOne;
+            }
+            var countryTotalsRanksNorm = {
+                total_messages: ensureRank(ranksRaw, 'total_messages'),
+                total_chars: ensureRank(ranksRaw, 'total_chars'),
+                jiafang_count: ensureRank(ranksRaw, 'jiafang_count'),
+                ketao_count: ensureRank(ranksRaw, 'ketao_count'),
+                avg_user_message_length: ensureRank(ranksRaw, 'avg_user_message_length'),
+                work_days: ensureRank(ranksRaw, 'work_days'),
+                _meta: ranksRaw._meta || { totalCountries: totalCountries || 1 }
+            };
+
+            var out = {
                 ...(typeof rawData === 'object' && rawData !== null ? rawData : {}),
                 countryTotals: {
                     ai: ai,
@@ -8327,8 +8373,14 @@
                     no: no,
                     please: please,
                     word: word
-                }
+                },
+                countryTotalsRanks: countryTotalsRanksNorm,
+                total_countries: totalCountries || (rawData && rawData.total_countries) || 1,
+                _meta: { ...(root._meta || rawData?._meta || {}), totalCountries: totalCountries || 1 }
             };
+            out.myCountryRanks = rawData?.myCountryRanks ?? rawData?.data?.myCountryRanks ?? root.myCountryRanks ?? out.myCountryRanks;
+            out.country_user_ranks = rawData?.country_user_ranks ?? rawData?.data?.country_user_ranks ?? root.country_user_ranks ?? out.country_user_ranks;
+            return out;
         }
 
         function showDrawersWithCountryData(countryCode, countryName, overrideRightData, options) {
