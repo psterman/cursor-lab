@@ -5843,8 +5843,8 @@ app.get('/api/country-summary', async (c) => {
     }
 
     // ----------------------------
-    // 【异步聚合 + KV 缓存】国家累积：优先从 KV 读取，KV 无数据时降级调用 RPC
-    // 【绕过缓存】检测调试参数或缓存数据全为0时强制重新查询数据库
+    // 【优先】国家累积：从 v_country_stats 视图读取（country_code 匹配 cc）
+    // 无视图或失败时再走 KV / RPC / 直接查询
     // ----------------------------
     const debugFlag = String(c.req.query('debug') || '').trim();
     const forceRefresh = debugFlag === '1' || debugFlag.toLowerCase() === 'true' || refresh;
@@ -5855,33 +5855,100 @@ app.get('/api/country-summary', async (c) => {
     let totals: any;
     let countryTotalsRanks: any;
 
-    // 【绕过缓存】如果强制刷新或缓存数据全为0，跳过 KV 缓存
+    let viewCountryRow: any = null;
+    try {
+      const viewUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_country_stats`);
+      viewUrl.searchParams.set('select', '*');
+      viewUrl.searchParams.set('limit', '1');
+      viewUrl.searchParams.set('country_code', `eq.${cc}`);
+      let viewRows = await fetchSupabaseJson<any[]>(
+        env,
+        viewUrl.toString(),
+        { headers: buildSupabaseHeaders(env) },
+        SUPABASE_FETCH_TIMEOUT_MS
+      ).catch(() => []);
+      if (!Array.isArray(viewRows) || viewRows.length === 0) {
+        viewUrl.searchParams.delete('country_code');
+        viewUrl.searchParams.set('or', `(country_code.eq.${cc},country.eq.${cc})`);
+        viewRows = await fetchSupabaseJson<any[]>(env, viewUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
+      }
+      viewCountryRow = Array.isArray(viewRows) && viewRows.length > 0 ? viewRows[0] : null;
+    } catch {
+      viewCountryRow = null;
+    }
+
+    const getViewNum = (r: any, ...keys: string[]): number => {
+      if (!r) return 0;
+      for (const k of keys) {
+        const v = r[k];
+        if (v !== undefined && v !== null && (typeof v === 'number' || !Number.isNaN(Number(v)))) return Number(v) || 0;
+      }
+      return 0;
+    };
+
+    if (viewCountryRow) {
+      const tm = getViewNum(viewCountryRow, 'total_messages', 'totalmessages', 'totalMessages', 'msg_count');
+      const tc = getViewNum(viewCountryRow, 'total_chars', 'totalchars', 'totalChars', 'total_chars_sum');
+      const wd = getViewNum(viewCountryRow, 'total_work_days', 'work_days', 'work_days_sum', 'totaldays');
+      const jc = getViewNum(viewCountryRow, 'total_jiafang', 'jiafang_count', 'jiafang_count_sum', 'totalno');
+      const kc = getViewNum(viewCountryRow, 'total_ketao', 'ketao_count', 'ketao_count_sum', 'totalplease');
+      const hasAny = tc > 0 || wd > 0 || jc > 0 || kc > 0 || tm > 0;
+      if (hasAny) {
+        row = viewCountryRow;
+        const tuc = getViewNum(viewCountryRow, 'total_user_chars', 'total_chars', 'totalchars') || tc;
+        countryTotalUsers = getViewNum(viewCountryRow, 'total_users', 'user_count', 'total_users_sum') || 0;
+        totalCountries = Math.max(1, getViewNum(viewCountryRow, 'total_countries') || 1);
+        const avgLen = tm > 0 ? tuc / tm : 0;
+        totals = {
+          totalUsers: countryTotalUsers,
+          total_messages_sum: tm,
+          total_user_chars_sum: tuc,
+          total_chars_sum: tc,
+          jiafang_count_sum: jc,
+          ketao_count_sum: kc,
+          avg_user_message_length_sum: avgLen,
+          work_days_sum: wd,
+          source: 'V_COUNTRY_STATS',
+        };
+        countryTotalsRanks = {
+          total_messages: safeRank(viewCountryRow.rank_total_messages ?? viewCountryRow.rank_messages, totalCountries),
+          total_chars: safeRank(viewCountryRow.rank_total_chars ?? viewCountryRow.rank_chars, totalCountries),
+          jiafang_count: safeRank(viewCountryRow.rank_jiafang ?? viewCountryRow.rank_no, totalCountries),
+          ketao_count: safeRank(viewCountryRow.rank_ketao ?? viewCountryRow.rank_please, totalCountries),
+          avg_user_message_length: safeRank(viewCountryRow.rank_avg_len ?? viewCountryRow.rank_word, totalCountries),
+          work_days: safeRank(viewCountryRow.rank_work_days ?? viewCountryRow.rank_days, totalCountries),
+          _meta: { totalCountries, no_competition: countryTotalUsers <= 1 },
+        };
+      } else {
+        viewCountryRow = null;
+      }
+    }
+
+    // ----------------------------
+    // 【异步聚合 + KV 缓存】国家累积：无视图时从 KV 读取，KV 无数据时降级调用 RPC
+    // ----------------------------
     let shouldSkipKV = forceRefresh;
     let countryRow: any = null;
     
-    // 【清理】统一查找 countryRow，避免重复查找
-    if (!shouldSkipKV && kvCountry?.country_level?.length) {
+    if (!totals && !shouldSkipKV && kvCountry?.country_level?.length) {
       countryRow = kvCountry.country_level.find((it: any) => String(it?.country_code || '').trim().toUpperCase() === cc);
       if (countryRow) {
-        // 【修复】检查缓存数据是否全为0（但至少有一个字段有值就不跳过）
         const tm = Number(countryRow.total_messages_sum ?? 0) || 0;
         const tc = Number(countryRow.total_chars_sum ?? 0) || 0;
         const wd = Number(countryRow.work_days_sum ?? 0) || 0;
         const jc = Number(countryRow.jiafang_count_sum ?? 0) || 0;
         const kc = Number(countryRow.ketao_count_sum ?? 0) || 0;
-        // 只有当所有关键字段都为 0 时才跳过（至少有一个非0就使用缓存）
         if (tm === 0 && tc === 0 && wd === 0 && jc === 0 && kc === 0) {
-          shouldSkipKV = true; // 缓存数据全为0，强制重新查询
-          countryRow = null; // 清空 countryRow，强制重新查询
+          shouldSkipKV = true;
+          countryRow = null;
         } else {
-          // 至少有一个字段有值，使用缓存数据
           shouldSkipKV = false;
         }
       }
     }
 
-    // 使用 KV 缓存数据
-    if (!shouldSkipKV && countryRow) {
+    // 使用 KV 缓存数据（仅当未从 v_country_stats 拿到数据时）
+    if (!totals && !shouldSkipKV && countryRow) {
       row = countryRow;
       // 【强制类型转换】使用 Number() 强制转换所有数值（尤其是 total_say/total_chars）
       countryTotalUsers = Number(countryRow.total_users ?? 0) || 0;
@@ -6196,10 +6263,63 @@ app.get('/api/country-summary', async (c) => {
       }
     }
 
-    // 【修复】myCountryRanks：按当前查看的国家(cc)计算用户排名，而非用户本国
-    // 当用户在该国列表中时，用 viewed-country 排名覆盖 myRanks/countryUserRanks；该国仅 1 人时返回各指标 1/1
+    // 【修复】myCountryRanks：优先从 v_user_ranks_in_country 按 fingerprint+country_code 取个人在该国排名
     const canIdentifyForCountry = !!(userId || fingerprint) && /^[A-Z]{2}$/.test(cc);
     if (canIdentifyForCountry) {
+      let viewRankRow: any = null;
+      try {
+        const rankViewUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_user_ranks_in_country`);
+        rankViewUrl.searchParams.set('select', '*');
+        rankViewUrl.searchParams.set('country_code', `eq.${cc}`);
+        if (fingerprint) rankViewUrl.searchParams.set('fingerprint', `eq.${encodeURIComponent(fingerprint)}`);
+        else if (userId) rankViewUrl.searchParams.set('user_id', `eq.${encodeURIComponent(userId)}`);
+        rankViewUrl.searchParams.set('limit', '1');
+        const rankRows = await fetchSupabaseJson<any[]>(
+          env,
+          rankViewUrl.toString(),
+          { headers: buildSupabaseHeaders(env) },
+          SUPABASE_FETCH_TIMEOUT_MS
+        ).catch(() => []);
+        viewRankRow = Array.isArray(rankRows) && rankRows.length > 0 ? rankRows[0] : null;
+      } catch {
+        viewRankRow = null;
+      }
+
+      if (viewRankRow) {
+        const totalInCountry = Number(viewRankRow.total_in_country ?? viewRankRow.total_country ?? countryTotalUsers) || Math.max(1, countryTotalUsers);
+        const toRank = (rankVal: any): { rank: number; total: number; percentile?: number } | null => {
+          const r = ni(rankVal);
+          if (r == null || r <= 0 || totalInCountry <= 0) return null;
+          return {
+            rank: Math.min(r, totalInCountry),
+            total: totalInCountry,
+            percentile: Math.max(0, Math.min(100, (1 - (r - 1) / totalInCountry) * 100)),
+          };
+        };
+        const DIMS = ['total_messages', 'total_chars', 'avg_user_message_length', 'jiafang_count', 'ketao_count', 'work_days'] as const;
+        const viewRankMap: Record<string, string> = {
+          total_messages: 'rank_messages',
+          total_chars: 'rank_chars',
+          work_days: 'rank_days',
+          jiafang_count: 'rank_jiafang',
+          ketao_count: 'rank_ketao',
+          avg_user_message_length: 'rank_avg_len',
+        };
+        myRanks = {} as any;
+        countryUserRanks = {};
+        for (const k of DIMS) {
+          const col = viewRankMap[k] ?? k;
+          const rk = toRank(viewRankRow[col] ?? viewRankRow[k]);
+          if (rk) {
+            myRanks[k] = rk;
+            countryUserRanks[k] = { rank: rk.rank, total: rk.total };
+          } else {
+            const fallback = totalInCountry <= 1 ? { rank: 1, total: 1, percentile: 100 } : null;
+            myRanks[k] = fallback;
+            countryUserRanks[k] = fallback ? { rank: 1, total: 1 } : { rank: 0, total: 0 };
+          }
+        }
+      } else {
       try {
         const countryUsersUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
         countryUsersUrl.searchParams.set('select', 'id,fingerprint,total_messages,total_chars,avg_user_message_length,jiafang_count,ketao_count,work_days');
@@ -6262,6 +6382,7 @@ app.get('/api/country-summary', async (c) => {
         }
       } catch (e: any) {
         console.warn('[Worker] myCountryRanks 按查看国家计算失败:', e?.message);
+      }
       }
     }
 
@@ -6565,10 +6686,13 @@ app.get('/api/country-summary', async (c) => {
           0
         ) || 0;
         
+        // 兼容 v_country_stats 视图字段名（含无下划线/驼峰）
         const tc = Number(
           data.tc ?? 
           data.total_chars ?? 
           data.total_chars_sum ?? 
+          data.totalchars ?? 
+          data.totalChars ?? 
           totalChars ?? 
           0
         ) || 0;
@@ -6577,6 +6701,9 @@ app.get('/api/country-summary', async (c) => {
           data.wd ?? 
           data.work_days ?? 
           data.work_days_sum ?? 
+          data.total_work_days ?? 
+          data.totaldays ?? 
+          data.totalDays ?? 
           0
         ) || 0;
         
@@ -6584,6 +6711,9 @@ app.get('/api/country-summary', async (c) => {
           data.jc ?? 
           data.jiafang_count ?? 
           data.jiafang_count_sum ?? 
+          data.total_jiafang ?? 
+          data.totalno ?? 
+          data.totalNo ?? 
           0
         ) || 0;
         
@@ -6591,6 +6721,9 @@ app.get('/api/country-summary', async (c) => {
           data.kc ?? 
           data.ketao_count ?? 
           data.ketao_count_sum ?? 
+          data.total_ketao ?? 
+          data.totalplease ?? 
+          data.totalPlease ?? 
           0
         ) || 0;
         
@@ -6618,11 +6751,11 @@ app.get('/api/country-summary', async (c) => {
         };
     })();
 
-    // msg_count = 调戏 AI 总次数（用户对话次数，SUM total_messages），与 totalUsers 区分
+    // msg_count = 调戏 AI 总次数；根节点 totalchars/totaldays 等必须与 countryTotals 一致，且不为 0 当有数据时
     const msg_count = Number(computedCountryTotals.total_messages ?? totalMessages ?? 0) || 0;
     const user_count = Number(countryTotalUsers ?? 0) || 0;
     const totalanalysis = msg_count;
-    const totalchars = Number(totalChars ?? computedCountryTotals.total_chars ?? 0) || 0;
+    const totalchars = Number(computedCountryTotals.total_chars ?? totalChars ?? 0) || 0;
     const totaldays = Number(computedCountryTotals.work_days ?? 0) || 0;
     const totalno = Number(computedCountryTotals.jiafang_count ?? 0) || 0;
     const totalplease = Number(computedCountryTotals.ketao_count ?? 0) || 0;

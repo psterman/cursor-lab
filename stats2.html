@@ -5248,7 +5248,14 @@
                     const ranksBox = document.getElementById('rtMyCountryRanks');
                     if (totalsBox || ranksBox) {
                         const fmt = (n) => new Intl.NumberFormat('zh-CN').format(Number(n) || 0);
-                        const fp = (() => { try { return localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch { return ''; } })();
+                        const fp = (() => {
+                            try {
+                                var p = new URLSearchParams(window.location.search);
+                                var fromUrl = p.get('fingerprint') || p.get('fp') || '';
+                                if (fromUrl) return String(fromUrl).trim();
+                                return localStorage.getItem('user_fingerprint') || window.fpId || '';
+                            } catch { return ''; }
+                        })();
                         const uid = (() => {
                             try {
                                 // 我的排名：优先用视图/登录身份 id，登录后不再依赖 fingerprint
@@ -8321,16 +8328,26 @@
         }
 
         /**
-         * 全能抓取：从 KV/接口混乱字段名中归一化出 countryTotals（支持 data 嵌套、全小写、下划线、驼峰）
+         * 全能抓取：从 KV/接口混乱字段名中归一化出 countryTotals（支持 data 嵌套、根节点、全小写、下划线、驼峰）
+         * 若 countryTotals 为 undefined，则从根节点/rawData 顶层补全，确保 COUNTRY 视图累计字数等不为 N/A
          */
         function normalizeStats(rawData) {
-            var root = (rawData && rawData.data) ? rawData.data : (rawData || {});
+            var raw = rawData || {};
+            var root = (raw.data && typeof raw.data === 'object') ? raw.data : raw;
             var ct = root.countryTotals || {};
+            function fromRoot(keys) {
+                for (var i = 0; i < keys.length; i++) {
+                    var k = keys[i];
+                    var val = root[k] ?? raw[k];
+                    if (val !== undefined && val !== null && !isNaN(Number(val))) return Number(val);
+                }
+                return null;
+            }
 
             function pick(keys) {
                 for (var i = 0; i < keys.length; i++) {
                     var k = keys[i];
-                    var val = ct[k] ?? root[k] ?? root[k.toLowerCase()] ?? (typeof k === 'string' ? root[k.replace(/_/g, '')] : undefined);
+                    var val = ct[k] ?? root[k] ?? raw[k] ?? root[k.toLowerCase()] ?? (typeof k === 'string' ? root[k.replace(/_/g, '')] : undefined);
                     if (val !== undefined && val !== null && !isNaN(Number(val)) && Number(val) !== 0) {
                         return Number(val);
                     }
@@ -8338,12 +8355,12 @@
                 return 0;
             }
 
-            var ai = pick(['msg_count', 'ai', 'totalanalysis', 'total_messages', 'totalAnalysis']);
-            var say = pick(['say', 'totalchars', 'total_chars', 'totalChars']);
-            var day = pick(['day', 'totaldays', 'work_days', 'work_days_sum']) || 127;
-            var no = pick(['no', 'totalno', 'jiafang_count', 'jiafang_count_sum']) || 306;
-            var please = pick(['please', 'totalplease', 'ketao_count', 'ketao_count_sum']) || 168;
-            var word = pick(['word', 'avgPerScan', 'avg_user_message_length']) || 238;
+            var ai = pick(['msg_count', 'ai', 'totalanalysis', 'total_messages', 'totalAnalysis']) || fromRoot(['totalanalysis', 'totalAnalysis', 'msg_count']) || 0;
+            var say = pick(['say', 'totalchars', 'total_chars', 'totalChars']) || fromRoot(['totalchars', 'totalChars']) || 0;
+            var day = pick(['day', 'totaldays', 'work_days', 'work_days_sum']) || fromRoot(['totaldays', 'totalDays']) || 127;
+            var no = pick(['no', 'totalno', 'jiafang_count', 'jiafang_count_sum']) || fromRoot(['totalno', 'totalNo']) || 306;
+            var please = pick(['please', 'totalplease', 'ketao_count', 'ketao_count_sum']) || fromRoot(['totalplease', 'totalPlease']) || 168;
+            var word = pick(['word', 'avgPerScan', 'avg_user_message_length']) || fromRoot(['avgPerScan', 'avg_per_scan']) || 238;
 
             var totalCountries = Number(root.total_countries ?? root._meta?.totalCountries ?? root._meta?.total_countries ?? rawData?.total_countries ?? rawData?._meta?.totalCountries ?? 0) || 0;
             var ranksRaw = root.countryTotalsRanks || rawData?.countryTotalsRanks || {};
@@ -8369,10 +8386,16 @@
                 countryTotals: {
                     ai: ai,
                     say: say,
+                    total_chars: say,
                     day: day,
                     no: no,
                     please: please,
-                    word: word
+                    word: word,
+                    total_messages: ai,
+                    work_days: day,
+                    jiafang_count: no,
+                    ketao_count: please,
+                    avg_user_message_length: word
                 },
                 countryTotalsRanks: countryTotalsRanksNorm,
                 total_countries: totalCountries || (rawData && rawData.total_countries) || 1,
@@ -8380,6 +8403,15 @@
             };
             out.myCountryRanks = rawData?.myCountryRanks ?? rawData?.data?.myCountryRanks ?? root.myCountryRanks ?? out.myCountryRanks;
             out.country_user_ranks = rawData?.country_user_ranks ?? rawData?.data?.country_user_ranks ?? root.country_user_ranks ?? out.country_user_ranks;
+            var mcr = out.myCountryRanks || {};
+            out.personalRanks = {
+                ai: mcr.rank_messages ?? mcr.total_messages ?? null,
+                say: mcr.rank_chars ?? mcr.total_chars ?? null,
+                day: mcr.rank_days ?? mcr.work_days ?? null,
+                no: mcr.rank_jiafang ?? mcr.jiafang_count ?? null,
+                please: mcr.rank_ketao ?? mcr.ketao_count ?? null,
+                word: mcr.rank_avg_len ?? mcr.avg_user_message_length ?? null
+            };
             return out;
         }
 
@@ -8650,13 +8682,14 @@
                         };
                     } else {
                         const s = overrideRightData.data || overrideRightData;
+                        const top = overrideRightData;
                         rightDrawerData.countryTotals = {
-                            ai: Number(s.ai ?? s.totalanalysis ?? s.totalAnalysis ?? s.total_analysis ?? 0) || 0,
-                            say: Number(s.say ?? s.totalChars ?? s.total_chars ?? s.totalRoastWords ?? 0) || 0,
-                            no: Number(s.no ?? s.jiafang_count ?? s.jiafang_count_sum ?? 0) || 0,
-                            please: Number(s.please ?? s.ketao_count ?? s.ketao_count_sum ?? 0) || 0,
-                            day: Number(s.day ?? s.work_days ?? s.work_days_sum ?? 0) || 0,
-                            word: Number(s.word ?? s.avgPerScan ?? s.avg_per_scan ?? 0) || 0
+                            ai: Number(s.ai ?? s.totalanalysis ?? top.totalanalysis ?? s.total_analysis ?? 0) || 0,
+                            say: Number(s.say ?? s.totalChars ?? s.total_chars ?? s.totalchars ?? top.totalchars ?? top.totalChars ?? s.totalRoastWords ?? 0) || 0,
+                            no: Number(s.no ?? s.jiafang_count ?? s.jiafang_count_sum ?? top.totalno ?? top.totalNo ?? 0) || 0,
+                            please: Number(s.please ?? s.ketao_count ?? s.ketao_count_sum ?? top.totalplease ?? top.totalPlease ?? 0) || 0,
+                            day: Number(s.day ?? s.work_days ?? s.work_days_sum ?? top.totaldays ?? top.totalDays ?? 0) || 0,
+                            word: Number(s.word ?? s.avgPerScan ?? s.avg_per_scan ?? top.avgPerScan ?? 0) || 0
                         };
                     }
                 }
@@ -9696,10 +9729,9 @@
                 `;
                 rightCards.push(totalAnalysisCard);
 
-                // 【修复】累计吐槽字数：在 global 视图时使用国家累加值（total_chars）
-                // total_chars 是该国所有用户的字符总数（累加值）
-                const totalChars = isGlobalView && countryTotals.total_chars !== undefined && countryTotals.total_chars !== null
-                    ? Number(countryTotals.total_chars)
+                // 【修复】累计吐槽字数：COUNTRY 视图使用该国全量 total_chars（countryTotals.say / total_chars）
+                const totalChars = (countryTotals && (countryTotals.total_chars !== undefined && countryTotals.total_chars !== null || countryTotals.say !== undefined && countryTotals.say !== null))
+                    ? Number(countryTotals.total_chars ?? countryTotals.say ?? 0)
                     : (data.totalChars !== undefined && data.totalChars !== null ? Number(data.totalChars) : (data.totalRoastWords !== undefined && data.totalRoastWords !== null ? Number(data.totalRoastWords) : undefined));
                 const totalCharsCard = document.createElement('div');
                 totalCharsCard.className = 'drawer-item stat-card';
@@ -14284,11 +14316,23 @@
             const maxAttempts = 2; // 最多尝试2个端点
             const cc = String(countryCode).toUpperCase();
             
-            // 使用 API 端点管理器获取端点
+            const fp = (() => {
+                try {
+                    var p = new URLSearchParams(window.location.search);
+                    var fromUrl = p.get('fingerprint') || p.get('fp') || '';
+                    if (fromUrl) return String(fromUrl).trim();
+                    return localStorage.getItem('user_fingerprint') || window.fpId || '';
+                } catch { return ''; }
+            })();
+            const uid = (window.currentUser && window.currentUser.id) || (window.currentUserData && window.currentUserData.id) || '';
+            
             const apiManager = window.API_ENDPOINT_MANAGER;
             const baseEndpoint = apiManager ? apiManager.getCurrent() : (document.querySelector('meta[name="api-endpoint"]')?.content || '');
             const base = baseEndpoint.endsWith('/') ? baseEndpoint.slice(0, -1) : baseEndpoint;
-            const url = `${base}/api/country-summary?country=${encodeURIComponent(cc)}&_t=${Date.now()}`;
+            let url = `${base}/api/country-summary?country=${encodeURIComponent(cc)}`;
+            if (uid) url += `&user_id=${encodeURIComponent(uid)}`;
+            if (fp) url += `&fingerprint=${encodeURIComponent(fp)}`;
+            url += `&_t=${Date.now()}`;
             
             // 检查本地缓存（5分钟内有效）
             const cacheKey = `country_summary_${cc}`;
