@@ -8284,7 +8284,7 @@
             const sub = (root.countryStats && root.countryStats[0]) || {};
             const country = root.countryTotals || {};
             return {
-                ai: country.ai ?? sub.total_messages_sum ?? root.totalAnalysis ?? root.totalanalysis ?? root.total_analysis ?? sub.total_messages ?? sub.totalanalysis ?? 0,
+                ai: country.ai ?? root.msg_count ?? sub.total_messages_sum ?? root.totalAnalysis ?? root.totalanalysis ?? root.total_analysis ?? sub.total_messages ?? sub.totalanalysis ?? 0,
                 say: country.say ?? sub.total_chars_sum ?? root.totalChars ?? root.total_chars ?? root.totalRoastWords ?? sub.total_chars ?? 0,
                 day: country.day ?? sub.work_days_sum ?? sub.work_days ?? sub.day ?? root.systemDays ?? root.work_days ?? root.work_days_sum ?? 0,
                 no: country.no ?? sub.jiafang_count_sum ?? sub.jiafang_count ?? sub.no ?? root.jiafang_count ?? root.jiafang_count_sum ?? 0,
@@ -8294,36 +8294,52 @@
         }
 
         /**
-         * 字段无关归一化：将 total_messages_sum、totalAnalysis、ai 等统一映射到 countryTotals.ai（及 say/day/no/please/word）
-         * 确保所有 UI 渲染和排名计算之前使用同一套字段。
-         * @param {object} rawData - 原始接口/缓存数据
-         * @returns {object} 带归一化 countryTotals 的对象
+         * 全能抓取：从 KV/接口混乱字段名中归一化出 countryTotals（支持 data 嵌套、全小写、下划线、驼峰）
          */
         function normalizeStats(rawData) {
-            const data = rawData || {};
-            // 关键：优先取顶层的 countryTotals，那是经过 SQL SUM 运算的准确值
-            const ct = data.countryTotals || {};
-            const cl = (data.country_level && data.country_level[0]) || {};
+            var root = (rawData && rawData.data) ? rawData.data : (rawData || {});
+            var ct = root.countryTotals || {};
+
+            function pick(keys) {
+                for (var i = 0; i < keys.length; i++) {
+                    var k = keys[i];
+                    var val = ct[k] ?? root[k] ?? root[k.toLowerCase()] ?? (typeof k === 'string' ? root[k.replace(/_/g, '')] : undefined);
+                    if (val !== undefined && val !== null && !isNaN(Number(val)) && Number(val) !== 0) {
+                        return Number(val);
+                    }
+                }
+                return 0;
+            }
+
+            var ai = pick(['msg_count', 'ai', 'totalanalysis', 'total_messages', 'totalAnalysis']);
+            var say = pick(['say', 'totalchars', 'total_chars', 'totalChars']);
+            var day = pick(['day', 'totaldays', 'work_days', 'work_days_sum']) || 127;
+            var no = pick(['no', 'totalno', 'jiafang_count', 'jiafang_count_sum']) || 306;
+            var please = pick(['please', 'totalplease', 'ketao_count', 'ketao_count_sum']) || 168;
+            var word = pick(['word', 'avgPerScan', 'avg_user_message_length']) || 238;
 
             return {
-                ...data,
+                ...(typeof rawData === 'object' && rawData !== null ? rawData : {}),
                 countryTotals: {
-                    // 1. 彻底解决 "2" 的问题：显式跳过 totalUsers，直接锁定大数
-                    ai: Number(ct.ai || ct.total_messages || cl.total_messages_sum || data.totalAnalysis || 0),
-
-                    // 2. 解决 "0" 的问题：如果数组里是 0，强制回退到 ct 对象或 root
-                    say: Number(ct.say || ct.total_chars || data.totalChars || 0),
-                    day: Number(ct.day || ct.work_days || cl.work_days_sum || 127),
-                    no: Number(ct.no || ct.jiafang_count || cl.jiafang_count_sum || 306),
-                    please: Number(ct.please || ct.ketao_count || cl.ketao_count_sum || 168),
-
-                    // 3. 平均长度
-                    word: Number(ct.word || ct.avg_user_message_length || data.avgPerScan || 238)
+                    ai: ai,
+                    say: say,
+                    day: day,
+                    no: no,
+                    please: please,
+                    word: word
                 }
             };
         }
 
         function showDrawersWithCountryData(countryCode, countryName, overrideRightData, options) {
+            // 统一入口：有传入数据时先归一化并写入全局，供后续卡片与 renderCardsStaggered 使用
+            if (overrideRightData != null && typeof overrideRightData === 'object') {
+                var normalizedData = normalizeStats(overrideRightData);
+                window.rightDrawerData = normalizedData;
+                window.overrideRightData = normalizedData;
+                window.rightDrawerData.countryTotals = normalizedData.countryTotals;
+                console.log('[Data Sync] 数据已对齐:', window.rightDrawerData.countryTotals);
+            }
             // 【彻底解决卡片重复】先使旧渲染代次失效，再清空容器，避免旧 setTimeout 继续 append
             try {
                 const globalCardsContainer = document.getElementById('global-cards-container') || document.getElementById('panel-global-content');
@@ -8557,7 +8573,7 @@
             // 如果是在 global 视图且没有 overrideRightData，优先使用国家摘要缓存
             let rightDrawerData;
             if (overrideRightData != null) {
-                rightDrawerData = overrideRightData;
+                rightDrawerData = window.rightDrawerData || normalizeStats(overrideRightData);
                 // 【修复】确保 overrideRightData 中的 countryTotals 被正确传递（summary 数据可能直接包含 countryTotals）
                 // API 返回的数据结构：{ countryTotals: {...}, ... }，countryTotals 在顶层
                 if (!rightDrawerData.countryTotals) {
@@ -8624,10 +8640,10 @@
                     console.log('[GlobalCards] cachedSummary.countryTotals:', cachedSummary.countryTotals);
                 }
             } else {
-                // 在 global 视图时，如果没有缓存，应该使用国家数据而不是 window.lastData（可能是全球数据）
-                // 这里先使用 window.lastData 作为兜底，但后续会通过 fetchCountrySummaryV3 获取正确的国家数据
                 rightDrawerData = window.lastData || {};
             }
+            // 统一用归一化结果覆盖 countryTotals，确保后续卡片使用的全是归一化后的六维数据（打通全维度数据链）
+            rightDrawerData.countryTotals = normalizeStats(rightDrawerData).countryTotals;
             
             // 【调试】检查 rightDrawerData 结构（在渲染卡片之前）
             // 注意：isGlobalViewForCards 在这里还未定义，需要在后面检查

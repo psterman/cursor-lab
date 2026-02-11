@@ -5979,24 +5979,17 @@ app.get('/api/country-summary', async (c) => {
           SUPABASE_FETCH_TIMEOUT_MS
         ).catch(() => []);
 
-        // 如果查询成功，聚合所有行的数据
+        // 如果查询成功，使用 reduce 聚合（与 global-aggregate 同口径，严禁 .length 计数）
         if (Array.isArray(directRows) && directRows.length > 0) {
-          // 聚合所有行的数据
-          let sumTm = 0, sumTc = 0, sumWd = 0, sumJc = 0, sumKc = 0, sumTuc = 0;
+          const sumTm = directRows.reduce((s, r) => s + (Number(r.tm) || 0), 0);
+          const sumTc = directRows.reduce((s, r) => s + (Number(r.tc) || 0), 0);
+          const sumWd = directRows.reduce((s, r) => s + (Number(r.wd) || 0), 0);
+          const sumJc = directRows.reduce((s, r) => s + (Number(r.jc) || 0), 0);
+          const sumKc = directRows.reduce((s, r) => s + (Number(r.kc) || 0), 0);
+          const sumTuc = directRows.reduce((s, r) => s + (Number(r.tuc) || 0), 0);
           const uniqueUsers = new Set<string>();
-          
-          for (const r of directRows) {
-            // 【强制类型转换】使用 Number() 强制转换，匹配显式别名（tm, tc, wd, jc, kc, tuc）
-            sumTm += Number(r.tm ?? 0) || 0;
-            sumTc += Number(r.tc ?? 0) || 0;
-            sumWd += Number(r.wd ?? 0) || 0;
-            sumJc += Number(r.jc ?? 0) || 0;
-            sumKc += Number(r.kc ?? 0) || 0;
-            sumTuc += Number(r.tuc ?? 0) || 0;
-            if (r.fingerprint) uniqueUsers.add(String(r.fingerprint));
-          }
+          directRows.forEach((r: any) => { if (r?.fingerprint) uniqueUsers.add(String(r.fingerprint)); });
 
-          // 使用聚合后的数据
           row = {
             tm: sumTm,
             tc: sumTc,
@@ -6007,10 +6000,10 @@ app.get('/api/country-summary', async (c) => {
             total_users: uniqueUsers.size,
             country_code: cc,
           };
-          
+
           countryTotalUsers = uniqueUsers.size;
-          totalCountries = 1; // 单国查询，总国家数为1
-          
+          totalCountries = 1;
+
           const tm = Number(sumTm) || 0;
           const tc = Number(sumTc) || 0;
           const tuc = Number(sumTuc) || 0;
@@ -6018,7 +6011,7 @@ app.get('/api/country-summary', async (c) => {
           const kc = Number(sumKc) || 0;
           const wd = Number(sumWd) || 0;
           const avgLen = tm > 0 ? (tuc / tm) : 0;
-          
+
           totals = {
             totalUsers: countryTotalUsers,
             total_messages_sum: tm,
@@ -6547,14 +6540,30 @@ app.get('/api/country-summary', async (c) => {
         };
     })();
 
+    // msg_count = 调戏 AI 总次数（用户对话次数，SUM total_messages），与 totalUsers 区分
+    const msg_count = Number(computedCountryTotals.total_messages ?? totalMessages ?? 0) || 0;
+    const user_count = Number(countryTotalUsers ?? 0) || 0;
+    const totalanalysis = msg_count;
+    const totalchars = Number(totalChars ?? computedCountryTotals.total_chars ?? 0) || 0;
+    const totaldays = Number(computedCountryTotals.work_days ?? 0) || 0;
+    const totalno = Number(computedCountryTotals.jiafang_count ?? 0) || 0;
+    const totalplease = Number(computedCountryTotals.ketao_count ?? 0) || 0;
+    const countryTotalsForResponse = { ...computedCountryTotals, ai: msg_count };
+
     const out: any = {
       success: true,
+      msg_count,
+      user_count,
+      totalanalysis,
+      totalchars,
+      totaldays,
+      totalno,
+      totalplease,
       totalUsers: globalTotalUsers,
-      totalAnalysis: globalTotalAnalysis,
+      totalAnalysis: msg_count,
       totalChars,
       avgPerUser,
       avgPerScan,
-      // 保持兼容：country-summary 仍返回这两个字段（stats2 右侧雷达使用）
       globalAverage: avgDims,
       averages: avgDims,
       locationRank: [{ name: country, value: Number(computedCountryTotals.totalUsers) || Number(countryTotalUsers) || 0 }],
@@ -6562,8 +6571,7 @@ app.get('/api/country-summary', async (c) => {
       personalityDistribution: [],
       latestRecords,
       topByMetrics,
-      // 新增：国家累计与个人国家排名
-      countryTotals: computedCountryTotals,
+      countryTotals: countryTotalsForResponse,
       countryTotalsRanks,
       myCountry: myOut,
       myCountryValues: myValues,
@@ -6672,8 +6680,8 @@ app.get('/api/global-aggregate', async (c) => {
       return c.json({ success: false, error: 'Supabase 未配置' }, 500);
     }
 
-    // 检查 KV 缓存（1小时）
-    const cacheKey = 'GLOBAL_AGGREGATE_DATA';
+    // 检查 KV 缓存（1小时），强制刷新：使用 V2 key 避开旧数据
+    const cacheKey = 'GLOBAL_AGGREGATE_DATA_V3';
     try {
       const cached = await env.STATS_STORE?.get(cacheKey, 'json');
       if (cached && typeof cached === 'object' && cached.data && cached.ts) {
@@ -6687,11 +6695,10 @@ app.get('/api/global-aggregate', async (c) => {
       // 缓存读取失败，继续查询数据库
     }
 
-    // 从 v_unified_analysis_v2 聚合全站数据
-    // 由于 Supabase PostgREST 限制，我们查询数据后在 Worker 中聚合
+    // 从 v_unified_analysis_v2 聚合全站数据（与 country-summary 同口径：SUM 聚合，严禁 .length 计数）
     const queryUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
-    queryUrl.searchParams.set('select', 'total_messages,avg_user_message_length,work_days,jiafang_count,total_chars,ketao_count');
-    queryUrl.searchParams.set('limit', '10000'); // 限制最大查询数量
+    queryUrl.searchParams.set('select', 'total_messages,total_chars,work_days,jiafang_count,ketao_count');
+    queryUrl.searchParams.set('limit', '10000');
 
     const rows = await fetchSupabaseJson<any[]>(
       env,
@@ -6701,53 +6708,45 @@ app.get('/api/global-aggregate', async (c) => {
     ).catch(() => []);
 
     const data = Array.isArray(rows) ? rows : [];
-    
-    // 聚合计算
-    let ai = 0; // SUM(total_messages)
-    let word = 0; // AVG(avg_user_message_length)
-    let day = 0; // SUM(work_days)
-    let no = 0; // SUM(jiafang_count)
-    let say = 0; // SUM(total_chars)
-    let please = 0; // SUM(ketao_count)
 
-    let wordSum = 0;
-    let wordCount = 0;
-
-    for (const row of data) {
-      const tm = Number(row?.total_messages) || 0;
-      const avgLen = Number(row?.avg_user_message_length) || 0;
-      const wd = Number(row?.work_days) || 0;
-      const jc = Number(row?.jiafang_count) || 0;
-      const tc = Number(row?.total_chars) || 0;
-      const kc = Number(row?.ketao_count) || 0;
-
-      ai += tm;
-      if (avgLen > 0) {
-        wordSum += avgLen;
-        wordCount++;
-      }
-      day += wd;
-      no += jc;
-      say += tc;
-      please += kc;
-    }
-
-    word = wordCount > 0 ? wordSum / wordCount : 0;
+    // msg_count = 调戏 AI 总次数（用户对话次数，reduce 累加），user_count = 总人数（rows.length）
+    const msg_count = data.reduce((sum, r) => sum + (Number(r.total_messages) || 0), 0);
+    const user_count = data.length;
+    const totalChars = data.reduce((sum, r) => sum + (Number(r.total_chars) || 0), 0);
+    const totalDays = data.reduce((sum, r) => sum + (Number(r.work_days) || 0), 0);
+    const totalNo = data.reduce((sum, r) => sum + (Number(r.jiafang_count) || 0), 0);
+    const totalPlease = data.reduce((sum, r) => sum + (Number(r.ketao_count) || 0), 0);
+    const word = msg_count > 0 ? Number((totalChars / msg_count).toFixed(1)) : 0;
 
     const result = {
-      ai: Math.round(ai),
-      word: Math.round(word * 100) / 100, // 保留2位小数
-      day: Math.round(day),
-      no: Math.round(no),
-      say: Math.round(say),
-      please: Math.round(please),
-      // 同时返回数据库原名，供前端映射使用
-      total_messages: ai,
+      msg_count,
+      user_count,
+      totalanalysis: msg_count,
+      totalchars: totalChars,
+      totaldays: totalDays,
+      totalno: totalNo,
+      totalplease: totalPlease,
+      totalAnalysis: msg_count,
+      countryTotals: {
+        ai: msg_count,
+        say: totalChars,
+        day: totalDays,
+        no: totalNo,
+        please: totalPlease,
+        word,
+      },
+      ai: msg_count,
+      word,
+      day: totalDays,
+      no: totalNo,
+      say: totalChars,
+      please: totalPlease,
+      total_messages: msg_count,
       avg_user_message_length: word,
-      work_days: day,
-      jiafang_count: no,
-      total_chars: say,
-      ketao_count: please,
+      work_days: totalDays,
+      jiafang_count: totalNo,
+      total_chars: totalChars,
+      ketao_count: totalPlease,
       _meta: {
         rowCount: data.length,
         at: new Date().toISOString(),
@@ -7151,18 +7150,13 @@ async function fetchFromSupabase(
       fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/v_global_stats_v6?select=*`),
       // 视图 B：获取地理位置排行和最近受害者
       fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/extended_stats_view?select=*`),
-      // 聚合查询：从 user_analysis 表获取总记录数、total_chars 总和、最早创建时间、人格分布、平均长度和最新记录
-      // 分成多个查询并行执行
+      // 聚合查询：SUM 结果完整映射到根节点和 countryTotals，供前端消除 0 值
       Promise.all([
-        // 1) 获取最早时间（用于计算 systemDays）
         fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/user_analysis?select=created_at&order=created_at.asc&limit=1`),
-        // 2) 获取所有 total_chars（用于计算总和、总数和平均值）
-        fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/user_analysis?select=total_chars`, {
-          headers: { 'Prefer': 'count=exact' },
-        }),
-        // 3) 获取所有 personality_type（用于统计人格分布）
+        fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/user_analysis?select=total_chars`, { headers: { 'Prefer': 'count=exact' } }),
+        fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/user_analysis?select=total_messages`),
+        fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/user_analysis?select=work_days,jiafang_count,ketao_count`),
         fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/user_analysis?select=personality_type`),
-        // 4) 获取最新记录（含 work_days、github_username；若已创建 v_user_analysis_extended 可改为查该视图以带出 jiafang_rank/ketao_rank/days_rank）
         fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/user_analysis?select=personality_type,ip_location,created_at,user_name,work_days,github_username,user_identity,fingerprint,updated_at&order=updated_at.desc&limit=20`),
       ]),
     ]);
@@ -7172,8 +7166,11 @@ async function fetchFromSupabase(
     let totalUsers: number = 1;
     let totalRoastWords: number = 0;
     let cityCount: number = 0;
-    let totalAnalysis: number = 0; // 总记录数（分析次数）
+    let totalAnalysis: number = 0; // 总记录数（分析次数）= SUM(total_messages)
     let totalCharsSum: number = 0; // total_chars 的总和（吐槽字数）
+    let workDaysSum: number = 0;
+    let jiafangSum: number = 0;
+    let ketaoSum: number = 0;
     let systemDays: number = 1; // 系统运行天数（从最早记录到现在）
     let avgChars: number = 0; // 平均吐槽字数（AVG(total_chars)）
     let avgPerScan: number = 0; // 【新增】单次平均篇幅（优先使用视图字段）
@@ -7316,11 +7313,38 @@ async function fetchFromSupabase(
           avgCharsPerUser,
         });
         
-        // 【处理聚合查询】获取总记录数、total_chars 总和、systemDays、人格分布、平均长度和最新记录
-        // 【数据类型强制转换】确保所有数值都是数字类型
+        // 【处理聚合查询】SUM 结果完整映射，所有数值 Number() 防止字符串干扰
         try {
-          const [earliestRes, charsRes, personalityRes, latestRes] = await aggregationRes;
-          
+          const [earliestRes, charsRes, messagesRes, dimsRes, personalityRes, latestRes] = await aggregationRes;
+
+          // totalAnalysis 仅来源于 SUM(total_messages)
+          if (messagesRes && messagesRes.ok) {
+            try {
+              const messagesData = await messagesRes.json();
+              if (Array.isArray(messagesData)) {
+                totalAnalysis = messagesData.reduce((sum: number, item: any) => sum + (Number(item.total_messages) || 0), 0);
+                totalAnalysis = Number(totalAnalysis) || 0;
+              }
+            } catch (_) {
+              totalAnalysis = 0;
+            }
+          }
+
+          // work_days, jiafang_count, ketao_count 求和，供根节点与 countryTotals
+          if (dimsRes && dimsRes.ok) {
+            try {
+              const dimsData = await dimsRes.json();
+              if (Array.isArray(dimsData)) {
+                workDaysSum = dimsData.reduce((s: number, i: any) => s + (Number(i.work_days) || 0), 0);
+                jiafangSum = dimsData.reduce((s: number, i: any) => s + (Number(i.jiafang_count) || 0), 0);
+                ketaoSum = dimsData.reduce((s: number, i: any) => s + (Number(i.ketao_count) || 0), 0);
+                workDaysSum = Number(workDaysSum) || 0;
+                jiafangSum = Number(jiafangSum) || 0;
+                ketaoSum = Number(ketaoSum) || 0;
+              }
+            } catch (_) {}
+          }
+
           // 处理最早记录查询（用于计算 systemDays）
           if (earliestRes && earliestRes.ok) {
             const earliestData = await earliestRes.json();
@@ -7349,41 +7373,12 @@ async function fetchFromSupabase(
             }
           }
           
-          // 处理 total_chars 总和查询
+          // total_chars 总和（say）：强制 Number() 防止字符串
           if (charsRes && charsRes.ok) {
-            const contentRange = charsRes.headers.get('content-range');
-            if (contentRange) {
-              const parts = contentRange.split('/');
-              if (parts.length === 2) {
-                // 强制转换为数字
-                totalAnalysis = Number(parts[1]) || 0;
-                if (isNaN(totalAnalysis)) {
-                  totalAnalysis = 0;
-                }
-              }
-            }
-            
             const charsData = await charsRes.json();
             if (Array.isArray(charsData)) {
-              // 如果 content-range 没有，使用数组长度作为总记录数
-              if (totalAnalysis === 0) {
-                totalAnalysis = Number(charsData.length) || 0;
-              }
-              
-              // 计算 total_chars 的总和，强制转换为数字
-              totalCharsSum = charsData.reduce((sum: number, item: any) => {
-                // 使用 Number() 强制转换，处理字符串类型的数字
-                const chars = Number(item.total_chars) || 0;
-                if (isNaN(chars)) {
-                  return sum;
-                }
-                return sum + chars;
-              }, 0);
-              
-              // 确保 totalCharsSum 是数字类型
+              totalCharsSum = charsData.reduce((sum: number, item: any) => sum + (Number(item.total_chars) || 0), 0);
               totalCharsSum = Number(totalCharsSum) || 0;
-              
-              // 【计算平均吐槽字数】AVG(total_chars)
               if (totalAnalysis > 0 && totalCharsSum > 0) {
                 avgChars = Number((totalCharsSum / totalAnalysis).toFixed(2)) || 0;
               } else {
@@ -7667,8 +7662,8 @@ async function fetchFromSupabase(
       averages: globalAverage,
       // 1.1. 兼容性字段（保留 globalAverage 以保持向后兼容）
       globalAverage: globalAverage,
-      // 2. 参与人数 (必须有，不然卡片显示 0)
-      totalUsers: finalTotalUsers,
+      // 2. 参与人数 (必须有，不然卡片显示 0)；强制数字防字符串
+      totalUsers: Number(finalTotalUsers) || 1,
       // 3. 标签定义 (必须有，不然雷达图不显示文字) - 硬编码注入
       dimensions: {
         L: { label: '逻辑力' },
@@ -7689,19 +7684,35 @@ async function fetchFromSupabase(
           F: { label: '频率感' }
         },
       },
-      // 5. 其他统计数据（必须包含）
-      totalRoastWords: totalRoastWords,
-      totalChars: Number(totalCharsSum) || 0, // total_chars 的总和（吐槽字数）- 强制转换为数字
-      totalAnalysis: Number(totalAnalysis) || 0, // 总记录数（分析次数）- 强制转换为数字
-      // 【显式返回新字段】与 v_global_stats_v6 对齐
+      // 5. 其他统计数据；根节点小写命名与 totalanalysis 一致，打通全维度数据链
+      totalRoastWords: Number(totalRoastWords) || 0,
+      totalChars: Number(totalCharsSum) || 0,
+      total_chars: Number(totalCharsSum) || 0,
+      totalchars: Number(totalCharsSum) || 0, // 全小写，与 totalanalysis 一致
+      totalAnalysis: Number(totalAnalysis) || 0,
+      totalanalysis: Number(totalAnalysis) || 0,
+      work_days: Number(workDaysSum) || Number(systemDays) || 0,
+      totaldays: Number(workDaysSum) || Number(systemDays) || 0, // total_chars -> totalchars, work_days -> totaldays
+      jiafang_count: Number(jiafangSum) || 0,
+      totalno: Number(jiafangSum) || 0, // jiafang_count -> totalno
+      ketao_count: Number(ketaoSum) || 0,
+      totalplease: Number(ketaoSum) || 0, // ketao_count -> totalplease
       avgPerScan: Number(avgPerScan) || 0,
       avgCharsPerUser: Number(avgCharsPerUser) || 0,
-      // 向后兼容：旧字段名
       avgPerUser: Number(avgCharsPerUser) || 0,
-      systemDays: Number(systemDays) || 1, // 系统运行天数 - 强制转换为数字
-      cityCount: Number(cityCount) || 0, // 覆盖城市数 - 强制转换为数字
-      avgChars: Number(avgChars) || 0, // 平均吐槽字数（AVG(total_chars)）- 强制转换为数字
-      locationRank: locationRank, // 格式：{ name: string, value: number }
+      systemDays: Number(systemDays) || 1,
+      cityCount: Number(cityCount) || 0,
+      avgChars: Number(avgChars) || 0,
+      // countryTotals：SUM 结果完整映射，与前端 normalizeStats 对齐
+      countryTotals: {
+        ai: Number(totalAnalysis) || 0,
+        say: Number(totalCharsSum) || 0,
+        day: Number(workDaysSum) || Number(systemDays) || 0,
+        no: Number(jiafangSum) || 0,
+        please: Number(ketaoSum) || 0,
+        word: Number(avgPerScan) || Number(avgChars) || 0,
+      },
+      locationRank: locationRank,
       recentVictims: recentVictims, // 格式：{ name: string, type: string, location: string, time: string }
       personalityDistribution: personalityDistribution, // 人格分布（前三个）- 格式：{ type: string, count: number }[]
       latestRecords: latestRecords, // 最新记录（最近 5 条）- 格式：{ personality_type: string, ip_location: string, created_at: string, name: string, type: string, location: string, time: string }[]
@@ -7758,22 +7769,29 @@ async function fetchFromSupabase(
           F: { label: '频率感' }
         },
       },
-      // 其他统计数据（默认值）
       totalRoastWords: 0,
-      totalChars: 0, // total_chars 的总和（吐槽字数）
-      totalAnalysis: 0, // 总记录数（分析次数）
-      // 【显式补齐字段】与 v_global_stats_v6 返回结构对齐
+      totalChars: 0,
+      total_chars: 0,
+      totalchars: 0,
+      totalAnalysis: 0,
+      totalanalysis: 0,
+      work_days: 0,
+      totaldays: 0,
+      jiafang_count: 0,
+      totalno: 0,
+      ketao_count: 0,
+      totalplease: 0,
       avgPerScan: 0,
       avgCharsPerUser: 0,
-      // 向后兼容
       avgPerUser: 0,
       systemDays: 1,
-      avgChars: 0, // 平均吐槽字数
+      avgChars: 0,
       cityCount: 0,
+      countryTotals: { ai: 0, say: 0, day: 0, no: 0, please: 0, word: 0 },
       locationRank: [],
       recentVictims: [],
-      personalityDistribution: [], // 人格分布（前三个）
-      latestRecords: [], // 最新记录（最近 5 条）
+      personalityDistribution: [],
+      latestRecords: [],
       source: 'error_fallback',
     };
 
