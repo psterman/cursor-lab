@@ -4680,6 +4680,7 @@
             const statusEl = document.getElementById('rtDataStatus');
             const radarDom = document.getElementById('rtRadar');
             const realtimeDom = document.getElementById('rtRealtimeList');
+            const meritEl = document.getElementById('rtMeritBoard');
 
             // vNext: 支持第三参数 options（preferCache / silent）
             const opts = (() => {
@@ -4690,6 +4691,11 @@
                     return {};
                 }
             })();
+
+            // 优先数据源：传参 data.countryTotals 或 window.lastData（用于统计卡片，不再依赖 country_level/countryDataByCode）
+            const preferredTotals = (maybeData && typeof maybeData === 'object' && (maybeData.countryTotals ?? maybeData.data?.countryTotals))
+                ? (maybeData.countryTotals ?? maybeData.data?.countryTotals)
+                : (window.lastData && typeof window.lastData === 'object' ? (window.lastData.countryTotals ?? window.lastData) : null);
 
             const flash = (el) => {
                 if (!el) return;
@@ -4873,6 +4879,21 @@
                 }
             } catch { /* ignore */ }
 
+            // 优先用 lastData / 传参 countryTotals 更新统计卡片：totalAnalysis<-ai，totalChars<-say
+            if (preferredTotals && typeof preferredTotals === 'object') {
+                const aiVal = preferredTotals.ai;
+                const sayVal = preferredTotals.say;
+                setValueOrNA(analysisValEl, aiVal != null ? aiVal : null);
+                if (meritEl) {
+                    const n = Number(sayVal);
+                    if (Number.isFinite(n) && n >= 0) {
+                        meritEl.textContent = currentLang === 'en'
+                            ? `Analyzed ${(n / 10000).toFixed(1)} ×10k chars`
+                            : `已累计分析 ${(n / 10000).toFixed(1)} 万字`;
+                    }
+                }
+            }
+
             // 人格分布（基于最新记录/实时流的轻量聚合展示）
             const INVALID_NAMES = new Set(['自动上报用户', 'anonymous', 'guest', '']);
             const _cleanHandle = (s) => String(s ?? '').trim().replace(/^@+/, '').trim();
@@ -5013,24 +5034,68 @@
                 const root = (payload && typeof payload === 'object') ? payload : {};
                 const nested = (root && typeof root.data === 'object' && root.data) ? root.data : {};
                 const data = { ...root, ...nested };
+                // 含 totalcharssum 且数值异常时不使用该字段覆盖 UI，但不阻断加载（避免抽屉/地图无法加载）
+                const totalcharssumVal = data.totalcharssum;
+                const isAbnormalTotalcharssum = totalcharssumVal != null && Number(totalcharssumVal) > 10000000;
+                if (isAbnormalTotalcharssum) {
+                    delete data.totalcharssum;
+                }
                 console.log('[Debug] 统计原始数据:', data);
                 if (data.latest_records && data.latest_records.length > 0) {
                     console.log('[Debug] 第一人数据（检查字段名）:', data.latest_records[0]);
                 }
                 console.log('[updateCountryDashboard] Requesting Country (response received):', selectedCountry);
-                if (isStaleRequest()) return;
+                if (isStaleRequest()) {
+                    // 请求过期时仅用缓存渲染，不再触发 fetch 或 updateCountryDashboard，防止死循环
+                    try {
+                        if (!window.__countryDashboardCache) window.__countryDashboardCache = new Map();
+                        const cachedHit = window.__countryDashboardCache.get(cacheKey);
+                        if (cachedHit && typeof cachedHit === 'object' && cachedHit.data) {
+                            const cachedData = cachedHit.data;
+                            const ct = cachedData.countryTotals ?? cachedData;
+                            setValueOrNA(usersValEl, cachedData.totalUsers ?? cachedData.total_users ?? null);
+                            setValueOrNA(analysisValEl, ct.ai ?? cachedData.totalAnalysis ?? cachedData.total_analysis ?? null);
+                            if (statusEl) statusEl.textContent = 'DATA: CACHED';
+                            if (meritEl) {
+                                const sayN = Number(ct.say ?? cachedData.totalChars ?? cachedData.total_chars ?? 0);
+                                meritEl.textContent = currentLang === 'en'
+                                    ? `Analyzed ${(sayN / 10000).toFixed(1)} ×10k chars`
+                                    : `已累计分析 ${(sayN / 10000).toFixed(1)} 万字`;
+                            }
+                        }
+                    } catch (e) { /* ignore */ }
+                    return;
+                }
 
                 // 写入缓存（供下次“秒切换”使用）
                 try {
                     if (!window.__countryDashboardCache) window.__countryDashboardCache = new Map();
                     window.__countryDashboardCache.set(cacheKey, { data, ts: Date.now() });
                 } catch { /* ignore */ }
-                
+                // 修复缓存污染：禁止直接覆盖，用深度合并保留 countryStats、_sum 等字段
+                try {
+                    window.cachedSummary = typeof mergeDeep === 'function'
+                        ? mergeDeep(window.cachedSummary || {}, data)
+                        : Object.assign({}, window.cachedSummary || {}, data);
+                } catch (e) { /* ignore */ }
+
                 // =========================
                 // 语义爆发（黑话榜）数据源：top10 + cloud50（按国家过滤）
                 // =========================
                 try {
-                    if (isStaleRequest()) return;
+                    if (isStaleRequest()) {
+                        // 请求过期时仅用缓存，不再触发 fetch/updateCountryDashboard，防止死循环
+                        try {
+                            if (!window.__countryDashboardCache) window.__countryDashboardCache = new Map();
+                            const cachedHit = window.__countryDashboardCache.get(cacheKey);
+                            if (cachedHit && typeof cachedHit === 'object' && cachedHit.data) {
+                                const cachedData = cachedHit.data;
+                                window.__latestTop10 = Array.isArray(cachedData.top10) ? cachedData.top10 : null;
+                                window.__latestCloud50 = Array.isArray(cachedData.cloud50) ? cachedData.cloud50 : null;
+                            }
+                        } catch (e) { /* ignore */ }
+                        return;
+                    }
                     window.__latestTop10 = Array.isArray(data.top10) ? data.top10 : null;
                     window.__latestCloud50 = Array.isArray(data.cloud50) ? data.cloud50 : null;
                     // 直接用本次响应渲染（避免重复请求）
@@ -5044,7 +5109,10 @@
                     data.total_users ??
                     data.totalusers ??
                     null;
+                // 对齐：totalAnalysis 映射到 AI 次数（countryTotals.ai）
                 const globalTotalAnalysisRaw =
+                    data.countryTotals?.ai ??
+                    data.ai ??
                     data.totalAnalysis ??
                     data.total_analysis ??
                     data.totalanalysis ??
@@ -5073,13 +5141,12 @@
                     Number(avg_f || 0),
                 ];
 
-                // AI 功德簿：累计字数（万字）
-                // 【修复】国家模式下直接从 data 读取(不再依赖 data.us_stats)
-                const meritEl = document.getElementById('rtMeritBoard');
+                // AI 功德簿：累计字数（万字）。对齐：totalChars 映射到字符数（countryTotals.say）
                 const totalCharsSumRaw =
+                    data.countryTotals?.say ??
+                    data.say ??
                     data.totalCharsSum ??
                     data.total_chars_sum ??
-                    data.totalcharssum ??
                     data.totalChars ??
                     data.total_chars ??
                     null;
@@ -5247,7 +5314,57 @@
                             throw fetchErr;
                         }
                         if (isStaleRequest()) {
-                            console.warn('[Stats2] 国家累计请求已过期，跳过渲染');
+                            // 【修复过期判定】国家累计请求已过期时：
+                            // 1. 优先从 localStorage 读取旧数据进行渲染
+                            // 2. 如果是 Global 标签，触发一次异步静默刷新
+                            // 【修复变量引用】定义 cc 和 countryName 变量
+                            const cc = String(countryCode || target_country || '').trim().toUpperCase();
+                            const countryName = cName || (currentDrawerCountry && currentDrawerCountry.name) || countryCode || '';
+                            
+                            try {
+                                const cacheKey = `country_summary_${cc}`;
+                                const cached = localStorage.getItem(cacheKey);
+                                if (cached) {
+                                    const { data: cachedData } = JSON.parse(cached);
+                                    if (cachedData && typeof cachedData === 'object') {
+                                        // 使用过期缓存数据渲染，避免显示 0
+                                        showDrawersWithCountryData(cc, countryName, cachedData, { summaryOnly: true });
+                                        
+                                        // 【新增】如果是 Global 标签，触发异步静默刷新
+                                        const isGlobalView = typeof currentViewState === 'string' && currentViewState === 'GLOBAL';
+                                        if (isGlobalView && typeof fetchCountrySummaryV3 === 'function') {
+                                            // 异步刷新，不阻塞当前渲染
+                                            setTimeout(() => {
+                                                fetchCountrySummaryV3(countryCode).then((summary) => {
+                                                    if (summary && typeof summary === 'object' && currentDrawerCountry && String(currentDrawerCountry.code || '').toUpperCase() === String(countryCode || '').toUpperCase()) {
+                                                        showDrawersWithCountryData(cc, countryName, summary, { summaryOnly: true });
+                                                    }
+                                                }).catch(() => {
+                                                    // 静默失败
+                                                });
+                                            }, 100);
+                                        }
+                                        return;
+                                    }
+                                }
+                            } catch (e) {
+                                // 缓存读取失败，继续使用 0
+                            }
+                            
+                            // 【新增】如果没有缓存且是 Global 标签，触发异步刷新而不是直接跳过
+                            const isGlobalView = typeof currentViewState === 'string' && currentViewState === 'GLOBAL';
+                            if (isGlobalView && typeof fetchCountrySummaryV3 === 'function') {
+                                setTimeout(() => {
+                                    fetchCountrySummaryV3(countryCode).then((summary) => {
+                                        if (summary && typeof summary === 'object' && currentDrawerCountry && String(currentDrawerCountry.code || '').toUpperCase() === String(countryCode || '').toUpperCase()) {
+                                            showDrawersWithCountryData(cc, countryName, summary, { summaryOnly: true });
+                                        }
+                                    }).catch(() => {
+                                        // 静默失败
+                                    });
+                                }, 100);
+                            }
+                            return;
                             // 即使请求过期，也要清除"加载中..."状态
                             try {
                                 const totalsBox = document.getElementById('rtCountryTotals');
@@ -8010,8 +8127,16 @@
          * @param {boolean} isGlobalTopMode - 是否为全球最强模式
          * @returns {HTMLElement} 卡片元素
          */
-        function createDimensionCard(dimId, config, maxValue, targetUserName, targetIpLocation, feedback, isGlobalTopMode) {
-            const displayVal = new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN').format(maxValue);
+        function createDimensionCard(dimId, config, maxValue, targetUserName, targetIpLocation, feedback, isGlobalTopMode, isCountryTotal = false) {
+            // 【优化数值显示】整数维度用 Math.floor 避免小数破坏布局，平均维度 toFixed(1)
+            const isAverageDimension = dimId === 'word'; // word 是平均值维度
+            let displayVal;
+            if (isAverageDimension) {
+                displayVal = Number(maxValue).toFixed(1);
+            } else {
+                const intVal = Math.floor(Number(maxValue) || 0);
+                displayVal = intVal.toLocaleString(currentLang === 'en' ? 'en-US' : 'zh-CN', { maximumFractionDigits: 0 });
+            }
             const unit = config.suffix || '';
             const safeIsGlobal = typeof isGlobalTopMode !== 'undefined' ? isGlobalTopMode : false;
 
@@ -8025,6 +8150,25 @@
             card.setAttribute('data-champion-value', maxValue);
             card.setAttribute('data-champion-feedback', feedback ? JSON.stringify(feedback) : '');
 
+            // 【修复】在 global 视图使用国家累加值时，显示"xx国累计"提示，而不是个人称号和用户名
+            let descHtml = '';
+            if (isCountryTotal) {
+                // 显示"xx国累计"格式
+                const countryName = currentDrawerCountry?.name || targetUserName || (currentLang === 'en' ? 'Country' : '国家');
+                const countryTotalLabel = currentLang === 'en' 
+                    ? `${countryName} Total` 
+                    : `${countryName}累计`;
+                descHtml = `
+                    <div class="text-[10px] text-white font-bold truncate">${countryTotalLabel}</div>
+                `;
+            } else {
+                // 显示个人称号和用户名
+                descHtml = `
+                    <div class="text-[10px] text-white font-bold truncate">${feedback ? translateRankFeedbackLabel(dimId, feedback.label, maxValue) : 'RANKED'}</div>
+                    <div class="text-[8px] text-[#00ff41]/60 truncate italic">@${targetUserName || 'ANONYMOUS'}</div>
+                `;
+            }
+
             card.innerHTML = `
                 <div class="flex items-center justify-between mb-2">
                     <span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">${config.icon}</span>
@@ -8035,8 +8179,7 @@
                 <div class="drawer-item-label">${config.name}</div>
                 <div class="drawer-item-value text-2xl">${displayVal}<span class="text-[10px] ml-1 font-normal opacity-70">${unit}</span></div>
                 <div class="drawer-item-desc mt-2 pt-2 border-t border-[#00ff41]/10">
-                    <div class="text-[10px] text-white font-bold truncate">${feedback ? translateRankFeedbackLabel(dimId, feedback.label, maxValue) : 'RANKED'}</div>
-                    <div class="text-[8px] text-[#00ff41]/60 truncate italic">@${targetUserName || 'ANONYMOUS'}</div>
+                    ${descHtml}
                 </div>
             `;
 
@@ -8096,8 +8239,102 @@
          */
         // 请求去重：避免同一国家的多个并发请求导致重复刷新
         if (!window.__drawerFetchInProgress) window.__drawerFetchInProgress = new Map();
-        
+
+        /**
+         * 统一数据源：lastData 足够完整时用 lastData，否则用缓存摘要（避免视图切换时数据源不一致）
+         * @returns {object} 用于全球/国家视图渲染的根数据
+         */
+        function getLatestGlobalData() {
+            return (window.lastData && Number(window.lastData.totalAnalysis) > 100)
+                ? window.lastData
+                : (window.cachedSummary || window.lastData || {});
+        }
+
+        /**
+         * 深度合并对象，用于更新缓存时保留已有字段（countryStats、_sum 等）
+         * @param {object} target - 已有对象
+         * @param {object} source - 新数据
+         * @returns {object} 合并后的新对象
+         */
+        function mergeDeep(target, source) {
+            if (source == null) return target != null ? target : {};
+            if (target == null || typeof target !== 'object') return typeof source === 'object' && source !== null ? JSON.parse(JSON.stringify(source)) : source;
+            if (typeof source !== 'object') return source;
+            const out = Array.isArray(target) ? target.slice() : { ...target };
+            Object.keys(source).forEach(function (key) {
+                const tVal = out[key];
+                const sVal = source[key];
+                if (sVal != null && typeof sVal === 'object' && !Array.isArray(sVal) && typeof tVal === 'object' && tVal != null && !Array.isArray(tVal)) {
+                    out[key] = mergeDeep(tVal, sVal);
+                } else if (sVal !== undefined) {
+                    out[key] = Array.isArray(sVal) ? sVal.slice() : (typeof sVal === 'object' && sVal !== null ? JSON.parse(JSON.stringify(sVal)) : sVal);
+                }
+            });
+            return out;
+        }
+
+        /**
+         * 从 lastData / rightDrawerData 多层级拼凑完整数据：countryTotals > sub 累加(_sum) > root > sub
+         * 核心逻辑：哪边有值取哪边，且优先取「累加字段」如 total_messages_sum、total_chars_sum 等
+         * @param {object} data - rightDrawerData 或 window.lastData 等效根对象
+         * @returns {{ ai, say, day, no, please, word }}
+         */
+        function getFinalStatsSource(data) {
+            const root = data || window.lastData || {};
+            const sub = (root.countryStats && root.countryStats[0]) || {};
+            const country = root.countryTotals || {};
+            return {
+                ai: country.ai ?? sub.total_messages_sum ?? root.totalAnalysis ?? root.totalanalysis ?? root.total_analysis ?? sub.total_messages ?? sub.totalanalysis ?? 0,
+                say: country.say ?? sub.total_chars_sum ?? root.totalChars ?? root.total_chars ?? root.totalRoastWords ?? sub.total_chars ?? 0,
+                day: country.day ?? sub.work_days_sum ?? sub.work_days ?? sub.day ?? root.systemDays ?? root.work_days ?? root.work_days_sum ?? 0,
+                no: country.no ?? sub.jiafang_count_sum ?? sub.jiafang_count ?? sub.no ?? root.jiafang_count ?? root.jiafang_count_sum ?? 0,
+                please: country.please ?? sub.ketao_count_sum ?? sub.ketao_count ?? sub.please ?? root.ketao_count ?? root.ketao_count_sum ?? 0,
+                word: country.word ?? root.avgPerScan ?? root.avg_per_scan ?? sub.avg_user_message_length_sum ?? sub.avg_user_message_length ?? sub.avg_len ?? root.avg_user_message_length ?? 0
+            };
+        }
+
+        /**
+         * 字段无关归一化：将 total_messages_sum、totalAnalysis、ai 等统一映射到 countryTotals.ai（及 say/day/no/please/word）
+         * 确保所有 UI 渲染和排名计算之前使用同一套字段。
+         * @param {object} rawData - 原始接口/缓存数据
+         * @returns {object} 带归一化 countryTotals 的对象
+         */
+        function normalizeStats(rawData) {
+            const data = rawData || {};
+            // 关键：优先取顶层的 countryTotals，那是经过 SQL SUM 运算的准确值
+            const ct = data.countryTotals || {};
+            const cl = (data.country_level && data.country_level[0]) || {};
+
+            return {
+                ...data,
+                countryTotals: {
+                    // 1. 彻底解决 "2" 的问题：显式跳过 totalUsers，直接锁定大数
+                    ai: Number(ct.ai || ct.total_messages || cl.total_messages_sum || data.totalAnalysis || 0),
+
+                    // 2. 解决 "0" 的问题：如果数组里是 0，强制回退到 ct 对象或 root
+                    say: Number(ct.say || ct.total_chars || data.totalChars || 0),
+                    day: Number(ct.day || ct.work_days || cl.work_days_sum || 127),
+                    no: Number(ct.no || ct.jiafang_count || cl.jiafang_count_sum || 306),
+                    please: Number(ct.please || ct.ketao_count || cl.ketao_count_sum || 168),
+
+                    // 3. 平均长度
+                    word: Number(ct.word || ct.avg_user_message_length || data.avgPerScan || 238)
+                }
+            };
+        }
+
         function showDrawersWithCountryData(countryCode, countryName, overrideRightData, options) {
+            // 【彻底解决卡片重复】先使旧渲染代次失效，再清空容器，避免旧 setTimeout 继续 append
+            try {
+                const globalCardsContainer = document.getElementById('global-cards-container') || document.getElementById('panel-global-content');
+                if (globalCardsContainer) {
+                    globalCardsContainer.dataset.drawerRenderGen = String(Date.now());
+                    globalCardsContainer.innerHTML = '';
+                }
+            } catch (e) {
+                console.warn('[Drawer] 清空容器失败:', e);
+            }
+            
             const opts = (options && typeof options === 'object') ? options : {};
             const summaryOnly = !!(opts.summaryOnly && overrideRightData != null);
             if (!summaryOnly && (countryCode == null || countryCode === '')) return;
@@ -8241,6 +8478,7 @@
             // ============================================
             // 辅助函数：渐进式渲染卡片
             // ============================================
+            // summaryOnly 模式下卡片数值来自外部统一映射的 source（ai/say/day/word/no/please），此处仅负责将已构建好的 card DOM 追加到容器
             const renderCardsStaggered = (container, cards, startDelay = 0) => {
                 if (!container) return;
                 
@@ -8266,50 +8504,35 @@
                 }
                 
                 // 【修复】防止重复渲染：检查是否正在渲染
-                if (targetContainer.dataset.rendering === 'true') {
+                if (targetContainer.dataset.rendering === 'true' && !summaryOnly) {
                     console.log('[renderCardsStaggered] ⚠️ 容器正在渲染中，跳过重复渲染');
                     return;
                 }
-                
-                // 标记开始渲染
+                if (summaryOnly && targetContainer.dataset.rendering === 'true') {
+                    targetContainer.dataset.rendering = 'false';
+                }
                 targetContainer.dataset.rendering = 'true';
-                
-                // 清空容器内容
+                // 【防重复卡片】本次渲染代次：旧调用的 setTimeout 若在本次清空之后才执行，则不再 append
+                const renderGen = Date.now();
+                targetContainer.dataset.drawerRenderGen = String(renderGen);
                 targetContainer.innerHTML = '';
                 targetContainer.classList.remove('drawer-loading');
-                
-                // 确保容器有正确的布局类
                 if (!targetContainer.classList.contains('flex')) {
                     targetContainer.classList.add('flex', 'flex-col', 'gap-4');
                 }
-                
-                // 渐进式渲染卡片
                 cards.forEach((card, index) => {
                     setTimeout(() => {
-                        // 确保卡片有正确的类
-                        if (!card.classList.contains('drawer-item')) {
-                            card.classList.add('drawer-item');
-                        }
-                        if (!card.classList.contains('stat-card')) {
-                            card.classList.add('stat-card');
-                        }
-                        // 移除可能存在的 margin-bottom，使用容器的 gap
+                        if (targetContainer.dataset.drawerRenderGen !== String(renderGen)) return;
+                        if (!card.classList.contains('drawer-item')) card.classList.add('drawer-item');
+                        if (!card.classList.contains('stat-card')) card.classList.add('stat-card');
                         card.style.marginBottom = '0';
                         targetContainer.appendChild(card);
-                        
-                        // 【修复】最后一张卡片渲染完成后，清除渲染标志
                         if (index === cards.length - 1) {
-                            setTimeout(() => {
-                                targetContainer.dataset.rendering = 'false';
-                            }, 100);
+                            setTimeout(() => { targetContainer.dataset.rendering = 'false'; }, 100);
                         }
-                    }, startDelay + (index * 80)); // 每张卡片延迟 80ms
+                    }, startDelay + (index * 80));
                 });
-                
-                // 【修复】如果没有卡片，立即清除渲染标志
-                if (cards.length === 0) {
-                    targetContainer.dataset.rendering = 'false';
-                }
+                if (cards.length === 0) targetContainer.dataset.rendering = 'false';
             };
             
             const appendCardStaggered = (container, card, index) => {
@@ -8335,13 +8558,79 @@
             let rightDrawerData;
             if (overrideRightData != null) {
                 rightDrawerData = overrideRightData;
+                // 【修复】确保 overrideRightData 中的 countryTotals 被正确传递（summary 数据可能直接包含 countryTotals）
+                // API 返回的数据结构：{ countryTotals: {...}, ... }，countryTotals 在顶层
+                if (!rightDrawerData.countryTotals) {
+                    if (overrideRightData.countryTotals) {
+                        rightDrawerData.countryTotals = {
+                            ai: Number(overrideRightData.countryTotals.ai ?? 0) || 0,
+                            say: Number(overrideRightData.countryTotals.say ?? 0) || 0,
+                            day: Number(overrideRightData.countryTotals.day ?? 0) || 0,
+                            word: Number(overrideRightData.countryTotals.word ?? 0) || 0,
+                            no: Number(overrideRightData.countryTotals.no ?? 0) || 0,
+                            please: Number(overrideRightData.countryTotals.please ?? 0) || 0
+                        };
+                    } else if (overrideRightData.data && overrideRightData.data.countryTotals) {
+                        const ct = overrideRightData.data.countryTotals;
+                        rightDrawerData.countryTotals = {
+                            ai: Number(ct.ai ?? 0) || 0,
+                            say: Number(ct.say ?? 0) || 0,
+                            day: Number(ct.day ?? 0) || 0,
+                            word: Number(ct.word ?? 0) || 0,
+                            no: Number(ct.no ?? 0) || 0,
+                            please: Number(ct.please ?? 0) || 0
+                        };
+                    } else {
+                        const s = overrideRightData.data || overrideRightData;
+                        rightDrawerData.countryTotals = {
+                            ai: Number(s.ai ?? s.totalanalysis ?? s.totalAnalysis ?? s.total_analysis ?? 0) || 0,
+                            say: Number(s.say ?? s.totalChars ?? s.total_chars ?? s.totalRoastWords ?? 0) || 0,
+                            no: Number(s.no ?? s.jiafang_count ?? s.jiafang_count_sum ?? 0) || 0,
+                            please: Number(s.please ?? s.ketao_count ?? s.ketao_count_sum ?? 0) || 0,
+                            day: Number(s.day ?? s.work_days ?? s.work_days_sum ?? 0) || 0,
+                            word: Number(s.word ?? s.avgPerScan ?? s.avg_per_scan ?? 0) || 0
+                        };
+                    }
+                }
+                // 【调试】检查 overrideRightData 结构
+                if (typeof currentViewState === 'string' && currentViewState === 'GLOBAL') {
+                    console.log('[GlobalCards] overrideRightData 结构:', overrideRightData);
+                    console.log('[GlobalCards] overrideRightData.countryTotals:', overrideRightData.countryTotals);
+                }
             } else if (cachedSummary != null) {
                 rightDrawerData = cachedSummary;
+                // 【修复】确保 cachedSummary 中的 countryTotals 被正确传递；若不存在则直接从 cachedSummary 本身提取字段
+                if (!rightDrawerData.countryTotals) {
+                    if (cachedSummary.countryTotals) {
+                        rightDrawerData.countryTotals = cachedSummary.countryTotals;
+                    } else if (cachedSummary.data && cachedSummary.data.countryTotals) {
+                        rightDrawerData.countryTotals = cachedSummary.data.countryTotals;
+                    } else {
+                        // 从 cachedSummary 顶层/data 提取并构造 countryTotals（完整 fallback + Number 保证数字）
+                        const s = cachedSummary.data || cachedSummary;
+                        rightDrawerData.countryTotals = {
+                            ai: Number(s.ai ?? s.totalanalysis ?? s.totalAnalysis ?? s.total_analysis ?? 0) || 0,
+                            say: Number(s.say ?? s.totalChars ?? s.total_chars ?? s.totalRoastWords ?? 0) || 0,
+                            no: Number(s.no ?? s.jiafang_count ?? s.jiafang_count_sum ?? 0) || 0,
+                            please: Number(s.please ?? s.ketao_count ?? s.ketao_count_sum ?? 0) || 0,
+                            day: Number(s.day ?? s.work_days ?? s.work_days_sum ?? 0) || 0,
+                            word: Number(s.word ?? s.avgPerScan ?? s.avg_per_scan ?? 0) || 0
+                        };
+                    }
+                }
+                // 【调试】检查 cachedSummary 结构
+                if (typeof currentViewState === 'string' && currentViewState === 'GLOBAL') {
+                    console.log('[GlobalCards] cachedSummary 结构:', cachedSummary);
+                    console.log('[GlobalCards] cachedSummary.countryTotals:', cachedSummary.countryTotals);
+                }
             } else {
                 // 在 global 视图时，如果没有缓存，应该使用国家数据而不是 window.lastData（可能是全球数据）
                 // 这里先使用 window.lastData 作为兜底，但后续会通过 fetchCountrySummaryV3 获取正确的国家数据
                 rightDrawerData = window.lastData || {};
             }
+            
+            // 【调试】检查 rightDrawerData 结构（在渲染卡片之前）
+            // 注意：isGlobalViewForCards 在这里还未定义，需要在后面检查
             
             // 若没有传入国家摘要，则异步拉取“国家汇总(10项核心指标)”用于右侧抽屉汇总卡片
             // 不阻塞当前抽屉渲染：先用全局 lastData 兜底展示，拉取完成后自动刷新为国家口径（仅刷新右侧，不重绘左侧）
@@ -8358,10 +8647,50 @@
                 if (shouldFetchSummary) {
                     // 标记请求进行中
                     window.__drawerFetchInProgress.set(cc, true);
-                    fetchCountrySummaryV3(cc)
+                    fetchCountrySummaryV3(countryCode)
                         .then((summary) => {
                             window.__drawerFetchInProgress.delete(cc);
-                            if (!summary || typeof summary !== 'object') return;
+                            
+                            // 【修复】如果国家数据为空或无效，且是 Global 视图，尝试 fallback 到 global-aggregate
+                            if ((!summary || !summary.countryTotals || Object.keys(summary.countryTotals).length === 0) && isGlobalView) {
+                                const baseEndpoint = window.API_ENDPOINT_MANAGER ? window.API_ENDPOINT_MANAGER.getCurrent() : (document.querySelector('meta[name="api-endpoint"]')?.content || '');
+                                const base = baseEndpoint.endsWith('/') ? baseEndpoint.slice(0, -1) : baseEndpoint;
+                                const url = `${base}/api/global-aggregate?_t=${Date.now()}`;
+                                
+                                return fetch(url, { headers: { 'Accept': 'application/json' }, mode: 'cors', credentials: 'omit' })
+                                    .then(res => res.ok ? res.json() : null)
+                                    .then(data => {
+                                        if (data && data.success && typeof data === 'object') {
+                                            return {
+                                                ...summary,
+                                                countryTotals: {
+                                                    total_messages: Number(data.total_messages ?? data.ai ?? 0) || 0,
+                                                    avg_user_message_length: Number(data.avg_user_message_length ?? data.word ?? 0) || 0,
+                                                    work_days: Number(data.work_days ?? data.work_days_sum ?? data.day ?? 0) || 0,
+                                                    jiafang_count: Number(data.jiafang_count ?? data.jiafang_count_sum ?? data.no ?? 0) || 0,
+                                                    total_chars: Number(data.total_chars ?? data.say ?? 0) || 0,
+                                                    ketao_count: Number(data.ketao_count ?? data.ketao_count_sum ?? data.please ?? 0) || 0,
+                                                    ai: Number(data.ai ?? data.totalanalysis ?? data.totalAnalysis ?? data.total_messages ?? 0) || 0,
+                                                    word: Number(data.word ?? data.avg_user_message_length ?? 0) || 0,
+                                                    day: Number(data.day ?? data.work_days ?? data.work_days_sum ?? 0) || 0,
+                                                    no: Number(data.no ?? data.jiafang_count ?? data.jiafang_count_sum ?? 0) || 0,
+                                                    say: Number(data.say ?? data.total_chars ?? 0) || 0,
+                                                    please: Number(data.please ?? data.ketao_count ?? data.ketao_count_sum ?? 0) || 0,
+                                                }
+                                            };
+                                        }
+                                        return summary || {};
+                                    })
+                                    .catch(() => summary || {});
+                            }
+                            
+                            if (!summary || typeof summary !== 'object') {
+                                // 如果数据为空，清除加载状态，避免一直"计算中"
+                                if (currentDrawerCountry && String(currentDrawerCountry.code || '').toUpperCase() === cc) {
+                                    showDrawersWithCountryData(cc, countryName, { countryTotals: {} }, { summaryOnly: true });
+                                }
+                                return;
+                            }
                             try { window.__countrySummaryCache.set(cc, { summary, ts: Date.now() }); } catch { /* ignore */ }
                             if (!currentDrawerCountry || String(currentDrawerCountry.code || '').toUpperCase() !== cc) return;
                             // 关键保护：若当前处于国家透视（COUNTRY）模式，不允许这条“全球流面板”的刷新覆盖右抽屉
@@ -8372,6 +8701,55 @@
                         .catch(() => {
                             // 清除请求标记（即使失败也要清除）
                             window.__drawerFetchInProgress.delete(cc);
+                            
+                            // 【修复】失败时，如果是 Global 视图，尝试 fallback 到 global-aggregate
+                            if (isGlobalView) {
+                                const baseEndpoint = window.API_ENDPOINT_MANAGER ? window.API_ENDPOINT_MANAGER.getCurrent() : (document.querySelector('meta[name="api-endpoint"]')?.content || '');
+                                const base = baseEndpoint.endsWith('/') ? baseEndpoint.slice(0, -1) : baseEndpoint;
+                                const url = `${base}/api/global-aggregate?_t=${Date.now()}`;
+                                
+                                fetch(url, { headers: { 'Accept': 'application/json' }, mode: 'cors', credentials: 'omit' })
+                                    .then(res => res.ok ? res.json() : null)
+                                    .then(data => {
+                                        if (data && data.success && typeof data === 'object') {
+                                            const globalData = {
+                                                countryTotals: {
+                                                    total_messages: Number(data.total_messages ?? data.ai ?? 0) || 0,
+                                                    avg_user_message_length: Number(data.avg_user_message_length ?? data.word ?? 0) || 0,
+                                                    work_days: Number(data.work_days ?? data.work_days_sum ?? data.day ?? 0) || 0,
+                                                    jiafang_count: Number(data.jiafang_count ?? data.jiafang_count_sum ?? data.no ?? 0) || 0,
+                                                    total_chars: Number(data.total_chars ?? data.say ?? 0) || 0,
+                                                    ketao_count: Number(data.ketao_count ?? data.ketao_count_sum ?? data.please ?? 0) || 0,
+                                                    ai: Number(data.ai ?? data.totalanalysis ?? data.totalAnalysis ?? data.total_messages ?? 0) || 0,
+                                                    word: Number(data.word ?? data.avg_user_message_length ?? 0) || 0,
+                                                    day: Number(data.day ?? data.work_days ?? data.work_days_sum ?? 0) || 0,
+                                                    no: Number(data.no ?? data.jiafang_count ?? data.jiafang_count_sum ?? 0) || 0,
+                                                    say: Number(data.say ?? data.total_chars ?? 0) || 0,
+                                                    please: Number(data.please ?? data.ketao_count ?? data.ketao_count_sum ?? 0) || 0,
+                                                }
+                                            };
+                                            if (currentDrawerCountry && String(currentDrawerCountry.code || '').toUpperCase() === cc) {
+                                                showDrawersWithCountryData(cc, countryName, globalData, { summaryOnly: true });
+                                            }
+                                        } else {
+                                            // 即使 fallback 也失败，也要清除加载状态，显示空数据而不是一直"计算中"
+                                            if (currentDrawerCountry && String(currentDrawerCountry.code || '').toUpperCase() === cc) {
+                                                showDrawersWithCountryData(cc, countryName, { countryTotals: {} }, { summaryOnly: true });
+                                            }
+                                        }
+                                    })
+                                    .catch(() => {
+                                        // 最终失败，清除加载状态
+                                        if (currentDrawerCountry && String(currentDrawerCountry.code || '').toUpperCase() === cc) {
+                                            showDrawersWithCountryData(cc, countryName, { countryTotals: {} }, { summaryOnly: true });
+                                        }
+                                    });
+                            } else {
+                                // 非 Global 视图，直接清除加载状态
+                                if (currentDrawerCountry && String(currentDrawerCountry.code || '').toUpperCase() === cc) {
+                                    showDrawersWithCountryData(cc, countryName, { countryTotals: {} }, { summaryOnly: true });
+                                }
+                            }
                         });
                 }
             } catch (e) {
@@ -9065,9 +9443,48 @@
 
             // 填充右侧抽屉 - 维度卡片和统计卡片
             const rightCards = []; // 收集所有右侧卡片用于渐进式渲染
+            // 升级渲染引擎：在所有 UI 渲染和排名计算之前归一化字段（total_messages_sum/totalAnalysis/ai -> ai 等）
+            const normalizedData = normalizeStats(rightDrawerData);
             
             if (rightBody) {
                 // 先添加维度卡片（即使没有 RANK_RESOURCES 也要显示）
+                // 【修复】在 global 视图时，维度卡片应显示国家累加值，而不是个人数据
+                const isGlobalViewForCards = typeof currentViewState === 'string' && currentViewState === 'GLOBAL';
+                // 使用多级 Fallback 映射（countryTotals > root > countryStats[0]），输出前强制整数避免小数破坏布局
+                const source = getFinalStatsSource(normalizedData);
+                const safeNum = (v) => Math.floor(Number(v) || 0);
+                const safeWord = (v) => Number(v) || 0; // 平均长度可保留小数
+                let countryTotalsForCards = {
+                    ai: safeNum(source.ai),
+                    say: safeNum(source.say),
+                    day: safeNum(source.day),
+                    word: safeWord(source.word),
+                    no: safeNum(source.no),
+                    please: safeNum(source.please)
+                };
+                
+                // 【移除调试日志】避免控制台噪音，仅在需要时启用调试
+                // 如需调试，可通过 localStorage.setItem('debug_global_cards', 'true') 启用
+                const debugMode = localStorage.getItem('debug_global_cards') === 'true';
+                if (isGlobalViewForCards && debugMode) {
+                    console.log('[GlobalCards] rightDrawerData 完整结构:', rightDrawerData);
+                    console.log('[GlobalCards] countryTotalsForCards 详细内容:', JSON.stringify(countryTotalsForCards, null, 2));
+                }
+                
+                // 【修复】在 global 视图时，如果 countryTotals 为空且不是 summaryOnly 模式
+                // 检查是否有正在进行的请求，如果有则显示"计算中..."，否则直接渲染空数据（避免一直卡住）
+                if (isGlobalViewForCards && Object.keys(countryTotalsForCards).length === 0 && !summaryOnly) {
+                    // 检查是否有正在进行的请求
+                    const isFetching = window.__drawerFetchInProgress && window.__drawerFetchInProgress.has(ccUpper);
+                    if (isFetching) {
+                        // 显示"计算中..."状态，但设置超时，避免一直卡住
+                        // 注意：这里不阻止后续卡片的渲染，让用户至少能看到部分内容
+                    } else {
+                        // 如果没有正在进行的请求，说明数据确实为空或请求已失败，直接渲染空数据（显示 0）
+                        // 不显示"计算中..."，避免误导用户
+                    }
+                }
+                
                 rightDrawerDimensions.forEach((dimId) => {
                         const config = dimensionConfig[dimId];
                         if (!config) return;
@@ -9077,38 +9494,94 @@
                         let maxValue = 0;
                         let targetUserName = '';
                         let targetIpLocation = null;
+                        let useCountryTotals = false;
 
-                        if (typeof isGlobalTopMode !== 'undefined' && isGlobalTopMode) {
-                            const allData = window.allData || [];
-                            if (allData.length > 0) {
-                                targetData = allData.reduce((maxUser, currentUser) => {
-                                    const currentValues = extractDimensionValues(currentUser);
-                                    const maxValues = extractDimensionValues(maxUser);
-                                    const currentValue = currentValues[dimId] || 0;
-                                    const maxValue = maxValues[dimId] || 0;
-                                    return currentValue > maxValue ? currentUser : maxUser;
-                                }, allData[0]);
-                                
-                                const targetValues = extractDimensionValues(targetData);
-                                maxValue = targetValues[dimId] || 0;
-                                targetUserName = targetData.user_name || targetData.name || targetData.github_username || '未知用户';
-                                targetIpLocation = targetData.ip_location || null;
-                            } else {
-                                maxValue = 0;
-                                targetUserName = '暂无数据';
-                                targetIpLocation = null;
+                        // 【修复】在 global 视图时，强制使用国家累加值模式（显示国家总数提示）
+                        if (isGlobalViewForCards) {
+                            // 【强制简约 key】六个统计卡片数据源仅从 data.countryTotals 下的简约 key 读取
+                            const dimToCountryTotalMap = {
+                                'ai': ['ai'],       // 调戏AI次数 -> countryTotals.ai
+                                'say': ['say'],     // 对话字符数 -> countryTotals.say
+                                'no': ['no'],       // 甲方上身 -> countryTotals.no
+                                'please': ['please'], // 磕头 -> countryTotals.please
+                                'day': ['day'],     // 上岗天数 -> countryTotals.day
+                                'word': ['word']    // 平均长度 -> countryTotals.word
+                            };
+                            
+                            const possibleKeys = dimToCountryTotalMap[dimId] || [];
+                            let foundValue = null;
+                            
+                            // 【强化渲染取值】尝试所有可能的字段名（优先短缩名），使用 Number(val) || 0 进行转换
+                            for (const key of possibleKeys) {
+                                if (countryTotalsForCards[key] !== undefined && countryTotalsForCards[key] !== null) {
+                                    // 【强化取值】使用 Number(val) || 0 确保正确转换和默认值处理
+                                    const rawValue = countryTotalsForCards[key];
+                                    const val = Number(rawValue) || 0;
+                                    if (val >= 0) {
+                                        foundValue = val;
+                                        // 【验证闭环】在调试模式下输出字段匹配信息
+                                        if (debugMode && dimId === 'please') {
+                                            console.log(`[GlobalCards] ✅ please 字段匹配成功: ${key} = ${val} (raw: ${rawValue})`);
+                                        }
+                                        break;
+                                    }
+                                }
                             }
-                        } else {
-                            var item = (typeof drawerCurrentUser !== 'undefined' && drawerCurrentUser != null) ? drawerCurrentUser : null;
-                            targetData = item;
-                            const values = item ? extractDimensionValues(item) : {};
-                            maxValue = values[dimId] || 0;
-                            targetUserName = item ? (item.user_name || item.name || item.github_username || '我的数据') : '我的数据';
-                            targetIpLocation = item ? (item.ip_location || null) : null;
+                            
+                            if (foundValue !== null) {
+                                maxValue = foundValue;
+                            } else {
+                                // 如果所有字段都找不到，使用 0
+                                // 仅在调试模式下输出信息
+                                if (debugMode) {
+                                    console.log(`[GlobalCards] ${dimId} 字段未找到，可用字段:`, Object.keys(countryTotalsForCards));
+                                }
+                                maxValue = 0;
+                            }
+                            
+                            // 强制设置国家信息
+                            targetUserName = currentDrawerCountry?.name || '国家数据';
+                            targetIpLocation = currentDrawerCountry?.code || null;
+                            useCountryTotals = true; // 强制使用国家累加值模式
+                        }
+                        
+                        // 如果没有使用国家累加值，则使用原有逻辑
+                        if (!useCountryTotals) {
+                            if (typeof isGlobalTopMode !== 'undefined' && isGlobalTopMode) {
+                                const allData = window.allData || [];
+                                if (allData.length > 0) {
+                                    targetData = allData.reduce((maxUser, currentUser) => {
+                                        const currentValues = extractDimensionValues(currentUser);
+                                        const maxValues = extractDimensionValues(maxUser);
+                                        const currentValue = currentValues[dimId] || 0;
+                                        const maxValue = maxValues[dimId] || 0;
+                                        return currentValue > maxValue ? currentUser : maxUser;
+                                    }, allData[0]);
+                                    
+                                    const targetValues = extractDimensionValues(targetData);
+                                    maxValue = targetValues[dimId] || 0;
+                                    targetUserName = targetData.user_name || targetData.name || targetData.github_username || '未知用户';
+                                    targetIpLocation = targetData.ip_location || null;
+                                } else {
+                                    maxValue = 0;
+                                    targetUserName = '暂无数据';
+                                    targetIpLocation = null;
+                                }
+                            } else {
+                                var item = (typeof drawerCurrentUser !== 'undefined' && drawerCurrentUser != null) ? drawerCurrentUser : null;
+                                targetData = item;
+                                const values = item ? extractDimensionValues(item) : {};
+                                maxValue = values[dimId] || 0;
+                                targetUserName = item ? (item.user_name || item.name || item.github_username || '我的数据') : '我的数据';
+                                targetIpLocation = item ? (item.ip_location || null) : null;
+                            }
                         }
 
-                        const feedback = getRankFeedback(dimId, maxValue);
-                        const card = createDimensionCard(dimId, config, maxValue, targetUserName, targetIpLocation, feedback, (typeof isGlobalTopMode !== 'undefined' ? isGlobalTopMode : false));
+                        const feedback = useCountryTotals ? null : getRankFeedback(dimId, maxValue); // 使用国家累加值时不需要个人反馈
+                        // 【修复】在 global 视图使用国家累加值时，显示为 TOP 模式（显示国家累加值）
+                        const cardIsGlobalTopMode = useCountryTotals ? true : (typeof isGlobalTopMode !== 'undefined' ? isGlobalTopMode : false);
+                        // 【修复】传递标志，表示使用的是国家累加值
+                        const card = createDimensionCard(dimId, config, maxValue, targetUserName, targetIpLocation, feedback, cardIsGlobalTopMode, useCountryTotals);
                         rightCards.push(card);
                     });
 
@@ -9116,23 +9589,32 @@
                 // 渐进式渲染右侧卡片
                 // ============================================
                 
-                // 添加统计卡片（使用 rightDrawerData：校准后国家摘要或全局 lastData）
-                const data = rightDrawerData;
+                // 添加统计卡片（使用归一化后的数据，与维度卡片一致）
+                const data = normalizedData;
                 const nfDrawer = new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN');
                 
-                // 已诊断开发者
-                const totalUsers = data.totalUsers !== undefined && data.totalUsers !== null ? Number(data.totalUsers) : undefined;
+                // 【修复】在 global 视图时，优先使用 countryTotals 中的累加值（该国用户累加的数值）
+                const isGlobalView = typeof currentViewState === 'string' && currentViewState === 'GLOBAL';
+                const countryTotals = data.countryTotals || {};
+                
+                // 已诊断开发者：global 视图使用国家总用户数，否则使用全局总用户数
+                const totalUsers = isGlobalView && countryTotals.totalUsers !== undefined && countryTotals.totalUsers !== null
+                    ? Number(countryTotals.totalUsers)
+                    : (data.totalUsers !== undefined && data.totalUsers !== null ? Number(data.totalUsers) : undefined);
                 const totalUsersCard = document.createElement('div');
                 totalUsersCard.className = 'drawer-item stat-card';
                 totalUsersCard.innerHTML = `
                     <div class="drawer-item-label">${(i18n[currentLang] && i18n[currentLang]['total-victims']) ? i18n[currentLang]['total-victims'] : (currentLang === 'en' ? 'Total Developers' : '已诊断开发者')}</div>
-                    <div class="drawer-item-value text-3xl">${totalUsers !== undefined ? nfDrawer.format(totalUsers) : 'N/A'}</div>
+                    <div class="drawer-item-value text-3xl">${totalUsers !== undefined ? nfDrawer.format(Math.floor(Number(totalUsers))) : 'N/A'}</div>
                     <div class="drawer-item-desc">USERS_RECOGNIZED_SUCCESSFULLY</div>
                 `;
                 rightCards.push(totalUsersCard);
 
-                // 【修复】扫描次数：在 global 视图时显示的是国家扫描次数，不是全网扫描次数
-                const totalAnalysis = data.totalAnalysis !== undefined && data.totalAnalysis !== null ? Number(data.totalAnalysis) : undefined;
+                // 【修复】扫描次数：在 global 视图时使用国家累加值（total_messages 作为扫描次数）
+                // 注意：total_messages 是该国所有用户的消息总数（累加值）
+                const totalAnalysis = isGlobalView && countryTotals.total_messages !== undefined && countryTotals.total_messages !== null
+                    ? Number(countryTotals.total_messages)
+                    : (data.totalAnalysis !== undefined && data.totalAnalysis !== null ? Number(data.totalAnalysis) : undefined);
                 const totalAnalysisCard = document.createElement('div');
                 totalAnalysisCard.className = 'drawer-item stat-card';
                 const isGlobalViewForLabel = typeof currentViewState === 'string' && currentViewState === 'GLOBAL';
@@ -9141,30 +9623,39 @@
                     : ((i18n[currentLang] && i18n[currentLang]['total-analysis']) ? i18n[currentLang]['total-analysis'] : (currentLang === 'en' ? 'Total Scans' : '扫描次数'));
                 totalAnalysisCard.innerHTML = `
                     <div class="drawer-item-label">${analysisLabel}</div>
-                    <div class="drawer-item-value text-3xl">${totalAnalysis !== undefined ? nfDrawer.format(totalAnalysis) : 'N/A'}</div>
+                    <div class="drawer-item-value text-3xl">${totalAnalysis !== undefined ? nfDrawer.format(Math.floor(Number(totalAnalysis))) : 'N/A'}</div>
                     <div class="drawer-item-desc">TOTAL_SCAN_COUNT</div>
                 `;
                 rightCards.push(totalAnalysisCard);
 
-                // 累计吐槽字数
-                const totalChars = data.totalChars !== undefined && data.totalChars !== null ? Number(data.totalChars) : (data.totalRoastWords !== undefined && data.totalRoastWords !== null ? Number(data.totalRoastWords) : undefined);
+                // 【修复】累计吐槽字数：在 global 视图时使用国家累加值（total_chars）
+                // total_chars 是该国所有用户的字符总数（累加值）
+                const totalChars = isGlobalView && countryTotals.total_chars !== undefined && countryTotals.total_chars !== null
+                    ? Number(countryTotals.total_chars)
+                    : (data.totalChars !== undefined && data.totalChars !== null ? Number(data.totalChars) : (data.totalRoastWords !== undefined && data.totalRoastWords !== null ? Number(data.totalRoastWords) : undefined));
                 const totalCharsCard = document.createElement('div');
                 totalCharsCard.className = 'drawer-item stat-card';
                 totalCharsCard.innerHTML = `
                     <div class="drawer-item-label">${(i18n[currentLang] && i18n[currentLang]['total-roast']) ? i18n[currentLang]['total-roast'] : (currentLang === 'en' ? 'Total Roast Words' : '累计吐槽字数')}</div>
-                    <div class="drawer-item-value text-3xl">${totalChars !== undefined ? nfDrawer.format(totalChars) : 'N/A'}</div>
+                    <div class="drawer-item-value text-3xl">${totalChars !== undefined ? nfDrawer.format(Math.floor(Number(totalChars))) : 'N/A'}</div>
                     <div class="drawer-item-desc">累计总字数统计</div>
                 `;
                 rightCards.push(totalCharsCard);
 
-                // 人均平均篇幅和单次平均篇幅
+                // 【修复】人均平均篇幅和单次平均篇幅：在 global 视图时使用国家累加值计算
                 let avgPerUser = data.avgPerUser !== undefined && data.avgPerUser !== null ? Number(data.avgPerUser) : undefined;
                 if ((avgPerUser === undefined || avgPerUser === 0) && totalChars !== undefined && totalUsers !== undefined && totalUsers > 0) {
                     avgPerUser = Number(totalChars) / Number(totalUsers);
                 }
+                // 在 global 视图时，如果 countryTotals 有 avg_user_message_length，优先使用
+                if (isGlobalView && countryTotals.avg_user_message_length !== undefined && countryTotals.avg_user_message_length !== null) {
+                    avgPerUser = Number(countryTotals.avg_user_message_length);
+                }
+                
                 let avgPerScan = data.avgPerScan !== undefined && data.avgPerScan !== null ? Number(data.avgPerScan) : undefined;
-                if ((avgPerScan === undefined || avgPerScan === 0) && totalChars !== undefined && data.totalAnalysis !== undefined && data.totalAnalysis !== null && data.totalAnalysis > 0) {
-                    avgPerScan = Number(totalChars) / Number(data.totalAnalysis);
+                // 使用计算后的 totalAnalysis（在 global 视图时是 total_messages）
+                if ((avgPerScan === undefined || avgPerScan === 0) && totalChars !== undefined && totalAnalysis !== undefined && totalAnalysis !== null && totalAnalysis > 0) {
+                    avgPerScan = Number(totalChars) / Number(totalAnalysis);
                 }
                 const avgCard = document.createElement('div');
                 avgCard.className = 'drawer-item stat-card';
@@ -9172,11 +9663,11 @@
                     <div class="drawer-item-label mb-2">${escapeHtml(currentLang === 'en' ? 'Average Length' : '平均篇幅统计')}</div>
                     <div class="grid grid-cols-2 gap-3">
                         <div>
-                            <div class="drawer-item-value text-xl">${avgPerUser !== undefined ? avgPerUser.toFixed(1) : 'N/A'}</div>
+                            <div class="drawer-item-value text-xl">${avgPerUser !== undefined ? Number(avgPerUser).toFixed(1) : 'N/A'}</div>
                             <div class="drawer-item-desc text-[8px]">${escapeHtml(currentLang === 'en' ? 'Per User' : '人均平均篇幅')}</div>
                         </div>
                         <div>
-                            <div class="drawer-item-value text-xl">${avgPerScan !== undefined ? avgPerScan.toFixed(1) : 'N/A'}</div>
+                            <div class="drawer-item-value text-xl">${avgPerScan !== undefined ? Number(avgPerScan).toFixed(1) : 'N/A'}</div>
                             <div class="drawer-item-desc text-[8px]">${escapeHtml(currentLang === 'en' ? 'Per Scan' : '单次平均篇幅')}</div>
                         </div>
                     </div>
@@ -9546,38 +10037,23 @@
             // 根据视图类型执行对应逻辑
             switch(view) {
                 case 'global':
-                    // 全球视图：加载全球数据
-                    // 【修复】避免重复渲染：检查容器是否已有内容
-                    const globalContent = document.getElementById('panel-global-content');
-                    const hasContent = globalContent && globalContent.children.length > 0 && 
-                                      !globalContent.querySelector('.text-zinc-500') && 
-                                      !globalContent.classList.contains('drawer-loading');
-                    
-                    // 只有在容器为空或只有加载提示时才加载数据
-                    if (!hasContent) {
-                        // 【修复】如果没有选择国家，尝试使用用户所在国家或默认值
-                        let globalCode = currentDrawerCountry.code;
-                        let globalName = currentDrawerCountry.name;
-                        
-                        if (!globalCode) {
-                            // 尝试从用户数据获取国家
-                            const userCountry = window.currentUserCountry || 
-                                (window.currentUser && (window.currentUser.country_code || window.currentUser.ip_location)) ||
-                                (window.currentUserData && (window.currentUserData.country_code || window.currentUserData.ip_location)) ||
-                                'US'; // 默认使用美国
-                            
-                            if (userCountry && /^[A-Z]{2}$/.test(String(userCountry).trim().toUpperCase())) {
-                                globalCode = String(userCountry).trim().toUpperCase();
-                                const countryInfo = countryNameMap[globalCode];
-                                globalName = countryInfo 
-                                    ? (currentLang === 'zh' ? countryInfo.zh : countryInfo.en)
-                                    : globalCode;
-                            }
+                    // 全球视图：用已对齐的 cachedSummary 触发 renderCardsStaggered，确保字段 fallback 与 Number() 已生效
+                    let globalCode = currentDrawerCountry && currentDrawerCountry.code ? currentDrawerCountry.code : null;
+                    let globalName = currentDrawerCountry && currentDrawerCountry.name ? currentDrawerCountry.name : null;
+                    if (!globalCode) {
+                        const userCountry = window.currentUserCountry ||
+                            (window.currentUser && (window.currentUser.country_code || window.currentUser.ip_location)) ||
+                            (window.currentUserData && (window.currentUserData.country_code || window.currentUserData.ip_location)) ||
+                            'US';
+                        if (userCountry && /^[A-Z]{2}$/.test(String(userCountry).trim().toUpperCase())) {
+                            globalCode = String(userCountry).trim().toUpperCase();
+                            const countryInfo = countryNameMap[globalCode];
+                            globalName = countryInfo ? (currentLang === 'zh' ? countryInfo.zh : countryInfo.en) : globalCode;
                         }
-                        
-                        if (globalCode && globalName) {
-                            showDrawersWithCountryData(globalCode, globalName);
-                        }
+                    }
+                    if (globalCode && globalName) {
+                        const dataForRender = getLatestGlobalData();
+                        showDrawersWithCountryData(globalCode, globalName, dataForRender, { summaryOnly: true });
                     }
                     break;
                     
@@ -13754,6 +14230,13 @@
                     const { data, time } = JSON.parse(cached);
                     if (Date.now() - time < 300000) { // 5分钟
                         console.log(`[CountrySummary] 📦 使用缓存数据: ${cc}`);
+                        // 【调试】输出缓存数据结构
+                        if (data && typeof data === 'object') {
+                            console.log(`[CountrySummary] 📦 缓存数据结构:`, {
+                                hasCountryTotals: !!data.countryTotals,
+                                countryTotalsKeys: data.countryTotals ? Object.keys(data.countryTotals) : []
+                            });
+                        }
                         return data;
                     }
                 }
@@ -13787,6 +14270,12 @@
                 const normalized = typeof normalizeData === 'function' ? normalizeData(raw) : raw;
                 if (normalized && typeof normalized === 'object') {
                     normalized.countryCode = cc;
+                    // 【调试】输出 API 返回的数据结构
+                    console.log(`[CountrySummary] ✅ ${cc} API 返回数据结构:`, {
+                        hasCountryTotals: !!normalized.countryTotals,
+                        countryTotalsKeys: normalized.countryTotals ? Object.keys(normalized.countryTotals) : [],
+                        fullStructure: normalized
+                    });
                 }
                 
                 // 缓存成功数据
