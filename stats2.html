@@ -4740,6 +4740,22 @@
                 el.textContent = new Intl.NumberFormat('zh-CN').format(n);
             };
 
+            /** 国家视图下：一旦 countryTotals.ai > 0 则执行——移除 .animate-pulse，将 N/A 替换为实际数字。不影响 Global 视图。 */
+            function updateCountryRankUI(payload) {
+                if (!payload || !payload.countryTotals || Number(payload.countryTotals.ai) <= 0) return;
+                if (effectiveIsGlobal) return;
+                try {
+                    document.querySelectorAll('#right-drawer .animate-pulse, .right-drawer .animate-pulse').forEach(function(el) { if (el && el.classList) el.classList.remove('animate-pulse'); });
+                    var totalsBox = document.getElementById('rtCountryTotals');
+                    var ranksBox = document.getElementById('rtMyCountryRanks');
+                    if (totalsBox && totalsBox.closest && totalsBox.closest('.clinic-card')) totalsBox.closest('.clinic-card').classList.remove('animate-pulse');
+                    if (ranksBox && ranksBox.closest && ranksBox.closest('.clinic-card')) ranksBox.closest('.clinic-card').classList.remove('animate-pulse');
+                    var ct = payload.countryTotals;
+                    setValueOrNA(usersValEl, Number(ct.totalUsers ?? ct.total_users ?? 0) || null);
+                    setValueOrNA(analysisValEl, Number(ct.ai ?? ct.total_messages ?? 0) || null);
+                } catch (e) { /* ignore */ }
+            }
+
             // 雷达图（ECharts）
             if (!window.__countryRadarChart) window.__countryRadarChart = null;
             const disposeRadar = () => {
@@ -5483,9 +5499,11 @@
                         const DIM_KEYS = ['total_messages','total_chars','avg_message_length','jiafang_count','ketao_count','work_days'];
                         const gRanks = payload2.global_user_ranks || payload2.data?.global_user_ranks || {};
                         const cRanks = payload2.country_user_ranks || payload2.data?.country_user_ranks || ranks || {};
+                        const rankDimMap = { total_messages: 'rank_messages', total_chars: 'rank_chars', work_days: 'rank_days', jiafang_count: 'rank_jiafang', ketao_count: 'rank_ketao', avg_user_message_length: 'rank_avg_len' };
                         const rowRanks = (label, myVal, dimKey) => {
                             const dimKeyAlt = dimKey === 'avg_message_length' ? 'avg_user_message_length' : dimKey;
-                            const cr = ranks?.[dimKey] ?? cRanks[dimKey] ?? ranks?.[dimKeyAlt] ?? cRanks[dimKeyAlt] ?? (dimKey === 'total_chars' ? (ranks?.total_chars ?? cRanks?.total_chars) : null);
+                            const rankKey = rankDimMap[dimKey] || rankDimMap[dimKeyAlt];
+                            const cr = ranks?.[dimKey] ?? (rankKey ? ranks?.[rankKey] : null) ?? cRanks[dimKey] ?? ranks?.[dimKeyAlt] ?? (rankKey ? ranks?.[rankKey] : null) ?? cRanks[dimKeyAlt] ?? (dimKey === 'total_chars' ? (ranks?.total_chars ?? ranks?.rank_chars ?? cRanks?.total_chars) : null);
                             const gr = gRanks[dimKey] ?? gRanks[dimKeyAlt] ?? (dimKey === 'total_chars' ? gRanks?.total_chars : null);
                             let rankCountry = cr && ((cr.rank ?? cr._rank) != null) && Number.isFinite(Number(cr.rank ?? cr._rank)) ? Number(cr.rank ?? cr._rank) : null;
                             let totalCountry = cr && (cr.total != null) ? Number(cr.total) : 0;
@@ -5545,12 +5563,12 @@
                         // 【修复】使用 hasValidTotals 确保数据真正有效，而非仅判断对象存在
                         const totalsHtml = hasValidTotals
                             ? [
-                                rowTotals(getI18nText('countryTotals.messages') || 'Messages', totals.total_messages ?? 0, totalsRanks?.total_messages, 'total_messages'),
-                                rowTotals(getI18nText('countryTotals.totalChars') || 'Total Chars', totals.total_chars ?? 0, totalsRanks?.total_chars, 'total_chars'),
-                                rowTotals(getI18nText('countryTotals.avgLen') || 'Avg Len', Math.round(Number(totals.avg_message_length ?? totals['avg_user_message_length'] ?? 0) || 0), totalsRanks?.avg_user_message_length ?? totalsRanks?.avg_message_length, 'avg_message_length'),
-                                rowTotals(getI18nText('countryTotals.jiafang') || 'Jiafang', totals.jiafang_count ?? 0, totalsRanks?.jiafang_count, 'jiafang_count'),
-                                rowTotals(getI18nText('countryTotals.ketao') || 'Ketao', totals.ketao_count ?? 0, totalsRanks?.ketao_count, 'ketao_count'),
-                                rowTotals(getI18nText('countryTotals.workDays') || '上岗天数', totals.work_days ?? totals.work_days_sum ?? 0, totalsRanks?.work_days, 'work_days'),
+                                rowTotals(getI18nText('countryTotals.messages') || 'Messages', totals.total_messages ?? totals.ai ?? 0, totalsRanks?.total_messages, 'total_messages'),
+                                rowTotals(getI18nText('countryTotals.totalChars') || 'Total Chars', totals.total_chars ?? totals.say ?? 0, totalsRanks?.total_chars, 'total_chars'),
+                                rowTotals(getI18nText('countryTotals.avgLen') || 'Avg Len', Math.round(Number(totals.avg_message_length ?? totals['avg_user_message_length'] ?? totals.word ?? 0) || 0), totalsRanks?.avg_user_message_length ?? totalsRanks?.avg_message_length, 'avg_message_length'),
+                                rowTotals(getI18nText('countryTotals.jiafang') || 'Jiafang', totals.jiafang_count ?? totals.no ?? 0, totalsRanks?.jiafang_count, 'jiafang_count'),
+                                rowTotals(getI18nText('countryTotals.ketao') || 'Ketao', totals.ketao_count ?? totals.please ?? 0, totalsRanks?.ketao_count, 'ketao_count'),
+                                rowTotals(getI18nText('countryTotals.workDays') || '上岗天数', totals.work_days ?? totals.work_days_sum ?? totals.day ?? 0, totalsRanks?.work_days, 'work_days'),
                               ].join('')
                             : `<div class="text-zinc-500 text-xs">${currentLang === 'en' ? 'No data' : '暂无数据'}</div>`;
 
@@ -5568,6 +5586,10 @@
                         if (totalsBox) totalsBox.innerHTML = totalsHtml;
                         if (ranksBox) ranksBox.innerHTML = ranksHtml;
                         try { window.__countryTotalsCache.set(cacheKey2, { totalsHtml, ranksHtml, ts: Date.now() }); } catch { /* ignore */ }
+                        // 核心逻辑：一旦 countryTotals.ai > 0，立即执行 updateCountryRankUI 并移除 .animate-pulse，将 N/A 替换为实际数字（仅国家视图，不影响 Global）
+                        if (hasValidTotals && payload2.countryTotals && Number(payload2.countryTotals.ai) > 0) {
+                            if (typeof updateCountryRankUI === 'function') updateCountryRankUI(payload2);
+                        }
                     }
                 } catch (e) {
                     // 不阻断主面板；国家数据加载失败时显示 #-- / --
@@ -8355,12 +8377,25 @@
                 return 0;
             }
 
-            var ai = pick(['msg_count', 'ai', 'totalanalysis', 'total_messages', 'totalAnalysis']) || fromRoot(['totalanalysis', 'totalAnalysis', 'msg_count']) || 0;
-            var say = pick(['say', 'totalchars', 'total_chars', 'totalChars']) || fromRoot(['totalchars', 'totalChars']) || 0;
-            var day = pick(['day', 'totaldays', 'work_days', 'work_days_sum']) || fromRoot(['totaldays', 'totalDays']) || 127;
-            var no = pick(['no', 'totalno', 'jiafang_count', 'jiafang_count_sum']) || fromRoot(['totalno', 'totalNo']) || 306;
-            var please = pick(['please', 'totalplease', 'ketao_count', 'ketao_count_sum']) || fromRoot(['totalplease', 'totalPlease']) || 168;
-            var word = pick(['word', 'avgPerScan', 'avg_user_message_length']) || fromRoot(['avgPerScan', 'avg_per_scan']) || 238;
+            var isCountryView = (typeof currentViewState === 'string' && currentViewState === 'COUNTRY');
+            var forceCountryTotals = isCountryView && ct && (ct.say != null || ct.ai != null || ct.total_chars != null || ct.say === 0 || ct.ai === 0);
+            function pickOrRoot(keys, rootKeys, def) {
+                if (forceCountryTotals && keys.length) {
+                    for (var i = 0; i < keys.length; i++) {
+                        var v = ct[keys[i]] ?? root[keys[i]] ?? raw[keys[i]];
+                        if (v !== undefined && v !== null && !isNaN(Number(v))) return Number(v);
+                    }
+                }
+                var p = pick(keys);
+                if (p !== 0) return p;
+                return fromRoot(rootKeys || keys) ?? def ?? 0;
+            }
+            var ai = pickOrRoot(['ai', 'total_messages', 'msg_count'], ['totalanalysis', 'totalAnalysis', 'msg_count'], 0);
+            var say = pickOrRoot(['say', 'total_chars', 'totalchars'], ['totalchars', 'totalChars'], 0);
+            var day = pickOrRoot(['day', 'work_days', 'totaldays'], ['totaldays', 'totalDays'], 127);
+            var no = pickOrRoot(['no', 'jiafang_count', 'totalno'], ['totalno', 'totalNo'], 306);
+            var please = pickOrRoot(['please', 'ketao_count', 'totalplease'], ['totalplease', 'totalPlease'], 168);
+            var word = pickOrRoot(['word', 'avg_user_message_length'], ['avgPerScan', 'avg_per_scan'], 238);
 
             var totalCountries = Number(root.total_countries ?? root._meta?.totalCountries ?? root._meta?.total_countries ?? rawData?.total_countries ?? rawData?._meta?.totalCountries ?? 0) || 0;
             var ranksRaw = root.countryTotalsRanks || rawData?.countryTotalsRanks || {};
@@ -8383,20 +8418,38 @@
 
             var out = {
                 ...(typeof rawData === 'object' && rawData !== null ? rawData : {}),
-                countryTotals: {
-                    ai: ai,
-                    say: say,
-                    total_chars: say,
-                    day: day,
-                    no: no,
-                    please: please,
-                    word: word,
-                    total_messages: ai,
-                    work_days: day,
-                    jiafang_count: no,
-                    ketao_count: please,
-                    avg_user_message_length: word
-                },
+                countryTotals: (function() {
+                    if (isCountryView && ct && typeof ct === 'object' && (ct.ai != null || ct.say != null || ct.total_chars != null)) {
+                        return {
+                            ai: Number(ct.ai ?? ct.total_messages ?? 0) || 0,
+                            say: Number(ct.say ?? ct.total_chars ?? 0) || 0,
+                            day: Number(ct.day ?? ct.work_days ?? ct.total_work_days ?? 0) || 0,
+                            no: Number(ct.no ?? ct.jiafang_count ?? ct.total_jiafang ?? 0) || 0,
+                            please: Number(ct.please ?? ct.ketao_count ?? ct.total_ketao ?? 0) || 0,
+                            word: Number(ct.word ?? ct.avg_user_message_length ?? 0) || 0,
+                            total_chars: Number(ct.say ?? ct.total_chars ?? 0) || 0,
+                            total_messages: Number(ct.ai ?? ct.total_messages ?? 0) || 0,
+                            work_days: Number(ct.day ?? ct.work_days ?? 0) || 0,
+                            jiafang_count: Number(ct.no ?? ct.jiafang_count ?? 0) || 0,
+                            ketao_count: Number(ct.please ?? ct.ketao_count ?? 0) || 0,
+                            avg_user_message_length: Number(ct.word ?? ct.avg_user_message_length ?? 0) || 0
+                        };
+                    }
+                    return {
+                        ai: ai,
+                        say: say,
+                        total_chars: say,
+                        day: day,
+                        no: no,
+                        please: please,
+                        word: word,
+                        total_messages: ai,
+                        work_days: day,
+                        jiafang_count: no,
+                        ketao_count: please,
+                        avg_user_message_length: word
+                    };
+                })(),
                 countryTotalsRanks: countryTotalsRanksNorm,
                 total_countries: totalCountries || (rawData && rawData.total_countries) || 1,
                 _meta: { ...(root._meta || rawData?._meta || {}), totalCountries: totalCountries || 1 }

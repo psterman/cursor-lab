@@ -5748,39 +5748,27 @@ app.get('/api/country-summary', async (c) => {
     }
 
     // 【鲁棒性参数】同时兼容 cc 和 country 参数，强制大写
-    // 1. 优先从查询参数获取
     const ccRaw = (c.req.query('cc') || c.req.query('country') || '').trim();
-    // 2. 如果参数为空，尝试从 Cloudflare 环境获取国家代码
+    const hasExplicitCc = ccRaw.length > 0;
     let countryCodeRaw = ccRaw;
     if (!countryCodeRaw) {
       try {
         const rawReq: any = c.req?.raw;
         const cfCountry = String(rawReq?.cf?.country || '').trim().toUpperCase();
-        if (cfCountry && /^[A-Z]{2}$/.test(cfCountry)) {
-          countryCodeRaw = cfCountry;
-        }
-      } catch (e) {
-        // 忽略错误，继续使用默认值
-      }
+        if (cfCountry && /^[A-Z]{2}$/.test(cfCountry)) countryCodeRaw = cfCountry;
+      } catch (e) { /* ignore */ }
     }
-    // 3. 如果仍然为空，使用默认值 US
-    if (!countryCodeRaw) {
-      countryCodeRaw = 'US';
-    }
-    // 4. 强制大写并验证格式
+    if (!countryCodeRaw) countryCodeRaw = 'US';
     const countryCode = String(countryCodeRaw).toUpperCase();
     if (!/^[A-Z]{2}$/.test(countryCode)) {
       return c.json({ success: false, error: 'country/cc 必须是 2 位国家代码（如 US、CN）' }, 400);
     }
 
-    // 兼容参数（不参与筛选）：已切换到 v_unified_analysis_v2，统一使用 country_code.eq.ISO2
     const countryNameRaw = (c.req.query('country_name') || c.req.query('countryName') || '').trim();
     const fingerprint = (c.req.query('fingerprint') || c.req.query('fp') || '').trim();
     const userId = (c.req.query('user_id') || c.req.query('userId') || c.req.query('id') || '').trim();
-    
-    // ✅ 简化筛选逻辑：只用 ISO2 country_code
-    const cc = countryCode; // 使用已标准化的 countryCode
-    const country = cc; // 保持向后兼容
+    const cc = countryCode;
+    const country = cc;
 
     const n = (v: any) => {
       const x = Number(v ?? 0);
@@ -5850,12 +5838,15 @@ app.get('/api/country-summary', async (c) => {
     const forceRefresh = debugFlag === '1' || debugFlag.toLowerCase() === 'true' || refresh;
     const kvCountry = await getGlobalCountryStatsFromKV(env);
     let row: any = null;
+    let countryRow: any = null;
     let countryTotalUsers = 0;
     let totalCountries = 0;
     let totals: any;
     let countryTotalsRanks: any;
 
+    // SUM/RANK 仅在请求带 cc 或 country 参数时生效，不修改 Global 视图的 fetch 逻辑
     let viewCountryRow: any = null;
+    if (hasExplicitCc) {
     try {
       const viewUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_country_stats`);
       viewUrl.searchParams.set('select', '*');
@@ -5928,7 +5919,6 @@ app.get('/api/country-summary', async (c) => {
     // 【异步聚合 + KV 缓存】国家累积：无视图时从 KV 读取，KV 无数据时降级调用 RPC
     // ----------------------------
     let shouldSkipKV = forceRefresh;
-    let countryRow: any = null;
     
     if (!totals && !shouldSkipKV && kvCountry?.country_level?.length) {
       countryRow = kvCountry.country_level.find((it: any) => String(it?.country_code || '').trim().toUpperCase() === cc);
@@ -6114,6 +6104,7 @@ app.get('/api/country-summary', async (c) => {
         console.warn('[Worker] 直接查询视图降级失败:', directErr);
       }
     }
+    }
 
     // 最终降级：RPC 也失败时返回预设空值，排名字段仍返回 1/1 避免 null
     if (!totals) {
@@ -6194,8 +6185,13 @@ app.get('/api/country-summary', async (c) => {
             const fetchMe = async (selectCols: string) => {
               const meUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
               meUrl.searchParams.set('select', selectCols);
-              if (userId) meUrl.searchParams.set('id', `eq.${encodeURIComponent(userId)}`);
-              else meUrl.searchParams.set('fingerprint', `eq.${encodeURIComponent(fingerprint)}`);
+              if (userId && fingerprint) {
+                meUrl.searchParams.set('or', `(id.eq.${encodeURIComponent(userId)},fingerprint.eq.${encodeURIComponent(fingerprint)})`);
+              } else if (userId) {
+                meUrl.searchParams.set('id', `eq.${encodeURIComponent(userId)}`);
+              } else {
+                meUrl.searchParams.set('fingerprint', `eq.${encodeURIComponent(fingerprint)}`);
+              }
               meUrl.searchParams.set('limit', '1');
               return await fetchSupabaseJson<any[]>(env, meUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS);
             };
@@ -6233,13 +6229,35 @@ app.get('/api/country-summary', async (c) => {
             countryUserRanks = {};
             for (const k of DIMS) {
               const v = ranks6d.ranks[k];
-              if (v) {
-                const rc = v.rank_country > 0 && v.total_country > 0 ? { rank: v.rank_country, total: v.total_country, percentile: Math.max(0, Math.min(100, (1 - (v.rank_country - 1) / v.total_country) * 100)) } : null;
-                myRanks[k] = rc;
-                globalUserRanks[k] = { rank: v.rank_global || 0, total: v.total_global || 0 };
-                countryUserRanks[k] = { rank: v.rank_country || 0, total: v.total_country || 0 };
+              if (v && typeof v === 'object') {
+                // 放宽条件：只要有 total_country 就认为是有效数据
+                const rankCountry = Number(v.rank_country) || null;
+                const totalCountry = Number(v.total_country) || 0;
+                const rankGlobal = Number(v.rank_global) || null;
+                const totalGlobal = Number(v.total_global) || 0;
+                
+                // 国家排名：只要 total > 0 就填充
+                if (totalCountry > 0 && rankCountry != null && rankCountry > 0) {
+                  myRanks[k] = { 
+                    rank: rankCountry, 
+                    total: totalCountry, 
+                    percentile: Math.max(0, Math.min(100, (1 - (rankCountry - 1) / totalCountry) * 100)) 
+                  };
+                  countryUserRanks[k] = { rank: rankCountry, total: totalCountry };
+                } else {
+                  myRanks[k] = null;
+                  countryUserRanks[k] = { rank: 0, total: totalCountry || 0 };
+                }
+                
+                // 全球排名
+                if (totalGlobal > 0 && rankGlobal != null && rankGlobal > 0) {
+                  globalUserRanks[k] = { rank: rankGlobal, total: totalGlobal };
+                } else {
+                  globalUserRanks[k] = { rank: 0, total: totalGlobal || 0 };
+                }
               }
             }
+            console.log('[Worker] ranks6d 分支完成，myRanks:', JSON.stringify(myRanks));
           } else {
             const totalInCountry = rankRow ? rankRow.total_in_country : countryTotalUsers;
             const rankInCountry = rankRow ? rankRow.rank_in_country : null;
@@ -6257,22 +6275,42 @@ app.get('/api/country-summary', async (c) => {
               countryUserRanks[k] = one ? { rank: one.rank, total: one.total } : { rank: 0, total: 0 };
             }
           }
+          console.log('[Worker] rankRow 分支完成，myRanks:', JSON.stringify(myRanks));
         }
       } catch {
         // ignore
       }
     }
 
-    // 【修复】myCountryRanks：优先从 v_user_ranks_in_country 按 fingerprint+country_code 取个人在该国排名
-    const canIdentifyForCountry = !!(userId || fingerprint) && /^[A-Z]{2}$/.test(cc);
+    // 【修复】myCountryRanks：请求带 cc 且存在 fingerprint 或 user_id 时，从 v_user_ranks_in_country 取排名
+    const canIdentifyForCountry = hasExplicitCc && !!(userId || fingerprint) && /^[A-Z]{2}$/.test(cc);
+    let resolvedFp = fingerprint;
+    if (canIdentifyForCountry && !resolvedFp && userId) {
+      try {
+        const meUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
+        meUrl.searchParams.set('select', 'fingerprint');
+        meUrl.searchParams.set('id', `eq.${encodeURIComponent(userId)}`);
+        meUrl.searchParams.set('limit', '1');
+        const meRows = await fetchSupabaseJson<any[]>(env, meUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
+        const me = Array.isArray(meRows) && meRows.length > 0 ? meRows[0] : null;
+        if (me?.fingerprint) resolvedFp = String(me.fingerprint).trim();
+      } catch {
+        // ignore
+      }
+    }
     if (canIdentifyForCountry) {
       let viewRankRow: any = null;
       try {
         const rankViewUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_user_ranks_in_country`);
         rankViewUrl.searchParams.set('select', '*');
         rankViewUrl.searchParams.set('country_code', `eq.${cc}`);
-        if (fingerprint) rankViewUrl.searchParams.set('fingerprint', `eq.${encodeURIComponent(fingerprint)}`);
-        else if (userId) rankViewUrl.searchParams.set('user_id', `eq.${encodeURIComponent(userId)}`);
+        if (resolvedFp && userId) {
+          rankViewUrl.searchParams.set('or', `(fingerprint.eq.${encodeURIComponent(resolvedFp)},id.eq.${encodeURIComponent(userId)},user_id.eq.${encodeURIComponent(userId)})`);
+        } else if (resolvedFp) {
+          rankViewUrl.searchParams.set('fingerprint', `eq.${encodeURIComponent(resolvedFp)}`);
+        } else if (userId) {
+          rankViewUrl.searchParams.set('or', `(id.eq.${encodeURIComponent(userId)},user_id.eq.${encodeURIComponent(userId)})`);
+        }
         rankViewUrl.searchParams.set('limit', '1');
         const rankRows = await fetchSupabaseJson<any[]>(
           env,
@@ -6305,20 +6343,28 @@ app.get('/api/country-summary', async (c) => {
           ketao_count: 'rank_ketao',
           avg_user_message_length: 'rank_avg_len',
         };
-        myRanks = {} as any;
-        countryUserRanks = {};
+        // 创建临时变量，避免中途失败导致主数据被清空
+        const nextMyRanks = {} as any;
+        const nextCountryUserRanks = {} as any;
         for (const k of DIMS) {
           const col = viewRankMap[k] ?? k;
           const rk = toRank(viewRankRow[col] ?? viewRankRow[k]);
           if (rk) {
-            myRanks[k] = rk;
-            countryUserRanks[k] = { rank: rk.rank, total: rk.total };
+            nextMyRanks[k] = rk;
+            nextCountryUserRanks[k] = { rank: rk.rank, total: rk.total };
           } else {
             const fallback = totalInCountry <= 1 ? { rank: 1, total: 1, percentile: 100 } : null;
-            myRanks[k] = fallback;
-            countryUserRanks[k] = fallback ? { rank: 1, total: 1 } : { rank: 0, total: 0 };
+            nextMyRanks[k] = fallback;
+            nextCountryUserRanks[k] = fallback ? { rank: 1, total: 1 } : { rank: 0, total: 0 };
           }
         }
+        // 排名注入：将 v_user_ranks_in_country 的 rank_messages 赋值给 myCountryRanks.ai（前端 #—/— 用）
+        nextMyRanks.ai = nextMyRanks.total_messages ?? toRank(viewRankRow.rank_messages) ?? null;
+        
+        // 只有确认找到数据才覆盖
+        myRanks = nextMyRanks;
+        countryUserRanks = nextCountryUserRanks;
+        console.log('[Worker] v_user_ranks_in_country 分支完成，myRanks:', JSON.stringify(myRanks));
       } else {
       try {
         const countryUsersUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
@@ -6379,6 +6425,7 @@ app.get('/api/country-summary', async (c) => {
           }
           myRanks = viewedMyRanks;
           countryUserRanks = viewedRanks;
+          console.log('[Worker] 手动计算分支完成，myRanks:', JSON.stringify(myRanks));
         }
       } catch (e: any) {
         console.warn('[Worker] myCountryRanks 按查看国家计算失败:', e?.message);
@@ -6647,9 +6694,8 @@ app.get('/api/country-summary', async (c) => {
 
     // 【预先计算 countryTotals】以便在 locationRank 中使用
     const computedCountryTotals = (() => {
-        // 【第二步：修复对象赋值映射（核心）】强制使用 Number 并匹配显式别名
-        // 优先级：row 对象（直接查询/RPC） > totals 对象（KV缓存） > country_level（KV中的国家数据） > 计算值
-        let data = row || totals || {};
+        // 当数据来自 v_country_stats 时优先用 totals（列名已对齐），避免 row 为视图原始行导致 total_chars 等读不到
+        let data = (totals?.source === 'V_COUNTRY_STATS' && totals) ? totals : (row || totals || {});
         let finalCountryTotalUsers = countryTotalUsers;
         
         // 【兜底修复】如果 row 和 totals 都没有数据，尝试从 country_level 中读取
@@ -6751,15 +6797,56 @@ app.get('/api/country-summary', async (c) => {
         };
     })();
 
-    // msg_count = 调戏 AI 总次数；根节点 totalchars/totaldays 等必须与 countryTotals 一致，且不为 0 当有数据时
+    // msg_count = 调戏 AI 总次数；根节点 totalchars/totaldays 等必须与 countryTotals 一致，有视图数据时从 totals 取避免为 0
     const msg_count = Number(computedCountryTotals.total_messages ?? totalMessages ?? 0) || 0;
     const user_count = Number(countryTotalUsers ?? 0) || 0;
     const totalanalysis = msg_count;
-    const totalchars = Number(computedCountryTotals.total_chars ?? totalChars ?? 0) || 0;
-    const totaldays = Number(computedCountryTotals.work_days ?? 0) || 0;
-    const totalno = Number(computedCountryTotals.jiafang_count ?? 0) || 0;
-    const totalplease = Number(computedCountryTotals.ketao_count ?? 0) || 0;
-    const countryTotalsForResponse = { ...computedCountryTotals, ai: msg_count };
+    const totalchars = (totals?.source === 'V_COUNTRY_STATS' && totals)
+      ? Number(totals.total_chars_sum ?? 0) || 0
+      : (Number(computedCountryTotals.total_chars ?? totalChars ?? 0) || 0);
+    const totaldays = (totals?.source === 'V_COUNTRY_STATS' && totals)
+      ? Number(totals.work_days_sum ?? 0) || 0
+      : (Number(computedCountryTotals.work_days ?? 0) || 0);
+    const totalno = (totals?.source === 'V_COUNTRY_STATS' && totals)
+      ? Number(totals.jiafang_count_sum ?? 0) || 0
+      : (Number(computedCountryTotals.jiafang_count ?? 0) || 0);
+    const totalplease = (totals?.source === 'V_COUNTRY_STATS' && totals)
+      ? Number(totals.ketao_count_sum ?? 0) || 0
+      : (Number(computedCountryTotals.ketao_count ?? 0) || 0);
+    // 从 v_country_stats 获取后必须显式映射：total_chars→say, total_work_days→day, total_jiafang→no, total_ketao→please
+    const countryTotalsForResponse = (totals?.source === 'V_COUNTRY_STATS' && totals)
+      ? {
+          country: cc,
+          totalUsers: Number(totals.totalUsers ?? countryTotalUsers) || 0,
+          total_messages: Number(totals.total_messages_sum ?? 0) || 0,
+          total_chars: Number(totals.total_chars_sum ?? 0) || 0,
+          work_days: Number(totals.work_days_sum ?? 0) || 0,
+          jiafang_count: Number(totals.jiafang_count_sum ?? 0) || 0,
+          ketao_count: Number(totals.ketao_count_sum ?? 0) || 0,
+          avg_user_message_length: Number(totals.avg_user_message_length_sum ?? 0) || 0,
+          ai: Number(totals.total_messages_sum ?? 0) || 0,
+          say: Number(totals.total_chars_sum ?? 0) || 0,
+          day: Number(totals.work_days_sum ?? 0) || 0,
+          no: Number(totals.jiafang_count_sum ?? 0) || 0,
+          please: Number(totals.ketao_count_sum ?? 0) || 0,
+          word: totals.total_messages_sum > 0 ? Number(((totals.total_chars_sum ?? 0) / (totals.total_messages_sum ?? 1)).toFixed(1)) : 0,
+        }
+      : {
+          country: computedCountryTotals.country,
+          totalUsers: computedCountryTotals.totalUsers,
+          total_messages: msg_count,
+          total_chars: totalchars,
+          work_days: totaldays,
+          jiafang_count: totalno,
+          ketao_count: totalplease,
+          avg_user_message_length: computedCountryTotals.avg_user_message_length,
+          ai: msg_count,
+          say: totalchars,
+          day: totaldays,
+          no: totalno,
+          please: totalplease,
+          word: computedCountryTotals.word,
+        };
 
     const out: any = {
       success: true,
@@ -6786,7 +6873,29 @@ app.get('/api/country-summary', async (c) => {
       countryTotalsRanks,
       myCountry: myOut,
       myCountryValues: myValues,
-      myCountryRanks: myRanks,
+      myCountryRanks: (() => {
+        // 检查 myRanks 是否真正包含有效数据（至少一个维度有 rank 和 total）
+        console.log('[Worker] 最终 myRanks 检查:', JSON.stringify(myRanks));
+        const hasValidRanks = myRanks && Object.keys(myRanks).some(k => {
+          const v = myRanks[k];
+          return v && typeof v === 'object' && v.rank != null && v.total != null && v.total > 0;
+        });
+        
+        console.log('[Worker] hasValidRanks:', hasValidRanks);
+        
+        if (hasValidRanks) {
+          const result = { ...myRanks, ai: myRanks.ai ?? myRanks.total_messages ?? null };
+          console.log('[Worker] 返回有效排名:', JSON.stringify(result));
+          return result;
+        }
+        
+        // 如果没有有效排名数据，返回 null 而不是空对象，让前端知道数据不可用
+        const dims = ['total_messages', 'total_chars', 'avg_user_message_length', 'jiafang_count', 'ketao_count', 'work_days'] as const;
+        const empty: Record<string, null> = { ai: null };
+        dims.forEach((k) => { empty[k] = null; });
+        console.log('[Worker] 返回空排名:', JSON.stringify(empty));
+        return empty;
+      })(),
       global_user_ranks: globalUserRanks ?? undefined,
       country_user_ranks: countryUserRanks ?? undefined,
       _meta: {
