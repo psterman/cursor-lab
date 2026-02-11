@@ -8301,9 +8301,9 @@
          * @returns {object} 用于全球/国家视图渲染的根数据
          */
         function getLatestGlobalData() {
-            return (window.lastData && Number(window.lastData.totalAnalysis) > 100)
-                ? window.lastData
-                : (window.cachedSummary || window.lastData || {});
+            // 有 lastData 即用（不再要求 totalAnalysis>100），保证 Global 视图有数据可展示
+            if (window.lastData && typeof window.lastData === 'object') return window.lastData;
+            return (window.cachedSummary || {});
         }
 
         /**
@@ -8435,6 +8435,10 @@
                             avg_user_message_length: Number(ct.word ?? ct.avg_user_message_length ?? 0) || 0
                         };
                     }
+                    var wordVal = word;
+                    if ((wordVal === undefined || wordVal === 0) && ct && Number(ct.ai ?? ct.total_messages) > 0 && (ct.say != null || ct.total_chars != null)) {
+                        wordVal = Number((Number(ct.say ?? ct.total_chars ?? 0) / Number(ct.ai ?? ct.total_messages ?? 1)).toFixed(1)) || 0;
+                    }
                     return {
                         ai: ai,
                         say: say,
@@ -8442,12 +8446,14 @@
                         day: day,
                         no: no,
                         please: please,
-                        word: word,
+                        word: wordVal ?? word,
                         total_messages: ai,
                         work_days: day,
                         jiafang_count: no,
                         ketao_count: please,
-                        avg_user_message_length: word
+                        avg_user_message_length: wordVal ?? word,
+                        totalUsers: ct?.totalUsers ?? ct?.total_users ?? root?.totalUsers ?? root?.total_users ?? undefined,
+                        total_users: ct?.total_users ?? ct?.totalUsers ?? root?.total_users ?? root?.totalUsers ?? undefined
                     };
                 })(),
                 countryTotalsRanks: countryTotalsRanksNorm,
@@ -8706,11 +8712,10 @@
                     return null;
                 }
             })();
-            // 【修复】global 视图应使用当前选择国家的数据，而不是全球数据
-            // 如果是在 global 视图且没有 overrideRightData，优先使用国家摘要缓存
+            // 【修复】有传入数据时一律用本次传入的数据，不采用 window.rightDrawerData，避免切换 Ranking 后 Global 视图错用被污染的数据
             let rightDrawerData;
             if (overrideRightData != null) {
-                rightDrawerData = window.rightDrawerData || normalizeStats(overrideRightData);
+                rightDrawerData = normalizeStats(overrideRightData);
                 // 【修复】确保 overrideRightData 中的 countryTotals 被正确传递（summary 数据可能直接包含 countryTotals）
                 // API 返回的数据结构：{ countryTotals: {...}, ... }，countryTotals 在顶层
                 if (!rightDrawerData.countryTotals) {
@@ -9751,9 +9756,9 @@
                 const isGlobalView = typeof currentViewState === 'string' && currentViewState === 'GLOBAL';
                 const countryTotals = data.countryTotals || {};
                 
-                // 已诊断开发者：global 视图使用国家总用户数，否则使用全局总用户数
-                const totalUsers = isGlobalView && countryTotals.totalUsers !== undefined && countryTotals.totalUsers !== null
-                    ? Number(countryTotals.totalUsers)
+                // 已诊断开发者：global 视图使用该国总用户数，否则使用全局总用户数
+                const totalUsers = isGlobalView && (countryTotals.totalUsers !== undefined && countryTotals.totalUsers !== null || countryTotals.total_users !== undefined && countryTotals.total_users !== null)
+                    ? Number(countryTotals.totalUsers ?? countryTotals.total_users)
                     : (data.totalUsers !== undefined && data.totalUsers !== null ? Number(data.totalUsers) : undefined);
                 const totalUsersCard = document.createElement('div');
                 totalUsersCard.className = 'drawer-item stat-card';
@@ -9773,7 +9778,7 @@
                 totalAnalysisCard.className = 'drawer-item stat-card';
                 const isGlobalViewForLabel = typeof currentViewState === 'string' && currentViewState === 'GLOBAL';
                 const analysisLabel = isGlobalViewForLabel 
-                    ? (currentLang === 'en' ? 'Country Scans' : '国家扫描次数')
+                    ? (currentLang === 'en' ? 'Country AI Conversations' : '该国用户与AI对话总次数')
                     : ((i18n[currentLang] && i18n[currentLang]['total-analysis']) ? i18n[currentLang]['total-analysis'] : (currentLang === 'en' ? 'Total Scans' : '扫描次数'));
                 totalAnalysisCard.innerHTML = `
                     <div class="drawer-item-label">${analysisLabel}</div>
@@ -9781,6 +9786,14 @@
                     <div class="drawer-item-desc">TOTAL_SCAN_COUNT</div>
                 `;
                 rightCards.push(totalAnalysisCard);
+
+                // 【修复】Global 视图时同步更新左侧抽屉头部「已诊断开发者」「诊断次数」，避免一直显示 N/A
+                try {
+                    const rtDiagnosed = document.getElementById('rtDiagnosedTotal');
+                    const rtScan = document.getElementById('rtScanTotal');
+                    if (rtDiagnosed) rtDiagnosed.textContent = totalUsers !== undefined ? nfDrawer.format(Math.floor(Number(totalUsers))) : 'N/A';
+                    if (rtScan) rtScan.textContent = totalAnalysis !== undefined ? nfDrawer.format(Math.floor(Number(totalAnalysis))) : 'N/A';
+                } catch (e) { /* ignore */ }
 
                 // 【修复】累计吐槽字数：COUNTRY 视图使用该国全量 total_chars（countryTotals.say / total_chars）
                 const totalChars = (countryTotals && (countryTotals.total_chars !== undefined && countryTotals.total_chars !== null || countryTotals.say !== undefined && countryTotals.say !== null))
@@ -9795,20 +9808,23 @@
                 `;
                 rightCards.push(totalCharsCard);
 
-                // 【修复】人均平均篇幅和单次平均篇幅：在 global 视图时使用国家累加值计算
+                // 【修复】Global 视图=该国口径：人均=该国 total_chars/total_users（全国人均每次字符数），单次=该国 total_chars/total_messages（每人单次对话字符数）
                 let avgPerUser = data.avgPerUser !== undefined && data.avgPerUser !== null ? Number(data.avgPerUser) : undefined;
                 if ((avgPerUser === undefined || avgPerUser === 0) && totalChars !== undefined && totalUsers !== undefined && totalUsers > 0) {
                     avgPerUser = Number(totalChars) / Number(totalUsers);
                 }
-                // 在 global 视图时，如果 countryTotals 有 avg_user_message_length，优先使用
-                if (isGlobalView && countryTotals.avg_user_message_length !== undefined && countryTotals.avg_user_message_length !== null) {
-                    avgPerUser = Number(countryTotals.avg_user_message_length);
+                if (isGlobalView && totalChars !== undefined && totalUsers !== undefined && totalUsers > 0) {
+                    avgPerUser = Number(totalChars) / Number(totalUsers);
                 }
-                
                 let avgPerScan = data.avgPerScan !== undefined && data.avgPerScan !== null ? Number(data.avgPerScan) : undefined;
-                // 使用计算后的 totalAnalysis（在 global 视图时是 total_messages）
                 if ((avgPerScan === undefined || avgPerScan === 0) && totalChars !== undefined && totalAnalysis !== undefined && totalAnalysis !== null && totalAnalysis > 0) {
                     avgPerScan = Number(totalChars) / Number(totalAnalysis);
+                }
+                if (isGlobalView && totalChars !== undefined && totalAnalysis !== undefined && totalAnalysis > 0) {
+                    avgPerScan = Number(totalChars) / Number(totalAnalysis);
+                }
+                if (isGlobalView && (countryTotals.word != null && Number(countryTotals.word) > 0)) {
+                    avgPerScan = Number(countryTotals.word);
                 }
                 const avgCard = document.createElement('div');
                 avgCard.className = 'drawer-item stat-card';
@@ -9817,11 +9833,11 @@
                     <div class="grid grid-cols-2 gap-3">
                         <div>
                             <div class="drawer-item-value text-xl">${avgPerUser !== undefined ? Number(avgPerUser).toFixed(1) : 'N/A'}</div>
-                            <div class="drawer-item-desc text-[8px]">${escapeHtml(currentLang === 'en' ? 'Per User' : '人均平均篇幅')}</div>
+                            <div class="drawer-item-desc text-[8px]">${escapeHtml(isGlobalView ? (currentLang === 'en' ? 'Per user (chars)' : '全国人均每次字符数') : (currentLang === 'en' ? 'Per User' : '人均平均篇幅'))}</div>
                         </div>
                         <div>
                             <div class="drawer-item-value text-xl">${avgPerScan !== undefined ? Number(avgPerScan).toFixed(1) : 'N/A'}</div>
-                            <div class="drawer-item-desc text-[8px]">${escapeHtml(currentLang === 'en' ? 'Per Scan' : '单次平均篇幅')}</div>
+                            <div class="drawer-item-desc text-[8px]">${escapeHtml(isGlobalView ? (currentLang === 'en' ? 'Per message (chars)' : '每人单次对话字符数') : (currentLang === 'en' ? 'Per Scan' : '单次平均篇幅'))}</div>
                         </div>
                     </div>
                 `;
@@ -10205,8 +10221,20 @@
                         }
                     }
                     if (globalCode && globalName) {
-                        const dataForRender = getLatestGlobalData();
-                        showDrawersWithCountryData(globalCode, globalName, dataForRender, { summaryOnly: true });
+                        // Global 视图应显示「该国」口径：调戏AI次数=该国用户与AI对话总次数，平均长度=该国人均每次对话字符数，平均篇幅=该国人均/单次字符数
+                        if (typeof fetchCountrySummaryV3 === 'function') {
+                            fetchCountrySummaryV3(globalCode).then(function (summary) {
+                                if (summary && (summary.countryTotals || (summary.data && summary.data.countryTotals))) {
+                                    showDrawersWithCountryData(globalCode, globalName, summary, { summaryOnly: true });
+                                } else {
+                                    showDrawersWithCountryData(globalCode, globalName, getLatestGlobalData(), { summaryOnly: true });
+                                }
+                            }).catch(function () {
+                                showDrawersWithCountryData(globalCode, globalName, getLatestGlobalData(), { summaryOnly: true });
+                            });
+                        } else {
+                            showDrawersWithCountryData(globalCode, globalName, getLatestGlobalData(), { summaryOnly: true });
+                        }
                     }
                     break;
                     
@@ -10510,11 +10538,11 @@
             const rows = leaders.map(leader => {
                 const user = leader.user || {};
                 const fingerprint = user.fingerprint || '';
-                const github = user.github_username || '';
-                const username = user.user_name || '';
-                const display = github ? `@${github}` : (username ? `@${username}` : `user_${fingerprint.slice(0, 6)}`);
-                const avatar = github 
-                    ? `https://github.com/${encodeURIComponent(github)}.png?size=64`
+                // 头像与用户名同源：优先 github_username（GitHub 展示），否则 user_name，避免第一名头像和名字弄混
+                const canonicalName = (user.github_username && String(user.github_username).trim()) || (user.user_name && String(user.user_name).trim()) || '';
+                const display = canonicalName ? `@${canonicalName}` : `user_${(fingerprint || '').slice(0, 6)}`;
+                const avatar = (user.user_identity === 'github' && canonicalName)
+                    ? `https://github.com/${encodeURIComponent(canonicalName)}.png?size=64`
                     : DEFAULT_AVATAR;
 
                 const value = ladderType.key === 'avg_user_message_length' 
@@ -10617,9 +10645,9 @@
                 // 并行获取所有维度的排行榜（增强容错：单个维度失败不影响其他维度）
                 const promises = dimensions.map(async (dim) => {
                     try {
-                        // 从 v_unified_analysis_v2 表查询
-                        // 基础字段：id, fingerprint, user_name, user_identity, country_code, vibe_index_str
-                        let selectFields = 'id, fingerprint, user_name, user_identity, country_code, vibe_index_str';
+                        // 从 v_unified_analysis_v2 表查询（全球榜单）
+                        // 基础字段含 manual_location：展示「用户最后选择的国籍」
+                        let selectFields = 'id, fingerprint, user_name, user_identity, country_code, manual_location, vibe_index_str';
                         
                         // 对于 avg_user_message_length，需要计算，所以需要 total_chars 和 total_messages
                         if (dim.key === 'avg_user_message_length') {
@@ -10675,20 +10703,21 @@
                                 const user_name = (item.user_name && String(item.user_name).trim()) || '';
                                 const user_identity = (item.user_identity && String(item.user_identity).trim()) || '';
                                 const fingerprint = (item.fingerprint && String(item.fingerprint)) || '';
-                                // country_code: 如果为 null，显示 "UN"
+                                // 榜单国籍：优先用户最后选择的国籍（manual_location，仅 ISO2 两字母时采用），否则 country_code，全球榜单统一
+                                const manual_loc = (item.manual_location && String(item.manual_location).trim()) || '';
                                 const country_code_raw = item.country_code;
-                                const country_code = (country_code_raw && String(country_code_raw).trim()) || (country_code_raw === null ? 'UN' : '');
+                                const country_code_fallback = (country_code_raw && String(country_code_raw).trim()) || (country_code_raw === null ? 'UN' : '');
+                                const country_code = (manual_loc.length === 2 && /^[A-Za-z]{2}$/.test(manual_loc)) ? manual_loc.toUpperCase() : country_code_fallback;
                                 // vibe_index_str 作为称号/维度显示
                                 const vibe_index_str = (item.vibe_index_str && String(item.vibe_index_str).trim()) || '';
 
-                                // 用户名显示逻辑：使用 user_name（不是 username）
-                                const username = user_name || `user_${fingerprint.slice(0, 6)}`;
+                                // 头像与用户名同源：同一行只用同一 identity，避免第一名头像和名字弄混
+                                const displayName = user_name || `user_${fingerprint.slice(0, 6)}`;
                                 const display = user_name ? `@${user_name}` : `user_${fingerprint.slice(0, 6)}`;
 
-                                // 用户头像逻辑：检查 user_identity，如果为 'github'，则使用 GitHub 头像；否则使用默认头像
                                 let avatar = DEFAULT_AVATAR;
-                                if (user_identity === 'github' && user_name) {
-                                    avatar = `https://github.com/${encodeURIComponent(user_name)}.png?size=64`;
+                                if (user_identity === 'github' && displayName) {
+                                    avatar = `https://github.com/${encodeURIComponent(displayName)}.png?size=64`;
                                 }
 
                                 // 计算 avg_user_message_length
@@ -10703,7 +10732,6 @@
                                     value = (fieldValue !== null && fieldValue !== undefined) ? Number(fieldValue) : 0;
                                 }
 
-                                // 获取国家代码：使用 country_code 字段，如果为 null，显示 "UN"
                                 const countryCode = country_code || 'UN';
                                 
                                 // 获取国旗 Emoji（使用 getFlagEmoji 函数，有 fallback 逻辑）
@@ -10731,13 +10759,15 @@
                                     username: display,
                                     avatar: avatar,
                                     github_username: (user_identity === 'github' ? user_name : '') || '',
-                                    user_name: user_name, // 使用 user_name（不是 username）
+                                    user_name: user_name,
                                     value: value,
                                     user_identity: user_identity || null,
-                                    vibe_index_str: vibe_index_str, // 作为称号/维度显示
+                                    vibe_index_str: vibe_index_str,
                                     personality_title: personalityTitle,
-                                    countryCode: countryCode, // 使用 country_code，null 时显示 "UN"
-                                    flagEmoji: flagEmoji // 国旗 Emoji
+                                    countryCode: countryCode,
+                                    manual_location: manual_loc || null,
+                                    country_code: country_code,
+                                    flagEmoji: flagEmoji
                                 };
                             } catch (itemErr) {
                                 console.error(`[GlobalRankings] ❌ 处理 ${dim.key} 排行榜项时出错:`, itemErr, item);
@@ -10904,10 +10934,10 @@
                         avatar = String(item.avatar).trim();
                     }
                     
-                    // 国家代码：优先使用 country_code（小写下划线），确保从 v_unified_analysis_v2 查询的字段包含 country_code
-                    const country_code = (item.country_code && String(item.country_code).trim()) || 
-                                       (item.countryCode && String(item.countryCode).trim()) || 
-                                       null;
+                    // 榜单国籍：优先用户最后选择的国籍（manual_location，仅 ISO2 时采用），再 country_code
+                    const manual_loc = (item.manual_location && String(item.manual_location).trim()) || '';
+                    const fallback = (item.country_code && String(item.country_code).trim()) || (item.countryCode && String(item.countryCode).trim()) || null;
+                    const country_code = (manual_loc.length === 2 && /^[A-Za-z]{2}$/.test(manual_loc)) ? manual_loc.toUpperCase() : fallback;
                     const countryCode = country_code || 'UN';
                     
                     // 使用 getFlagEmoji 函数将 country_code 转换为国旗 Emoji
@@ -14387,21 +14417,14 @@
             if (fp) url += `&fingerprint=${encodeURIComponent(fp)}`;
             url += `&_t=${Date.now()}`;
             
-            // 检查本地缓存（5分钟内有效）
+            // 检查本地缓存（5分钟内有效）；缺 countryTotals 的旧缓存视为无效，避免 Global 视图错数
             const cacheKey = `country_summary_${cc}`;
             try {
                 const cached = localStorage.getItem(cacheKey);
                 if (cached) {
                     const { data, time } = JSON.parse(cached);
-                    if (Date.now() - time < 300000) { // 5分钟
+                    if (Date.now() - time < 300000 && data && typeof data === 'object' && data.countryTotals && typeof data.countryTotals === 'object') {
                         console.log(`[CountrySummary] 📦 使用缓存数据: ${cc}`);
-                        // 【调试】输出缓存数据结构
-                        if (data && typeof data === 'object') {
-                            console.log(`[CountrySummary] 📦 缓存数据结构:`, {
-                                hasCountryTotals: !!data.countryTotals,
-                                countryTotalsKeys: data.countryTotals ? Object.keys(data.countryTotals) : []
-                            });
-                        }
                         return data;
                     }
                 }
@@ -14432,9 +14455,16 @@
                 }
                 
                 const raw = payload?.data ?? payload?.result ?? payload?.summary ?? payload?.payload ?? payload;
-                const normalized = typeof normalizeData === 'function' ? normalizeData(raw) : raw;
+                let normalized = typeof normalizeData === 'function' ? normalizeData(raw) : raw;
                 if (normalized && typeof normalized === 'object') {
                     normalized.countryCode = cc;
+                    // 【修复】normalizeData 不返回 countryTotals，必须从 raw 保留，否则 Global 视图会错用 root 导致调戏AI次数/平均篇幅错乱
+                    if (raw && typeof raw === 'object' && raw.countryTotals && typeof raw.countryTotals === 'object') {
+                        normalized.countryTotals = raw.countryTotals;
+                        normalized.totalUsers = normalized.totalUsers ?? raw.countryTotals.totalUsers ?? raw.countryTotals.total_users;
+                        normalized.totalAnalysis = normalized.totalAnalysis ?? raw.countryTotals.ai ?? raw.countryTotals.total_messages;
+                        normalized.totalChars = normalized.totalChars ?? raw.countryTotals.say ?? raw.countryTotals.total_chars;
+                    }
                     // 【调试】输出 API 返回的数据结构
                     console.log(`[CountrySummary] ✅ ${cc} API 返回数据结构:`, {
                         hasCountryTotals: !!normalized.countryTotals,
@@ -18683,120 +18713,139 @@
                 
                 let updatedUser = null;
                 
-                // 【关键修复】如果已登录，必须使用 user_id 进行更新
+                // 【关键修复】绑定策略：优先加载「本设备上传」的记录，避免误绑异地最高数值用户
                 if (authenticatedUserId) {
                     console.log('[GitHub] 🔗 已登录，使用 user_id 进行更新（认祖归宗）:', authenticatedUserId.substring(0, 8) + '...');
                     
-                    // 首先尝试根据 user_id 查找现有用户
-                    const { data: existingUserById, error: findByIdError } = await supabaseClient
+                    let existingUserById = null;
+                    const { data: byId, error: findByIdError } = await supabaseClient
                         .from('v_unified_analysis_v2')
                         .select('*')
                         .eq('id', authenticatedUserId)
                         .maybeSingle();
-                    
+                    if (!findByIdError) existingUserById = byId;
                     if (findByIdError && findByIdError.code !== 'PGRST116') {
-                        console.error('[GitHub] ❌ 查询用户失败:', findByIdError);
-                        throw new Error(`查询失败: ${findByIdError.message}`);
+                        console.error('[GitHub] ❌ 按 id 查询失败:', findByIdError);
                     }
                     
-                    // 执行更新（使用 user_id）
+                    // 已登录但库里无此 id 时：优先用本机 fingerprint 查找「自己上传」的记录并绑定，避免绑到他人
+                    if (!existingUserById && currentFingerprint) {
+                        const { data: byFp, error: byFpErr } = await supabaseClient
+                            .from('v_unified_analysis_v2')
+                            .select('*')
+                            .eq('fingerprint', currentFingerprint)
+                            .maybeSingle();
+                        if (!byFpErr && byFp) {
+                            console.log('[GitHub] ✅ 按本机 fingerprint 找到自己上传的记录，绑定到当前 GitHub');
+                            existingUserById = byFp;
+                        }
+                    }
+                    
                     const updatePayload = {
                         user_name: normalizedUsername,
                         user_identity: 'github',
-                        fingerprint: currentFingerprint, // 可选：保存 fingerprint 作为备用
+                        fingerprint: currentFingerprint,
                         updated_at: new Date().toISOString()
                     };
                     
-                    const { data, error: updateError } = await supabaseClient
-                        .from('user_analysis')
-                        .update(updatePayload)
-                        .eq('id', authenticatedUserId) // 【关键】使用 user_id 而不是 user_name
-                        .select()
-                        .single();
-                    
-                    if (updateError) {
-                        console.error('[GitHub] ❌ 更新用户失败:', updateError);
-                        
-                        // 如果更新失败，尝试使用 upsert
-                        if (updateError.code === '42501' || updateError.message?.includes('row-level security')) {
-                            console.log('[GitHub] 🔄 RLS 策略阻止更新，尝试使用 upsert...');
-                            
-                            const upsertPayload = {
-                                id: authenticatedUserId,
-                                user_name: normalizedUsername,
-                                user_identity: 'github',
-                                fingerprint: currentFingerprint,
-                                updated_at: new Date().toISOString()
-                            };
-                            
-                            const { data: upsertData, error: upsertError } = await supabaseClient
-                                .from('user_analysis')
-                                .upsert([upsertPayload], { onConflict: 'id' })
-                                .select()
-                                .single();
-                            
-                            if (upsertError) {
-                                console.error('[GitHub] ❌ Upsert 也失败:', upsertError);
-                                throw new Error(`更新失败: ${upsertError.message}`);
-                            } else {
-                                updatedUser = upsertData;
-                                console.log('[GitHub] ✅ 通过 upsert 更新用户成功（使用 user_id）');
-                            }
+                    if (existingUserById) {
+                        const rowId = existingUserById.id;
+                        const { data, error: updateError } = await supabaseClient
+                            .from('user_analysis')
+                            .update(updatePayload)
+                            .eq('id', rowId)
+                            .select()
+                            .single();
+                        if (updateError) {
+                            console.error('[GitHub] ❌ 更新用户失败:', updateError);
+                            if (updateError.code === '42501' || updateError.message?.includes('row-level security')) {
+                                const upsertPayload = {
+                                    id: rowId,
+                                    user_name: normalizedUsername,
+                                    user_identity: 'github',
+                                    fingerprint: currentFingerprint,
+                                    updated_at: new Date().toISOString()
+                                };
+                                const { data: upsertData, error: upsertError } = await supabaseClient
+                                    .from('user_analysis')
+                                    .upsert([upsertPayload], { onConflict: 'id' })
+                                    .select()
+                                    .single();
+                                if (!upsertError) {
+                                    updatedUser = upsertData;
+                                    console.log('[GitHub] ✅ 通过 upsert 更新用户成功');
+                                } else { throw new Error(upsertError.message); }
+                            } else { throw new Error(updateError.message); }
                         } else {
-                            throw new Error(`更新失败: ${updateError.message}`);
+                            updatedUser = data;
+                            console.log('[GitHub] ✅ 用户信息已成功更新（使用 user_id 或本机 fingerprint）');
                         }
                     } else {
-                        updatedUser = data;
-                        console.log('[GitHub] ✅ 用户信息已成功更新（使用 user_id）');
+                        const upsertPayload = {
+                            id: authenticatedUserId,
+                            user_name: normalizedUsername,
+                            user_identity: 'github',
+                            fingerprint: currentFingerprint,
+                            updated_at: new Date().toISOString()
+                        };
+                        const { data: upsertData, error: upsertError } = await supabaseClient
+                            .from('user_analysis')
+                            .upsert([upsertPayload], { onConflict: 'id' })
+                            .select()
+                            .single();
+                        if (upsertError) throw new Error(upsertError.message);
+                        updatedUser = upsertData;
+                        console.log('[GitHub] ✅ 新用户已创建（使用 GitHub User ID）');
                     }
                 } else {
-                    // 【降级方案】未登录时，使用 user_name 进行更新（兼容旧逻辑）
-                    console.log('[GitHub] ⚠️ 未登录，使用 user_name 进行更新（降级方案）');
+                    // 【绑定策略】未登录时：先按本机 fingerprint 找「自己上传」再绑定，避免按 user_name 误绑异地用户
+                    console.log('[GitHub] ⚠️ 未登录，先按本机 fingerprint 查找再绑定');
                     
-                    // 4.4 首先尝试根据 user_name 查找现有用户
-                    // 【Task 2】查询时使用统一视图
-                    const { data: existingUser, error: findError } = await supabaseClient
-                        .from('v_unified_analysis_v2')
-                        .select('*')
-                        // GitHub 用户名大小写不敏感：避免 user_name 大小写不一致导致查不到
-                        .ilike('user_name', normalizedUsername)
-                        .maybeSingle();
+                    let existingUser = null;
+                    let findError = null;
+                    if (currentFingerprint) {
+                        const { data: byFp, error: e } = await supabaseClient
+                            .from('v_unified_analysis_v2')
+                            .select('*')
+                            .eq('fingerprint', currentFingerprint)
+                            .maybeSingle();
+                        if (!e && byFp) {
+                            existingUser = byFp;
+                            console.log('[GitHub] ✅ 按本机 fingerprint 找到自己上传的记录');
+                        }
+                    }
+                    if (!existingUser) {
+                        const { data: byName, error: e } = await supabaseClient
+                            .from('v_unified_analysis_v2')
+                            .select('*')
+                            .ilike('user_name', normalizedUsername)
+                            .maybeSingle();
+                        findError = e;
+                        if (!e && byName) existingUser = byName;
+                    }
                     
-                    if (findError && findError.code !== 'PGRST116') { // PGRST116 表示未找到记录，这是正常的
+                    if (findError && findError.code !== 'PGRST116') {
                         console.error('[GitHub] ❌ 查询用户失败:', findError);
                         throw new Error(`查询失败: ${findError.message}`);
                     }
                     
-                    // 4.5 执行 UPSERT 操作（更新或创建）
                     if (existingUser) {
-                        // 用户已存在，更新 fingerprint 字段
-                        console.log('[GitHub] ✅ 找到现有用户，更新 fingerprint 字段');
-                        
-                        // 【修复】只使用 user_name 字段，不使用 github_username
+                        console.log('[GitHub] ✅ 找到现有用户，更新 fingerprint / user_name');
                         const { data, error: updateError } = await supabaseClient
-                                .from('user_analysis')
-                                .update({
-                                    fingerprint: currentFingerprint,
-                                    user_name: normalizedUsername,
-                                    updated_at: new Date().toISOString()
-                                })
-                                // GitHub 用户名大小写不敏感：避免 user_name 大小写不一致导致更新不到
-                                .ilike('user_name', normalizedUsername)
-                                .select()
-                                .single();
-                        
-                        if (updateError) {
-                            console.error('[GitHub] ❌ 更新用户失败:', updateError);
-                            throw new Error(`更新失败: ${updateError.message}`);
-                        }
-                        
+                            .from('user_analysis')
+                            .update({
+                                fingerprint: currentFingerprint,
+                                user_name: normalizedUsername,
+                                updated_at: new Date().toISOString()
+                            })
+                            .eq('id', existingUser.id)
+                            .select()
+                            .single();
+                        if (updateError) throw new Error(`更新失败: ${updateError.message}`);
                         updatedUser = data;
                         console.log('[GitHub] ✅ 指纹已成功更新到数据库');
                     } else {
-                        // 用户不存在，创建新记录
                         console.log('[GitHub] ✅ 用户不存在，创建新记录');
-                        
-                        // 【修复】只使用 user_name 字段，不使用 github_username
                         const newUserData = {
                             id: crypto.randomUUID(),
                             user_name: normalizedUsername,
@@ -18804,18 +18853,12 @@
                             created_at: new Date().toISOString(),
                             updated_at: new Date().toISOString()
                         };
-                        
                         const { data, error: insertError } = await supabaseClient
                             .from('user_analysis')
                             .insert([newUserData])
                             .select()
                             .single();
-                        
-                        if (insertError) {
-                            console.error('[GitHub] ❌ 创建用户失败:', insertError);
-                            throw new Error(`创建失败: ${insertError.message}`);
-                        }
-                        
+                        if (insertError) throw new Error(`创建失败: ${insertError.message}`);
                         updatedUser = data;
                         console.log('[GitHub] ✅ 新用户已创建，指纹已绑定');
                     }

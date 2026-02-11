@@ -4551,6 +4551,73 @@ app.get('/api/global-average', async (c) => {
     };
   }
 
+  // 6.5) Global 大盘补全：缺失时从聚合与 extended_stats_view 补 totalAnalysis/totalChars/locationRank/personalityDistribution
+  if (region === 'Global' && env.SUPABASE_URL && env.SUPABASE_KEY) {
+    try {
+      const fr = finalRow as any;
+      const needAgg = !Number(fr.totalAnalysis ?? fr.total_analysis);
+      const needLocation = !Array.isArray(fr.locationRank) || fr.locationRank.length === 0;
+      const needPersonality = !Array.isArray(fr.personalityDistribution) && !Array.isArray(fr.personalityRank);
+      if (needLocation || needAgg || needPersonality) {
+        const extUrl = `${env.SUPABASE_URL}/rest/v1/extended_stats_view?select=*`;
+        const aggUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?select=total_messages,total_chars,personality_type&limit=5000`;
+        const [extData, aggRows] = await Promise.all([
+          needLocation ? fetchSupabaseJson<any>(env, extUrl, { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []) : [],
+          (needAgg || needPersonality) ? fetchSupabaseJson<any[]>(env, aggUrl, { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []) : [],
+        ]);
+        const extArr = Array.isArray(extData) ? extData : (extData && typeof extData === 'object' ? [extData] : []);
+        const extRow = extArr[0] || {};
+        if (needLocation && extRow.location_rank && Array.isArray(extRow.location_rank)) {
+          fr.locationRank = extRow.location_rank.slice(0, 10).map((item: any) => ({
+            name: item.name ?? item.location ?? '未知',
+            value: typeof item.value === 'number' ? item.value : (typeof item.count === 'number' ? item.count : 0),
+          }));
+        } else if (needLocation && extRow.location_rank && typeof extRow.location_rank === 'object') {
+          fr.locationRank = Object.entries(extRow.location_rank).slice(0, 10).map(([name, count]: [string, unknown]) => ({
+            name,
+            value: typeof count === 'number' ? count : Number(count) || 0,
+          })).sort((a, b) => b.value - a.value);
+        } else if (needLocation) {
+          fr.locationRank = fr.locationRank || [];
+        }
+        const rows = Array.isArray(aggRows) ? aggRows : [];
+        if (rows.length > 0 && (needAgg || needPersonality)) {
+          if (needAgg) {
+            let totalAnalysis = 0;
+            let totalCharsSum = 0;
+            for (const r of rows) {
+              totalAnalysis += Number(r.total_messages) || 0;
+              totalCharsSum += Number(r.total_chars) || 0;
+            }
+            if (totalAnalysis > 0 || totalCharsSum > 0) {
+              fr.totalAnalysis = totalAnalysis;
+              fr.total_analysis = totalAnalysis;
+              fr.totalChars = totalCharsSum;
+              fr.total_chars = totalCharsSum;
+              fr.totalchars = totalCharsSum;
+              fr.totalRoastWords = fr.totalRoastWords ?? totalCharsSum;
+              fr.total_roast_words = fr.total_roast_words ?? totalCharsSum;
+            }
+          }
+          if (needPersonality) {
+            const personalityMap = new Map<string, number>();
+            for (const r of rows) {
+              const t = (r.personality_type || 'UNKNOWN') as string;
+              personalityMap.set(t, (personalityMap.get(t) || 0) + 1);
+            }
+            fr.personalityDistribution = Array.from(personalityMap.entries())
+              .map(([type, count]) => ({ type, count }))
+              .sort((a, b) => b.count - a.count)
+              .slice(0, 10);
+            fr.personalityRank = fr.personalityDistribution;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Worker] ⚠️ Global 大盘补全失败:', (e as Error)?.message);
+    }
+  }
+
   // 7) 黑话榜聚合（按需）：slang_trends_pool + 时间衰减
   // - country_code: 从 slang_trends_pool 过滤 region
   // - top10: hit_count desc 前 10
