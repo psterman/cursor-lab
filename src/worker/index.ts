@@ -5865,34 +5865,30 @@ app.get('/api/country-summary', async (c) => {
     // ----------------------------
     const refresh = c.req.query('refresh') === 'true';
     const cacheKey = `global_stats_v4_${countryCode}`; // 【缓存版本升级】v4 避免旧缓存死锁
-    
-    // 如果 refresh=false，尝试从缓存读取
-    if (!refresh && env.STATS_STORE) {
+
+    // 【国家视图数据对齐】当请求带明确国家码时，不读 KV 缓存，必须从 v_country_stats 取该国真实聚合，避免返回全局平均
+    const skipCacheForCountry = hasExplicitCc && /^[A-Z]{2}$/.test(cc);
+    if (!refresh && !skipCacheForCountry && env.STATS_STORE) {
       try {
         const cached = await env.STATS_STORE.get(cacheKey, 'text');
         if (cached) {
           try {
             const parsed = JSON.parse(cached);
-            // 检查缓存数据是否全为0（避免缓存死锁）
             const checkData = parsed?.countryTotals || parsed?.data?.countryTotals || {};
             const tm = Number(checkData.ai ?? checkData.total_messages ?? 0) || 0;
             const tc = Number(checkData.say ?? checkData.total_chars ?? 0) || 0;
             const wd = Number(checkData.day ?? checkData.work_days ?? 0) || 0;
             const jc = Number(checkData.no ?? checkData.jiafang_count ?? 0) || 0;
             const kc = Number(checkData.please ?? checkData.ketao_count ?? 0) || 0;
-            // 如果缓存数据不全为0，直接返回
             if (tm > 0 || tc > 0 || wd > 0 || jc > 0 || kc > 0) {
               return c.json(parsed);
             }
-            // 如果缓存数据全为0，继续执行数据库查询（避免缓存死锁）
             console.warn('[Worker] 缓存数据全为0，跳过缓存，继续查询数据库');
           } catch (parseErr) {
-            // JSON 解析失败，继续执行数据库查询
             console.warn('[Worker] 缓存 JSON 解析失败，继续查询数据库:', parseErr);
           }
         }
       } catch (e) {
-        // 缓存读取失败，继续执行数据库查询
         console.warn('[Worker] 缓存读取失败，继续查询数据库:', e);
       }
     }
@@ -5915,21 +5911,17 @@ app.get('/api/country-summary', async (c) => {
     let viewCountryRow: any = null;
     if (hasExplicitCc) {
     try {
+      // 优先用 v_country_stats 返回该国 total_chars / total_messages / total_work_days 等真实聚合（兼容 country_code 与 country 列）
       const viewUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_country_stats`);
       viewUrl.searchParams.set('select', '*');
       viewUrl.searchParams.set('limit', '1');
-      viewUrl.searchParams.set('country_code', `eq.${cc}`);
+      viewUrl.searchParams.set('or', `(country_code.eq.${cc},country.eq.${cc})`);
       let viewRows = await fetchSupabaseJson<any[]>(
         env,
         viewUrl.toString(),
         { headers: buildSupabaseHeaders(env) },
         SUPABASE_FETCH_TIMEOUT_MS
       ).catch(() => []);
-      if (!Array.isArray(viewRows) || viewRows.length === 0) {
-        viewUrl.searchParams.delete('country_code');
-        viewUrl.searchParams.set('or', `(country_code.eq.${cc},country.eq.${cc})`);
-        viewRows = await fetchSupabaseJson<any[]>(env, viewUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
-      }
       viewCountryRow = Array.isArray(viewRows) && viewRows.length > 0 ? viewRows[0] : null;
     } catch {
       viewCountryRow = null;
@@ -6004,8 +5996,8 @@ app.get('/api/country-summary', async (c) => {
       }
     }
 
-    // 使用 KV 缓存数据（仅当未从 v_country_stats 拿到数据时）
-    if (!totals && !shouldSkipKV && countryRow) {
+    // 【国家视图】有明确国家码时不再用 KV 汇总，仅用 v_country_stats / RPC / 直接查询，避免返回全局平均
+    if (!totals && !shouldSkipKV && countryRow && !hasExplicitCc) {
       row = countryRow;
       // 【强制类型转换】使用 Number() 强制转换所有数值（尤其是 total_say/total_chars）
       countryTotalUsers = Number(countryRow.total_users ?? 0) || 0;

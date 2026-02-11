@@ -4668,9 +4668,15 @@
 
             const base = (document.querySelector('meta[name="api-endpoint"]')?.content || '').trim();
             const API_ENDPOINT = base.endsWith('/') ? base : `${base}/`;
+            // 国家视图必须用 country-summary 拉取该国 v_country_stats 真实聚合与 v_user_ranks_in_country 排名，不再用 global-average
+            let uid = '';
+            let fp = '';
+            try { uid = localStorage.getItem('github_username') || window.userId || ''; } catch (_) {}
+            try { fp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+            const cName = (typeof currentDrawerCountry !== 'undefined' && currentDrawerCountry && currentDrawerCountry.name) ? currentDrawerCountry.name : '';
             const url = effectiveIsGlobal
                 ? `${API_ENDPOINT}api/global-average`
-                : `${API_ENDPOINT}api/global-average?country_code=${encodeURIComponent(target_country)}`;
+                : `${API_ENDPOINT}api/country-summary?country=${encodeURIComponent(target_country)}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${uid ? `&user_id=${encodeURIComponent(uid)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}&_ts=${Date.now()}`;
 
             // DOM 绑定点
             const usersValEl = document.getElementById('rtDiagnosedTotal');
@@ -5030,14 +5036,23 @@
                 }
             };
 
-            // 非全网：仅更新状态（词云由 loadWordCloud() 负责渲染）
+            // 国家视图切换：清空旧数据占位，避免显示上一国数据；请求完成后用新 countryTotals 替换，移除 N/A
+            if (!effectiveIsGlobal && !opts.silent && !opts.preferCache) {
+                if (usersValEl) usersValEl.textContent = '—';
+                if (analysisValEl) analysisValEl.textContent = '—';
+                const totalsBoxPre = document.getElementById('rtCountryTotals');
+                const ranksBoxPre = document.getElementById('rtMyCountryRanks');
+                if (totalsBoxPre) totalsBoxPre.innerHTML = '<div class="text-zinc-500 text-xs">' + (currentLang === 'en' ? 'Loading...' : '加载中...') + '</div>';
+                if (ranksBoxPre) ranksBoxPre.innerHTML = '<div class="text-zinc-500 text-xs">' + (currentLang === 'en' ? 'Loading...' : '加载中...') + '</div>';
+                if (meritEl) meritEl.textContent = currentLang === 'en' ? 'Analyzed -- ×10k chars' : '已累计分析 -- 万字';
+                if (window.__countryTotalsCache && countryCode) window.__countryTotalsCache.delete(`CT:${String(countryCode).toUpperCase()}`);
+            }
             if (!effectiveIsGlobal && !opts.silent) {
                 if (statusEl) statusEl.textContent = 'DATA: FETCHING';
             }
 
             try {
                 if (statusEl) statusEl.textContent = 'DATA: FETCHING';
-                // 请求发起前先给出加载态，避免旧数据误导
                 if (!opts.silent) {
                     renderRadarMessage(getI18nText('radar.loading') || 'Loading...');
                     if (realtimeDom) realtimeDom.innerHTML = `<div class="text-zinc-500 text-xs">${escapeHtml(getI18nText('common.loading') || (currentLang === 'en' ? 'Loading...' : '加载中...'))}</div>`;
@@ -5125,14 +5140,10 @@
                     data.total_users ??
                     data.totalusers ??
                     null;
-                // 对齐：totalAnalysis 映射到 AI 次数（countryTotals.ai）
-                const globalTotalAnalysisRaw =
-                    data.countryTotals?.ai ??
-                    data.ai ??
-                    data.totalAnalysis ??
-                    data.total_analysis ??
-                    data.totalanalysis ??
-                    null;
+                // 国家视图：仅从 countryTotals 读取，不落回全局根节点
+                const globalTotalAnalysisRaw = effectiveIsGlobal
+                    ? (data.countryTotals?.ai ?? data.ai ?? data.totalAnalysis ?? data.total_analysis ?? data.totalanalysis ?? null)
+                    : (data.countryTotals?.ai ?? data.total_messages ?? data.totalAnalysis ?? data.total_analysis ?? data.totalanalysis ?? null);
 
                 // 雷达图数据：兼容两种后端结构：
                 // 1) v_global_stats_v6 / RPC: avg_l/avg_p/... 或 avgL/avgP/...
@@ -5157,15 +5168,10 @@
                     Number(avg_f || 0),
                 ];
 
-                // AI 功德簿：累计字数（万字）。对齐：totalChars 映射到字符数（countryTotals.say）
-                const totalCharsSumRaw =
-                    data.countryTotals?.say ??
-                    data.say ??
-                    data.totalCharsSum ??
-                    data.total_chars_sum ??
-                    data.totalChars ??
-                    data.total_chars ??
-                    null;
+                // 国家视图：仅从 countryTotals 读取（say/total_chars）
+                const totalCharsSumRaw = effectiveIsGlobal
+                    ? (data.countryTotals?.say ?? data.say ?? data.totalCharsSum ?? data.total_chars_sum ?? data.totalChars ?? data.total_chars ?? null)
+                    : (data.countryTotals?.say ?? data.total_chars ?? data.totalCharsSum ?? data.total_chars_sum ?? data.totalChars ?? data.total_chars ?? null);
                 const totalCharsSum = Number(totalCharsSumRaw);
                 if (meritEl) {
                     // 0 也应显示（否则看起来像“未加载”）
@@ -5179,12 +5185,13 @@
                     }
                 }
 
-                // 数据字段补全：从响应提取 jiafang_count, ketao_count, work_days 并赋值给对应 UI
+                // 国家视图：ai/say/day/no/please 均从 countryTotals 读取
+                const ctForDrawer = data.countryTotals || {};
                 const firstRecord = Array.isArray(data.latest_records) && data.latest_records[0] ? data.latest_records[0] : null;
                 const stats = data.statistics || data.stats || (firstRecord && (firstRecord.statistics || firstRecord.stats)) || {};
-                const jiafangVal = data.jiafang_count ?? stats.jiafang_count ?? firstRecord?.jiafang_count ?? null;
-                const ketaoVal = data.ketao_count ?? stats.ketao_count ?? firstRecord?.ketao_count ?? null;
-                const workDaysVal = data.work_days ?? stats.work_days ?? firstRecord?.work_days ?? null;
+                const jiafangVal = effectiveIsGlobal ? (data.jiafang_count ?? stats.jiafang_count ?? firstRecord?.jiafang_count ?? null) : (ctForDrawer.no ?? ctForDrawer.jiafang_count ?? data.jiafang_count ?? stats.jiafang_count ?? firstRecord?.jiafang_count ?? null);
+                const ketaoVal = effectiveIsGlobal ? (data.ketao_count ?? stats.ketao_count ?? firstRecord?.ketao_count ?? null) : (ctForDrawer.please ?? ctForDrawer.ketao_count ?? data.ketao_count ?? stats.ketao_count ?? firstRecord?.ketao_count ?? null);
+                const workDaysVal = effectiveIsGlobal ? (data.work_days ?? stats.work_days ?? firstRecord?.work_days ?? null) : (ctForDrawer.day ?? ctForDrawer.work_days ?? data.work_days ?? stats.work_days ?? firstRecord?.work_days ?? null);
                 const rtJiafang = document.getElementById('rtJiafangCount');
                 const rtKetao = document.getElementById('rtKetaoCount');
                 const rtWorkDays = document.getElementById('rtWorkDays');
@@ -5211,14 +5218,13 @@
                     localTotalUsers = globalTotalUsers;
                     localTotalAnalysis = globalTotalAnalysis;
                 } else {
-                    // 【修复核心问题】国家/地区模式:
-                    // 当传入 country_code=US 时，API返回的 data.totalUsers 已经是该国数据(已过滤)
-                    // 不应该再从 data.us_stats 中读取(那是旧的嵌套结构)
+                    // 国家模式：仅从 countryTotals 读取该国 totalUsers、ai，不落回根节点
+                    const ct = data.countryTotals || {};
                     localTotalUsers = Number(
-                        data.totalUsers ?? data.total_users ?? data.totalusers ?? null
+                        ct.totalUsers ?? ct.total_users ?? data.totalUsers ?? data.total_users ?? data.totalusers ?? null
                     );
                     localTotalAnalysis = Number(
-                        data.totalAnalysis ?? data.total_analysis ?? data.totalanalysis ?? null
+                        ct.ai ?? ct.total_messages ?? data.totalAnalysis ?? data.total_analysis ?? data.totalanalysis ?? null
                     );
                     
                 // 国家模式下，需要重新获取全网数据用于占比计算
@@ -5303,12 +5309,13 @@
                                 return '';
                             }
                         })();
-                        // 加时间戳：避免 edge cache/中间层缓存导致“永远是 0”
-                        const url2 = `${API_ENDPOINT}api/country-summary?country=${encodeURIComponent(String(target_country || countryCode || '').toUpperCase())}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${uid ? `&user_id=${encodeURIComponent(uid)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}&_ts=${Date.now()}`;
-
-                        // cache-first：避免切换抖动
-                        if (!window.__countryTotalsCache) window.__countryTotalsCache = new Map();
+                        // 国家视图且主请求已是 country-summary：直接复用 data 作为 payload2，不再二次请求，即时刷新
                         const cacheKey2 = `CT:${String(countryCode || '').toUpperCase()}`;
+                        if (!window.__countryTotalsCache) window.__countryTotalsCache = new Map();
+                        const useMainDataAsPayload2 = !effectiveIsGlobal && data && data.countryTotals && typeof data.countryTotals === 'object';
+                        let payload2 = useMainDataAsPayload2 ? data : null;
+                        if (!useMainDataAsPayload2) {
+                        const url2 = `${API_ENDPOINT}api/country-summary?country=${encodeURIComponent(String(target_country || countryCode || '').toUpperCase())}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${uid ? `&user_id=${encodeURIComponent(uid)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}&_ts=${Date.now()}`;
                         const hit2 = window.__countryTotalsCache.get(cacheKey2);
                         if (hit2 && typeof hit2 === 'object') {
                             if (totalsBox && hit2.totalsHtml) totalsBox.innerHTML = hit2.totalsHtml;
@@ -5317,13 +5324,10 @@
                         if (totalsBox && !String(totalsBox.innerHTML || '').trim()) totalsBox.innerHTML = '<div class="text-zinc-500 text-xs">加载中...</div>';
                         if (ranksBox && !String(ranksBox.innerHTML || '').trim()) ranksBox.innerHTML = '<div class="text-zinc-500 text-xs">加载中...</div>';
 
-                        // 并发保护：复用 updateCountryDashboard 的 requestSeq / isStaleRequest
-                        // 添加超时控制，防止请求挂起导致一直显示"加载中..."
                         const controller = new AbortController();
-                        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
-                        let resp2, payload2;
+                        const timeoutId = setTimeout(() => controller.abort(), 10000);
                         try {
-                            resp2 = await fetch(url2 + (url2.indexOf('?') >= 0 ? '&' : '?') + '_t=' + Date.now(), { signal: controller.signal });
+                            const resp2 = await fetch(url2 + (url2.indexOf('?') >= 0 ? '&' : '?') + '_t=' + Date.now(), { signal: controller.signal });
                             clearTimeout(timeoutId);
                             if (!resp2.ok) throw new Error(`HTTP ${resp2.status}`);
                             payload2 = await resp2.json().catch(() => null);
@@ -5336,7 +5340,8 @@
                             }
                             throw fetchErr;
                         }
-                        if (isStaleRequest()) {
+                        }
+                        if (!useMainDataAsPayload2 && payload2 && isStaleRequest()) {
                             // 【修复过期判定】国家累计请求已过期时：
                             // 1. 优先从 localStorage 读取旧数据进行渲染
                             // 2. 如果是 Global 标签，触发一次异步静默刷新
