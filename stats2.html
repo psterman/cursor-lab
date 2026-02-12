@@ -4813,11 +4813,22 @@
 
             const base = (document.querySelector('meta[name="api-endpoint"]')?.content || '').trim();
             const API_ENDPOINT = base.endsWith('/') ? base : `${base}/`;
-            // 国家视图必须用 country-summary 拉取该国 v_country_stats 真实聚合与 v_user_ranks_in_country 排名，不再用 global-average
-            let uid = '';
-            let fp = '';
-            try { uid = localStorage.getItem('github_username') || window.userId || ''; } catch (_) {}
-            try { fp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+            // 国家视图必须用 country-summary 拉取该国 v_country_stats 真实聚合与 v_user_ranks_in_country 排名；user_id/fingerprint 与「我的排名」一致，后端才能返回 global_user_ranks
+            let uid = (() => {
+                try {
+                    const fromWindow = (window.currentUser && window.currentUser.id) || (window.currentUserData && window.currentUserData.id) || (window.supabaseAuthUser && window.supabaseAuthUser.id) || (window.authenticatedUserId) || (window.__authUserId) || '';
+                    if (fromWindow) return String(fromWindow);
+                    return localStorage.getItem('github_user_id') || localStorage.getItem('supabase_user_id') || localStorage.getItem('auth_user_id') || localStorage.getItem('user_id') || localStorage.getItem('github_username') || window.userId || '';
+                } catch { return ''; }
+            })();
+            let fp = (() => {
+                try {
+                    const p = new URLSearchParams(window.location.search);
+                    const fromUrl = p.get('fingerprint') || p.get('fp') || '';
+                    if (fromUrl) return String(fromUrl).trim();
+                    return localStorage.getItem('user_fingerprint') || window.fpId || '';
+                } catch { return ''; }
+            })();
             const cName = (typeof currentDrawerCountry !== 'undefined' && currentDrawerCountry && currentDrawerCountry.name) ? currentDrawerCountry.name : '';
             const url = effectiveIsGlobal
                 ? `${API_ENDPOINT}api/global-average`
@@ -5401,6 +5412,7 @@
                         const gData = { ...gRoot, ...gNested };
                             globalTotalUsers = Number(gData.totalUsers ?? gData.total_users ?? gData.totalusers ?? 0);
                             globalTotalAnalysis = Number(gData.totalAnalysis ?? gData.total_analysis ?? gData.totalanalysis ?? 0);
+                            if (globalTotalUsers > 0) try { window.__globalTotalUsers = globalTotalUsers; } catch (_) {}
                         }
                     } catch (e) {
                         console.warn('[CountryDashboard] 获取全网数据失败，占比可能不准确:', e);
@@ -5616,10 +5628,45 @@
                         var myCountryFromApi = payload2.myCountry || payload2.data?.myCountry || {};
                         var baseUser = window.currentUserData || window.currentUser || {};
                         var merged = Object.assign({}, baseUser, remoteVals, myCountryFromApi);
-                        merged.vibe_rank = merged.vibe_rank ?? merged.vibeRank ?? payload2.vibe_rank ?? payload2.vibeRank ?? payload2.data?.vibe_rank ?? payload2.data?.vibeRank;
+                        merged.vibe_rank = merged.vibe_rank ?? merged.vibeRank ?? payload2.vibe_rank ?? payload2.vibeRank ?? payload2.data?.vibe_rank ?? payload2.data?.vibeRank
+                            ?? (function() {
+                                var list = payload2.latest_records ?? payload2.latestRecords ?? payload2.data?.latest_records ?? [];
+                                var fp = (merged.fingerprint || baseUser.fingerprint || '').toString();
+                                var uid = (merged.id ?? merged.user_id ?? baseUser.id ?? '').toString();
+                                for (var i = 0; i < (list.length || 0); i++) {
+                                    var r = list[i];
+                                    var rFp = (r.fingerprint || r.fp || '').toString();
+                                    var rId = (r.id ?? r.user_id ?? '').toString();
+                                    if ((fp && rFp && rFp.indexOf(fp.substring(0, 8)) >= 0) || (uid && rId && rId === uid) || (i === 0 && (r.vibe_rank != null || r.vibeRank != null))) {
+                                        var vr = r.vibe_rank ?? r.vibeRank;
+                                        if (vr != null && Number(vr) > 0) return Number(vr);
+                                    }
+                                }
+                                return (window.lastData && window.lastData.latest_records && window.lastData.latest_records[0]) ? (window.lastData.latest_records[0].vibe_rank ?? window.lastData.latest_records[0].vibeRank) : undefined;
+                            })();
                         if (merged.personality_name === undefined && merged.personalityName === undefined) merged.personality_name = merged.personalityName = (baseUser.personality_name || baseUser.personalityName || (currentLang === 'en' ? 'Unknown Title' : '未知人格'));
                         if (!merged.personality_type && !merged.personalityType) merged.personality_type = merged.personalityType = baseUser.personality_type || baseUser.personalityType || 'UNKNOWN';
+                        // 强制与 Supabase 同步国籍：搬家后立即覆盖全局，确保后续 filter 能匹配上
+                        var latestCC = (payload2.user && (payload2.user.current_location || payload2.user.country_code)) || payload2.current_location || payload2.target_country || (typeof target_country !== 'undefined' ? target_country : '');
+                        if (latestCC != null && String(latestCC).trim() !== '') {
+                            latestCC = String(latestCC).trim().toUpperCase().substring(0, 2);
+                            merged.current_location = merged.location = latestCC;
+                            window.currentUserCountry = latestCC;
+                        }
                         try { window.currentUserData = merged; window.currentUser = merged; } catch (e) { /* ignore */ }
+                        if (window.currentUserData && latestCC != null && String(latestCC).trim() !== '') {
+                            window.currentUserData.current_location = latestCC;
+                            if (window.allData && Array.isArray(window.allData)) {
+                                const myIndex = window.allData.findIndex(u =>
+                                    (u.fingerprint && u.fingerprint === window.currentUserData.fingerprint) ||
+                                    (u.github_username && u.github_username === window.currentUserData.github_username)
+                                );
+                                if (myIndex !== -1) {
+                                    window.allData[myIndex].current_location = latestCC;
+                                    console.log('[Fix] 已同步全局缓存中的国籍为:', latestCC);
+                                }
+                            }
+                        }
                         var localStats = window.last_local_stats;
                         var st = (localStats && localStats.payload && (Date.now() - (localStats.ts || 0)) < 300000) ? (localStats.payload.stats || {}) : null;
                         var meVals = {
@@ -5727,7 +5774,7 @@
                             // 【修复】改进全球排名的获取逻辑
                             const userData = window.currentUserData || window.currentUser || {};
                             const vibeRank = Number(userData?.vibe_rank ?? userData?.vibeRank ?? NaN);
-                            const totalUsersFallback = globalTotalUsers > 0 ? globalTotalUsers : (payload2.totalUsers ?? (window.lastData && (window.lastData.totalUsers != null) ? Number(window.lastData.totalUsers) : 0));
+                            const totalUsersFallback = effectiveIsGlobal ? globalTotalUsers : (window.__globalTotalUsers || (window.lastData && (window.lastData.totalUsers != null) ? Number(window.lastData.totalUsers) : 0) || globalTotalUsers);
                             
                             // 如果 gRanks 没有提供全球排名，尝试从 personalRanks 获取
                             if ((rankGlobal == null || totalGlobal <= 0) && payload2.personalRanks) {
@@ -5816,7 +5863,7 @@
                         try { window.__countryTotalsCache.set(cacheKey2, { totalsHtml, ranksHtml, ts: Date.now() }); } catch { /* ignore */ }
                         // 有 countryTotals 即更新排名 UI（含该国全 0 的首人情况），移除 animate-pulse，严禁回退全球数据
                         if (payload2.countryTotals && typeof updateCountryRankUI === 'function') updateCountryRankUI(payload2);
-                        // 国家视图成功后：将 payload 注入 UI，仅定向调用 renderUserStatsCards 与排名更新，不调用 refreshUserStats 避免死循环
+                        // 国家视图成功后：仅定向调用 renderUserStatsCards/排名更新。严禁调用 refreshUserStats，否则会重新拉取并覆盖已同步的 allData 缓存。
                         if (!effectiveIsGlobal) {
                             try {
                                 var baseUser = window.currentUserData || window.currentUser || {};
@@ -6371,6 +6418,11 @@
                 'drawer.details': '详细信息',
                 'drawer.my_stats': '我的数据统计',
                 'drawer.tech_rank': '技术排名',
+                'rank.country': '该国',
+                'rank.global': '全球',
+                'rank.rank_n': '第 {n} 名',
+                'rank.total_people': '共 {n} 人',
+                'rank.global_rank_label': '全球排名',
                 'drawer.personality_title': '人格称号',
                 'drawer.real_evaluation': '真实评价',
 
@@ -6474,6 +6526,11 @@
                 'drawer.details': 'Details',
                 'drawer.my_stats': 'My Stats',
                 'drawer.tech_rank': 'Tech Rank',
+                'rank.country': 'Country',
+                'rank.global': 'Global',
+                'rank.rank_n': 'No. {n}',
+                'rank.total_people': 'Total {n}',
+                'rank.global_rank_label': 'Global rank',
                 'drawer.personality_title': 'Title',
                 'drawer.real_evaluation': 'Real Evaluation',
 
@@ -10407,6 +10464,7 @@
             selectedCountry = code === 'US' ? 'US' : code;
             currentDrawerCountry.code = code;
             currentDrawerCountry.name = displayName;
+            try { window.currentUserCountry = String(code || '').trim().toUpperCase(); } catch (e) { /* ignore */ }
             // 【新增】更新顶部视图切换按钮
             updateHeaderViewToggleBtn();
             console.log('[Drawer] 国家透视已打开:', name);
@@ -10573,6 +10631,7 @@
                 var cc = String(initialCountryCode).trim().toUpperCase();
                 currentDrawerCountry.code = cc;
                 currentDrawerCountry.name = (countryNameMap && countryNameMap[cc]) ? (currentLang === 'zh' ? countryNameMap[cc].zh : countryNameMap[cc].en) : cc;
+                try { window.currentUserCountry = cc; } catch (e) { /* ignore */ }
             }
             // 更新当前视图状态
             currentViewState = targetView;
@@ -21046,36 +21105,47 @@
                     }
                 }
                 
-                const totalUsers = window.lastData?.totalUsers || 1;
                 const userTotalMsgs = Number(currentUserData?.total_messages ?? currentUserData?.totalMessages ?? dimensionValues?.ai ?? 0) || 0;
-                let techRankText = 'N/A';
                 const pct = (v) => Math.floor(Number(v) ?? 0) + '%';
                 const jiafangPct = pct(currentUserData.jiafang_rank_percent ?? currentUserData.jiafang_rank ?? 0);
                 const ketaoPct = pct(currentUserData.ketao_rank_percent ?? currentUserData.ketao_rank ?? 0);
                 const daysPct = pct(currentUserData.days_rank_percent ?? currentUserData.days_rank ?? 0);
 
-                // 技术排名来源：后端 v_user_analysis_extended 的 vibe_rank（1-based 名次）或由 _percent 推算
-                // 公平性：名次始终为 1-based，至少为 1，避免出现「第 0 名」
-                const rankForDisplay = (r) => Math.min(totalUsers, Math.max(1, Number(r) || 1));
-                if (vibeRank !== null && vibeRank !== undefined && totalUsers > 0) {
-                    const r = rankForDisplay(vibeRank);
-                    techRankText = currentLang === 'en'
-                        ? `#${r} / ${totalUsers}`
-                        : `第 ${r} 名 / ${totalUsers} 人`;
-                } else if (avgRank !== null && avgRank !== undefined && totalUsers > 0) {
-                    // avgRank 为百分比 0-100（越大越强），(1-avgRank/100)*totalUsers = 人数在你前面，+1 为 1-based 名次
-                    const peopleAhead = Math.round((1 - avgRank / 100) * totalUsers);
-                    const r = rankForDisplay(peopleAhead + 1);
-                    techRankText = currentLang === 'en'
-                        ? `#${r} / ${totalUsers}`
-                        : `第 ${r} 名 / ${totalUsers} 人`;
-                }
+                const allData = Array.isArray(window.allData) ? window.allData : [];
+                const globalTotal = Math.max(1, allData.length);
+                // 聚合国籍识别：多字段兼容，SQL 可能为 null 时仍返回 2 位码
+                const getUserCountry = (u) => {
+                    const code = u?.current_location || u?.manual_location || u?.ip_location || u?.country_code || 'US';
+                    return String(code).trim().toUpperCase().substring(0, 2);
+                };
+                const myCountry = getUserCountry(currentUserData);
+                const countryPeerGroup = allData.filter((u) => getUserCountry(u) === myCountry);
+                const countryTotal = Math.max(1, countryPeerGroup.length);
+                const myFingerprint = (currentUserData?.fingerprint || currentUserData?.fp || '').toString();
+                let myRankInCountry = myFingerprint ? countryPeerGroup.findIndex((u) => (u.fingerprint || u.fp || '').toString() === myFingerprint) : -1;
+                if (myRankInCountry < 0) myRankInCountry = countryPeerGroup.findIndex((u) => (u.user_name || u.userName || u.github_username || '').toString() === (currentUserData?.user_name || currentUserData?.userName || '').toString());
+                const countryRank = countryTotal > 0 ? (myRankInCountry >= 0 ? myRankInCountry + 1 : 1) : 1;
+
+                // 全球排名：按字数（其次消息数）排序后取当前用户索引
+                const sortScore = (u) => (Number(u?.total_chars ?? u?.say ?? u?.total_user_chars ?? 0) || 0) * 1e6 + (Number(u?.total_messages ?? u?.ai ?? 0) || 0);
+                const sortedGlobal = allData.slice().sort((a, b) => sortScore(b) - sortScore(a));
+                const myGlobalIdx = myFingerprint ? sortedGlobal.findIndex((u) => (u.fingerprint || u.fp || '').toString() === myFingerprint) : -1;
+                const myGlobalIdxByName = myGlobalIdx < 0 ? sortedGlobal.findIndex((u) => (u.user_name || u.userName || u.github_username || '').toString() === (currentUserData?.user_name || currentUserData?.userName || '').toString()) : myGlobalIdx;
+                const globalRank = myGlobalIdxByName >= 0 ? myGlobalIdxByName + 1 : (vibeRank != null && Number(vibeRank) >= 1 ? Math.min(globalTotal, Math.max(1, Number(vibeRank))) : 1);
+
+                const rn = (key, n) => {
+                    const s = (typeof getI18nText === 'function' ? getI18nText(key) : null) ?? '';
+                    return (s === undefined || s === null ? '' : String(s)).replace(/\{n\}/g, String(n)) || String(n);
+                };
+                const line1 = (getI18nText('rank.country') || '该国') + ' ' + (rn('rank.rank_n', countryRank) || ('第 ' + countryRank + ' 名')) + ' / ' + (rn('rank.total_people', countryTotal) || ('共 ' + countryTotal + ' 人'));
+                const line2 = '<span class="text-zinc-500 text-[10px] block mt-0.5">' + (getI18nText('rank.global') || '全球') + ' ' + (rn('rank.rank_n', globalRank) || ('第 ' + globalRank + ' 名')) + ' / ' + globalTotal + '</span>';
+                const techRankText = line1 + line2;
                 const isLowConfidence = userTotalMsgs > 0 && userTotalMsgs < 10;
                 const techRankClass = isLowConfidence ? 'text-gray-600' : '';
                 const confidenceHint = isLowConfidence
                     ? `<div class="text-[9px] text-zinc-500 mt-1">${currentLang === 'en' ? 'Low confidence (early stage)' : '当前处于病患初期，置信度较低'}</div>`
                     : '';
-                console.log('[UserStats] 🏆 技术排名:', { vibeRank, vibePercentile, avgRank, totalUsers, techRankText, userTotalMsgs });
+                console.log('[UserStats] 🏆 技术排名:', { vibeRank, vibePercentile, avgRank, myCountry: myCountry || '(none)', countryRank, globalRank, countryTotal, globalTotal, userTotalMsgs });
                 
                 const nf = new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN');
 
@@ -24685,6 +24755,14 @@
          * 【修复 AbortError】添加防重复调用机制，避免页面刷新时多次调用导致冲突
          */
         // 防重复调用标志
+        /** 获取用户国家码（country-summary 的 cc 参数）：current_location 优先，不能硬编码 */
+        window.safeGetCountry = function(u) {
+            if (!u || typeof u !== 'object') return 'US';
+            const cc = (u.current_location || u.manual_location || u.country_code || u.ip_location || 'US');
+            const s = String(cc).trim().toUpperCase();
+            return (s.length >= 2 ? s.substring(0, 2) : s) || 'US';
+        };
+
         let isRefreshingUserStats = false;
         let refreshUserStatsAbortController = null;
         
@@ -24890,15 +24968,14 @@
                     if (leftDrawer && leftBody) {
                         const isDrawerOpen = leftDrawer.classList.contains('active');
                         if (isDrawerOpen) {
-                            // ✅ 关键：母国（manual_location）≠ 当前国家视角（currentDrawerCountry/anchored_country）
-                            // 在国家透视（COUNTRY）模式下，必须保持用户正在查看的国家，不要被 manual_location 覆盖回去，
-                            // 否则会出现“点 CN 但抽屉仍显示 US 数据（看似复制）”的问题。
+                            // ✅ 刷新时 cc 必须用用户真实的 current_location，这样 country-summary 和 myCountryRanks 才能返回正确本国统计
+                            const currentCC = (typeof window.safeGetCountry === 'function')
+                                ? window.safeGetCountry(window.currentUserData || currentUser)
+                                : (currentUser.current_location || currentUser.manual_location || currentUser.country_code || currentDrawerCountry?.code || 'US');
                             const inCountryView = (typeof currentViewState === 'string' && currentViewState === 'COUNTRY');
                             const drawerCode = inCountryView
-                                ? currentDrawerCountry.code
-                                : ((localStorage.getItem('loc_fixed') === 'true' && (currentUser.manual_location || currentUser.country_code))
-                                    ? (currentUser.manual_location || currentUser.country_code)
-                                    : currentDrawerCountry.code);
+                                ? (currentDrawerCountry?.code || currentCC)
+                                : currentCC;
                             const drawerName = drawerCode && (typeof countryNameMap !== 'undefined' && countryNameMap[drawerCode])
                                 ? (currentLang === 'zh' ? countryNameMap[drawerCode].zh : countryNameMap[drawerCode].en)
                                 : (currentDrawerCountry.name || drawerCode);

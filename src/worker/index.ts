@@ -6976,6 +6976,28 @@ app.get('/api/country-summary', async (c) => {
           word: computedCountryTotals.word,
         };
 
+    // 地理分布：必须按 current_location GROUP BY，使用 RPC 查询
+    let locationRankList: Array<{ name: string; value: number }> = [{ name: country, value: Number(computedCountryTotals.totalUsers) || Number(countryTotalUsers) || 0 }];
+    try {
+      const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_location_distribution`;
+      const rpcRes = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { ...buildSupabaseHeaders(env), 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      if (rpcRes.ok) {
+        const raw = await rpcRes.json();
+        const arr = Array.isArray(raw) ? raw : (raw && typeof raw === 'object' && Array.isArray(raw?.data) ? raw.data : null);
+        if (arr && arr.length > 0) {
+          locationRankList = arr.map((item: any) => ({
+            name: String(item?.name ?? ''),
+            value: Number(item?.value) || 0,
+          })).filter((x: { name: string; value: number }) => x.name && x.name !== 'XX');
+          if (locationRankList.length === 0) locationRankList = [{ name: country, value: Number(computedCountryTotals.totalUsers) || Number(countryTotalUsers) || 0 }];
+        }
+      }
+    } catch (_) { /* 保留单国兜底 */ }
+
     const out: any = {
       success: true,
       msg_count,
@@ -6992,7 +7014,7 @@ app.get('/api/country-summary', async (c) => {
       avgPerScan,
       globalAverage: avgDims,
       averages: avgDims,
-      locationRank: [{ name: country, value: Number(computedCountryTotals.totalUsers) || Number(countryTotalUsers) || 0 }],
+      locationRank: locationRankList,
       personalityRank: [],
       personalityDistribution: [],
       latestRecords,
