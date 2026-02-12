@@ -3033,6 +3033,63 @@ app.post('/api/v2/analyze', async (c) => {
 });
 
 /**
+ * POST /api/update-location
+ * 全链路国籍同步：接收 fingerprint + new_cc，更新 user_analysis.current_location，保证与视图统计强一致。
+ * 响应 200 且 Cache-Control: no-store，供前端选籍后立即拉取最新 country-summary。
+ * 同一 fingerprint 的并发 PATCH 由 Supabase 按行原子处理，始终返回 200（success 或 warning）。
+ */
+app.post('/api/update-location', async (c) => {
+  const env = c.env;
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+    return c.json({ status: 'error', error: 'Supabase 未配置' }, 500);
+  }
+  let body: any = null;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ status: 'error', error: 'Invalid JSON' }, 400);
+  }
+  const fingerprint = (body?.fingerprint ? String(body.fingerprint).trim() : '') || '';
+  const newCcRaw = body?.new_cc ?? body?.newCc ?? body?.current_location ?? body?.currentLocation ?? '';
+  const newCc = String(newCcRaw || '').trim().toUpperCase();
+  if (!fingerprint) {
+    return c.json({ status: 'error', error: 'fingerprint 必填' }, 400);
+  }
+  if (!/^[A-Z]{2}$/.test(newCc)) {
+    return c.json({ status: 'error', error: 'new_cc 必须为 2 位国家码' }, 400);
+  }
+  try {
+    const patchPayload = {
+      current_location: newCc,
+      manual_location: newCc,
+      country_code: newCc, // 向后兼容
+      location_switched_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const url = `${env.SUPABASE_URL}/rest/v1/user_analysis?fingerprint=eq.${encodeURIComponent(fingerprint)}`;
+    const res = await fetchSupabase(env, url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify(patchPayload),
+    });
+    if (!res.ok) {
+      const t = await res.text().catch(() => '');
+      return c.json({ status: 'warning', updated: false, error: t || `HTTP ${res.status}` }, 200);
+    }
+    c.header('Cache-Control', 'no-store');
+    return c.json({
+      status: 'success',
+      updated: true,
+      current_location: newCc,
+      manual_location: newCc,
+      country_code: newCc,
+    });
+  } catch (e: any) {
+    return c.json({ status: 'warning', updated: false, error: e?.message || String(e) }, 200);
+  }
+});
+
+/**
  * POST /api/v2/update_location
  * 前端“切换国籍/视角”时调用：仅更新用户画像中的 current_location，不影响历史行为快照。
  * payload: { fingerprint?: string, current_location?: string, anchored_country?: string, switched_at?: string|number }
@@ -5866,9 +5923,9 @@ app.get('/api/country-summary', async (c) => {
     const refresh = c.req.query('refresh') === 'true';
     const cacheKey = `global_stats_v4_${countryCode}`; // 【缓存版本升级】v4 避免旧缓存死锁
 
-    // 【国家视图数据对齐】当请求带明确国家码时，不读 KV 缓存，必须从 v_country_stats 取该国真实聚合，避免返回全局平均
-    const skipCacheForCountry = hasExplicitCc && /^[A-Z]{2}$/.test(cc);
-    if (!refresh && !skipCacheForCountry && env.STATS_STORE) {
+    // 【强制跳过 KV】country-summary 始终从视图读取最新数据，保证与 current_location 更新后强一致
+    const skipCache = true;
+    if (!refresh && !skipCache && env.STATS_STORE) {
       try {
         const cached = await env.STATS_STORE.get(cacheKey, 'text');
         if (cached) {

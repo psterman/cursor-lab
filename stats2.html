@@ -3717,6 +3717,42 @@
             </div>
         </div>
     </div>
+    <script>
+    // 【强制选籍拦截】DOMContentLoaded 最开始：无 user_country_fixed 则全屏国籍选择弹窗并锁定滚动，有则设 currentCountryCode 初始化
+    (function() {
+        function closeCountryPickerModal() {
+            var modal = document.getElementById('country-selector-modal');
+            if (modal) modal.style.display = 'none';
+            try { document.body.style.overflow = ''; document.documentElement.style.overflow = ''; } catch (e) {}
+        }
+        document.addEventListener('click', function(e) {
+            var btn = e.target && (e.target.id === 'country-selector-close' || (e.target.closest && e.target.closest('#country-selector-close')));
+            if (btn) { closeCountryPickerModal(); }
+        });
+        function run() {
+            var fixed = null;
+            try { fixed = localStorage.getItem('user_country_fixed'); } catch (e) {}
+            if (fixed && fixed.length >= 2) {
+                try { window.currentCountryCode = String(fixed).trim().toUpperCase(); } catch (e) {}
+                return;
+            }
+            var modal = document.getElementById('country-selector-modal');
+            if (modal) {
+                modal.style.display = 'block';
+                modal.style.position = 'fixed';
+                modal.style.top = '0'; modal.style.left = '0'; modal.style.right = '0'; modal.style.bottom = '0';
+                modal.style.zIndex = '200';
+                try { document.body.style.overflow = 'hidden'; document.documentElement.style.overflow = 'hidden'; } catch (e) {}
+                window.__countryPickerForced = true;
+            }
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', run);
+        } else {
+            run();
+        }
+    })();
+    </script>
     
     <!-- 用户详情浮层（预留在 HTML 中，由事件委托打开；内容可由 JS 填充） -->
     <div id="user-modal" class="hidden" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 180; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; pointer-events: auto;">
@@ -4661,6 +4697,19 @@
             }
             const effectiveIsGlobal = isGlobal || !/^[A-Z]{2}$/.test(countryCode);
 
+            // vNext: 支持第三参数 options（preferCache / silent / force），提前解析供重复检查使用
+            const opts = (() => {
+                try {
+                    const o = arguments && arguments.length >= 3 ? arguments[2] : null;
+                    return o && typeof o === 'object' ? o : {};
+                } catch {
+                    return {};
+                }
+            })();
+            // 重复检查：同一国家且非强制刷新则直接 return，避免重复请求与死循环
+            const forceRefresh = opts.force === true || opts.forceRefresh === true;
+            if (!effectiveIsGlobal && countryCode && String(countryCode).toUpperCase() === String(lastRequestCountry || '').toUpperCase() && !forceRefresh) return;
+
             // RPC/API 参数 target_country 严格等于当前选择的国家码（与后端 get_country_* 一致）
             const target_country = effectiveIsGlobal ? '' : String(countryCode).toUpperCase();
             const selectedCountry = effectiveIsGlobal ? 'GLOBAL' : target_country;
@@ -4687,16 +4736,6 @@
             const radarDom = document.getElementById('rtRadar');
             const realtimeDom = document.getElementById('rtRealtimeList');
             const meritEl = document.getElementById('rtMeritBoard');
-
-            // vNext: 支持第三参数 options（preferCache / silent）
-            const opts = (() => {
-                try {
-                    const o = arguments && arguments.length >= 3 ? arguments[2] : null;
-                    return o && typeof o === 'object' ? o : {};
-                } catch {
-                    return {};
-                }
-            })();
 
             // 优先数据源：传参 data.countryTotals 或 window.lastData（用于统计卡片，不再依赖 country_level/countryDataByCode）
             const preferredTotals = (maybeData && typeof maybeData === 'object' && (maybeData.countryTotals ?? maybeData.data?.countryTotals))
@@ -4746,9 +4785,9 @@
                 el.textContent = new Intl.NumberFormat('zh-CN').format(n);
             };
 
-            /** 国家视图下：一旦 countryTotals.ai > 0 则执行——移除 .animate-pulse，将 N/A 替换为实际数字。不影响 Global 视图。 */
+            /** 国家视图下：有 countryTotals 即执行（含 ai=0 的首人国家）——移除 .animate-pulse，将数值替换为该国真实统计。严禁回退全球数据。 */
             function updateCountryRankUI(payload) {
-                if (!payload || !payload.countryTotals || Number(payload.countryTotals.ai) <= 0) return;
+                if (!payload || !payload.countryTotals) return;
                 if (effectiveIsGlobal) return;
                 try {
                     document.querySelectorAll('#right-drawer .animate-pulse, .right-drawer .animate-pulse').forEach(function(el) { if (el && el.classList) el.classList.remove('animate-pulse'); });
@@ -5036,15 +5075,21 @@
                 }
             };
 
-            // 国家视图切换：清空旧数据占位，避免显示上一国数据；请求完成后用新 countryTotals 替换，移除 N/A
+            // 预设加载态：发起 fetch 前立即将右侧抽屉所有卡片（总人数、总消息、总字数、国家累计、我的排名）置为 ... 并 animate-pulse
             if (!effectiveIsGlobal && !opts.silent && !opts.preferCache) {
-                if (usersValEl) usersValEl.textContent = '—';
-                if (analysisValEl) analysisValEl.textContent = '—';
+                if (usersValEl) { usersValEl.textContent = '...'; usersValEl.classList.add('animate-pulse'); }
+                if (analysisValEl) { analysisValEl.textContent = '...'; analysisValEl.classList.add('animate-pulse'); }
                 const totalsBoxPre = document.getElementById('rtCountryTotals');
                 const ranksBoxPre = document.getElementById('rtMyCountryRanks');
-                if (totalsBoxPre) totalsBoxPre.innerHTML = '<div class="text-zinc-500 text-xs">' + (currentLang === 'en' ? 'Loading...' : '加载中...') + '</div>';
-                if (ranksBoxPre) ranksBoxPre.innerHTML = '<div class="text-zinc-500 text-xs">' + (currentLang === 'en' ? 'Loading...' : '加载中...') + '</div>';
-                if (meritEl) meritEl.textContent = currentLang === 'en' ? 'Analyzed -- ×10k chars' : '已累计分析 -- 万字';
+                if (totalsBoxPre) totalsBoxPre.innerHTML = '<div class="text-zinc-500 text-xs animate-pulse">...</div>';
+                if (ranksBoxPre) ranksBoxPre.innerHTML = '<div class="text-zinc-500 text-xs animate-pulse">...</div>';
+                if (meritEl) { meritEl.textContent = '...'; meritEl.classList.add('animate-pulse'); }
+                var rtJ = document.getElementById('rtJiafangCount');
+                var rtK = document.getElementById('rtKetaoCount');
+                var rtW = document.getElementById('rtWorkDays');
+                if (rtJ) { rtJ.textContent = '...'; rtJ.classList.add('animate-pulse'); }
+                if (rtK) { rtK.textContent = '...'; rtK.classList.add('animate-pulse'); }
+                if (rtW) { rtW.textContent = '...'; rtW.classList.add('animate-pulse'); }
                 if (window.__countryTotalsCache && countryCode) window.__countryTotalsCache.delete(`CT:${String(countryCode).toUpperCase()}`);
             }
             if (!effectiveIsGlobal && !opts.silent) {
@@ -5052,13 +5097,16 @@
             }
 
             try {
+                if (window.countryAbortController) try { window.countryAbortController.abort(); } catch (abortE) {}
+                window.countryAbortController = new AbortController();
+                var fetchSignal = window.countryAbortController.signal;
                 if (statusEl) statusEl.textContent = 'DATA: FETCHING';
                 if (!opts.silent) {
                     renderRadarMessage(getI18nText('radar.loading') || 'Loading...');
                     if (realtimeDom) realtimeDom.innerHTML = `<div class="text-zinc-500 text-xs">${escapeHtml(getI18nText('common.loading') || (currentLang === 'en' ? 'Loading...' : '加载中...'))}</div>`;
                 }
 
-                const resp = await fetch(url);
+                const resp = await fetch(url, { signal: fetchSignal });
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 const payload = await resp.json();
                 // 后端返回可能是“顶层完整字段 + data(兼容包装)”的结构。
@@ -5098,6 +5146,8 @@
                     return;
                 }
 
+                // 请求成功后同步 lastRequestCountry
+                if (!effectiveIsGlobal && countryCode) lastRequestCountry = String(countryCode).toUpperCase();
                 // 写入缓存（供下次“秒切换”使用）
                 try {
                     if (!window.__countryDashboardCache) window.__countryDashboardCache = new Map();
@@ -5195,9 +5245,9 @@
                 const rtJiafang = document.getElementById('rtJiafangCount');
                 const rtKetao = document.getElementById('rtKetaoCount');
                 const rtWorkDays = document.getElementById('rtWorkDays');
-                if (rtJiafang) rtJiafang.textContent = (jiafangVal !== null && jiafangVal !== undefined) ? String(Number(jiafangVal)) : '--';
-                if (rtKetao) rtKetao.textContent = (ketaoVal !== null && ketaoVal !== undefined) ? String(Number(ketaoVal)) : '--';
-                if (rtWorkDays) rtWorkDays.textContent = (workDaysVal !== null && workDaysVal !== undefined) ? String(Number(workDaysVal)) : '--';
+                if (rtJiafang) { rtJiafang.textContent = (jiafangVal !== null && jiafangVal !== undefined) ? String(Number(jiafangVal)) : '--'; rtJiafang.classList.remove('animate-pulse'); }
+                if (rtKetao) { rtKetao.textContent = (ketaoVal !== null && ketaoVal !== undefined) ? String(Number(ketaoVal)) : '--'; rtKetao.classList.remove('animate-pulse'); }
+                if (rtWorkDays) { rtWorkDays.textContent = (workDaysVal !== null && workDaysVal !== undefined) ? String(Number(workDaysVal)) : '--'; rtWorkDays.classList.remove('animate-pulse'); }
 
                 // 如果是美国，需要同时拿到：本地区 totalUsers / totalAnalysis 和全球 totalUsers（用于 Ratio）
                 // 【修复】根据请求类型判断数据结构:
@@ -5218,14 +5268,10 @@
                     localTotalUsers = globalTotalUsers;
                     localTotalAnalysis = globalTotalAnalysis;
                 } else {
-                    // 国家模式：仅从 countryTotals 读取该国 totalUsers、ai，不落回根节点
+                    // 国家模式：严格仅从 countryTotals 读取该国数据，即使该国为 0 也不回退全球
                     const ct = data.countryTotals || {};
-                    localTotalUsers = Number(
-                        ct.totalUsers ?? ct.total_users ?? data.totalUsers ?? data.total_users ?? data.totalusers ?? null
-                    );
-                    localTotalAnalysis = Number(
-                        ct.ai ?? ct.total_messages ?? data.totalAnalysis ?? data.total_analysis ?? data.totalanalysis ?? null
-                    );
+                    localTotalUsers = Number(ct.totalUsers ?? ct.total_users ?? 0);
+                    localTotalAnalysis = Number(ct.ai ?? ct.total_messages ?? 0);
                     
                 // 国家模式下，需要重新获取全网数据用于占比计算
                 // (因为上面的 globalTotalUsers 实际是该国数据)
@@ -5563,7 +5609,7 @@
                             `;
                         };
 
-                        // 国家累计：移除冗余「废话输出」（与对话字符数同源），新增「上岗天数」
+                        // 国家累计：右侧抽屉所有数值（ai, say, day, no, please）严格从 payload.countryTotals 读取
                         // 注意：后端 countryTotalsRanks 键名是 avg_user_message_length，需要兼容
                         // 【修复】使用 hasValidTotals 确保数据真正有效，而非仅判断对象存在
                         const totalsHtml = hasValidTotals
@@ -5591,12 +5637,33 @@
                         if (totalsBox) totalsBox.innerHTML = totalsHtml;
                         if (ranksBox) ranksBox.innerHTML = ranksHtml;
                         try { window.__countryTotalsCache.set(cacheKey2, { totalsHtml, ranksHtml, ts: Date.now() }); } catch { /* ignore */ }
-                        // 核心逻辑：一旦 countryTotals.ai > 0，立即执行 updateCountryRankUI 并移除 .animate-pulse，将 N/A 替换为实际数字（仅国家视图，不影响 Global）
-                        if (hasValidTotals && payload2.countryTotals && Number(payload2.countryTotals.ai) > 0) {
-                            if (typeof updateCountryRankUI === 'function') updateCountryRankUI(payload2);
+                        // 有 countryTotals 即更新排名 UI（含该国全 0 的首人情况），移除 animate-pulse，严禁回退全球数据
+                        if (payload2.countryTotals && typeof updateCountryRankUI === 'function') updateCountryRankUI(payload2);
+                        // 国家视图成功后：将 payload 注入 UI，仅定向调用 renderUserStatsCards 与排名更新，不调用 refreshUserStats 避免死循环
+                        if (!effectiveIsGlobal) {
+                            try {
+                                var baseUser = window.currentUserData || window.currentUser || {};
+                                var myVals = payload2.myCountryValues || payload2.data?.myCountryValues || {};
+                                var myCountry = payload2.myCountry || payload2.data?.myCountry || {};
+                                var merged = Object.assign({}, baseUser, myVals, myCountry);
+                                if (merged.personality_name === undefined && merged.personalityName === undefined) {
+                                    merged.personalityName = merged.personality_name = (baseUser.personality_name || baseUser.personalityName || (currentLang === 'en' ? 'Unknown Title' : '未知人格'));
+                                }
+                                if (!merged.personality_type && !merged.personalityType) merged.personality_type = baseUser.personality_type || baseUser.personalityType || 'UNKNOWN';
+                                if (merged.personality_type && !merged.personalityType) merged.personalityType = merged.personality_type;
+                                if (merged.personalityType && !merged.personality_type) merged.personality_type = merged.personalityType;
+                                if (!merged.personality && baseUser.personality) merged.personality = baseUser.personality;
+                                window.currentUserData = merged;
+                                window.currentUser = merged;
+                                var leftBody = document.getElementById('left-drawer-body');
+                                if (leftBody && typeof renderUserStatsCards === 'function') renderUserStatsCards(leftBody, getBestUserRecordForStats(merged));
+                                if (typeof renderRankCards === 'function' && (merged.id || merged.fingerprint)) renderRankCards(merged);
+                            } catch (e) { console.warn('[updateCountryDashboard] 注入左侧名片失败:', e); }
+                            try { if (typeof window.highlightSelectedCountry === 'function') window.highlightSelectedCountry(); } catch (e) {}
                         }
                     }
                 } catch (e) {
+                    if (e && e.name === 'AbortError') return; // 静默中止，不报错
                     // 不阻断主面板；国家数据加载失败时显示 #-- / --
                     try {
                         const totalsBox = document.getElementById('rtCountryTotals');
@@ -6488,14 +6555,7 @@
                 }
             } catch { /* ignore */ }
 
-            // 如果国家透视面板处于打开状态：静默刷新右侧抽屉（文案会随 currentLang 更新）
-            try {
-                if (typeof refreshCountryRightPanel === 'function') {
-                    refreshCountryRightPanel();
-                } else if (typeof updateCountryDashboard === 'function' && currentDrawerCountry && currentDrawerCountry.code) {
-                    updateCountryDashboard(String(currentDrawerCountry.code).toUpperCase(), { preferCache: true, silent: true });
-                }
-            } catch { /* ignore */ }
+            // 解耦：语言切换仅负责 DOM 文本替换，不触发 refreshCountryRightPanel 或任何数据 fetch
         }
 
         const countryNameMap = {
@@ -7004,6 +7064,8 @@
 
         let mapChart, radarChart;
         let currentViewState = 'GLOBAL'; // GLOBAL / COUNTRY / RANKING（右侧抽屉三视图）
+        let isGlobalInitializing = true;
+        let lastRequestCountry = null;
         
         // 【重构】初始化右侧抽屉面板 - 支持三 Tab 结构
         function initRightDrawerPanels() {
@@ -7368,6 +7430,33 @@
             if (!/^[A-Z]{2}$/.test(code)) return;
             source = source || 'unknown';
             const showLoading = (opts && opts.showLoading !== undefined) ? opts.showLoading : (source === 'select' || source === 'country-select-dropdown');
+            window.isLogicProcessing = true;
+            try {
+            // 第一步：POST /api/update-location 同步到数据库；失败则 Toast 并 return，不写 localStorage、不切换 UI
+            try {
+                const base = (document.querySelector('meta[name="api-endpoint"]')?.content || '').trim();
+                const apiBase = base.endsWith('/') ? base.slice(0, -1) : base;
+                let fp = '';
+                try { fp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (e) {}
+                const res = await fetch(apiBase ? apiBase + '/api/update-location' : '/api/update-location', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fingerprint: fp, new_cc: code })
+                });
+                if (res.ok) {
+                    try { localStorage.setItem('user_country_fixed', code); } catch (e) {}
+                    window.currentCountryCode = code;
+                } else {
+                    if (typeof showNotification === 'function') showNotification('位置同步失败');
+                    else try { alert('位置同步失败'); } catch (_) {}
+                    return;
+                }
+            } catch (e) {
+                console.warn('[CountrySwitch] update-location 失败:', e);
+                if (typeof showNotification === 'function') showNotification('位置同步失败');
+                else try { alert('位置同步失败'); } catch (_) {}
+                return;
+            }
 
             const COUNTRY_CODE_TO_ZH = {
                 CN: '中国', US: '美国', JP: '日本', GB: '英国', DE: '德国', FR: '法国',
@@ -7450,8 +7539,7 @@
             }
 
             try {
-                if (typeof window.refreshUserStats === 'function') await window.refreshUserStats();
-                // 显式刷新右侧抽屉：国家累计 / 高分图谱等（get_country_stats、get_high_scores 逻辑由 updateCountryDashboard 拉取）
+                // 仅调用 updateCountryDashboard：其成功后会注入 payload 并定向调用 renderUserStatsCards/排名更新，不再调用 refreshUserStats 避免死循环
                 if (typeof updateCountryDashboard === 'function') {
                     await updateCountryDashboard(code, null, { preferCache: false, silent: false });
                 }
@@ -7478,6 +7566,9 @@
                 setRightDrawerLoading(false);
                 if (dropdown) dropdown.disabled = false;
                 if (dropdownLabel) dropdownLabel.textContent = originalLabelText;
+            }
+            } finally {
+                window.isLogicProcessing = false;
             }
         };
 
@@ -10169,11 +10260,22 @@
          * 处理全球、国家、排行榜三个视图的切换
          * @param {string} view - 'global' | 'country' | 'ranking'
          */
-        function switchView(view) {
+        function switchView(view, initialCountryCode) {
+            if (isGlobalInitializing && !window.__allowInitCall) return;
             console.log('[switchView] 切换到视图:', view);
-            
+            var targetView = (view || '').toUpperCase();
+            // 视图保护：目标视图与目标国家均与当前一致时直接跳过，避免重复触发 updateCountryDashboard 造成死循环
+            if (currentViewState === targetView) {
+                if (targetView !== 'COUNTRY') return;
+                if (currentDrawerCountry && currentDrawerCountry.code) return;
+            }
+            if (initialCountryCode && /^[A-Z]{2}$/i.test(String(initialCountryCode))) {
+                var cc = String(initialCountryCode).trim().toUpperCase();
+                currentDrawerCountry.code = cc;
+                currentDrawerCountry.name = (countryNameMap && countryNameMap[cc]) ? (currentLang === 'zh' ? countryNameMap[cc].zh : countryNameMap[cc].en) : cc;
+            }
             // 更新当前视图状态
-            currentViewState = view.toUpperCase();
+            currentViewState = targetView;
             
             // 获取所有面板和 Tab 按钮
             const panels = {
@@ -10244,21 +10346,16 @@
                     break;
                     
                 case 'country':
-                    // 国家视图：如果尚未渲染国家面板，则执行渲染
+                    // 国家视图：若已有国家码则渲染/刷新；否则仅切 Tab
                     const countryMount = document.getElementById('countryTemplateMount');
-                    // 【修复】避免与 switchToCountryView 的递归调用
-                    // 只有在不是从 switchToCountryView 调用时才执行渲染
-                    if (countryMount && !countryMount.innerHTML.trim() && !window.__renderingCountryView) {
-                        if (currentDrawerCountry.code && currentDrawerCountry.name) {
-                            // 设置标志防止递归
+                    if (currentDrawerCountry.code && currentDrawerCountry.name) {
+                        if (countryMount && !countryMount.innerHTML.trim() && !window.__renderingCountryView) {
                             window.__renderingCountryView = true;
                             switchToCountryView(currentDrawerCountry.code, currentDrawerCountry.name);
-                            // 清除标志
                             setTimeout(() => { window.__renderingCountryView = false; }, 100);
+                        } else {
+                            try { updateCountryDashboard(currentDrawerCountry.code); } catch (e) { /* ignore */ }
                         }
-                    } else {
-                        // 刷新国家数据
-                        try { updateCountryDashboard(currentDrawerCountry.code); } catch (e) { /* ignore */ }
                     }
                     break;
                     
@@ -13877,6 +13974,9 @@
                 // 初始化左侧抽屉国家选择菜单
                 initLeftDrawerCountrySelector();
                 
+                // 初始化身份设置弹窗（国家列表、搜索、关闭）
+                initCountrySelector();
+                
                 // 移除所有旧的拖拽和移动相关功能
                 // （不再需要校准、锚定等功能）
                 
@@ -13932,15 +14032,17 @@
                 
                 if (!modal || !closeBtn || !searchInput || !listContainer) return;
                 
-                // 关闭按钮
+                // 关闭按钮（与早期脚本中的事件委托互补，确保恢复滚动）
                 closeBtn.addEventListener('click', () => {
                     modal.style.display = 'none';
+                    try { document.body.style.overflow = ''; document.documentElement.style.overflow = ''; } catch (e) {}
                 });
                 
                 // 点击背景关闭
                 modal.addEventListener('click', (e) => {
                     if (e.target === modal) {
                         modal.style.display = 'none';
+                        try { document.body.style.overflow = ''; document.documentElement.style.overflow = ''; } catch (e) {}
                     }
                 });
                 
@@ -13958,6 +14060,11 @@
             } catch (e) {
                 console.warn('[CountrySelector] ⚠️ initCountrySelector 失败:', e);
             }
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function() { initCountrySelector(); });
+        } else {
+            initCountrySelector();
         }
         
         /**
@@ -14004,16 +14111,16 @@
                     return nameA.localeCompare(nameB);
                 });
                 
-                // 过滤
-                const filtered = searchQuery
-                    ? countries.filter(c => {
-                        const nameZh = c.nameZh.toLowerCase();
-                        const nameEn = c.nameEn.toLowerCase();
-                        const code = c.code.toLowerCase();
-                        const query = searchQuery.toLowerCase();
+                // 过滤（支持中文/英文/国家码，空名称按空字符串参与匹配）
+                const query = String(searchQuery || '').trim().toLowerCase();
+                const filtered = !query
+                    ? countries
+                    : countries.filter(c => {
+                        const nameZh = (c.nameZh != null ? String(c.nameZh) : '').toLowerCase();
+                        const nameEn = (c.nameEn != null ? String(c.nameEn) : '').toLowerCase();
+                        const code = (c.code != null ? String(c.code) : '').toLowerCase();
                         return nameZh.includes(query) || nameEn.includes(query) || code.includes(query);
-                    })
-                    : countries;
+                    });
                 
                 // 渲染
                 listContainer.innerHTML = filtered.map(c => {
@@ -14046,6 +14153,44 @@
          */
         async function selectCountryFromSelector(countryCode, countryName) {
             try {
+                // 【强制选籍】弹窗初选完成：先同步后端 → 持久化 user_country_fixed → 关弹窗解锁 → 再刷新仪表盘与左侧卡片
+                if (window.__countryPickerForced) {
+                    window.__countryPickerForced = false;
+                    const code = String(countryCode || '').trim().toUpperCase();
+                    if (!/^[A-Z]{2}$/.test(code)) return;
+                    const base = (document.querySelector('meta[name="api-endpoint"]')?.content || '').trim();
+                    const apiBase = base.endsWith('/') ? base.slice(0, -1) : base;
+                    let fp = '';
+                    try { fp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (e) {}
+                    try {
+                        const res = await fetch(apiBase ? apiBase + '/api/update-location' : '/api/update-location', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ fingerprint: fp, new_cc: code })
+                        });
+                        if (!res.ok) {
+                            if (typeof showNotification === 'function') showNotification('位置同步失败');
+                            else try { alert('位置同步失败'); } catch (_) {}
+                            window.__countryPickerForced = true;
+                            return;
+                        }
+                        try { localStorage.setItem('user_country_fixed', code); } catch (e) {}
+                        window.currentCountryCode = code;
+                    } catch (e) {
+                        console.warn('[CountryPicker] update-location 失败:', e);
+                        if (typeof showNotification === 'function') showNotification('位置同步失败');
+                        else try { alert('位置同步失败'); } catch (_) {}
+                        window.__countryPickerForced = true;
+                        return;
+                    }
+                    const modal = document.getElementById('country-selector-modal');
+                    if (modal) modal.style.display = 'none';
+                    try { document.body.style.overflow = ''; document.documentElement.style.overflow = ''; } catch (e) {}
+                    if (typeof updateCountryDashboard === 'function') await updateCountryDashboard(code, { force: true });
+                    if (typeof window.refreshUserStats === 'function') try { window.refreshUserStats(); } catch (e) {}
+                    try { localStorage.setItem('user_manual_location', code); localStorage.setItem('user_selected_country', code); } catch (e) {}
+                    return;
+                }
                 const modal = document.getElementById('country-selector-modal');
                 if (modal) modal.style.display = 'none';
                 
@@ -14420,7 +14565,7 @@
             let url = `${base}/api/country-summary?country=${encodeURIComponent(cc)}`;
             if (uid) url += `&user_id=${encodeURIComponent(uid)}`;
             if (fp) url += `&fingerprint=${encodeURIComponent(fp)}`;
-            url += `&_t=${Date.now()}`;
+            url += `&_ts=${Date.now()}`;
             
             // 检查本地缓存（5分钟内有效）；缺 countryTotals 的旧缓存视为无效，避免 Global 视图错数
             const cacheKey = `country_summary_${cc}`;
@@ -16348,25 +16493,12 @@
                     }
                 }
 
-                // 如果有国家代码，更新抽屉标题和内容
+                // 解耦：不再在 initDrawerState 内调用 switchToCountryView/switchView，由 window.onload 统一一次 switchView('country', savedCC)
                 if (countryCode) {
-                    // 延迟执行，确保其他初始化完成
-                    setTimeout(() => {
-                        try {
-                            // 统一走 onCountrySwitch：保证 anchored_country 更新 + Right Drawer 监听生效
-                            onCountrySwitch(String(countryCode).toUpperCase(), { source: 'init-restore', name: countryName || countryCode, silent: true, force: true });
-                            // 显式恢复抽屉视角（不依赖事件监听的 shouldRender 判定）
-                            const cc = String(countryCode).toUpperCase();
-                            if (/^[A-Z]{2}$/.test(cc)) {
-                                switchToCountryView(cc, countryName || countryCode);
-                                if (typeof switchView === 'function') {
-                                    switchView('country');
-                                }
-                            } else if (typeof showDrawersWithCountryData === 'function') {
-                                showDrawersWithCountryData(countryCode, countryName || countryCode);
-                            }
-                        } catch { /* ignore */ }
-                    }, 100);
+                    try {
+                        currentDrawerCountry.code = String(countryCode).toUpperCase();
+                        currentDrawerCountry.name = countryName || countryCode;
+                    } catch { /* ignore */ }
                 }
 
                 // 恢复左侧抽屉「用户校准」显示：必须与下拉列表选择的国家一致（优先 user_selected_country）
@@ -22061,6 +22193,7 @@
 
         window.onload = function() {
             (async function() {
+            try {
             loadGitHubUsername();
             try { await loadLanguageConfig(); } catch { /* ignore */ }
             try { updateLanguageContext(); } catch { /* ignore */ }
@@ -22114,6 +22247,18 @@
             if (apiFailed || !window.lastData) {
                 showApiStatusWarning();
             }
+            
+            // 瀑布式初始化：基础数据加载完成后，唯一一次主动调用 switchView('country', savedCC)
+            window.__allowInitCall = true;
+            try {
+                var savedCC = (localStorage.getItem('user_country_fixed') || localStorage.getItem('user_selected_country') || '').trim().toUpperCase();
+                if (savedCC && /^[A-Z]{2}$/.test(savedCC)) {
+                    switchView('country', savedCC);
+                } else {
+                    switchView('global');
+                }
+            } catch (e) { console.warn('[onload] switchView 初始化失败:', e); }
+            window.__allowInitCall = false;
             
             // ============================================
             // 【新增】初始化 GitHub OAuth 认证监听
@@ -22514,6 +22659,10 @@
              setTimeout(() => {
                  forceRestoreLockedCursor();
              }, 1500);
+            } finally {
+                isGlobalInitializing = false;
+                window.__allowInitCall = false;
+            }
             })();
          };
 
@@ -24168,6 +24317,7 @@
         let refreshUserStatsAbortController = null;
         
         window.refreshUserStats = async function() {
+            if (isGlobalInitializing && !window.__allowInitCall) return;
             // 【修复 AbortError】如果正在刷新，取消之前的请求
             if (isRefreshingUserStats) {
                 console.log('[Refresh] ⚠️ 检测到重复调用，取消之前的刷新请求...');
