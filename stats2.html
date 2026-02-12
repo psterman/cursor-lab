@@ -5285,6 +5285,17 @@
                         : Object.assign({}, window.cachedSummary || {}, data);
                 } catch (e) { /* ignore */ }
 
+                // 国家视图：拉取 get_country_dimension_averages(target_code) 作为雷达图真实数据源
+                let countryDimensionAverages = null;
+                if (!effectiveIsGlobal && countryCode && typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function') {
+                    try {
+                        const dimRes = await supabaseClient.rpc('get_country_dimension_averages', { target_code: countryCode });
+                        if (dimRes && dimRes.data != null) countryDimensionAverages = dimRes.data;
+                    } catch (e) { console.warn('[updateCountryDashboard] get_country_dimension_averages RPC 失败:', e); }
+                }
+                // 返回值可能是数组 [{ avg_e: "54.00", has_valid_data: true, ... }]，取首条
+                const record = (Array.isArray(countryDimensionAverages) ? countryDimensionAverages[0] : countryDimensionAverages) || null;
+
                 // =========================
                 // 语义爆发（黑话榜）数据源：top10 + cloud50（按国家过滤）
                 // =========================
@@ -5320,28 +5331,38 @@
                     ? (data.countryTotals?.ai ?? data.ai ?? data.totalAnalysis ?? data.total_analysis ?? data.totalanalysis ?? null)
                     : (data.countryTotals?.ai ?? data.total_messages ?? data.totalAnalysis ?? data.total_analysis ?? data.totalanalysis ?? null);
 
-                // 雷达图数据：兼容两种后端结构：
-                // 1) v_global_stats_v6 / RPC: avg_l/avg_p/... 或 avgL/avgP/...
-                // 2) 聚合版：globalAverage / averages: {L,P,D,E,F}
-                const avgObj =
-                    (data.globalAverage && typeof data.globalAverage === 'object' ? data.globalAverage : null) ||
-                    (data.averages && typeof data.averages === 'object' ? data.averages : null) ||
-                    (data.average && typeof data.average === 'object' ? data.average : null) ||
-                    null;
-                const avg_l = data.avg_l ?? data.avgL ?? avgObj?.L ?? avgObj?.l ?? null;
-                const avg_p = data.avg_p ?? data.avgP ?? avgObj?.P ?? avgObj?.p ?? null;
-                const avg_d = data.avg_d ?? data.avgD ?? avgObj?.D ?? avgObj?.d ?? null;
-                const avg_e = data.avg_e ?? data.avgE ?? avgObj?.E ?? avgObj?.e ?? null;
-                const avg_f = data.avg_f ?? data.avgF ?? avgObj?.F ?? avgObj?.f ?? null;
-
-                // 雷达图数据强制转换：避免 "55.0" 这类字符串导致 ECharts 异常
-                const radarData = [
-                    Number(avg_l || 0),
-                    Number(avg_p || 0),
-                    Number(avg_d || 0),
-                    Number(avg_e || 0),
-                    Number(avg_f || 0),
-                ];
+                // 雷达图数据：优先 RPC record（has_valid_data 时）强制 parseFloat，否则 country-summary 的 avg_/globalAverage，仅无有效数据时用 50 占位
+                const toRadarVal = (v) => {
+                    const n = parseFloat(v);
+                    return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : null;
+                };
+                const DEFAULT_RADAR_FALLBACK = [50, 50, 50, 50, 50];
+                let radarData;
+                if (record && record.has_valid_data === true) {
+                    radarData = [record.avg_l, record.avg_p, record.avg_d, record.avg_e, record.avg_f].map(function(v) { return parseFloat(v || 50); });
+                } else {
+                    const avgObj =
+                        (data.globalAverage && typeof data.globalAverage === 'object' ? data.globalAverage : null) ||
+                        (data.averages && typeof data.averages === 'object' ? data.averages : null) ||
+                        (data.average && typeof data.average === 'object' ? data.average : null) ||
+                        null;
+                    const avg_l = data.avg_l ?? data.avgL ?? avgObj?.L ?? avgObj?.l ?? null;
+                    const avg_p = data.avg_p ?? data.avgP ?? avgObj?.P ?? avgObj?.p ?? null;
+                    const avg_d = data.avg_d ?? data.avgD ?? avgObj?.D ?? avgObj?.d ?? null;
+                    const avg_e = data.avg_e ?? data.avgE ?? avgObj?.E ?? avgObj?.e ?? null;
+                    const avg_f = data.avg_f ?? data.avgF ?? avgObj?.F ?? avgObj?.f ?? null;
+                    radarData = [
+                        toRadarVal(avg_l) ?? 0,
+                        toRadarVal(avg_p) ?? 0,
+                        toRadarVal(avg_d) ?? 0,
+                        toRadarVal(avg_e) ?? 0,
+                        toRadarVal(avg_f) ?? 0
+                    ];
+                }
+                // 仅当无有效数据（非 has_valid_data 且全为 0）时使用 50 占位
+                if (radarData.every((v) => Number(v) === 0) && (!record || record.has_valid_data !== true)) {
+                    radarData = DEFAULT_RADAR_FALLBACK.slice();
+                }
 
                 // 国家视图：仅从 countryTotals 读取（say/total_chars）
                 const totalCharsSumRaw = effectiveIsGlobal
@@ -5914,12 +5935,64 @@
                 if (usersValEl && usersValEl.textContent !== 'N/A') flash(usersCardEl || usersValEl);
                 if (analysisValEl && analysisValEl.textContent !== 'N/A') flash(analysisCardEl || analysisValEl);
 
-                // 雷达图空状态：全部为 0 时显示提示而不是渲染空图
-                if (radarData.every((v) => Number(v) === 0)) {
+                // 雷达图：has_valid_data 为真时始终渲染图表且不隐藏容器；仅无有效数据且全 0 时显示“数据不足”
+                const hasValidRadarData = record && record.has_valid_data === true;
+                if (radarData.every((v) => Number(v) === 0) && !hasValidRadarData) {
                     renderRadarMessage(getI18nText('radar.insufficient') || 'Not enough data');
                 } else {
                     renderRadar(radarData);
+                    if (window.__countryRadarChart && record && record.has_valid_data === true) {
+                        try {
+                            window.__countryRadarChart.setOption({ series: [{ data: [{ value: radarData }] }] });
+                            window.__countryRadarChart.resize();
+                        } catch (e) { /* ignore */ }
+                    }
+                    try {
+                        requestAnimationFrame(function() {
+                            if (window.__countryRadarChart && typeof window.__countryRadarChart.resize === 'function') {
+                                window.__countryRadarChart.resize();
+                            }
+                        });
+                    } catch (e) { /* ignore */ }
                 }
+                if (radarDom && radarDom.closest) {
+                    const radarCard = radarDom.closest('.clinic-card');
+                    if (radarCard && hasValidRadarData) radarCard.style.display = '';
+                }
+
+                // 开发者画像（Top Personality）：国家视图下用 top_personality 更新标题与样式
+                try {
+                    const radarCard = radarDom && radarDom.closest ? radarDom.closest('.clinic-card') : null;
+                    const cardTitleEl = radarCard ? radarCard.querySelector('.card-header .card-title') : null;
+                    const topPersonality = data.top_personality ?? data.countryStats?.top_personality ?? data.topPersonality ?? null;
+                    const ab = (topPersonality && (topPersonality.answer_book || topPersonality.answerBook)) ? (topPersonality.answer_book || topPersonality.answerBook) : null;
+                    const personaTitle = (ab && (ab.title || ab.name)) ? String(ab.title || ab.name).trim() : '';
+                    const countryDisplayName = (typeof countryNameMap !== 'undefined' && countryNameMap && countryCode) ? (currentLang === 'zh' ? (countryNameMap[countryCode]?.zh || countryCode) : (countryNameMap[countryCode]?.en || countryCode)) : (countryCode || '');
+                    if (cardTitleEl) {
+                        if (!effectiveIsGlobal && (personaTitle || countryDisplayName)) {
+                            cardTitleEl.textContent = countryDisplayName ? (personaTitle ? `${countryDisplayName} · ${personaTitle}` : `${countryDisplayName} 开发者画像`) : (personaTitle || (currentLang === 'en' ? 'Top Personality' : '开发者画像'));
+                        } else {
+                            cardTitleEl.textContent = currentLang === 'en' ? 'Global Developer Persona' : '全网平均开发者画像';
+                        }
+                    }
+                    // 该国平均 Vibe 指数动态着色：用雷达五维平均或 top_personality 的 lpdef 推算
+                    if (radarCard && !effectiveIsGlobal) {
+                        const avgVibe = radarData.length ? (radarData.reduce((s, v) => s + Number(v) || 0, 0) / radarData.length) : 0;
+                        const lpdefStr = (topPersonality && (topPersonality.lpdef || topPersonality.lpDef)) ? String(topPersonality.lpdef || topPersonality.lpDef) : '';
+                        const vibeIdx = (lpdefStr && typeof lpdefToVibeIndex === 'function') ? lpdefToVibeIndex(lpdefStr) : null;
+                        const hue = vibeIdx ? (function() { const n = parseInt(String(vibeIdx).slice(0, 2) || '11', 10) || 11; return 120 + (n % 3) * 40; })() : (avgVibe < 40 ? 200 : avgVibe < 70 ? 150 : 45);
+                        const accent = vibeIdx != null ? `hsl(${hue}, 80%, 55%)` : 'var(--accent-terminal)';
+                        radarCard.style.setProperty('--radar-card-accent', accent);
+                        radarCard.style.borderLeftStyle = 'solid';
+                        radarCard.style.borderLeftColor = accent;
+                        radarCard.style.borderLeftWidth = '2px';
+                    } else if (radarCard) {
+                        radarCard.style.removeProperty('--radar-card-accent');
+                        radarCard.style.borderLeftStyle = '';
+                        radarCard.style.borderLeftColor = '';
+                        radarCard.style.borderLeftWidth = '';
+                    }
+                } catch (e) { console.warn('[updateCountryDashboard] 开发者画像样式更新失败:', e); }
 
                 // =========================
                 // 派生指标计算与渲染
@@ -6116,7 +6189,34 @@
                 // NOTE: 已在上方“派生指标计算与渲染 / 语义爆发（真实动态化）”完成渲染，
                 // 这里不再重复覆盖 powerScore / semanticBurst，避免 UI 抖动与逻辑分叉。
 
-                renderRealtime(latest);
+                // 人格分布：国家视图用 get_country_personality_distribution 拉取该国数据，全网用 latest_records 聚合
+                (async function renderPersonalityDistributionForDrawer() {
+                    const box = document.getElementById('rtRealtimeList');
+                    if (!box) return;
+                    if (!effectiveIsGlobal && target_country && (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function')) {
+                        try {
+                            const { data: distData, error } = await supabaseClient.rpc('get_country_personality_distribution', { target_country_code: target_country });
+                            if (!error && Array.isArray(distData) && distData.length > 0) {
+                                const distribution = distData.map((row) => ({
+                                    type: String(row.personality_type ?? row.type ?? row.personality_type_code ?? 'UNKNOWN').toUpperCase(),
+                                    count: Number(row.count ?? row.cnt ?? row.total ?? 0) || 0
+                                })).filter((it) => it.count > 0).sort((a, b) => b.count - a.count);
+                                const total = distribution.reduce((s, it) => s + it.count, 0);
+                                const maxPct = total > 0 ? Math.max(...distribution.map((it) => (it.count / total) * 100)) : 0;
+                                box.className = 'personality-vbar-chart';
+                                box.innerHTML = distribution.map((item) => {
+                                    const pctVal = total > 0 ? (item.count / total) * 100 : 0;
+                                    const pct = pctVal.toFixed(1);
+                                    const heightPct = maxPct > 0 ? Math.max(4, (pctVal / maxPct) * 100) : 0;
+                                    const title = typeof getPersonalityTitle === 'function' ? getPersonalityTitle(item, currentLang) : (item.type || '');
+                                    return `<div class="personality-vbar-col"><div class="personality-vbar-bar-wrap"><div class="personality-vbar-fill" style="height: ${heightPct}%;"></div></div><span class="personality-vbar-name" title="${escapeHtml(title)}">${escapeHtml(title)}</span><span class="personality-vbar-pct">${pct}%</span></div>`;
+                                }).join('');
+                                return;
+                            }
+                        } catch (e) { console.warn('[updateCountryDashboard] get_country_personality_distribution 失败，回退 latest_records:', e); }
+                    }
+                    renderRealtime(latest);
+                })();
 
                 if (statusEl) statusEl.textContent = getI18nText('panel.data_stable') || 'DATA: STABLE';
             } catch (err) {

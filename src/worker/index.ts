@@ -6268,27 +6268,52 @@ app.get('/api/country-summary', async (c) => {
     const avgPerUser = countryTotalUsers > 0 ? Math.round(totalChars / countryTotalUsers) : 0;
     const avgPerScan = totalMessages > 0 ? Math.round(totalChars / totalMessages) : 0;
 
-    // ✅ 支持全站平均分计算：从 v_unified_analysis_v2 聚合全站 l/p/d/e/f 平均值
+    // ✅ 雷达图维度平均：国家视图用该国 l/p/d/e/f 平均，否则用全站平均
     let avgDims = { L: 50, P: 50, D: 50, E: 50, F: 50 };
+    const clamp = (x: any) => {
+      const v = Number(x);
+      if (!Number.isFinite(v)) return 0;
+      return Math.max(0, Math.min(100, v));
+    };
+    const applyAvgFromRow = (r0: any): boolean => {
+      if (!r0) return false;
+      const L = clamp(r0.avg_l);
+      const P = clamp(r0.avg_p);
+      const D = clamp(r0.avg_d);
+      const E = clamp(r0.avg_e);
+      const F = clamp(r0.avg_f);
+      if ([L, P, D, E, F].some((v) => v > 0)) {
+        avgDims = { L, P, D, E, F };
+        return true;
+      }
+      return false;
+    };
     try {
-      const avgUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
-      avgUrl.searchParams.set('select', 'avg_l:avg(l_score),avg_p:avg(p_score),avg_d:avg(d_score),avg_e:avg(e_score),avg_f:avg(f_score)');
-      avgUrl.searchParams.set('limit', '1');
-      const rows = await fetchSupabaseJson<any[]>(env, avgUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
-      const r0 = Array.isArray(rows) ? (rows[0] || null) : null;
-      const clamp = (x: any) => {
-        const v = Number(x);
-        if (!Number.isFinite(v)) return 0;
-        return Math.max(0, Math.min(100, v));
-      };
-      if (r0) {
-        const L = clamp(r0.avg_l);
-        const P = clamp(r0.avg_p);
-        const D = clamp(r0.avg_d);
-        const E = clamp(r0.avg_e);
-        const F = clamp(r0.avg_f);
-        // 若确实拿到有效数据（至少一个非 0），才覆盖默认值
-        if ([L, P, D, E, F].some((v) => v > 0)) avgDims = { L, P, D, E, F };
+      // 国家视图：优先按该国 current_location/country_code 聚合 L/P/D/E/F 平均
+      if (hasExplicitCc && cc) {
+        const countryAvgUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
+        countryAvgUrl.searchParams.set('select', 'avg_l:avg(l_score),avg_p:avg(p_score),avg_d:avg(d_score),avg_e:avg(e_score),avg_f:avg(f_score)');
+        countryAvgUrl.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc})`);
+        const countryRows = await fetchSupabaseJson<any[]>(env, countryAvgUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
+        const countryR0 = Array.isArray(countryRows) ? (countryRows[0] || null) : null;
+        if (applyAvgFromRow(countryR0)) {
+          // 已用该国维度平均覆盖 avgDims，跳过全站查询
+        } else {
+          // 该国无有效维度数据，回退全站平均
+          const avgUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
+          avgUrl.searchParams.set('select', 'avg_l:avg(l_score),avg_p:avg(p_score),avg_d:avg(d_score),avg_e:avg(e_score),avg_f:avg(f_score)');
+          avgUrl.searchParams.set('limit', '1');
+          const rows = await fetchSupabaseJson<any[]>(env, avgUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
+          const r0 = Array.isArray(rows) ? (rows[0] || null) : null;
+          applyAvgFromRow(r0);
+        }
+      } else {
+        const avgUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
+        avgUrl.searchParams.set('select', 'avg_l:avg(l_score),avg_p:avg(p_score),avg_d:avg(d_score),avg_e:avg(e_score),avg_f:avg(f_score)');
+        avgUrl.searchParams.set('limit', '1');
+        const rows = await fetchSupabaseJson<any[]>(env, avgUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
+        const r0 = Array.isArray(rows) ? (rows[0] || null) : null;
+        applyAvgFromRow(r0);
       }
     } catch {
       // ignore
