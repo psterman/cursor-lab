@@ -2661,11 +2661,17 @@ app.post('/api/v2/analyze', async (c) => {
             
             // 【关键修复】添加 personality 对象，包含 detailedStats 与 answer_book（与 dimensions 等一并同步给 GitHub 用户/视图）
             // 数据格式：{ type, detailedStats, answer_book: { title, content, vibe_level } }
-            personality: {
-              type: personalityType,
-              detailedStats: detailedStats, // 包含 L, P, D, E, F 五个维度的详细统计数据
-              answer_book: answerBook ?? null, // 答案之书，供 stats2 左侧抽屉「今日箴言」与 index 同步
-            },
+            personality: (() => {
+              const base: Record<string, unknown> = {
+                type: personalityType,
+                detailedStats: detailedStats, // 包含 L, P, D, E, F 五个维度的详细统计数据
+                answer_book: answerBook ?? null, // 答案之书，供 stats2 左侧抽屉「今日箴言」与 index 同步
+              };
+              if (body.personality && typeof body.personality === 'object' && (body.personality as any).vibe_lexicon) {
+                base.vibe_lexicon = (body.personality as any).vibe_lexicon;
+              }
+              return base;
+            })(),
             
             // 【新增】personality_data 字段：包含称号和随机吐槽的五个维度数组（JSONB）
             // 格式：Array<{ dimension, score, label, roast }>
@@ -2707,13 +2713,20 @@ app.post('/api/v2/analyze', async (c) => {
           });
 
           // 检查是否在内网/VPN 环境
-          // 尝试从 Cloudflare 请求对象获取国家信息
+          // 尝试从 Cloudflare 请求对象获取国家信息；若前端传入 ip_location（如身份校准 CN），则优先使用
           try {
-            const rawRequest = c.req.raw as any;
-            if (rawRequest.cf && rawRequest.cf.country) {
-              payload.ip_location = rawRequest.cf.country;
+            const bodyIpLocation = body.ip_location != null && /^[A-Za-z]{2}$/.test(String(body.ip_location).trim())
+              ? String(body.ip_location).trim().toUpperCase()
+              : null;
+            if (bodyIpLocation) {
+              payload.ip_location = bodyIpLocation;
             } else {
-              payload.ip_location = normalizedIpLocation;
+              const rawRequest = c.req.raw as any;
+              if (rawRequest.cf && rawRequest.cf.country) {
+                payload.ip_location = rawRequest.cf.country;
+              } else {
+                payload.ip_location = normalizedIpLocation;
+              }
             }
           } catch (e) {
             payload.ip_location = normalizedIpLocation;
@@ -3206,6 +3219,57 @@ app.get('/api/rank-resources', async (c) => {
   } catch (error: any) {
     console.error('[Worker] /api/rank-resources 错误:', error);
     return c.json({ error: error?.message || '未知错误' }, 500);
+  }
+});
+
+/**
+ * GET /api/national-lexicon?country=CN&type=merit_board
+ * 按国家聚合 personality.vibe_lexicon[type]，返回 Top 词条 { phrase, hit_count }
+ * type: merit_board | slang_list | mantra_top
+ */
+const LEXICON_TYPES = new Set(['merit_board', 'slang_list', 'mantra_top']);
+app.get('/api/national-lexicon', async (c) => {
+  try {
+    const country = (c.req.query('country') || '').trim().toUpperCase();
+    const type = (c.req.query('type') || 'merit_board').trim();
+    if (!/^[A-Z]{2}$/.test(country)) {
+      return c.json({ data: [], error: 'invalid country' }, 400);
+    }
+    if (!LEXICON_TYPES.has(type)) {
+      return c.json({ data: [], error: 'invalid type' }, 400);
+    }
+    const env = c.env;
+    if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+      return c.json({ data: [] }, 200);
+    }
+    // 中国区统计：只要判定为该国（country_code / ip_location / manual_location / current_location 任一为该国），贡献即进入该国
+    const url = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
+    url.searchParams.set('select', 'personality');
+    url.searchParams.set('or', `(country_code.eq.${country},ip_location.eq.${country},manual_location.eq.${country},current_location.eq.${country})`);
+    url.searchParams.set('limit', '500');
+    const rows = await fetchSupabaseJson<any[]>(env, url.toString(), {
+      headers: buildSupabaseHeaders(env),
+    }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
+    const list = Array.isArray(rows) ? rows : [];
+    const agg = new Map<string, number>();
+    for (const row of list) {
+      const lex = row?.personality?.vibe_lexicon?.[type];
+      if (!Array.isArray(lex)) continue;
+      for (const it of lex) {
+        const w = it?.w != null ? String(it.w).trim() : '';
+        const v = Number(it?.v) || 0;
+        if (!w) continue;
+        agg.set(w, (agg.get(w) || 0) + v);
+      }
+    }
+    const data = Array.from(agg.entries())
+      .map(([phrase, hit_count]) => ({ phrase, hit_count }))
+      .sort((a, b) => b.hit_count - a.hit_count)
+      .slice(0, 20);
+    return c.json({ data }, 200, { 'Cache-Control': 'public, max-age=120' });
+  } catch (e: any) {
+    console.warn('[Worker] /api/national-lexicon 错误:', e?.message);
+    return c.json({ data: [] }, 200);
   }
 });
 
@@ -6152,19 +6216,13 @@ app.get('/api/country-summary', async (c) => {
       }
     }
 
-    // 【最终降级：直接查询视图】如果 RPC 也失败，直接查询 v_unified_analysis_v2 视图并使用显式别名
+    // 【最终降级：直接查基表】RPC 失败时查 user_analysis，四字段任一为国即计入该国（中文用户上报 CN 即进中国区）
     if (!totals) {
       try {
-        // 【第一步：修改 SQL 查询别名】确保显式定义别名，避免自动生成的字段名带点或不统一
-        // 查询所有匹配的行，然后在内存中聚合（因为 PostgREST 聚合语法复杂）
-        const directQueryUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
-        // 使用显式别名：tm, tc, wd, jc, kc, tuc（与视图字段名一致）
-        directQueryUrl.searchParams.set('select', 'tm,tc,wd,jc,kc,tuc,fingerprint,country_code,ip_location');
-        // 【统一地理位置查询逻辑】兼容 country_code 和 ip_location
-        // PostgREST 语法：or=(country_code.eq.US,ip_location.eq.US)
-        directQueryUrl.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc})`);
-        // 不设置 limit，获取所有行以便聚合
-        
+        const directQueryUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
+        directQueryUrl.searchParams.set('select', 'total_messages,total_chars,work_days,jiafang_count,ketao_count,fingerprint');
+        directQueryUrl.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc},manual_location.eq.${cc},current_location.eq.${cc})`);
+
         const directRows = await fetchSupabaseJson<any[]>(
           env,
           directQueryUrl.toString(),
@@ -6172,14 +6230,13 @@ app.get('/api/country-summary', async (c) => {
           SUPABASE_FETCH_TIMEOUT_MS
         ).catch(() => []);
 
-        // 如果查询成功，使用 reduce 聚合（与 global-aggregate 同口径，严禁 .length 计数）
         if (Array.isArray(directRows) && directRows.length > 0) {
-          const sumTm = directRows.reduce((s, r) => s + (Number(r.tm) || 0), 0);
-          const sumTc = directRows.reduce((s, r) => s + (Number(r.tc) || 0), 0);
-          const sumWd = directRows.reduce((s, r) => s + (Number(r.wd) || 0), 0);
-          const sumJc = directRows.reduce((s, r) => s + (Number(r.jc) || 0), 0);
-          const sumKc = directRows.reduce((s, r) => s + (Number(r.kc) || 0), 0);
-          const sumTuc = directRows.reduce((s, r) => s + (Number(r.tuc) || 0), 0);
+          const sumTm = directRows.reduce((s, r) => s + (Number(r.total_messages) || 0), 0);
+          const sumTc = directRows.reduce((s, r) => s + (Number(r.total_chars) || 0), 0);
+          const sumWd = directRows.reduce((s, r) => s + (Number(r.work_days) || 0), 0);
+          const sumJc = directRows.reduce((s, r) => s + (Number(r.jiafang_count) || 0), 0);
+          const sumKc = directRows.reduce((s, r) => s + (Number(r.ketao_count) || 0), 0);
+          const sumTuc = directRows.reduce((s, r) => s + (Number(r.total_chars) || 0), 0);
           const uniqueUsers = new Set<string>();
           directRows.forEach((r: any) => { if (r?.fingerprint) uniqueUsers.add(String(r.fingerprint)); });
 
@@ -6291,9 +6348,9 @@ app.get('/api/country-summary', async (c) => {
     try {
       // 国家视图：优先按该国 current_location/country_code 聚合 L/P/D/E/F 平均
       if (hasExplicitCc && cc) {
-        const countryAvgUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
+        const countryAvgUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
         countryAvgUrl.searchParams.set('select', 'avg_l:avg(l_score),avg_p:avg(p_score),avg_d:avg(d_score),avg_e:avg(e_score),avg_f:avg(f_score)');
-        countryAvgUrl.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc})`);
+        countryAvgUrl.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc},manual_location.eq.${cc},current_location.eq.${cc})`);
         const countryRows = await fetchSupabaseJson<any[]>(env, countryAvgUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
         const countryR0 = Array.isArray(countryRows) ? (countryRows[0] || null) : null;
         if (applyAvgFromRow(countryR0)) {
@@ -6520,9 +6577,9 @@ app.get('/api/country-summary', async (c) => {
         console.log('[Worker] v_user_ranks_in_country 分支完成，myRanks:', JSON.stringify(myRanks));
       } else {
       try {
-        const countryUsersUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
-        countryUsersUrl.searchParams.set('select', 'id,fingerprint,total_messages,total_chars,avg_user_message_length,jiafang_count,ketao_count,work_days');
-        countryUsersUrl.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc})`);
+        const countryUsersUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
+        countryUsersUrl.searchParams.set('select', 'id,fingerprint,total_messages,total_chars,jiafang_count,ketao_count,work_days');
+        countryUsersUrl.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc},manual_location.eq.${cc},current_location.eq.${cc})`);
         countryUsersUrl.searchParams.set('limit', '10000');
         const countryRows = await fetchSupabaseJson<any[]>(
           env,
@@ -6589,13 +6646,9 @@ app.get('/api/country-summary', async (c) => {
     // latestRecords：含 work_days、user_name、github_username，供 stats2 抽屉上岗天数与活跃节点头像
     let latestRecords: any[] = [];
     try {
-      const lrUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
-      // 【统一地理位置查询逻辑】兼容 country_code 和 ip_location
-      // 使用 PostgREST 的 or 语法：(country_code=eq.US,ip_location=eq.US)
+      const lrUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
       lrUrl.searchParams.set('select', 'user_name,github_username,user_identity,personality_type,ip_location,manual_location,updated_at,created_at,work_days,roast_text,country_code');
-      // 【统一地理位置查询】兼容模式：WHERE (country_code = ? OR ip_location = ?)
-      // PostgREST 语法：or=(country_code.eq.US,ip_location.eq.US)
-      lrUrl.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc})`);
+      lrUrl.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc},manual_location.eq.${cc},current_location.eq.${cc})`);
       lrUrl.searchParams.set('order', 'updated_at.desc');
       lrUrl.searchParams.set('limit', '8');
       const lr = await fetchSupabaseJson<any[]>(env, lrUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
@@ -6710,11 +6763,9 @@ app.get('/api/country-summary', async (c) => {
           const results = await Promise.all(metrics.map(async (m) => {
             try {
               const buildUrl = (selectCols: string) => {
-                const url = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
+                const url = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
                 url.searchParams.set('select', selectCols);
-                // 【统一地理位置查询逻辑】兼容 country_code 和 ip_location
-                // PostgREST 语法：or=(country_code.eq.US,ip_location.eq.US)
-                url.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc})`);
+                url.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc},manual_location.eq.${cc},current_location.eq.${cc})`);
                 // 排除 0 / null
                 url.searchParams.set(m.col, 'gt.0');
                 url.searchParams.set('order', `${m.col}.desc`);

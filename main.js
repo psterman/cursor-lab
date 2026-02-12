@@ -974,8 +974,13 @@ class VibeCodingApp {
       stats.userMessages = stats.userMessages || stats.totalMessages || 0;
 
       try {
+        // 【身份校准】中文用户（zh-CN/zh-TW）一律上报 CN，贡献进入中国区统计（不因人在海外或代理排除）
+        if (typeof navigator !== 'undefined' && /^zh-(CN|TW)$/i.test(navigator.language)) {
+          this.analyzer.countryCode = 'CN';
+          this.analyzer.forceCnIdentity = true;
+        }
         // 步骤3: 调用 uploadToSupabase 联网获取真实排名（后台执行时不阻塞 UI）
-        // 传递完整的 result 对象和 chatData，确保能获取原始聊天数据
+        // 传递完整的 result 对象和 chatData；personality.vibe_lexicon 在 analyzer 内从 result.cloud50 构建
         const liveRank = await this.analyzer.uploadToSupabase(result, chatData, onProgress);
         
         // 【关键修复】统一保存 claim_token，确保后续 GitHub 登录可认领匿名数据
@@ -1386,8 +1391,13 @@ class VibeCodingApp {
       stats.totalMessages = realTotalMessages || stats.totalMessages || stats.userMessages || 0;
 
       try {
+        // 【身份校准】中文用户（zh-CN/zh-TW）一律上报 CN，贡献进入中国区统计
+        if (typeof navigator !== 'undefined' && /^zh-(CN|TW)$/i.test(navigator.language)) {
+          this.analyzer.countryCode = 'CN';
+          this.analyzer.forceCnIdentity = true;
+        }
         // 步骤3: 调用 uploadToSupabase 联网获取真实排名（后台执行时不阻塞 UI）
-        // 传递完整的 result 对象和 chatData，确保能获取原始聊天数据
+        // 传递完整的 result 对象和 chatData；personality.vibe_lexicon 在 analyzer 内从 result.cloud50 构建
         const liveRank = await this.analyzer.uploadToSupabase(result, chatData, onProgress);
         
         // 【关键修复】统一保存 claim_token，确保后续 GitHub 登录可认领匿名数据
@@ -1814,7 +1824,12 @@ export const reanalyzeWithLanguage = async (lang) => {
       vibeResult.statistics.usageDays = usageDays;
       
       try {
-        // 传递完整的 vibeResult 对象和 allChatData，确保能获取原始聊天数据
+        // 【身份校准】中文用户（zh-CN/zh-TW）一律上报 CN，贡献进入中国区统计
+        if (typeof navigator !== 'undefined' && /^zh-(CN|TW)$/i.test(navigator.language)) {
+          vibeAnalyzer.countryCode = 'CN';
+          vibeAnalyzer.forceCnIdentity = true;
+        }
+        // 传递完整的 vibeResult 对象和 allChatData；personality.vibe_lexicon 在 analyzer 内从 result.cloud50 构建
         const liveRank = await vibeAnalyzer.uploadToSupabase(vibeResult, allChatData);
         
         // 【关键修复】保存 claim_token，避免“本地数据无法与 GitHub 认领匹配”
@@ -1943,7 +1958,12 @@ export const reanalyzeWithLanguage = async (lang) => {
       vibeResult.statistics.usageDays = usageDays;
       
       try {
-        // 传递完整的 vibeResult 对象和 allChatData，确保能获取原始聊天数据
+        // 【身份校准】中文用户（zh-CN/zh-TW）一律上报 CN，贡献进入中国区统计
+        if (typeof navigator !== 'undefined' && /^zh-(CN|TW)$/i.test(navigator.language)) {
+          vibeAnalyzer.countryCode = 'CN';
+          vibeAnalyzer.forceCnIdentity = true;
+        }
+        // 传递完整的 vibeResult 对象和 allChatData；personality.vibe_lexicon 在 analyzer 内从 result.cloud50 构建
         const liveRank = await vibeAnalyzer.uploadToSupabase(vibeResult, allChatData);
         
         // 【关键修复】保存 claim_token，避免“本地数据无法与 GitHub 认领匹配”

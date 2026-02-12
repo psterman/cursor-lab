@@ -4181,11 +4181,16 @@
                                 </div>
                             </div>
 
-                            <!-- 下方：文字榜单（国家Top10） -->
+                            <!-- 下方：文字榜单（分类词库 Top 10，Tab 切换功德簿/黑话/口头禅） -->
                             <div class="border border-white/10 bg-zinc-950/30 p-2">
                                 <div class="flex items-center justify-between mb-2">
-                                    <div class="text-[10px] text-zinc-500 uppercase tracking-widest" data-i18n="panel.country_top_10">国家 Top10</div>
+                                    <div id="vibe-top10-title" class="text-[10px] text-zinc-500 uppercase tracking-widest" data-i18n="panel.country_top_10">本国 Prompt 高频词组 Top 10</div>
                                     <div class="text-[10px] text-zinc-600 font-mono" id="vibe-country-top10-meta">--</div>
+                                </div>
+                                <div id="vibe-lexicon-tabs" class="flex gap-1 mb-2">
+                                    <button type="button" class="vibe-lexicon-tab px-2 py-1 text-[10px] rounded border border-white/20 bg-[var(--accent-terminal)]/20 text-[var(--accent-terminal)] font-medium" data-type="merit_board" data-t="lexicon.merit">功德簿</button>
+                                    <button type="button" class="vibe-lexicon-tab px-2 py-1 text-[10px] rounded border border-white/10 bg-transparent text-zinc-400 hover:bg-white/5" data-type="slang_list" data-t="lexicon.slang">行业黑话</button>
+                                    <button type="button" class="vibe-lexicon-tab px-2 py-1 text-[10px] rounded border border-white/10 bg-transparent text-zinc-400 hover:bg-white/5" data-type="mantra_top" data-t="lexicon.mantra">全民口头禅</button>
                                 </div>
                                 <ol id="vibe-top10-list" class="space-y-1"></ol>
                                 <div id="vibe-top10-empty" class="hidden text-zinc-500 text-sm p-3 italic" data-t="hotlist.collecting">
@@ -5297,11 +5302,10 @@
                 const record = (Array.isArray(countryDimensionAverages) ? countryDimensionAverages[0] : countryDimensionAverages) || null;
 
                 // =========================
-                // 语义爆发（黑话榜）数据源：top10 + cloud50（按国家过滤）
+                // 语义爆发（黑话榜）数据源：国家视图词云仅来源于 get_country_keywords RPC，禁止使用 data.cloud50 或 detailedStats 性格标签
                 // =========================
                 try {
                     if (isStaleRequest()) {
-                        // 请求过期时仅用缓存，不再触发 fetch/updateCountryDashboard，防止死循环
                         try {
                             if (!window.__countryDashboardCache) window.__countryDashboardCache = new Map();
                             const cachedHit = window.__countryDashboardCache.get(cacheKey);
@@ -5313,10 +5317,63 @@
                         } catch (e) { /* ignore */ }
                         return;
                     }
-                    window.__latestTop10 = Array.isArray(data.top10) ? data.top10 : null;
-                    window.__latestCloud50 = Array.isArray(data.cloud50) ? data.cloud50 : null;
-                    // 直接用本次响应渲染（避免重复请求）
-                    try { window.renderVibeCardFromData && window.renderVibeCardFromData(countryNameOrCode, data); } catch (e2) { /* ignore */ }
+                    if (!effectiveIsGlobal && countryCode && typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function') {
+                        var wordCloudContainer = document.getElementById('vibe-cloud50-container');
+                        var topRankContainer = document.getElementById('vibe-top10-list');
+                        if (wordCloudContainer) {
+                            wordCloudContainer.setAttribute('data-loading', 'true');
+                            wordCloudContainer.innerHTML = '<div class="flex items-center justify-center h-full min-h-[200px] text-zinc-500 text-sm">加载中...</div>';
+                        }
+                        if (topRankContainer) {
+                            topRankContainer.innerHTML = '<li class="list-none text-zinc-500 text-sm py-4 text-center">加载中...</li>';
+                            var emptyEl = document.getElementById('vibe-top10-empty');
+                            if (emptyEl) emptyEl.classList.add('hidden');
+                        }
+                        try {
+                            var kwRes = await supabaseClient.rpc('get_country_keywords', { target_code: countryCode });
+                            var kwData = (kwRes && kwRes.data != null) ? kwRes.data : null;
+                            if (!kwData || !Array.isArray(kwData) || kwData.length === 0) {
+                                if (typeof _renderCloud50 === 'function') _renderCloud50(countryCode, []);
+                            } else {
+                                var cloudData = kwData.map(function(x) { return { phrase: (x && x.tag) ? String(x.tag).trim() : '', hit_count: Number(x && x.weight) || 0 }; }).filter(function(x) { return x.phrase && x.hit_count > 0; });
+                                if (typeof _renderCloud50 === 'function') _renderCloud50(countryCode, cloudData);
+                            }
+                        } catch (rpcErr) {
+                            console.warn('[updateCountryDashboard] 词云 RPC 失败:', rpcErr);
+                            if (typeof _renderCloud50 === 'function') _renderCloud50(countryCode, []);
+                        } finally {
+                            if (wordCloudContainer) wordCloudContainer.removeAttribute('data-loading');
+                        }
+                        // 排行榜：调用 get_national_lexicon(countryCode, type)，默认 merit_board
+                        window.__currentCountryCode = countryCode;
+                        (function loadLexiconList() {
+                            var lexType = (window.__currentLexiconType || 'merit_board');
+                            var base = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content)) || '';
+                            base = (base && base.trim()) ? (base.trim().endsWith('/') ? base.trim() : base.trim() + '/') : '';
+                            var url = base + 'api/national-lexicon?country=' + encodeURIComponent(countryCode) + '&type=' + encodeURIComponent(lexType);
+                            fetch(url).then(function(r) { return r.json(); }).then(function(res) {
+                                var list = (res && res.data && Array.isArray(res.data)) ? res.data : [];
+                                if (typeof _renderTop10List === 'function') _renderTop10List(list, true);
+                            }).catch(function() {
+                                if (typeof _renderTop10List === 'function') _renderTop10List([], true);
+                            });
+                        })();
+                    } else {
+                        window.__latestTop10 = Array.isArray(data.top10) ? data.top10 : null;
+                        window.__latestCloud50 = effectiveIsGlobal ? (Array.isArray(data.cloud50) ? data.cloud50 : null) : null;
+                        if (effectiveIsGlobal) {
+                            try { window.renderVibeCardFromData && window.renderVibeCardFromData(countryNameOrCode, data); } catch (e2) { /* ignore */ }
+                        } else {
+                            window.__latestCloud50 = null;
+                            var emptyEl = document.getElementById('vibe-cloud50-empty');
+                            var emptyTopElse = document.getElementById('vibe-top10-empty');
+                            if (emptyEl) { emptyEl.textContent = '正在收集数据...'; emptyEl.classList.remove('hidden'); }
+                            if (emptyTopElse) { emptyTopElse.textContent = '正在收集数据...'; emptyTopElse.classList.remove('hidden'); }
+                            try { if (typeof _renderCloud50 === 'function') _renderCloud50(countryCode, []); } catch (_) {}
+                            try { if (typeof _renderTop10List === 'function') _renderTop10List([]); } catch (_) {}
+                            try { window.renderVibeCardFromData && window.renderVibeCardFromData(countryNameOrCode, { top10: [], cloud50: [] }); } catch (e2) { /* ignore */ }
+                        }
+                    }
                 } catch (e1) { /* ignore */ }
 
                 // 字段映射（兼容 total_users/totalUsers 等）
@@ -23572,14 +23629,19 @@
             } catch { /* ignore */ }
         }
 
-        function _renderTop10List(list) {
+        function _renderTop10List(list, isLexicon) {
             const ol = document.getElementById('vibe-top10-list');
             const empty = document.getElementById('vibe-top10-empty');
             const meta = document.getElementById('vibe-country-top10-meta');
             if (!ol) return;
 
+            // 兼容多种数据源：lexicon { w, v } / 黑话榜 { phrase, hit_count } / 开发者榜 { user_name, total_messages }
             let items = (Array.isArray(list) ? list : [])
-                .map((x) => ({ phrase: String(x?.phrase || '').trim(), hit: Number(x?.hit_count ?? x?.hitCount ?? 0) || 0 }))
+                .map((x) => {
+                    var phrase = String(x?.phrase ?? x?.w ?? x?.user_name ?? '').trim();
+                    var hit = Number(x?.hit_count ?? x?.hitCount ?? x?.v ?? x?.total_messages ?? 0) || 0;
+                    return { phrase: phrase, hit: hit };
+                })
                 .filter((x) => x.phrase && x.hit > 0);
             
             // 应用可读性过滤器
@@ -23590,7 +23652,10 @@
 
             if (items.length === 0) {
                 ol.innerHTML = '';
-                if (empty) empty.classList.remove('hidden');
+                if (empty) {
+                    empty.textContent = isLexicon ? '正在收集数据...' : '暂无数据（正在收录中...）';
+                    empty.classList.remove('hidden');
+                }
                 if (meta) meta.textContent = '--';
                 return;
             }
@@ -23608,16 +23673,48 @@
                             ${rank}
                         </div>
                         <div class="flex-1 min-w-0">
-                            <div class="text-[12px] text-zinc-200 font-mono truncate">${name}</div>
+                            <div class="text-[12px] text-zinc-200 font-mono truncate" title="${isLexicon ? '词汇' : ''}">${name}</div>
                         </div>
                         <div class="flex-shrink-0 flex items-center gap-1">
-                            <span class="text-[10px] text-zinc-500">×</span>
+                            <span class="text-[10px] text-zinc-500">${isLexicon ? '频次' : '×'}</span>
                             <span class="text-[12px] font-bold tabular-nums" style="color: ${countColor}">${count}</span>
                         </div>
                     </li>
                 `;
             }).join('');
         }
+
+        (function bindLexiconTabs() {
+            var tabsEl = document.getElementById('vibe-lexicon-tabs');
+            if (!tabsEl) return;
+            if (tabsEl.dataset.bound) return;
+            tabsEl.dataset.bound = '1';
+            window.__currentLexiconType = window.__currentLexiconType || 'merit_board';
+            tabsEl.addEventListener('click', function(e) {
+                var btn = e.target && e.target.closest && e.target.closest('.vibe-lexicon-tab');
+                if (!btn || !btn.dataset.type) return;
+                var type = btn.dataset.type;
+                window.__currentLexiconType = type;
+                var all = tabsEl.querySelectorAll('.vibe-lexicon-tab');
+                all.forEach(function(b) {
+                    b.classList.remove('bg-[var(--accent-terminal)]/20', 'text-[var(--accent-terminal)]', 'font-medium', 'border-white/20');
+                    b.classList.add('bg-transparent', 'text-zinc-400', 'border-white/10');
+                });
+                btn.classList.add('bg-[var(--accent-terminal)]/20', 'text-[var(--accent-terminal)]', 'font-medium', 'border-white/20');
+                btn.classList.remove('bg-transparent', 'text-zinc-400', 'border-white/10');
+                var country = (typeof window.__currentCountryCode === 'string' && window.__currentCountryCode) ? window.__currentCountryCode : '';
+                if (!country) return;
+                var base = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content)) || '';
+                base = (base && base.trim()) ? (base.trim().endsWith('/') ? base.trim() : base.trim() + '/') : '';
+                var url = base + 'api/national-lexicon?country=' + encodeURIComponent(country) + '&type=' + encodeURIComponent(type);
+                fetch(url).then(function(r) { return r.json(); }).then(function(res) {
+                    var list = (res && res.data && Array.isArray(res.data)) ? res.data : [];
+                    if (typeof _renderTop10List === 'function') _renderTop10List(list, true);
+                }).catch(function() {
+                    if (typeof _renderTop10List === 'function') _renderTop10List([], true);
+                });
+            });
+        })();
 
         function _renderCloud50(region, list) {
             const container = document.getElementById('vibe-cloud50-container');
@@ -23632,7 +23729,7 @@
                 }
                 return;
             }
-
+            // 仅接受 { phrase, hit_count }（来自 get_country_keywords 的 tag/weight），禁止传入 detailedStats 或性格 label
             let raw = (Array.isArray(list) ? list : [])
                 .map((x) => ({ name: String(x?.phrase || '').trim(), value: Number(x?.hit_count ?? x?.hitCount ?? 0) || 0 }))
                 .filter((x) => x.name && x.value > 0);
@@ -23760,7 +23857,10 @@
                 }
 
                 const top10 = Array.isArray(data?.top10) ? data.top10 : (Array.isArray(window.__latestTop10) ? window.__latestTop10 : []);
-                const cloud50 = Array.isArray(data?.cloud50) ? data.cloud50 : (Array.isArray(window.__latestCloud50) ? window.__latestCloud50 : []);
+                var isCountryRegion = (region && String(region).length === 2);
+                var cloud50 = isCountryRegion
+                    ? (Array.isArray(window.__latestCloud50) ? window.__latestCloud50 : [])
+                    : (Array.isArray(data?.cloud50) ? data.cloud50 : (Array.isArray(window.__latestCloud50) ? window.__latestCloud50 : []));
 
                 _renderTop10List(top10);
                 _renderCloud50(region, cloud50);
@@ -23792,24 +23892,52 @@
             _setVibeRefreshing(true);
             try { setTimeout(() => _setVibeRefreshing(false), 700); } catch { /* ignore */ }
 
-            try { vibeCloudAbort && vibeCloudAbort.abort && vibeCloudAbort.abort(); } catch { /* ignore */ }
-            vibeCloudAbort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-
-            try {
-                const API_ENDPOINT = _getApiEndpoint();
-                // cache-busting：避免浏览器/中间层对 GET 做意外缓存
-                const url = `${API_ENDPOINT}api/global-average?country_code=${encodeURIComponent(region)}&_t=${Date.now()}`;
-                const resp = await fetch(url, { cache: 'no-store', signal: vibeCloudAbort ? vibeCloudAbort.signal : undefined });
-                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                const payload = await resp.json().catch(() => null);
-                const data = payload?.data ?? payload ?? {};
-
-                window.__latestTop10 = Array.isArray(data.top10) ? data.top10 : null;
-                window.__latestCloud50 = Array.isArray(data.cloud50) ? data.cloud50 : null;
-                window.renderVibeCardFromData(region, data);
-            } catch (e) {
-                try { _renderTop10List([]); } catch { /* ignore */ }
-                try { _renderCloud50(region, []); } catch { /* ignore */ }
+            if (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function') {
+                window.__latestCloud50 = null;
+                try {
+                    var kwRes = await supabaseClient.rpc('get_country_keywords', { target_code: region });
+                    var kwData = (kwRes && kwRes.data != null) ? kwRes.data : null;
+                    if (!kwData || !Array.isArray(kwData) || kwData.length === 0) {
+                        window.__latestCloud50 = null;
+                        _renderCloud50(region, []);
+                        _renderTop10List([]);
+                        if (empty) { empty.textContent = '正在收集数据...'; empty.classList.remove('hidden'); }
+                        var emptyTop = document.getElementById('vibe-top10-empty');
+                        if (emptyTop) { emptyTop.textContent = '正在收集数据...'; emptyTop.classList.remove('hidden'); }
+                    } else {
+                        var cloud50Format = kwData.map(function(x) { return { phrase: (x && x.tag) ? String(x.tag).trim() : '', hit_count: Number(x && x.weight) || 0 }; }).filter(function(x) { return x.phrase && x.hit_count > 0; });
+                        window.__latestCloud50 = cloud50Format;
+                        _renderCloud50(region, cloud50Format);
+                        var top10Data = kwData.slice(0, 10).map(function(x) { return { phrase: (x && x.tag) ? String(x.tag).trim() : '', hitCount: Number(x && x.weight) || 0 }; }).filter(function(x) { return x.phrase && x.hitCount > 0; });
+                        window.__latestTop10 = top10Data;
+                        _renderTop10List(top10Data);
+                    }
+                } catch (e) {
+                    window.__latestCloud50 = null;
+                    try { _renderTop10List([]); } catch { /* ignore */ }
+                    try { _renderCloud50(region, []); } catch { /* ignore */ }
+                    if (empty) { empty.textContent = '正在收集数据...'; empty.classList.remove('hidden'); }
+                    var emptyTopCatch = document.getElementById('vibe-top10-empty');
+                    if (emptyTopCatch) { emptyTopCatch.textContent = '正在收集数据...'; emptyTopCatch.classList.remove('hidden'); }
+                }
+            } else {
+                try { vibeCloudAbort && vibeCloudAbort.abort && vibeCloudAbort.abort(); } catch { /* ignore */ }
+                vibeCloudAbort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+                try {
+                    var API_ENDPOINT = _getApiEndpoint();
+                    var url = API_ENDPOINT + 'api/global-average?country_code=' + encodeURIComponent(region) + '&_t=' + Date.now();
+                    var resp = await fetch(url, { cache: 'no-store', signal: vibeCloudAbort ? vibeCloudAbort.signal : undefined });
+                    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                    var payload = await resp.json().catch(function() { return null; });
+                    var data = payload && payload.data != null ? payload.data : payload || {};
+                    window.__latestTop10 = Array.isArray(data.top10) ? data.top10 : null;
+                    window.__latestCloud50 = null;
+                    window.renderVibeCardFromData(region, { top10: data.top10 || [], cloud50: [] });
+                } catch (e) {
+                    try { _renderTop10List([]); } catch { /* ignore */ }
+                    try { _renderCloud50(region, []); } catch { /* ignore */ }
+                    if (empty) { empty.textContent = '正在收集高频词...'; empty.classList.remove('hidden'); }
+                }
             }
 
             if (!window.__vibeCloudResizeBound) {

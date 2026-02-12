@@ -1468,6 +1468,7 @@ export class VibeCodingerAnalyzer {
     
     // 【v4.0 全球化上下文】
     this.countryCode = null; // 当前国家代码（ISO 3166-1 alpha-2）
+    this.forceCnIdentity = false; // 身份校准：zh-CN/zh-TW 且无 VPN 时由 main.js 设为 true，上传时强制 country_code/ip_location 为 CN
     this.countryAverage = null; // 国家平均分 {dimension: average}
     this.countryContext = {}; // 国家上下文数据
     
@@ -2108,7 +2109,46 @@ export class VibeCodingerAnalyzer {
       } catch (e) {
         fullResult.personalSentenceFingerprint = [];
       }
-      
+
+      // 【分类词库】同步构建 cloud50（功德/黑话/口头禅），供 uploadToSupabase 写入 vibe_lexicon
+      try {
+        const userTextForCloud = (Array.isArray(sanitizedChatData) ? sanitizedChatData : [])
+          .filter((m) => {
+            const role = String(m?.role || '').toUpperCase();
+            return role === 'USER' || role === 'HUMAN' || role === 'U' || role === '';
+          })
+          .map((m) => String(m?.text || m?.content || '').trim())
+          .filter(t => t.length > 0)
+          .join(' ');
+        if (userTextForCloud && userTextForCloud.length > 0) {
+          const keywords = extractVibeKeywords(userTextForCloud, { max: 50 });
+          const codeHits = this.#detectWordsFromCode(sanitizedChatData);
+          const merged = new Map();
+          const push = (it) => {
+            const phrase = String(it?.phrase || '').trim();
+            if (!phrase || phrase.length < 2 || phrase.length > 120) return;
+            const category = String(it?.category || 'slang').trim() || 'slang';
+            const weight = Math.max(1, Math.min(50, Number(it?.weight) || 1));
+            const key = `${category}:${phrase}`;
+            merged.set(key, {
+              phrase,
+              category,
+              weight: Math.max(1, Math.min(50, (merged.get(key)?.weight || 0) + weight)),
+            });
+          };
+          (Array.isArray(keywords) ? keywords : []).forEach(push);
+          (Array.isArray(codeHits) ? codeHits : []).forEach(push);
+          fullResult.cloud50 = Array.from(merged.values())
+            .sort((a, b) => (b.weight - a.weight) || (a.phrase > b.phrase ? 1 : -1))
+            .slice(0, 50)
+            .map((c) => ({ name: c.phrase, value: c.weight, category: c.category }));
+        } else {
+          fullResult.cloud50 = [];
+        }
+      } catch (e) {
+        fullResult.cloud50 = [];
+      }
+
       // 保存分析结果（兼容旧版本）
       this.analysisResult = fullResult;
 
@@ -2404,6 +2444,37 @@ export class VibeCodingerAnalyzer {
     // 计算统计信息（仅本地计算，不上传排名）
     const statistics = this.calculateStatistics();
     
+    // 【分类词库】同步路径也构建 cloud50，供 uploadToSupabase 写入 vibe_lexicon
+    let cloud50 = [];
+    try {
+      const userTextForCloud = (Array.isArray(sanitizedChatData) ? sanitizedChatData : [])
+        .filter((m) => (String(m?.role || '').toUpperCase() === 'USER' || String(m?.role || '').toUpperCase() === 'HUMAN' || String(m?.role || '').toUpperCase() === 'U' || !m?.role))
+        .map((m) => String(m?.text || m?.content || '').trim())
+        .filter(t => t.length > 0)
+        .join(' ');
+      if (userTextForCloud && userTextForCloud.length > 0) {
+        const keywords = extractVibeKeywords(userTextForCloud, { max: 50 });
+        const codeHits = this.#detectWordsFromCode(sanitizedChatData);
+        const merged = new Map();
+        const push = (it) => {
+          const phrase = String(it?.phrase || '').trim();
+          if (!phrase || phrase.length < 2 || phrase.length > 120) return;
+          const category = String(it?.category || 'slang').trim() || 'slang';
+          const weight = Math.max(1, Math.min(50, Number(it?.weight) || 1));
+          const key = `${category}:${phrase}`;
+          merged.set(key, { phrase, category, weight: Math.max(1, Math.min(50, (merged.get(key)?.weight || 0) + weight)) });
+        };
+        (Array.isArray(keywords) ? keywords : []).forEach(push);
+        (Array.isArray(codeHits) ? codeHits : []).forEach(push);
+        cloud50 = Array.from(merged.values())
+          .sort((a, b) => (b.weight - a.weight) || (a.phrase > b.phrase ? 1 : -1))
+          .slice(0, 50)
+          .map((c) => ({ name: c.phrase, value: c.weight, category: c.category }));
+      }
+    } catch (e) {
+      cloud50 = [];
+    }
+
     // 不再在 analyzeSync 内部自动上传排名，由外部调用 uploadToSupabase 统一处理
     // 排名数据将在外部通过 uploadToSupabase 获取后注入到 statistics 中
     
@@ -2420,6 +2491,7 @@ export class VibeCodingerAnalyzer {
       globalAverage: this.globalAverage || null,
       metadata: this.analysisMetadata || null,
       rankData: null, // 排名数据将在外部获取后注入
+      cloud50, // 分类词库，供 uploadToSupabase 写入 personality.vibe_lexicon
     };
   }
 
@@ -3503,6 +3575,26 @@ export class VibeCodingerAnalyzer {
           }
         })(),
       };
+
+      // 【分类词库】从 analysis.cloud50 构建 vibe_lexicon，格式 { w, v } 节省空间
+      const cloud50 = (vibeResult && Array.isArray(vibeResult.cloud50)) ? vibeResult.cloud50 : [];
+      const toItem = (c) => ({ w: c.name, v: c.value });
+      uploadData.personality = {
+        ...(vibeResult?.personality || {}),
+        vibe_lexicon: {
+          merit_board: cloud50.filter((c) => c.category === 'merit').map(toItem),
+          slang_list: cloud50.filter((c) => c.category === 'slang' || c.category === 'sv_slang').map(toItem),
+          mantra_top: cloud50.slice(0, 20).map(toItem),
+        },
+      };
+
+      // 【身份校准】zh-CN/zh-TW 且无 VPN 时 main.js 已设 forceCnIdentity，此处同步 country_code 与 ip_location
+      if (this.forceCnIdentity && this.countryCode === 'CN') {
+        uploadData.country_code = 'CN';
+        uploadData.ip_location = 'CN';
+      } else if (this.countryCode) {
+        uploadData.country_code = this.countryCode;
+      }
 
       console.log('[VibeAnalyzer] 发送原始聊天数据到 /api/v2/analyze:', {
         messageCount: formattedChatData.length,
