@@ -256,11 +256,10 @@
         
         for (let i = 0; i < maxRetries; i++) {
             let base = window.getApiEndpoint();
-            // 移除末尾的斜杠，避免双斜杠
-            if (base && base.endsWith('/')) {
-                base = base.slice(0, -1);
-            }
-            const url = base + (path.startsWith('/') ? path : '/' + path);
+            // 规范化 URL 拼接
+            if (base && !base.endsWith('/')) base += '/';
+            if (path.startsWith('/')) path = path.slice(1);
+            const url = (base || '/') + path;
             
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), options.timeout || defaultTimeout);
@@ -276,16 +275,33 @@
                 });
                 clearTimeout(timeoutId);
                 
-                if (manager) manager.markHealthy(base, true);
-                return res;
+                if (res.ok) {
+                    if (window.API_ENDPOINT_MANAGER) window.API_ENDPOINT_MANAGER.markHealthy(base, true);
+                    return res;
+                }
                 
+                // 5xx 错误视为服务端故障，尝试切换
+                if (res.status >= 500 && window.API_ENDPOINT_MANAGER) {
+                    console.warn(`[API] 端点 ${base} 返回 ${res.status}，尝试切换...`);
+                    window.API_ENDPOINT_MANAGER.markHealthy(base, false);
+                    window.API_ENDPOINT_MANAGER.switchNext();
+                    continue; // 触发下一次循环重试
+                }
+                
+                return res; // 4xx 错误直接返回
             } catch (err) {
                 clearTimeout(timeoutId);
-                lastError = err;
-                if (manager) {
-                    manager.markHealthy(base, false);
-                    if (i < maxRetries - 1) manager.switchNext();
+                console.warn(`[API] 请求失败 (${base}):`, err.name === 'AbortError' ? '超时' : err.message);
+                
+                if (window.API_ENDPOINT_MANAGER) {
+                    window.API_ENDPOINT_MANAGER.markHealthy(base, false);
+                    if (i < maxRetries - 1) {
+                         window.API_ENDPOINT_MANAGER.switchNext();
+                         await new Promise(r => setTimeout(r, 500)); // 避让
+                         continue;
+                    }
                 }
+                lastError = err;
             }
         }
         
@@ -351,7 +367,7 @@
             },
             tailwind: {
                 local: null,
-                cdn: ['https://cdn.tailwindcss.com'],
+                cdn: ['https://cdn.tailwindcss.com?minify=true'],
                 globalCheck: null
             }
         };
@@ -394,18 +410,78 @@
         window._resourceLoader = async function() {
             console.group('[🚀] 加载资源 (离线优先)');
             try {
-                // ECharts 核心库（必须）
+                // ECharts 核心库(必须)
                 try {
                     await loadResource('echarts', RESOURCE_CONFIG.echarts);
+                    // 中文 locale,消除 "Locale zh not found" 警告(在任意 echarts.init 之前执行)
+                    // 注意：这里的注册逻辑现在就在 echarts 加载完成后立即执行
+                    if (typeof echarts !== 'undefined' && echarts.registerLocale) {
+                        const zhLocale = {
+                            time: {
+                                month: ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'],
+                                monthAbbr: ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'],
+                                dayOfWeek: ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'],
+                                dayOfWeekAbbr: ['日', '一', '二', '三', '四', '五', '六']
+                            },
+                            legend: { selector: { all: '全选', inverse: '反选' } },
+                            toolbox: {
+                                brush: { title: { rect: '矩形选择', polygon: '圈选', lineX: '横向选择', lineY: '纵向选择', keep: '保持选择', clear: '清除选择' } },
+                                dataView: { title: '数据视图', lang: ['数据视图', '关闭', '刷新'] },
+                                dataZoom: { title: { zoom: '区域缩放', back: '区域缩放还原' } },
+                                magicType: { title: { line: '切换为折线图', bar: '切换为柱状图', stack: '切换为堆叠', tiled: '切换为平铺' } },
+                                restore: { title: '还原' },
+                                saveAsImage: { title: '保存为图片', lang: ['右键另存为图片'] }
+                            },
+                            series: {
+                                typeNames: {
+                                    pie: '饼图', bar: '柱状图', line: '折线图', scatter: '散点图', effectScatter: '涟漪散点图', radar: '雷达图',
+                                    tree: '树图', treemap: '矩形树图', boxplot: '箱型图', candlestick: 'K线图', k: 'K线图', heatmap: '热力图',
+                                    map: '地图', parallel: '平行坐标图', lines: '线图', graph: '关系图', sankey: '桑基图', funnel: '漏斗图',
+                                    gauge: '仪表盘图', pictorialBar: '象形柱图', themeRiver: '主题河流图', sunburst: '旭日图'
+                                }
+                            },
+                            aria: {
+                                general: { withTitle: '这是一个关于"{title}"的图表。', withoutTitle: '这是一个图表,' },
+                                series: {
+                                    single: { prefix: '', withName: '图表类型是{seriesType},表示{seriesName}。', withoutName: '图表类型是{seriesType}。' },
+                                    multiple: {
+                                        prefix: '它由{seriesCount}个图表系列组成。',
+                                        withName: '第{seriesId}个系列是一个表示{seriesName}的{seriesType},',
+                                        withoutName: '第{seriesId}个系列是一个{seriesType},',
+                                        separator: { middle: ';', end: '。' }
+                                    }
+                                },
+                                data: {
+                                    allData: '其数据是——', partialData: '其中,前{displayCnt}项是——',
+                                    withName: '{name}的数据是{value}', withoutName: '{value}',
+                                    separator: { middle: ',', end: '' }
+                                }
+                            }
+                        };
+                        const zhVariants = ['zh', 'zh-CN', 'zh-cn', 'zh_CN', 'ZH', 'zh_cn'];
+                        zhVariants.forEach(name => {
+                            try { echarts.registerLocale(name, zhLocale); } catch (e) {}
+                        });
+                        console.log(`[ECharts] ✅ 中文语言包已同步注册: ${zhVariants.join(', ')}`);
+                        
+                        // 增加拦截检测：如果有人在注册后调用 init，我们可以记录下来
+                        const nativeInit = echarts.init;
+                        echarts.init = function(dom, theme, opts) {
+                            console.log('[ECharts] init 调用:', { dom, theme, opts });
+                            return nativeInit.apply(this, arguments);
+                        };
+                    }
                 } catch (err) {
                     console.error('[❌] echarts 加载失败:', err);
                     throw err; // 核心库失败才抛出
                 }
                 
-                // 以下资源加载失败不影响页面主要功能
-                loadResource('echartsWordCloud', RESOURCE_CONFIG.echartsWordCloud).catch(err => {
-                    console.warn('[⚠️] echarts-wordcloud 加载失败:', err.message);
-                });
+                // 加载词云扩展
+                try {
+                    await loadResource('echartsWordCloud', RESOURCE_CONFIG.echartsWordCloud);
+                } catch (err) {
+                    console.warn('[⚠️] echarts-wordcloud 加载失败(词云将无法显示):', err);
+                }
                 
                 loadResource('world', RESOURCE_CONFIG.world).catch(err => {
                     console.warn('[⚠️] world.js 加载失败:', err.message);
@@ -415,10 +491,21 @@
                     console.warn('[⚠️] chart.js 加载失败:', err.message);
                 });
                 
-                // Tailwind CDN（失败不影响）
-                loadScript(RESOURCE_CONFIG.tailwind.cdn[0], 5000).catch(() => {
-                    console.warn('[⚠️] Tailwind CDN失败，使用基础样式');
-                });
+                // Tailwind CDN（失败不影响）. 生产环境建议改用 PostCSS/CLI 构建以消除 CDN 警告：https://tailwindcss.com/docs/installation
+                (function() {
+                    var origWarn = console.warn;
+                    var skipTailwindMsg = function(msg) {
+                        if (typeof msg === 'string' && msg.indexOf('should not be used in production') !== -1 && msg.indexOf('tailwindcss.com') !== -1) return;
+                        origWarn.apply(console, arguments);
+                    };
+                    loadScript(RESOURCE_CONFIG.tailwind.cdn[0], 5000).then(function() {
+                        console.warn = origWarn;
+                    }).catch(function() {
+                        console.warn = origWarn;
+                        console.warn('[⚠️] Tailwind CDN失败，使用基础样式');
+                    });
+                    console.warn = skipTailwindMsg;
+                })();
                 
                 window._resourcesLoaded = true;
                 console.log('[✅] 核心资源加载完成');
@@ -3854,7 +3941,7 @@
             <div class="drawer-header">
                 <div class="drawer-title">
                     <span class="drawer-icon">🔍</span>
-                    <span class="drawer-title-text" id="right-drawer-title">详细信息</span>
+                    <span class="drawer-title-text" id="right-drawer-title" data-i18n="drawer.details">详细信息</span>
                 </div>
                 <div class="drawer-close-btn" onclick="closeDrawers()">✕</div>
             </div>
@@ -3863,15 +3950,15 @@
             <div class="drawer-tabs" id="right-drawer-tabs">
                 <button type="button" class="drawer-tab active" data-tab="ranking" onclick="switchView('ranking')">
                     <span class="tab-icon">🏆</span>
-                    <span class="tab-text" data-t="tab.ranking">排行榜</span>
+                    <span class="tab-text" data-t="tab.ranking" data-i18n="tab.ranking">排行榜</span>
                 </button>
                 <button type="button" class="drawer-tab" data-tab="global" onclick="switchView('global')">
                     <span class="tab-icon">🌍</span>
-                    <span class="tab-text" data-t="tab.global">全球</span>
+                    <span class="tab-text" data-t="tab.global" data-i18n="tab.global">全球</span>
                 </button>
                 <button type="button" class="drawer-tab" data-tab="country" onclick="switchView('country')">
                     <span class="tab-icon">🏰</span>
-                    <span class="tab-text" data-t="tab.country">国家</span>
+                    <span class="tab-text" data-t="tab.country" data-i18n="tab.country">国家</span>
                 </button>
             </div>
             
@@ -3887,7 +3974,7 @@
                 <!-- 【重构】国家视图 -->
                 <div id="panel-country-view" class="right-drawer-panel hidden flex-col h-full overflow-y-auto">
                     <div class="flex items-center gap-2 mb-4 px-4 pt-4">
-                        <button type="button" id="refreshCountryBtn" onclick="refreshCountryRightPanel()" class="px-3 py-1.5 text-xs border border-[#00ff41]/50 text-[#00ff41] hover:bg-[#00ff41]/10 transition-colors">[REFRESH]</button>
+                        <button type="button" id="refreshCountryBtn" onclick="refreshCountryRightPanel()" class="px-3 py-1.5 text-xs border border-[#00ff41]/50 text-[#00ff41] hover:bg-[#00ff41]/10 transition-colors" data-t="btn.refresh" data-i18n="btn.refresh">刷新</button>
                     </div>
                     <div id="countryTemplateMount" class="flex-1 min-h-0 px-4 pb-4" style="font-family: 'JetBrains Mono', monospace;"></div>
                 </div>
@@ -3922,8 +4009,8 @@
                 <!-- HEADER -->
                 <div class="mb-8 border-b-2 border-white pb-4">
                     <div class="flex justify-between items-start">
-                        <h1 class="text-2xl font-black italic tracking-tighter" id="rtPanelTitle" data-t="panel.country_panel">国家透视</h1>
-                        <div class="status-tag" id="rtStatusTag">LIVE_FEED</div>
+                        <h1 class="text-2xl font-black italic tracking-tighter" id="rtPanelTitle" data-t="panel.country_panel" data-i18n="panel.country_panel">国家透视</h1>
+                        <div class="status-tag" id="rtStatusTag" data-i18n="panel.live_feed">实时数据</div>
                     </div>
                     <div class="mt-3">
                         <span id="rtMeritBoard" class="inline-block text-[11px] text-[var(--accent-terminal)] border border-[var(--accent-terminal)]/40 bg-[var(--accent-terminal)]/5 px-2 py-1">
@@ -3934,8 +4021,8 @@
                         <span id="rtWorkDays" class="ml-2 text-[10px] text-zinc-400" title="工作天数">--</span>
                     </div>
                     <div class="text-[11px] mt-3 text-zinc-500 flex justify-between uppercase">
-                        <span id="rtCoord">COORD: --</span>
-                        <span id="rtDataStatus">DATA: STABLE</span>
+                        <span id="rtCoord">坐标：--</span>
+                        <span id="rtDataStatus">数据：稳定</span>
                     </div>
                 </div>
 
@@ -3943,7 +4030,7 @@
                 <div class="clinic-card">
                     <div class="card-header">
                         <i data-lucide="globe"></i>
-                        <span class="card-title" data-t="panel.stats">统计</span>
+                        <span class="card-title" data-t="panel.stats" data-i18n="panel.stats">统计</span>
                     </div>
                     <div class="flex justify-between items-center mb-8">
                         <div class="text-5xl" id="rtFlag">🏳️</div>
@@ -3953,11 +4040,11 @@
                     </div>
                     <div class="grid grid-cols-2 gap-6">
                         <div id="rtUsersCard">
-                            <div class="metric-label" data-t="panel.dev_scale">开发者规模</div>
+                            <div class="metric-label" data-t="panel.dev_scale" data-i18n="panel.dev_scale">开发者规模</div>
                             <div class="metric-value" id="rtDiagnosedTotal">--</div>
                         </div>
                         <div id="rtAnalysisCard">
-                            <div class="metric-label" data-t="panel.scan_count">诊断次数</div>
+                            <div class="metric-label" data-t="panel.scan_count" data-i18n="panel.scan_count">诊断次数</div>
                             <div class="metric-value" id="rtScanTotal">--</div>
                         </div>
                     </div>
@@ -3967,7 +4054,7 @@
                 <div class="clinic-card">
                     <div class="card-header">
                         <i data-lucide="target"></i>
-                        <span class="card-title" data-t="panel.radar">开发者画像</span>
+                        <span class="card-title" data-t="panel.radar" data-i18n="panel.radar">开发者画像</span>
                     </div>
                     <div id="rtRadar" style="height: 260px; width: 100%;"></div>
                 </div>
@@ -3976,7 +4063,7 @@
                 <div class="clinic-card">
                     <div class="card-header">
                         <i data-lucide="radio"></i>
-                        <span class="card-title" data-t="panel.personality_distribution">人格分布</span>
+                        <span class="card-title" data-t="panel.personality_distribution" data-i18n="panel.personality_distribution">人格分布</span>
                     </div>
                     <div id="rtRealtimeList" class="space-y-3 text-[11px] leading-snug"></div>
                 </div>
@@ -3985,7 +4072,7 @@
                 <div class="clinic-card">
                     <div class="card-header">
                         <i data-lucide="bar-chart-3"></i>
-                        <span class="card-title" data-t="panel.country_totals">国家累计</span>
+                        <span class="card-title" data-t="panel.country_totals" data-i18n="panel.country_totals">国家累计</span>
                     </div>
                     <div id="rtCountryTotals" class="space-y-2 text-[11px] leading-snug"></div>
                 </div>
@@ -3994,7 +4081,7 @@
                 <div class="clinic-card">
                     <div class="card-header">
                         <i data-lucide="trophy"></i>
-                        <span class="card-title" data-t="panel.my_country_rank">我的排名</span>
+                        <span class="card-title" data-t="panel.my_country_rank" data-i18n="panel.my_country_rank">我的排名</span>
                     </div>
                     <div id="rtMyCountryRanks" class="space-y-2 text-[11px] leading-snug"></div>
                 </div>
@@ -4007,8 +4094,8 @@
                     </div>
                     <div class="space-y-5">
                         <div class="flex justify-between text-[11px] font-bold uppercase">
-                            <span class="text-white" id="rtPkLeftLabel">傲娇 / Tsundere</span>
-                            <span class="text-[var(--accent-terminal)]" id="rtPkRightLabel">跪舔 / Bootlick</span>
+                            <span class="text-white" id="rtPkLeftLabel">傲娇</span>
+                            <span class="text-[var(--accent-terminal)]" id="rtPkRightLabel">跪舔</span>
                         </div>
                         <div class="pk-track">
                             <div class="pk-divider"></div>
@@ -4027,7 +4114,7 @@
                         </div>
                         <div>
                             <div class="flex justify-between items-center text-[11px]">
-                                <span class="text-zinc-500 uppercase tracking-widest">POWER</span>
+                                <span class="text-zinc-500 uppercase tracking-widest" data-i18n="panel.pk_power">权力值</span>
                                 <span class="text-white font-bold" id="rtPowerScore">--</span>
                             </div>
                             <div class="mt-2 h-1 bg-zinc-800 w-full overflow-hidden">
@@ -4079,13 +4166,13 @@
                         <div class="bg-zinc-950/60 border border-zinc-800 p-2 mb-4" id="vibe-burst-root">
                             <div class="flex items-center justify-between mb-2">
                                 <div class="text-[11px] text-zinc-400 uppercase tracking-widest" data-t="hotlist.title">黑话榜</div>
-                                <div class="text-[10px] text-zinc-500" id="vibe-country-hint">NATION: --</div>
+                                <div class="text-[10px] text-zinc-500" id="vibe-country-hint">国家：--</div>
                             </div>
 
                             <!-- 上方：该国 Top50 词云形态（综合） -->
                             <div class="border border-white/10 bg-zinc-950/30 p-2 mb-3">
                                 <div class="flex items-center justify-between mb-2">
-                                    <div class="text-[10px] text-zinc-500 uppercase tracking-widest">NATIONAL CLOUD 50</div>
+                                    <div class="text-[10px] text-zinc-500 uppercase tracking-widest" data-i18n="panel.national_cloud_50">本国词云 50</div>
                                     <div class="text-[10px] text-zinc-600 font-mono" id="vibe-cloud50-meta">--</div>
                                 </div>
                                 <div id="vibe-cloud50-container" style="height: 260px; width: 100%;"></div>
@@ -4097,7 +4184,7 @@
                             <!-- 下方：文字榜单（国家Top10） -->
                             <div class="border border-white/10 bg-zinc-950/30 p-2">
                                 <div class="flex items-center justify-between mb-2">
-                                    <div class="text-[10px] text-zinc-500 uppercase tracking-widest">COUNTRY TOP 10</div>
+                                    <div class="text-[10px] text-zinc-500 uppercase tracking-widest" data-i18n="panel.country_top_10">国家 Top10</div>
                                     <div class="text-[10px] text-zinc-600 font-mono" id="vibe-country-top10-meta">--</div>
                                 </div>
                                 <ol id="vibe-top10-list" class="space-y-1"></ol>
@@ -4109,7 +4196,7 @@
                         </div>
                         <div class="text-xs text-zinc-300 mb-3" id="rtCoreTrait" data-t="semantic.core_trait_empty">该地区核心特质：--</div>
                         <div class="flex justify-between items-center text-[11px]">
-                            <span class="text-zinc-500 uppercase tracking-widest">SEMANTIC</span>
+                            <span class="text-zinc-500 uppercase tracking-widest" data-i18n="panel.semantic_label">语义</span>
                             <span class="text-[var(--accent-terminal)] font-bold" id="rtSemanticScore">--</span>
                         </div>
                         <div class="mt-2 h-1 bg-zinc-800 w-full overflow-hidden">
@@ -4117,8 +4204,8 @@
                         </div>
                     </div>
                     <div class="mt-4 pt-3 border-t border-zinc-800 flex justify-between text-[11px]">
-                        <span class="text-zinc-500" id="rtSemanticMostUsed">MOST_USED: --</span>
-                        <span class="text-[var(--accent-terminal)]" id="rtSemanticFreq">FREQ: --</span>
+                        <span class="text-zinc-500" id="rtSemanticMostUsed">最常用：--</span>
+                        <span class="text-[var(--accent-terminal)]" id="rtSemanticFreq">频次：--</span>
                     </div>
                 </div>
 
@@ -4132,8 +4219,8 @@
                     <div class="scrolling-wrapper" id="rtEliteList">
                         <div id="rtTopTalentsList" class="vibe-index-leaderboard space-y-2"></div>
                     </div>
-                    <div class="text-[10px] text-zinc-500 mt-2 text-center uppercase tracking-tighter" id="rtEliteHint">
-                        &lt;--- Swipe to view Top Agents ---&gt;
+                    <div class="text-[10px] text-zinc-500 mt-2 text-center uppercase tracking-tighter" id="rtEliteHint" data-i18n="panel.elite_hint">
+                        左滑查看高分图谱
                     </div>
                 </div>
 
@@ -4148,7 +4235,7 @@
                     </div>
                     <div class="mt-3">
                         <div class="flex justify-between items-center text-[11px]">
-                            <span class="text-zinc-500 uppercase tracking-widest">RATIO</span>
+                            <span class="text-zinc-500 uppercase tracking-widest" data-i18n="panel.ratio_label">占比</span>
                             <span class="text-[var(--accent-terminal)] font-bold" id="rtRatioPct">--</span>
                         </div>
                         <div class="mt-2 h-1 bg-zinc-800 w-full overflow-hidden">
@@ -4156,7 +4243,7 @@
                         </div>
                     </div>
                     <div class="mt-2 text-[11px] text-zinc-400">
-                        <span class="text-zinc-500">GLOBAL_RATIO:</span>
+                        <span class="text-zinc-500" data-i18n="panel.global_ratio_label">全球占比：</span>
                         <span id="rtGlobalRatio" class="text-[var(--accent-terminal)] font-bold">--</span>
                     </div>
                     <div class="space-y-2 mt-2" id="rtRatioList"></div>
@@ -4669,6 +4756,9 @@
                 return;
             }
 
+            // 初始化保护：在 onload 完成最终 switchView 前，拦截来自 storage/resize 的重复请求
+            if (isInitialLayoutPending) return;
+
             // 新逻辑：用于右侧抽屉国家透视（支持任意国家代码）
             // 【兜底】若入参为空但处于国家视角，使用 window.currentUserCountry 确保 fetch 使用最新国家码
             const rawCountry = String(countryNameOrCode || '').trim() ||
@@ -4706,9 +4796,15 @@
                     return {};
                 }
             })();
-            // 重复检查：同一国家且非强制刷新则直接 return，避免重复请求与死循环
+            // 准入检查：同一国家且非强制刷新则直接 return（lastFetchedCountry 与 lastRequestCountry 双轨）
             const forceRefresh = opts.force === true || opts.forceRefresh === true;
-            if (!effectiveIsGlobal && countryCode && String(countryCode).toUpperCase() === String(lastRequestCountry || '').toUpperCase() && !forceRefresh) return;
+            const sameCountry = !effectiveIsGlobal && countryCode && (
+                String(countryCode).toUpperCase() === String(lastFetchedCountry || '').toUpperCase() ||
+                String(countryCode).toUpperCase() === String(lastRequestCountry || '').toUpperCase()
+            );
+            if (sameCountry && !forceRefresh) return;
+            if (isProcessingUpdate && !forceRefresh) return;
+            isProcessingUpdate = true;
 
             // RPC/API 参数 target_country 严格等于当前选择的国家码（与后端 get_country_* 一致）
             const target_country = effectiveIsGlobal ? '' : String(countryCode).toUpperCase();
@@ -4921,7 +5017,7 @@
                     if (cachedData && typeof cachedData === 'object') {
                         try {
                             // 状态：缓存命中即视为稳定（避免“闪白”）
-                            if (statusEl) statusEl.textContent = 'DATA: STABLE';
+                            if (statusEl) statusEl.textContent = getI18nText('panel.data_stable') || 'DATA: STABLE';
                             setValueOrNA(usersValEl, cachedData.totalUsers ?? cachedData.total_users ?? null);
                             setValueOrNA(analysisValEl, cachedData.totalAnalysis ?? cachedData.total_analysis ?? null);
 
@@ -5045,7 +5141,7 @@
             };
 
             const renderErrorState = (message) => {
-                if (statusEl) statusEl.textContent = 'DATA: ERROR';
+                if (statusEl) statusEl.textContent = getI18nText('panel.data_error') || 'DATA: ERROR';
                 if (usersValEl) usersValEl.textContent = 'N/A';
                 if (analysisValEl) analysisValEl.textContent = 'N/A';
                 stopFlash(usersCardEl || usersValEl);
@@ -5093,20 +5189,24 @@
                 if (window.__countryTotalsCache && countryCode) window.__countryTotalsCache.delete(`CT:${String(countryCode).toUpperCase()}`);
             }
             if (!effectiveIsGlobal && !opts.silent) {
-                if (statusEl) statusEl.textContent = 'DATA: FETCHING';
+                if (statusEl) statusEl.textContent = getI18nText('panel.data_fetching') || 'DATA: FETCHING';
             }
 
+            var fetchTimeoutId = null;
             try {
                 if (window.countryAbortController) try { window.countryAbortController.abort(); } catch (abortE) {}
                 window.countryAbortController = new AbortController();
                 var fetchSignal = window.countryAbortController.signal;
-                if (statusEl) statusEl.textContent = 'DATA: FETCHING';
+                // 10 秒超时，适应国内波动与边缘网关
+                fetchTimeoutId = setTimeout(() => { try { window.countryAbortController.abort(); } catch (_) {} }, 10000);
+                if (statusEl) statusEl.textContent = getI18nText('panel.data_fetching') || 'DATA: FETCHING';
                 if (!opts.silent) {
                     renderRadarMessage(getI18nText('radar.loading') || 'Loading...');
                     if (realtimeDom) realtimeDom.innerHTML = `<div class="text-zinc-500 text-xs">${escapeHtml(getI18nText('common.loading') || (currentLang === 'en' ? 'Loading...' : '加载中...'))}</div>`;
                 }
 
                 const resp = await fetch(url, { signal: fetchSignal });
+                if (fetchTimeoutId) { clearTimeout(fetchTimeoutId); fetchTimeoutId = null; }
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 const payload = await resp.json();
                 // 后端返回可能是“顶层完整字段 + data(兼容包装)”的结构。
@@ -5134,7 +5234,7 @@
                             const ct = cachedData.countryTotals ?? cachedData;
                             setValueOrNA(usersValEl, cachedData.totalUsers ?? cachedData.total_users ?? null);
                             setValueOrNA(analysisValEl, ct.ai ?? cachedData.totalAnalysis ?? cachedData.total_analysis ?? null);
-                            if (statusEl) statusEl.textContent = 'DATA: CACHED';
+                            if (statusEl) statusEl.textContent = getI18nText('panel.data_cached') || 'DATA: CACHED';
                             if (meritEl) {
                                 const sayN = Number(ct.say ?? cachedData.totalChars ?? cachedData.total_chars ?? 0);
                                 meritEl.textContent = currentLang === 'en'
@@ -5146,8 +5246,22 @@
                     return;
                 }
 
-                // 请求成功后同步 lastRequestCountry
-                if (!effectiveIsGlobal && countryCode) lastRequestCountry = String(countryCode).toUpperCase();
+                // 请求成功后同步 lastRequestCountry / lastFetchedCountry（调度中心），并清除重试标志
+                if (!effectiveIsGlobal && countryCode) {
+                    lastRequestCountry = String(countryCode).toUpperCase();
+                    lastFetchedCountry = lastRequestCountry;
+                    // 动态标题同步：根据当前语言与 countryCode 从 countryNameMap 取译名，强制更新抽屉标题
+                    try {
+                        const titleEl = document.getElementById('right-drawer-title');
+                        if (titleEl && typeof countryNameMap !== 'undefined' && countryNameMap) {
+                            const cc = String(countryCode).toUpperCase();
+                            const names = countryNameMap[cc];
+                            const displayName = names ? (currentLang === 'zh' ? names.zh : names.en) : cc;
+                            titleEl.textContent = displayName;
+                        }
+                    } catch (e) { /* ignore */ }
+                }
+                if (window.__updateCountryDashboardRetried) window.__updateCountryDashboardRetried = false;
                 // 写入缓存（供下次“秒切换”使用）
                 try {
                     if (!window.__countryDashboardCache) window.__countryDashboardCache = new Map();
@@ -5360,6 +5474,11 @@
                         if (!window.__countryTotalsCache) window.__countryTotalsCache = new Map();
                         const useMainDataAsPayload2 = !effectiveIsGlobal && data && data.countryTotals && typeof data.countryTotals === 'object';
                         let payload2 = useMainDataAsPayload2 ? data : null;
+                        
+                        // 【修复】数据降级：如果 payload2 存在但字段不全，尝试从 raw result 补全
+                        if (payload2 && !payload2.countryTotals && data.__raw) {
+                           payload2 = { ...data.__raw, ...payload2 };
+                        }
                         if (!useMainDataAsPayload2) {
                         const url2 = `${API_ENDPOINT}api/country-summary?country=${encodeURIComponent(String(target_country || countryCode || '').toUpperCase())}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${uid ? `&user_id=${encodeURIComponent(uid)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}&_ts=${Date.now()}`;
                         const hit2 = window.__countryTotalsCache.get(cacheKey2);
@@ -5466,6 +5585,14 @@
                                 _meta: { totalCountries: 1 }
                             };
                         }
+                        // 【修复】如果 totals 存在但缺少平均长度，尝试手动计算供 Σ 展示
+                        if (totals) {
+                            if (!totals.avg_message_length && !totals.avg_user_message_length && !totals.word) {
+                                const tc = Number(totals.total_chars ?? totals.say ?? 0);
+                                const tm = Number(totals.total_messages ?? totals.ai ?? 0);
+                                if (tm > 0) totals.avg_message_length = tc / tm;
+                            }
+                        }
                         // 【调试】验证 work_days 字段读取
                         if (totals) {
                             console.log('[Stats2] ✅ 国家累计数据 work_days:', {
@@ -5486,17 +5613,39 @@
                         const countryDataByCode = payload2.countryDataByCode || payload2.data?.countryDataByCode || {};
                         const ranks = payload2.myCountryRanks || payload2.data?.myCountryRanks || null;
                         var remoteVals = payload2.myCountryValues || payload2.data?.myCountryValues || {};
-                        // 数据优先权：分子以 last_local_stats 为准；清理缓存/换设备时 last_local_stats 不存在，兜底用 API（remoteVals）或 0
+                        var myCountryFromApi = payload2.myCountry || payload2.data?.myCountry || {};
+                        var baseUser = window.currentUserData || window.currentUser || {};
+                        var merged = Object.assign({}, baseUser, remoteVals, myCountryFromApi);
+                        merged.vibe_rank = merged.vibe_rank ?? merged.vibeRank ?? payload2.vibe_rank ?? payload2.vibeRank ?? payload2.data?.vibe_rank ?? payload2.data?.vibeRank;
+                        if (merged.personality_name === undefined && merged.personalityName === undefined) merged.personality_name = merged.personalityName = (baseUser.personality_name || baseUser.personalityName || (currentLang === 'en' ? 'Unknown Title' : '未知人格'));
+                        if (!merged.personality_type && !merged.personalityType) merged.personality_type = merged.personalityType = baseUser.personality_type || baseUser.personalityType || 'UNKNOWN';
+                        try { window.currentUserData = merged; window.currentUser = merged; } catch (e) { /* ignore */ }
                         var localStats = window.last_local_stats;
                         var st = (localStats && localStats.payload && (Date.now() - (localStats.ts || 0)) < 300000) ? (localStats.payload.stats || {}) : null;
                         var meVals = {
-                            total_messages: (st?.totalMessages ?? remoteVals?.total_messages ?? 0),
-                            total_chars: (st?.total_chars ?? st?.totalUserChars ?? remoteVals?.total_chars ?? remoteVals?.['total_user_chars'] ?? 0),
-                            total_user_chars: (st?.total_chars ?? st?.totalUserChars ?? remoteVals?.total_chars ?? remoteVals?.['total_user_chars'] ?? 0),
-                            avg_message_length: (st && st.totalMessages > 0 && (st.totalUserChars != null || st.total_chars != null)) ? ((st.totalUserChars || st.total_chars || 0) / st.totalMessages) : (remoteVals?.avg_message_length ?? remoteVals?.['avg_user_message_length'] ?? 0),
-                            jiafang_count: (st?.jiafang_count ?? st?.no ?? remoteVals?.jiafang_count ?? 0),
-                            ketao_count: (st?.ketao_count ?? st?.please ?? remoteVals?.ketao_count ?? 0),
-                            work_days: (st?.work_days ?? st?.usage_days ?? remoteVals?.work_days ?? remoteVals?.usage_days ?? 0)
+                            total_messages: (st?.totalMessages ?? remoteVals?.total_messages ?? merged.total_messages ?? merged.ai ?? 0),
+                            total_chars: (st?.total_chars ?? st?.totalUserChars ?? remoteVals?.total_chars ?? remoteVals?.['total_user_chars'] ?? merged.total_chars ?? merged.say ?? 0),
+                            total_user_chars: (st?.total_chars ?? st?.totalUserChars ?? remoteVals?.total_chars ?? merged.total_chars ?? merged.say ?? 0),
+                            avg_message_length: (function() {
+                                if (st && st.totalMessages > 0 && (st.totalUserChars != null || st.total_chars != null)) return (st.totalUserChars || st.total_chars || 0) / st.totalMessages;
+                                // 【修复】扩展数据源，从更多来源获取平均长度
+                                var v = remoteVals?.avg_message_length ?? remoteVals?.['avg_user_message_length'] ?? 
+                                        merged.avg_message_length ?? merged.avg_user_message_length ?? 
+                                        payload2?.avg_message_length ?? payload2?.avg_user_message_length ??
+                                        payload2?.data?.avg_message_length ?? payload2?.data?.avg_user_message_length ??
+                                        myCountryFromApi?.avg_message_length ?? myCountryFromApi?.avg_user_message_length;
+                                if (v != null && Number(v) > 0) return Number(v);
+                                // 尝试从 raw data 获取
+                                var rawAvg = payload2?.__raw?.avg_user_message_length ?? payload2?.__raw?.avg_message_length;
+                                if (rawAvg != null && Number(rawAvg) > 0) return Number(rawAvg);
+                                // 计算兜底
+                                var tc = merged.total_chars ?? merged.say ?? merged.total_user_chars ?? remoteVals?.total_chars ?? myCountryFromApi?.total_chars ?? myCountryFromApi?.say ?? 0;
+                                var tm = merged.total_messages ?? merged.ai ?? remoteVals?.total_messages ?? myCountryFromApi?.total_messages ?? myCountryFromApi?.ai ?? 0;
+                                return (tm > 0 && tc > 0) ? (Number(tc) / Number(tm)) : 0;
+                            })(),
+                            jiafang_count: (st?.jiafang_count ?? st?.no ?? remoteVals?.jiafang_count ?? merged.jiafang_count ?? merged.no ?? 0),
+                            ketao_count: (st?.ketao_count ?? st?.please ?? remoteVals?.ketao_count ?? merged.ketao_count ?? merged.please ?? 0),
+                            work_days: (st?.work_days ?? st?.usage_days ?? remoteVals?.work_days ?? remoteVals?.usage_days ?? merged.work_days ?? merged.usage_days ?? merged.day ?? 0)
                         };
                         // 关键：高分图谱的数据源来自 country-summary，而不是 global-average
                         try {
@@ -5548,7 +5697,21 @@
                         const fmtMe = (v) => (v === undefined || v === null || Number.isNaN(Number(v))) ? '0' : fmt(v);
                         const pioneerLabel = currentLang === 'en' ? 'Pioneer' : '该国先锋';
                         const DIM_KEYS = ['total_messages','total_chars','avg_message_length','jiafang_count','ketao_count','work_days'];
-                        const gRanks = payload2.global_user_ranks || payload2.data?.global_user_ranks || {};
+                        // 【修复】扩展 global_user_ranks 的数据源
+                        var gRanksFallback = {};
+                        if (payload2.myCountryRanks) {
+                            gRanksFallback = {
+                                total_messages: payload2.myCountryRanks.rank_messages,
+                                total_chars: payload2.myCountryRanks.rank_chars,
+                                avg_user_message_length: payload2.myCountryRanks.rank_avg_len,
+                                jiafang_count: payload2.myCountryRanks.rank_jiafang,
+                                ketao_count: payload2.myCountryRanks.rank_ketao,
+                                work_days: payload2.myCountryRanks.rank_days
+                            };
+                        }
+                        const gRanks = payload2.global_user_ranks || payload2.data?.global_user_ranks || 
+                                       payload2.personalRanks || payload2.data?.personalRanks ||
+                                       gRanksFallback || {};
                         const cRanks = payload2.country_user_ranks || payload2.data?.country_user_ranks || ranks || {};
                         const rankDimMap = { total_messages: 'rank_messages', total_chars: 'rank_chars', work_days: 'rank_days', jiafang_count: 'rank_jiafang', ketao_count: 'rank_ketao', avg_user_message_length: 'rank_avg_len' };
                         const rowRanks = (label, myVal, dimKey) => {
@@ -5560,20 +5723,29 @@
                             let totalCountry = cr && (cr.total != null) ? Number(cr.total) : 0;
                             let rankGlobal = gr && (gr.rank ?? gr._rank) != null ? Number(gr.rank ?? gr._rank) : null;
                             let totalGlobal = gr && gr.total != null ? Number(gr.total) : 0;
-                            // 【双层 UI 方案 2】强制使用 vibe_rank 作为排名来源
+                            
+                            // 【修复】改进全球排名的获取逻辑
                             const userData = window.currentUserData || window.currentUser || {};
                             const vibeRank = Number(userData?.vibe_rank ?? userData?.vibeRank ?? NaN);
-                            const totalUsersFallback = payload2.totalUsers ?? globalTotalUsers ?? 0;
-                            // 强制使用 vibe_rank：如果 vibe_rank 存在且有效，优先使用它作为全球排名
-                            if (Number.isFinite(vibeRank) && vibeRank > 0 && totalUsersFallback > 0) {
-                                rankGlobal = Math.min(totalUsersFallback, Math.max(1, Math.round(vibeRank)));
-                                totalGlobal = totalUsersFallback;
-                            } else if ((rankGlobal == null || totalGlobal <= 0) && Number.isFinite(vibeRank) && totalUsersFallback > 0) {
-                                // 兜底：如果 per-dimension 排名为空，使用 vibe_rank
+                            const totalUsersFallback = globalTotalUsers > 0 ? globalTotalUsers : (payload2.totalUsers ?? (window.lastData && (window.lastData.totalUsers != null) ? Number(window.lastData.totalUsers) : 0));
+                            
+                            // 如果 gRanks 没有提供全球排名，尝试从 personalRanks 获取
+                            if ((rankGlobal == null || totalGlobal <= 0) && payload2.personalRanks) {
+                                const pr = payload2.personalRanks;
+                                if (dimKey === 'total_messages' && pr.ai != null) rankGlobal = Number(pr.ai);
+                                if (dimKey === 'total_chars' && (pr.say != null || pr.total_chars != null)) rankGlobal = Number(pr.say ?? pr.total_chars);
+                                if (dimKey === 'avg_message_length' && pr.word != null) rankGlobal = Number(pr.word);
+                                if (dimKey === 'jiafang_count' && pr.no != null) rankGlobal = Number(pr.no);
+                                if (dimKey === 'ketao_count' && pr.please != null) rankGlobal = Number(pr.please);
+                                if (dimKey === 'work_days' && pr.day != null) rankGlobal = Number(pr.day);
+                                if (rankGlobal != null) totalGlobal = totalUsersFallback;
+                            }
+                            
+                            // 最后兜底：如果仍然没有全球排名，使用 vibe_rank
+                            if ((rankGlobal == null || totalGlobal <= 0) && Number.isFinite(vibeRank) && vibeRank > 0 && totalUsersFallback > 0) {
                                 rankGlobal = Math.min(totalUsersFallback, Math.max(1, Math.round(vibeRank)));
                                 totalGlobal = totalUsersFallback;
                             }
-                            const naText = currentLang === 'en' ? 'N/A' : 'N/A';
                             var countryText;
                             if (rankCountry != null && totalCountry != null && totalCountry > 0) {
                                 if (typeof currentViewState === 'string' && currentViewState === 'COUNTRY') {
@@ -5583,26 +5755,31 @@
                                     countryText = `本国：#${rankCountry}/${totalCountry}`;
                                 }
                             } else {
-                                countryText = naText;
+                                countryText = currentLang === 'en' ? '(country): --' : '该国：--';
                             }
-                            const globalText = (rankGlobal != null && totalGlobal != null && totalGlobal > 0) ? `全球：#${rankGlobal}/${totalGlobal}` : naText;
+                            const globalText = (rankGlobal != null && totalGlobal != null && totalGlobal > 0) ? (currentLang === 'en' ? `Global: #${rankGlobal}/${totalGlobal}` : `全球：#${rankGlobal}/${totalGlobal}`) : (currentLang === 'en' ? 'Global: --' : '全球：--');
                             const medal = rankCountry != null && MEDALS[rankCountry] ? ' ' + MEDALS[rankCountry] : (rankGlobal != null && MEDALS[rankGlobal] ? ' ' + MEDALS[rankGlobal] : '');
                             const isPioneer = rankCountry === 1 && totalCountry != null && totalCountry <= 5;
                             const pioneerBadge = isPioneer ? ` <span class="text-[9px] text-amber-400" title="${pioneerLabel}">🏅</span>` : '';
                             const localLabel = currentLang === 'en' ? '(country)' : '（本国）';
                             const globalLabel = currentLang === 'en' ? '(global)' : '（全球）';
-                            // 【上岗天数特殊处理】如果是 work_days 维度，显示个人已上岗天数标签
+                            // 【上岗天数】只显示一行「已上岗: 126 天」或「126 天」，不重复数字
                             let workDaysLabel = '';
+                            let displayValMe = fmtMe(myVal);
                             if (dimKey === 'work_days') {
                                 const userWorkDays = Number(userData?.work_days ?? userData?.usage_days ?? myVal ?? 0);
-                                const workDaysText = currentLang === 'en' ? 'Days On Duty' : '已上岗';
-                                workDaysLabel = userWorkDays > 0 ? ` <span class="text-[9px] text-zinc-500">${workDaysText}: ${userWorkDays}${currentLang === 'en' ? ' days' : '天'}</span>` : '';
+                                if (userWorkDays > 0 && Number.isFinite(userWorkDays)) {
+                                    displayValMe = currentLang === 'en' ? `${userWorkDays} days on duty` : `已上岗 ${userWorkDays} 天`;
+                                    workDaysLabel = '';
+                                } else {
+                                    displayValMe = fmtMe(myVal);
+                                }
                             }
                             return `
                                 <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
                                     <div class="text-zinc-200">${label}</div>
                                     <div class="flex flex-col items-end gap-0.5 min-w-0">
-                                        <span class="text-[10px] text-zinc-400">${fmtMe(myVal)}${workDaysLabel}</span>
+                                        <span class="text-[10px] text-zinc-400">${displayValMe}${workDaysLabel}</span>
                                         <span class="text-[10px] text-[var(--accent-terminal)] font-bold tabular-nums">${countryText}${medal}${pioneerBadge} | ${globalText}</span>
                                     </div>
                                 </div>
@@ -5669,7 +5846,14 @@
                         const totalsBox = document.getElementById('rtCountryTotals');
                         const ranksBox = document.getElementById('rtMyCountryRanks');
                         const failRank = '<span class="text-[10px] text-zinc-500 font-bold tabular-nums">#-- / --</span>';
-                        const dimLabels = ['Messages','Total Chars','Avg Len','Jiafang','Ketao','上岗天数'];
+                        const dimLabels = [
+                            getI18nText('countryTotals.messages') || 'Messages',
+                            getI18nText('countryTotals.totalChars') || 'Total Chars',
+                            getI18nText('countryTotals.avgLen') || 'Avg Len',
+                            getI18nText('countryTotals.jiafang') || 'Jiafang',
+                            getI18nText('countryTotals.ketao') || 'Ketao',
+                            getI18nText('countryTotals.workDays') || '上岗天数'
+                        ];
                         const fallback = dimLabels.map(l => `<div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2"><div class="text-zinc-200">${l}</div><div>${failRank}</div></div>`).join('');
                         if (totalsBox && !totalsBox.innerHTML.trim()) totalsBox.innerHTML = fallback;
                         if (ranksBox && !ranksBox.innerHTML.trim()) ranksBox.innerHTML = fallback;
@@ -5859,8 +6043,10 @@
 
                 const semanticMostUsedEl = document.getElementById('rtSemanticMostUsed');
                 const semanticFreqEl = document.getElementById('rtSemanticFreq');
-                if (semanticMostUsedEl) semanticMostUsedEl.textContent = `CORE_TRAIT: ${traitName} (${coreTrait})`;
-                if (semanticFreqEl) semanticFreqEl.textContent = `SEMANTIC: ${metrics.semantic.toFixed(1)}`;
+                const coreTraitPrefix = typeof getI18nText === 'function' ? getI18nText('panel.core_trait_prefix') : 'CORE_TRAIT';
+                const semanticPrefix = typeof getI18nText === 'function' ? getI18nText('panel.semantic_score_prefix') : 'SEMANTIC';
+                if (semanticMostUsedEl) semanticMostUsedEl.textContent = `${coreTraitPrefix}: ${traitName} (${coreTrait})`;
+                if (semanticFreqEl) semanticFreqEl.textContent = `${semanticPrefix}: ${metrics.semantic.toFixed(1)}`;
 
                 // 全球占比列表（简单两项）
                 const ratioListEl = document.getElementById('rtRatioList');
@@ -5885,22 +6071,36 @@
 
                 renderRealtime(latest);
 
-                if (statusEl) statusEl.textContent = 'DATA: STABLE';
+                if (statusEl) statusEl.textContent = getI18nText('panel.data_stable') || 'DATA: STABLE';
             } catch (err) {
+                if (fetchTimeoutId) { clearTimeout(fetchTimeoutId); fetchTimeoutId = null; }
+                const isAbort = err && (err.name === 'AbortError' || (err.message && String(err.message).includes('aborted')));
+                if (isAbort) {
+                    console.log('[Info] 旧请求已静默中止');
+                    return;
+                }
                 console.error('[CountryDashboard] ❌ 更新失败:', err);
-                renderErrorState(err && err.message ? String(err.message) : '网络异常或服务器错误');
-                
-                // 【修复】确保国家累计和排名卡片不会一直显示"加载中..."
+                const message = (err && err.message) ? String(err.message) : '网络异常或服务器错误';
+                if (statusEl) statusEl.textContent = (currentLang === 'en' ? 'Network error' : '网络异常');
+                renderErrorState(message);
                 try {
                     const totalsBox = document.getElementById('rtCountryTotals');
                     const ranksBox = document.getElementById('rtMyCountryRanks');
                     const failRank = '<span class="text-[10px] text-zinc-500 font-bold tabular-nums">#-- / --</span>';
-                    const dimLabels = ['Messages','Total Chars','Avg Len','Jiafang','Ketao','上岗天数'];
+                    const dimLabels = [
+                        getI18nText('countryTotals.messages') || 'Messages',
+                        getI18nText('countryTotals.totalChars') || 'Total Chars',
+                        getI18nText('countryTotals.avgLen') || 'Avg Len',
+                        getI18nText('countryTotals.jiafang') || 'Jiafang',
+                        getI18nText('countryTotals.ketao') || 'Ketao',
+                        getI18nText('countryTotals.workDays') || '上岗天数'
+                    ];
                     const fallback = dimLabels.map(l => `<div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2"><div class="text-zinc-200">${l}</div><div>${failRank}</div></div>`).join('');
                     if (totalsBox && totalsBox.innerHTML.includes('加载中')) totalsBox.innerHTML = fallback;
                     if (ranksBox && ranksBox.innerHTML.includes('加载中')) ranksBox.innerHTML = fallback;
                 } catch { /* ignore */ }
             } finally {
+                isProcessingUpdate = false;
                 try { setRightDrawerLoading(false); } catch { /* ignore */ }
             }
         }
@@ -6161,7 +6361,14 @@
         // ============================================
         const I18N_MAP = {
             zh: {
+                // 右抽屉 Tab 与按钮（中文下必须显示中文）
+                'tab.ranking': '排行榜',
+                'tab.global': '全球',
+                'tab.country': '国家',
+                'btn.refresh': '刷新',
+
                 // Drawer / Panels
+                'drawer.details': '详细信息',
                 'drawer.my_stats': '我的数据统计',
                 'drawer.tech_rank': '技术排名',
                 'drawer.personality_title': '人格称号',
@@ -6186,6 +6393,33 @@
                 'panel.country_code': '国家识别码',
                 'panel.dev_scale': '开发者规模',
                 'panel.scan_count': '诊断次数',
+
+                // Right drawer status / labels（中文版下右抽屉标题与状态）
+                'panel.live_feed': '实时数据',
+                'panel.coord_prefix': '坐标',
+                'panel.coord_placeholder': '坐标：--',
+                'panel.data_stable': '数据：稳定',
+                'panel.data_cached': '数据：缓存',
+                'panel.data_fetching': '数据：获取中',
+                'panel.data_error': '数据：错误',
+                'panel.data_ready': '数据：就绪',
+                'panel.nation_prefix': '国家',
+                'panel.pk_power': '权力值',
+                'panel.pk_tsundere': '傲娇',
+                'panel.pk_bootlick': '跪舔',
+                'panel.national_cloud_50': '本国词云 50',
+                'panel.country_top_10': '国家 Top10',
+                'panel.semantic_label': '语义',
+                'panel.most_used': '最常用',
+                'panel.freq': '频次',
+                'panel.elite_hint': '左滑查看高分图谱',
+                'panel.ratio_label': '占比',
+                'panel.global_ratio_label': '全球占比',
+                'panel.core_trait_prefix': '核心特质',
+                'panel.semantic_score_prefix': '语义分',
+                'panel.meltdown_pending': '待计算',
+                'panel.meltdown_words': '字数',
+                'panel.others': '其他',
 
                 // Common
                 'common.no_data': '暂无数据',
@@ -6237,6 +6471,7 @@
             },
             en: {
                 // Drawer / Panels
+                'drawer.details': 'Details',
                 'drawer.my_stats': 'My Stats',
                 'drawer.tech_rank': 'Tech Rank',
                 'drawer.personality_title': 'Title',
@@ -6261,6 +6496,33 @@
                 'panel.country_code': 'Country Code',
                 'panel.dev_scale': 'Developer Scale',
                 'panel.scan_count': 'Scan Count',
+
+                // Right drawer status / labels
+                'panel.live_feed': 'LIVE_FEED',
+                'panel.coord_prefix': 'COORD',
+                'panel.coord_placeholder': 'COORD: --',
+                'panel.data_stable': 'DATA: STABLE',
+                'panel.data_cached': 'DATA: CACHED',
+                'panel.data_fetching': 'DATA: FETCHING',
+                'panel.data_error': 'DATA: ERROR',
+                'panel.data_ready': 'DATA: READY',
+                'panel.nation_prefix': 'NATION',
+                'panel.pk_power': 'POWER',
+                'panel.pk_tsundere': 'Tsundere',
+                'panel.pk_bootlick': 'Bootlick',
+                'panel.national_cloud_50': 'NATIONAL CLOUD 50',
+                'panel.country_top_10': 'COUNTRY TOP 10',
+                'panel.semantic_label': 'SEMANTIC',
+                'panel.most_used': 'MOST_USED',
+                'panel.freq': 'FREQ',
+                'panel.elite_hint': 'Swipe to view Top Agents',
+                'panel.ratio_label': 'RATIO',
+                'panel.global_ratio_label': 'GLOBAL_RATIO',
+                'panel.core_trait_prefix': 'Core trait',
+                'panel.semantic_score_prefix': 'Semantic',
+                'panel.meltdown_pending': 'PENDING',
+                'panel.meltdown_words': 'WORDS',
+                'panel.others': 'OTHERS',
 
                 // Common
                 'common.no_data': 'No data',
@@ -6369,6 +6631,15 @@
                 // 按用户要求：优先 data-t
                 document.querySelectorAll('[data-t]').forEach((el) => {
                     const k = el.getAttribute('data-t');
+                    if (!k) return;
+                    const v = getI18nText(k, '');
+                    if (v) el.textContent = v;
+                });
+            } catch { /* ignore */ }
+            // 属性式翻译：抽屉内统计卡片等所有带 data-i18n 的元素
+            try {
+                document.querySelectorAll('[data-i18n]').forEach((el) => {
+                    const k = el.getAttribute('data-i18n');
                     if (!k) return;
                     const v = getI18nText(k, '');
                     if (v) el.textContent = v;
@@ -6514,48 +6785,48 @@
         };
 
         function updateLanguageContext() {
-            // 读取最新语言设置（以 localStorage.lang 为准）
+            // 只准翻译，不准请求：仅执行 data-t / data-i18n 文本替换，禁止触发 refreshCountryRightPanel 或 updateCountryDashboard
             let next = currentLang;
             try {
                 next = normalizeLang(localStorage.getItem(LANG_STORAGE_KEY) || localStorage.getItem('appLanguage') || currentLang);
             } catch { /* ignore */ }
             currentLang = next === 'en' ? 'en' : 'zh';
 
-            // 持久化：新键 lang + 兼容旧键 appLanguage
             try { localStorage.setItem(LANG_STORAGE_KEY, currentLang); } catch { /* ignore */ }
             try { localStorage.setItem('appLanguage', currentLang === 'en' ? 'en' : 'zh-CN'); } catch { /* ignore */ }
             try { document.documentElement.setAttribute('lang', currentLang === 'en' ? 'en' : 'zh-CN'); } catch { /* ignore */ }
 
-            // 顶部国旗按钮选中态
             const btnZh = document.getElementById('btn-zh');
             const btnEn = document.getElementById('btn-en');
             if (btnZh) btnZh.classList.toggle('active', currentLang === 'zh');
             if (btnEn) btnEn.classList.toggle('active', currentLang === 'en');
 
-            // 静态文案：sub-title + 页面 data-t/data-key
             try {
                 const sub = document.getElementById('sub-title');
                 if (sub) sub.innerText = (i18n[currentLang] && i18n[currentLang]['sub-title']) ? i18n[currentLang]['sub-title'] : (sub.innerText || '');
             } catch { /* ignore */ }
-            translatePage();
-            
-            // 【新增】语言切换时更新顶部视图切换按钮
+            // 仅翻译：data-t + data-i18n + lang-key，不调用任何 refresh/updateCountryDashboard
+            document.querySelectorAll('[data-t]').forEach((el) => {
+                const k = el.getAttribute('data-t');
+                if (!k) return;
+                const v = getI18nText(k, '');
+                if (v) el.textContent = v;
+            });
+            document.querySelectorAll('[data-i18n]').forEach((el) => {
+                const k = el.getAttribute('data-i18n');
+                if (!k) return;
+                const v = getI18nText(k, '');
+                if (v) el.textContent = v;
+            });
+            document.querySelectorAll('.lang-key').forEach((el) => {
+                const k = el.getAttribute('data-key');
+                if (!k) return;
+                const lang = currentLang === 'en' ? 'en' : 'zh';
+                const v = (i18n[lang] && i18n[lang][k]) ? i18n[lang][k] : '';
+                if (v) el.textContent = v;
+            });
+
             updateHeaderViewToggleBtn();
-
-            // 重新渲染：依赖 currentLang 的列表/地图/抽屉内容
-            try {
-                if (window.lastData) {
-                    renderLocationList(window.lastData.locationRank);
-                    const activityData = window.lastData.latestRecords || window.lastData.recentVictims || [];
-                    renderRecentActivity(activityData);
-                    renderPersonalityDistribution(window.lastData.personalityDistribution);
-                    const ld = window.lastData;
-                    const opts = (ld.countryStats && ld.countryStats.length > 0) ? { countryStats: ld.countryStats, updatedAt: ld.countryStatsUpdatedAt } : {};
-                    initGlobalMap(ld.locationRank || [], opts).catch(() => {});
-                }
-            } catch { /* ignore */ }
-
-            // 解耦：语言切换仅负责 DOM 文本替换，不触发 refreshCountryRightPanel 或任何数据 fetch
         }
 
         const countryNameMap = {
@@ -7066,6 +7337,11 @@
         let currentViewState = 'GLOBAL'; // GLOBAL / COUNTRY / RANKING（右侧抽屉三视图）
         let isGlobalInitializing = true;
         let lastRequestCountry = null;
+        /** 调度中心：防止 updateCountryDashboard 并发与死循环 */
+        let isProcessingUpdate = false;
+        let lastFetchedCountry = null;
+        /** 初始化保护锁：在 window.onload 完成最终 switchView 之前，拦截 storage/resize 等触发的重复刷新 */
+        let isInitialLayoutPending = true;
         
         // 【重构】初始化右侧抽屉面板 - 支持三 Tab 结构
         function initRightDrawerPanels() {
@@ -7432,7 +7708,7 @@
             const showLoading = (opts && opts.showLoading !== undefined) ? opts.showLoading : (source === 'select' || source === 'country-select-dropdown');
             window.isLogicProcessing = true;
             try {
-            // 第一步：POST /api/update-location 同步到数据库；失败则 Toast 并 return，不写 localStorage、不切换 UI
+            // 第一步：POST /api/update-location 同步到数据库（用户主动切换位置，必须强制执行写入，不受 AUTO_REPORT 等限制）；失败则 Toast 并 return
             try {
                 const base = (document.querySelector('meta[name="api-endpoint"]')?.content || '').trim();
                 const apiBase = base.endsWith('/') ? base.slice(0, -1) : base;
@@ -7440,7 +7716,7 @@
                 try { fp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (e) {}
                 const res = await fetch(apiBase ? apiBase + '/api/update-location' : '/api/update-location', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Intent': 'manual_location_update' },
                     body: JSON.stringify({ fingerprint: fp, new_cc: code })
                 });
                 if (res.ok) {
@@ -8558,6 +8834,19 @@
             };
             out.myCountryRanks = rawData?.myCountryRanks ?? rawData?.data?.myCountryRanks ?? root.myCountryRanks ?? out.myCountryRanks;
             out.country_user_ranks = rawData?.country_user_ranks ?? rawData?.data?.country_user_ranks ?? root.country_user_ranks ?? out.country_user_ranks;
+            // 【修复】添加 global_user_ranks 的处理
+            var globalRanksFallback = {};
+            if (rawData && rawData.personalRanks) {
+                globalRanksFallback = {
+                    total_messages: { rank: rawData.personalRanks.ai, total: out.totalUsers },
+                    total_chars: { rank: rawData.personalRanks.say, total: out.totalUsers },
+                    avg_user_message_length: { rank: rawData.personalRanks.word, total: out.totalUsers },
+                    jiafang_count: { rank: rawData.personalRanks.no, total: out.totalUsers },
+                    ketao_count: { rank: rawData.personalRanks.please, total: out.totalUsers },
+                    work_days: { rank: rawData.personalRanks.day, total: out.totalUsers }
+                };
+            }
+            out.global_user_ranks = rawData?.global_user_ranks ?? rawData?.data?.global_user_ranks ?? root.global_user_ranks ?? globalRanksFallback;
             var mcr = out.myCountryRanks || {};
             out.personalRanks = {
                 ai: mcr.rank_messages ?? mcr.total_messages ?? null,
@@ -10148,13 +10437,14 @@
 
             // 先渲染基础骨架（不再硬编码美国数据；数据由 updateCountryDashboard(countryName) 拉取）
             const cc = String(code || '').trim().toUpperCase();
+            const coordPrefix = (typeof getI18nText === 'function' ? getI18nText('panel.coord_prefix') : null) || (currentLang === 'zh' ? '坐标' : 'COORD');
             const model = {
                 coord: (cc === 'US' || name === 'United States')
-                    ? 'COORD: 37.0902° N, 95.7129° W'
+                    ? coordPrefix + ': 37.0902° N, 95.7129° W'
                     : (cc === 'CN' || name === 'China' || name === '中国')
-                        ? 'COORD: 35.8617° N, 104.1954° E'
-                        : 'COORD: --',
-                dataStatus: 'DATA: READY',
+                        ? coordPrefix + ': 35.8617° N, 104.1954° E'
+                        : (coordPrefix + ': --'),
+                dataStatus: (typeof getI18nText === 'function' ? getI18nText('panel.data_ready') : null) || (currentLang === 'zh' ? '数据：就绪' : 'DATA: READY'),
                 flag: (cc === 'US' || name === 'United States')
                     ? '🇺🇸'
                     : (cc === 'CN' || name === 'China' || name === '中国')
@@ -10170,8 +10460,17 @@
                     rightPct: 50,
                     quote: ''
                 },
-                meltdown: { words: '-- WORDS', fillPct: 0, level: 'PENDING', victims: '--' },
-                semantic: { tags: [], mostUsed: 'MOST_USED: --', freq: 'FREQ: --' },
+                meltdown: {
+                    words: (typeof getI18nText === 'function' ? getI18nText('panel.meltdown_words') : '字数') + ': --',
+                    fillPct: 0,
+                    level: (typeof getI18nText === 'function' ? getI18nText('panel.meltdown_pending') : null) || (currentLang === 'zh' ? '待计算' : 'PENDING'),
+                    victims: '--'
+                },
+                semantic: {
+                    tags: [],
+                    mostUsed: (typeof getI18nText === 'function' ? getI18nText('panel.most_used') : 'MOST_USED') + ': --',
+                    freq: (typeof getI18nText === 'function' ? getI18nText('panel.freq') : 'FREQ') + ': --'
+                },
                 elite: [],
                 ratio: []
             };
@@ -10264,10 +10563,11 @@
             if (isGlobalInitializing && !window.__allowInitCall) return;
             console.log('[switchView] 切换到视图:', view);
             var targetView = (view || '').toUpperCase();
-            // 视图保护：目标视图与目标国家均与当前一致时直接跳过，避免重复触发 updateCountryDashboard 造成死循环
+            // 视图拦截：目标视图与目标国家均与当前一致时跳过数据拉取，避免死循环
             if (currentViewState === targetView) {
                 if (targetView !== 'COUNTRY') return;
-                if (currentDrawerCountry && currentDrawerCountry.code) return;
+                var targetCode = (initialCountryCode && /^[A-Z]{2}$/i.test(String(initialCountryCode))) ? String(initialCountryCode).trim().toUpperCase() : (currentDrawerCountry && currentDrawerCountry.code);
+                if (targetCode && currentDrawerCountry && String(currentDrawerCountry.code || '').toUpperCase() === String(targetCode).toUpperCase()) return;
             }
             if (initialCountryCode && /^[A-Z]{2}$/i.test(String(initialCountryCode))) {
                 var cc = String(initialCountryCode).trim().toUpperCase();
@@ -10346,15 +10646,13 @@
                     break;
                     
                 case 'country':
-                    // 国家视图：若已有国家码则渲染/刷新；否则仅切 Tab
+                    // 国家视图：单一请求源，仅通过 switchToCountryView 触发 updateCountryDashboard；此处仅渲染骨架，不重复请求
                     const countryMount = document.getElementById('countryTemplateMount');
                     if (currentDrawerCountry.code && currentDrawerCountry.name) {
                         if (countryMount && !countryMount.innerHTML.trim() && !window.__renderingCountryView) {
                             window.__renderingCountryView = true;
                             switchToCountryView(currentDrawerCountry.code, currentDrawerCountry.name);
                             setTimeout(() => { window.__renderingCountryView = false; }, 100);
-                        } else {
-                            try { updateCountryDashboard(currentDrawerCountry.code); } catch (e) { /* ignore */ }
                         }
                     }
                     break;
@@ -14163,9 +14461,10 @@
                     let fp = '';
                     try { fp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (e) {}
                     try {
+                        // 用户主动选籍，强制执行写入，不受 AUTO_REPORT 限制
                         const res = await fetch(apiBase ? apiBase + '/api/update-location' : '/api/update-location', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: { 'Content-Type': 'application/json', 'X-Intent': 'manual_location_update' },
                             body: JSON.stringify({ fingerprint: fp, new_cc: code })
                         });
                         if (!res.ok) {
@@ -14580,13 +14879,14 @@
                 }
             } catch (e) { /* 忽略缓存错误 */ }
             
-            // 添加超时控制（快速失败模式）
+            // 添加超时控制：正常 10 秒、快速失败 4 秒，适应国内波动与边缘网关
             const fastFail = document.querySelector('meta[name="api-fast-fail"]')?.content === 'true';
+            const timeoutMs = fastFail ? 4000 : 10000;
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), fastFail ? 2500 : 8000); // 2.5秒快速失败
-            
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
             try {
-                const res = await fetch(url, { 
+                const res = await fetch(url, {
                     signal: controller.signal,
                     headers: { 'Accept': 'application/json' },
                     mode: 'cors',
@@ -14636,17 +14936,21 @@
                 
             } catch (e) {
                 clearTimeout(timeoutId);
-                
+
                 // 标记端点不健康
                 if (apiManager) apiManager.markHealthy(baseEndpoint, false);
-                
+
                 // 尝试切换端点重试
                 if (attempt < maxAttempts - 1 && apiManager && apiManager.endpoints.length > 1) {
                     apiManager.switchNext();
                     console.log(`[CountrySummary] 🔄 切换端点重试 ${cc}...`);
                     return fetchCountrySummaryV3(countryCode, attempt + 1);
                 }
-                
+
+                // 超时/网络错误时在右侧抽屉显示友好提示（不只在控制台）
+                const statusEl = document.getElementById('rtDataStatus');
+                if (statusEl) statusEl.textContent = (currentLang === 'en' ? 'Network unstable, retry or refresh' : '网络连接不稳定，请稍后或刷新');
+
                 // 错误分类提示
                 if (e.name === 'AbortError') {
                     console.warn(`[CountrySummary] ⏱️ 请求超时: ${cc} (API可能在国内无法访问)`);
@@ -14655,7 +14959,31 @@
                 } else {
                     console.warn(`[CountrySummary] ❌ ${cc}:`, e.message || e);
                 }
-                
+
+                // 最后降级：尝试不带 country 拉取 global-average，返回归一化结构供抽屉展示
+                if (attempt >= maxAttempts - 1) {
+                    try {
+                        const globalUrl = `${base}/api/global-average`;
+                        const fallbackController = new AbortController();
+                        const fallbackTimer = setTimeout(() => fallbackController.abort(), 8000);
+                        const fallbackRes = await fetch(globalUrl, { signal: fallbackController.signal, headers: { 'Accept': 'application/json' }, mode: 'cors', credentials: 'omit' });
+                        clearTimeout(fallbackTimer);
+                        if (fallbackRes.ok) {
+                            const globalPayload = await fallbackRes.json();
+                            const raw = globalPayload?.data ?? globalPayload?.result ?? globalPayload;
+                            if (raw && typeof raw === 'object') {
+                                const normalized = typeof normalizeData === 'function' ? normalizeData(raw) : raw;
+                                if (normalized && typeof normalized === 'object') {
+                                    normalized.countryCode = cc;
+                                    normalized.countryTotals = raw.countryTotals || (raw.globalAverage ? { totalUsers: raw.totalUsers, ai: raw.total_messages, say: raw.total_chars } : {});
+                                    console.log(`[CountrySummary] 📦 ${cc} 超时，已用全球汇总降级`);
+                                    return normalized;
+                                }
+                            }
+                        }
+                    } catch (fallbackErr) { /* ignore */ }
+                }
+
                 // 尝试返回过期缓存
                 try {
                     const cached = localStorage.getItem(cacheKey);
@@ -15541,6 +15869,7 @@
             }
             
             return {
+                ...data, // ⚡️ 保留所有原始字段，避免被过滤掉
                 totalUsers: totalUsers !== undefined && totalUsers !== null ? totalUsers : undefined,
                 totalAnalysis: totalAnalysis !== undefined && totalAnalysis !== null ? totalAnalysis : undefined,
                 totalRoastWords: totalRoastWords !== undefined && totalRoastWords !== null ? totalRoastWords : undefined,
@@ -17964,12 +18293,12 @@
                                     localStorage.removeItem('user_fingerprint'); // 同时清除指纹
                                 } else {
                                     // 其他错误，记录但不中断流程（确保不输出 undefined）
-                                    const msg = (errorMsg != null && errorMsg !== '') ? String(errorMsg) : '未知';
+                                    const msg = (errorMsg != null && String(errorMsg).trim() !== '') ? String(errorMsg) : `HTTP ${migrateResponse.status || 0} ${migrateResponse.statusText || ''}`.trim() || '未知';
                                     console.warn('[Auth] ⚠️ 数据迁移失败，继续正常流程:', msg);
                                 }
-                                
-                                // 无论什么错误，都继续正常流程（不迁移）
-                                migrateResult = { status: 'error', error: errorMsg };
+
+                                // 无论什么错误，都继续正常流程（不迁移）；保证 error 有可读兜底
+                                migrateResult = { status: 'error', error: (errorMsg != null && String(errorMsg).trim() !== '') ? errorMsg : (migrateResponse.status ? `HTTP ${migrateResponse.status} ${migrateResponse.statusText || ''}`.trim() : '未知') };
                             }
                             
                             migrationCompleted = true;
@@ -18073,11 +18402,13 @@
                                 hideSyncingOverlay();
                                 
                                 return; // 迁移成功，直接返回，不再执行后续的指纹绑定逻辑
-                            } else if (migrateResult && migrateResult.status === 'not_found') {
-                                console.log('[Auth] ℹ️ 未找到需要迁移的数据，继续正常流程');
+                            } else if (migrateResult && (migrateResult.status === 'not_found' || migrateResult.status === 'skipped')) {
+                                console.log('[Auth] ℹ️', migrateResult.status === 'skipped' ? '迁移已跳过（无待迁移数据），继续正常流程' : '未找到需要迁移的数据，继续正常流程');
                                 hideSyncingOverlay();
                             } else {
-                                const errMsg = (migrateResult && migrateResult.error != null) ? String(migrateResult.error) : '未知';
+                                const errMsg = (migrateResult?.error != null && String(migrateResult.error).trim() !== '')
+                                    ? String(migrateResult.error)
+                                    : (migrateResult?.status ? `迁移返回 status=${migrateResult.status}` : '未知');
                                 console.warn('[Auth] ⚠️ 数据迁移失败，继续正常流程:', errMsg);
                                 hideSyncingOverlay();
                             }
@@ -19440,7 +19771,7 @@
                 // 说明：AUTO_REPORT 是占位/在线状态用途，但会导致 user_analysis 出现“额外一条类似数据”，
                 // 与 index.html 上传分析生成的真实人格记录混在一起（你贴的第一条 AUTO_REPORT 就来自这里）。
                 // 这里只保留本地光标展示与状态逻辑，不再向 Supabase 写入占位行。
-                console.warn('[AutoReport] 🚫 已禁用 AUTO_REPORT 写入 user_analysis（仅本地显示，不写库）');
+                console.log('[AutoReport] ℹ️ 已禁用 AUTO_REPORT 写入 user_analysis（仅本地显示，不写库）');
                 const data = null;
 
                 // 6. 立即反馈:上报成功后立即在地图上显示自己的位置(不等待 Realtime 监听)
@@ -21559,6 +21890,12 @@
                     });
                 }
                 
+                // 动态插入 HTML 后触发 Tailwind CDN 重新扫描，确保动态类名生效
+                try {
+                    if (typeof window.tailwind !== 'undefined' && window.tailwind.config && typeof window.tailwind.config.refresh === 'function') {
+                        window.tailwind.config.refresh();
+                    }
+                } catch (e) { /* ignore */ }
                 console.log('[UserStats] ✅ 用户统计卡片已渲染');
             } catch (error) {
                 console.error('[UserStats] ❌ 渲染用户统计卡片失败:', error);
@@ -22192,6 +22529,38 @@
 
 
         window.onload = function() {
+            // Highcharts 中文包：页面初始化最前端注入，消除 Locale 警告
+            try {
+                if (typeof Highcharts !== 'undefined' && Highcharts.setOptions) {
+                    Highcharts.setOptions({
+                        lang: {
+                            months: ['一月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','十二月'],
+                            shortMonths: ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'],
+                            weekdays: ['星期日','星期一','星期二','星期三','星期四','星期五','星期六'],
+                            shortWeekdays: ['周日','周一','周二','周三','周四','周五','周六'],
+                            loading: '加载中...',
+                            noData: '暂无数据',
+                            resetZoom: '重置缩放',
+                            resetZoomTitle: '重置为 1:1',
+                            thousandsSep: ',',
+                            decimalPoint: '.',
+                            exportButtonTitle: '导出',
+                            printButtonTitle: '打印',
+                            rangeSelectorFrom: '从',
+                            rangeSelectorTo: '到',
+                            rangeSelectorZoom: '范围',
+                            downloadPNG: '下载 PNG',
+                            downloadJPEG: '下载 JPEG',
+                            downloadPDF: '下载 PDF',
+                            downloadSVG: '下载 SVG',
+                            printChart: '打印图表'
+                        }
+                    });
+                }
+            } catch (e) { /* ignore */ }
+
+            // Tailwind 降级：延迟 100ms 再执行主流程，确保 CDN/扫描稳定，降低初始化 CPU 压力
+            setTimeout(function() {
             (async function() {
             try {
             loadGitHubUsername();
@@ -22259,6 +22628,7 @@
                 }
             } catch (e) { console.warn('[onload] switchView 初始化失败:', e); }
             window.__allowInitCall = false;
+            isInitialLayoutPending = false;
             
             // ============================================
             // 【新增】初始化 GitHub OAuth 认证监听
@@ -22664,6 +23034,7 @@
                 window.__allowInitCall = false;
             }
             })();
+            }, 100);
          };
 
         // ==========================================
@@ -23214,7 +23585,8 @@
                             label = dn.of(label) || label;
                         } catch { /* ignore */ }
                     }
-                    hint.textContent = `NATION: ${label}`;
+                    const nationPrefix = typeof getI18nText === 'function' ? getI18nText('panel.nation_prefix') : 'NATION';
+                    hint.textContent = `${nationPrefix}: ${label}`;
                 }
 
                 const top10 = Array.isArray(data?.top10) ? data.top10 : (Array.isArray(window.__latestTop10) ? window.__latestTop10 : []);
@@ -24318,6 +24690,21 @@
         
         window.refreshUserStats = async function() {
             if (isGlobalInitializing && !window.__allowInitCall) return;
+            
+            // 【等待资源加载】确保 ECharts 及其 Locale 已经准备好，防止 "zh not found"
+            let resourceWaitStart = Date.now();
+            while (!window._resourcesLoaded && (Date.now() - resourceWaitStart < 5000)) {
+                if (window._resourceError) {
+                    console.error('[Refresh] ❌ 资源加载失败，放弃刷新:', window._resourceError);
+                    return;
+                }
+                console.log('[Refresh] ⏳ 等待资源加载...');
+                await new Promise(r => setTimeout(r, 200));
+            }
+            if (!window._resourcesLoaded && typeof echarts === 'undefined') {
+                 console.warn('[Refresh] ⚠️ 资源加载超时或未定义 echarts，尝试继续...');
+            }
+
             // 【修复 AbortError】如果正在刷新，取消之前的请求
             if (isRefreshingUserStats) {
                 console.log('[Refresh] ⚠️ 检测到重复调用，取消之前的刷新请求...');
@@ -24601,6 +24988,7 @@
         
         // 监听 storage 事件，当其他页面更新 localStorage 时自动刷新
         window.addEventListener('storage', (e) => {
+            if (isInitialLayoutPending) return;
             if (e.key === 'user_fingerprint' || e.key === 'github_username') {
                 console.log('[Storage] 🔔 检测到 localStorage 变化，触发数据刷新');
                 setTimeout(() => {

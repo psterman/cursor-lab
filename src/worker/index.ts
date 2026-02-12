@@ -3074,7 +3074,13 @@ app.post('/api/update-location', async (c) => {
     });
     if (!res.ok) {
       const t = await res.text().catch(() => '');
-      return c.json({ status: 'warning', updated: false, error: t || `HTTP ${res.status}` }, 200);
+      return c.json({
+        status: 'warning',
+        updated: false,
+        error: t || `HTTP ${res.status}`,
+        current_location: newCc,
+        country_code: newCc,
+      }, 200);
     }
     c.header('Cache-Control', 'no-store');
     return c.json({
@@ -3085,7 +3091,13 @@ app.post('/api/update-location', async (c) => {
       country_code: newCc,
     });
   } catch (e: any) {
-    return c.json({ status: 'warning', updated: false, error: e?.message || String(e) }, 200);
+    return c.json({
+      status: 'warning',
+      updated: false,
+      error: e?.message || String(e),
+      current_location: newCc,
+      country_code: newCc,
+    }, 200);
   }
 });
 

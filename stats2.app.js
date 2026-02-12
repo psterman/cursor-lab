@@ -105,11 +105,8 @@
         // 辅助函数：从后端获取国家平均值
         async function fetchCountryAverage(countryCode) {
             try {
-                const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content || 
-                                   'https://cursor-clinical-analysis.psterman.workers.dev/';
-                const url = `${apiEndpoint}api/v2/country-average?countryCode=${countryCode}`;
-                
-                const response = await fetch(url);
+                // 使用 window.apiFetch 自动处理代理和 host
+                const response = await window.apiFetch(`api/v2/country-average?countryCode=${countryCode}`, { timeout: 8000 });
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 
                 const data = await response.json();
@@ -299,7 +296,8 @@
                     // ignore
                 }
                 dom.innerHTML = '';
-                window.__countryRadarChart = echarts.init(dom, null, { renderer: 'canvas' });
+                // 【修复】显式指定 locale: 'zh'，确保使用已注册的中文包
+                window.__countryRadarChart = echarts.init(dom, null, { renderer: 'canvas', locale: 'zh' });
                 const radarLabel = effectiveIsGlobal
                     ? 'GLOBAL_AVG'
                     : (countryCode && /^[A-Z]{2}$/.test(String(countryCode).toUpperCase())
@@ -737,8 +735,8 @@
                             }
                         })();
                         // 加时间戳：避免 edge cache/中间层缓存导致“永远是 0”
-                        const url2 = `${API_ENDPOINT}api/country-summary?country=${encodeURIComponent(String(countryCode || '').toUpperCase())}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${uid ? `&user_id=${encodeURIComponent(uid)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}&_ts=${Date.now()}`;
-
+                        const qs = `country=${encodeURIComponent(String(countryCode || '').toUpperCase())}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${uid ? `&user_id=${encodeURIComponent(uid)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}&_ts=${Date.now()}`;
+                        
                         // cache-first：避免切换抖动
                         if (!window.__countryTotalsCache) window.__countryTotalsCache = new Map();
                         const cacheKey2 = `CT:${String(countryCode || '').toUpperCase()}`;
@@ -751,7 +749,8 @@
                         if (ranksBox && !String(ranksBox.innerHTML || '').trim()) ranksBox.innerHTML = '<div class="text-zinc-500 text-xs">加载中...</div>';
 
                         // 并发保护：复用 updateCountryDashboard 的 requestSeq / isStaleRequest
-                        const resp2 = await fetch(url2, { cache: 'no-cache' });
+                        // 使用 window.apiFetch 自动处理代理和 host
+                        const resp2 = await window.apiFetch(`api/country-summary?${qs}`, { timeout: 8000, cache: 'no-cache' });
                         if (!resp2.ok) throw new Error(`HTTP ${resp2.status}`);
                         const payload2 = await resp2.json().catch(() => null);
                         if (!payload2 || typeof payload2 !== 'object') throw new Error('bad payload');
@@ -14230,7 +14229,8 @@
                     const words = applyLogFontSize(combined0, (w) => w?.value ?? 0);
                     nationalContainer.innerHTML = '';
                     _disposeChart(nationalSentenceChart);
-                    nationalSentenceChart = echarts.init(nationalContainer, 'dark', { renderer: 'canvas' });
+                    // 【修复】显式指定 locale: 'zh'，以及暗色主题 'dark'
+                    nationalSentenceChart = echarts.init(nationalContainer, 'dark', { renderer: 'canvas', locale: 'zh' });
 
                 const maxVal = Math.max(...words.map((w) => w.value));
                 const getColor = (category, value) => {
