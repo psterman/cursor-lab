@@ -5219,7 +5219,7 @@ app.get('/api/v2/message/read', async (c) => {
  * - 若命中种子词：delta = baseWeight * 10，否则 delta = baseWeight * 1
  * - 异步入库：c.executionCtx.waitUntil(...) 调用 Supabase RPC upsert_slang_hits_v2
  */
-type VibeCategory = 'slang' | 'merit' | 'sv_slang' | 'phrase';
+type VibeCategory = 'slang' | 'merit' | 'sv_slang' | 'phrase' | 'uncategorized_hot';
 
 const SEED_DICTIONARY: Record<VibeCategory, Set<string>> = {
   slang: new Set([
@@ -5232,8 +5232,8 @@ const SEED_DICTIONARY: Record<VibeCategory, Set<string>> = {
   sv_slang: new Set([
     '护城河', '增长', '融资', '赛道', '头部效应', '估值', '现金流', '天使轮', 'A轮',
   ]),
-  // 国民级词组：不做种子放大，保持自然计数
   phrase: new Set([]),
+  uncategorized_hot: new Set([]), // 动态发现词，不做种子放大
 };
 
 function normalizeCategory(input: any): VibeCategory {
@@ -5241,6 +5241,7 @@ function normalizeCategory(input: any): VibeCategory {
   if (raw === 'merit') return 'merit';
   if (raw === 'sv_slang' || raw === 'svslang' || raw === 'siliconvalley') return 'sv_slang';
   if (raw === 'phrase' || raw === 'ngram' || raw === 'idiom') return 'phrase';
+  if (raw === 'uncategorized_hot' || raw === 'uncategorizedhot') return 'uncategorized_hot';
   return 'slang';
 }
 

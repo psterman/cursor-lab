@@ -572,6 +572,11 @@
             height: 100% !important;
         }
 
+        #identity-cloud-canvas {
+            min-width: 360px;
+            min-height: 360px;
+        }
+
         .prompts-list {
             display: flex;
             flex-direction: column;
@@ -3394,8 +3399,13 @@
                             <div class="wordcloud-section">
                                 <div class="chart-card">
                                     <h3 class="chart-title">${getText('dashboard.aiMerits')}</h3>
-                                    <div class="wordcloud-container">
-                                        <canvas id="chineseWordCloud"></canvas>
+                                    <div class="flex gap-2 mb-3" id="identity-level-tabs">
+                                        <button type="button" class="identity-level-btn active px-2 py-1 text-[10px] rounded border border-white/20 bg-[var(--accent-terminal)]/20 text-[var(--accent-terminal)] font-medium" data-level="Novice">新手村</button>
+                                        <button type="button" class="identity-level-btn px-2 py-1 text-[10px] rounded border border-white/20 text-zinc-400 hover:bg-white/5 font-medium" data-level="Professional">脱发期</button>
+                                        <button type="button" class="identity-level-btn px-2 py-1 text-[10px] rounded border border-white/20 text-zinc-400 hover:bg-white/5 font-medium" data-level="Architect">霸天级</button>
+                                    </div>
+                                    <div class="wordcloud-container" id="identity-cloud-container">
+                                        <canvas id="identity-cloud-canvas" width="400" height="400"></canvas>
                                     </div>
                                 </div>
                                 <div class="chart-card">
@@ -4723,6 +4733,11 @@
                         onComplete: (data) => {
                             console.log('onComplete:', data);
                             setAnalysisData(data);
+                            const vr = data?.vibeResult;
+                            if (vr && (vr.rankData?.totalUsers != null || vr.statistics?.totalUsers != null)) {
+                                const total = Number(vr.rankData?.totalUsers ?? vr.statistics?.totalUsers ?? 0) || 0;
+                                if (total > 0) setTotalUsers(total);
+                            }
                             setLogs(prev => [...prev, `> ${t('upload.logs.analysisComplete')}`]);
                             setTimeout(() => {
                                 setStep('preview');
@@ -6784,7 +6799,11 @@
                                             overflow: 'visible'
                                         }}
                                     >
-                                        {analysisData.vibeResult?.roastText || t('preview.analyzing')}
+                                        {(() => {
+                                            const rt = analysisData.vibeResult?.roastText || '';
+                                            const invalid = !rt || !rt.trim() || /正在生成中|正在由后端生成|personality combination is so unique/i.test(rt) || (/索引\s*\d+\s*对应的吐槽文案/.test(rt) && /人格组合太独特/.test(rt));
+                                            return invalid ? (t('preview.deciphering') || '正在破译你的人格密码...') : rt;
+                                        })()}
                                     </p>
                                 </div>
 
@@ -6792,21 +6811,21 @@
                                 <div className="preview-card-right">
                                     <StatBox 
                                         label={t('dashboard.totalUsers')} 
-                                        value={formatNumber(totalUsers)} 
+                                        value={formatNumber(analysisData.vibeResult?.rankData?.totalUsers ?? analysisData.vibeResult?.statistics?.totalUsers ?? totalUsers)} 
                                         sub={t('dashboard.personUnit')} 
                                         color="text-white"
                                         lang={lang}
                                     />
                                     <StatBox 
                                         label={t('dashboard.cyberBowCount')} 
-                                        value={analysisData.stats?.qingCount || 0} 
+                                        value={analysisData.stats?.qingCount ?? analysisData.vibeResult?.statistics?.qingCount ?? 0} 
                                         sub={t('dashboard.timesUnit')} 
                                         color="text-white"
                                         lang={lang}
                                     />
                                     <StatBox 
                                         label={t('preview.globalRank')} 
-                                        value={calculateRank(analysisData.stats?.qingCount || 0)} 
+                                        value={analysisData.vibeResult?.rankData?.rankPercent != null ? Math.round(Number(analysisData.vibeResult.rankData.rankPercent)) : (analysisData.vibeResult?.statistics?.rankPercent != null ? Math.round(Number(analysisData.vibeResult.statistics.rankPercent)) : calculateRank(analysisData.stats?.qingCount || 0))} 
                                         sub={lang === 'en' ? t('dashboard.rankUnit') : '%'} 
                                         color="text-white"
                                         lang={lang}

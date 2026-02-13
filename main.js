@@ -337,6 +337,53 @@ if (typeof window !== 'undefined') {
 }
 
 /**
+ * 【三身份级别词云】一次性加载 Novice/Professional/Architect 词库
+ * @returns {Promise<{ Novice: string[], Professional: string[], Architect: string[] }>}
+ */
+async function loadIdentityLevelKeywords() {
+  const base = window.BASE_PATH || '';
+  const urls = ['Novice.json', 'Professional.json', 'Architect.json'].map(name => {
+    if (!base) return name; // 如果 base 为空，直接使用相对路径
+    return base + (base.endsWith('/') ? '' : '/') + name;
+  });
+  
+  console.log('[Main] 正在加载身份级别词库:', urls);
+  
+  const results = await Promise.all(urls.map(async (url) => {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        console.warn(`[Main] 加载失败 ${url}: HTTP ${response.status}`);
+        return { keywords: [] };
+      }
+      const data = await response.json();
+      const count = Array.isArray(data?.keywords) ? data.keywords.length : 0;
+      console.log(`[Main] 成功加载 ${url}: ${count} 个关键词`);
+      return data;
+    } catch (err) {
+      console.warn(`[Main] 加载失败 ${url}:`, err.message);
+      return { keywords: [] };
+    }
+  }));
+  
+  const [n, p, a] = results;
+  const result = {
+    Novice: Array.isArray(n?.keywords) ? n.keywords : [],
+    Professional: Array.isArray(p?.keywords) ? p.keywords : [],
+    Architect: Array.isArray(a?.keywords) ? a.keywords : [],
+  };
+  
+  console.log('[Main] 身份级别词库加载完成:', {
+    Novice: result.Novice.length,
+    Professional: result.Professional.length,
+    Architect: result.Architect.length
+  });
+  
+  if (typeof window !== 'undefined') window.__identityLevelKeywords = result;
+  return result;
+}
+
+/**
  * 构建 Worker 文件的 URL（适配 GitHub Pages 环境）
  * @param {string} workerFileName - Worker 文件名（如 'vibeAnalyzerWorker.js'）
  * @returns {string} Worker 的完整 URL
@@ -661,74 +708,41 @@ class VibeCodingApp {
       hasRoastText: !!el.querySelector('.roast-text')
     })));
 
-    // 遍历 detailedStats 数组
+    // 遍历 detailedStats 数组，某维度容器不存在时仅 console.warn 不中断渲染
     detailedStats.forEach((item) => {
-      const { dimension, label, roast, score } = item;
-      
-      if (!dimension) {
-        console.warn('[VibeCodingApp] updateV6UI: 维度标识缺失', item);
-        return;
-      }
-
-      // 通过 data-v6-dim 属性找到对应的 DOM 元素
-      const dimensionCard = document.querySelector(`[data-v6-dim="${dimension}"]`);
-      if (!dimensionCard) {
-        console.warn(`[VibeCodingApp] updateV6UI: 未找到维度 ${dimension} 的容器`);
-        // 【调试】列出所有可用的维度容器
-        const availableDimensions = Array.from(document.querySelectorAll('[data-v6-dim]')).map(el => el.getAttribute('data-v6-dim'));
-        console.warn(`[VibeCodingApp] updateV6UI: 可用的维度容器:`, availableDimensions);
-        return;
-      }
-
-      // 更新称号（.rank-label）
-      const rankLabelEl = dimensionCard.querySelector('.rank-label');
-      if (!rankLabelEl) {
-        console.warn(`[VibeCodingApp] updateV6UI: 维度 ${dimension} 的容器中未找到 .rank-label 元素`);
-        // 【调试】列出容器内的所有元素
-        const allElements = Array.from(dimensionCard.querySelectorAll('*')).map(el => ({
-          tag: el.tagName,
-          classes: el.className,
-          id: el.id
-        }));
-        console.warn(`[VibeCodingApp] updateV6UI: 容器内的元素:`, allElements);
-      } else {
-        // 如果后端返回的 label 为"未知"，保留前端计算的降级文案
-        if (label && label !== '未知') {
+      try {
+        const { dimension, label, roast, score } = item || {};
+        if (!dimension) {
+          console.warn('[VibeCodingApp] updateV6UI: 维度标识缺失', item);
+          return;
+        }
+        const dimensionCard = document.querySelector('[data-v6-dim="' + dimension + '"]');
+        if (!dimensionCard) {
+          console.warn('[VibeCodingApp] updateV6UI: 未找到维度 ' + dimension + ' 的容器，跳过');
+          return;
+        }
+        const rankLabelEl = dimensionCard.querySelector('.rank-label');
+        if (!rankLabelEl) {
+          console.warn('[VibeCodingApp] updateV6UI: 维度 ' + dimension + ' 的容器中未找到 .rank-label');
+        } else if (label && label !== '未知') {
           rankLabelEl.textContent = label;
           updatedCount++;
-          console.log(`[VibeCodingApp] updateV6UI: 维度 ${dimension} 的称号已更新为 "${label}"`);
-        } else {
-          console.log(`[VibeCodingApp] updateV6UI: 维度 ${dimension} 的 label 为"未知"，保留前端降级文案`);
         }
-      }
-
-      // 更新吐槽文案（.roast-text）
-      const roastTextEl = dimensionCard.querySelector('.roast-text');
-      if (!roastTextEl) {
-        console.warn(`[VibeCodingApp] updateV6UI: 维度 ${dimension} 的容器中未找到 .roast-text 元素`);
-      } else {
-        if (roast && roast !== '暂无吐槽文案') {
+        const roastTextEl = dimensionCard.querySelector('.roast-text');
+        if (!roastTextEl) {
+          console.warn('[VibeCodingApp] updateV6UI: 维度 ' + dimension + ' 的容器中未找到 .roast-text');
+        } else if (roast && roast !== '暂无吐槽文案') {
           roastTextEl.textContent = roast;
           updatedCount++;
-          console.log(`[VibeCodingApp] updateV6UI: 维度 ${dimension} 的吐槽文案已更新`);
-        } else {
-          console.log(`[VibeCodingApp] updateV6UI: 维度 ${dimension} 的 roast 为空，保留前端降级文案`);
         }
-      }
-
-      // 更新进度条数值（如果 score 存在）
-      if (score !== undefined && score !== null) {
-        const dimensionValueEl = dimensionCard.querySelector('.dimension-value');
-        if (dimensionValueEl) {
-          dimensionValueEl.textContent = Math.round(score);
+        if (score !== undefined && score !== null) {
+          const dimensionValueEl = dimensionCard.querySelector('.dimension-value');
+          if (dimensionValueEl) dimensionValueEl.textContent = Math.round(score);
+          const dimensionBarEl = dimensionCard.querySelector('.dimension-bar');
+          if (dimensionBarEl) dimensionBarEl.style.width = Math.min(100, Math.max(0, score)) + '%';
         }
-        
-        // 更新进度条宽度
-        const dimensionBarEl = dimensionCard.querySelector('.dimension-bar');
-        if (dimensionBarEl) {
-          const percentage = Math.min(100, Math.max(0, score));
-          dimensionBarEl.style.width = `${percentage}%`;
-        }
+      } catch (err) {
+        console.warn('[VibeCodingApp] updateV6UI: 更新某维度时异常，跳过', err && err.message);
       }
     });
 
@@ -903,9 +917,30 @@ class VibeCodingApp {
     // 【V6 环境感知】生成环境上下文
     const context = await this.generateContext();
 
+    // 【三身份词云】分析前正确注入 JSON 词库，分析完成后挂载 window.vibeResults
+    const levelKeywords = await loadIdentityLevelKeywords();
+    if (levelKeywords) {
+      context.levelKeywords = levelKeywords;
+      if (this.analyzer && typeof this.analyzer.setLevelKeywords === 'function') {
+        this.analyzer.setLevelKeywords(levelKeywords);
+      }
+    }
+
     // 步骤1: 调用 analyze 进行本地分析（传入 context 对象）
     const result = await this.analyzer.analyze(chatData, context, null, onProgress);
     console.log('[VibeCodingApp] analyze 完成:', result);
+
+    // 【身份词云】分析完成回调：必须立即挂载 window.vibeResults，并强制刷新词云
+    const ilc = result && (result.identityLevelCloud || (result.statistics && result.statistics.identityLevelCloud) || (result.stats && result.stats.identityLevelCloud));
+    if (!ilc || typeof ilc !== 'object') {
+      console.warn('[Main] onAnalyzeComplete: payload.identityLevelCloud 缺失，请检查 Worker 是否上报');
+    } else {
+      window.vibeResults = normalizeIdentityLevelCloud(ilc);
+      selectedIdentityLevel = 'Novice';
+      if (typeof renderIdentityLevelCloud === 'function') {
+        renderIdentityLevelCloud('Novice');
+      }
+    }
 
     // 【V6 适配】确保 stats 对象被正确保存
     // 从 result.stats 或 result.statistics 中提取 stats 对象
@@ -924,6 +959,7 @@ class VibeCodingApp {
           balance_score: result.statistics.balance_score || 0, // 【V6 新增】人格稳定性
           style_label: result.statistics.style_label || '标准型', // 【V6 新增】交互风格标签
           blackword_hits: result.statistics.blackword_hits || {}, // 【V6 新增】黑话命中统计
+          identityLevelCloud: result.statistics.identityLevelCloud || result.identityLevelCloud || { Novice: {}, Professional: {}, Architect: {} },
           ...result.statistics // 保留其他字段
         };
       } else {
@@ -1306,10 +1342,30 @@ class VibeCodingApp {
     // 【V6 环境感知】生成环境上下文
     const context = await this.generateContext();
 
+    // 【三身份词云】先 await 加载词库，再分析
+    const levelKeywords = await loadIdentityLevelKeywords();
+    if (levelKeywords) {
+      context.levelKeywords = levelKeywords;
+      if (this.analyzer && typeof this.analyzer.setLevelKeywords === 'function') {
+        this.analyzer.setLevelKeywords(levelKeywords);
+      }
+    }
+
     // 步骤1: 调用 analyzeSync 进行本地分析（同步方法，传入 context）
     // 注意：analyzeSync 可能需要适配 context 参数，这里先传入 lang 作为兼容
     const result = await this.analyzer.analyzeSync(chatData, context.lang || currentLang, null, onProgress);
     console.log('[VibeCodingApp] analyzeSync 完成:', result);
+
+    // 【身份词云】同步分析完成：挂载 window.vibeResults 并强制刷新词云（与 Worker 路径一致）
+    const ilcSync = result && (result.identityLevelCloud || (result.statistics && result.statistics.identityLevelCloud) || (result.stats && result.stats.identityLevelCloud));
+    if (!ilcSync || typeof ilcSync !== 'object') {
+      console.warn('[Main] analyzeSync 完成: identityLevelCloud 缺失');
+    } else {
+      window.vibeResults = normalizeIdentityLevelCloud(ilcSync);
+      if (typeof renderIdentityLevelCloud === 'function') {
+        renderIdentityLevelCloud('Novice');
+      }
+    }
 
     // 【V6 适配】确保 stats 对象被正确保存
     // 从 result.stats 或 result.statistics 中提取 stats 对象
@@ -1328,6 +1384,7 @@ class VibeCodingApp {
           balance_score: result.statistics.balance_score || 0, // 【V6 新增】人格稳定性
           style_label: result.statistics.style_label || '标准型', // 【V6 新增】交互风格标签
           blackword_hits: result.statistics.blackword_hits || {}, // 【V6 新增】黑话命中统计
+          identityLevelCloud: result.statistics.identityLevelCloud || result.identityLevelCloud || { Novice: {}, Professional: {}, Architect: {} },
           ...result.statistics // 保留其他字段
         };
       } else {
@@ -1633,6 +1690,10 @@ let allChatData = [];
 let globalStats = null;
 let vibeAnalyzer = null;
 let vibeResult = null;
+/** 【三身份级别词云】当前选中的层级（Novice/Professional/Architect） */
+let selectedIdentityLevel = 'Novice';
+// 仅在此处初始化，后续仅由 onAnalyzeComplete / renderFullDashboard 赋值，禁止别处写 null 覆盖
+if (typeof window !== 'undefined') window.vibeResults = null;
 let globalAverageData = { L: 50, P: 50, D: 50, E: 50, F: 50 }; // 存储从后端获取的全局平均值，默认值作为保底
 let globalAverageDataLoaded = false; // 标记是否已从 API 成功加载数据
 let globalAverageDataLoading = false; // 标记是否正在加载数据（防止重复请求）
@@ -1669,11 +1730,32 @@ export const setGlobalStats = (stats) => {
   }
 };
 
+/**
+ * 设置全局 vibeResult。兼容三身份词云与预览/排名：
+ * - 若新 result 无 rankData 而当前已有 rankData，只合并 identityLevelCloud/词云相关，保留排名与人格文案
+ * - 否则整体替换
+ */
 export const setVibeResult = (result) => {
-  if (result) {
-    vibeResult = result;
-    console.log('[Main] 已设置分享模式的 Vibe 结果:', vibeResult);
+  if (!result) return;
+  var hasNewRank = !!(result.rankData || (result.statistics && result.statistics.rankPercent != null));
+  var hasCurrentRank = !!(vibeResult && (vibeResult.rankData || (vibeResult.statistics && vibeResult.statistics.rankPercent != null)));
+  if (!hasNewRank && hasCurrentRank) {
+    var ilc = result.identityLevelCloud || result.statistics?.identityLevelCloud || result.stats?.identityLevelCloud;
+    if (ilc && typeof ilc === 'object') {
+      vibeResult.identityLevelCloud = ilc;
+      if (vibeResult.statistics) vibeResult.statistics.identityLevelCloud = ilc;
+      if (vibeResult.stats) vibeResult.stats.identityLevelCloud = ilc;
+      window.vibeResults = normalizeIdentityLevelCloud(ilc);
+      console.log('[Main] 已合并 identityLevelCloud，保留原有 rankData/人格文案');
+      return;
+    }
   }
+  vibeResult = result;
+  if (result && (result.identityLevelCloud || result.statistics?.identityLevelCloud || result.stats?.identityLevelCloud)) {
+    var ilc = result.identityLevelCloud || result.statistics?.identityLevelCloud || result.stats?.identityLevelCloud;
+    window.vibeResults = normalizeIdentityLevelCloud(ilc);
+  }
+  console.log('[Main] 已设置 Vibe 结果:', { hasRankData: !!result.rankData, hasIdentityCloud: !!(result.identityLevelCloud || result.statistics?.identityLevelCloud) });
 };
 
 export const setAllChatData = (data) => {
@@ -2025,12 +2107,43 @@ export const reanalyzeWithLanguage = async (lang) => {
 // 导出渲染函数
 export const renderFullDashboard = async (passedVibeResult) => {
   // 如果没有传入参数，使用全局变量（向后兼容）
-  const currentVibeResult = passedVibeResult || window.vibeResult || globalThis.vibeResult;
-  
-  // 【关键修复】更新全局变量，确保所有渲染函数都能访问到最新数据
+  let currentVibeResult = passedVibeResult || window.vibeResult || globalThis.vibeResult;
+  // 【三身份词云兼容】若传入结果无 rankData 但全局已有，只合并词云数据，不覆盖排名/人格
+  if (currentVibeResult && !currentVibeResult.rankData && vibeResult && vibeResult.rankData) {
+    var ilc = currentVibeResult.identityLevelCloud || currentVibeResult.statistics?.identityLevelCloud || currentVibeResult.stats?.identityLevelCloud;
+    if (ilc && typeof ilc === 'object') {
+      vibeResult.identityLevelCloud = ilc;
+      if (vibeResult.statistics) vibeResult.statistics.identityLevelCloud = ilc;
+      if (vibeResult.stats) vibeResult.stats.identityLevelCloud = ilc;
+      window.vibeResults = normalizeIdentityLevelCloud(ilc);
+      currentVibeResult = vibeResult;
+    }
+  }
   if (currentVibeResult) {
     window.vibeResult = currentVibeResult;
     vibeResult = currentVibeResult;
+    // 【三身份级别词云】一次计算，三路输出，供按钮切换
+    const ilc = currentVibeResult?.identityLevelCloud || currentVibeResult?.statistics?.identityLevelCloud || currentVibeResult?.stats?.identityLevelCloud;
+    var ilcLen = function (arr) { return Array.isArray(arr) ? arr.length : (arr && typeof arr === 'object' ? Object.keys(arr).length : 0); };
+    console.log('[Main] identityLevelCloud 数据:', {
+      hasIlc: !!ilc,
+      noviceKeys: ilc ? ilcLen(ilc.Novice) : 0,
+      professionalKeys: ilc ? ilcLen(ilc.Professional) : 0,
+      architectKeys: ilc ? ilcLen(ilc.Architect) : 0,
+      nativeKeys: ilc && Array.isArray(ilc.native) ? ilc.native.length : 0
+    });
+    if (ilc && typeof ilc === 'object') {
+      window.vibeResults = normalizeIdentityLevelCloud(ilc);
+      console.log('[Main] vibeResults 已生成:', {
+        Novice: window.vibeResults.Novice.length,
+        Professional: window.vibeResults.Professional.length,
+        Architect: window.vibeResults.Architect.length,
+        native: window.vibeResults.native ? window.vibeResults.native.length : 0
+      });
+      renderIdentityLevelCloud(selectedIdentityLevel || 'Novice');
+    } else {
+      console.warn('[Main] identityLevelCloud 数据不存在，词云将无法渲染');
+    }
     console.log('[Main] ✅ 已更新全局 vibeResult:', {
       hasPersonalityName: !!currentVibeResult.personalityName,
       hasRoastText: !!currentVibeResult.roastText,
@@ -2080,6 +2193,7 @@ export const renderFullDashboard = async (passedVibeResult) => {
   }
   console.log('[Main] 渲染词云...');
   renderWordClouds();
+  bindIdentityLevelTabs();
   console.log('[Main] renderFullDashboard 完成');
 };
 
@@ -2558,6 +2672,17 @@ async function init() {
   console.log('[Main] 初始化 VibeCodingerAnalyzer...');
   vibeAnalyzer = new VibeCodingerAnalyzer();
   console.log('[Main] VibeCodingerAnalyzer 初始化完成');
+
+  // 【三身份级别词云】必须先 await 加载词库，再注入 analyzer
+  try {
+    const kw = await loadIdentityLevelKeywords();
+    if (vibeAnalyzer && typeof vibeAnalyzer.setLevelKeywords === 'function') {
+      vibeAnalyzer.setLevelKeywords(kw);
+      console.log('[Main] ✅ 身份级别词库已注入:', { N: (kw && kw.Novice) ? kw.Novice.length : 0, P: (kw && kw.Professional) ? kw.Professional.length : 0, A: (kw && kw.Architect) ? kw.Architect.length : 0 });
+    }
+  } catch (e) {
+    console.warn('[Main] 身份级别词库加载失败:', e);
+  }
 
   // 初始化 VibeCodingApp 类
   console.log('[Main] 初始化 VibeCodingApp...');
@@ -3049,10 +3174,20 @@ async function handleFileUpload(event, type, callbacks = {}) {
         // 【上传状态锁】设置分析状态
         isAnalyzing = true;
         isProcessing = true;
-        
+
+        // 数据量较大时，分析开始前显示深度体检提示
+        var totalCharsForHint = 0;
+        for (var ti = 0; ti < allChatData.length; ti++) {
+          var t = allChatData[ti] && (allChatData[ti].text || allChatData[ti].content || '');
+          totalCharsForHint += t ? String(t).length : 0;
+        }
+        if (totalCharsForHint > 50000 && (!callbacks || !callbacks.onLog)) {
+          showLoading(getCurrentLang() === 'en' ? 'Deep analysis in progress (large dataset)...' : '正在深度体检中（数据量较大）...');
+        }
+
         // 使用 VibeCodingApp 的 analyzeFile 方法
-        // 该方法内部会：1) 调用 analyze 2) 立即 await uploadToSupabase 3) 更新 statistics 4) 调用 renderReport
-        vibeResult = await vibeCodingApp.analyzeFile(allChatData, extraStats, onProgress);
+        // 上传流程必须等待 rankData 再回调，否则预览/横向排名无数据（deferGlobalSync 默认会先返回再后台同步）
+        vibeResult = await vibeCodingApp.analyzeFile(allChatData, extraStats, onProgress, { deferGlobalSync: false });
         console.log('[Main] Vibe Codinger 分析完成（使用 VibeCodingApp）:', vibeResult);
         
         // 重置处理状态
@@ -3123,8 +3258,7 @@ async function handleFileUpload(event, type, callbacks = {}) {
           };
           
           // 使用 VibeCodingApp 的 analyzeFileSync 方法（同步方法）
-          // 该方法内部会：1) 调用 analyzeSync 2) 立即 await uploadToSupabase 3) 更新 statistics 4) 调用 renderReport
-          vibeResult = await vibeCodingApp.analyzeFileSync(allChatData, extraStats, onProgress);
+          vibeResult = await vibeCodingApp.analyzeFileSync(allChatData, extraStats, onProgress, { deferGlobalSync: false });
           console.log('[Main] Vibe Codinger 分析完成（使用 VibeCodingApp 同步方法）:', vibeResult);
           
           // 重置处理状态
@@ -3155,7 +3289,39 @@ async function handleFileUpload(event, type, callbacks = {}) {
       }
     }
     
+    // 【人格预览】若吐槽文案为占位或「正在生成中」，严禁直接展示：先 roastLibrary 补全，仍无效则前端根据 dimensions 动态生成
+    if (vibeResult) {
+      var rt = vibeResult.roastText ? String(vibeResult.roastText) : '';
+      var isPlaceholder = isInvalidPersonalityText(rt);
+      if (isPlaceholder) {
+        var idx = (vibeResult.vibeIndex || vibeResult.vibe_index || '').toString().slice(0, 5);
+        var lang = getCurrentLang();
+        var isEn = lang === 'en';
+        try {
+          var libUrl = isEn ? 'src/roastLibrary2.json' : 'src/roastLibrary.json';
+          var res = await fetch(libUrl);
+          if (res.ok) {
+            var roastData = await res.json();
+            if (roastData && roastData[idx]) {
+              vibeResult.roastText = roastData[idx];
+              console.log('[Main] 已从 roastLibrary 补全人格预览吐槽文案，vibeIndex:', idx);
+            }
+          }
+        } catch (e) {
+          console.warn('[Main] 从 roastLibrary 补全吐槽文案失败:', e);
+        }
+        if (isInvalidPersonalityText(vibeResult.roastText)) {
+          vibeResult.roastText = fallbackInterpretationFromDimensions(vibeResult.dimensions, lang);
+          console.log('[Main] roastLibrary 无命中，已使用 dimensions 动态文案保底');
+        }
+      }
+      try {
+        console.log('[Main] finalVibePayload (传入预览)', { vibeIndex: vibeResult.vibeIndex, roastTextLen: (vibeResult.roastText || '').length, hasDimensions: !!vibeResult.dimensions });
+      } catch (_) {}
+    }
+
     // 调用完成回调（不自动显示 Dashboard，由 React 控制）
+    // 【数据流】上传 -> analyzeFile(含 uploadToSupabase) -> vibeResult 含 dimensions/rankData/identityLevelCloud/roastText -> 补全 roastText -> 传入预览；三身份词云用 window.vibeResults，预览/排名用 vibeResult，互不覆盖
     if (onComplete) {
       onComplete({
         stats: globalStats,
@@ -4239,6 +4405,35 @@ function debounce(func, wait) {
   };
 }
 
+/** 是否为不可直接展示的人格文案（严禁展示给用户） */
+function isInvalidPersonalityText(s) {
+  if (s == null || String(s).trim() === '') return true;
+  var t = String(s);
+  if (/正在生成中|正在由后端生成|personality combination is so unique that even our AI needs more time/i.test(t)) return true;
+  if (/索引\s*\d+\s*对应的吐槽文案(正在由后端生成中|未找到)/.test(t) && /人格组合太独特/.test(t)) return true;
+  return false;
+}
+
+/** 后端失效时根据 dimensions 最高两维动态拼接人格描述（供预览与完整报告共用） */
+function fallbackInterpretationFromDimensions(dims, lang) {
+  if (!dims || typeof dims !== 'object') return lang === 'en' ? 'A developer with a unique vibe.' : '一位风格鲜明的开发者。';
+  var labels = lang === 'en'
+    ? { L: 'Logic', P: 'Patience', D: 'Detail', E: 'Exploration', F: 'Feedback' }
+    : { L: '逻辑', P: '耐性', D: '细节', E: '探索', F: '反馈' };
+  var entries = Object.entries(dims).filter(function (e) { return e[0] && labels[e[0]] != null; }).map(function (e) { return { key: e[0], value: Number(e[1]) || 0 }; });
+  entries.sort(function (a, b) { return b.value - a.value; });
+  var top2 = entries.slice(0, 2);
+  if (top2.length === 0) return lang === 'en' ? 'A developer with a unique vibe.' : '一位风格鲜明的开发者。';
+  if (top2.length === 1) {
+    return lang === 'en'
+      ? 'A developer strong in ' + labels[top2[0].key] + '.'
+      : '一位极具' + labels[top2[0].key] + '的代码架构师。';
+  }
+  return lang === 'en'
+    ? 'A developer with strong ' + labels[top2[0].key] + ' and ' + labels[top2[1].key].toLowerCase() + '.'
+    : '一位极具' + labels[top2[0].key] + '且' + (top2[1].value >= 70 ? '极度' : '较为') + labels[top2[1].key] + '的代码架构师。';
+}
+
 // 显示 Vibe Codinger 人格分析结果
 function displayVibeCodingerAnalysis() {
   // #region agent log
@@ -4264,6 +4459,25 @@ function displayVibeCodingerAnalysis() {
   }
 
   const { personalityType, dimensions, analysis, semanticFingerprint, statistics, vibeIndex, roastText, personalityName, stats } = vibeResult;
+
+  // 【调试】打印完整 payload，便于排查 interpretation/roastText 为空问题
+  try {
+    var finalVibePayload = {
+      dimensions: dimensions,
+      vibeIndex: vibeIndex,
+      roastText: roastText ? String(roastText).substring(0, 80) + (roastText.length > 80 ? '...' : '') : '',
+      personalityName: personalityName,
+      detailedStats: vibeResult.personality?.detailedStats || vibeResult.detailedStats || [],
+    };
+    console.log('[Main] finalVibePayload', finalVibePayload);
+  } catch (_) {}
+
+  var safeRoastText = roastText;
+  if (isInvalidPersonalityText(safeRoastText)) {
+    safeRoastText = fallbackInterpretationFromDimensions(dimensions, getCurrentLang());
+    if (vibeResult) vibeResult.roastText = safeRoastText;
+    console.log('[Main] interpretation/roastText 无效，已触发 fallbackInterpretation:', safeRoastText.substring(0, 50) + '...');
+  }
   
   // 【V6 语义指纹统一化】从 VibeCodingerAnalyzer 的 generateLPDEF 方法获取结果
   let lpdef = vibeResult.lpdef;
@@ -4384,7 +4598,7 @@ function displayVibeCodingerAnalysis() {
         <div class="vibe-index">${getCurrentLang() === 'en' ? `${t('vibeCodinger.lpdef')}: ${lpdef || 'N/A'}` : `${t('vibeCodinger.index')}: ${vibeIndex} | ${t('vibeCodinger.lpdef')}: ${lpdef || 'N/A'}`}</div>
       </div>
       <div class="roast-content">
-        <p class="roast-text">${roastText}</p>
+        <p class="roast-text">${safeRoastText}</p>
       </div>
       <div class="dimension-tags">
         ${getDimensionTags(dimensions).map(tag => `
@@ -4401,11 +4615,16 @@ function displayVibeCodingerAnalysis() {
         const detailedStats = vibeResult.personality?.detailedStats || vibeResult.detailedStats || [];
         const detailedStat = detailedStats.find(stat => stat.dimension === key);
         
-        // 优先使用 detailedStats 中的文案，降级到 analysis.dimensions[key]
+        // 优先使用 detailedStats 中的文案，降级到 analysis.dimensions[key]；严禁展示「正在生成中」或空
+        let dimInterpretation = (detailedStat && detailedStat.roast) || (analysis.dimensions && analysis.dimensions[key] && analysis.dimensions[key].interpretation) || '';
+        if (isInvalidPersonalityText(dimInterpretation)) {
+          dimInterpretation = (getCurrentLang() === 'en' ? (key + ' dimension: ' + (value >= 70 ? 'high' : value >= 40 ? 'medium' : 'low')) : (key + '维度' + (value >= 70 ? '表现突出' : value >= 40 ? '中等水平' : '有待提升')));
+          if (typeof console !== 'undefined' && console.log) console.log('[Main] 维度 ' + key + ' interpretation 为空或占位，已使用 fallback');
+        }
         const dimInfo = detailedStat ? {
           level: detailedStat.label || '未知',
-          interpretation: detailedStat.roast || '暂无吐槽文案'
-        } : (analysis.dimensions[key] || { level: '未知', interpretation: '暂无吐槽文案' });
+          interpretation: dimInterpretation || '暂无吐槽文案'
+        } : (analysis.dimensions && analysis.dimensions[key] ? { level: analysis.dimensions[key].level || '未知', interpretation: dimInterpretation || '暂无吐槽文案' } : { level: '未知', interpretation: dimInterpretation || '暂无吐槽文案' });
         
         const percentage = value;
         const dimLabel = window.i18n?.getI18nText(getCurrentLang())?.dimensions?.[key]?.label || DIMENSIONS[key].label;
@@ -5496,6 +5715,198 @@ function extractWordCloudData(text) {
   }
 }
 
+/** 身份词云 Tab 是否已绑定（事件委托仅需一次） */
+let _identityLevelTabsBound = false;
+
+/**
+ * 【三身份级别词云】绑定切换按钮事件（事件委托，兼容 recreateDashboardDOM 替换 DOM）
+ */
+function bindIdentityLevelTabs() {
+  if (_identityLevelTabsBound) return;
+  _identityLevelTabsBound = true;
+  document.addEventListener('click', function (e) {
+    const btn = e.target && e.target.closest && e.target.closest('.identity-level-btn');
+    if (!btn) return;
+    const tabs = document.getElementById('identity-level-tabs');
+    if (!tabs || !tabs.contains(btn)) return;
+    const level = btn.getAttribute('data-level');
+    if (!level) return;
+    selectedIdentityLevel = level;
+    tabs.querySelectorAll('.identity-level-btn').forEach(function (b) {
+      b.classList.remove('active', 'bg-[var(--accent-terminal)]/20', 'text-[var(--accent-terminal)]');
+      b.classList.add('text-zinc-400');
+    });
+    btn.classList.add('active', 'bg-[var(--accent-terminal)]/20', 'text-[var(--accent-terminal)]');
+    btn.classList.remove('text-zinc-400');
+    renderIdentityLevelCloud(level);
+  });
+}
+
+/**
+ * 将 Worker 返回的 identityLevelCloud 统一为渲染用格式
+ * 支持旧格式 { word: count } 与新格式 [{ word, count, source }]
+ */
+function normalizeIdentityLevelCloud(ilc) {
+  if (!ilc || typeof ilc !== 'object') {
+    return { Novice: [], Professional: [], Architect: [], native: [] };
+  }
+  const out = { Novice: [], Professional: [], Architect: [], native: [] };
+  for (const level of ['Novice', 'Professional', 'Architect']) {
+    const arr = ilc[level];
+    if (Array.isArray(arr)) {
+      out[level] = arr.map(function (x) {
+        return { word: x.word, count: x.count, source: x.source || level.toLowerCase(), maxInLevel: x.maxInLevel };
+      });
+    } else if (arr && typeof arr === 'object') {
+      out[level] = Object.entries(arr)
+        .filter(function (e) { return e[1] > 0; })
+        .map(function (e) { return { word: e[0], count: e[1], source: level.toLowerCase() }; });
+    }
+  }
+  const nat = ilc.native;
+  if (Array.isArray(nat)) {
+    out.native = nat.map(function (x) {
+      return { word: x.word, count: x.count, source: 'native' };
+    });
+  }
+  return out;
+}
+
+/**
+ * 将 hex 转为 rgba，并可按 alpha 调节透明度
+ */
+function hexToRgba(hex, alpha) {
+  var m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (!m) return hex;
+  var r = parseInt(m[1], 16);
+  var g = parseInt(m[2], 16);
+  var b = parseInt(m[3], 16);
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + (alpha != null ? alpha : 1) + ')';
+}
+
+/**
+ * 【三身份级别词云】渲染指定层级的词云（本地数据，无 Network）
+ * - 非线性字号：FontSize = BaseSize + (Math.pow(count/maxCount, 0.8) * (MaxSize - BaseSize))
+ * - Top 5 加成、长词保护、颜色饱和度随频率联动、gridSize 4 繁星密度
+ */
+function renderIdentityLevelCloud(level) {
+  const vr = window.vibeResults;
+  let data = (vr && vr[level]) || [];
+  const native = (vr && vr.native) || [];
+
+  var merged = [];
+  if (Array.isArray(data)) {
+    merged = data.map(function (x) {
+      return typeof x === 'object' && x !== null
+        ? { word: x.word || x[0], count: x.count != null ? x.count : x[1], source: x.source, maxInLevel: x.maxInLevel }
+        : { word: String(x[0]), count: x[1] || 1, source: level.toLowerCase(), maxInLevel: null };
+    });
+  } else if (Array.isArray(data) === false && data && typeof data === 'object') {
+    merged = Object.entries(data).filter(function (e) { return e[1] > 0; }).map(function (e) { return { word: e[0], count: e[1], source: level.toLowerCase(), maxInLevel: null }; });
+  }
+  if (Array.isArray(native) && native.length > 0) {
+    native.forEach(function (x) {
+      merged.push({ word: x.word || x[0], count: x.count != null ? x.count : x[1] || 1, source: 'native', maxInLevel: null });
+    });
+  }
+  var totalCount = merged.reduce(function (a, x) { return a + (x.count || 0); }, 0);
+  if (totalCount <= 0) totalCount = 1;
+
+  var mergedData = merged;
+  console.log('[Main] 渲染身份级别词云 [' + level + ']:', { dataLength: mergedData.length, totalCount: totalCount });
+  if (mergedData.length > 0) console.table(mergedData);
+
+  var canvas = document.getElementById('identity-cloud-canvas') || document.getElementById('chineseWordCloud');
+  if (!canvas || typeof WordCloud === 'undefined') {
+    console.warn('[Main] WordCloud canvas 或库未找到');
+    return;
+  }
+  var container = canvas.parentElement;
+  var width = (container && container.offsetWidth) ? container.offsetWidth : 400;
+  var height = (container && container.offsetHeight) ? container.offsetHeight : 400;
+  if (width <= 0 || height <= 0) { width = 400; height = 400; }
+  canvas.width = width;
+  canvas.height = height;
+  var ctx = canvas.getContext('2d');
+  if (ctx) ctx.clearRect(0, 0, width, height);
+
+  if (merged.length === 0) {
+    if (ctx) {
+      ctx.fillStyle = 'rgba(113, 113, 122, 0.5)';
+      ctx.font = '14px "Microsoft YaHei", "微软雅黑", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(getCurrentLang() === 'en' ? 'No keywords matched' : '暂无命中词', width / 2, height / 2);
+    }
+    return;
+  }
+
+  merged.sort(function (a, b) { return (b.count || 0) - (a.count || 0); });
+  var levelItems = merged.filter(function (x) { return x.source !== 'native'; });
+  var nativeItems = merged.filter(function (x) { return x.source === 'native'; });
+  var maxInLevel = levelItems.length ? Math.max.apply(null, levelItems.map(function (x) { return x.count || 0; })) : 1;
+  var maxNative = nativeItems.length ? Math.max.apply(null, nativeItems.map(function (x) { return x.count || 0; })) : 1;
+
+  var BaseSize = 12;
+  var MaxSize = 80;
+  var Top5Bonus = 1.22;
+  var LongWordLen = 6;
+  var LongWordPenalty = 0.82;
+
+  var sourceMap = {};
+  var wordToRatio = {};
+  merged.forEach(function (x) { sourceMap[x.word] = x.source || level.toLowerCase(); });
+  merged.forEach(function (x) {
+    var maxRef = x.source === 'native' ? maxNative : (x.maxInLevel || maxInLevel);
+    if (maxRef <= 0) maxRef = 1;
+    wordToRatio[x.word] = (x.count || 0) / maxRef;
+  });
+
+  var colorBySource = {
+    architect: '#5b21b6',
+    professional: '#3b82f6',
+    novice: '#10b981',
+    native: '#9ca3af'
+  };
+
+  var list = merged.map(function (x, idx) {
+    var count = x.count || 0;
+    var maxRef = x.source === 'native' ? maxNative : (x.maxInLevel || maxInLevel);
+    if (maxRef <= 0) maxRef = 1;
+    var ratio = count / maxRef;
+    var size = BaseSize + Math.pow(ratio, 0.8) * (MaxSize - BaseSize);
+    if (idx < 5) size *= Top5Bonus;
+    if (String(x.word || '').length > LongWordLen) size *= LongWordPenalty;
+    size = Math.max(BaseSize, Math.min(MaxSize + 10, size));
+    return [String(x.word || ''), size];
+  }).filter(function (item) { return item[0].length > 0 && item[1] > 0; });
+
+  try {
+    WordCloud(canvas, {
+      list: list,
+      gridSize: 4,
+      weightFactor: function (size) {
+        return Math.max(BaseSize, Math.min(MaxSize + 10, size));
+      },
+      fontFamily: '"Microsoft YaHei", "微软雅黑", SimHei, sans-serif',
+      color: function (word) {
+        var src = sourceMap[word];
+        var baseHex = colorBySource[src] || '#6b7280';
+        var ratio = wordToRatio[word] != null ? wordToRatio[word] : 0.5;
+        var alpha = 0.5 + 0.5 * Math.pow(ratio, 0.7);
+        return hexToRgba(baseHex, alpha);
+      },
+      rotateRatio: 0.6,
+      backgroundColor: 'transparent',
+      minSize: BaseSize,
+      drawOutOfBound: false,
+      shrinkToFit: false,
+      ellipticity: 0.8
+    });
+  } catch (err) {
+    console.warn('[Main] 词云渲染失败:', err);
+  }
+}
+
 // 渲染词云
 function renderWordClouds() {
   if (typeof WordCloud === 'undefined') {
@@ -5514,16 +5925,22 @@ function renderWordClouds() {
   console.log('[Main] 中文词组数据:', chineseWordsCount);
   console.log('[Main] 英文词组数据:', englishWordsCount);
 
-  // 渲染AI情绪词云（只显示情绪类词组）
-  const chineseCanvas = document.getElementById('chineseWordCloud');
+  // 渲染AI功德簿词云（优先：三身份级别词云；降级：情绪类词组）
+  const chineseCanvas = document.getElementById('identity-cloud-canvas') || document.getElementById('chineseWordCloud');
   if (!chineseCanvas) {
-    console.warn('[Main] AI情绪词云canvas未找到');
+    console.warn('[Main] AI功德簿词云canvas未找到');
+  } else if (window.vibeResults && (window.vibeResults.Novice?.length || window.vibeResults.Professional?.length || window.vibeResults.Architect?.length)) {
+    renderIdentityLevelCloud(selectedIdentityLevel);
+    console.log('[Main] ✅ AI功德簿（三身份级别）词云渲染完成');
   } else if (!globalStats.chineseEmotionWords || emotionWordsCount === 0) {
-    console.warn('[Main] AI情绪词云数据为空');
-    // 显示提示信息
+    console.warn('[Main] AI功德簿词云数据为空');
     const container = chineseCanvas.parentElement;
     if (container) {
-      container.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">暂无AI情绪数据</div>';
+      const wrap = container.querySelector('.wordcloud-container');
+      const target = wrap || container;
+      if (target && target.querySelector('canvas')) {
+        target.innerHTML = '<div style="padding: 20px; text-align: center; color: #999;">暂无数据</div>';
+      }
     }
   } else {
     // 获取排名最靠前的情绪类词组（按频率排序）

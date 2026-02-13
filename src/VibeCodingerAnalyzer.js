@@ -21,49 +21,54 @@ import { getText } from './i18n.js';
  * ==========================================
  */
 // 分类关键词词典
-const MERIT_KEYWORDS = new Set(['重构', '优化', '修复', '改进', '完善', '提升', '增强', '调整', '更新', '升级']);
-const SLANG_KEYWORDS = new Set(['闭环', '颗粒度', '对齐', '抓手', '落地', '复盘', '链路', '兜底', '赋能', '降维', '护城河', '赛道']);
+const MERIT_KEYWORDS = new Set(['重构', '优化', '修复', '改进', '完善', '提升', '增强', '调整', '更新', '升级', '功德', '福报', '积德', '善业']);
+const SLANG_KEYWORDS = new Set(['闭环', '颗粒度', '对齐', '抓手', '落地', '复盘', '链路', '兜底', '赋能', '降维', '护城河', '赛道', '方法论', '底层逻辑', '架构解耦']);
+
+/** 动态提取 cloud50 用停用词（的、是、在、AI、请 等） */
+const STOPWORDS_CLOUD50 = new Set([
+  '的', '是', '在', 'AI', 'ai', '请', '一', '不', '了', '有', '和', '人', '我', '你', '他', '她', '它', '们', '这', '那', '就', '也', '都', '很',
+  '与', '及', '而', '或', '但', '又', '被', '把', '给', '对', '为', '从', '到', '来', '去', '上', '下', '中', '里', '外', '前', '后', '其', '之',
+]);
 
 /**
- * 自动分类关键词
+ * 自动分类关键词（支持 uncategorized_hot：未命中 merit/slang 时）
  * @param {string} phrase - 关键词
- * @returns {'merit' | 'slang' | 'sv_slang'}
+ * @returns {'merit' | 'slang' | 'sv_slang' | 'uncategorized_hot'}
  */
 function categorizeKeyword(phrase) {
   const normalized = String(phrase || '').trim();
-  if (!normalized) return 'slang';
+  if (!normalized) return 'uncategorized_hot';
 
   const lower = normalized.toLowerCase();
 
   // 0) 美区适配：若包含 >=3 个英文单词（含空格），且不包含明显中文，则一律归为 sv_slang
-  // 例："ship it today" / "fix the bug quickly"
   if (!/[\u4e00-\u9fff]/.test(normalized)) {
     const words = lower.split(/\s+/g).filter(Boolean);
     const englishWords = words.filter(w => /^[a-z]+(?:'[a-z]+)?$/.test(w));
     if (englishWords.length >= 3) return 'sv_slang';
   }
 
-  // 1) 指令/修复类：优先归为 merit（即使是长句）
-  // 例：TODO: 优化逻辑 / 修复一下链路 / fix the bug
+  // 1) 指令/修复类：优先归为 merit
   if (/\btodo\b/i.test(lower) || /\bfix(?:me|ing|ed)?\b/i.test(lower) || /修复|优化|重构|改进|完善|提升|增强|调整|更新|升级/.test(normalized)) {
     return 'merit';
   }
 
-  // 2) 黑话/计划类：包含即可归为 slang（支持长句）
-  if (/对齐|闭环|链路|抓手|落地|复盘|兜底|赋能|降维|护城河|赛道|颗粒度/.test(normalized)) {
+  // 2) 黑话/计划类：包含即可归为 slang
+  if (/对齐|闭环|链路|抓手|落地|复盘|兜底|赋能|降维|护城河|赛道|颗粒度|方法论|底层逻辑|架构解耦/.test(normalized)) {
     return 'slang';
   }
 
-  // 3) 纯英文词/短语：归为 sv_slang（与旧逻辑对齐）
+  // 3) 纯英文词/短语：归为 sv_slang
   if (/^[a-zA-Z][a-zA-Z\s-]{1,}$/.test(normalized)) {
     return 'sv_slang';
   }
 
-  // 4) 兼容旧 seed：完整命中仍有效
+  // 4) 种子词典命中
   if (MERIT_KEYWORDS.has(normalized)) return 'merit';
   if (SLANG_KEYWORDS.has(normalized)) return 'slang';
 
-  return 'slang';
+  // 5) 未命中：统一标记为 uncategorized_hot（自动发现的热词）
+  return 'uncategorized_hot';
 }
 
 export function extractVibeKeywords(text, { max = 5 } = {}) {
@@ -221,6 +226,62 @@ export function extractVibeKeywords(text, { max = 5 } = {}) {
       category: categorizeKeyword(phrase),
       weight: Number(count) || 0,
     }));
+}
+
+/**
+ * 【动态统计提取】基于 TF 提取 cloud50 候选词（替代固定字典匹配）
+ * - 过滤停用词（的、是、在、AI、请 等）
+ * - 中文：2-4 字 n-gram；英文：按词边界分词
+ * - 取词频最高且 length > 1 的前 50 个词
+ * - 分类：命中 merit/slang 打对应标签，否则 uncategorized_hot
+ * @param {string} text - 用户聊天文本
+ * @param {Object} options - { max?: number }
+ * @returns {Array<{ phrase, category, weight }>}
+ */
+export function extractCloud50Dynamic(text, { max = 50 } = {}) {
+  const raw = String(text || '');
+  if (!raw.trim()) return [];
+
+  const cleaned = maskNoiseForVibes(raw);
+  if (!cleaned) return [];
+
+  const freq = new Map(); // phrase -> TF count
+
+  // 1) 中文：2-4 字 n-gram 滑窗
+  const zhRuns = (cleaned.match(/[\u4e00-\u9fff]{2,}/g) || []);
+  for (const run of zhRuns) {
+    const s = String(run);
+    const len = s.length;
+    for (let n = 2; n <= 4; n++) {
+      for (let i = 0; i <= len - n; i++) {
+        const gram = s.slice(i, i + n);
+        if (STOPWORDS_CLOUD50.has(gram) || WORDCLOUD_STOPWORDS_ZH.has(gram)) continue;
+        if (gram.length <= 1) continue;
+        freq.set(gram, (freq.get(gram) || 0) + 1);
+      }
+    }
+  }
+
+  // 2) 英文：按词边界分词（保留字母数字组合）
+  const enTokens = (cleaned.match(/[A-Za-z][A-Za-z0-9]*/g) || [])
+    .map(t => String(t).toLowerCase())
+    .filter(t => t.length > 1);
+  for (const tok of enTokens) {
+    if (STOPWORDS_CLOUD50.has(tok) || WORDCLOUD_STOPWORDS_EN.has(tok)) continue;
+    freq.set(tok, (freq.get(tok) || 0) + 1);
+  }
+
+  // 3) 过滤 length <= 1，按 TF 降序取 top N
+  const top = Array.from(freq.entries())
+    .filter(([p]) => p && p.length > 1)
+    .sort((a, b) => (b[1] - a[1]) || (a[0] > b[0] ? 1 : -1))
+    .slice(0, Math.max(1, Math.min(50, Number(max) || 50)));
+
+  return top.map(([phrase, count]) => ({
+    phrase,
+    category: categorizeKeyword(phrase),
+    weight: Number(count) || 1,
+  }));
 }
 
 // ==========================================
@@ -1376,14 +1437,15 @@ export function getVibeIndex(dimensions) {
     return '2';                  // 高探索欲
   };
   
-  // 按照 L, P, D, E, F 的顺序拼接
-  return [
+  // 按照 L, P, D, E, F 的顺序拼接，强制 5 位防止溢出
+  var raw = [
     indexMap(dimensions.L),
     indexMap(dimensions.P),
     indexMap(dimensions.D),
     eIndex(dimensions.E),
     indexMap(dimensions.F),
   ].join('');
+  return raw.length > 5 ? raw.slice(0, 5) : (raw.length < 5 ? (raw + '00000').slice(0, 5) : raw);
 }
 
 /**
@@ -1451,6 +1513,8 @@ export class VibeCodingerAnalyzer {
     this.lang = lang;
     this.userMessages = [];
     this.chatData = []; // 保存原始聊天数据，用于上传到后端
+    /** 【三身份级别词云】Novice/Professional/Architect 词库 */
+    this.levelKeywords = null;
     this.analysisResult = null;
     this.worker = null;
     this.workerReady = false;
@@ -1474,7 +1538,7 @@ export class VibeCodingerAnalyzer {
     
     // 【v4.0 性能优化】并发锁与超时保护
     this.analysisLock = false; // 并发锁，防止任务竞争
-    this.analysisTimeout = 5000; // 5秒超时
+    this.analysisTimeout = 30000; // 30秒超时，23 万字极限数据下 Trie 构建与长词优先排序需要时间
     this.activeTimeouts = new Map(); // Map<taskId, timeoutId>
     
     // 【v4.0 逻辑漏洞修复】MessageChannel清理
@@ -1490,6 +1554,11 @@ export class VibeCodingerAnalyzer {
     
     // 初始化 Web Worker（Singleton 模式）
     this.initWorker();
+  }
+
+  /** 【三身份级别词云】设置 Novice/Professional/Architect 词库 */
+  setLevelKeywords(kw) {
+    this.levelKeywords = kw && typeof kw === 'object' ? kw : null;
   }
 
   /**
@@ -1956,7 +2025,7 @@ export class VibeCodingerAnalyzer {
         return this.getDefaultResultWithContext(safeContext);
       }
 
-      // 【v5.0 超时保护】设置5秒超时
+      // 【v5.0 超时保护】设置 15 秒超时
       const timeoutPromise = new Promise((_, reject) => {
         const timeoutId = setTimeout(() => {
           reject(new Error(`Analysis timeout after ${this.analysisTimeout}ms`));
@@ -1966,9 +2035,13 @@ export class VibeCodingerAnalyzer {
 
       // 【修正】优先使用本地 Web Worker 进行高性能分析
       const workerPromise = new Promise((resolve, reject) => {
+        const levelKw = (context && context.levelKeywords != null ? context.levelKeywords : this.levelKeywords) || (typeof window !== 'undefined' && window.__identityLevelKeywords) || null;
         this.pendingTasks.push({
           id: taskId,
-          payload: { chatData: sanitizedChatData }, // 发送清洗后的数据
+          payload: {
+            chatData: sanitizedChatData,
+            levelKeywords: levelKw
+          },
           resolve,
           reject,
           timeoutId: null // Timeout 由外部控制
@@ -1996,8 +2069,8 @@ export class VibeCodingerAnalyzer {
           this.activeTimeouts.delete(taskId);
         }
         
-        console.warn('[VibeAnalyzer] Worker 分析失败或超时，降级到本地同步匹配:', error);
-        // 降级方案：使用同步方法（这也是 Main Thread Blocking，但作为保底）
+        console.warn('[VibeAnalyzer] Worker 分析失败或超时，降级到本地同步匹配（仍可获取完整结果含词云）:', error.message || error);
+        // 降级方案：使用同步方法，仍返回完整结果（含 identityLevelCloud）
         return await this.analyzeSync(sanitizedChatData, safeContext.lang, extraStats, onProgress);
       }
       
@@ -2021,7 +2094,8 @@ export class VibeCodingerAnalyzer {
         nonsense_count: Number(workerStats.nonsense_count) || 0,
         balance_score: Number(workerStats.balance_score) || 0,
         style_label: workerStats.style_label || 'Standard',
-        blackword_hits: workerStats.blackword_hits || {}
+        blackword_hits: workerStats.blackword_hits || {},
+        identityLevelCloud: workerStats.identityLevelCloud || workerResult.identityLevelCloud || { Novice: {}, Professional: {}, Architect: {} }
       };
       
       // 【v5.0 异常兜底】确保所有 dimensions 字段都有默认值 0
@@ -2090,7 +2164,9 @@ export class VibeCodingerAnalyzer {
         // 【关键字段】语义指纹对象 - 完整报告需要
         semanticFingerprint: semanticFingerprint,
         // 统计数据
-        statistics: safeStats
+        statistics: safeStats,
+        // 【三身份词云】主线程可直接读取 result.identityLevelCloud
+        identityLevelCloud: safeStats.identityLevelCloud || { Novice: {}, Professional: {}, Architect: {} }
       };
 
       // 【新增】本地“个人句式指纹”（Top 15 核心口癖）
@@ -2121,7 +2197,7 @@ export class VibeCodingerAnalyzer {
           .filter(t => t.length > 0)
           .join(' ');
         if (userTextForCloud && userTextForCloud.length > 0) {
-          const keywords = extractVibeKeywords(userTextForCloud, { max: 50 });
+          const keywords = extractCloud50Dynamic(userTextForCloud, { max: 50 });
           const codeHits = this.#detectWordsFromCode(sanitizedChatData);
           const merged = new Map();
           const push = (it) => {
@@ -2207,9 +2283,8 @@ export class VibeCodingerAnalyzer {
 
             if (!userText || userText.length === 0) return;
 
-            // 句式/长短语：使用 extractVibeKeywords（已升级为原生句式捕获）
-            // 输出：[{ phrase, category, weight }]
-            const keywords = extractVibeKeywords(userText, { max: 20 });
+            // 动态统计提取：使用 extractCloud50Dynamic（TF 词频 + merit/slang/uncategorized_hot 分类）
+            const keywords = extractCloud50Dynamic(userText, { max: 50 });
 
             // 补充：代码片段中的功德/黑话（避免“只在代码块里出现”的词漏掉）
             const codeHits = this.#detectWordsFromCode(sanitizedChatData);
@@ -2234,7 +2309,7 @@ export class VibeCodingerAnalyzer {
             (Array.isArray(codeHits) ? codeHits : []).forEach(push);
             const finalList = Array.from(merged.values())
               .sort((a, b) => (b.weight - a.weight) || (a.phrase > b.phrase ? 1 : -1))
-              .slice(0, 15);
+              .slice(0, 25);
 
             // Debug：暴露本次 userText/提词/最终上报列表，便于排查“黑盒筛选”
             try {
@@ -2453,7 +2528,7 @@ export class VibeCodingerAnalyzer {
         .filter(t => t.length > 0)
         .join(' ');
       if (userTextForCloud && userTextForCloud.length > 0) {
-        const keywords = extractVibeKeywords(userTextForCloud, { max: 50 });
+        const keywords = extractCloud50Dynamic(userTextForCloud, { max: 50 });
         const codeHits = this.#detectWordsFromCode(sanitizedChatData);
         const merged = new Map();
         const push = (it) => {
@@ -2475,14 +2550,53 @@ export class VibeCodingerAnalyzer {
       cloud50 = [];
     }
 
+    // 【超时降级】同步路径也计算身份词云，确保即使 Worker 超时用户仍能看到词云
+    let identityLevelCloud = { Novice: [], Professional: [], Architect: [], native: [] };
+    try {
+      const levelKw = this.levelKeywords || (typeof window !== 'undefined' && window.__identityLevelKeywords) || null;
+      const userText = (Array.isArray(sanitizedChatData) ? sanitizedChatData : [])
+        .filter((m) => /^(USER|HUMAN|U)?$/i.test(String(m?.role || '')))
+        .map((m) => String(m?.text || m?.content || '').trim())
+        .filter(Boolean)
+        .join('\n');
+      if (userText && levelKw && typeof levelKw === 'object') {
+        const rawCounts = { Novice: {}, Professional: {}, Architect: {} };
+        for (const level of ['Novice', 'Professional', 'Architect']) {
+          const kw = levelKw[level];
+          if (!Array.isArray(kw)) continue;
+          kw.forEach((w) => {
+            const s = String(w || '').trim();
+            if (s.length < 2) return;
+            const re = /^[a-zA-Z0-9]+$/.test(s)
+              ? new RegExp('\\b' + s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi')
+              : new RegExp((s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'g');
+            const m = userText.match(re);
+            const cnt = m ? m.length : 0;
+            if (cnt > 0) rawCounts[level][s] = (rawCounts[level][s] || 0) + cnt;
+          });
+        }
+        for (const level of ['Novice', 'Professional', 'Architect']) {
+          const total = Object.values(rawCounts[level]).reduce((a, b) => a + b, 0);
+          Object.entries(rawCounts[level]).forEach(([word, count]) => {
+            if (count > 0) {
+              identityLevelCloud[level].push({ word, count, source: level.toLowerCase(), totalInLevel: total });
+            }
+          });
+          identityLevelCloud[level].sort((a, b) => b.count - a.count);
+        }
+      }
+    } catch (_) { /* ignore */ }
+
     // 不再在 analyzeSync 内部自动上传排名，由外部调用 uploadToSupabase 统一处理
     // 排名数据将在外部通过 uploadToSupabase 获取后注入到 statistics 中
-    
+
+    const statsWithIlc = { ...statistics, identityLevelCloud };
     return {
       personalityType,
       dimensions,
       analysis,
-      statistics,
+      statistics: statsWithIlc,
+      identityLevelCloud,
       semanticFingerprint: this.generateSemanticFingerprint(dimensions),
       vibeIndex,
       roastText,

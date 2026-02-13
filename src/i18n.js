@@ -181,6 +181,7 @@ export const I18N = {
     preview: {
       personalityLabel: '人格鉴定结果',
       analyzing: '分析中...',
+      deciphering: '正在破译你的人格密码...',
       globalRank: '全网排名',
       fullReport: '查看完整报告',
       diagnosisTitle: '专家诊断',
@@ -431,6 +432,7 @@ export const I18N = {
     preview: {
       personalityLabel: 'Personality Verdict',
       analyzing: 'Analyzing...',
+      deciphering: 'Deciphering your personality...',
       globalRank: 'Global Rank',
       fullReport: 'View Full Report',
       diagnosisTitle: 'Expert Diagnosis',

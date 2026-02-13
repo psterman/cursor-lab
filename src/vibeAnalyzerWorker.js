@@ -92,9 +92,9 @@ const V6_BEHAVIOR_THRESHOLDS = {
 
 /**
  * 【2026-01-27 V6.0 新增】最大分析字符数限制
- * 防止超大型 SQLite 文本导致 Worker 内存溢出（OOM）
+ * 放宽至 300,000 以支持 23 万字级别的深度体检
  */
-const MAX_ANALYSIS_CHARS = 50000;
+const MAX_ANALYSIS_CHARS = 300000;
 
 /**
  * 【2026-01-20 新增】稀有度分值（IDF 模拟值）
@@ -285,6 +285,380 @@ const SILICON_VALLEY_BLACKWORDS = [
   // 技术术语黑话化
   '架构', '重构', '优化', '性能', '瓶颈', '痛点', '场景', '方案', '落地', '上线'
 ];
+
+// ==========================================
+// 【三身份级别词云】AC 自动机单次扫描 + 位图冲突 + 原生语料
+// ==========================================
+
+function escapeRegExp(str) {
+  return String(str || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * 身份词云专用 Trie 节点（仅 category + term）
+ */
+function IdentityTrieNode() {
+  this.children = {};
+  this.fail = null;
+  this.output = [];
+  this.isEnd = false;
+  this.category = ''; // 'Novice' | 'Professional' | 'Architect'
+  this.term = '';
+}
+
+/**
+ * 身份词云 Aho-Corasick 自动机
+ * 单次扫描文本返回所有命中位置，供长词优先 + 位图去重
+ */
+function IdentityACAutomaton() {
+  this.root = new IdentityTrieNode();
+  this.root.fail = this.root;
+  this.isBuilt = false;
+}
+
+IdentityACAutomaton.prototype.insert = function (word, category) {
+  var node = this.root;
+  for (var i = 0; i < word.length; i++) {
+    var c = word[i];
+    if (!node.children[c]) node.children[c] = new IdentityTrieNode();
+    node = node.children[c];
+  }
+  node.isEnd = true;
+  node.category = category;
+  node.term = word;
+};
+
+IdentityACAutomaton.prototype.buildFailureLinks = function () {
+  var queue = [];
+  var root = this.root;
+  for (var c in root.children) {
+    var child = root.children[c];
+    child.fail = root;
+    queue.push(child);
+  }
+  while (queue.length > 0) {
+    var current = queue.shift();
+    for (var c in current.children) {
+      var child = current.children[c];
+      var fail = current.fail;
+      while (fail !== root && !fail.children[c]) fail = fail.fail;
+      child.fail = fail.children[c] || root;
+      child.output = child.fail.isEnd ? [child.fail].concat(child.fail.output) : child.fail.output.slice();
+      queue.push(child);
+    }
+  }
+  this.isBuilt = true;
+};
+
+/**
+ * 单次扫描返回所有命中：{ start, length, word, category }
+ */
+IdentityACAutomaton.prototype.searchAllMatches = function (text) {
+  var matches = [];
+  if (!this.isBuilt || !text) return matches;
+  var node = this.root;
+  var root = this.root;
+  for (var i = 0; i < text.length; i++) {
+    var c = text[i];
+    while (node !== root && !node.children[c]) node = node.fail;
+    node = node.children[c] || root;
+    var toCheck = [node].concat(node.output);
+    for (var k = 0; k < toCheck.length; k++) {
+      var n = toCheck[k];
+      if (n.isEnd && n.term) {
+        var len = n.term.length;
+        matches.push({ start: i - len + 1, length: len, word: n.term, category: n.category });
+      }
+    }
+  }
+  return matches;
+};
+
+/**
+ * 预检查：仅保留在文本中出现的词，减小 Trie 规模，加速 AC 扫描
+ */
+function filterLevelKeywordsByText(levelKeywords, text) {
+  if (!levelKeywords || !text || typeof text !== 'string') return levelKeywords || {};
+  var textLower = text.toLowerCase();
+  var out = { Novice: [], Professional: [], Architect: [] };
+  for (var level of ['Novice', 'Professional', 'Architect']) {
+    var kw = levelKeywords[level];
+    if (!Array.isArray(kw)) continue;
+    for (var i = 0; i < kw.length; i++) {
+      var s = String(kw[i] || '').trim();
+      if (s.length < 2) continue;
+      var included = /^[a-zA-Z0-9]+$/.test(s)
+        ? textLower.indexOf(s.toLowerCase()) !== -1
+        : text.indexOf(s) !== -1;
+      if (included) out[level].push(s);
+    }
+  }
+  return out;
+}
+
+/**
+ * 从 levelKeywords 构建身份 AC 自动机（Novice / Professional / Architect）
+ */
+function buildIdentityACAutomaton(levelKeywords) {
+  var ac = new IdentityACAutomaton();
+  if (!levelKeywords || typeof levelKeywords !== 'object') return ac;
+  for (var level of ['Novice', 'Professional', 'Architect']) {
+    var kw = levelKeywords[level];
+    if (!Array.isArray(kw)) continue;
+    for (var i = 0; i < kw.length; i++) {
+      var s = String(kw[i] || '').trim();
+      if (s.length >= 2) ac.insert(s, level);
+    }
+  }
+  ac.buildFailureLinks();
+  return ac;
+}
+
+/**
+ * 提取用户文本中非关键词的高频词（动词/名词等生活化词汇）
+ * 若一词既是关键词又是高频词，优先归为身份词，此处不纳入 native（由 keywordSet 排除）
+ * @param {string} text - 用户文本
+ * @param {Set} keywordSet - 所有关键词集合（含原文及小写，用于排除）
+ * @param {number} limit - 最多返回数量
+ * @returns {Array<{word: string, count: number, source: string}>}
+ */
+function extractNativeHighFreq(text, keywordSet, limit) {
+  if (!text || typeof text !== 'string' || text.length < 4) return [];
+  const freq = {};
+  const chineseWords = text.match(/[\u4e00-\u9fa5]{2,4}/g) || [];
+  const enWords = (text.match(/\b[a-zA-Z]{2,20}\b/g) || []).map(function (w) { return w.toLowerCase(); });
+  chineseWords.forEach(function (w) {
+    if (!keywordSet.has(w) && w.length >= 2) {
+      freq[w] = (freq[w] || 0) + 1;
+    }
+  });
+  enWords.forEach(function (w) {
+    if (!keywordSet.has(w)) {
+      freq[w] = (freq[w] || 0) + 1;
+    }
+  });
+  return Object.entries(freq)
+    .filter(function (e) { return e[1] > 1; })
+    .sort(function (a, b) { return b[1] - a[1]; })
+    .slice(0, limit)
+    .map(function (e) { return { word: e[0], count: e[1], source: 'native' }; });
+}
+
+/** 检查 [start, end) 在 mask 中是否已被占用 */
+function rangeOverlapsMask(start, end, mask) {
+  for (var i = start; i < end && i < mask.length; i++) {
+    if (mask[i] === 1) return true;
+  }
+  return false;
+}
+/** 标记 [start, end) 为已占用 */
+function markRange(start, end, mask) {
+  for (var i = start; i < end && i < mask.length; i++) mask[i] = 1;
+}
+
+/** 构建关键词 Set（用于原生语料排除） */
+function buildKeywordSet(levelKeywords) {
+  var keywordSet = new Set();
+  for (var level of ['Novice', 'Professional', 'Architect']) {
+    var kw = levelKeywords[level];
+    if (!Array.isArray(kw)) continue;
+    for (var i = 0; i < kw.length; i++) {
+      var s = String(kw[i] || '').trim();
+      if (s.length >= 2) {
+        keywordSet.add(s);
+        if (/[a-zA-Z]/.test(s)) keywordSet.add(s.toLowerCase());
+      }
+    }
+  }
+  return keywordSet;
+}
+
+/**
+ * 身份词云核心：AC 自动机单次扫描 + 长词优先 + Uint8Array 位图去重
+ * 禁止对 1500 词做循环正则；单次遍历文本即可得到所有命中，再按词长排序后位图计分
+ * @param {string} text - 全文
+ * @param {Object} levelKeywords - { Novice: string[], Professional: string[], Architect: string[] }
+ * @returns {{ Novice: Array, Professional: Array, Architect: Array, native: Array }}
+ */
+function computeIdentityLevelCloud(text, levelKeywords) {
+  var out = { Novice: [], Professional: [], Architect: [], native: [] };
+  if (!levelKeywords || typeof levelKeywords !== 'object') return out;
+  if (!text || typeof text !== 'string') return out;
+
+  var filtered = filterLevelKeywordsByText(levelKeywords, text);
+  var ac = buildIdentityACAutomaton(filtered);
+  var keywordSet = buildKeywordSet(levelKeywords);
+
+  var matches = ac.searchAllMatches(text);
+  matches.sort(function (a, b) { return b.length - a.length; });
+
+  var mask = new Uint8Array(text.length);
+  var rawCounts = { Novice: {}, Professional: {}, Architect: {} };
+  for (var i = 0; i < matches.length; i++) {
+    var m = matches[i];
+    var start = m.start;
+    var end = m.start + m.length;
+    if (start < 0 || end > text.length) continue;
+    if (!rangeOverlapsMask(start, end, mask)) {
+      var word = m.word;
+      var cat = m.category;
+      rawCounts[cat][word] = (rawCounts[cat][word] || 0) + 1;
+      markRange(start, end, mask);
+    }
+  }
+
+  for (var level of ['Novice', 'Professional', 'Architect']) {
+    var total = 0;
+    var maxInLevel = 0;
+    for (var w in rawCounts[level]) {
+      var cnt = rawCounts[level][w];
+      total += cnt;
+      if (cnt > maxInLevel) maxInLevel = cnt;
+    }
+    for (var w in rawCounts[level]) {
+      var c = rawCounts[level][w];
+      if (c > 0) {
+        out[level].push({ word: w, count: c, source: level.toLowerCase(), totalInLevel: total, maxInLevel: maxInLevel });
+      }
+    }
+    out[level].sort(function (a, b) { return b.count - a.count; });
+  }
+
+  out.native = extractNativeHighFreq(text, keywordSet, 20);
+  return out;
+}
+
+/**
+ * 超长文本分片扫描：每段 4 万字，段间 postMessage PROGRESS + setTimeout(0) 真正让出时间片
+ * 返回 Promise<identityLevelCloud>
+ */
+function computeIdentityLevelCloudAsync(text, levelKeywords) {
+  var CHUNK_LEN = 40000;
+  var out = { Novice: [], Professional: [], Architect: [], native: [] };
+  if (!levelKeywords || typeof levelKeywords !== 'object' || !text || typeof text !== 'string') {
+    return Promise.resolve(out);
+  }
+
+  var filtered = filterLevelKeywordsByText(levelKeywords, text);
+  var ac = buildIdentityACAutomaton(filtered);
+  var keywordSet = buildKeywordSet(levelKeywords);
+  var allMatches = [];
+  var offset = 0;
+  var totalLen = text.length;
+
+  function finish() {
+    allMatches.sort(function (a, b) { return b.length - a.length; });
+    var mask = new Uint8Array(text.length);
+    var rawCounts = { Novice: {}, Professional: {}, Architect: {} };
+    for (var i = 0; i < allMatches.length; i++) {
+      var m = allMatches[i];
+      var start = m.start;
+      var end = m.start + m.length;
+      if (start < 0 || end > text.length) continue;
+      if (!rangeOverlapsMask(start, end, mask)) {
+        var word = m.word;
+        var cat = m.category;
+        rawCounts[cat][word] = (rawCounts[cat][word] || 0) + 1;
+        markRange(start, end, mask);
+      }
+    }
+    for (var level of ['Novice', 'Professional', 'Architect']) {
+      var total = 0;
+      var maxInLevel = 0;
+      for (var w in rawCounts[level]) {
+        var cnt = rawCounts[level][w];
+        total += cnt;
+        if (cnt > maxInLevel) maxInLevel = cnt;
+      }
+      for (var w in rawCounts[level]) {
+        var c = rawCounts[level][w];
+        if (c > 0) out[level].push({ word: w, count: c, source: level.toLowerCase(), totalInLevel: total, maxInLevel: maxInLevel });
+      }
+      out[level].sort(function (a, b) { return b.count - a.count; });
+    }
+    out.native = extractNativeHighFreq(text, keywordSet, 20);
+    return out;
+  }
+
+  return new Promise(function (resolve) {
+    function nextChunk() {
+      if (offset >= totalLen) {
+        resolve(finish());
+        return;
+      }
+      var chunk = text.slice(offset, offset + CHUNK_LEN);
+      var chunkMatches = ac.searchAllMatches(chunk);
+      for (var j = 0; j < chunkMatches.length; j++) {
+        var m = chunkMatches[j];
+        allMatches.push({ start: m.start + offset, length: m.length, word: m.word, category: m.category });
+      }
+      offset += chunk.length;
+      try {
+        self.postMessage({ type: 'PROGRESS', payload: { phase: 'identityCloud', offset: offset, total: totalLen } });
+      } catch (_) {}
+      setTimeout(function () { nextChunk(); }, 0);
+    }
+    setTimeout(function () { nextChunk(); }, 0);
+  });
+}
+
+// ==========================================
+// 【V6.0】词云爆发力因子与扁平化
+// ==========================================
+
+function calculateSequenceCombo(categoryWords, currentWord, windowSize) {
+  windowSize = windowSize || 3;
+  const recent = categoryWords.slice(-windowSize);
+  const sameTypeMatches = recent.filter(function (w) {
+    return w.word === currentWord || Math.abs(w.word.length - currentWord.length) <= 1;
+  });
+  return sameTypeMatches.length;
+}
+
+function calculateIDFWeight(hits, totalHits) {
+  if (hits <= 0) return 1;
+  const maxHits = Math.max(hits, totalHits);
+  const ratio = hits / maxHits;
+  return Math.max(1, Math.min(5, 1 / Math.sqrt(ratio)));
+}
+
+function calculateWordCloudWeight(hits, idfWeight, sequenceCombo) {
+  const comboFactor = Math.log(1 + sequenceCombo);
+  return Math.round((hits * idfWeight) * comboFactor);
+}
+
+function flattenBlackwordHits(blackwordHits, totalHits) {
+  totalHits = totalHits || 1;
+  const result = [];
+  const wordHistory = [];
+  const sumChinese = Object.values(blackwordHits.chinese_slang || {}).reduce(function (a, b) { return a + b; }, 0);
+  const sumEnglish = Object.values(blackwordHits.english_slang || {}).reduce(function (a, b) { return a + b; }, 0);
+  if (blackwordHits.chinese_slang) {
+    const sortedWords = Object.entries(blackwordHits.chinese_slang).sort(function (a, b) { return b[1] - a[1]; });
+    for (let i = 0; i < sortedWords.length; i++) {
+      const word = sortedWords[i][0];
+      const hits = sortedWords[i][1];
+      const idfWeight = calculateIDFWeight(hits, sumChinese || totalHits);
+      const combo = calculateSequenceCombo(wordHistory, word);
+      const weight = calculateWordCloudWeight(hits, idfWeight, combo);
+      result.push({ name: word, value: weight, category: 'merit' });
+      wordHistory.push({ word: word, hits: hits });
+    }
+  }
+  if (blackwordHits.english_slang) {
+    const sortedWords = Object.entries(blackwordHits.english_slang).sort(function (a, b) { return b[1] - a[1]; });
+    for (let i = 0; i < sortedWords.length; i++) {
+      const word = sortedWords[i][0];
+      const hits = sortedWords[i][1];
+      const idfWeight = calculateIDFWeight(hits, sumEnglish || totalHits);
+      const combo = calculateSequenceCombo(wordHistory, word);
+      const weight = calculateWordCloudWeight(hits, idfWeight, combo);
+      result.push({ name: word, value: weight, category: 'slang' });
+      wordHistory.push({ word: word, hits: hits });
+    }
+  }
+  return result;
+}
 
 // ==========================================
 // 2. AC 自动机 (Aho-Corasick Automaton)
@@ -1322,7 +1696,6 @@ function scanAndMatch(chatData, patterns) {
     workDays, // 【2026-01-27 新增】工作天数
     codeRatio, // 【2026-01-27 新增】代码行占比
     feedbackDensity, // 【2026-01-27 新增】消息反馈密度
-    balanceScore, // 【2026-01-27 新增】维度平衡度
     diversityScore, // 【2026-01-27 新增】技术多样性
     totalSlangCount, // 【2026-01-27 新增】黑话命中总数
     styleIndex, // 【2026-01-27 新增】交互风格指数
@@ -1583,8 +1956,38 @@ self.onmessage = function(e) {
         break;
 
       case 'ANALYZE':
-        if (!acAutomaton || !bm25Scorer) throw new Error('Worker未初始化');
-        const { chatData } = payload;
+        (async function () {
+          try {
+          if (!acAutomaton || !bm25Scorer) throw new Error('Worker未初始化');
+          var chatData = payload.chatData;
+          var levelKeywords = payload.levelKeywords;
+
+          var userTextForCloud = (Array.isArray(chatData) ? chatData : [])
+          .filter((m) => {
+            const r = String(m?.role || '').toUpperCase();
+            return r === 'USER' || r === 'HUMAN' || r === 'U' || r === '';
+          })
+          .map((m) => String(m?.text || m?.content || '').trim())
+          .filter(Boolean)
+          .join('\n');
+
+        console.log('[Worker] 用户文本长度:', userTextForCloud.length);
+        console.log('[Worker] 词库状态:', levelKeywords ? {
+          Novice: levelKeywords.Novice?.length || 0,
+          Professional: levelKeywords.Professional?.length || 0,
+          Architect: levelKeywords.Architect?.length || 0
+        } : '未提供');
+
+        var identityLevelCloud = userTextForCloud.length > 150000
+          ? await computeIdentityLevelCloudAsync(userTextForCloud, levelKeywords)
+          : computeIdentityLevelCloud(userTextForCloud, levelKeywords);
+        
+        console.log('[Worker] identityLevelCloud 计算结果:', {
+          Novice: Array.isArray(identityLevelCloud.Novice) ? identityLevelCloud.Novice.length : 0,
+          Professional: Array.isArray(identityLevelCloud.Professional) ? identityLevelCloud.Professional.length : 0,
+          Architect: Array.isArray(identityLevelCloud.Architect) ? identityLevelCloud.Architect.length : 0,
+          native: Array.isArray(identityLevelCloud.native) ? identityLevelCloud.native.length : 0
+        });
 
         // 【2026-01-20 新增】初始化 BM25 文档频率
         bm25Scorer.initDocFreq(chatData, acAutomaton);
@@ -1748,15 +2151,28 @@ self.onmessage = function(e) {
             },
             totalSlangCount || 1
           ),
+          // 【三身份级别词云】Novice/Professional/Architect 词频 Map
+          identityLevelCloud,
         };
 
-        // 返回结果
+        // 分析结束后打印命中统计，便于排查「有数据但前端无展示」的传输问题
+        console.log('[Worker] 最终命中统计:', {
+          identityLevelCloud: {
+            Novice: (identityLevelCloud.Novice && identityLevelCloud.Novice.length) || 0,
+            Professional: (identityLevelCloud.Professional && identityLevelCloud.Professional.length) || 0,
+            Architect: (identityLevelCloud.Architect && identityLevelCloud.Architect.length) || 0,
+            native: (identityLevelCloud.native && identityLevelCloud.native.length) || 0
+          }
+        });
+
+        // 返回结果（identityLevelCloud 置于 payload 根以便主线程直接读取）
         self.postMessage({
           type: 'ANALYZE_SUCCESS',
           payload: {
             dimensions: normalizedScores,
             rawScores, // 仅供调试
             stats, // 【2026-01-27 新增】V6 接口标准 stats 字段
+            identityLevelCloud,
             metadata: {
               wordCount: estimatedWordCount,
               totalChars: totalTextLength,
@@ -1772,149 +2188,15 @@ self.onmessage = function(e) {
             // globalAverage 将在主线程中通过 fetchGlobalAverage() 获取并注入到 vibeResult 中
           },
         });
+          } catch (innerErr) {
+            self.postMessage({ type: 'ERROR', payload: { message: innerErr && innerErr.message ? innerErr.message : String(innerErr) } });
+          }
+        })();
         break;
 
       default:
         throw new Error(`未知类型: ${type}`);
     }
-// ==========================================
-// 【V6.0 新增】词云爆发力因子计算
-// ==========================================
-
-/**
- * 计算连击数（sequence_combo）
- * 检测连续出现同一类别的黑话
- * 
- * @param {Array} categoryWords - 词汇历史 [{word, hits}]
- * @param {string} currentWord - 当前词汇
- * @param {number} windowSize - 滑动窗口大小（默认 3）
- * @returns {number} 连击数
- */
-function calculateSequenceCombo(
-  categoryWords,
-  currentWord,
-  windowSize = 3
-) {
-  // 获取当前窗口内的词汇
-  const recent = categoryWords.slice(-windowSize);
-  
-  // 检测同类别词汇的连续出现
-  const sameTypeMatches = recent.filter(w => 
-    w.word === currentWord || 
-    Math.abs(w.word.length - currentWord.length) <= 1
-  );
-  
-  return sameTypeMatches.length;
-}
-
-/**
- * 计算 IDF 权重（基于词汇稀有度）
- * 稀有词获得更高权重
- * 
- * @param {number} hits - 该词的命中次数
- * @param {number} totalHits - 总命中次数（用于归一化）
- * @returns {number} IDF 权重 (1-5)
- */
-function calculateIDFWeight(hits, totalHits) {
-  if (hits <= 0) return 1;
-  
-  // 简单的稀有度模型：命中次数越少，权重越高
-  const maxHits = Math.max(hits, totalHits);
-  const ratio = hits / maxHits;
-  
-  // 权重范围：1（高频） 到 5（稀有）
-  return Math.max(1, Math.min(5, 1 / Math.sqrt(ratio)));
-}
-
-/**
- * 【V6.0 新增】计算词云权重（爆发力因子）
- * weight = (hits * IDF_weight) * log(1 + sequence_combo)
- * 
- * @param {number} hits - 该词的命中次数
- * @param {number} idfWeight - IDF 权重
- * @param {number} sequenceCombo - 连击数
- * @returns {number} 词云权重（整数）
- */
-function calculateWordCloudWeight(
-  hits,
-  idfWeight,
-  sequenceCombo
-) {
-  const comboFactor = Math.log(1 + sequenceCombo);
-  return Math.round((hits * idfWeight) * comboFactor);
-}
-
-/**
- * 【V6.0 新增】将 blackword_hits 转化为扁平化的 tag_cloud_data 数组
- * 格式：{name: string, value: number, category: string}
- * 
- * @param {Object} blackwordHits - {chinese_slang, english_slang}
- * @param {number} totalHits - 总命中次数（用于 IDF 计算）
- * @returns {Array} 扁平化的词云数据
- */
-function flattenBlackwordHits(
-  blackwordHits,
-  totalHits = 1
-) {
-  const result = [];
-  
-  // 词汇历史（用于连击检测）
-  const wordHistory = [];
-  
-  // 计算各类别的总命中次数（用于归一化）
-  const sumChinese = Object.values(blackwordHits.chinese_slang || {}).reduce((a, b) => a + b, 0);
-  const sumEnglish = Object.values(blackwordHits.english_slang || {}).reduce((a, b) => a + b, 0);
-  const totalCategoryHits = sumChinese + sumEnglish || 1;
-  
-  // 处理中文黑话（功德簿） -> category: 'merit'
-  if (blackwordHits.chinese_slang) {
-    const sortedWords = Object.entries(blackwordHits.chinese_slang)
-      .sort((a, b) => b[1] - a[1]); // 按频次排序
-    
-    for (const [word, hits] of sortedWords) {
-      const idfWeight = calculateIDFWeight(hits, sumChinese || totalHits);
-      const combo = calculateSequenceCombo(wordHistory, word);
-      const weight = calculateWordCloudWeight(hits, idfWeight, combo);
-      
-      result.push({
-        name: word,
-        value: weight,
-        category: 'merit'
-      });
-      
-      // 添加到历史（用于后续的连击检测）
-      wordHistory.push({word, hits});
-    }
-  }
-  
-  // 处理英文黑话（硅谷黑话） -> category: 'slang'
-  if (blackwordHits.english_slang) {
-    const sortedWords = Object.entries(blackwordHits.english_slang)
-      .sort((a, b) => b[1] - a[1]); // 按频次排序
-    
-    for (const [word, hits] of sortedWords) {
-      const idfWeight = calculateIDFWeight(hits, sumEnglish || totalHits);
-      const combo = calculateSequenceCombo(wordHistory, word);
-      const weight = calculateWordCloudWeight(hits, idfWeight, combo);
-      
-      result.push({
-        name: word,
-        value: weight,
-        category: 'slang'
-      });
-      
-      // 添加到历史（用于后续的连击检测）
-      wordHistory.push({word, hits});
-    }
-  }
-  
-  return result;
-}
-
-// ==========================================
-// 原有代码结束
-// ==========================================
-
   } catch (error) {
     self.postMessage({ type: 'ERROR', payload: { message: error.message } });
   }

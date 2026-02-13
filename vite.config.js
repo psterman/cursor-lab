@@ -1,25 +1,29 @@
 import { defineConfig } from 'vite';
-import { copyFileSync, mkdirSync } from 'fs';
+import { copyFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 
-// 自定义插件：复制 i18n.js 到 dist 目录
+// 自定义插件：复制 i18n.js 和身份级别词库 JSON 到 dist 目录
 const copyI18nPlugin = () => {
   return {
     name: 'copy-i18n',
     closeBundle() {
-      // 构建完成后复制 i18n.js
-      const srcPath = join(process.cwd(), 'src', 'i18n.js');
-      const distSrcDir = join(process.cwd(), 'dist', 'src');
-      const distPath = join(distSrcDir, 'i18n.js');
-      
       try {
-        // 确保 dist/src 目录存在
+        const distSrcDir = join(process.cwd(), 'dist', 'src');
         mkdirSync(distSrcDir, { recursive: true });
-        // 复制文件
-        copyFileSync(srcPath, distPath);
+        copyFileSync(join(process.cwd(), 'src', 'i18n.js'), join(distSrcDir, 'i18n.js'));
         console.log('[Vite] ✅ 已复制 src/i18n.js 到 dist/src/i18n.js');
       } catch (error) {
         console.error('[Vite] ❌ 复制 i18n.js 失败:', error);
+      }
+      for (const name of ['Novice.json', 'Professional.json', 'Architect.json']) {
+        try {
+          const src = join(process.cwd(), name);
+          const dest = join(process.cwd(), 'dist', name);
+          if (existsSync(src)) {
+            copyFileSync(src, dest);
+            console.log(`[Vite] ✅ 已复制 ${name} 到 dist/`);
+          }
+        } catch (e) { /* ignore */ }
       }
     }
   };

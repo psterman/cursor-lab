@@ -146,14 +146,15 @@ export function getVibeIndex(dimensions: { L: number; P: number; D: number; E: n
     return '2';                  // 高探索欲
   };
   
-  // 按照 L, P, D, E, F 的顺序拼接
-  return [
+  // 按照 L, P, D, E, F 的顺序拼接，强制 5 位防止溢出
+  const raw = [
     indexMap(dimensions.L),
     indexMap(dimensions.P),
     indexMap(dimensions.D),
     eIndex(dimensions.E),
     indexMap(dimensions.F),
   ].join('');
+  return raw.length > 5 ? raw.slice(0, 5) : (raw.length < 5 ? (raw + '00000').slice(0, 5) : raw);
 }
 
 /**

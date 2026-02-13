@@ -11,20 +11,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
         // #region agent log
-        (function() {
-            const checkChart = setInterval(function() {
-                if (window.Chart || globalThis.Chart) {
-                    fetch('http://127.0.0.1:7242/ingest/77cf65a2-f6f6-400e-839c-82d53b031ba9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.html:11',message:'Chart.js loaded successfully',data:{hasWindowChart:!!window.Chart,hasGlobalChart:!!globalThis.Chart,chartType:typeof(window.Chart||globalThis.Chart)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-                    clearInterval(checkChart);
-                }
-            }, 100);
-            setTimeout(function() {
-                if (!window.Chart && !globalThis.Chart) {
-                    fetch('http://127.0.0.1:7242/ingest/77cf65a2-f6f6-400e-839c-82d53b031ba9',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'index.html:11',message:'Chart.js failed to load after 5s',data:{hasWindowChart:!!window.Chart,hasGlobalChart:!!globalThis.Chart},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-                    clearInterval(checkChart);
-                }
-            }, 5000);
-        })();
+
         // #endregion
     </script>
     <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
@@ -159,6 +146,179 @@
             background: var(--accent-terminal);
             margin: 30px auto 0;
             box-shadow: 0 0 8px var(--accent-terminal);
+        }
+        /* stats2 顶部标题栏风格：仅用于 fullReport 顶部 */
+        .fullreport-topbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1200;
+            background: rgba(5, 5, 5, 0.95);
+            backdrop-filter: blur(18px);
+            border-bottom: 1px solid rgba(0, 255, 65, 0.2);
+            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.5);
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .fullreport-topbar .title {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+        .fullreport-topbar .title .main {
+            color: #ffffff;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            font-style: italic;
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .fullreport-topbar .title .sub {
+            margin-top: 2px;
+            font-size: 10px;
+            color: #71717a;
+            letter-spacing: 0.22em;
+            text-transform: uppercase;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        /* stats2 顶部固定 Header（在 index fullReport 复刻） */
+        .top-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1500;
+            background: rgba(5, 5, 5, 0.95);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(0, 255, 65, 0.2);
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.5);
+            pointer-events: auto;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .top-header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            min-width: 0;
+        }
+        .top-header-title {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+        .top-header-title h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 900;
+            letter-spacing: -0.02em;
+            font-style: italic;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .top-header-title p {
+            margin: 4px 0 0 0;
+            font-size: 9px;
+            color: #71717a;
+            letter-spacing: 0.3em;
+            font-weight: bold;
+            text-transform: uppercase;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .top-header-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .top-header-card {
+            border: 1px solid rgba(0, 255, 65, 0.25);
+            background: rgba(0, 0, 0, 0.35);
+            padding: 8px 10px;
+            min-width: 138px;
+        }
+        .top-header-card-label {
+            font-size: 9px;
+            color: rgba(113, 113, 122, 0.95);
+            letter-spacing: 0.22em;
+            text-transform: uppercase;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+        .top-header-card-value {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #00ff41;
+        }
+        .lang-flag-btn {
+            padding: 0;
+            background: transparent;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 44px;
+            height: 44px;
+            opacity: 0.6;
+            transform: scale(1);
+            box-shadow: none;
+            overflow: hidden;
+        }
+        .lang-flag-btn img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            border-radius: 50%;
+            transition: all 0.4s ease;
+            padding: 2px;
+            outline: none;
+            border: none;
+            box-shadow: none;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        .lang-flag-btn.active {
+            opacity: 1;
+            border: 3px solid var(--accent-terminal);
+            box-shadow: 0 0 16px rgba(0, 255, 65, 0.6), 0 0 32px rgba(0, 255, 65, 0.3), inset 0 0 20px rgba(0, 255, 65, 0.1);
+            transform: scale(1.1);
+        }
+        .lang-flag-btn:hover:not(.active) {
+            opacity: 0.9;
+            transform: scale(1.15);
+            transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .lang-flag-btn:hover.active {
+            border: 3px solid var(--accent-terminal);
+            transform: scale(1.15);
+            box-shadow: 0 0 20px rgba(0, 255, 65, 0.8), 0 0 40px rgba(0, 255, 65, 0.4), inset 0 0 25px rgba(0, 255, 65, 0.15);
+            transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s ease;
         }
         .logo-box {
             display: inline-block;
@@ -367,6 +527,10 @@
         .wordcloud-container canvas {
             width: 100% !important;
             height: 100% !important;
+        }
+        #identity-cloud-canvas {
+            min-width: 360px;
+            min-height: 360px;
         }
         .prompts-list {
             display: flex;
@@ -1029,6 +1193,10 @@
             0% { opacity: 0; transform: translateY(-20px); }
             50% { opacity: 0.5; }
             100% { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes fadeIn {
+            0% { opacity: 0; }
+            100% { opacity: 1; }
         }
         @media (max-width: 768px) {
             .stats-grid {
@@ -1824,7 +1992,7 @@
             }
         }
     </style>
-  <script type="module" crossorigin src="/cursor-lab/assets/main-Bkc18Q3w.js"></script>
+  <script type="module" crossorigin src="/cursor-lab/assets/main-DbpSa_XC.js"></script>
 </head>
 <body class="bg-[#050505]">
     <div id="root"></div>
@@ -2679,8 +2847,13 @@
                             <div class="wordcloud-section">
                                 <div class="chart-card">
                                     <h3 class="chart-title">${getText('dashboard.aiMerits')}</h3>
-                                    <div class="wordcloud-container">
-                                        <canvas id="chineseWordCloud"></canvas>
+                                    <div class="flex gap-2 mb-3" id="identity-level-tabs">
+                                        <button type="button" class="identity-level-btn active px-2 py-1 text-[10px] rounded border border-white/20 bg-[var(--accent-terminal)]/20 text-[var(--accent-terminal)] font-medium" data-level="Novice">新手村</button>
+                                        <button type="button" class="identity-level-btn px-2 py-1 text-[10px] rounded border border-white/20 text-zinc-400 hover:bg-white/5 font-medium" data-level="Professional">脱发期</button>
+                                        <button type="button" class="identity-level-btn px-2 py-1 text-[10px] rounded border border-white/20 text-zinc-400 hover:bg-white/5 font-medium" data-level="Architect">霸天级</button>
+                                    </div>
+                                    <div class="wordcloud-container" id="identity-cloud-container">
+                                        <canvas id="identity-cloud-canvas" width="400" height="400"></canvas>
                                     </div>
                                 </div>
                                 <div class="chart-card">
@@ -2862,6 +3035,7 @@
             const [analysisData, setAnalysisData] = useState(null);
             const [error, setError] = useState(null);
             const [isInitialized, setIsInitialized] = useState(false);
+            const [isSubmitting, setIsSubmitting] = useState(false); // 防止重复触发分析/重复写库
             const [totalTestUsers, setTotalTestUsers] = useState(0); // 从 API 获取，不使用硬编码
             // 实时统计数据（全部从 Cloudflare API 获取）
             const [totalUsers, setTotalUsers] = useState(0); // 受虐人数
@@ -2871,6 +3045,7 @@
             const [shareRankings, setShareRankings] = useState(null); // 分享的排名数据
             const [hasHistory, setHasHistory] = useState(false); // 是否有历史记录
             const [shareModal, setShareModal] = useState(null); // 分享弹窗数据 { show: boolean, message: string, shareUrl: string }
+            const [pathCopyToast, setPathCopyToast] = useState(false); // 路径复制轻 toast
             const folderInputRef = useRef(null);
             const fileInputRef = useRef(null);
             // 用于保存动画所需的旧值和新值
@@ -3901,6 +4076,12 @@
                 console.log('handleFileSelect 被调用', type);
                 console.log('folderInputRef.current:', folderInputRef.current);
                 console.log('fileInputRef.current:', fileInputRef.current);
+
+                // 请求未返回前禁止重复触发
+                if (isSubmitting || step === 'analyzing') {
+                    console.warn('[UI] 🛑 分析进行中，忽略重复选择操作');
+                    return;
+                }
                 
                 if (type === 'folder') {
                     if (folderInputRef.current) {
@@ -3922,6 +4103,12 @@
             // 处理文件上传
             const handleFileUpload = async (event, type) => {
                 console.log('handleFileUpload 被调用', { type, files: event.target.files });
+
+                // 【防重复】同一轮分析未结束前，忽略重复触发（双击/重复 onChange/并发）
+                if (isSubmitting || step === 'analyzing') {
+                    console.warn('[UI] 🛑 检测到重复触发 handleFileUpload，已忽略');
+                    return;
+                }
                 
                 const files = Array.from(event.target.files || []);
                 console.log('文件列表:', files.map(f => ({ name: f.name, size: f.size })));
@@ -3932,6 +4119,7 @@
                 }
 
                 setError(null);
+                setIsSubmitting(true);
                 setStep('analyzing');
                 setLogs([`> ${t('upload.logs.startParsing')}`]);
 
@@ -3996,18 +4184,21 @@
                             setLogs(prev => [...prev, `> ${t('upload.logs.analysisComplete')}`]);
                             setTimeout(() => {
                                 setStep('preview');
+                                setIsSubmitting(false);
                             }, 500);
                         },
                         onError: (err) => {
                             console.error('onError:', err);
                             setError(err.message || '处理失败');
                             setStep('upload');
+                            setIsSubmitting(false);
                         }
                     });
                 } catch (err) {
                     console.error('处理失败:', err);
                     setError(err.message || '处理失败');
                     setStep('upload');
+                    setIsSubmitting(false);
                 }
             };
 
@@ -4034,1213 +4225,696 @@
 
             // 进入完整报告
             const showFullReport = async () => {
-                console.log('showFullReport 被调用，发起 POST 请求增加计数值并上传统计数据...');
+                // 【性能优化】立即切换到 fullReport 页面，渲染和数据准备并行执行
+                setStep('fullReport');
                 
-                // 保存当前值，用于动画效果
-                const oldTotalUsers = totalUsers;
-                const oldTechRank = techRank;
-                const oldUnlockedCount = unlockedCount;
-                
-                // 获取当前用户的统计数据
+                // 获取当前用户的统计数据（复用已有数据，不阻塞渲染）
                 const stats = window.analysisModule?.getGlobalStats();
                 const vibeResult = window.analysisModule?.getVibeResult();
-                const analyzer = window.analysisModule?.getVibeAnalyzer();
-                const usageDays = calculateUsageDays(stats);
                 
-                // 如果有 vibeResult 和 analyzer，调用 uploadToSupabase 上传数据并获取排名
-                // 注意：uploadToSupabase 内部已经发送了 submit_stats 请求，不需要重复发送
-                let rankingResult = null;
+                // 尝试从已有数据获取排名
                 let newCount = 0;
-                let data = null; // 用于存储 API 返回的数据
+                let rankingResult = null;
                 
-                if (vibeResult && analyzer) {
-                    // ==========================================================
-                    // 【只读模式：彻底禁止二次写入】
-                    // main.js 的首次分析流程已经会写入并返回排名。
-                    // showFullReport 这里不再触发 uploadToSupabase，也不再走 /api/analyze 降级，
-                    // 否则会导致“一次上传 -> 多次写入 -> Supabase 出现多条相似记录”。
-                    // ==========================================================
-                    try {
-                        const existingTotalUsers =
-                            (vibeResult?.statistics?.totalUsers ?? vibeResult?.rankData?.totalUsers ?? null);
-                        const existingRankPercent =
-                            (vibeResult?.statistics?.rankPercent ?? vibeResult?.rankData?.rankPercent ?? null);
-                        const existingRanks = (vibeResult?.rankData?.ranks ?? null);
-
-                        // 尝试从本地缓存读 totalUsers（uploadToSupabase 通常会写 vibe_global_stats）
-                        let cachedTotalUsers = null;
-                        try {
-                            const gsRaw = localStorage.getItem('vibe_global_stats');
-                            if (gsRaw) {
-                                const gs = JSON.parse(gsRaw);
-                                cachedTotalUsers = gs?.totalUsers ?? gs?.total_users ?? null;
-                            }
-                        } catch { /* ignore */ }
-                        if (cachedTotalUsers == null) {
-                            try {
-                                const v = localStorage.getItem('totalTestUsers');
-                                cachedTotalUsers = (v != null && v !== '') ? Number(v) : null;
-                            } catch { /* ignore */ }
-                        }
-
-                        const totalUsersToUse = (existingTotalUsers != null ? existingTotalUsers : cachedTotalUsers);
-                        if (totalUsersToUse != null) newCount = Number(totalUsersToUse) || 0;
-
-                        if (existingTotalUsers != null && (existingRankPercent != null || existingRanks)) {
+                if (vibeResult) {
+                    const existingTotalUsers = vibeResult?.statistics?.totalUsers ?? vibeResult?.rankData?.totalUsers ?? null;
+                    const existingRankPercent = vibeResult?.statistics?.rankPercent ?? vibeResult?.rankData?.rankPercent ?? null;
+                    const existingRanks = vibeResult?.rankData?.ranks ?? null;
+                    
+                    if (existingTotalUsers != null) {
+                        newCount = Number(existingTotalUsers) || 0;
+                        if (existingRankPercent != null || existingRanks) {
                             rankingResult = {
                                 rankPercent: existingRankPercent ?? 0,
-                                totalUsers: Number(existingTotalUsers) || 0,
+                                totalUsers: newCount,
                                 ranks: existingRanks
                             };
-                        } else {
-                            rankingResult = null;
                         }
-
-                        console.log('[React] 🧠 showFullReport 只读：复用已有/缓存排名数据', {
-                            totalUsers: newCount,
-                            hasRanks: !!existingRanks,
-                            hasRankPercent: existingRankPercent != null
-                        });
-                    } catch (e) {
-                        console.warn('[React] showFullReport 只读模式异常:', e);
+                    }
+                    
+                    // 如果没有已有数据，尝试从 localStorage 读取
+                    if (newCount === 0) {
+                        try {
+                            const cached = localStorage.getItem('totalTestUsers');
+                            if (cached) newCount = Number(cached) || 0;
+                        } catch { /* ignore */ }
                     }
                 }
                 
-                // 统一更新所有相关状态（无论数据来源是 uploadToSupabase 还是降级请求）
-                // 允许 newCount 为 0（表示数据库为空或查询失败，但仍尝试更新）
-                if (typeof newCount === 'number' && newCount >= 0) {
-                    // 更新所有相关状态
-                    setTotalUsers(newCount >= 0 ? newCount : 0);
-                    setTotalTestUsers(newCount >= 0 ? newCount : 0);
+                // 更新状态
+                if (newCount > 0) {
+                    setTotalUsers(newCount);
+                    setTotalTestUsers(newCount);
+                    setTechRank(Math.floor(newCount * 0.6));
+                    setUnlockedCount(Math.min(100, parseFloat((newCount / 1000).toFixed(1))));
                     
-                    // 根据新的总人数动态计算技术排名和人格库解锁
-                    const calculatedRank = Math.floor(newCount * 0.6);
-                    setTechRank(calculatedRank);
-                    
-                    const calculatedUnlocked = Math.min(100, parseFloat((newCount / 1000).toFixed(1)));
-                    setUnlockedCount(calculatedUnlocked);
-                    
-                    // 保存到本地存储作为 fallback
-                    localStorage.setItem('totalTestUsers', newCount.toString());
-                    
-                    // 保存排名数据到状态（优先使用 uploadToSupabase 返回的排名，否则使用 API 返回的排名）
-                    if (rankingResult && rankingResult.ranks) {
-                        // 优先使用 uploadToSupabase 返回的 ranks 对象（多维排名数据）
-                        const apiTotalUsers = rankingResult.totalUsers || newCount || 0;
-                        const ranks = rankingResult.ranks || {};
-                        
-                        // 将百分比排名转换为实际排名数字
+                    // 构建排名数据
+                    if (rankingResult?.ranks) {
+                        const apiTotalUsers = rankingResult.totalUsers || newCount;
+                        const ranks = rankingResult.ranks;
                         const convertPercentToRank = (percent) => {
-                            if (percent === null || percent === undefined || apiTotalUsers <= 0) return null;
-                            if (percent <= 0) return apiTotalUsers;
+                            if (!percent || apiTotalUsers <= 0) return null;
                             const beaten = Math.floor(apiTotalUsers * (percent / 100));
-                            const rank = Math.max(1, apiTotalUsers - beaten);
-                            return rank;
+                            return Math.max(1, apiTotalUsers - beaten);
                         };
-                        
                         window.userRankings = {
-                            qingCount: { 
-                                rank: convertPercentToRank(ranks.ketaoRank), 
-                                total: apiTotalUsers 
-                            },
-                            buCount: { 
-                                rank: convertPercentToRank(ranks.jiafangRank), 
-                                total: apiTotalUsers 
-                            },
-                            userMessages: { 
-                                rank: convertPercentToRank(ranks.messageRank), 
-                                total: apiTotalUsers 
-                            },
-                            totalUserChars: { 
-                                rank: convertPercentToRank(ranks.charRank), 
-                                total: apiTotalUsers 
-                            },
-                            avgUserMessageLength: { 
-                                rank: convertPercentToRank(ranks.avgRank), 
-                                total: apiTotalUsers 
-                            },
-                            usageDays: { 
-                                rank: convertPercentToRank(ranks.daysRank), 
-                                total: apiTotalUsers 
-                            }
+                            qingCount: { rank: convertPercentToRank(ranks.ketaoRank), total: apiTotalUsers },
+                            buCount: { rank: convertPercentToRank(ranks.jiafangRank), total: apiTotalUsers },
+                            userMessages: { rank: convertPercentToRank(ranks.messageRank), total: apiTotalUsers },
+                            totalUserChars: { rank: convertPercentToRank(ranks.charRank), total: apiTotalUsers },
+                            avgUserMessageLength: { rank: convertPercentToRank(ranks.avgRank), total: apiTotalUsers },
+                            usageDays: { rank: convertPercentToRank(ranks.daysRank), total: apiTotalUsers }
                         };
-                        console.log('[React] ✅ 排名数据已保存（来自 uploadToSupabase ranks）:', window.userRankings);
-                        console.log('[React] 原始 ranks 数据:', ranks);
-                    } else if (rankingResult && rankingResult.totalUsers > 0) {
-                        // 使用 uploadToSupabase 返回的排名数据（单个 rankPercent）
-                        const finalRank = rankingResult.rankPercent ?? rankingResult.ranking ?? 0;
-                        if (finalRank > 0) {
-                            // 构造排名数据结构
-                            window.userRankings = {
-                                qingCount: { rank: Math.round(rankingResult.totalUsers * (finalRank / 100)), total: rankingResult.totalUsers },
-                                buCount: { rank: Math.round(rankingResult.totalUsers * (finalRank / 100)), total: rankingResult.totalUsers },
-                                userMessages: { rank: Math.round(rankingResult.totalUsers * (finalRank / 100)), total: rankingResult.totalUsers },
-                                totalUserChars: { rank: Math.round(rankingResult.totalUsers * (finalRank / 100)), total: rankingResult.totalUsers },
-                                avgUserMessageLength: { rank: Math.round(rankingResult.totalUsers * (finalRank / 100)), total: rankingResult.totalUsers },
-                                usageDays: { rank: Math.round(rankingResult.totalUsers * (finalRank / 100)), total: rankingResult.totalUsers }
-                            };
-                            console.log('[React] ✅ 排名数据已保存（来自 uploadToSupabase rankPercent）:', window.userRankings);
-                        }
-                    } else if (data && data.ranks && data.totalUsers) {
-                        // 处理 Worker 返回的 data.ranks 格式（百分比排名）
-                        // ranks 对象包含：messageRank, charRank, daysRank, jiafangRank, ketaoRank, avgRank
-                        // 这些百分比表示击败了多少用户（beatMsg / totalUsers * 100）
-                        const apiTotalUsers = data.totalUsers || newCount || 0;
-                        const ranks = data.ranks || {};
-                        
-                        // 将百分比排名转换为实际排名数字
-                        // Worker 中：percent = Math.floor((beatMsg / totalUsers) * 100)
-                        // 所以：beatMsg ≈ Math.floor(percent * totalUsers / 100)
-                        // 实际排名 = totalUsers - beatMsg（因为 beatMsg 是击败的用户数，即排名更低的用户数）
-                        const convertPercentToRank = (percent) => {
-                            if (percent === null || percent === undefined || apiTotalUsers <= 0) return null;
-                            // 如果百分比为 0，说明没有击败任何用户，排名可能是最后一名
-                            if (percent <= 0) return apiTotalUsers;
-                            // 计算击败的用户数（向下取整，与 Worker 中的计算保持一致）
-                            const beaten = Math.floor(apiTotalUsers * (percent / 100));
-                            // 实际排名 = 总用户数 - 击败的用户数
-                            // 排名从 1 开始，所以如果击败了 0 个用户，排名是 totalUsers（最后一名）
-                            // 如果击败了 totalUsers-1 个用户，排名是 1（第一名）
-                            const rank = Math.max(1, apiTotalUsers - beaten);
-                            return rank;
-                        };
-                        
-                        window.userRankings = {
-                            qingCount: { 
-                                rank: convertPercentToRank(ranks.ketaoRank), 
-                                total: apiTotalUsers 
-                            },
-                            buCount: { 
-                                rank: convertPercentToRank(ranks.jiafangRank), 
-                                total: apiTotalUsers 
-                            },
-                            userMessages: { 
-                                rank: convertPercentToRank(ranks.messageRank), 
-                                total: apiTotalUsers 
-                            },
-                            totalUserChars: { 
-                                rank: convertPercentToRank(ranks.charRank), 
-                                total: apiTotalUsers 
-                            },
-                            avgUserMessageLength: { 
-                                rank: convertPercentToRank(ranks.avgRank), 
-                                total: apiTotalUsers 
-                            },
-                            usageDays: { 
-                                rank: convertPercentToRank(ranks.daysRank), 
-                                total: apiTotalUsers 
-                            }
-                        };
-                        console.log('[React] ✅ 排名数据已保存（来自 API ranks）:', window.userRankings);
-                        console.log('[React] 原始 ranks 数据:', ranks);
-                    } else if (data && data.rankings) {
-                        // 兼容旧格式：data.rankings（完整排名对象）
-                        window.userRankings = data.rankings;
-                        console.log('[React] ✅ 排名数据已保存（来自 API rankings）:', data.rankings);
-                    } else if (data && (data.ranking !== undefined || data.rankPercent !== undefined)) {
-                        // 兼容新格式：data.ranking 或 data.rankPercent（单个排名值）
-                        const apiRank = data.rankPercent ?? data.ranking ?? 0;
-                        const apiTotalUsers = data.totalUsers || newCount || 0;
-                        if (apiRank > 0 && apiTotalUsers > 0) {
-                            window.userRankings = {
-                                qingCount: { rank: Math.round(apiTotalUsers * (apiRank / 100)), total: apiTotalUsers },
-                                buCount: { rank: Math.round(apiTotalUsers * (apiRank / 100)), total: apiTotalUsers },
-                                userMessages: { rank: Math.round(apiTotalUsers * (apiRank / 100)), total: apiTotalUsers },
-                                totalUserChars: { rank: Math.round(apiTotalUsers * (apiRank / 100)), total: apiTotalUsers },
-                                avgUserMessageLength: { rank: Math.round(apiTotalUsers * (apiRank / 100)), total: apiTotalUsers },
-                                usageDays: { rank: Math.round(apiTotalUsers * (apiRank / 100)), total: apiTotalUsers }
-                            };
-                            console.log('[React] ✅ 排名数据已保存（来自 API ranking/rankPercent）:', window.userRankings);
-                        }
-                    } else {
-                        console.warn('[React] ⚠️ 未找到排名数据！');
-                        console.warn('[React] 请检查：');
-                        console.warn('1. 是否已更新 Cloudflare Worker 代码（参考 CLOUDFLARE_WORKER_RANKING.md）');
-                        console.warn('2. 浏览器控制台是否有 API 错误');
-                        console.warn('3. 运行 RANKING_DEBUG.md 中的调试代码');
                     }
-
-                    // 保存到历史记录
-                    try {
-                        const historyData = {
-                            analysisData: analysisData,
-                            rankings: (rankingResult && window.userRankings) || window.userRankings || (data && data.rankings) || null,
-                            timestamp: Date.now()
-                        };
-                        localStorage.setItem('cursor_clinical_history', JSON.stringify(historyData));
-                        setHasHistory(true);
-                        console.log('[History] 已保存到历史记录');
-                    } catch (e) {
-                        console.error('[History] 保存历史记录失败:', e);
-                    }
-                    
-                    console.log('[React] ✅ 数据上传和排名更新完成:', {
-                        totalUsers: newCount,
-                        techRank: Math.floor(newCount * 0.6),
-                        unlockedCount: Math.min(100, parseFloat((newCount / 1000).toFixed(1))),
-                        hasRankings: !!window.userRankings,
-                        dataSource: rankingResult ? 'uploadToSupabase' : (data ? 'fallback API' : 'none')
-                    });
-                    
-                    // 保存动画数据到 ref，等待 Dashboard 渲染完成后触发
-                    animationDataRef.current = {
-                        totalUsers: { old: oldTotalUsers, new: newCount },
-                        techRank: { old: oldTechRank, new: Math.floor(newCount * 0.6) },
-                        unlockedCount: { old: oldUnlockedCount, new: Math.min(100, parseFloat((newCount / 1000).toFixed(1))) }
-                    };
-                } else {
-                    // 如果所有请求都失败，使用 localStorage fallback
-                    console.warn('[React] ⚠️ 所有上传请求都失败，使用 localStorage fallback');
-                    const cached = parseInt(localStorage.getItem('totalTestUsers') || '0');
-                    setTotalUsers(cached >= 0 ? cached : 0);
-                    setTotalTestUsers(cached >= 0 ? cached : 0);
-                    setTechRank(Math.floor(cached * 0.6));
-                    setUnlockedCount(Math.min(100, parseFloat((cached / 1000).toFixed(1))));
                 }
                 
-                // 【关键修复】在进入 fullReport 前，将 analysisData 保存到全局变量
+                // 【关键优化】将数据保存到全局变量（立即执行，不阻塞）
                 if (analysisData && window.analysisModule) {
-                    if (analysisData.stats && window.analysisModule.setGlobalStats) {
-                        window.analysisModule.setGlobalStats(analysisData.stats);
-                        console.log('[React] ✅ 已保存 stats 到全局变量');
-                    }
-                    if (analysisData.vibeResult && window.analysisModule.setVibeResult) {
+                    if (analysisData.stats) window.analysisModule.setGlobalStats(analysisData.stats);
+                    if (analysisData.vibeResult) {
                         window.analysisModule.setVibeResult(analysisData.vibeResult);
-                        // 将答案之书写入 localStorage，供 stats2 左侧抽屉「今日箴言」读取
                         try {
                             const ab = analysisData.vibeResult.answer_book || analysisData.vibeResult.answerBook;
                             if (ab && (ab.title || ab.content)) {
                                 localStorage.setItem('user_answer_book', JSON.stringify(ab));
-                                console.log('[React] ✅ 已保存答案之书到 localStorage，供左侧抽屉使用');
                             }
                             if (analysisData.vibeResult.vibeIndex || analysisData.vibeResult.vibe_index) {
                                 localStorage.setItem('user_vibe_index', analysisData.vibeResult.vibeIndex || analysisData.vibeResult.vibe_index);
                             }
-                        } catch (e) {
-                            console.warn('[React] 保存答案之书到 localStorage 失败:', e);
-                        }
-                        console.log('[React] ✅ 已保存 vibeResult 到全局变量:', {
-                            hasPersonalityName: !!analysisData.vibeResult.personalityName,
-                            hasRoastText: !!analysisData.vibeResult.roastText,
-                            hasDimensions: !!analysisData.vibeResult.dimensions,
-                            hasAnalysis: !!analysisData.vibeResult.analysis,
-                            hasSemanticFingerprint: !!analysisData.vibeResult.semanticFingerprint
-                        });
+                        } catch { /* ignore */ }
                     }
-                    if (analysisData.chatData && window.analysisModule.setAllChatData) {
-                        window.analysisModule.setAllChatData(analysisData.chatData);
-                        console.log('[React] ✅ 已保存 chatData 到全局变量');
+                    if (analysisData.chatData) window.analysisModule.setAllChatData(analysisData.chatData);
+                }
+                
+                // 【关键优化】使用 requestAnimationFrame 完成所有渲染，避免多层嵌套 setTimeout
+                requestAnimationFrame(() => {
+                    const container = document.getElementById('fullReportContainer');
+                    if (!container || !window.analysisModule) return;
+                    
+                    // 创建 Dashboard DOM
+                    recreateDashboardDOM(lang);
+                    container.style.display = 'block';
+                    
+                    // 渲染 Dashboard
+                    const dashboardSection = container.querySelector('#dashboardSection');
+                    if (dashboardSection) {
+                        dashboardSection.classList.remove('hidden');
+                        dashboardSection.style.display = 'block';
+                    }
+                    
+                    // 获取数据并渲染
+                    const currentStats = window.analysisModule.getGlobalStats();
+                    const currentVibeResult = window.analysisModule.getVibeResult();
+                    
+                    if (currentVibeResult) {
+                        window.analysisModule.renderFullDashboard(currentVibeResult);
+                    }
+                    
+                    // 更新排名徽章（非关键路径，延迟执行）
+                    if (window.userRankings) {
+                        setTimeout(() => {
+                            updateRankingBadges(window.userRankings, localStorage.getItem('appLanguage') || 'zh-CN');
+                        }, 50);
+                    }
+                });
+                
+                // 后台保存历史记录（非阻塞）
+                setTimeout(() => {
+                    try {
+                        const historyData = {
+                            analysisData: analysisData,
+                            rankings: window.userRankings || null,
+                            timestamp: Date.now()
+                        };
+                        localStorage.setItem('cursor_clinical_history', JSON.stringify(historyData));
+                        setHasHistory(true);
+                    } catch { /* ignore */ }
+                }, 0);
+            };
+
+            // ===== 排名数据加载和更新函数 =====
+            
+            // 加载排名JSON数据
+            // 将缓存暴露到全局，以便在语言切换时清除
+            if (!window.rankingDataCache) {
+                window.rankingDataCache = {};
+            }
+            const rankingDataCache = window.rankingDataCache;
+            const loadRankingData = async (jsonFile, lang = 'zh-CN') => {
+                // 根据语言生成缓存键
+                const cacheKey = `${jsonFile}_${lang}`;
+                if (rankingDataCache[cacheKey]) {
+                    return rankingDataCache[cacheKey];
+                }
+                try {
+                    // 尝试加载对应语言的JSON文件
+                    let targetFile = jsonFile;
+                    if (lang === 'en') {
+                        // 英文版使用*2.json格式（如please2.json, word2.json等）
+                        const enFile = jsonFile.replace('.json', '2.json');
+                        try {
+                            const enResponse = await fetch(`src/${enFile}`);
+                            if (enResponse.ok) {
+                                targetFile = enFile;
+                            } else {
+                                // 英文文件不存在，使用中文版本
+                                console.warn(`英文版文件 ${enFile} 不存在（HTTP ${enResponse.status}），使用中文版本`);
+                            }
+                        } catch (e) {
+                            // 英文文件不存在，使用中文版本
+                            console.warn(`英文版文件 ${enFile} 加载失败，使用中文版本:`, e.message);
+                        }
+                    }
+                    const response = await fetch(`src/${targetFile}`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    // 英文版JSON文件可能包含多个JSON对象，需要特殊处理
+                    const text = await response.text();
+                    let data;
+                    if (lang === 'en' && targetFile.endsWith('2.json')) {
+                        // 英文版文件（*2.json）可能包含多个独立的JSON对象
+                        // 先尝试作为单个JSON解析
+                        try {
+                            data = JSON.parse(text);
+                            // 如果解析成功但没有segments字段，说明是单个对象，需要转换为segments数组
+                            if (!data.segments && !data.levels) {
+                                data = { segments: [data], isEnglishFormat: true };
+                            } else if (data.segments) {
+                                data.isEnglishFormat = true;
+                            }
+                        } catch (e) {
+                            // 如果失败，尝试分割多个JSON对象
+                            // 查找所有独立的JSON对象（以{开头，以}结尾）
+                            const segments = [];
+                            let braceCount = 0;
+                            let startPos = -1;
+                            
+                            for (let i = 0; i < text.length; i++) {
+                                if (text[i] === '{') {
+                                    if (braceCount === 0) startPos = i;
+                                    braceCount++;
+                                } else if (text[i] === '}') {
+                                    braceCount--;
+                                    if (braceCount === 0 && startPos !== -1) {
+                                        // 找到一个完整的JSON对象
+                                        try {
+                                            const jsonStr = text.substring(startPos, i + 1);
+                                            const obj = JSON.parse(jsonStr);
+                                            segments.push(obj);
+                                        } catch (parseError) {
+                                            console.warn('解析JSON对象失败:', parseError);
+                                        }
+                                        startPos = -1;
+                                    }
+                                }
+                            }
+                            
+                            if (segments.length > 0) {
+                                data = { segments: segments, isEnglishFormat: true };
+                            } else {
+                                // 如果英文版解析失败，尝试加载中文版本作为回退
+                                console.warn(`英文版 ${targetFile} 解析失败，尝试加载中文版本`);
+                                const zhFile = jsonFile; // 使用原始的中文文件名
+                                try {
+                                    const zhResponse = await fetch(`src/${zhFile}`);
+                                    if (zhResponse.ok) {
+                                        const zhText = await zhResponse.text();
+                                        data = JSON.parse(zhText);
+                                        console.log(`已回退到中文版本: ${zhFile}`);
+                                    } else {
+                                        throw new Error(`无法加载中文版本 ${zhFile}`);
+                                    }
+                                } catch (zhError) {
+                                    throw new Error(`无法解析JSON文件（英文版和中文版都失败）`);
+                                }
+                            }
+                        }
+                    } else {
+                        data = JSON.parse(text);
+                    }
+                    rankingDataCache[cacheKey] = data;
+                    return data;
+                } catch (error) {
+                    console.error(`加载 ${jsonFile} 失败:`, error);
+                    return null;
+                }
+            };
+            
+            // 根据排名匹配对应的level和comment
+            const getRankingComment = (data, rank, total, lang = 'zh-CN') => {
+                if (!data || rank === null || rank === undefined || total <= 0) {
+                    console.warn('[getRankingComment] 参数无效:', { data: !!data, rank, total, lang });
+                    return null;
+                }
+                
+                // 强制类型转换：将输入值转换为数字，防止字符串对比导致的逻辑失效
+                const rankNum = parseFloat(rank);
+                const totalNum = parseFloat(total);
+                
+                if (isNaN(rankNum) || isNaN(totalNum) || totalNum <= 0) {
+                    console.warn('[getRankingComment] 参数转换失败:', { rank, total, rankNum, totalNum });
+                    return null;
+                }
+                
+                // 限制 rank 范围，防止溢出：Math.min(99, Math.max(1, rank))
+                const safeRank = Math.min(99, Math.max(1, rankNum));
+                const safeTotal = Math.max(1, totalNum);
+                
+                const percent = ((safeTotal - safeRank + 1) / safeTotal * 100);
+                const rankPercent = (safeRank / safeTotal) * 100;
+                
+                console.log('[getRankingComment] 开始匹配:', {
+                    rank, 
+                    total, 
+                    percent: percent.toFixed(1) + '%',
+                    rankPercent: rankPercent.toFixed(1) + '%',
+                    lang,
+                    hasLevels: !!data.levels,
+                    levelsCount: data.levels?.length
+                });
+                
+                // 处理英文版JSON格式（有segments数组或isEnglishFormat标志）
+                if (data.isEnglishFormat && data.segments) {
+                    // 英文版：根据rank匹配segment
+                    for (const segment of data.segments) {
+                        if (!segment.segment || !segment.comments) continue;
+                        
+                        // 解析segment格式，如"Rank 1-33"或"Rank 68-100"
+                        const segmentMatch = segment.segment.match(/Rank\s+(\d+)-(\d+)/);
+                        if (segmentMatch) {
+                            const minRank = parseInt(segmentMatch[1]);
+                            const maxRank = parseInt(segmentMatch[2]);
+                            if (rank >= minRank && rank <= maxRank) {
+                                // 找到匹配的segment，随机选择一个comment
+                                const randomComment = segment.comments[Math.floor(Math.random() * segment.comments.length)];
+                                return {
+                                    title: randomComment.title,
+                                    content: randomComment.content,
+                                    label: segment.segment
+                                };
+                            }
+                        }
+                    }
+                    return null;
+                }
+                
+                // 处理中文版JSON格式（有levels数组）
+                if (!data.levels) {
+                    return null;
+                }
+                
+                // 遍历levels，找到匹配的level
+                for (const level of data.levels) {
+                    const range = level.range;
+                    
+                    // 处理不同的range格式
+                    let matched = false;
+                    
+                    // 处理 "TOP 81-100" 格式（please.json）
+                    if (range.startsWith('TOP ')) {
+                        const rangeStr = range.replace('TOP ', '');
+                        const [minPercent, maxPercent] = rangeStr.split('-').map(s => parseFloat(s.trim()));
+                        const minP = parseFloat(minPercent);
+                        const maxP = parseFloat(maxPercent);
+                        if (!isNaN(minP) && !isNaN(maxP) && percent >= minP && percent <= maxP) {
+                            matched = true;
+                        }
+                    }
+                    // 处理 "1-10", "11-30" 等格式（no.json, ai.json）
+                    else if (/^\d+-\d+$/.test(range)) {
+                        const [minRank, maxRank] = range.split('-').map(s => parseInt(s.trim()));
+                        const minR = parseInt(minRank);
+                        const maxR = parseInt(maxRank);
+                        if (!isNaN(minR) && !isNaN(maxR) && safeRank >= minR && safeRank <= maxR) {
+                            matched = true;
+                        }
+                    }
+                    // 处理 "91-100+" 格式（no.json）
+                    else if (/^\d+-\d+\+$/.test(range)) {
+                        const [minRank] = range.replace('+', '').split('-').map(s => parseInt(s.trim()));
+                        const minR = parseInt(minRank);
+                        if (!isNaN(minR) && safeRank >= minR) {
+                            matched = true;
+                        }
+                    }
+                    // 处理 "1-7天", "8-30天" 等格式（day.json）
+                    else if (range.includes('天') || range === '181+' || range === '181+天') {
+                        const currentRankPercent = (safeRank / safeTotal) * 100;
+                        
+                        console.log(`[day.json匹配] range: ${range}, currentRankPercent: ${currentRankPercent}`);
+                        
+                        if (range === '181+' || range === '181+天') {
+                            if (currentRankPercent <= 20.0) {
+                                console.log(`[day.json匹配成功] ${range} matched!`);
+                                matched = true;
+                            }
+                        } else if (range === '91-180天') {
+                            if (currentRankPercent > 20.0 && currentRankPercent <= 40.0) matched = true;
+                        } else if (range === '31-90天') {
+                            if (currentRankPercent > 40.0 && currentRankPercent <= 60.0) matched = true;
+                        } else if (range === '8-30天') {
+                            if (currentRankPercent > 60.0 && currentRankPercent <= 80.0) matched = true;
+                        } else if (range === '1-7天') {
+                            if (currentRankPercent > 80.0) matched = true;
+                        }
+                    }
+                    // 处理 "1-50字", "51-200字" 等格式（word.json）
+                    else if (range === '1001+' || range === '1001+字' || range === '1-50字' || range === '51-200字' || range === '201-500字' || range === '501-1000字') {
+                        const currentRankPercent = (safeRank / safeTotal) * 100;
+                        
+                        console.log(`[word.json匹配] range: ${range}, currentRankPercent: ${currentRankPercent}`);
+                        
+                        if (range === '1001+' || range === '1001+字') {
+                            if (currentRankPercent <= 20.0) {
+                                console.log(`[word.json匹配成功] ${range} matched!`);
+                                matched = true;
+                            }
+                        } else if (range === '501-1000字') {
+                            if (currentRankPercent > 20.0 && currentRankPercent <= 40.0) {
+                                console.log(`[word.json匹配成功] ${range} matched!`);
+                                matched = true;
+                            }
+                        } else if (range === '201-500字') {
+                            if (currentRankPercent > 40.0 && currentRankPercent <= 60.0) matched = true;
+                        } else if (range === '51-200字') {
+                            if (currentRankPercent > 60.0 && currentRankPercent <= 80.0) matched = true;
+                        } else if (range === '1-50字') {
+                            if (currentRankPercent > 80.0) matched = true;
+                        }
+                    }
+                    // 处理 "1-500字", "501-2000字" 等格式（say.json）
+                    else if (range === '10001+字' || range === '5001-10000字' || range === '2001-5000字' || range === '501-2000字' || range === '1-500字') {
+                        const currentRankPercent = (safeRank / safeTotal) * 100;
+                        if (range === '10001+字') {
+                            if (currentRankPercent <= 20) matched = true;
+                        } else if (range === '5001-10000字') {
+                            if (currentRankPercent > 20 && currentRankPercent <= 40) matched = true;
+                        } else if (range === '2001-5000字') {
+                            if (currentRankPercent > 40 && currentRankPercent <= 60) matched = true;
+                        } else if (range === '501-2000字') {
+                            if (currentRankPercent > 60 && currentRankPercent <= 80) matched = true;
+                        } else if (range === '1-500字') {
+                            if (currentRankPercent > 80) matched = true;
+                        }
+                    }
+                    
+                    if (matched && level.comments && level.comments.length > 0) {
+                        // 随机选择一个comment
+                        const randomComment = level.comments[Math.floor(Math.random() * level.comments.length)];
+                        
+                        // 调试日志
+                        console.log(`[getRankingComment] 匹配成功:`, {
+                            range: range,
+                            rank: rank,
+                            total: total,
+                            rankPercent: rankPercent.toFixed(1) + '%',
+                            title: randomComment.title,
+                            content: randomComment.content?.substring(0, 50) + '...'
+                        });
+                        
+                        // 根据语言选择对应的文本
+                        let title = randomComment.title;
+                        let content = randomComment.content;
+                        let label = level.label;
+                        
+                        // 如果当前语言是英文，但数据是中文，尝试使用多语言字段或提供默认翻译
+                        if (lang === 'en') {
+                            // 优先使用英文字段（如果存在）
+                            if (randomComment.title_en) {
+                                title = randomComment.title_en;
+                            }
+                            if (randomComment.content_en) {
+                                content = randomComment.content_en;
+                            }
+                            if (level.label_en) {
+                                label = level.label_en;
+                            }
+                        }
+                        
+                        return {
+                            title: title,
+                            content: content,
+                            label: label
+                        };
                     }
                 }
                 
-                setStep('fullReport');
-                // 延迟渲染，确保 DOM 已更新
-                setTimeout(() => {
-                    const container = document.getElementById('fullReportContainer');
-                    if (container && window.analysisModule) {
-                        console.log('创建 Dashboard DOM...');
-                        // 使用 recreateDashboardDOM 函数创建 Dashboard DOM（使用当前语言）
-                        recreateDashboardDOM(lang);
-                        // 显示容器
-                        container.style.display = 'block';
-                        
-                        // 等待 DOM 完全渲染后再调用渲染函数
-                        setTimeout(() => {
-                            console.log('开始渲染 Dashboard...');
-                            // 显示 Dashboard
-                            const dashboardSection = container.querySelector('#dashboardSection');
-                            if (dashboardSection) {
-                                dashboardSection.classList.remove('hidden');
-                                dashboardSection.style.display = 'block';
-                            }
-                            
-                            // 确保数据已准备好
-                            const stats = window.analysisModule.getGlobalStats();
-                            const vibeResult = window.analysisModule.getVibeResult();
-                            console.log('数据状态:', {
-                                hasStats: !!stats,
-                                hasVibeResult: !!vibeResult,
-                                vibeResultKeys: vibeResult ? Object.keys(vibeResult) : null
-                            });
-                            
-                            // 渲染完整 Dashboard，传递 vibeResult 参数
-                            try {
-                                window.analysisModule.renderFullDashboard(vibeResult);
-                                console.log('Dashboard 渲染完成');
-                                
-                                // 确保 AnswerBookCard 在 Dashboard 渲染后也能正确渲染
-                                setTimeout(() => {
-                                    const answerBookContainer = document.getElementById('answerBookCardContainer');
-                                    console.log('[renderFullDashboard后] 检查 AnswerBookCard 容器:', {
-                                        container存在: !!answerBookContainer,
-                                        containerId: answerBookContainer?.id,
-                                        containerParent: answerBookContainer?.parentElement?.id,
-                                        windowReact存在: !!window.React,
-                                        windowReactDOM存在: !!window.ReactDOM,
-                                    });
-                                    
-                                    if (answerBookContainer && !answerBookContainer.hasChildNodes() && window.React && window.ReactDOM) {
-                                        console.log('[renderFullDashboard后] 重新渲染 AnswerBookCard');
-                                        const root = window.ReactDOM.createRoot(answerBookContainer);
-                                        root.render(window.React.createElement(AnswerBookCard, { lang: lang, vibeResult: window.vibeResult || vibeResult || null }));
-                                    }
-                                }, 200);
-                                
-                                // 延迟更新排名显示（确保 DOM 元素已创建）
-                                setTimeout(async () => {
-                                    if (window.userRankings) {
-                                        const currentLang = localStorage.getItem('appLanguage') || 'zh-CN';
-                                        await updateRankingBadges(window.userRankings, currentLang);
-                                        console.log('[React] ✅ 排名徽章已更新:', window.userRankings);
-                                    } else {
-                                        console.warn('[React] ⚠️ 未找到排名数据！');
-                                        console.warn('[React] 请检查：');
-                                        console.warn('1. 是否已更新 Cloudflare Worker 代码（参考 CLOUDFLARE_WORKER_RANKING.md）');
-                                        console.warn('2. 浏览器控制台是否有 API 错误');
-                                        console.warn('3. 运行 RANKING_DEBUG.md 中的调试代码');
-                                    }
-                                }, 100);
-                                
-                            // 立即使用当前状态值更新显示（使用 formatNumber）
-                            const formatNumber = (num) => {
-                                if (typeof num !== 'number' || isNaN(num)) return '0';
-                                const currentLang = localStorage.getItem('appLanguage') || 'zh-CN';
-                                const isEn = currentLang === 'en';
-                                
-                                // 英文使用标准格式：K, M, B, T
-                                if (isEn) {
-                                    if (num >= 1000000000000) {
-                                        return (num / 1000000000000).toFixed(1) + 'T';
-                                    }
-                                    if (num >= 1000000000) {
-                                        return (num / 1000000000).toFixed(1) + 'B';
-                                    }
-                                    if (num >= 1000000) {
-                                        return (num / 1000000).toFixed(1) + 'M';
-                                    }
-                                    if (num >= 1000) {
-                                        return (num / 1000).toFixed(1) + 'K';
-                                    }
-                                    return num.toString();
-                                }
-                                
-                                // 中文使用万、亿等单位
-                                if (num >= 1000000000000) {
-                                    return (num / 1000000000000).toFixed(1) + '万亿';
-                                }
-                                if (num >= 100000000000) {
-                                    return (num / 100000000000).toFixed(1) + '千亿';
-                                }
-                                if (num >= 10000000000) {
-                                    return (num / 10000000000).toFixed(1) + '百亿';
-                                }
-                                if (num >= 100000000) {
-                                    return (num / 100000000).toFixed(1) + '亿';
-                                }
-                                if (num >= 10000000) {
-                                    return (num / 10000000).toFixed(1) + '千万';
-                                }
-                                if (num >= 1000000) {
-                                    return (num / 1000000).toFixed(1) + '百万';
-                                }
-                                if (num >= 10000) {
-                                    return (num / 10000).toFixed(1) + '万';
-                                }
-                                if (num >= 1000) {
-                                    return (num / 1000).toFixed(1) + 'K';
-                                }
-                                return num.toString();
-                            };
-                                
-                                const totalUsersEl = document.getElementById('totalTestUsers');
-                                const techRankEl = document.getElementById('techRank');
-                                
-                                if (totalUsersEl && totalUsers >= 0) {
-                                    totalUsersEl.textContent = formatNumber(totalUsers);
-                                }
-                                if (techRankEl && techRank >= 0) {
-                                    techRankEl.textContent = formatNumber(techRank);
-                                }
-                                
-                                // 检查是否有待执行的动画数据（来自 POST 请求）
-                                if (animationDataRef.current) {
-                                    const animData = animationDataRef.current;
-                                    console.log('[动画] 开始执行数字跳动动画:', animData);
-                                    
-                                    // 更新全网受虐人数，带跳动效果
-                                    if (animData.totalUsers.old !== animData.totalUsers.new) {
-                                        animateNumberUpdate('totalTestUsers', animData.totalUsers.old, animData.totalUsers.new, formatNumber);
-                                    }
-                                    
-                                    // 更新技术排名，带跳动效果
-                                    if (animData.techRank.old !== animData.techRank.new) {
-                                        animateNumberUpdate('techRank', animData.techRank.old, animData.techRank.new, formatNumber);
-                                    }
-                                    
-                                    // 人格库解锁已替换为答案之书组件，移除百分比进度条逻辑
-                                    
-                                    // 清空动画数据
-                                    animationDataRef.current = null;
-                                }
-                            } catch (error) {
-                                console.error('渲染 Dashboard 失败:', error);
-                            }
-                            
-                            // 加载排名JSON数据
-                            // 将缓存暴露到全局，以便在语言切换时清除
-                            if (!window.rankingDataCache) {
-                                window.rankingDataCache = {};
-                            }
-                            const rankingDataCache = window.rankingDataCache;
-                            const loadRankingData = async (jsonFile, lang = 'zh-CN') => {
-                                // 根据语言生成缓存键
-                                const cacheKey = `${jsonFile}_${lang}`;
-                                if (rankingDataCache[cacheKey]) {
-                                    return rankingDataCache[cacheKey];
-                                }
-                                try {
-                                    // 尝试加载对应语言的JSON文件
-                                    let targetFile = jsonFile;
-                                    if (lang === 'en') {
-                                        // 英文版使用*2.json格式（如please2.json, word2.json等）
-                                        const enFile = jsonFile.replace('.json', '2.json');
-                                        try {
-                                            const enResponse = await fetch(`src/${enFile}`);
-                                            if (enResponse.ok) {
-                                                targetFile = enFile;
-                                            } else {
-                                                // 英文文件不存在，使用中文版本
-                                                console.warn(`英文版文件 ${enFile} 不存在（HTTP ${enResponse.status}），使用中文版本`);
-                                            }
-                                        } catch (e) {
-                                            // 英文文件不存在，使用中文版本
-                                            console.warn(`英文版文件 ${enFile} 加载失败，使用中文版本:`, e.message);
-                                        }
-                                    }
-                                    const response = await fetch(`src/${targetFile}`);
-                                    if (!response.ok) {
-                                        throw new Error(`HTTP error! status: ${response.status}`);
-                                    }
-                                    // 英文版JSON文件可能包含多个JSON对象，需要特殊处理
-                                    const text = await response.text();
-                                    let data;
-                                    if (lang === 'en' && targetFile.endsWith('2.json')) {
-                                        // 英文版文件（*2.json）可能包含多个独立的JSON对象
-                                        // 先尝试作为单个JSON解析
-                                        try {
-                                            data = JSON.parse(text);
-                                            // 如果解析成功但没有segments字段，说明是单个对象，需要转换为segments数组
-                                            if (!data.segments && !data.levels) {
-                                                data = { segments: [data], isEnglishFormat: true };
-                                            } else if (data.segments) {
-                                                data.isEnglishFormat = true;
-                                            }
-                                        } catch (e) {
-                                            // 如果失败，尝试分割多个JSON对象
-                                            // 查找所有独立的JSON对象（以{开头，以}结尾）
-                                            const segments = [];
-                                            let braceCount = 0;
-                                            let startPos = -1;
-                                            
-                                            for (let i = 0; i < text.length; i++) {
-                                                if (text[i] === '{') {
-                                                    if (braceCount === 0) startPos = i;
-                                                    braceCount++;
-                                                } else if (text[i] === '}') {
-                                                    braceCount--;
-                                                    if (braceCount === 0 && startPos !== -1) {
-                                                        // 找到一个完整的JSON对象
-                                                        try {
-                                                            const jsonStr = text.substring(startPos, i + 1);
-                                                            const obj = JSON.parse(jsonStr);
-                                                            segments.push(obj);
-                                                        } catch (parseError) {
-                                                            console.warn('解析JSON对象失败:', parseError);
-                                                        }
-                                                        startPos = -1;
-                                                    }
-                                                }
-                                            }
-                                            
-                                            if (segments.length > 0) {
-                                                data = { segments: segments, isEnglishFormat: true };
-                                            } else {
-                                                // 如果英文版解析失败，尝试加载中文版本作为回退
-                                                console.warn(`英文版 ${targetFile} 解析失败，尝试加载中文版本`);
-                                                const zhFile = jsonFile; // 使用原始的中文文件名
-                                                try {
-                                                    const zhResponse = await fetch(`src/${zhFile}`);
-                                                    if (zhResponse.ok) {
-                                                        const zhText = await zhResponse.text();
-                                                        data = JSON.parse(zhText);
-                                                        console.log(`已回退到中文版本: ${zhFile}`);
-                                                    } else {
-                                                        throw new Error(`无法加载中文版本 ${zhFile}`);
-                                                    }
-                                                } catch (zhError) {
-                                                    throw new Error(`无法解析JSON文件（英文版和中文版都失败）`);
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        data = JSON.parse(text);
-                                    }
-                                    rankingDataCache[cacheKey] = data;
-                                    return data;
-                                } catch (error) {
-                                    console.error(`加载 ${jsonFile} 失败:`, error);
-                                    return null;
-                                }
-                            };
-                            
-                            // 根据排名匹配对应的level和comment
-                            const getRankingComment = (data, rank, total, lang = 'zh-CN') => {
-                                if (!data || rank === null || rank === undefined || total <= 0) {
-                                    console.warn('[getRankingComment] 参数无效:', { data: !!data, rank, total, lang });
-                                    return null;
-                                }
-                                
-                                // 强制类型转换：将输入值转换为数字，防止字符串对比导致的逻辑失效
-                                const rankNum = parseFloat(rank);
-                                const totalNum = parseFloat(total);
-                                
-                                if (isNaN(rankNum) || isNaN(totalNum) || totalNum <= 0) {
-                                    console.warn('[getRankingComment] 参数转换失败:', { rank, total, rankNum, totalNum });
-                                    return null;
-                                }
-                                
-                                // 限制 rank 范围，防止溢出：Math.min(99, Math.max(1, rank))
-                                const safeRank = Math.min(99, Math.max(1, rankNum));
-                                const safeTotal = Math.max(1, totalNum);
-                                
-                                const percent = ((safeTotal - safeRank + 1) / safeTotal * 100);
-                                const rankPercent = (safeRank / safeTotal) * 100;
-                                
-                                console.log('[getRankingComment] 开始匹配:', {
-                                    rank, 
-                                    total, 
-                                    percent: percent.toFixed(1) + '%',
-                                    rankPercent: rankPercent.toFixed(1) + '%',
-                                    lang,
-                                    hasLevels: !!data.levels,
-                                    levelsCount: data.levels?.length
-                                });
-                                
-                                // 处理英文版JSON格式（有segments数组或isEnglishFormat标志）
-                                if (data.isEnglishFormat && data.segments) {
-                                    // 英文版：根据rank匹配segment
-                                    for (const segment of data.segments) {
-                                        if (!segment.segment || !segment.comments) continue;
-                                        
-                                        // 解析segment格式，如"Rank 1-33"或"Rank 68-100"
-                                        const segmentMatch = segment.segment.match(/Rank\s+(\d+)-(\d+)/);
-                                        if (segmentMatch) {
-                                            const minRank = parseInt(segmentMatch[1]);
-                                            const maxRank = parseInt(segmentMatch[2]);
-                                            if (rank >= minRank && rank <= maxRank) {
-                                                // 找到匹配的segment，随机选择一个comment
-                                                const randomComment = segment.comments[Math.floor(Math.random() * segment.comments.length)];
-                                                return {
-                                                    title: randomComment.title,
-                                                    content: randomComment.content,
-                                                    label: segment.segment
-                                                };
-                                            }
-                                        }
-                                    }
-                                    return null;
-                                }
-                                
-                                // 处理中文版JSON格式（有levels数组）
-                                if (!data.levels) {
-                                    return null;
-                                }
-                                
-                                // 遍历levels，找到匹配的level
-                                for (const level of data.levels) {
-                                    const range = level.range;
-                                    
-                                    // 处理不同的range格式
-                                    let matched = false;
-                                    
-                                    // 处理 "TOP 81-100" 格式（please.json）
-                                    if (range.startsWith('TOP ')) {
-                                        const rangeStr = range.replace('TOP ', '');
-                                        const [minPercent, maxPercent] = rangeStr.split('-').map(s => parseFloat(s.trim()));
-                                        const minP = parseFloat(minPercent);
-                                        const maxP = parseFloat(maxPercent);
-                                        if (!isNaN(minP) && !isNaN(maxP) && percent >= minP && percent <= maxP) {
-                                            matched = true;
-                                        }
-                                    }
-                                    // 处理 "1-10", "11-30" 等格式（no.json, ai.json）
-                                    else if (/^\d+-\d+$/.test(range)) {
-                                        const [minRank, maxRank] = range.split('-').map(s => parseInt(s.trim()));
-                                        const minR = parseInt(minRank);
-                                        const maxR = parseInt(maxRank);
-                                        if (!isNaN(minR) && !isNaN(maxR) && safeRank >= minR && safeRank <= maxR) {
-                                            matched = true;
-                                        }
-                                    }
-                                    // 处理 "91-100+" 格式（no.json）
-                                    else if (/^\d+-\d+\+$/.test(range)) {
-                                        const [minRank] = range.replace('+', '').split('-').map(s => parseInt(s.trim()));
-                                        const minR = parseInt(minRank);
-                                        if (!isNaN(minR) && safeRank >= minR) {
-                                            matched = true;
-                                        }
-                                    }
-                                    // 处理 "1-7天", "8-30天" 等格式（day.json）
-                                    // 必须在 "201+" 格式之前检查，避免误匹配 day.json 的 "181+"
-                                    else if (range.includes('天') || range === '181+' || range === '181+天') {
-                                        // 根据排名百分比匹配：排名越靠前（rank越小），天数越多
-                                        // levels数组从低到高排列，所以需要反向匹配
-                                        // 使用精确的rankPercent值进行比较，避免浮点数精度问题
-                                        const currentRankPercent = (safeRank / safeTotal) * 100;
-                                        
-                                        console.log(`[day.json匹配] range: ${range}, currentRankPercent: ${currentRankPercent}`);
-                                        
-                                        if (range === '181+' || range === '181+天') {
-                                            // 最高level，排名前20%（包含20%）
-                                            if (currentRankPercent <= 20.0) {
-                                                console.log(`[day.json匹配成功] ${range} matched!`);
-                                                matched = true;
-                                            }
-                                        } else if (range === '91-180天') {
-                                            if (currentRankPercent > 20.0 && currentRankPercent <= 40.0) matched = true;
-                                        } else if (range === '31-90天') {
-                                            if (currentRankPercent > 40.0 && currentRankPercent <= 60.0) matched = true;
-                                        } else if (range === '8-30天') {
-                                            if (currentRankPercent > 60.0 && currentRankPercent <= 80.0) matched = true;
-                                        } else if (range === '1-7天') {
-                                            if (currentRankPercent > 80.0) matched = true;
-                                        }
-                                    }
-                                    // 处理 "1-50字", "51-200字" 等格式（word.json）
-                                    // 注意：word.json的最后一个range是"1001+"，不包含"字"
-                                    // 必须在 "201+" 格式和 say.json 之前检查，避免误匹配
-                                    else if (range === '1001+' || range === '1001+字' || range === '1-50字' || range === '51-200字' || range === '201-500字' || range === '501-1000字') {
-                                        // word.json的格式
-                                        // 使用精确的rankPercent值进行比较，避免浮点数精度问题
-                                        const currentRankPercent = (safeRank / safeTotal) * 100;
-                                        
-                                        console.log(`[word.json匹配] range: ${range}, currentRankPercent: ${currentRankPercent}`);
-                                        
-                                        if (range === '1001+' || range === '1001+字') {
-                                            // 最高level，排名前20%（包含20%）
-                                            if (currentRankPercent <= 20.0) {
-                                                console.log(`[word.json匹配成功] ${range} matched!`);
-                                                matched = true;
-                                            }
-                                        } else if (range === '501-1000字') {
-                                            if (currentRankPercent > 20.0 && currentRankPercent <= 40.0) {
-                                                console.log(`[word.json匹配成功] ${range} matched!`);
-                                                matched = true;
-                                            }
-                                        } else if (range === '201-500字') {
-                                            if (currentRankPercent > 40.0 && currentRankPercent <= 60.0) matched = true;
-                                        } else if (range === '51-200字') {
-                                            if (currentRankPercent > 60.0 && currentRankPercent <= 80.0) matched = true;
-                                        } else if (range === '1-50字') {
-                                            if (currentRankPercent > 80.0) matched = true;
-                                        }
-                                    }
-                                    // 处理 "1-500字", "501-2000字" 等格式（say.json）
-                                    // 必须在word.json之后检查，避免误匹配word.json的range
-                                    else if (range === '10001+字' || range === '5001-10000字' || range === '2001-5000字' || range === '501-2000字' || range === '1-500字') {
-                                        // say.json的格式
-                                        const rankPercent = (safeRank / safeTotal) * 100;
-                                        if (range === '10001+字') {
-                                            if (rankPercent <= 20) matched = true;
-                                        } else if (range === '5001-10000字') {
-                                            if (rankPercent > 20 && rankPercent <= 40) matched = true;
-                                        } else if (range === '2001-5000字') {
-                                            if (rankPercent > 40 && rankPercent <= 60) matched = true;
-                                        } else if (range === '501-2000字') {
-                                            if (rankPercent > 60 && rankPercent <= 80) matched = true;
-                                        } else if (range === '1-500字') {
-                                            if (rankPercent > 80) matched = true;
-                                        }
-                                    }
-                                    
-                                    if (matched && level.comments && level.comments.length > 0) {
-                                        // 随机选择一个comment
-                                        const randomComment = level.comments[Math.floor(Math.random() * level.comments.length)];
-                                        
-                                        // 调试日志
-                                        console.log(`[getRankingComment] 匹配成功:`, {
-                                            range: range,
-                                            rank: rank,
-                                            total: total,
-                                            rankPercent: rankPercent.toFixed(1) + '%',
-                                            title: randomComment.title,
-                                            content: randomComment.content?.substring(0, 50) + '...'
-                                        });
-                                        
-                                        // 根据语言选择对应的文本
-                                        let title = randomComment.title;
-                                        let content = randomComment.content;
-                                        let label = level.label;
-                                        
-                                        // 如果当前语言是英文，但数据是中文，尝试使用多语言字段或提供默认翻译
-                                        if (lang === 'en') {
-                                            // 优先使用英文字段（如果存在）
-                                            if (randomComment.title_en) {
-                                                title = randomComment.title_en;
-                                            }
-                                            if (randomComment.content_en) {
-                                                content = randomComment.content_en;
-                                            }
-                                            if (level.label_en) {
-                                                label = level.label_en;
-                                            }
-                                        }
-                                        
-                                        return {
-                                            title: title,
-                                            content: content,
-                                            label: label
-                                        };
-                                    }
-                                }
-                                
-                                console.warn('[getRankingComment] 未找到匹配的level:', {
-                                    rank: safeRank,
-                                    total: safeTotal,
-                                    rankPercent: rankPercent.toFixed(1) + '%',
-                                    levels: data.levels?.map(l => l.range)
-                                });
-                                // 处理 0% 的情况：返回默认值而不是 undefined
-                                if (rankPercent === 0 || safeRank === 0) {
-                                    return {
-                                        title: lang === 'en' ? 'Ranking Data' : '排名数据',
-                                        content: lang === 'en' ? 'Your ranking data is being calculated.' : '您的排名数据正在计算中。',
-                                        label: lang === 'en' ? 'Top 0%' : '前 0%'
-                                    };
-                                }
-                                return null;
-                            };
-                            
-                            // 统一更新排名徽章的函数（暴露到全局，以便在语言切换时调用）
-                            const updateRankingBadges = async (rankings, lang = 'zh-CN') => {
-                                if (!rankings) {
-                                    console.warn('[updateRankingBadges] rankings 为空，无法更新排名徽章');
-                                    return;
-                                }
-                                
-                                // 辅助函数：从排名对象中提取 rank 值，兼容 ranking 或 rankPercent 字段
-                                const extractRank = (rankingObj, total) => {
-                                    if (!rankingObj) return null;
-                                    
-                                    // 优先使用 rank 字段
-                                    if (rankingObj.rank !== null && rankingObj.rank !== undefined) {
-                                        return Number(rankingObj.rank);
-                                    }
-                                    
-                                    // 兼容 ranking 字段
-                                    if (rankingObj.ranking !== null && rankingObj.ranking !== undefined) {
-                                        const rankingValue = Number(rankingObj.ranking);
-                                        // 如果 ranking 是 0-100 之间的值，认为是百分比，需要转换为排名
-                                        if (!isNaN(rankingValue) && rankingValue >= 0 && rankingValue <= 100 && total > 0) {
-                                            // 百分比转换为排名（rankPercent 越小，排名越靠前）
-                                            return Math.max(1, Math.round(total * (rankingValue / 100)));
-                                        }
-                                        // 如果 ranking 大于 100，认为是排名数字
-                                        return rankingValue;
-                                    }
-                                    
-                                    // 兼容 rankPercent 字段
-                                    if (rankingObj.rankPercent !== null && rankingObj.rankPercent !== undefined && total > 0) {
-                                        const rankPercent = Number(rankingObj.rankPercent);
-                                        if (!isNaN(rankPercent) && rankPercent >= 0 && rankPercent <= 100) {
-                                            // 百分比转换为排名（rankPercent 越小，排名越靠前）
-                                            return Math.max(1, Math.round(total * (rankPercent / 100)));
-                                        }
-                                    }
-                                    
-                                    return null;
-                                };
-                                
-                                // 获取i18n翻译函数
-                                const t = (key) => {
-                                    if (window.i18n && window.i18n.getText) {
-                                        return window.i18n.getText(key, lang);
-                                    }
-                                    return key;
-                                };
-                                
-                                // 更新排名徽章（统计卡片右下角）
-                                const updateBadge = (badgeId, rankingObj, total) => {
-                                    const badge = document.getElementById(badgeId);
-                                    if (!badge) return;
-                                    
-                                    const rank = extractRank(rankingObj, total);
-                                    const actualTotal = rankingObj?.total || total || 0;
-                                    
-                                    if (rank !== null && rank !== undefined && actualTotal > 0) {
-                                        // 限制 rank 范围，防止溢出：Math.min(99, Math.max(1, rank))
-                                        const safeRank = Math.min(99, Math.max(1, rank));
-                                        const safeTotal = Math.max(1, actualTotal);
-                                        const percent = Math.min(99, Math.max(1, ((safeTotal - safeRank + 1) / safeTotal * 100))).toFixed(1);
-                                        if (lang === 'en') {
-                                            badge.textContent = `#${safeRank} (Top ${percent}%)`;
-                                        } else {
-                                            badge.textContent = `#${safeRank} (前${percent}%)`;
-                                        }
-                                        badge.classList.add('has-rank');
-                                    } else {
-                                        badge.textContent = '--';
-                                        badge.classList.remove('has-rank');
-                                    }
-                                };
-                                
-                                 // 更新"全网横向排名"区域的卡片（大卡片）
-                                const updateRankingCard = async (valueId, percentId, rankingObj, total, jsonFile) => {
-                                    const valueEl = document.getElementById(valueId);
-                                    const percentEl = document.getElementById(percentId);
-                                    const beatenEl = document.getElementById(percentId.replace('Percent', 'Beaten'));
-                                    
-                                    // 确保标题不换行
-                                    if (valueEl) {
-                                        valueEl.style.whiteSpace = 'nowrap';
-                                        valueEl.style.overflow = 'hidden';
-                                        valueEl.style.textOverflow = 'ellipsis';
-                                    }
-                                    if (percentEl) {
-                                        percentEl.style.whiteSpace = 'nowrap';
-                                        percentEl.style.overflow = 'hidden';
-                                        percentEl.style.textOverflow = 'ellipsis';
-                                    }
-                                    if (beatenEl) {
-                                        beatenEl.style.whiteSpace = 'nowrap';
-                                        beatenEl.style.overflow = 'visible';
-                                        beatenEl.style.textOverflow = 'clip';
-                                    }
-                                    
-                                    // 从 rankingObj 中提取 rank 值，兼容 ranking 或 rankPercent 字段
-                                    const rank = extractRank(rankingObj, total);
-                                    const actualTotal = rankingObj?.total || total || 0;
-                                    
-                                    // 使用原始 rank 值计算击败人数，但显示时限制范围防止溢出
-                                    const actualRank = rank !== null && rank !== undefined ? rank : null;
-                                    const safeRank = actualRank !== null ? Math.min(99, Math.max(1, actualRank)) : null;
-                                    
-                                    if (actualRank !== null && actualRank !== undefined && actualTotal > 0) {
-                                        // 计算击败人数：使用原始 rank 值，而不是被限制的 safeRank
-                                        // 击败人数 = 总人数 - 排名（排名越小，击败人数越多）
-                                        // 例如：排名1，总人数13，击败人数 = 13 - 1 = 12
-                                        const beatenCount = Math.max(0, actualTotal - actualRank);
-                                        
-                                        // 判断是否在100名内
-                                        if (safeRank <= 100) {
-                                            // 100名内：显示排名数字和JSON中的标题和评语
-                                            const data = await loadRankingData(jsonFile, lang);
-                                            const comment = getRankingComment(data, safeRank, actualTotal, lang);
-                                            
-                                            if (comment && valueEl && percentEl) {
-                                                // valueEl显示排名数字（大字体，参考技术排名样式）
-                                                valueEl.textContent = safeRank;
-                                                valueEl.style.fontSize = '36px';
-                                                valueEl.style.fontWeight = '700';
-                                                valueEl.style.fontFamily = "'JetBrains Mono', monospace";
-                                                
-                                                // percentEl显示JSON中的title和content
-                                                // strong标签会自动应用绿色加粗样式（通过CSS）
-                                                percentEl.innerHTML = `<strong>${comment.title}</strong><br/>${comment.content}`;
-                                                percentEl.style.whiteSpace = 'normal'; // 允许换行显示content
-                                                 percentEl.style.color = '#ffffff'; // 确保内容文字是白色
-                                                 
-                                                 // 击败人数：显示击败人数和百分比（正确计算：击败人数/总人数*100）
-                                                 if (beatenEl) {
-                                                     // 击败百分比 = (击败人数 / 总人数) * 100
-                                                     const beatPercent = actualTotal > 0 
-                                                         ? Math.min(99.9, Math.max(0.1, (beatenCount / actualTotal * 100))).toFixed(1)
-                                                         : '0.0';
-                                                     if (lang === 'en') {
-                                                         beatenEl.textContent = `Defeated ${formatNumber(beatenCount)} users (Top ${beatPercent}%)`;
-                                                     } else {
-                                                         beatenEl.textContent = `击败了 ${formatNumber(beatenCount)} 人 (超过 ${beatPercent}%)`;
-                                                     }
-                                                 }
-                                             } else {
-                                                // 如果无法从JSON获取，使用默认显示（限制范围防止溢出）
-                                                const percent = Math.min(99, Math.max(1, ((actualTotal - safeRank + 1) / actualTotal * 100))).toFixed(1);
-                                                if (valueEl) {
-                                                    valueEl.textContent = safeRank;
-                                                    valueEl.style.fontSize = '36px';
-                                                    valueEl.style.fontWeight = '700';
-                                                    valueEl.style.fontFamily = "'JetBrains Mono', monospace";
-                                                }
-                                                if (percentEl) {
-                                                    if (lang === 'en') {
-                                                        percentEl.textContent = `Top ${percent}%`;
-                                                    } else {
-                                                        percentEl.textContent = `前 ${percent}%`;
-                                                    }
-                                                    percentEl.style.whiteSpace = 'nowrap';
-                                                }
-                                                 // 击败人数：显示击败人数和百分比（使用原始 rank 值计算）
-                                                if (beatenEl) {
-                                                    const beatPercent = actualTotal > 0 
-                                                        ? Math.min(99.9, Math.max(0.1, (beatenCount / actualTotal * 100))).toFixed(1)
-                                                        : '0.0';
-                                                    if (lang === 'en') {
-                                                        beatenEl.textContent = `Defeated ${formatNumber(beatenCount)} users (Top ${beatPercent}%)`;
-                                                    } else {
-                                                        beatenEl.textContent = `击败了 ${formatNumber(beatenCount)} 人 (超过 ${beatPercent}%)`;
-                                                    }
-                                                }
-                                            }
-                                        } else {
-                                            // 101名以后：只显示数字排名
-                                            if (valueEl) {
-                                                valueEl.textContent = safeRank;
-                                                valueEl.style.fontSize = '36px';
-                                                valueEl.style.fontWeight = '700';
-                                                valueEl.style.fontFamily = "'JetBrains Mono', monospace";
-                                            }
-                                            if (percentEl) {
-                                                if (lang === 'en') {
-                                                    percentEl.textContent = 'Rank';
-                                                } else {
-                                                    percentEl.textContent = '名';
-                                                }
-                                                percentEl.style.whiteSpace = 'nowrap';
-                                            }
-                                                 // 击败人数：显示击败人数和百分比（使用原始 rank 值计算）
-                                                if (beatenEl) {
-                                                    const beatPercent = actualTotal > 0 
-                                                        ? Math.min(99.9, Math.max(0.1, (beatenCount / actualTotal * 100))).toFixed(1)
-                                                        : '0.0';
-                                                    if (lang === 'en') {
-                                                        beatenEl.textContent = `Defeated ${formatNumber(beatenCount)} users (Top ${beatPercent}%)`;
-                                                    } else {
-                                                        beatenEl.textContent = `击败了 ${formatNumber(beatenCount)} 人 (超过 ${beatPercent}%)`;
-                                                    }
-                                                }
-                                        }
-                                    } else {
-                                        // 使用 (val ?? '--') 代替 (val && val)，确保当数值为 0 时依然渲染标题和边框
-                                        if (valueEl) valueEl.textContent = '--';
-                                        if (percentEl) percentEl.textContent = '--';
-                                        if (beatenEl) beatenEl.textContent = '--';
-                                    }
-                                };
-                                
-                                // 更新各个统计卡片的排名徽章（右下角小徽章）
-                                // 使用完整的 rankingObj，函数内部会处理 ranking 或 rankPercent 字段
-                                updateBadge('rankingQingCountBadge', rankings.qingCount, rankings.qingCount?.total);
-                                updateBadge('rankingBuCountBadge', rankings.buCount, rankings.buCount?.total);
-                                updateBadge('rankingUserMessagesBadge', rankings.userMessages, rankings.userMessages?.total);
-                                updateBadge('rankingTotalCharsBadge', rankings.totalUserChars, rankings.totalUserChars?.total);
-                                updateBadge('rankingAvgLengthBadge', rankings.avgUserMessageLength, rankings.avgUserMessageLength?.total);
-                                updateBadge('rankingUsageDaysBadge', rankings.usageDays, rankings.usageDays?.total);
-                                
-                                // 更新"全网横向排名"区域的卡片（大卡片显示）
-                                // 对应关系：no.json -> 甲方爸爸上身, ai.json -> 调戏AI, please.json -> 赛博磕头
-                                // say.json -> 废话输出（总字数）, word.json -> 平均长度（单次指令厚度）, day.json -> 上岗天数
-                                // 使用完整的 rankingObj，函数内部会处理 ranking 或 rankPercent 字段
-                                await updateRankingCard('rankingQingCount', 'rankingQingCountPercent', rankings.qingCount, rankings.qingCount?.total, 'please.json');
-                                await updateRankingCard('rankingBuCount', 'rankingBuCountPercent', rankings.buCount, rankings.buCount?.total, 'no.json');
-                                await updateRankingCard('rankingUserMessages', 'rankingUserMessagesPercent', rankings.userMessages, rankings.userMessages?.total, 'ai.json');
-                                await updateRankingCard('rankingTotalChars', 'rankingTotalCharsPercent', rankings.totalUserChars, rankings.totalUserChars?.total, 'say.json');
-                                await updateRankingCard('rankingAvgLength', 'rankingAvgLengthPercent', rankings.avgUserMessageLength, rankings.avgUserMessageLength?.total, 'word.json');
-                                await updateRankingCard('rankingUsageDays', 'rankingUsageDaysPercent', rankings.usageDays, rankings.usageDays?.total, 'day.json');
-                            };
-                            
-                            // 将updateRankingBadges暴露到全局作用域
-                            window.updateRankingBadges = updateRankingBadges;
-                            
-                            // 实时更新统计数据（从 Cloudflare API 获取）
-                            const updateRealtimeStats = async () => {
-                                // 格式化数字函数（确保在作用域内可用，支持多语言和大数值）
-                                const formatNumber = (num) => {
-                                    if (typeof num !== 'number' || isNaN(num)) return '0';
-                                    const currentLang = localStorage.getItem('appLanguage') || 'zh-CN';
-                                    const isEn = currentLang === 'en';
-                                    
-                                    // 英文使用标准格式：K, M, B, T
-                                    if (isEn) {
-                                        if (num >= 1000000000000) {
-                                            return (num / 1000000000000).toFixed(1) + 'T';
-                                        }
-                                        if (num >= 1000000000) {
-                                            return (num / 1000000000).toFixed(1) + 'B';
-                                        }
-                                        if (num >= 1000000) {
-                                            return (num / 1000000).toFixed(1) + 'M';
-                                        }
-                                        if (num >= 1000) {
-                                            return (num / 1000).toFixed(1) + 'K';
-                                        }
-                                        return num.toString();
-                                    }
-                                    
-                                    // 中文使用万、亿等单位（符合中文数字习惯）
-                                    if (num >= 100000000) {
-                                        // 1亿及以上：使用亿
-                                        const yi = num / 100000000;
-                                        if (yi >= 10000) {
-                                            // 1万亿及以上：使用万亿
-                                            return (yi / 10000).toFixed(1) + '万亿';
-                                        }
-                                        if (yi >= 1000) {
-                                            // 1千亿及以上：使用千亿
-                                            return (yi / 1000).toFixed(1) + '千亿';
-                                        }
-                                        if (yi >= 100) {
-                                            // 1百亿及以上：使用百亿
-                                            return (yi / 100).toFixed(1) + '百亿';
-                                        }
-                                        // 1亿-99.9亿：使用亿
-                                        return yi.toFixed(1) + '亿';
-                                    }
-                                    if (num >= 10000) {
-                                        // 1万-9999.9万：直接使用万，不显示小数（符合中文习惯）
-                                        const wan = num / 10000;
-                                        // 如果整数部分大于等于1000，保留1位小数；否则显示整数
-                                        if (wan >= 1000) {
-                                            return wan.toFixed(1) + '万';
-                                        } else if (wan >= 100) {
-                                            return Math.round(wan) + '万';
-                                        } else if (wan >= 10) {
-                                            return wan.toFixed(1) + '万';
-                                        } else {
-                                            return wan.toFixed(1) + '万';
-                                        }
-                                    }
-                                    if (num >= 1000) {
-                                        return (num / 1000).toFixed(1) + 'K';
-                                    }
-                                    return num.toString();
-                                };
-                                
-                                try {
-                                    // 获取 API 端点（与 main.js 保持一致）
-                                    const getApiEndpoint = () => {
-                                        if (typeof window !== 'undefined') {
-                                            const envApiUrl = window.__API_ENDPOINT__ || window.API_ENDPOINT;
-                                            if (envApiUrl) {
-                                                return envApiUrl;
-                                            }
-                                            const metaApi = document.querySelector('meta[name="api-endpoint"]');
-                                            if (metaApi && metaApi.content) {
-                                                const apiUrl = metaApi.content.trim();
-                                                return apiUrl.endsWith('/') ? apiUrl : apiUrl + '/';
-                                            }
-                                        }
-                                        return 'https://cursor-clinical-analysis.psterman.workers.dev/';
-                                    };
-                                    
-                                    const apiUrl = getApiEndpoint();
-                                    console.log('[实时更新] 开始获取 Cloudflare 实时数据，API 端点:', apiUrl);
-                                    
-                                    const response = await fetch(apiUrl, {
-                                        method: 'GET',
-                                        headers: {
-                                            'Content-Type': 'application/json',
-                                        },
-                                        mode: 'cors',
-                                        credentials: 'omit', // 避免 CORS 预检问题
-                                        cache: 'no-cache',
-                                    });
-                                    
-                                    if (response.ok) {
-                                        const data = await response.json();
-                                        const value = data.value || data.totalUsers || data.total || data.count || 0;
-                                        
-                                        console.log('[实时更新] API 返回数据:', data, '解析后的值:', value);
-                                        
-                                        if (value >= 0) {
-                                            // 更新 React 状态
-                                            setTotalUsers(value);
-                                            setTotalTestUsers(value);
-                                            const calculatedRank = Math.floor(value * 0.6);
-                                            setTechRank(calculatedRank);
-                                            const calculatedUnlocked = Math.min(100, parseFloat((value / 1000).toFixed(1)));
-                                            setUnlockedCount(calculatedUnlocked);
-                                            
-                                            // 如果 API 返回了排名数据，也更新排名徽章
-                                            if (data.rankings) {
-                                                window.userRankings = data.rankings;
-                                                // 延迟更新，确保 DOM 元素存在
-                                                setTimeout(async () => {
-                                                    const currentLang = localStorage.getItem('appLanguage') || 'zh-CN';
-                                                    await updateRankingBadges(data.rankings, currentLang);
-                                                    console.log('[实时更新] 排名徽章已更新:', data.rankings);
-                                                }, 100);
-                                            }
-                                            
-                                            // 更新 DOM 元素
-                                            const totalUsersEl = document.getElementById('totalTestUsers');
-                                            const techRankEl = document.getElementById('techRank');
-                                            
-                                            if (totalUsersEl) {
-                                                // 使用 formatNumber 处理显示格式
-                                                const formatted = formatNumber(value);
-                                                totalUsersEl.textContent = formatted;
-                                                // 添加更新动画
-                                                totalUsersEl.classList.add('animate-pulse');
-                                                setTimeout(() => {
-                                                    totalUsersEl.classList.remove('animate-pulse');
-                                                }, 600);
-                                                console.log('[实时更新] 全网受虐人数已更新:', formatted);
-                                            } else {
-                                                console.warn('[实时更新] 未找到 totalTestUsers 元素');
-                                            }
-                                            
-                                            if (techRankEl) {
-                                                // 使用 formatNumber 处理显示格式
-                                                const formatted = formatNumber(calculatedRank);
-                                                techRankEl.textContent = formatted;
-                                                techRankEl.classList.add('animate-pulse');
-                                                setTimeout(() => {
-                                                    techRankEl.classList.remove('animate-pulse');
-                                                }, 600);
-                                                console.log('[实时更新] 技术排名已更新:', formatted);
-                                            } else {
-                                                console.warn('[实时更新] 未找到 techRank 元素');
-                                            }
-                                            
-                                            // 人格库解锁已替换为答案之书组件，移除百分比更新逻辑
-                                            
-                                            console.log('[实时更新] 统计数据已全部更新:', {
-                                                totalUsers: value,
-                                                techRank: calculatedRank
-                                            });
-                                        } else {
-                                            console.warn('[实时更新] API 返回的值无效');
-                                        }
-                                    } else {
-                                        console.warn('[实时更新] API 请求失败，状态码:', response.status);
-                                    }
-                                } catch (error) {
-                                    console.error('[实时更新] 获取数据失败:', error.message, error);
-                                }
-                            };
-                            
-                            // 等待 DOM 完全渲染后再更新（延迟执行以确保元素存在）
-                            setTimeout(() => {
-                                console.log('[实时更新] 开始首次更新实时统计数据...');
-                                updateRealtimeStats();
-                                
-                                // 清理之前的定时器（如果存在）
-                                if (window.realtimeStatsInterval) {
-                                    clearInterval(window.realtimeStatsInterval);
-                                }
-                                
-                                // 每30秒自动刷新一次
-                                window.realtimeStatsInterval = setInterval(() => {
-                                    console.log('[实时更新] 定时刷新统计数据...');
-                                    updateRealtimeStats();
-                                }, 30000);
-                            }, 500);
-                        }, 200);
-                    } else {
-                        console.error('容器或模块未找到');
-                    }
-                }, 100);
+                console.warn('[getRankingComment] 未找到匹配的level:', {
+                    rank: safeRank,
+                    total: safeTotal,
+                    rankPercent: rankPercent.toFixed(1) + '%',
+                    levels: data.levels?.map(l => l.range)
+                });
+                // 处理 0% 的情况：返回默认值而不是 undefined
+                if (rankPercent === 0 || safeRank === 0) {
+                    return {
+                        title: lang === 'en' ? 'Ranking Data' : '排名数据',
+                        content: lang === 'en' ? 'Your ranking data is being calculated.' : '您的排名数据正在计算中。',
+                        label: lang === 'en' ? 'Top 0%' : '前 0%'
+                    };
+                }
+                return null;
             };
+            
+            // 统一更新排名徽章的函数（暴露到全局，以便在语言切换时调用）
+            const updateRankingBadges = async (rankings, lang = 'zh-CN') => {
+                if (!rankings) {
+                    console.warn('[updateRankingBadges] rankings 为空，无法更新排名徽章');
+                    return;
+                }
+                
+                // 辅助函数：从排名对象中提取 rank 值，兼容 ranking 或 rankPercent 字段
+                const extractRank = (rankingObj, total) => {
+                    if (!rankingObj) return null;
+                    
+                    // 优先使用 rank 字段
+                    if (rankingObj.rank !== null && rankingObj.rank !== undefined) {
+                        return Number(rankingObj.rank);
+                    }
+                    
+                    // 兼容 ranking 字段
+                    if (rankingObj.ranking !== null && rankingObj.ranking !== undefined) {
+                        const rankingValue = Number(rankingObj.ranking);
+                        // 如果 ranking 是 0-100 之间的值，认为是百分比，需要转换为排名
+                        if (!isNaN(rankingValue) && rankingValue >= 0 && rankingValue <= 100 && total > 0) {
+                            // 百分比转换为排名（rankPercent 越小，排名越靠前）
+                            return Math.max(1, Math.round(total * (rankingValue / 100)));
+                        }
+                        // 如果 ranking 大于 100，认为是排名数字
+                        return rankingValue;
+                    }
+                    
+                    // 兼容 rankPercent 字段
+                    if (rankingObj.rankPercent !== null && rankingObj.rankPercent !== undefined && total > 0) {
+                        const rankPercent = Number(rankingObj.rankPercent);
+                        if (!isNaN(rankPercent) && rankPercent >= 0 && rankPercent <= 100) {
+                            // 百分比转换为排名（rankPercent 越小，排名越靠前）
+                            return Math.max(1, Math.round(total * (rankPercent / 100)));
+                        }
+                    }
+                    
+                    return null;
+                };
+                
+                // 获取i18n翻译函数
+                const t = (key) => {
+                    if (window.i18n && window.i18n.getText) {
+                        return window.i18n.getText(key, lang);
+                    }
+                    return key;
+                };
+                
+                // 格式化数字函数
+                const formatNumber = (num) => {
+                    if (typeof num !== 'number' || isNaN(num)) return '0';
+                    const isEn = lang === 'en';
+                    
+                    if (isEn) {
+                        if (num >= 1000000000000) return (num / 1000000000000).toFixed(1) + 'T';
+                        if (num >= 1000000000) return (num / 1000000000).toFixed(1) + 'B';
+                        if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+                        if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+                        return num.toString();
+                    }
+                    
+                    if (num >= 100000000) return (num / 100000000).toFixed(1) + '亿';
+                    if (num >= 10000) return (num / 10000).toFixed(1) + '万';
+                    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+                    return num.toString();
+                };
+                
+                // 更新排名徽章（统计卡片右下角）
+                const updateBadge = (badgeId, rankingObj, total) => {
+                    const badge = document.getElementById(badgeId);
+                    if (!badge) return;
+                    
+                    const rank = extractRank(rankingObj, total);
+                    const actualTotal = rankingObj?.total || total || 0;
+                    
+                    if (rank !== null && rank !== undefined && actualTotal > 0) {
+                        // 限制 rank 范围，防止溢出：Math.min(99, Math.max(1, rank))
+                        const safeRank = Math.min(99, Math.max(1, rank));
+                        const safeTotal = Math.max(1, actualTotal);
+                        const percent = Math.min(99, Math.max(1, ((safeTotal - safeRank + 1) / safeTotal * 100))).toFixed(1);
+                        if (lang === 'en') {
+                            badge.textContent = `#${safeRank} (Top ${percent}%)`;
+                        } else {
+                            badge.textContent = `#${safeRank} (前${percent}%)`;
+                        }
+                        badge.classList.add('has-rank');
+                    } else {
+                        badge.textContent = '--';
+                        badge.classList.remove('has-rank');
+                    }
+                };
+                
+                // 更新"全网横向排名"区域的卡片（大卡片）
+                const updateRankingCard = async (valueId, percentId, rankingObj, total, jsonFile) => {
+                    const valueEl = document.getElementById(valueId);
+                    const percentEl = document.getElementById(percentId);
+                    const beatenEl = document.getElementById(percentId.replace('Percent', 'Beaten'));
+                    
+                    // 确保标题不换行
+                    if (valueEl) {
+                        valueEl.style.whiteSpace = 'nowrap';
+                        valueEl.style.overflow = 'hidden';
+                        valueEl.style.textOverflow = 'ellipsis';
+                    }
+                    if (percentEl) {
+                        percentEl.style.whiteSpace = 'nowrap';
+                        percentEl.style.overflow = 'hidden';
+                        percentEl.style.textOverflow = 'ellipsis';
+                    }
+                    if (beatenEl) {
+                        beatenEl.style.whiteSpace = 'nowrap';
+                        beatenEl.style.overflow = 'visible';
+                        beatenEl.style.textOverflow = 'clip';
+                    }
+                    
+                    // 从 rankingObj 中提取 rank 值，兼容 ranking 或 rankPercent 字段
+                    const rank = extractRank(rankingObj, total);
+                    const actualTotal = rankingObj?.total || total || 0;
+                    
+                    // 使用原始 rank 值计算击败人数，但显示时限制范围防止溢出
+                    const actualRank = rank !== null && rank !== undefined ? rank : null;
+                    const safeRank = actualRank !== null ? Math.min(99, Math.max(1, actualRank)) : null;
+                    
+                    if (actualRank !== null && actualRank !== undefined && actualTotal > 0) {
+                        // 计算击败人数：使用原始 rank 值，而不是被限制的 safeRank
+                        const beatenCount = Math.max(0, actualTotal - actualRank);
+                        
+                        // 判断是否在100名内
+                        if (safeRank <= 100) {
+                            // 100名内：显示排名数字和JSON中的标题和评语
+                            const data = await loadRankingData(jsonFile, lang);
+                            const comment = getRankingComment(data, safeRank, actualTotal, lang);
+                            
+                            if (comment && valueEl && percentEl) {
+                                // valueEl显示排名数字
+                                valueEl.textContent = safeRank;
+                                valueEl.style.fontSize = '36px';
+                                valueEl.style.fontWeight = '700';
+                                valueEl.style.fontFamily = "'JetBrains Mono', monospace";
+                                
+                                // percentEl显示JSON中的title和content
+                                percentEl.innerHTML = `<strong>${comment.title}</strong><br/>${comment.content}`;
+                                percentEl.style.whiteSpace = 'normal';
+                                percentEl.style.color = '#ffffff';
+                                
+                                // 击败人数
+                                if (beatenEl) {
+                                    const beatPercent = actualTotal > 0 
+                                        ? Math.min(99.9, Math.max(0.1, (beatenCount / actualTotal * 100))).toFixed(1)
+                                        : '0.0';
+                                    if (lang === 'en') {
+                                        beatenEl.textContent = `Defeated ${formatNumber(beatenCount)} users (Top ${beatPercent}%)`;
+                                    } else {
+                                        beatenEl.textContent = `击败了 ${formatNumber(beatenCount)} 人 (超过 ${beatPercent}%)`;
+                                    }
+                                }
+                            } else {
+                                // 如果无法从JSON获取，使用默认显示
+                                const percent = Math.min(99, Math.max(1, ((actualTotal - safeRank + 1) / actualTotal * 100))).toFixed(1);
+                                if (valueEl) {
+                                    valueEl.textContent = safeRank;
+                                    valueEl.style.fontSize = '36px';
+                                    valueEl.style.fontWeight = '700';
+                                    valueEl.style.fontFamily = "'JetBrains Mono', monospace";
+                                }
+                                if (percentEl) {
+                                    if (lang === 'en') {
+                                        percentEl.textContent = `Top ${percent}%`;
+                                    } else {
+                                        percentEl.textContent = `前 ${percent}%`;
+                                    }
+                                    percentEl.style.whiteSpace = 'nowrap';
+                                }
+                                if (beatenEl) {
+                                    const beatPercent = actualTotal > 0 
+                                        ? Math.min(99.9, Math.max(0.1, (beatenCount / actualTotal * 100))).toFixed(1)
+                                        : '0.0';
+                                    if (lang === 'en') {
+                                        beatenEl.textContent = `Defeated ${formatNumber(beatenCount)} users (Top ${beatPercent}%)`;
+                                    } else {
+                                        beatenEl.textContent = `击败了 ${formatNumber(beatenCount)} 人 (超过 ${beatPercent}%)`;
+                                    }
+                                }
+                            }
+                        } else {
+                            // 101名以后：只显示数字排名
+                            if (valueEl) {
+                                valueEl.textContent = safeRank;
+                                valueEl.style.fontSize = '36px';
+                                valueEl.style.fontWeight = '700';
+                                valueEl.style.fontFamily = "'JetBrains Mono', monospace";
+                            }
+                            if (percentEl) {
+                                if (lang === 'en') {
+                                    percentEl.textContent = 'Rank';
+                                } else {
+                                    percentEl.textContent = '名';
+                                }
+                                percentEl.style.whiteSpace = 'nowrap';
+                            }
+                            if (beatenEl) {
+                                const beatPercent = actualTotal > 0 
+                                    ? Math.min(99.9, Math.max(0.1, (beatenCount / actualTotal * 100))).toFixed(1)
+                                    : '0.0';
+                                if (lang === 'en') {
+                                    beatenEl.textContent = `Defeated ${formatNumber(beatenCount)} users (Top ${beatPercent}%)`;
+                                } else {
+                                    beatenEl.textContent = `击败了 ${formatNumber(beatenCount)} 人 (超过 ${beatPercent}%)`;
+                                }
+                            }
+                        }
+                    } else {
+                        // 使用 (val ?? '--') 代替 (val && val)，确保当数值为 0 时依然渲染标题和边框
+                        if (valueEl) valueEl.textContent = '--';
+                        if (percentEl) percentEl.textContent = '--';
+                        if (beatenEl) beatenEl.textContent = '--';
+                    }
+                };
+                
+                // 更新各个统计卡片的排名徽章（右下角小徽章）
+                updateBadge('rankingQingCountBadge', rankings.qingCount, rankings.qingCount?.total);
+                updateBadge('rankingBuCountBadge', rankings.buCount, rankings.buCount?.total);
+                updateBadge('rankingUserMessagesBadge', rankings.userMessages, rankings.userMessages?.total);
+                updateBadge('rankingTotalCharsBadge', rankings.totalUserChars, rankings.totalUserChars?.total);
+                updateBadge('rankingAvgLengthBadge', rankings.avgUserMessageLength, rankings.avgUserMessageLength?.total);
+                updateBadge('rankingUsageDaysBadge', rankings.usageDays, rankings.usageDays?.total);
+                
+                // 更新"全网横向排名"区域的卡片（大卡片显示）
+                await updateRankingCard('rankingQingCount', 'rankingQingCountPercent', rankings.qingCount, rankings.qingCount?.total, 'please.json');
+                await updateRankingCard('rankingBuCount', 'rankingBuCountPercent', rankings.buCount, rankings.buCount?.total, 'no.json');
+                await updateRankingCard('rankingUserMessages', 'rankingUserMessagesPercent', rankings.userMessages, rankings.userMessages?.total, 'ai.json');
+                await updateRankingCard('rankingTotalChars', 'rankingTotalCharsPercent', rankings.totalUserChars, rankings.totalUserChars?.total, 'say.json');
+                await updateRankingCard('rankingAvgLength', 'rankingAvgLengthPercent', rankings.avgUserMessageLength, rankings.avgUserMessageLength?.total, 'word.json');
+                await updateRankingCard('rankingUsageDays', 'rankingUsageDaysPercent', rankings.usageDays, rankings.usageDays?.total, 'day.json');
+            };
+            
+            // 将updateRankingBadges暴露到全局作用域
+            window.updateRankingBadges = updateRankingBadges;
 
             // ===== 超短分享编码系统 =====
 
@@ -6095,6 +5769,10 @@
                         style={{ display: 'none' }}
                         onChange={(e) => {
                             console.log('文件夹选择事件触发', e.target.files);
+                            if (isSubmitting || step === 'analyzing') {
+                                console.warn('[UI] 🛑 分析进行中，忽略重复文件夹选择事件');
+                                return;
+                            }
                             handleFileUpload(e, 'folder');
                         }}
                     />
@@ -6106,6 +5784,10 @@
                         style={{ display: 'none' }}
                         onChange={(e) => {
                             console.log('文件选择事件触发', e.target.files);
+                            if (isSubmitting || step === 'analyzing') {
+                                console.warn('[UI] 🛑 分析进行中，忽略重复文件选择事件');
+                                return;
+                            }
                             handleFileUpload(e, 'file');
                         }}
                     />
@@ -6333,18 +6015,28 @@
                                     <div className="flex gap-4 justify-center mt-6">
                                         <button 
                                             onClick={() => handleFileSelect('folder')}
-                                            className="px-6 py-3 bg-green-500 hover:bg-transparent hover:text-green-500 text-black rounded-sm font-semibold transition-colors border border-green-500 uppercase tracking-wider font-mono"
+                                            disabled={isSubmitting || step === 'analyzing'}
+                                            className={`px-6 py-3 bg-green-500 hover:bg-transparent hover:text-green-500 text-black rounded-sm font-semibold transition-colors border border-green-500 uppercase tracking-wider font-mono ${isSubmitting || step === 'analyzing' ? 'opacity-60 cursor-not-allowed pointer-events-none' : ''}`}
                                         >
                                         {t('upload.selectFolder')}
                                         </button>
                                         {hasHistory && (
-                                            <button 
-                                                onClick={loadHistory}
-                                                className="px-6 py-3 bg-transparent hover:bg-zinc-800 text-green-500 rounded-sm font-semibold transition-colors border border-zinc-700 uppercase tracking-wider font-mono"
-                                                title={t('upload.viewHistory')}
-                                            >
-                                                {t('upload.viewHistory')}
-                                            </button>
+                                            <>
+                                                <button 
+                                                    onClick={loadHistory}
+                                                    className="px-6 py-3 bg-transparent hover:bg-zinc-800 text-green-500 rounded-sm font-semibold transition-colors border border-zinc-700 uppercase tracking-wider font-mono"
+                                                    title={t('upload.viewHistory')}
+                                                >
+                                                    {t('upload.viewHistory')}
+                                                </button>
+                                                <a 
+                                                    href="stats2.html"
+                                                    className="px-6 py-3 bg-transparent hover:bg-zinc-800 text-green-500 rounded-sm font-semibold transition-colors border border-zinc-700 uppercase tracking-wider font-mono inline-block text-center no-underline"
+                                                    title={lang === 'en' ? 'Global Rankings' : '全球排行 PK'}
+                                                >
+                                                    {lang === 'en' ? 'PK' : 'PK'}
+                                                </a>
+                                            </>
                                         )}
                                         {/* <button 
                                             onClick={() => handleFileSelect('file')}
@@ -6369,14 +6061,33 @@
                                             gap: '12px',
                                             marginBottom: '8px'
                                         }}>
-                                            <code style={{ 
-                                                color: 'var(--accent-terminal)', 
-                                                fontSize: '12px', 
-                                                flex: 1, 
-                                                textAlign: 'left',
-                                                wordBreak: 'break-all',
-                                                fontFamily: "'JetBrains Mono', monospace"
-                                            }} id="workspacePath">
+                                            <code 
+                                                id="workspacePath"
+                                                role="button"
+                                                tabIndex={0}
+                                                onClick={() => {
+                                                    const pathEl = document.getElementById('workspacePath');
+                                                    const path = pathEl ? pathEl.textContent.trim() : '';
+                                                    navigator.clipboard.writeText(path).then(() => {
+                                                        setPathCopyToast(true);
+                                                        setTimeout(() => setPathCopyToast(false), 2000);
+                                                    }).catch(err => {
+                                                        console.error('复制失败:', err);
+                                                        alert(t('dashboard.copyFailed'));
+                                                    });
+                                                }}
+                                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); const pathEl = document.getElementById('workspacePath'); const path = pathEl ? pathEl.textContent.trim() : ''; if (path) navigator.clipboard.writeText(path).then(() => { setPathCopyToast(true); setTimeout(() => setPathCopyToast(false), 2000); }); } }}
+                                                style={{ 
+                                                    color: 'var(--accent-terminal)', 
+                                                    fontSize: '12px', 
+                                                    flex: 1, 
+                                                    textAlign: 'left',
+                                                    wordBreak: 'break-all',
+                                                    fontFamily: "'JetBrains Mono', monospace",
+                                                    cursor: 'pointer',
+                                                    userSelect: 'none'
+                                                }}
+                                            >
                                                 {(navigator.platform.toLowerCase().includes('win') || navigator.userAgent.toLowerCase().includes('windows')) 
                                                     ? '%APPDATA%\\Cursor\\User\\workspaceStorage\\' 
                                                     : '~/Library/Application Support/Cursor/User/workspaceStorage/'}
@@ -6384,19 +6095,10 @@
                                             <button 
                                                 onClick={(e) => {
                                                     const pathEl = document.getElementById('workspacePath');
-                                                    const path = pathEl ? pathEl.textContent : '';
+                                                    const path = pathEl ? pathEl.textContent.trim() : '';
                                                     navigator.clipboard.writeText(path).then(() => {
-                                                        const btn = e.target;
-                                                        const originalText = btn.textContent;
-                                                        btn.textContent = t('dashboard.copied');
-                                                        btn.style.color = 'var(--accent-terminal)';
-                                                        btn.style.background = 'var(--accent-terminal)';
-                                                        btn.style.color = '#050505';
-                                                        setTimeout(() => {
-                                                            btn.textContent = originalText;
-                                                            btn.style.background = 'transparent';
-                                                            btn.style.color = 'var(--accent-terminal)';
-                                                        }, 2000);
+                                                        setPathCopyToast(true);
+                                                        setTimeout(() => setPathCopyToast(false), 2000);
                                                     }).catch(err => {
                                                         console.error('复制失败:', err);
                                                         alert(t('dashboard.copyFailed'));
@@ -6428,6 +6130,26 @@
                                                 {t('dashboard.copy')}
                                             </button>
                                         </div>
+                                        {pathCopyToast && (
+                                            <div style={{
+                                                position: 'fixed',
+                                                bottom: '24px',
+                                                left: '50%',
+                                                transform: 'translateX(-50%)',
+                                                padding: '8px 16px',
+                                                background: 'rgba(0, 255, 65, 0.15)',
+                                                border: '1px solid rgba(0, 255, 65, 0.4)',
+                                                borderRadius: '4px',
+                                                color: 'var(--accent-terminal)',
+                                                fontSize: '12px',
+                                                fontFamily: "'JetBrains Mono', monospace",
+                                                zIndex: 9999,
+                                                boxShadow: '0 0 12px rgba(0, 255, 65, 0.2)',
+                                                animation: 'fadeIn 0.2s ease'
+                                            }}>
+                                                {lang === 'en' ? 'Copied' : '已复制'}
+                                            </div>
+                                        )}
                                         <p style={{ 
                                             color: '#ffffff', 
                                             fontSize: '10px', 
@@ -6634,7 +6356,7 @@
 
                             {/* 分享模式下隐藏操作按钮 */}
                             {!isShareMode && (
-                                <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
+                                <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4 flex-wrap">
                                     <button 
                                         onClick={showFullReport}
                                         className="flex items-center justify-center gap-2 bg-green-500 text-black px-8 py-4 rounded-sm font-bold hover:bg-transparent hover:text-green-500 transition-colors border border-green-500 uppercase tracking-wider font-mono relative"
@@ -6643,12 +6365,20 @@
                                         <span>{lang === 'en' ? 'INVASIVE PROFILING' : '偷看档案'}</span>
                                         <Icon name="search" size={18} className="opacity-70" />
                                     </button>
+                                    <a 
+                                        href="stats2.html"
+                                        className="flex items-center justify-center gap-2 bg-transparent text-white px-8 py-4 rounded-sm font-bold hover:bg-zinc-800 transition-colors border border-green-500 uppercase tracking-wider font-mono relative no-underline"
+                                    >
+                                        <Icon name="trending-up" size={18} className="opacity-70" />
+                                        <span>{lang === 'en' ? 'GLOBAL RANKINGS' : '全球排行'}</span>
+                                        <Icon name="trending-up" size={18} className="opacity-70" />
+                                    </a>
                                     <button 
                                         onClick={shareReport}
                                         className="flex items-center justify-center gap-2 bg-transparent text-white px-8 py-4 rounded-sm font-bold hover:bg-zinc-800 transition-colors border border-green-500 uppercase tracking-wider font-mono relative"
                                     >
                                         <Icon name="send" size={18} className="opacity-70" />
-                                        <span>{lang === 'en' ? "DON'T @ ME" : '请君入瓮'}</span>
+                                        <span>{lang === 'en' ? 'Share Report' : '分享病情'}</span>
                                         <Icon name="send" size={18} className="opacity-70" />
                                     </button>
                                 </div>
@@ -6658,7 +6388,80 @@
 
                     {/* 完整报告阶段 */}
                     {step === 'fullReport' && (
-                        <div className="w-full" style={{minHeight: '100vh'}}>
+                        <div className="w-full" style={{minHeight: '100vh', paddingTop: '64px'}}>
+                            {/* 复刻 stats2.html 顶部标题栏（1:1 结构） */}
+                            <div className="top-header" role="banner">
+                                <div className="top-header-left">
+                                    <div className="top-header-title">
+                                        <h1>
+                                            <span className="text-white">
+                                                {lang === 'en'
+                                                    ? 'Cursor Behavior Report · Global Distribution Map'
+                                                    : 'Cursor行为报告全球分布图'}
+                                            </span>
+                                        </h1>
+                                        <p id="sub-title">
+                                            {lang === 'en'
+                                                ? 'Telemetry Status // Node: Central_Pacific'
+                                                : '实时远程监测状态 // 节点：太平洋中部'}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="top-header-right">
+                                    <div className="top-header-card">
+                                        <div className="top-header-card-label">
+                                            {lang === 'en' ? 'ACTIVE NODES' : '活跃节点'}
+                                        </div>
+                                        <div className="top-header-card-value text-emerald-400">
+                                            <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full pulse"></span>
+                                            <span>0</span> CONNECTED
+                                        </div>
+                                    </div>
+                                    <div className="top-header-card">
+                                        <div className="top-header-card-label">
+                                            {lang === 'en' ? 'THREAT LEVEL' : '风险评级'}
+                                        </div>
+                                        <div className="top-header-card-value text-red-500">LEVEL_CRITICAL</div>
+                                    </div>
+                                    <div className="flex gap-2 items-center">
+                                        <button
+                                            type="button"
+                                            className={`lang-flag-btn ${lang !== 'en' ? 'active' : ''}`}
+                                            title="中文"
+                                            aria-label="中文"
+                                            onClick={() => {
+                                                try { localStorage.setItem('lang', 'zh'); } catch {}
+                                                switchLanguage('zh-CN');
+                                            }}
+                                        >
+                                            <img
+                                                src="images/zh.png"
+                                                alt="中文"
+                                                onError={(e) => { try { e.currentTarget.style.display = 'none'; } catch {} }}
+                                            />
+                                            <span style={{position:'absolute', left:'-9999px'}}>🇨🇳</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className={`lang-flag-btn ${lang === 'en' ? 'active' : ''}`}
+                                            title="English"
+                                            aria-label="English"
+                                            onClick={() => {
+                                                try { localStorage.setItem('lang', 'en'); } catch {}
+                                                switchLanguage('en');
+                                            }}
+                                        >
+                                            <img
+                                                src="images/us.png"
+                                                alt="English"
+                                                onError={(e) => { try { e.currentTarget.style.display = 'none'; } catch {} }}
+                                            />
+                                            <span style={{position:'absolute', left:'-9999px'}}>🇺🇸</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
                             {/* 分享模式提示 */}
                             {isShareMode && (
                                 <div className="w-full bg-zinc-900/50 border border-zinc-700 rounded-sm p-4 mb-4 flex flex-col sm:flex-row items-center justify-between gap-4" style={{marginBottom: '20px', maxWidth: '1100px', margin: '0 auto 20px', padding: '16px'}}>
