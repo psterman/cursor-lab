@@ -1243,10 +1243,11 @@ class VibeCodingApp {
         dimensions: result?.dimensions || null,
         stats: {
           ...(fromResult),
-          // 【修复】确保 earliestFileTime 和 usageDays 被保存，供 stats2.html 计算上岗天数（含云端兜底）
           earliestFileTime: earliestFileTime,
           usageDays: usageDays,
           work_days: usageDays ?? fromResult.work_days ?? null,
+          // 供 stats2 右抽屉本国词云兜底：identityLevelCloud 按 Novice/Professional/Architect 分桶
+          identityLevelCloud: result.identityLevelCloud || result.statistics?.identityLevelCloud || fromResult.identityLevelCloud || null,
         },
         meta: context || null,
         vibeIndex: result?.vibeIndex || result?.vibe_index || null,

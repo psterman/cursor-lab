@@ -5371,8 +5371,39 @@
                         } catch (apiErr) {
                             console.warn('[updateCountryDashboard] 本国词云 API 失败:', apiErr);
                             window.__countryKeywordsByLevel = null;
-                            if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud('Novice');
-                            if (emptyCloudEl) { emptyCloudEl.textContent = '暂无该国词云数据'; emptyCloudEl.classList.remove('hidden'); }
+                            var isLocalUser = (countryCode === (localStorage.getItem('user_manual_location') || window.currentUserCountry || '').toUpperCase()) || !countryCode;
+                            try {
+                                if (isLocalUser) {
+                                    var lastStr = localStorage.getItem('last_analysis_data');
+                                    if (lastStr) {
+                                        var lastData = JSON.parse(lastStr);
+                                        var ilc = (lastData && lastData.stats && lastData.stats.identityLevelCloud) || (lastData && lastData.identityLevelCloud) || null;
+                                        if (ilc && typeof ilc === 'object') {
+                                            var toList = function(raw) {
+                                                if (!raw) return [];
+                                                if (Array.isArray(raw)) return raw.map(function(x) {
+                                                    var phrase = (x && (x.word != null ? x.word : x.phrase != null ? x.phrase : x[0]) != null) ? String(x.word != null ? x.word : x.phrase != null ? x.phrase : x[0]).trim() : '';
+                                                    var weight = (x && (x.count != null ? x.count : x.weight != null ? x.weight : x[1]) != null) ? Number(x.count != null ? x.count : x.weight != null ? x.weight : x[1]) || 0 : 0;
+                                                    return phrase ? { phrase: phrase, weight: weight } : null;
+                                                }).filter(Boolean);
+                                                return Object.entries(raw).filter(function(e) { return e[0] && (Number(e[1]) || 0) > 0; }).map(function(e) { return { phrase: String(e[0]).trim(), weight: Number(e[1]) || 0 }; });
+                                            };
+                                            window.__countryKeywordsByLevel = {
+                                                Novice: toList(ilc.Novice),
+                                                Professional: toList(ilc.Professional),
+                                                Architect: toList(ilc.Architect),
+                                                globalNative: []
+                                            };
+                                            if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud(window.__currentNationalIdentityLevel || 'Novice');
+                                            if (emptyCloudEl) emptyCloudEl.classList.add('hidden');
+                                        }
+                                    }
+                                }
+                            } catch (e2) { console.warn('[updateCountryDashboard] 本国词云 localStorage 兜底失败:', e2); }
+                            if (!window.__countryKeywordsByLevel) {
+                                if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud('Novice');
+                                if (emptyCloudEl) { emptyCloudEl.textContent = '暂无该国词云数据'; emptyCloudEl.classList.remove('hidden'); }
+                            }
                         } finally {
                             if (wordCloudContainer) wordCloudContainer.removeAttribute('data-loading');
                         }
@@ -7960,7 +7991,7 @@
                 try { fp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (e) {}
                 const res = await fetch(apiBase ? apiBase + '/api/update-location' : '/api/update-location', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Intent': 'manual_location_update' },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ fingerprint: fp, new_cc: code })
                 });
                 if (res.ok) {
@@ -14710,7 +14741,7 @@
                         // 用户主动选籍，强制执行写入，不受 AUTO_REPORT 限制
                         const res = await fetch(apiBase ? apiBase + '/api/update-location' : '/api/update-location', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'X-Intent': 'manual_location_update' },
+                            headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ fingerprint: fp, new_cc: code })
                         });
                         if (!res.ok) {
@@ -23808,8 +23839,14 @@
                 return [String(x.phrase || '').trim(), size];
             }).filter(function(item) { return item[0].length > 0 && item[1] > 0; });
             if (list.length === 0) return;
-            var width = container.offsetWidth || 400;
-            var height = container.offsetHeight || 260;
+            var width = container.offsetWidth || 0;
+            var height = container.offsetHeight || 0;
+            if (width <= 0 || height <= 0) {
+                requestAnimationFrame(function() {
+                    if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud(level);
+                });
+                return;
+            }
             canvas.width = width;
             canvas.height = height;
             var ctx = canvas.getContext('2d');
@@ -24046,8 +24083,34 @@
                 if (total === 0 && empty) empty.classList.remove('hidden');
             } catch (e) {
                 window.__countryKeywordsByLevel = null;
-                if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud('Novice');
-                if (empty) { empty.textContent = '暂无该国词云数据'; empty.classList.remove('hidden'); }
+                var isLocalUser = (region === (localStorage.getItem('user_manual_location') || window.currentUserCountry || '').toUpperCase());
+                try {
+                    if (isLocalUser) {
+                        var lastStr = localStorage.getItem('last_analysis_data');
+                        if (lastStr) {
+                            var lastData = JSON.parse(lastStr);
+                            var ilc = (lastData && lastData.stats && lastData.stats.identityLevelCloud) || (lastData && lastData.identityLevelCloud) || null;
+                            if (ilc && typeof ilc === 'object') {
+                                var toList = function(raw) {
+                                    if (!raw) return [];
+                                    if (Array.isArray(raw)) return raw.map(function(x) {
+                                        var phrase = (x && (x.word != null ? x.word : x.phrase != null ? x.phrase : x[0]) != null) ? String(x.word != null ? x.word : x.phrase != null ? x.phrase : x[0]).trim() : '';
+                                        var weight = (x && (x.count != null ? x.count : x.weight != null ? x.weight : x[1]) != null) ? Number(x.count != null ? x.count : x.weight != null ? x.weight : x[1]) || 0 : 0;
+                                        return phrase ? { phrase: phrase, weight: weight } : null;
+                                    }).filter(Boolean);
+                                    return Object.entries(raw).filter(function(e) { return e[0] && (Number(e[1]) || 0) > 0; }).map(function(e) { return { phrase: String(e[0]).trim(), weight: Number(e[1]) || 0 }; });
+                                };
+                                window.__countryKeywordsByLevel = { Novice: toList(ilc.Novice), Professional: toList(ilc.Professional), Architect: toList(ilc.Architect), globalNative: [] };
+                                if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud(window.__currentNationalIdentityLevel || 'Novice');
+                                if (empty) empty.classList.add('hidden');
+                            }
+                        }
+                    }
+                } catch (e2) { console.warn('[refreshVibeCard] 本国词云 localStorage 兜底失败:', e2); }
+                if (!window.__countryKeywordsByLevel) {
+                    if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud('Novice');
+                    if (empty) { empty.textContent = '暂无该国词云数据'; empty.classList.remove('hidden'); }
+                }
             }
             if (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function') {
                 try {

@@ -1340,7 +1340,7 @@ const ALLOWED_ORIGINS = [
 app.use('/*', cors({
   origin: '*',
   allowMethods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'],
-  allowHeaders: ['Content-Type', 'X-Fingerprint', 'Cache-Control', 'Authorization', 'X-Requested-With', 'cache-control', 'x-fingerprint'],
+  allowHeaders: ['Content-Type', 'X-Fingerprint', 'Cache-Control', 'Authorization', 'X-Requested-With', 'cache-control', 'x-fingerprint', 'x-intent', 'X-Intent'],
   exposeHeaders: ['Content-Length', 'Content-Type'],
   credentials: false,
   maxAge: 86400,
@@ -5990,7 +5990,40 @@ app.get('/api/v2/stats/keywords', async (c) => {
       });
     } catch (e: any) {
       console.warn('[Worker] /api/v2/stats/keywords 地区查询失败:', regionRaw, e?.message || String(e));
-      return c.json(out);
+    }
+  }
+
+  // 回源：若 slang 表无数据，从该国用户的 vibe_lexicon 聚合（user_analysis.personality.vibe_lexicon）
+  if (!Array.isArray(rows) || rows.length === 0) {
+    try {
+      const uaUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
+      uaUrl.searchParams.set('select', 'personality');
+      uaUrl.searchParams.set('or', `(country_code.eq.${regionRaw},ip_location.eq.${regionRaw},manual_location.eq.${regionRaw},current_location.eq.${regionRaw})`);
+      uaUrl.searchParams.set('limit', '500');
+      const uaRows = await fetchSupabaseJson<any[]>(env, uaUrl.toString(), {
+        headers: buildSupabaseHeaders(env),
+      });
+      const agg = new Map<string, number>();
+      for (const row of Array.isArray(uaRows) ? uaRows : []) {
+        const lex = row?.personality?.vibe_lexicon;
+        if (!lex || typeof lex !== 'object') continue;
+        for (const type of ['merit_board', 'slang_list', 'mantra_top']) {
+          const arr = lex[type];
+          if (!Array.isArray(arr)) continue;
+          for (const it of arr) {
+            const w = (it?.w != null ? String(it.w) : it?.phrase ?? '').trim();
+            const v = Number(it?.v ?? it?.weight ?? it?.hit_count ?? 0) || 0;
+            if (w.length > 1) agg.set(w, (agg.get(w) || 0) + v);
+          }
+        }
+      }
+      rows = Array.from(agg.entries())
+        .filter(([, v]) => v > 2)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 300)
+        .map(([phrase, weight]) => ({ phrase, hit_count: weight }));
+    } catch (e: any) {
+      console.warn('[Worker] /api/v2/stats/keywords vibe_lexicon 回源失败:', regionRaw, e?.message || String(e));
     }
   }
 
