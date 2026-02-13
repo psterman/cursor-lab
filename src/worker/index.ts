@@ -13,6 +13,7 @@ import { getRankResult, RANK_DATA } from './rank';
 // 直接从 rank-content.ts 导入 RANK_RESOURCES（rank.ts 已导入但未导出）
 import { RANK_RESOURCES } from '../rank-content';
 import { identifyUserByFingerprint, identifyUserByUserId, identifyUserByUsername, bindFingerprintToUser, updateUserByFingerprint, migrateFingerprintToUserId, identifyUserByClaimToken } from './fingerprint-service';
+import { getIdentityWordSets } from './identityWordBanks';
 
 // Cloudflare Workers 类型定义（兼容性处理）
 type KVNamespace = {
@@ -5936,6 +5937,87 @@ const handleWordCloudRequest = async (c: any) => {
 // 注册两个路由（别名）
 app.get('/api/v2/world-cloud', handleWordCloudRequest);
 app.get('/api/v2/wordcloud-data', handleWordCloudRequest);
+
+/**
+ * GET /api/v2/stats/keywords?region=CN（或 country=CN）
+ * 返回按 Novice/Professional/Architect 聚合的该国词云数据，供 stats2 右抽屉“本国词云”按身份 Tab 展示。
+ * - 去噪：剔除长度 1 的字符，且该国总频次 > 2 才进入统计。
+ * - 输出：{ Novice: [{ phrase, weight }], Professional: [...], Architect: [...], globalNative: [...] }
+ */
+app.get('/api/v2/stats/keywords', async (c) => {
+  const regionRaw = (c.req.query('region') || c.req.query('country') || '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(regionRaw)) {
+    return c.json(
+      { error: 'Missing or invalid region/country (expect 2-letter ISO code)' },
+      400
+    );
+  }
+  const env = c.env;
+  c.header('Cache-Control', 'public, max-age=60');
+
+  type Item = { phrase: string; weight: number };
+  const empty = (): Item[] => [];
+  const out: { Novice: Item[]; Professional: Item[]; Architect: Item[]; globalNative: Item[] } = {
+    Novice: empty(),
+    Professional: empty(),
+    Architect: empty(),
+    globalNative: empty(),
+  };
+
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+    return c.json(out);
+  }
+
+  let rows: any[] = [];
+  try {
+    const poolUrl = new URL(`${env.SUPABASE_URL}/rest/v1/slang_trends_pool`);
+    poolUrl.searchParams.set('select', 'phrase,hit_count');
+    poolUrl.searchParams.set('region', `eq.${regionRaw}`);
+    poolUrl.searchParams.set('order', 'hit_count.desc');
+    poolUrl.searchParams.set('limit', '300');
+    rows = await fetchSupabaseJson<any[]>(env, poolUrl.toString(), {
+      headers: buildSupabaseHeaders(env),
+    });
+  } catch {
+    try {
+      const url = new URL(`${env.SUPABASE_URL}/rest/v1/slang_trends`);
+      url.searchParams.set('select', 'phrase,hit_count');
+      url.searchParams.set('region', `eq.${regionRaw}`);
+      url.searchParams.set('order', 'hit_count.desc');
+      url.searchParams.set('limit', '300');
+      rows = await fetchSupabaseJson<any[]>(env, url.toString(), {
+        headers: buildSupabaseHeaders(env),
+      });
+    } catch (e: any) {
+      console.warn('[Worker] /api/v2/stats/keywords 地区查询失败:', regionRaw, e?.message || String(e));
+      return c.json(out);
+    }
+  }
+
+  const raw = (Array.isArray(rows) ? rows : [])
+    .map((r: any) => ({
+      phrase: String(r?.phrase ?? '').trim(),
+      weight: Number(r?.hit_count ?? r?.value ?? 0) || 0,
+    }))
+    .filter((x) => x.phrase.length > 1 && x.weight > 2);
+
+  const sets = getIdentityWordSets();
+  for (const x of raw) {
+    const key = x.phrase.toLowerCase();
+    const item = { phrase: x.phrase, weight: x.weight };
+    if (sets.architect.has(key)) {
+      out.Architect.push(item);
+    } else if (sets.professional.has(key)) {
+      out.Professional.push(item);
+    } else if (sets.novice.has(key)) {
+      out.Novice.push(item);
+    } else {
+      out.globalNative.push(item);
+    }
+  }
+
+  return c.json(out);
+});
 
 /**
  * 【国家摘要】GET /api/country-summary?country=CN（get_country_summary_v3）

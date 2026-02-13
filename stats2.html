@@ -369,6 +369,11 @@
                 local: null,
                 cdn: ['https://cdn.tailwindcss.com?minify=true'],
                 globalCheck: null
+            },
+            wordcloud2: {
+                local: null,
+                cdn: ['https://cdnjs.cloudflare.com/ajax/libs/wordcloud2.js/1.1.0/wordcloud2.min.js'],
+                globalCheck: 'WordCloud'
             }
         };
 
@@ -481,6 +486,12 @@
                     await loadResource('echartsWordCloud', RESOURCE_CONFIG.echartsWordCloud);
                 } catch (err) {
                     console.warn('[⚠️] echarts-wordcloud 加载失败(词云将无法显示):', err);
+                }
+                // 本国词云三身份 Tab 使用 WordCloud2（与 main.js 个人报告一致）
+                try {
+                    await loadResource('wordcloud2', RESOURCE_CONFIG.wordcloud2);
+                } catch (err) {
+                    console.warn('[⚠️] wordcloud2.js 加载失败(本国词云三身份将无法显示):', err);
                 }
                 
                 loadResource('world', RESOURCE_CONFIG.world).catch(err => {
@@ -4169,15 +4180,22 @@
                                 <div class="text-[10px] text-zinc-500" id="vibe-country-hint">国家：--</div>
                             </div>
 
-                            <!-- 上方：该国 Top50 词云形态（综合） -->
+                            <!-- 上方：该国词云按 Novice/Professional/Architect 视图（WordCloud2 + 三 Tab） -->
                             <div class="border border-white/10 bg-zinc-950/30 p-2 mb-3">
                                 <div class="flex items-center justify-between mb-2">
-                                    <div class="text-[10px] text-zinc-500 uppercase tracking-widest" data-i18n="panel.national_cloud_50">本国词云 50</div>
+                                    <div class="text-[10px] text-zinc-500 uppercase tracking-widest" data-i18n="panel.national_cloud_50">本国词云</div>
                                     <div class="text-[10px] text-zinc-600 font-mono" id="vibe-cloud50-meta">--</div>
                                 </div>
-                                <div id="vibe-cloud50-container" style="height: 260px; width: 100%;"></div>
+                                <div id="national-identity-tabs" class="flex gap-1 mb-2">
+                                    <button type="button" class="national-identity-tab px-2 py-1 text-[10px] rounded border font-medium hover:opacity-90" data-level="Novice" data-t="lexicon.novice" style="border-color:#10b981;background-color:rgba(16,185,129,0.15);color:#10b981">小白</button>
+                                    <button type="button" class="national-identity-tab px-2 py-1 text-[10px] rounded border border-white/10 bg-transparent text-zinc-400 hover:bg-white/5" data-level="Professional" data-t="lexicon.pro">脱发</button>
+                                    <button type="button" class="national-identity-tab px-2 py-1 text-[10px] rounded border border-white/10 bg-transparent text-zinc-400 hover:bg-white/5" data-level="Architect" data-t="lexicon.arch">霸天</button>
+                                </div>
+                                <div id="vibe-cloud50-container" style="height: 260px; width: 100%; position: relative;">
+                                    <canvas id="national-identity-cloud-canvas" style="display: block; width: 100%; height: 100%;"></canvas>
+                                </div>
                                 <div id="vibe-cloud50-empty" class="hidden text-zinc-500 text-sm p-3 italic" data-t="hotlist.building">
-                                    正在建立该地区黑话榜...
+                                    正在扫描该国开发者指纹...
                                 </div>
                             </div>
 
@@ -5317,30 +5335,44 @@
                         } catch (e) { /* ignore */ }
                         return;
                     }
-                    if (!effectiveIsGlobal && countryCode && typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function') {
+                    if (!effectiveIsGlobal && countryCode) {
                         var wordCloudContainer = document.getElementById('vibe-cloud50-container');
+                        var emptyCloudEl = document.getElementById('vibe-cloud50-empty');
                         var topRankContainer = document.getElementById('vibe-top10-list');
+                        if (emptyCloudEl) {
+                            emptyCloudEl.textContent = '正在扫描该国开发者指纹...';
+                            emptyCloudEl.classList.remove('hidden');
+                        }
                         if (wordCloudContainer) {
                             wordCloudContainer.setAttribute('data-loading', 'true');
-                            wordCloudContainer.innerHTML = '<div class="flex items-center justify-center h-full min-h-[200px] text-zinc-500 text-sm">加载中...</div>';
+                            var canvas = document.getElementById('national-identity-cloud-canvas');
+                            if (canvas && canvas.getContext) {
+                                var ctx = canvas.getContext('2d');
+                                if (ctx) { ctx.clearRect(0, 0, canvas.width || 0, canvas.height || 0); }
+                            }
                         }
                         if (topRankContainer) {
                             topRankContainer.innerHTML = '<li class="list-none text-zinc-500 text-sm py-4 text-center">加载中...</li>';
                             var emptyEl = document.getElementById('vibe-top10-empty');
                             if (emptyEl) emptyEl.classList.add('hidden');
                         }
+                        window.__countryKeywordsByLevel = null;
                         try {
-                            var kwRes = await supabaseClient.rpc('get_country_keywords', { target_code: countryCode });
-                            var kwData = (kwRes && kwRes.data != null) ? kwRes.data : null;
-                            if (!kwData || !Array.isArray(kwData) || kwData.length === 0) {
-                                if (typeof _renderCloud50 === 'function') _renderCloud50(countryCode, []);
-                            } else {
-                                var cloudData = kwData.map(function(x) { return { phrase: (x && x.tag) ? String(x.tag).trim() : '', hit_count: Number(x && x.weight) || 0 }; }).filter(function(x) { return x.phrase && x.hit_count > 0; });
-                                if (typeof _renderCloud50 === 'function') _renderCloud50(countryCode, cloudData);
+                            var kwResp = await fetch(API_ENDPOINT + 'api/v2/stats/keywords?region=' + encodeURIComponent(countryCode) + '&_t=' + Date.now(), { cache: 'no-store' });
+                            if (!kwResp.ok) throw new Error('keywords API ' + kwResp.status);
+                            var kwPayload = await kwResp.json();
+                            window.__countryKeywordsByLevel = kwPayload && typeof kwPayload === 'object' ? kwPayload : null;
+                            var currentLevel = (window.__currentNationalIdentityLevel || 'Novice');
+                            if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud(currentLevel);
+                            if (emptyCloudEl && window.__countryKeywordsByLevel) {
+                                var total = (window.__countryKeywordsByLevel.Novice || []).length + (window.__countryKeywordsByLevel.Professional || []).length + (window.__countryKeywordsByLevel.Architect || []).length + (window.__countryKeywordsByLevel.globalNative || []).length;
+                                if (total === 0) emptyCloudEl.classList.remove('hidden'); else emptyCloudEl.classList.add('hidden');
                             }
-                        } catch (rpcErr) {
-                            console.warn('[updateCountryDashboard] 词云 RPC 失败:', rpcErr);
-                            if (typeof _renderCloud50 === 'function') _renderCloud50(countryCode, []);
+                        } catch (apiErr) {
+                            console.warn('[updateCountryDashboard] 本国词云 API 失败:', apiErr);
+                            window.__countryKeywordsByLevel = null;
+                            if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud('Novice');
+                            if (emptyCloudEl) { emptyCloudEl.textContent = '暂无该国词云数据'; emptyCloudEl.classList.remove('hidden'); }
                         } finally {
                             if (wordCloudContainer) wordCloudContainer.removeAttribute('data-loading');
                         }
@@ -5348,9 +5380,7 @@
                         window.__currentCountryCode = countryCode;
                         (function loadLexiconList() {
                             var lexType = (window.__currentLexiconType || 'merit_board');
-                            var base = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content)) || '';
-                            base = (base && base.trim()) ? (base.trim().endsWith('/') ? base.trim() : base.trim() + '/') : '';
-                            var url = base + 'api/national-lexicon?country=' + encodeURIComponent(countryCode) + '&type=' + encodeURIComponent(lexType);
+                            var url = API_ENDPOINT + 'api/national-lexicon?country=' + encodeURIComponent(countryCode) + '&type=' + encodeURIComponent(lexType);
                             fetch(url).then(function(r) { return r.json(); }).then(function(res) {
                                 var list = (res && res.data && Array.isArray(res.data)) ? res.data : [];
                                 if (typeof _renderTop10List === 'function') _renderTop10List(list, true);
@@ -23716,6 +23746,107 @@
             });
         })();
 
+        (function bindNationalIdentityTabs() {
+            var tabsEl = document.getElementById('national-identity-tabs');
+            if (!tabsEl || tabsEl.dataset.bound) return;
+            tabsEl.dataset.bound = '1';
+            window.__currentNationalIdentityLevel = window.__currentNationalIdentityLevel || 'Novice';
+            var colorByLevel = { Novice: '#10b981', Professional: '#3b82f6', Architect: '#5b21b6' };
+            tabsEl.addEventListener('click', function(e) {
+                var btn = e.target && e.target.closest && e.target.closest('.national-identity-tab');
+                if (!btn || !btn.dataset.level) return;
+                var level = btn.dataset.level;
+                window.__currentNationalIdentityLevel = level;
+                var all = tabsEl.querySelectorAll('.national-identity-tab');
+                all.forEach(function(b) {
+                    b.classList.remove('border-[var(--accent-terminal)]', 'bg-[var(--accent-terminal)]/20', 'text-[var(--accent-terminal)]');
+                    b.classList.add('border-white/10', 'bg-transparent', 'text-zinc-400');
+                });
+                btn.classList.remove('border-white/10', 'bg-transparent', 'text-zinc-400');
+                btn.classList.add('border-white/20');
+                var hex = colorByLevel[level] || '#10b981';
+                btn.style.borderColor = hex;
+                btn.style.backgroundColor = hex + '26';
+                btn.style.color = hex;
+                if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud(level);
+            });
+        })();
+
+        function _hexToRgba(hex, alpha) {
+            var m = (hex || '').replace(/^#/, '').match(/^([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+            if (!m) return 'rgba(107, 114, 128, ' + (alpha != null ? alpha : 0.8) + ')';
+            return 'rgba(' + parseInt(m[1], 16) + ',' + parseInt(m[2], 16) + ',' + parseInt(m[3], 16) + ',' + (alpha != null ? alpha : 0.8) + ')';
+        }
+
+        function _renderNationalIdentityCloud(level) {
+            var container = document.getElementById('vibe-cloud50-container');
+            var canvas = document.getElementById('national-identity-cloud-canvas');
+            if (!container) return;
+            if (!canvas) {
+                canvas = document.createElement('canvas');
+                canvas.id = 'national-identity-cloud-canvas';
+                canvas.setAttribute('style', 'display:block;width:100%;height:100%');
+                container.appendChild(canvas);
+            }
+            var empty = document.getElementById('vibe-cloud50-empty');
+            var meta = document.getElementById('vibe-cloud50-meta');
+            var data = window.__countryKeywordsByLevel && Array.isArray(window.__countryKeywordsByLevel[level]) ? window.__countryKeywordsByLevel[level] : [];
+            if (data.length === 0) {
+                if (canvas.getContext) canvas.getContext('2d').clearRect(0, 0, canvas.width || 0, canvas.height || 0);
+                if (meta) meta.textContent = '--';
+                if (empty) { empty.classList.remove('hidden'); empty.textContent = (level === 'Novice' ? '小白' : level === 'Professional' ? '脱发' : '霸天') + '视角暂无命中词'; }
+                return;
+            }
+            if (empty) empty.classList.add('hidden');
+            if (meta) meta.textContent = 'N=' + data.length;
+            var colorByLevel = { Novice: '#10b981', Professional: '#3b82f6', Architect: '#5b21b6' };
+            var baseHex = colorByLevel[level] || '#10b981';
+            var maxW = Math.max.apply(null, data.map(function(x) { return x.weight || 0; })) || 1;
+            var list = data.map(function(x) {
+                var w = Number(x.weight) || 0;
+                var size = Math.max(12, Math.min(80, 10 + Math.log2(w + 1) * 14));
+                return [String(x.phrase || '').trim(), size];
+            }).filter(function(item) { return item[0].length > 0 && item[1] > 0; });
+            if (list.length === 0) return;
+            var width = container.offsetWidth || 400;
+            var height = container.offsetHeight || 260;
+            canvas.width = width;
+            canvas.height = height;
+            var ctx = canvas.getContext('2d');
+            if (ctx) ctx.clearRect(0, 0, width, height);
+            if (typeof WordCloud === 'undefined') {
+                if (empty) { empty.textContent = 'WordCloud2 未加载'; empty.classList.remove('hidden'); }
+                return;
+            }
+            try {
+                var wordToRatio = {};
+                list.forEach(function(item, i) {
+                    var w = Number(data[i] && data[i].weight) || 0;
+                    wordToRatio[item[0]] = maxW > 0 ? w / maxW : 0.5;
+                });
+                WordCloud(canvas, {
+                    list: list,
+                    gridSize: 4,
+                    weightFactor: function(size) { return Math.max(12, Math.min(80, size)); },
+                    fontFamily: '"Microsoft YaHei", "微软雅黑", SimHei, sans-serif',
+                    color: function(word) {
+                        var ratio = wordToRatio[word] != null ? wordToRatio[word] : 0.5;
+                        var alpha = 0.5 + 0.5 * Math.pow(ratio, 0.7);
+                        return _hexToRgba(baseHex, alpha);
+                    },
+                    rotateRatio: 0.6,
+                    backgroundColor: 'transparent',
+                    minSize: 12,
+                    drawOutOfBound: false,
+                    shrinkToFit: false,
+                    ellipticity: 0.8
+                });
+            } catch (err) {
+                console.warn('[WordCloud] 本国词云渲染失败:', err);
+                if (empty) { empty.textContent = '词云渲染失败'; empty.classList.remove('hidden'); }
+            }
+        }
+
         function _renderCloud50(region, list) {
             const container = document.getElementById('vibe-cloud50-container');
             const empty = document.getElementById('vibe-cloud50-empty');
@@ -23858,12 +23989,15 @@
 
                 const top10 = Array.isArray(data?.top10) ? data.top10 : (Array.isArray(window.__latestTop10) ? window.__latestTop10 : []);
                 var isCountryRegion = (region && String(region).length === 2);
-                var cloud50 = isCountryRegion
-                    ? (Array.isArray(window.__latestCloud50) ? window.__latestCloud50 : [])
-                    : (Array.isArray(data?.cloud50) ? data.cloud50 : (Array.isArray(window.__latestCloud50) ? window.__latestCloud50 : []));
-
                 _renderTop10List(top10);
-                _renderCloud50(region, cloud50);
+                if (isCountryRegion && window.__countryKeywordsByLevel && typeof _renderNationalIdentityCloud === 'function') {
+                    _renderNationalIdentityCloud(window.__currentNationalIdentityLevel || 'Novice');
+                } else {
+                    var cloud50 = isCountryRegion
+                        ? (Array.isArray(window.__latestCloud50) ? window.__latestCloud50 : [])
+                        : (Array.isArray(data?.cloud50) ? data.cloud50 : (Array.isArray(window.__latestCloud50) ? window.__latestCloud50 : []));
+                    _renderCloud50(region, cloud50);
+                }
 
                 try {
                     const enabled = _isSemanticBurstDebugEnabled();
@@ -23892,33 +24026,41 @@
             _setVibeRefreshing(true);
             try { setTimeout(() => _setVibeRefreshing(false), 700); } catch { /* ignore */ }
 
+            window.__countryKeywordsByLevel = null;
+            if (empty) { empty.textContent = '正在扫描该国开发者指纹...'; empty.classList.remove('hidden'); }
+            var canvas = document.getElementById('national-identity-cloud-canvas');
+            if (canvas && canvas.getContext) { try { canvas.getContext('2d').clearRect(0, 0, canvas.width || 0, canvas.height || 0); } catch (_) {} }
+            try {
+                var API_ENDPOINT = _getApiEndpoint();
+                var kwResp = await fetch(API_ENDPOINT + 'api/v2/stats/keywords?region=' + encodeURIComponent(region) + '&_t=' + Date.now(), { cache: 'no-store' });
+                if (!kwResp.ok) throw new Error('keywords ' + kwResp.status);
+                var kwPayload = await kwResp.json();
+                window.__countryKeywordsByLevel = kwPayload && typeof kwPayload === 'object' ? kwPayload : null;
+                var currentLevel = window.__currentNationalIdentityLevel || 'Novice';
+                if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud(currentLevel);
+                var total = 0;
+                if (window.__countryKeywordsByLevel) {
+                    total = (window.__countryKeywordsByLevel.Novice || []).length + (window.__countryKeywordsByLevel.Professional || []).length + (window.__countryKeywordsByLevel.Architect || []).length + (window.__countryKeywordsByLevel.globalNative || []).length;
+                }
+                if (empty && total > 0) empty.classList.add('hidden');
+                if (total === 0 && empty) empty.classList.remove('hidden');
+            } catch (e) {
+                window.__countryKeywordsByLevel = null;
+                if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud('Novice');
+                if (empty) { empty.textContent = '暂无该国词云数据'; empty.classList.remove('hidden'); }
+            }
             if (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function') {
-                window.__latestCloud50 = null;
                 try {
+                    var top10Data = [];
                     var kwRes = await supabaseClient.rpc('get_country_keywords', { target_code: region });
                     var kwData = (kwRes && kwRes.data != null) ? kwRes.data : null;
-                    if (!kwData || !Array.isArray(kwData) || kwData.length === 0) {
-                        window.__latestCloud50 = null;
-                        _renderCloud50(region, []);
-                        _renderTop10List([]);
-                        if (empty) { empty.textContent = '正在收集数据...'; empty.classList.remove('hidden'); }
-                        var emptyTop = document.getElementById('vibe-top10-empty');
-                        if (emptyTop) { emptyTop.textContent = '正在收集数据...'; emptyTop.classList.remove('hidden'); }
-                    } else {
-                        var cloud50Format = kwData.map(function(x) { return { phrase: (x && x.tag) ? String(x.tag).trim() : '', hit_count: Number(x && x.weight) || 0 }; }).filter(function(x) { return x.phrase && x.hit_count > 0; });
-                        window.__latestCloud50 = cloud50Format;
-                        _renderCloud50(region, cloud50Format);
-                        var top10Data = kwData.slice(0, 10).map(function(x) { return { phrase: (x && x.tag) ? String(x.tag).trim() : '', hitCount: Number(x && x.weight) || 0 }; }).filter(function(x) { return x.phrase && x.hitCount > 0; });
+                    if (kwData && Array.isArray(kwData) && kwData.length > 0) {
+                        top10Data = kwData.slice(0, 10).map(function(x) { return { phrase: (x && x.tag) ? String(x.tag).trim() : '', hitCount: Number(x && x.weight) || 0 }; }).filter(function(x) { return x.phrase && x.hitCount > 0; });
                         window.__latestTop10 = top10Data;
-                        _renderTop10List(top10Data);
                     }
-                } catch (e) {
-                    window.__latestCloud50 = null;
-                    try { _renderTop10List([]); } catch { /* ignore */ }
-                    try { _renderCloud50(region, []); } catch { /* ignore */ }
-                    if (empty) { empty.textContent = '正在收集数据...'; empty.classList.remove('hidden'); }
-                    var emptyTopCatch = document.getElementById('vibe-top10-empty');
-                    if (emptyTopCatch) { emptyTopCatch.textContent = '正在收集数据...'; emptyTopCatch.classList.remove('hidden'); }
+                    if (typeof _renderTop10List === 'function') _renderTop10List(top10Data);
+                } catch (_) {
+                    if (typeof _renderTop10List === 'function') _renderTop10List([]);
                 }
             } else {
                 try { vibeCloudAbort && vibeCloudAbort.abort && vibeCloudAbort.abort(); } catch { /* ignore */ }
@@ -23944,6 +24086,9 @@
                 window.__vibeCloudResizeBound = true;
                 window.addEventListener('resize', () => {
                     try { vibeCloudChart && vibeCloudChart.resize(); } catch {}
+                    if (window.__countryKeywordsByLevel && typeof _renderNationalIdentityCloud === 'function') {
+                        _renderNationalIdentityCloud(window.__currentNationalIdentityLevel || 'Novice');
+                    }
                 });
             }
         };
