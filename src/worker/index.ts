@@ -5944,112 +5944,112 @@ app.get('/api/v2/wordcloud-data', handleWordCloudRequest);
  * - 去噪：剔除长度 1 的字符，且该国总频次 > 2 才进入统计。
  * - 输出：{ Novice: [{ phrase, weight }], Professional: [...], Architect: [...], globalNative: [...] }
  */
+/**
+ * GET /api/v2/stats/keywords?region=CN
+ * 关键词统计聚合接口：从 user_analysis 表聚合 identityLevelCloud 数据
+ * 
+ * @param region - 国家代码（2位ISO代码），默认为 'CN'
+ * @returns { status: 'success', data: { Novice: [], Professional: [], Architect: [] } }
+ */
 app.get('/api/v2/stats/keywords', async (c) => {
-  const regionRaw = (c.req.query('region') || c.req.query('country') || '').trim().toUpperCase();
-  if (!/^[A-Z]{2}$/.test(regionRaw)) {
-    return c.json(
-      { error: 'Missing or invalid region/country (expect 2-letter ISO code)' },
-      400
-    );
-  }
   const env = c.env;
   c.header('Cache-Control', 'public, max-age=60');
 
+  // 接收 region 查询参数，默认为 'CN'
+  const regionRaw = (c.req.query('region') || c.req.query('country') || 'CN').trim().toUpperCase();
+  
+  // 验证 region 格式（2位ISO代码）
+  if (!/^[A-Z]{2}$/.test(regionRaw)) {
+    return c.json(
+      { status: 'error', error: 'Invalid region/country (expect 2-letter ISO code)' },
+      400
+    );
+  }
+
+  // 定义返回数据结构
   type Item = { phrase: string; weight: number };
   const empty = (): Item[] => [];
-  const out: { Novice: Item[]; Professional: Item[]; Architect: Item[]; globalNative: Item[] } = {
+  const out: { Novice: Item[]; Professional: Item[]; Architect: Item[] } = {
     Novice: empty(),
     Professional: empty(),
     Architect: empty(),
-    globalNative: empty(),
   };
 
+  // 容错处理：如果 Supabase 未配置，返回空数据
   if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
-    return c.json(out);
+    return c.json({ status: 'success', data: out });
   }
 
-  let rows: any[] = [];
   try {
-    const poolUrl = new URL(`${env.SUPABASE_URL}/rest/v1/slang_trends_pool`);
-    poolUrl.searchParams.set('select', 'phrase,hit_count');
-    poolUrl.searchParams.set('region', `eq.${regionRaw}`);
-    poolUrl.searchParams.set('order', 'hit_count.desc');
-    poolUrl.searchParams.set('limit', '300');
-    rows = await fetchSupabaseJson<any[]>(env, poolUrl.toString(), {
+    // 从 user_analysis 表查询，筛选 country_code 等于 region 的数据
+    // 按 updated_at 倒序排列，limit 20
+    const uaUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
+    uaUrl.searchParams.set('select', 'stats');
+    uaUrl.searchParams.set('country_code', `eq.${regionRaw}`);
+    uaUrl.searchParams.set('order', 'updated_at.desc');
+    uaUrl.searchParams.set('limit', '20');
+    
+    const uaRows = await fetchSupabaseJson<any[]>(env, uaUrl.toString(), {
       headers: buildSupabaseHeaders(env),
     });
-  } catch {
-    try {
-      const url = new URL(`${env.SUPABASE_URL}/rest/v1/slang_trends`);
-      url.searchParams.set('select', 'phrase,hit_count');
-      url.searchParams.set('region', `eq.${regionRaw}`);
-      url.searchParams.set('order', 'hit_count.desc');
-      url.searchParams.set('limit', '300');
-      rows = await fetchSupabaseJson<any[]>(env, url.toString(), {
-        headers: buildSupabaseHeaders(env),
-      });
-    } catch (e: any) {
-      console.warn('[Worker] /api/v2/stats/keywords 地区查询失败:', regionRaw, e?.message || String(e));
-    }
-  }
 
-  // 回源：若 slang 表无数据，从该国用户的 vibe_lexicon 聚合（user_analysis.personality.vibe_lexicon）
-  if (!Array.isArray(rows) || rows.length === 0) {
-    try {
-      const uaUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
-      uaUrl.searchParams.set('select', 'personality');
-      uaUrl.searchParams.set('or', `(country_code.eq.${regionRaw},ip_location.eq.${regionRaw},manual_location.eq.${regionRaw},current_location.eq.${regionRaw})`);
-      uaUrl.searchParams.set('limit', '500');
-      const uaRows = await fetchSupabaseJson<any[]>(env, uaUrl.toString(), {
-        headers: buildSupabaseHeaders(env),
-      });
-      const agg = new Map<string, number>();
-      for (const row of Array.isArray(uaRows) ? uaRows : []) {
-        const lex = row?.personality?.vibe_lexicon;
-        if (!lex || typeof lex !== 'object') continue;
-        for (const type of ['merit_board', 'slang_list', 'mantra_top']) {
-          const arr = lex[type];
-          if (!Array.isArray(arr)) continue;
-          for (const it of arr) {
-            const w = (it?.w != null ? String(it.w) : it?.phrase ?? '').trim();
-            const v = Number(it?.v ?? it?.weight ?? it?.hit_count ?? 0) || 0;
-            if (w.length > 1) agg.set(w, (agg.get(w) || 0) + v);
+    // 容错处理：如果 Supabase 无数据，返回 status: 'success' 且 data 里的等级数组为空
+    if (!Array.isArray(uaRows) || uaRows.length === 0) {
+      return c.json({ status: 'success', data: out });
+    }
+
+    // 聚合逻辑：遍历查询到的记录，提取 stats.identityLevelCloud
+    const wordCounts: {
+      Novice: Map<string, number>;
+      Professional: Map<string, number>;
+      Architect: Map<string, number>;
+    } = {
+      Novice: new Map(),
+      Professional: new Map(),
+      Architect: new Map(),
+    };
+
+    for (const row of uaRows) {
+      const stats = row?.stats;
+      if (!stats || typeof stats !== 'object') continue;
+      
+      const ilc = stats.identityLevelCloud;
+      if (!ilc || typeof ilc !== 'object') continue;
+
+      // 遍历各等级的词云数据（Novice, Professional, Architect）
+      for (const level of ['Novice', 'Professional', 'Architect'] as const) {
+        const levelData = ilc[level];
+        if (!Array.isArray(levelData)) continue;
+
+        for (const item of levelData) {
+          // 适配不同数据格式：{word, count} 或 {phrase, weight}
+          const phrase = String(item?.word ?? item?.phrase ?? '').trim();
+          const count = Number(item?.count ?? item?.weight ?? 0) || 0;
+          
+          // 只处理有效的词汇（长度 > 1 且 count > 0）
+          if (phrase.length > 1 && count > 0) {
+            const current = wordCounts[level].get(phrase) || 0;
+            wordCounts[level].set(phrase, current + count);
           }
         }
       }
-      rows = Array.from(agg.entries())
-        .filter(([, v]) => v > 2)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 300)
-        .map(([phrase, weight]) => ({ phrase, hit_count: weight }));
-    } catch (e: any) {
-      console.warn('[Worker] /api/v2/stats/keywords vibe_lexicon 回源失败:', regionRaw, e?.message || String(e));
     }
-  }
 
-  const raw = (Array.isArray(rows) ? rows : [])
-    .map((r: any) => ({
-      phrase: String(r?.phrase ?? '').trim(),
-      weight: Number(r?.hit_count ?? r?.value ?? 0) || 0,
-    }))
-    .filter((x) => x.phrase.length > 1 && x.weight > 2);
-
-  const sets = getIdentityWordSets();
-  for (const x of raw) {
-    const key = x.phrase.toLowerCase();
-    const item = { phrase: x.phrase, weight: x.weight };
-    if (sets.architect.has(key)) {
-      out.Architect.push(item);
-    } else if (sets.professional.has(key)) {
-      out.Professional.push(item);
-    } else if (sets.novice.has(key)) {
-      out.Novice.push(item);
-    } else {
-      out.globalNative.push(item);
+    // 将聚合后的数据格式化为前端需要的格式
+    for (const level of ['Novice', 'Professional', 'Architect'] as const) {
+      const map = wordCounts[level];
+      out[level] = Array.from(map.entries())
+        .map(([phrase, weight]) => ({ phrase, weight }))
+        .filter((x) => x.phrase.length > 1 && x.weight > 0)
+        .sort((a, b) => b.weight - a.weight);
     }
-  }
 
-  return c.json(out);
+    return c.json({ status: 'success', data: out });
+  } catch (e: any) {
+    console.warn('[Worker] /api/v2/stats/keywords 查询失败:', regionRaw, e?.message || String(e));
+    // 容错处理：如果查询失败，返回空数组结构，绝不要返回 404 或 500
+    return c.json({ status: 'success', data: out });
+  }
 });
 
 /**
