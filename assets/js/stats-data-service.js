@@ -27,7 +27,10 @@
         return list.map(function(item) {
             if (!item || typeof item !== 'object') return null;
             var phrase = '';
-            if (item.word != null) {
+            // 优先识别 Supabase personality.vibe_lexicon.slang_list 格式：item.w 为词组，item.v 为权重
+            if (item.w != null) {
+                phrase = String(item.w);
+            } else if (item.word != null) {
                 phrase = String(item.word);
             } else if (item.phrase != null) {
                 phrase = String(item.phrase);
@@ -35,12 +38,14 @@
                 phrase = String(item[0]);
             } else {
                 var keys = Object.keys(item);
-                if (keys.length > 0 && keys[0] !== 'count' && keys[0] !== 'weight') {
+                if (keys.length > 0 && keys[0] !== 'count' && keys[0] !== 'weight' && keys[0] !== 'v') {
                     phrase = String(keys[0]);
                 }
             }
             var weight = 0;
-            if (item.count != null) {
+            if (item.v != null) {
+                weight = Number(item.v);
+            } else if (item.count != null) {
                 weight = Number(item.count);
             } else if (item.weight != null) {
                 weight = Number(item.weight);
@@ -79,7 +84,29 @@
         } catch (e) {
             return { raw: raw, data: null, identityLevelCloud: null };
         }
-        var ilc = (data && data.stats && data.stats.identityLevelCloud) || (data && data.identityLevelCloud) || null;
+        // 词云数据位于 analysis 字段内，优先从 analysis 读取
+        var root = (data && data.analysis != null && typeof data.analysis === 'object') ? data.analysis : data;
+        var ilc = (root && root.stats && root.stats.identityLevelCloud) || (root && root.identityLevelCloud) || null;
+        if (!ilc && root) {
+            var pRaw = root.personality || root.personality_data;
+            var pObj = null;
+            if (typeof pRaw === 'string') {
+                try { pObj = JSON.parse(pRaw); } catch(e) {}
+            } else if (pRaw && typeof pRaw === 'object') {
+                pObj = pRaw;
+            }
+            if (pObj) {
+                ilc = pObj.identityLevelCloud || pObj.vibe_lexicon;
+                // 若仅有 personality.vibe_lexicon.slang_list，补全为 Novice/Professional/Architect 供词云使用
+                if (ilc && typeof ilc === 'object' && Array.isArray(ilc.slang_list) && ilc.slang_list.length > 0 &&
+                    !ilc.Novice && !ilc.Professional && !ilc.Architect) {
+                    var adapted = adaptCloudData(ilc.slang_list);
+                    if (adapted.length > 0) {
+                        ilc = { Novice: adapted, Professional: adapted, Architect: adapted, globalNative: ilc.globalNative || ilc.native || [] };
+                    }
+                }
+            }
+        }
         return { raw: raw, data: data, identityLevelCloud: ilc };
     }
 
@@ -98,6 +125,7 @@
 
     /**
      * 从 _loc 与 localStorage 解析 user_id / fingerprint（与 updateCountryDashboard 一致）
+     * 指纹优先从 localStorage.getItem('vibe_fp') 获取，保证与上报端对齐。
      */
     function getUserIdAndFingerprint() {
         var uid = '';
@@ -107,8 +135,11 @@
             if (!uid) {
                 uid = localStorage.getItem('github_user_id') || localStorage.getItem('supabase_user_id') || localStorage.getItem('auth_user_id') || localStorage.getItem('user_id') || localStorage.getItem('github_username') || (window.userId) || '';
             }
-            var p = new URLSearchParams(_loc.search);
-            fp = p.get('fingerprint') || p.get('fp') || '';
+            fp = localStorage.getItem('vibe_fp') || '';
+            if (!fp) {
+                var p = new URLSearchParams(_loc.search);
+                fp = p.get('fingerprint') || p.get('fp') || '';
+            }
             if (!fp) fp = localStorage.getItem('user_fingerprint') || (window.fpId) || '';
         } catch (e) {}
         return { uid: String(uid || '').trim(), fp: String(fp || '').trim() };
@@ -150,13 +181,7 @@
             if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
             if (resp.ok) {
                 return resp.json().then(function(data) {
-                    if (data && data.vibe_lexicon && typeof data.vibe_lexicon === 'object') {
-                        try {
-                            if (!window.__countryKeywordsByLevel) window.__countryKeywordsByLevel = {};
-                            window.__countryKeywordsByLevel['Professional'] = adaptCloudData(data.vibe_lexicon.mantra_top);
-                            window.__countryKeywordsByLevel['Novice'] = adaptCloudData(data.vibe_lexicon.slang_list);
-                        } catch (e) { /* ignore */ }
-                    }
+                    // 国家关键词/词云仅由 fetchCountryKeywords -> get_user_soul_words 填充，此处不再用 vibe_lexicon 覆盖
                     if (!effectiveIsGlobal && data && data._meta && (data.jiafang_count != null || data.ketao_count != null)) {
                         data.countryTotals = data.countryTotals || {};
                         data.countryTotals.jiafang_count = data.jiafang_count != null ? data.jiafang_count : data.countryTotals.jiafang_count;
@@ -200,49 +225,59 @@
     }
 
     /**
-     * 国家关键词/词云 API：fetch + 失败时从 last_analysis_data 读取 identityLevelCloud
-     * @param {string} countryCode - ISO2
+     * 国家关键词/词云：仅从 Supabase RPC get_user_soul_words 获取，phrase + hit_count 按 hit_count 降序供词云中心显示。
+     * 若用户选择了国家，在客户端按 country 过滤（RPC 当前仅支持 p_fingerprint）。
+     * @param {string} countryCode - ISO2，可选，用于客户端过滤
      * @returns {Promise<object>} - { Novice, Professional, Architect, globalNative } 已用 adaptCloudData 转换
      */
     function fetchCountryKeywords(countryCode) {
-        var base = getApiBase();
-        var API_ENDPOINT = base || '/';
-        var url = API_ENDPOINT + 'api/v2/stats/keywords?region=' + encodeURIComponent(countryCode) + '&_t=' + Date.now();
+        var effectiveCountry = (countryCode && String(countryCode).trim()) || (window.__selectedCountry && String(window.__selectedCountry).trim()) || '';
+        var ids = getUserIdAndFingerprint();
+        var fp = ids.fp;
+        var supabase = window.supabase || window.supabaseClient;
+        var emptyResult = {
+            Novice: [],
+            Professional: [],
+            Architect: [],
+            globalNative: []
+        };
 
-        return fetch(url, { cache: 'no-store' }).then(function(kwResp) {
-            if (kwResp.ok) {
-                return kwResp.json().then(function(rawPayload) {
-                    var kwPayload = (rawPayload && rawPayload.data) ? rawPayload.data : rawPayload;
-                    if (kwPayload && typeof kwPayload === 'object') {
-                        return {
-                            Novice: adaptCloudData(kwPayload.Novice || []),
-                            Professional: adaptCloudData(kwPayload.Professional || []),
-                            Architect: adaptCloudData(kwPayload.Architect || []),
-                            globalNative: adaptCloudData(kwPayload.globalNative || [])
-                        };
-                    }
-                    return null;
-                });
+        if (!supabase || typeof supabase.rpc !== 'function' || !fp) {
+            window.__countryKeywordsByLevel = emptyResult;
+            window.__nationalCloudData = emptyResult;
+            return Promise.resolve(emptyResult);
+        }
+
+        return supabase.rpc('get_user_soul_words', { p_fingerprint: fp }).then(function(result) {
+            var err = result.error;
+            var rows = (result && result.data && Array.isArray(result.data)) ? result.data : [];
+            if (err) {
+                console.warn('[StatsDataService] get_user_soul_words RPC 失败:', err);
+                window.__countryKeywordsByLevel = emptyResult;
+                window.__nationalCloudData = emptyResult;
+                return emptyResult;
             }
-            if (kwResp.status === 404) throw new Error('keywords API 404');
-            throw new Error('keywords API ' + kwResp.status);
-        }).catch(function(apiErr) {
-            var last = getLastAnalysisData();
-            var lastData = last.data;
-            var localCountryCode = (lastData && lastData.country_code) ? String(lastData.country_code).toUpperCase() : '';
-            var currentUpper = countryCode ? String(countryCode).toUpperCase() : '';
-            if (!currentUpper || localCountryCode === currentUpper) {
-                var ilc = last.identityLevelCloud;
-                if (ilc && typeof ilc === 'object') {
-                    return {
-                        Novice: adaptCloudData(ilc.Novice || []),
-                        Professional: adaptCloudData(ilc.Professional || []),
-                        Architect: adaptCloudData(ilc.Architect || []),
-                        globalNative: adaptCloudData(ilc.globalNative || ilc.native || [])
-                    };
-                }
+            var countryFilter = effectiveCountry ? String(effectiveCountry).toUpperCase() : '';
+            if (countryFilter) {
+                rows = rows.filter(function(r) { return (r.country || '').toUpperCase() === countryFilter; });
             }
-            throw apiErr;
+            rows.sort(function(a, b) { return (b.hit_count || 0) - (a.hit_count || 0); });
+            var mapped = rows.map(function(r) { return { phrase: r.phrase, count: r.hit_count }; });
+            var adapted = adaptCloudData(mapped);
+            var out = {
+                Novice: adapted,
+                Professional: adapted,
+                Architect: adapted,
+                globalNative: adapted
+            };
+            window.__countryKeywordsByLevel = out;
+            window.__nationalCloudData = out;
+            return out;
+        }).catch(function(e) {
+            console.warn('[StatsDataService] fetchCountryKeywords 异常:', e);
+            window.__countryKeywordsByLevel = emptyResult;
+            window.__nationalCloudData = emptyResult;
+            return emptyResult;
         });
     }
 

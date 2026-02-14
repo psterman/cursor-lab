@@ -647,10 +647,7 @@ class VibeCodingApp {
     }
 
     const container = document.getElementById(containerId) || document.querySelector(`#${containerId}`);
-    if (!container) {
-      console.warn(`[VibeCodingApp] renderBehaviorTags: 容器 ${containerId} 未找到`);
-      return;
-    }
+    if (!container) return; // 当前页面无此容器时静默返回，不刷控制台
 
     const lang = getCurrentLang();
     const badges = V6_METRIC_CONFIG.badges;
@@ -937,6 +934,18 @@ class VibeCodingApp {
     } else {
       window.vibeResults = normalizeIdentityLevelCloud(ilc);
       selectedIdentityLevel = 'Novice';
+
+      // 【三级别各取最高频一词】在 identityLevelCloud 生成后立即执行，脱钩渲染
+      // 即使 renderIdentityLevelCloud 因找不到 Canvas 退出，上报也会运行
+      var selectedWords = pickTopWordPerLevel(ilc);
+      var country = (result && (result.ip_location || result.statistics?.ip_location || result.stats?.ip_location)) || (typeof window !== 'undefined' && window.lastAnalysisResult && window.lastAnalysisResult.ip_location) ? String((result && (result.ip_location || result.statistics?.ip_location || result.stats?.ip_location)) || (window.lastAnalysisResult && window.lastAnalysisResult.ip_location) || '').trim().toUpperCase() : '';
+      if (!country || !/^[A-Za-z]{2}$/.test(country)) country = '';
+      if (selectedWords.length > 0) {
+        console.log('[Main] 高频词上传：已选取 ' + selectedWords.length + ' 个词', selectedWords.map(function (w) { return w.p + '(' + w.c + ')'; }));
+      }
+      reportSoulWord(selectedWords, country).catch(function (err) { console.error('[Main] 灵魂词上报失败:', err); });
+
+      // 渲染词云（可选，取决于页面是否有 Canvas）
       if (typeof renderIdentityLevelCloud === 'function') {
         renderIdentityLevelCloud('Novice');
       }
@@ -1366,6 +1375,9 @@ class VibeCodingApp {
       if (typeof renderIdentityLevelCloud === 'function') {
         renderIdentityLevelCloud('Novice');
       }
+      // 【灵魂词提炼与上报】异步执行，不阻塞 UI
+      const soulDataSync = extractSoulWord(result);
+      if (soulDataSync) reportSoulWord(soulDataSync).catch(console.error);
     }
 
     // 【V6 适配】确保 stats 对象被正确保存
@@ -5774,6 +5786,260 @@ function normalizeIdentityLevelCloud(ilc) {
 }
 
 /**
+ * 【三级别各取最高频一词】从 identityLevelCloud 的 Novice、Architect、Native 中各取 count 最大的一个词
+ * @param {Object} ilc - identityLevelCloud 对象
+ * @returns {Array<{ p: string, c: string, v: number }>} 最多 3 个词，用于上报
+ */
+function pickTopWordPerLevel(ilc) {
+  if (!ilc || typeof ilc !== 'object') return [];
+  var selectedWords = [];
+  var levels = [
+    { key: 'Novice', name: 'Novice' },
+    { key: 'Architect', name: 'Architect' },
+    { key: 'native', name: 'Native' }
+  ];
+  for (var i = 0; i < levels.length; i++) {
+    var level = levels[i];
+    var arr = ilc[level.key];
+    if (!arr) continue;
+    var items = [];
+    if (Array.isArray(arr)) {
+      items = arr.map(function (x) {
+        var word = x.word != null ? String(x.word) : (x[0] != null ? String(x[0]) : '');
+        var count = x.count != null ? Number(x.count) : (x[1] != null ? Number(x[1]) : 0);
+        return { word: word, count: count };
+      });
+    } else if (arr && typeof arr === 'object') {
+      items = Object.entries(arr).map(function (e) {
+        return { word: String(e[0]), count: Number(e[1]) || 0 };
+      });
+    }
+    if (items.length === 0) continue;
+    var maxItem = items[0];
+    for (var j = 1; j < items.length; j++) {
+      if (items[j].count > maxItem.count) maxItem = items[j];
+    }
+    if (maxItem && maxItem.word && maxItem.count > 0) {
+      selectedWords.push({
+        p: maxItem.word.trim(),
+        c: level.name,
+        v: maxItem.count
+      });
+    }
+  }
+  return selectedWords;
+}
+
+/**
+ * 【灵魂词提炼】从 vibeResult.identityLevelCloud 中提取权重绝对值最高的非标准词
+ * @param {Object} vibeResult - 分析结果对象，包含 identityLevelCloud 属性
+ * @returns {{ p: string, c: string, v: number } | null} 提炼出的灵魂词对象 { p: 词组, c: 分类, v: 权重 }，失败返回 null
+ */
+function extractSoulWord(vibeResult) {
+  if (!vibeResult || typeof vibeResult !== 'object') {
+    return null;
+  }
+
+  // 从 vibeResult.identityLevelCloud 提取数据
+  const ilc = vibeResult.identityLevelCloud || vibeResult.statistics?.identityLevelCloud || vibeResult.stats?.identityLevelCloud;
+  if (!ilc || typeof ilc !== 'object') {
+    return null;
+  }
+
+  // 若 window.__standardSets 未定义，则不进行标准词过滤（健壮性）
+  let standardSet = null;
+  if (typeof window !== 'undefined' && window.__standardSets != null) {
+    try {
+      if (window.__standardSets instanceof Set) {
+        standardSet = window.__standardSets;
+      } else if (Array.isArray(window.__standardSets)) {
+        standardSet = new Set(window.__standardSets);
+      } else if (typeof window.__standardSets === 'object') {
+        const allWords = [];
+        for (const key in window.__standardSets) {
+          if (Array.isArray(window.__standardSets[key])) {
+            allWords.push(...window.__standardSets[key]);
+          }
+        }
+        standardSet = new Set(allWords);
+      }
+    } catch (e) {
+      console.warn('[Main] 构建标准词库 Set 失败:', e?.message || String(e));
+    }
+  }
+
+  const categories = ['Novice', 'Professional', 'Architect'];
+  const candidates = [];
+
+  // 遍历三个分类
+  for (const category of categories) {
+    const arr = ilc[category];
+    if (!arr) continue;
+
+    let items = [];
+    if (Array.isArray(arr)) {
+      items = arr;
+    } else if (typeof arr === 'object') {
+      // 如果是对象格式，转换为数组格式
+      items = Object.entries(arr)
+        .filter(function (e) { return e[1] > 0; })
+        .map(function (e) { 
+          return { word: e[0], count: e[1] }; 
+        });
+    }
+
+    // 过滤候选词
+    for (const item of items) {
+      const word = String(item.word || item[0] || '').trim();
+      if (!word || word.length <= 1) continue; // 排除单字词
+
+      // 排除标准词库中的词（如果标准词库存在）
+      if (standardSet && standardSet.has(word)) {
+        continue;
+      }
+
+      // 提取权重 v 的绝对值（优先使用 v 字段，兼容 count 和其他格式）
+      let weight = 0;
+      if (item.v != null) {
+        weight = Math.abs(Number(item.v));
+      } else if (item.count != null) {
+        weight = Math.abs(Number(item.count));
+      } else if (Array.isArray(item) && item.length >= 2) {
+        weight = Math.abs(Number(item[1]));
+      }
+      if (weight <= 0) continue;
+
+      candidates.push({
+        phrase: word,
+        category: category,
+        weight: weight
+      });
+    }
+  }
+
+  // 找到这三类中权重(v)绝对值最高的一个非标准词作为"灵魂词"
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  candidates.sort(function (a, b) {
+    return b.weight - a.weight;
+  });
+
+  const soulWord = candidates[0];
+  if (!soulWord) {
+    return null;
+  }
+
+  // 返回 { p, c, v } 格式
+  const soulData = {
+    p: soulWord.phrase,
+    c: soulWord.category,
+    v: soulWord.weight
+  };
+  console.log('[Main] ✅ 灵魂词提炼成功:', soulData);
+  return soulData;
+}
+
+/**
+ * 灵魂词上报 API 基地址：智能识别本地开发环境，指向已部署的 Cloudflare Worker
+ * - localhost 环境：默认指向已部署的 Worker（可通过 window.__VIBE_SOUL_API_BASE__ 覆盖）
+ * - 非本地环境：使用相对路径，保持生产环境兼容性
+ * 
+ * 配置方式：
+ * 1. 在页面中设置：window.__VIBE_SOUL_API_BASE__ = 'https://cursor-clinical-analysis.你的账户子域名.workers.dev';
+ * 2. 或修改下面的 defaultWorkerUrl 为你的实际 Worker 域名
+ */
+function getSoulWordApiBaseUrl() {
+  if (typeof window === 'undefined') return '';
+  var hostname = window.location.hostname || '';
+  // 判断是否本地开发环境（包含 localhost）
+  if (hostname.includes('localhost') || hostname === '127.0.0.1') {
+    // 优先使用配置的 Worker 域名，否则使用默认的已部署 Worker
+    // 格式：https://{worker-name}.{account-subdomain}.workers.dev
+    // 例如：https://cursor-clinical-analysis.your-subdomain.workers.dev
+    var defaultWorkerUrl = 'https://cursor-clinical-analysis.psterman.workers.dev';
+    return (window.__VIBE_SOUL_API_BASE__ != null && String(window.__VIBE_SOUL_API_BASE__).trim() !== '')
+      ? String(window.__VIBE_SOUL_API_BASE__).replace(/\/$/, '')
+      : defaultWorkerUrl;
+  }
+  // 非本地环境：返回空字符串，使用相对路径
+  return '';
+}
+
+/**
+ * 【灵魂词上报】将选中的词（最多 3 个）逐个 POST 到 Worker /api/v2/log-vibe-soul
+ * @param {Array<{ p: string, c: string, v: number }>|{ p: string, c: string, v: number }} selectedWords - 选中的词数组，或单个词对象（兼容旧调用）
+ * @param {string} [country] - 国家代码，优先从 lastAnalysisResult.ip_location 传入，用于地理对齐
+ * @returns {Promise<void>} Promise，确保使用 .catch() 捕获错误，不干扰主页面的分析显示
+ */
+async function reportSoulWord(selectedWords, country) {
+  var list = Array.isArray(selectedWords) ? selectedWords : (selectedWords && selectedWords.p ? [selectedWords] : []);
+  if (list.length === 0) return;
+
+  var base = getSoulWordApiBaseUrl();
+  var url = base ? base + '/api/v2/log-vibe-soul' : '/api/v2/log-vibe-soul';
+  var fingerprint = (typeof localStorage !== 'undefined' && localStorage.getItem) ? localStorage.getItem('user_fingerprint') || '' : '';
+  if (country && !/^[A-Za-z]{2}$/.test(String(country))) country = '';
+
+  for (var i = 0; i < list.length; i++) {
+    var soulData = list[i];
+    if (!soulData || !soulData.p) continue;
+    var payload = {
+      p: soulData.p,
+      c: soulData.c || 'Novice',
+      v: soulData.v || 1,
+      f: fingerprint
+    };
+    if (country) payload.country = country;
+
+    try {
+      var response = await fetch(url, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (response.status === 404) continue;
+      if (!response.ok) {
+        var text = await response.text().catch(function () { return ''; });
+        console.warn('[Main] 灵魂词上报失败:', response.status, soulData.p, text);
+        continue;
+      }
+      var result = await response.json().catch(function () { return {}; });
+      if (result.status === 'success') {
+        console.log('[SoulWord] ✅ 已投递:', soulData.p);
+      }
+    } catch (err) {
+      console.error('[Main] 灵魂词上报异常:', { url: url, word: soulData.p, error: err?.message || String(err) });
+    }
+  }
+  if (list.length > 0) {
+    console.log('[SoulWord] 高频词已上传 ' + list.length + ' 个，等待 Cron 汇总');
+  }
+}
+
+/**
+ * 【灵魂词提炼与上报】完整流程：提炼 + 上报
+ * @param {Object} vibeResult - vibeResult 对象，包含 identityLevelCloud
+ */
+async function extractAndReportSoulWord(vibeResult) {
+  try {
+    // 提炼灵魂词（从 vibeResult.identityLevelCloud）
+    const soulData = extractSoulWord(vibeResult);
+    if (!soulData) {
+      console.log('[Main] 未找到符合条件的灵魂词');
+      return;
+    }
+
+    // 异步上报（不阻塞主线程）
+    await reportSoulWord(soulData);
+  } catch (err) {
+    console.warn('[Main] 灵魂词提炼/上报流程异常:', err?.message || String(err));
+  }
+}
+
+/**
  * 将 hex 转为 rgba，并可按 alpha 调节透明度
  */
 function hexToRgba(hex, alpha) {
@@ -5819,7 +6085,7 @@ function renderIdentityLevelCloud(level) {
 
   var canvas = document.getElementById('identity-cloud-canvas') || document.getElementById('chineseWordCloud');
   if (!canvas || typeof WordCloud === 'undefined') {
-    console.warn('[Main] WordCloud canvas 或库未找到');
+    if (mergedData.length > 0) console.warn('[Main] 有词云数据但 WordCloud canvas 或库未找到，当前页面可能未挂载词云区域');
     return;
   }
   var container = canvas.parentElement;

@@ -933,60 +933,88 @@ var _loc = window.location;
                     }
                 }
                 
-                // 【404/超时降级】如果 fetch 失败且是本地用户，从 localStorage 读取保底数据（优先使用 StatsDataService）
+                // 【404/超时降级】如果 fetch 失败且是本地用户，从 localStorage 读取保底数据（仅全网视角；国家视角禁止用个人 personality 保底）
                 if (fetchError && fetchError.fallback && isLocalUser) {
                     try {
-                        var lastData = null;
-                        var ilc = null;
-                        if (window.StatsDataService && typeof window.StatsDataService.getLastAnalysisData === 'function') {
-                            var lastResult = window.StatsDataService.getLastAnalysisData();
-                            lastData = lastResult.data;
-                            ilc = lastResult.identityLevelCloud;
-                        } else {
-                            var lastStr = localStorage.getItem('last_analysis_data');
-                            if (lastStr) {
-                                lastData = JSON.parse(lastStr);
-                                ilc = (lastData && lastData.stats && lastData.stats.identityLevelCloud) || (lastData && lastData.identityLevelCloud) || null;
+                        if (!effectiveIsGlobal) {
+                            window.__nationalCloudData = null;
+                            window.__countryKeywordsByLevel = null;
+                            var emptyCloudCountry = document.getElementById('vibe-cloud50-empty');
+                            if (emptyCloudCountry) {
+                                emptyCloudCountry.textContent = (typeof getI18nText === 'function' ? getI18nText('panel.syncing_country') : null) || '正在同步该国节点数据...';
+                                emptyCloudCountry.classList.remove('hidden');
                             }
-                        }
-                        if (lastData && ilc && typeof ilc === 'object') {
-                            var dataAdapterFn = (window.StatsDataService && window.StatsDataService.adaptCloudData) || dataAdapter;
-                            const adaptedData = {
-                                Novice: dataAdapterFn(ilc.Novice || []),
-                                Professional: dataAdapterFn(ilc.Professional || []),
-                                Architect: dataAdapterFn(ilc.Architect || []),
-                                globalNative: dataAdapterFn(ilc.globalNative || ilc.native || [])
+                            payload = {
+                                countryTotals: { totalUsers: 0, ai: 0 },
+                                __fallback: true,
+                                __source: 'localStorage',
+                                __countryCloudEmpty: true
                             };
-                                
-                                // 构建降级 payload（仅包含词云数据）
+                        }
+                        if (effectiveIsGlobal) {
+                            var lastData = null;
+                            var ilc = null;
+                            if (window.StatsDataService && typeof window.StatsDataService.getLastAnalysisData === 'function') {
+                                var lastResult = window.StatsDataService.getLastAnalysisData();
+                                lastData = lastResult.data;
+                                ilc = lastResult.identityLevelCloud;
+                            } else {
+                                var lastStr = localStorage.getItem('last_analysis_data');
+                                if (lastStr) {
+                                    lastData = JSON.parse(lastStr);
+                                    var dataForIlc = (lastData && lastData.analysis != null && typeof lastData.analysis === 'object') ? lastData.analysis : lastData;
+                                    ilc = (dataForIlc && dataForIlc.stats && dataForIlc.stats.identityLevelCloud) || (dataForIlc && dataForIlc.identityLevelCloud) || null;
+                                }
+                            }
+                            // 词云数据位于 analysis 字段内，优先从 analysis 读取
+                            var dataForCloud = (lastData && lastData.analysis != null && typeof lastData.analysis === 'object') ? lastData.analysis : lastData;
+                            var slangListFromPersonality = null;
+                            if (dataForCloud) {
+                                var pRaw = dataForCloud.personality || dataForCloud.personality_data;
+                                var pObj = null;
+                                if (typeof pRaw === 'string') {
+                                    try { pObj = JSON.parse(pRaw); } catch (e) { /* ignore */ }
+                                } else if (pRaw && typeof pRaw === 'object') {
+                                    pObj = pRaw;
+                                }
+                                var vibeLexicon = (pObj && pObj.vibe_lexicon && typeof pObj.vibe_lexicon === 'object') ? pObj.vibe_lexicon : null;
+                                slangListFromPersonality = (vibeLexicon && Array.isArray(vibeLexicon.slang_list)) ? vibeLexicon.slang_list : null;
+                                if (slangListFromPersonality && slangListFromPersonality.length > 0) {
+                                    var adaptFn = (window.StatsDataService && typeof window.StatsDataService.adaptCloudData === 'function') ? window.StatsDataService.adaptCloudData : (function(arr) { return Array.isArray(arr) ? arr : []; });
+                                    var adaptedSlang = adaptFn(slangListFromPersonality);
+                                    if (adaptedSlang && adaptedSlang.length > 0) {
+                                        window.__nationalCloudData = {
+                                            Novice: adaptedSlang,
+                                            Professional: adaptedSlang,
+                                            Architect: adaptedSlang,
+                                            globalNative: []
+                                        };
+                                    }
+                                }
+                            }
+                            if (lastData && ilc && typeof ilc === 'object') {
+                                var dataAdapterFn = (window.StatsDataService && window.StatsDataService.adaptCloudData) || dataAdapter;
+                                const adaptedData = {
+                                    Novice: dataAdapterFn(ilc.Novice || []),
+                                    Professional: dataAdapterFn(ilc.Professional || []),
+                                    Architect: dataAdapterFn(ilc.Architect || []),
+                                    globalNative: dataAdapterFn(ilc.globalNative || ilc.native || [])
+                                };
+                                window.__nationalCloudData = adaptedData;
                                 payload = {
-                                    countryTotals: {
-                                        totalUsers: 1,
-                                        ai: 1
-                                    },
+                                    countryTotals: { totalUsers: 1, ai: 1 },
                                     __fallback: true,
                                     __source: 'localStorage'
                                 };
-                                
-                                // 设置词云数据
-                                if (!window.__countryKeywordsByLevel) {
-                                    window.__countryKeywordsByLevel = {};
-                                }
+                                if (!window.__countryKeywordsByLevel) window.__countryKeywordsByLevel = {};
                                 window.__countryKeywordsByLevel = adaptedData;
-                                
-                                console.log('[updateCountryDashboard] ✅ 已从 localStorage 加载保底数据');
-                                
-                                // 渲染词云
+                                console.log('[updateCountryDashboard] ✅ 已从 localStorage 加载保底数据（全网）');
                                 if (typeof _renderNationalIdentityCloud === 'function') {
                                     _renderNationalIdentityCloud(window.__currentNationalIdentityLevel || 'Novice');
                                 }
-                                
-                                const emptyCloudEl = document.getElementById('vibe-cloud50-empty');
+                                var emptyCloudEl = document.getElementById('vibe-cloud50-empty');
                                 if (emptyCloudEl) {
-                                    const total = (adaptedData.Novice || []).length + 
-                                                 (adaptedData.Professional || []).length + 
-                                                 (adaptedData.Architect || []).length + 
-                                                 (adaptedData.globalNative || []).length;
+                                    var total = (adaptedData.Novice || []).length + (adaptedData.Professional || []).length + (adaptedData.Architect || []).length + (adaptedData.globalNative || []).length;
                                     if (total === 0) {
                                         emptyCloudEl.textContent = '暂无词云数据';
                                         emptyCloudEl.classList.remove('hidden');
@@ -994,18 +1022,43 @@ var _loc = window.location;
                                         emptyCloudEl.classList.add('hidden');
                                     }
                                 }
-                                
-                                // 更新状态
                                 if (statusEl) statusEl.textContent = getI18nText('panel.data_cached') || 'DATA: CACHED (本地)';
-                                
-                                // 继续执行后续逻辑，但标记为降级模式
                                 payload.__isFallback = true;
+                            } else if (lastData && slangListFromPersonality && slangListFromPersonality.length > 0) {
+                                var adaptFn2 = (window.StatsDataService && typeof window.StatsDataService.adaptCloudData === 'function') ? window.StatsDataService.adaptCloudData : function(arr) { return Array.isArray(arr) ? arr : []; };
+                                var adaptedFromSlang = adaptFn2(slangListFromPersonality);
+                                if (adaptedFromSlang && adaptedFromSlang.length > 0) {
+                                    var cloudData = {
+                                        Novice: adaptedFromSlang,
+                                        Professional: adaptedFromSlang,
+                                        Architect: adaptedFromSlang,
+                                        globalNative: []
+                                    };
+                                    window.__nationalCloudData = cloudData;
+                                    if (!window.__countryKeywordsByLevel) window.__countryKeywordsByLevel = {};
+                                    window.__countryKeywordsByLevel = cloudData;
+                                    payload = {
+                                        countryTotals: { totalUsers: 1, ai: 1 },
+                                        __fallback: true,
+                                        __source: 'localStorage'
+                                    };
+                                    payload.__isFallback = true;
+                                    if (typeof _renderNationalIdentityCloud === 'function') {
+                                        _renderNationalIdentityCloud(window.__currentNationalIdentityLevel || 'Novice');
+                                    }
+                                    var emptyCloudEl2 = document.getElementById('vibe-cloud50-empty');
+                                    if (emptyCloudEl2) emptyCloudEl2.classList.add('hidden');
+                                    if (statusEl) statusEl.textContent = getI18nText('panel.data_cached') || 'DATA: CACHED (本地)';
+                                    console.log('[updateCountryDashboard] ✅ 已从 localStorage personality.slang_list 加载保底词云（全网）');
+                                } else {
+                                    throw new Error('localStorage 中无有效词云数据或 last_analysis_data');
+                                }
                             } else {
                                 throw new Error('localStorage 中无有效词云数据或 last_analysis_data');
                             }
+                        }
                     } catch (fallbackErr) {
                         console.warn('[updateCountryDashboard] 本地保底模式失败:', fallbackErr);
-                        // 如果降级也失败，继续抛出原始错误
                         throw fetchError.error || fetchErr;
                     }
                 }
@@ -1143,6 +1196,7 @@ var _loc = window.location;
                             var emptyEl = document.getElementById('vibe-top10-empty');
                             if (emptyEl) emptyEl.classList.add('hidden');
                         }
+                        window.__nationalCloudData = null;
                         window.__countryKeywordsByLevel = null;
                         var cloudLoadingHint = document.getElementById('cloud-loading-hint');
                         if (cloudLoadingHint) cloudLoadingHint.classList.remove('hidden');
@@ -1151,11 +1205,13 @@ var _loc = window.location;
                             try {
                                 var kw = await window.StatsDataService.fetchCountryKeywords(countryCode);
                                 window.__countryKeywordsByLevel = kw;
+                                window.__nationalCloudData = kw;
                                 apiSuccess = true;
                             } catch (e) {
                                 console.warn('[updateCountryDashboard] 本国词云 API 失败:', e);
                             }
                         }
+                        // 国家视角禁止用 localStorage 个人 personality 保底；该国数据未加载时仅显示“正在同步该国节点数据...”
                         if (cloudLoadingHint) cloudLoadingHint.classList.add('hidden');
                         // 数据准备好后，强制触发词云重绘（Professional）
                         if (typeof window._renderNationalIdentityCloud === 'function') {
@@ -1175,8 +1231,7 @@ var _loc = window.location;
                                 emptyCloudEl.classList.add('hidden');
                             }
                         } else if (!apiSuccess && emptyCloudEl) {
-                            // 如果 API 失败且本地也没有数据，显示空状态
-                            emptyCloudEl.textContent = '暂无该国词云数据';
+                            emptyCloudEl.textContent = (typeof getI18nText === 'function' ? getI18nText('panel.syncing_country') : null) || '正在同步该国节点数据...';
                             emptyCloudEl.classList.remove('hidden');
                             if (typeof _renderNationalIdentityCloud === 'function') {
                                 _renderNationalIdentityCloud('Novice');
@@ -2478,6 +2533,7 @@ var _loc = window.location;
                 'panel.data_fetching': '数据：获取中',
                 'panel.data_error': '数据：错误',
                 'panel.data_ready': '数据：就绪',
+                'panel.syncing_country': '正在同步该国节点数据...',
                 'panel.nation_prefix': '国家',
                 'panel.pk_power': '权力值',
                 'panel.pk_tsundere': '傲娇',
@@ -2586,6 +2642,7 @@ var _loc = window.location;
                 'panel.data_fetching': 'DATA: FETCHING',
                 'panel.data_error': 'DATA: ERROR',
                 'panel.data_ready': 'DATA: READY',
+                'panel.syncing_country': 'Syncing country node data...',
                 'panel.nation_prefix': 'NATION',
                 'panel.pk_power': 'POWER',
                 'panel.pk_tsundere': 'Tsundere',
@@ -3802,6 +3859,9 @@ var _loc = window.location;
         window.switchGlobalCountry = async function(countryCode, source, opts) {
             const code = String(countryCode || '').trim().toUpperCase();
             if (!/^[A-Z]{2}$/.test(code)) return;
+            // 切换国家时清空词云缓存，防止上一国数据闪现
+            window.__nationalCloudData = null;
+            window.__countryKeywordsByLevel = null;
             source = source || 'unknown';
             const showLoading = (opts && opts.showLoading !== undefined) ? opts.showLoading : (source === 'select' || source === 'country-select-dropdown');
             window.isLogicProcessing = true;
@@ -6486,6 +6546,19 @@ var _loc = window.location;
          * @param {string} name - 国家名称，如 'United States'
          */
         function switchToCountryView(code, name) {
+            // 强制清空该国词云缓存，防止上一国数据闪现
+            window.__nationalCloudData = null;
+            window.__countryKeywordsByLevel = null;
+            var cloudCanvas = document.getElementById('national-identity-cloud-canvas');
+            if (cloudCanvas && cloudCanvas.getContext) {
+                var ctx = cloudCanvas.getContext('2d');
+                if (ctx) ctx.clearRect(0, 0, cloudCanvas.width || 0, cloudCanvas.height || 0);
+            }
+            var cloudEmpty = document.getElementById('vibe-cloud50-empty');
+            if (cloudEmpty) {
+                cloudEmpty.textContent = (typeof getI18nText === 'function' && getI18nText('panel.syncing_country')) || '正在同步该国节点数据...';
+                cloudEmpty.classList.remove('hidden');
+            }
             showDrawersWithCountryData(code, name);
             currentViewState = 'COUNTRY';
             const rightDrawer = document.getElementById('right-drawer');
@@ -18783,6 +18856,7 @@ var _loc = window.location;
                 btn.style.borderColor = hex;
                 btn.style.backgroundColor = hex + '26';
                 btn.style.color = hex;
+                // 国家词云：仅用 __countryKeywordsByLevel 该国数据渲染，无数据时 _renderNationalIdentityCloud 内显示「正在同步该国节点数据...」
                 if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud(level);
             });
         })();
@@ -18805,12 +18879,15 @@ var _loc = window.location;
             }
             var empty = document.getElementById('vibe-cloud50-empty');
             var meta = document.getElementById('vibe-cloud50-meta');
+            // 国家词云仅用 __countryKeywordsByLevel（该国汇总），禁止使用 __currentUserCloudData
             var data = window.__countryKeywordsByLevel && Array.isArray(window.__countryKeywordsByLevel[level]) ? window.__countryKeywordsByLevel[level] : [];
             if (data.length === 0) {
-                if (canvas.getContext) canvas.getContext('2d').clearRect(0, 0, canvas.width || 0, canvas.height || 0);
                 if (meta) meta.textContent = '--';
                 if (empty) {
-                    empty.textContent = '暂无该国词云数据';
+                    var isCountryView = (typeof currentViewState === 'string' && currentViewState === 'COUNTRY');
+                    empty.textContent = isCountryView
+                        ? ((typeof getI18nText === 'function' ? getI18nText('panel.syncing_country') : null) || '正在同步该国节点数据...')
+                        : '暂无该国词云数据';
                     empty.classList.remove('hidden');
                 }
                 return;
@@ -19056,9 +19133,10 @@ var _loc = window.location;
             _setVibeRefreshing(true);
             try { setTimeout(() => _setVibeRefreshing(false), 700); } catch { /* ignore */ }
 
+            window.__nationalCloudData = null;
             window.__countryKeywordsByLevel = null;
             if (empty) {
-                empty.textContent = '正在扫描该国开发者指纹...';
+                empty.textContent = (typeof getI18nText === 'function' ? getI18nText('panel.syncing_country') : null) || '正在同步该国节点数据...';
                 empty.classList.remove('hidden');
             }
             var canvas = document.getElementById('national-identity-cloud-canvas');
@@ -19069,6 +19147,7 @@ var _loc = window.location;
                 if (!kwResp.ok) throw new Error('keywords ' + kwResp.status);
                 var kwPayload = await kwResp.json();
                 window.__countryKeywordsByLevel = kwPayload && typeof kwPayload === 'object' ? kwPayload : null;
+                window.__nationalCloudData = window.__countryKeywordsByLevel;
                 var currentLevel = window.__currentNationalIdentityLevel || 'Novice';
                 if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud(currentLevel);
                 var total = 0;
@@ -19076,36 +19155,17 @@ var _loc = window.location;
                     total = (window.__countryKeywordsByLevel.Novice || []).length + (window.__countryKeywordsByLevel.Professional || []).length + (window.__countryKeywordsByLevel.Architect || []).length + (window.__countryKeywordsByLevel.globalNative || []).length;
                 }
                 if (empty && total > 0) empty.classList.add('hidden');
-                if (total === 0 && empty) empty.classList.remove('hidden');
+                if (total === 0 && empty) {
+                    empty.textContent = (typeof getI18nText === 'function' ? getI18nText('panel.syncing_country') : null) || '正在同步该国节点数据...';
+                    empty.classList.remove('hidden');
+                }
             } catch (e) {
+                window.__nationalCloudData = null;
                 window.__countryKeywordsByLevel = null;
-                var isLocalUser = (region === (localStorage.getItem('user_manual_location') || window.currentUserCountry || '').toUpperCase());
-                try {
-                    if (isLocalUser) {
-                        var lastStr = localStorage.getItem('last_analysis_data');
-                        if (lastStr) {
-                            var lastData = JSON.parse(lastStr);
-                            var ilc = (lastData && lastData.stats && lastData.stats.identityLevelCloud) || (lastData && lastData.identityLevelCloud) || null;
-                            if (ilc && typeof ilc === 'object') {
-                                // 【使用 dataAdapter】统一数据格式转换
-                                window.__countryKeywordsByLevel = { 
-                                    Novice: dataAdapter(ilc.Novice || []), 
-                                    Professional: dataAdapter(ilc.Professional || []), 
-                                    Architect: dataAdapter(ilc.Architect || []), 
-                                    globalNative: dataAdapter(ilc.globalNative || ilc.native || []) 
-                                };
-                                if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud(window.__currentNationalIdentityLevel || 'Novice');
-                                if (empty) empty.classList.add('hidden');
-                            }
-                        }
-                    }
-                } catch (e2) { console.warn('[refreshVibeCard] 本国词云 localStorage 兜底失败:', e2); }
-                if (!window.__countryKeywordsByLevel) {
-                    if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud('Novice');
-                    if (empty) {
-                        empty.textContent = '暂无该国词云数据';
-                        empty.classList.remove('hidden');
-                    }
+                if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud('Novice');
+                if (empty) {
+                    empty.textContent = (typeof getI18nText === 'function' ? getI18nText('panel.syncing_country') : null) || '正在同步该国节点数据...';
+                    empty.classList.remove('hidden');
                 }
             }
             if (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function') {
@@ -19138,9 +19198,9 @@ var _loc = window.location;
                     try { _renderTop10List([]); } catch { /* ignore */ }
                     try { _renderCloud50(region, []); } catch { /* ignore */ }
                     if (empty) {
-                    empty.textContent = '暂无该国词云数据';
-                    empty.classList.remove('hidden');
-                }
+                        empty.textContent = (typeof getI18nText === 'function' ? getI18nText('panel.syncing_country') : null) || '正在同步该国节点数据...';
+                        empty.classList.remove('hidden');
+                    }
                 }
             }
 
@@ -20387,6 +20447,26 @@ var _loc = window.location;
                     window.currentUser = currentUser;
                     window.currentUserData = currentUser;
                     window.currentUserMatchedByFingerprint = !matchedByGitHub; // 如果通过 GitHub 匹配，则设为 false
+                    
+                    // 个人词云仅写入 __currentUserCloudData，禁止写入 __nationalCloudData/__countryKeywordsByLevel（国家词云仅由该国 API 填充）
+                    try {
+                        var pRaw = currentUser.personality || currentUser.personality_data;
+                        var pObj = (typeof pRaw === 'string') ? (function() { try { return JSON.parse(pRaw); } catch (e) { return null; } })() : (pRaw && typeof pRaw === 'object' ? pRaw : null);
+                        var vibeLexicon = (pObj && pObj.vibe_lexicon && typeof pObj.vibe_lexicon === 'object') ? pObj.vibe_lexicon : null;
+                        var slangList = vibeLexicon && Array.isArray(vibeLexicon.slang_list) ? vibeLexicon.slang_list : null;
+                        if (slangList && slangList.length > 0) {
+                            var adaptFn = (window.StatsDataService && typeof window.StatsDataService.adaptCloudData === 'function') ? window.StatsDataService.adaptCloudData : function(arr) { return Array.isArray(arr) ? arr : []; };
+                            var adapted = adaptFn(slangList);
+                            if (adapted && adapted.length > 0) {
+                                window.__currentUserCloudData = {
+                                    Novice: adapted,
+                                    Professional: adapted,
+                                    Architect: adapted,
+                                    globalNative: []
+                                };
+                            }
+                        }
+                    } catch (personalityErr) { /* 解析失败不阻塞 */ }
                     
                     // 【Master Key】如果当前用户有数据且已识别，确保持久化存储其指纹（作为万能钥匙）
                     const totalMsgs = currentUser.total_messages || currentUser.stats?.total_messages || 0;

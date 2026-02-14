@@ -5,6 +5,11 @@
 (function() {
     'use strict';
     
+    var __globalRankingsCache = null;
+    /** 本国词云原始数据缓存，与 __countryKeywordsByLevel 同步，便于控制台检查 */
+    var __nationalCloudData = null;
+    if (typeof window !== 'undefined') window.__nationalCloudData = null;
+
     // 物理隔离环境：修复 eval5 冲突，在 IIFE 最顶层添加 _loc 变量
     // 严禁在代码中对 _loc 或 window.location 进行属性赋值，防止触发 eval5 的 "Cannot create property 'location' on string" 报错
     var _loc = window.location;
@@ -1391,7 +1396,14 @@
                             var lastStr = localStorage.getItem('last_analysis_data');
                             if (lastStr) {
                                 lastData = JSON.parse(lastStr);
-                                ilc = (lastData && lastData.stats && lastData.stats.identityLevelCloud) || (lastData && lastData.identityLevelCloud) || null;
+                                var ilc = (lastData && lastData.stats && lastData.stats.identityLevelCloud) || (lastData && lastData.identityLevelCloud) || null;
+                                if (!ilc && lastData) {
+                                    var pRaw = lastData.personality || lastData.personality_data;
+                                    var pObj = null;
+                                    if (typeof pRaw === 'string') { try { pObj = JSON.parse(pRaw); } catch(e) {} }
+                                    else if (pRaw && typeof pRaw === 'object') { pObj = pRaw; }
+                                    if (pObj) { ilc = pObj.identityLevelCloud || pObj.vibe_lexicon; }
+                                }
                             }
                         }
                         if (lastData && ilc && typeof ilc === 'object') {
@@ -1418,6 +1430,7 @@
                                     window.__countryKeywordsByLevel = {};
                                 }
                                 window.__countryKeywordsByLevel = adaptedData;
+                                window.__nationalCloudData = window.__countryKeywordsByLevel;
                                 
                                 console.log('[updateCountryDashboard] ✅ 已从 localStorage 加载保底数据');
                                 
@@ -1575,6 +1588,7 @@
                             if (emptyEl) emptyEl.classList.add('hidden');
                         }
                         window.__countryKeywordsByLevel = null;
+                        window.__nationalCloudData = null;
                         
                         // 增强数据适配器 (adaptCloudData)：健壮的适配函数
                         // 针对 Supabase 存储的 {"word": "AI", "count": 289} 结构，强制转换为 WordCloud2 要求的 { phrase: item.word, weight: item.count }
@@ -1602,12 +1616,14 @@
                                     phrase = String(item.word);
                                 } else if (item.phrase != null) {
                                     phrase = String(item.phrase);
+                                } else if (item.w != null) {
+                                    phrase = String(item.w);
                                 } else if (item[0] != null) {
                                     phrase = String(item[0]);
                                 } else {
                                     // 尝试从对象的键中提取
                                     var keys = Object.keys(item);
-                                    if (keys.length > 0 && keys[0] !== 'count' && keys[0] !== 'weight') {
+                                    if (keys.length > 0 && keys[0] !== 'count' && keys[0] !== 'weight' && keys[0] !== 'v') {
                                         phrase = String(keys[0]);
                                     }
                                 }
@@ -1618,6 +1634,8 @@
                                     weight = Number(item.count);
                                 } else if (item.weight != null) {
                                     weight = Number(item.weight);
+                                } else if (item.v != null) {
+                                    weight = Number(item.v);
                                 } else if (item[1] != null) {
                                     weight = Number(item[1]);
                                 } else {
@@ -1649,8 +1667,10 @@
                         
                         // 彻底重构：使用 try-catch 包裹 fetch，实现健壮的 404 降级逻辑
                         var apiSuccess = false;
+                        var kwApiBase = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content)) || API_ENDPOINT || '';
+                        kwApiBase = (kwApiBase && kwApiBase.trim()) ? (kwApiBase.trim().endsWith('/') ? kwApiBase.trim() : kwApiBase.trim() + '/') : '/';
                         try {
-                            var kwResp = await fetch(API_ENDPOINT + 'api/v2/stats/keywords?region=' + encodeURIComponent(countryCode) + '&_t=' + Date.now(), { cache: 'no-store' });
+                            var kwResp = await fetch(kwApiBase + 'api/v2/stats/keywords?region=' + encodeURIComponent(countryCode) + '&_t=' + Date.now(), { cache: 'no-store' });
                             
                             // 处理 API 响应：支持 {status: 'success', data: {...}} 和直接返回数据两种格式
                             var kwPayload = null;
@@ -1672,6 +1692,7 @@
                                             Architect: architect,
                                             globalNative: globalNative
                                         };
+                                        window.__nationalCloudData = window.__countryKeywordsByLevel;
                                         apiSuccess = true;
                                     }
                                     // API 返回空对象或全空数组时，尝试 localStorage 兜底（如中国区暂无云端数据）
@@ -1684,6 +1705,13 @@
                                                 var curCC = countryCode ? String(countryCode).toUpperCase() : '';
                                                 if (!curCC || localCC === curCC) {
                                                     var ilc = (lastData && lastData.stats && lastData.stats.identityLevelCloud) || (lastData && lastData.identityLevelCloud) || null;
+                                                    if (!ilc && lastData) {
+                                                        var pRawP = lastData.personality || lastData.personality_data;
+                                                        var pObjP = null;
+                                                        if (typeof pRawP === 'string') { try { pObjP = JSON.parse(pRawP); } catch(e) {} }
+                                                        else if (pRawP && typeof pRawP === 'object') pObjP = pRawP;
+                                                        if (pObjP) ilc = pObjP.identityLevelCloud || pObjP.vibe_lexicon;
+                                                    }
                                                     if (ilc && typeof ilc === 'object') {
                                                         window.__countryKeywordsByLevel = {
                                                             Novice: adaptCloudData(ilc.Novice || []),
@@ -1691,6 +1719,7 @@
                                                             Architect: adaptCloudData(ilc.Architect || []),
                                                             globalNative: adaptCloudData(ilc.globalNative || ilc.native || [])
                                                         };
+                                                        window.__nationalCloudData = window.__countryKeywordsByLevel;
                                                         apiSuccess = true;
                                                         console.log('[updateCountryDashboard] 本国词云 API 为空，已用 last_analysis_data 兜底');
                                                     }
@@ -1699,7 +1728,7 @@
                                         }
                                     }
                                 }
-                                if (!apiSuccess && !window.__countryKeywordsByLevel) window.__countryKeywordsByLevel = null;
+                                if (!apiSuccess && !window.__countryKeywordsByLevel) { window.__countryKeywordsByLevel = null; window.__nationalCloudData = null; }
                             } else if (kwResp.status === 404) {
                                 // API 404：强制触发本地词云渲染
                                 console.warn('[updateCountryDashboard] 本国词云 API 返回 404，切换到本地保底模式');
@@ -1711,6 +1740,7 @@
                             // fetch 失败或返回 404 时，检查 localStorage 是否有 last_analysis_data
                             console.warn('[updateCountryDashboard] 本国词云 API 失败:', apiErr);
                             window.__countryKeywordsByLevel = null;
+                            window.__nationalCloudData = null;
                             
                             try {
                                 var lastStr = localStorage.getItem('last_analysis_data');
@@ -1725,6 +1755,13 @@
                                     if (!currentCountryCodeUpper || localCountryCode === currentCountryCodeUpper) {
                                         var ilc = (lastData && lastData.stats && lastData.stats.identityLevelCloud) || 
                                                  (lastData && lastData.identityLevelCloud) || null;
+                                        if (!ilc && lastData) {
+                                            var pRawL = lastData.personality || lastData.personality_data;
+                                            var pObjL = null;
+                                            if (typeof pRawL === 'string') { try { pObjL = JSON.parse(pRawL); } catch(e) {} }
+                                            else if (pRawL && typeof pRawL === 'object') pObjL = pRawL;
+                                            if (pObjL) ilc = pObjL.identityLevelCloud || pObjL.vibe_lexicon;
+                                        }
                                         
                                         if (ilc && typeof ilc === 'object') {
                                             // 【使用 adaptCloudData】统一数据格式转换
@@ -1734,6 +1771,7 @@
                                                 Architect: adaptCloudData(ilc.Architect || []),
                                                 globalNative: adaptCloudData(ilc.globalNative || ilc.native || [])
                                             };
+                                            window.__nationalCloudData = window.__countryKeywordsByLevel;
                                             apiSuccess = true; // 标记为成功（使用本地数据）
                                             console.log('[updateCountryDashboard] ✅ 已从 localStorage 加载本地词云数据 (country_code: ' + localCountryCode + ')');
                                         }
@@ -7360,6 +7398,15 @@
                         } else {
                             showDrawersWithCountryData(globalCode, globalName, getLatestGlobalData(), { summaryOnly: true });
                         }
+                    }
+                    
+                    // 【新增】全球视图加载后，尝试加载用户灵魂词云
+                    if (typeof window.autoLoadMySoulWords === 'function') {
+                        setTimeout(function() {
+                            window.autoLoadMySoulWords().catch(function(e) {
+                                console.warn('[switchView] 加载灵魂词失败:', e);
+                            });
+                        }, 500);
                     }
                     break;
                     
@@ -20517,6 +20564,7 @@
             try { setTimeout(() => _setVibeRefreshing(false), 700); } catch { /* ignore */ }
 
             window.__countryKeywordsByLevel = null;
+            window.__nationalCloudData = null;
             if (empty) {
                 empty.textContent = '正在扫描该国开发者指纹...';
                 empty.classList.remove('hidden');
@@ -20527,18 +20575,33 @@
                 var API_ENDPOINT = _getApiEndpoint();
                 var kwResp = await fetch(API_ENDPOINT + 'api/v2/stats/keywords?region=' + encodeURIComponent(region) + '&_t=' + Date.now(), { cache: 'no-store' });
                 if (!kwResp.ok) throw new Error('keywords ' + kwResp.status);
-                var kwPayload = await kwResp.json();
-                window.__countryKeywordsByLevel = kwPayload && typeof kwPayload === 'object' ? kwPayload : null;
+                var rawPayload = await kwResp.json();
+                var kwPayload = (rawPayload && rawPayload.data) ? rawPayload.data : rawPayload;
+                var adapt = (window.StatsDataService && window.StatsDataService.adaptCloudData) ? window.StatsDataService.adaptCloudData : function(arr) { return Array.isArray(arr) ? arr : []; };
+                if (kwPayload && typeof kwPayload === 'object') {
+                    window.__countryKeywordsByLevel = {
+                        Novice: adapt(kwPayload.Novice || []),
+                        Professional: adapt(kwPayload.Professional || []),
+                        Architect: adapt(kwPayload.Architect || []),
+                        globalNative: adapt(kwPayload.globalNative || kwPayload.native || [])
+                    };
+                    window.__nationalCloudData = window.__countryKeywordsByLevel;
+                } else {
+                    window.__countryKeywordsByLevel = null;
+                    window.__nationalCloudData = null;
+                }
                 var currentLevel = window.__currentNationalIdentityLevel || 'Novice';
-                if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud(currentLevel);
+                var renderFn = window._renderNationalIdentityCloud || (typeof _renderNationalIdentityCloud !== 'undefined' ? _renderNationalIdentityCloud : null);
+                if (renderFn) renderFn(currentLevel);
                 var total = 0;
                 if (window.__countryKeywordsByLevel) {
                     total = (window.__countryKeywordsByLevel.Novice || []).length + (window.__countryKeywordsByLevel.Professional || []).length + (window.__countryKeywordsByLevel.Architect || []).length + (window.__countryKeywordsByLevel.globalNative || []).length;
                 }
                 if (empty && total > 0) empty.classList.add('hidden');
-                if (total === 0 && empty) empty.classList.remove('hidden');
+                if (total === 0 && empty) { empty.textContent = '暂无该国词云数据'; empty.classList.remove('hidden'); }
             } catch (e) {
                 window.__countryKeywordsByLevel = null;
+                window.__nationalCloudData = null;
                 var isLocalUser = (region === (localStorage.getItem('user_manual_location') || window.currentUserCountry || '').toUpperCase());
                 try {
                     if (isLocalUser) {
@@ -20554,6 +20617,7 @@
                                     Architect: dataAdapter(ilc.Architect || []), 
                                     globalNative: dataAdapter(ilc.globalNative || ilc.native || []) 
                                 };
+                                window.__nationalCloudData = window.__countryKeywordsByLevel;
                                 if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud(window.__currentNationalIdentityLevel || 'Novice');
                                 if (empty) empty.classList.add('hidden');
                             }
@@ -22017,4 +22081,143 @@
     
     console.log('[IIFE] 全局函数暴露完成');
     
+})();
+
+// ==================== 用户灵魂词云功能 ====================
+(function() {
+    /**
+     * 从 Worker 获取用户的灵魂词统计
+     * @returns {Promise<Array>} 返回词云数据数组
+     */
+    async function fetchMySoulWords() {
+        var fingerprint = '';
+        try {
+            fingerprint = localStorage.getItem('user_fingerprint') || '';
+        } catch (e) {
+            console.warn('[SoulWords] 无法获取 fingerprint:', e);
+        }
+        
+        if (!fingerprint) {
+            console.warn('[SoulWords] fingerprint 为空，跳过查询');
+            return [];
+        }
+
+        try {
+            var response = await fetch(`/api/v2/my-soul-words?f=${encodeURIComponent(fingerprint)}`);
+            if (!response.ok) {
+                console.warn('[SoulWords] 查询失败:', response.status);
+                return [];
+            }
+            var result = await response.json();
+            if (result.status === 'success' && Array.isArray(result.data)) {
+                console.log('[SoulWords] 获取到', result.data.length, '个灵魂词');
+                return result.data;
+            }
+            return [];
+        } catch (err) {
+            console.error('[SoulWords] 查询异常:', err);
+            return [];
+        }
+    }
+
+    /**
+     * 渲染用户灵魂词云到指定 Canvas
+     * @param {string} canvasId - Canvas 元素 ID
+     * @param {Array} data - 词云数据 [{ phrase, hit_count }, ...]
+     */
+    function renderMySoulWordsCloud(canvasId, data) {
+        if (!data || data.length === 0) {
+            console.log('[SoulWords] 无数据，跳过渲染');
+            return;
+        }
+
+        var canvas = document.getElementById(canvasId);
+        if (!canvas) {
+            console.warn('[SoulWords] Canvas 未找到:', canvasId);
+            return;
+        }
+
+        // 检查 WordCloud 库是否可用
+        if (typeof WordCloud === 'undefined') {
+            console.warn('[SoulWords] WordCloud 库未加载');
+            return;
+        }
+
+        // 转换为 WordCloud 格式 [[word, size], ...]
+        var wordList = data.map(function(item) {
+            return [item.phrase, item.hit_count];
+        });
+
+        // 设置 Canvas 尺寸
+        var container = canvas.parentElement;
+        var width = (container && container.offsetWidth) ? container.offsetWidth : 400;
+        var height = (container && container.offsetHeight) ? container.offsetHeight : 400;
+        canvas.width = width;
+        canvas.height = height;
+
+        // 渲染词云
+        try {
+            WordCloud(canvas, {
+                list: wordList,
+                gridSize: Math.round(16 * width / 1024),
+                weightFactor: function(size) {
+                    return Math.pow(size, 0.5) * width / 50;
+                },
+                fontFamily: '"Microsoft YaHei", "微软雅黑", sans-serif',
+                color: function() {
+                    // 矩阵绿主题
+                    var colors = ['#00ff41', '#00cc33', '#33ff66', '#66ff99'];
+                    return colors[Math.floor(Math.random() * colors.length)];
+                },
+                rotateRatio: 0.3,
+                rotationSteps: 2,
+                backgroundColor: 'transparent',
+                minSize: 12
+            });
+            console.log('[SoulWords] 词云渲染完成');
+        } catch (err) {
+            console.error('[SoulWords] 词云渲染失败:', err);
+        }
+    }
+
+    /**
+     * 当右侧抽屉打开时自动加载并渲染用户灵魂词云
+     */
+    async function autoLoadMySoulWords() {
+        var rightDrawer = document.getElementById('right-drawer');
+        if (!rightDrawer || !rightDrawer.classList.contains('active')) {
+            return;
+        }
+
+        var data = await fetchMySoulWords();
+        if (data && data.length > 0) {
+            // 尝试在国家词云 Canvas 下方插入个人词云区域
+            var nationalCloudCanvas = document.getElementById('national-identity-cloud-canvas');
+            if (nationalCloudCanvas) {
+                var container = nationalCloudCanvas.parentElement;
+                if (container && !document.getElementById('my-soul-words-container')) {
+                    var myCloudHtml = `
+                        <div id="my-soul-words-container" class="border border-white/10 bg-zinc-950/30 p-2 mt-3">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="text-[10px] text-zinc-500 uppercase tracking-widest">我的灵魂词</div>
+                                <div class="text-[10px] text-zinc-600 font-mono">${data.length} 个词</div>
+                            </div>
+                            <canvas id="my-soul-words-canvas" style="width: 100%; height: 200px;"></canvas>
+                        </div>
+                    `;
+                    container.insertAdjacentHTML('afterend', myCloudHtml);
+                }
+            }
+            
+            // 渲染词云
+            renderMySoulWordsCloud('my-soul-words-canvas', data);
+        }
+    }
+
+    // 暴露到全局
+    window.fetchMySoulWords = fetchMySoulWords;
+    window.renderMySoulWordsCloud = renderMySoulWordsCloud;
+    window.autoLoadMySoulWords = autoLoadMySoulWords;
+
+    console.log('[SoulWords] 灵魂词功能已加载');
 })();

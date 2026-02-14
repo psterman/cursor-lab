@@ -48,12 +48,13 @@ type ExecutionContext = {
   passThroughOnException(): void;
 };
 
-// 定义环境变量类型
+// 定义环境变量类型（含 KV_VIBE，供 Cron 灵魂词收割使用）
 export type Env = {
   SUPABASE_URL?: string;
   SUPABASE_KEY?: string;
   STATS_STORE?: KVNamespace; // KV 存储（第二阶段使用）
   CONTENT_STORE?: KVNamespace; // KV 存储（第三阶段：文案库）
+  KV_VIBE?: KVNamespace; // 灵魂词上报专用 KV（24h TTL），scheduled 每小时 list/聚合/入库后 delete
   prompts_library?: D1Database; // D1 数据库：答案之书
   GITHUB_TOKEN?: string; // 可选，用于 GitHub API 代理提升限流额度
 };
@@ -1324,9 +1325,12 @@ const app = new Hono<{ Bindings: Env }>();
 // CORS 配置（V6 协议：允许所有来源访问）
 // 注意：这是一个公开的 API，允许所有域名访问以支持跨域请求
 // 如果需要限制访问，可以取消注释下面的 ALLOWED_ORIGINS 配置
+// 允许的来源（含 localhost:3000，供灵魂词等跨域上报）
 const ALLOWED_ORIGINS = [
   'http://localhost:3000',
   'http://localhost:5173',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5173',
   'http://localhost:5174',
   'http://127.0.0.1:5173',
   'http://127.0.0.1:5174',
@@ -1337,10 +1341,12 @@ const ALLOWED_ORIGINS = [
   // 可以根据需要添加更多允许的域名
 ];
 
-app.use('/*', cors({
+// 全局跨域：解决 CORS Error，通过浏览器 Preflight（OPTIONS）预检
+// 使用 '*' 确保对所有路径（含 /api/v2/log-vibe-soul）生效，避免 localhost 跨域被拦
+app.use('*', cors({
   origin: '*',
-  allowMethods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'],
-  allowHeaders: ['Content-Type', 'X-Fingerprint', 'Cache-Control', 'Authorization', 'X-Requested-With', 'cache-control', 'x-fingerprint', 'x-intent', 'X-Intent'],
+  allowMethods: ['POST', 'GET', 'OPTIONS', 'PUT', 'PATCH', 'DELETE', 'HEAD'],
+  allowHeaders: ['Content-Type', 'X-Fingerprint', 'Cache-Control', 'Authorization', 'X-Requested-With', 'cache-control', 'x-fingerprint', 'x-intent', 'X-Intent', 'Accept'],
   exposeHeaders: ['Content-Length', 'Content-Type'],
   credentials: false,
   maxAge: 86400,
@@ -3172,8 +3178,8 @@ function vibeLexiconToIdentityLevelCloud(vibeLexicon: any): Record<string, Array
   if (!vibeLexicon || typeof vibeLexicon !== 'object') return { Novice: empty, Professional: empty, Architect: empty };
   const toWordCount = (arr: any[]): Array<{ word: string; count: number }> =>
     (arr || []).map((x: any) => ({
-      word: String(x?.word ?? x?.phrase ?? '').trim(),
-      count: Number(x?.count ?? x?.weight ?? 0) || 0,
+      word: String(x?.word ?? x?.phrase ?? x?.w ?? '').trim(),
+      count: Number(x?.count ?? x?.weight ?? x?.v ?? 0) || 0,
     })).filter((x) => x.word.length > 0);
   const raw = {
     Novice: toWordCount(vibeLexicon.Novice ?? vibeLexicon.slang_list ?? []),
@@ -6047,6 +6053,147 @@ app.post('/api/v2/report-vibe', async (c) => {
 });
 
 /**
+ * OPTIONS /api/v2/log-vibe-soul
+ * 显式响应预检，确保 localhost 等跨域 preflight 收到 CORS 头（部分环境 cors 中间件对 OPTIONS 不生效时兜底）
+ */
+app.options('/api/v2/log-vibe-soul', (c) => {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, X-Fingerprint, Cache-Control, Authorization, X-Requested-With, x-fingerprint, x-intent, X-Intent, Accept',
+      'Access-Control-Max-Age': '86400',
+    },
+  });
+});
+
+/**
+ * POST /api/v2/log-vibe-soul
+ * 灵魂词上报：接收 p(phrase), c(level), v(value/count), f(fingerprint), country，写入 KV
+ * Key: soul:${country}:${level}:${phrase}  Value: 次数|指纹1,指纹2（指纹不重复）
+ * Query ?immediate=true：存入 KV 后立即在后台执行一次 runSoulWordHourlyRollup（即时入库调试）
+ */
+app.post('/api/v2/log-vibe-soul', async (c) => {
+  try {
+    const env = c.env as Env;
+    // 健壮性：未绑定 KV 时明确提示，防止崩溃
+    const kv = env.KV_VIBE;
+    if (!kv) {
+      console.warn('[Worker] log-vibe-soul: KV_VIBE 未绑定，请在 wrangler.toml 中配置 [[kv_namespaces]] binding = "KV_VIBE"');
+      return c.json({ success: false, error: 'KV 未配置' }, 500);
+    }
+
+    let body: any = null;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ success: false, error: 'Invalid JSON' }, 400);
+    }
+
+    const phrase = String(body?.p ?? body?.phrase ?? '').trim();
+    const levelRaw = String(body?.c ?? body?.category ?? body?.level ?? '').trim();
+    const v = Number(body?.v ?? body?.value ?? body?.count ?? 1);
+    const fingerprint = String(body?.f ?? body?.fingerprint ?? '').trim();
+    const countryFromBody = String(body?.country ?? '').trim().toUpperCase();
+
+    if (!phrase || phrase.length < 2 || phrase.length > 120) {
+      return c.json({ success: false, error: 'phrase 无效' }, 400);
+    }
+
+    const validLevels = ['Novice', 'Professional', 'Architect', 'Native'];
+    const level = validLevels.includes(levelRaw) ? levelRaw : 'Novice';
+
+    const countryCf = (c.req.raw as any)?.cf?.country ?? 'UN';
+    const countryCode = /^[A-Za-z]{2}$/.test(countryFromBody)
+      ? countryFromBody
+      : (/^[A-Za-z]{2}$/.test(String(countryCf)) ? String(countryCf).toUpperCase() : 'UN');
+
+    console.log('[Worker] 灵魂词上报 收到:', { phrase, level, value: v, country: countryCode });
+
+    const key = `soul:${countryCode}:${level}:${phrase}`;
+    const existing = await kv.get(key, 'text');
+    let newValue: string;
+    if (existing != null) {
+      const parts = existing.split('|');
+      const oldCount = parseInt(parts[0], 10) || 0;
+      const addCount = Number.isFinite(v) && v > 0 ? Math.floor(v) : 1;
+      const fps = parts[1] ? new Set(parts[1].split(',').filter(Boolean)) : new Set<string>();
+      if (fingerprint) fps.add(fingerprint);
+      newValue = `${oldCount + addCount}|${Array.from(fps).join(',')}`;
+    } else {
+      newValue = fingerprint ? `${Number.isFinite(v) && v > 0 ? Math.floor(v) : 1}|${fingerprint}` : `${Number.isFinite(v) && v > 0 ? Math.floor(v) : 1}|`;
+    }
+    await kv.put(key, newValue, { expirationTtl: 86400 });
+    console.log('[KV] 已存入灵魂词:', key);
+
+    try {
+      const url = new URL(c.req.url);
+      if (url.searchParams.get('immediate') === 'true') {
+        const ctx = c.executionCtx;
+        if (ctx && typeof (ctx as any).waitUntil === 'function') {
+          (ctx as any).waitUntil(runSoulWordHourlyRollup(env));
+          console.log('[Worker] 已排队即时灵魂词汇总（immediate=true）');
+        } else {
+          await runSoulWordHourlyRollup(env);
+          console.log('[Worker] 即时灵魂词汇总完成（immediate=true）');
+        }
+      }
+    } catch (immediateErr: any) {
+      console.warn('[Worker] log-vibe-soul immediate=true 执行失败:', immediateErr?.message || String(immediateErr));
+    }
+
+    return c.json({ success: true, status: 'success' }, 200, {
+      'Access-Control-Allow-Origin': '*',
+    });
+  } catch (err: any) {
+    console.error('[Worker] /api/v2/log-vibe-soul 错误:', err?.message || String(err));
+    return c.json({ success: false, error: '上报失败' }, 500, {
+      'Access-Control-Allow-Origin': '*',
+    });
+  }
+});
+
+/**
+ * GET /api/v2/my-soul-words
+ * 查询用户的灵魂词统计（根据 fingerprint）
+ * Query: f=fingerprint
+ * 返回：{ status: 'success', data: [{ phrase, country, hit_count, rank }, ...] }
+ */
+app.get('/api/v2/my-soul-words', async (c) => {
+  const env = c.env;
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+    return c.json({ status: 'error', error: 'Supabase 未配置' }, 500);
+  }
+
+  const fingerprint = (c.req.query('f') ?? c.req.query('fingerprint') ?? '').trim();
+  if (!fingerprint) {
+    return c.json({ status: 'error', error: 'fingerprint 参数必填' }, 400);
+  }
+
+  try {
+    const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_user_soul_words`;
+    const rows = await fetchSupabaseJson<any[]>(env, rpcUrl, {
+      method: 'POST',
+      headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ p_fingerprint: fingerprint }),
+    }, SUPABASE_FETCH_TIMEOUT_MS);
+
+    const data = (Array.isArray(rows) ? rows : []).map((r: any) => ({
+      phrase: String(r?.phrase || ''),
+      country: String(r?.country || ''),
+      hit_count: Number(r?.hit_count) || 0,
+      rank: Number(r?.rank) || 0,
+    }));
+
+    return c.json({ status: 'success', data, total: data.length });
+  } catch (err: any) {
+    console.error('[Worker] /api/v2/my-soul-words 错误:', err?.message || String(err));
+    return c.json({ status: 'error', error: '查询失败' }, 500);
+  }
+});
+
+/**
  * GET /api/v2/world-cloud (别名: /api/v2/wordcloud-data)
  * 返回全局词云 Top 50：{ status: 'success', data: [{ name, value }] }
  * 要求：Cache-Control: public, max-age=3600
@@ -6308,105 +6455,150 @@ app.get('/api/v2/stats/keywords', async (c) => {
   const env = c.env;
   c.header('Cache-Control', 'public, max-age=60');
 
-  // 接收 region 查询参数，默认为 'CN'
   const regionRaw = (c.req.query('region') || c.req.query('country') || 'CN').trim().toUpperCase();
-  
-  // 验证 region 格式（2位ISO代码）
   if (!/^[A-Z]{2}$/.test(regionRaw)) {
-    return c.json(
-      { status: 'error', error: 'Invalid region/country (expect 2-letter ISO code)' },
-      400
-    );
+    return c.json({ status: 'error', error: 'Invalid region/country (expect 2-letter ISO code)' }, 400);
   }
 
-  // 定义返回数据结构
   type Item = { phrase: string; weight: number };
-  const empty = (): Item[] => [];
   const out: { Novice: Item[]; Professional: Item[]; Architect: Item[] } = {
-    Novice: empty(),
-    Professional: empty(),
-    Architect: empty(),
+    Novice: [],
+    Professional: [],
+    Architect: [],
   };
 
-  // 容错处理：如果 Supabase 未配置，返回空数据
   if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
     return c.json({ status: 'success', data: out });
   }
 
   try {
-    // 从 user_analysis 表查询，筛选 country_code 等于 region 的数据
-    // 按 updated_at 倒序排列，limit 20
+    // 【第一步】优先从视图 v_keyword_stats_by_country 查询（聚合更精准且性能更好）
+    const viewUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_keyword_stats_by_country`);
+    viewUrl.searchParams.set('select', 'phrase,category,hit_count');
+    viewUrl.searchParams.set('country_code', `eq.${regionRaw}`);
+    viewUrl.searchParams.set('order', 'hit_count.desc');
+    viewUrl.searchParams.set('limit', '300');
+
+    let viewRows: any[] = [];
+    try {
+      viewRows = await fetchSupabaseJson<any[]>(env, viewUrl.toString(), {
+        headers: buildSupabaseHeaders(env),
+      });
+    } catch (e) {
+      console.warn('[Worker] /api/v2/stats/keywords 视图查询失败，回退 user_analysis:', e);
+    }
+
+    if (Array.isArray(viewRows) && viewRows.length > 0) {
+      for (const r of viewRows) {
+        const phrase = String(r?.phrase || '').trim();
+        const weight = Number(r?.hit_count ?? 1) || 1;
+        const category = String(r?.category || '').trim();
+        if (!phrase || weight <= 0) continue;
+
+        if (category === 'Novice') {
+          out.Novice.push({ phrase, weight });
+        } else if (category === 'Architect') {
+          out.Architect.push({ phrase, weight });
+          // Architect 关键词也算作 Professional
+          out.Professional.push({ phrase, weight });
+        } else {
+          // Senior/Expert/Master/Professional 都放入 Professional
+          out.Professional.push({ phrase, weight });
+        }
+      }
+      
+      // 去重并排序
+      for (const level of ['Novice', 'Professional', 'Architect'] as const) {
+        const map = new Map<string, number>();
+        for (const item of out[level]) {
+          map.set(item.phrase, (map.get(item.phrase) || 0) + item.weight);
+        }
+        out[level] = Array.from(map.entries())
+          .map(([phrase, weight]) => ({ phrase, weight }))
+          .sort((a, b) => b.weight - a.weight)
+          .slice(0, 50);
+      }
+
+      if (out.Novice.length > 0 || out.Professional.length > 0) {
+        return c.json({ status: 'success', data: out });
+      }
+    }
+
+    // 【第二步】兜底：从 user_analysis 表查询，筛选 country_code 等于 region 的数据
+    // 增加 limit 到 100 以获取更丰富的数据
     const uaUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
     uaUrl.searchParams.set('select', 'stats');
     uaUrl.searchParams.set('country_code', `eq.${regionRaw}`);
     uaUrl.searchParams.set('order', 'updated_at.desc');
-    uaUrl.searchParams.set('limit', '20');
+    uaUrl.searchParams.set('limit', '100');
     
     const uaRows = await fetchSupabaseJson<any[]>(env, uaUrl.toString(), {
       headers: buildSupabaseHeaders(env),
     });
 
-    // 容错处理：如果 Supabase 无数据，返回 status: 'success' 且 data 里的等级数组为空
-    if (!Array.isArray(uaRows) || uaRows.length === 0) {
-      return c.json({ status: 'success', data: out });
-    }
+    if (Array.isArray(uaRows) && uaRows.length > 0) {
+      const wordCounts: {
+        Novice: Map<string, number>;
+        Professional: Map<string, number>;
+        Architect: Map<string, number>;
+      } = {
+        Novice: new Map(),
+        Professional: new Map(),
+        Architect: new Map(),
+      };
 
-    // 聚合逻辑：遍历查询到的记录，提取 stats.identityLevelCloud
-    const wordCounts: {
-      Novice: Map<string, number>;
-      Professional: Map<string, number>;
-      Architect: Map<string, number>;
-    } = {
-      Novice: new Map(),
-      Professional: new Map(),
-      Architect: new Map(),
-    };
+      for (const row of uaRows) {
+        const stats = row?.stats;
+        if (!stats || typeof stats !== 'object') continue;
+        // 优先 identityLevelCloud，若无则从 vibe_lexicon（mantra_top/slang_list）构建，兼容旧数据结构
+        let ilc = stats.identityLevelCloud;
+        if (!ilc || (typeof ilc === 'object' && Object.keys(ilc).length === 0)) {
+          const raw = stats.vibe_lexicon ?? stats.personality?.vibe_lexicon;
+          if (raw && typeof raw === 'object') ilc = vibeLexiconToIdentityLevelCloud(raw);
+        }
+        if (!ilc || typeof ilc !== 'object') continue;
+        // 遍历所有可能的键
+        const allKeys = Object.keys(ilc);
+        for (const key of allKeys) {
+          const levelData = ilc[key];
+          if (!Array.isArray(levelData)) continue;
 
-    for (const row of uaRows) {
-      const stats = row?.stats;
-      if (!stats || typeof stats !== 'object') continue;
-      
-      const ilc = stats.identityLevelCloud;
-      if (!ilc || typeof ilc !== 'object') continue;
+          for (const item of levelData) {
+            const phrase = String(item?.word ?? item?.phrase ?? item?.w ?? '').trim();
+            const count = Number(item?.count ?? item?.weight ?? item?.v ?? 0) || 1;
+            if (phrase.length <= 1 || count <= 0) continue;
 
-      // 遍历各等级：Novice / Professional / Architect，以及 Senior、Expert、Master（高阶键合并到 Professional，满足前端固定读 Professional）
-      const levelsToAggregate = ['Novice', 'Professional', 'Architect', 'Senior', 'Expert', 'Master'] as const;
-      for (const level of levelsToAggregate) {
-        const levelData = ilc[level];
-        if (!Array.isArray(levelData)) continue;
-
-        for (const item of levelData) {
-          const phrase = String(item?.word ?? item?.phrase ?? '').trim();
-          const count = Number(item?.count ?? item?.weight ?? 0) || 0;
-          if (phrase.length <= 1 || count <= 0) continue;
-          if (level === 'Novice') {
-            wordCounts.Novice.set(phrase, (wordCounts.Novice.get(phrase) || 0) + count);
-          } else {
-            wordCounts.Professional.set(phrase, (wordCounts.Professional.get(phrase) || 0) + count);
-            if (level === 'Architect') {
+            if (key === 'Novice') {
+              wordCounts.Novice.set(phrase, (wordCounts.Novice.get(phrase) || 0) + count);
+            } else if (key === 'Architect') {
               wordCounts.Architect.set(phrase, (wordCounts.Architect.get(phrase) || 0) + count);
+              wordCounts.Professional.set(phrase, (wordCounts.Professional.get(phrase) || 0) + count);
+            } else {
+              // 其他非小白等级均计入 Professional
+              wordCounts.Professional.set(phrase, (wordCounts.Professional.get(phrase) || 0) + count);
             }
           }
         }
       }
+
+      for (const level of ['Novice', 'Professional', 'Architect'] as const) {
+        const map = wordCounts[level];
+        out[level] = Array.from(map.entries())
+          .map(([phrase, weight]) => ({ phrase, weight }))
+          .sort((a, b) => b.weight - a.weight)
+          .slice(0, 50);
+      }
     }
 
-    // 格式化为前端所需：phrase + weight（adaptCloudData 兼容 word/count 与 phrase/weight）
-    for (const level of ['Novice', 'Professional', 'Architect'] as const) {
-      const map = wordCounts[level];
-      out[level] = Array.from(map.entries())
-        .map(([phrase, weight]) => ({ phrase, weight }))
-        .filter((x) => x.phrase.length > 1 && x.weight > 0)
-        .sort((a, b) => b.weight - a.weight);
-    }
-
+    // 无 Supabase 数据时返回空，不再使用 identityWordBanks 硬编码兜底，避免前端显示与后台脱节
+    // 前端将显示「暂无该国词云数据」，待 keyword_logs / user_analysis 有真实数据后即可展示
     return c.json({ status: 'success', data: out });
   } catch (e: any) {
     console.warn('[Worker] /api/v2/stats/keywords 查询失败:', regionRaw, e?.message || String(e));
-    // 容错处理：如果查询失败，返回空数组结构，绝不要返回 404 或 500
     return c.json({ status: 'success', data: out });
   }
 });
+
 
 /**
  * 【国家摘要】GET /api/country-summary?country=CN（get_country_summary_v3）
@@ -9289,6 +9481,211 @@ async function writeGlobalCountryStatsToKV(env: Env): Promise<{ success: boolean
   }
 }
 
+/** 灵魂词 KV Key 前缀，与 /api/v2/log-vibe-soul 一致：soul:国家:分类:词组 */
+const SOUL_KV_PREFIX = 'soul:';
+
+/** 聚合行：入库时 hit_count 以 bigint 存 Supabase，fingerprints 记录贡献用户 */
+type SoulWordRow = { phrase: string; country: string; hit_count: number; fingerprints: string[] };
+
+/**
+ * 从 STATS_STORE 同步灵魂词到 Supabase：遍历 soul: 前缀 Key，解析国家/词组/频次/指纹，批量 upsert_soul_word_hits 后清理 KV。
+ * 用于 Cron 每分钟或手动 GET /api/v2/sync-soul-words 调用。
+ */
+async function syncSoulWordsFromKV(env: Env): Promise<{ success: boolean; error?: string; synced?: number; deleted?: number }> {
+  const kv = env.STATS_STORE;
+  if (!kv) {
+    return { success: true, synced: 0, deleted: 0 };
+  }
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+    return { success: true, synced: 0, deleted: 0 };
+  }
+
+  try {
+    const keys: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const list = await kv.list({ prefix: SOUL_KV_PREFIX, limit: 1000, cursor });
+      for (const k of list.keys) keys.push(k.name);
+      cursor = list.list_complete ? undefined : list.cursor;
+    } while (cursor);
+
+    if (keys.length === 0) {
+      return { success: true, synced: 0, deleted: 0 };
+    }
+
+    const aggregated = new Map<string, SoulWordRow>();
+    const validCategories = new Set(['Novice', 'Professional', 'Architect', 'Native']);
+
+    for (const key of keys) {
+      const parts = key.split(':');
+      if (parts.length < 4) continue;
+      const country = (parts[1] || 'UN').toUpperCase();
+      const category = parts[2] || '';
+      const phrase = parts.slice(3).join(':').trim();
+      if (!phrase || !/^[A-Za-z]{2}$/.test(country)) continue;
+      if (category && !validCategories.has(category)) continue;
+
+      const raw = await kv.get(key, 'text');
+      if (!raw) continue;
+
+      const valueParts = String(raw).split('|');
+      const count = valueParts[0] ? parseInt(valueParts[0], 10) : 0;
+      const fpList = valueParts[1] ? valueParts[1].split(',').filter((f: string) => f.trim()) : [];
+      const delta = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+      if (delta <= 0) continue;
+
+      const aggKey = `${country}\t${phrase}`;
+      const existing = aggregated.get(aggKey);
+      if (existing) {
+        existing.hit_count += delta;
+        const fpSet = new Set([...existing.fingerprints, ...fpList]);
+        existing.fingerprints = Array.from(fpSet);
+      } else {
+        aggregated.set(aggKey, { country, phrase, hit_count: delta, fingerprints: fpList });
+      }
+    }
+
+    const rows: SoulWordRow[] = Array.from(aggregated.values());
+    // 解析校验：打印 p_rows 便于确认 soul:国家:等级:词组 解析正确
+    console.log('[Worker] syncSoulWordsFromKV p_rows 解析结果:', rows.length > 0 ? rows : '[]', '条数:', rows.length);
+    if (rows.length === 0) {
+      for (const key of keys) {
+        try { await kv.delete(key); } catch { /* ignore */ }
+      }
+      return { success: true, synced: 0, deleted: keys.length };
+    }
+
+    const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/upsert_soul_word_hits`;
+    const res = await fetchSupabase(env, rpcUrl, {
+      method: 'POST',
+      headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ p_rows: rows }),
+    }, SUPABASE_FETCH_TIMEOUT_MS);
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      const msg = errText || `Supabase RPC ${res.status}`;
+      console.warn('[Worker] 灵魂词 STATS_STORE 同步 RPC 失败:', res.status, msg);
+      return { success: false, error: msg };
+    }
+
+    // 事务安全性：仅 RPC 返回 resp.ok 后才执行 KV 删除
+    let deleted = 0;
+    for (const key of keys) {
+      try {
+        await kv.delete(key);
+        deleted++;
+      } catch {
+        // 单键删除失败不阻断
+      }
+    }
+
+    console.log('[Worker] ✅ 灵魂词 STATS_STORE 同步完成:', { synced: rows.length, kvDeleted: deleted });
+    return { success: true, synced: rows.length, deleted };
+  } catch (e: any) {
+    console.warn('[Worker] ⚠️ 灵魂词 STATS_STORE 同步失败:', e?.message || String(e));
+    return { success: false, error: e?.message || String(e) };
+  }
+}
+
+/**
+ * 每小时收割灵魂词（Cron）：KV_VIBE list → 读 Value → 按 { phrase, country } 聚合 → RPC 批量入库 → 仅 200/204 成功后删 KV
+ * 由 export default 的 scheduled 在 cron 0 * * * * 时调用
+ */
+async function runSoulWordHourlyRollup(env: Env): Promise<{ success: boolean; error?: string; synced?: number; deleted?: number }> {
+  const kv = env.KV_VIBE;
+  if (!kv) {
+    return { success: true }; // 未配置 KV 时静默跳过
+  }
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+    return { success: true }; // 未配置 Supabase 时静默跳过，不删 KV，下次再试
+  }
+
+  try {
+    // 1) 使用 env.KV_VIBE.list({ prefix: 'soul:' }) 扫描所有上报的 Key
+    const keys: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const list = await kv.list({ prefix: SOUL_KV_PREFIX, limit: 1000, cursor });
+      for (const k of list.keys) keys.push(k.name);
+      cursor = list.list_complete ? undefined : list.cursor;
+    } while (cursor);
+
+    if (keys.length === 0) {
+      return { success: true, synced: 0, deleted: 0 };
+    }
+
+    // 2) 循环读取每个 Key 的 Value（格式：count|fp1,fp2），解析并聚合，记录 fingerprints
+    const aggregated = new Map<string, SoulWordRow>();
+    const validCategories = new Set(['Novice', 'Professional', 'Architect']);
+
+    for (const key of keys) {
+      const parts = key.split(':');
+      if (parts.length < 4) continue;
+      const country = (parts[1] || 'UN').toUpperCase();
+      const category = parts[2] || '';
+      const phrase = parts.slice(3).join(':').trim();
+      if (!phrase || !/^[A-Za-z]{2}$/.test(country)) continue;
+      if (category && !validCategories.has(category)) continue;
+
+      const raw = await kv.get(key, 'text');
+      if (!raw) continue;
+      
+      // 解析格式：count|fp1,fp2,fp3
+      const valueParts = String(raw).split('|');
+      const count = valueParts[0] ? parseInt(valueParts[0], 10) : 0;
+      const fpList = valueParts[1] ? valueParts[1].split(',').filter(f => f.trim()) : [];
+      const delta = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+      if (delta <= 0) continue;
+
+      const aggKey = `${country}\t${phrase}`;
+      const existing = aggregated.get(aggKey);
+      if (existing) {
+        existing.hit_count += delta;
+        // 合并 fingerprints（去重）
+        const fpSet = new Set([...existing.fingerprints, ...fpList]);
+        existing.fingerprints = Array.from(fpSet);
+      } else {
+        aggregated.set(aggKey, { country, phrase, hit_count: delta, fingerprints: fpList });
+      }
+    }
+
+    const rows: SoulWordRow[] = Array.from(aggregated.values());
+    if (rows.length === 0) {
+      return { success: true, synced: 0, deleted: 0 };
+    }
+
+    // 3) 批量入库：聚合数组转 JSON，fetch 调用 Supabase RPC，Body 格式 { p_rows: 聚合后的数组 }
+    const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/upsert_soul_word_hits`;
+    const res = await fetchSupabase(env, rpcUrl, {
+      method: 'POST',
+      headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ p_rows: rows }),
+    }, SUPABASE_FETCH_TIMEOUT_MS);
+
+    // 4) 清理：只有在 Supabase 返回 200/204 成功后，才执行 env.KV_VIBE.delete(key)
+    if (!res.ok) {
+      throw new Error(`Supabase RPC ${res.status}: ${await res.text().catch(() => '')}`);
+    }
+
+    let deleted = 0;
+    for (const key of keys) {
+      try {
+        await kv.delete(key);
+        deleted++;
+      } catch {
+        // 单键删除失败不阻断
+      }
+    }
+
+    console.log('[Worker] ✅ 灵魂词每小时收割完成:', { synced: rows.length, kvDeleted: deleted });
+    return { success: true, synced: rows.length, deleted };
+  } catch (e: any) {
+    console.warn('[Worker] ⚠️ 灵魂词每小时收割失败:', e?.message || String(e));
+    return { success: false, error: e?.message || String(e) };
+  }
+}
+
 /**
  * 【第二阶段新增】定期汇总任务（Cron Trigger）
  * 每小时执行一次，从 Supabase 汇总平均分并存入 KV
@@ -9303,14 +9700,30 @@ export async function scheduled(event: ScheduledEvent, env: Env, ctx: any) {
   });
 
   // 多 Cron 支持：
+  // - * * * * *：每分钟灵魂词 STATS_STORE → Supabase 同步
   // - 0 * * * *：国家累积写入 KV（GLOBAL_COUNTRY_STATS），全球排行每小时更新
   // - */10 * * * *：国家累计 rollup（refresh_country_stats_current）
   const cron = String(event.cron || '').trim();
+
+  if (cron === '* * * * *') {
+    const r = await syncSoulWordsFromKV(env);
+    if (r.success && (r.synced ?? 0) > 0) {
+      console.log('[Worker] ✅ 灵魂词每分钟同步完成:', r.synced, '条, 清理 KV', r.deleted, '个');
+    } else if (!r.success) {
+      console.warn('[Worker] ⚠️ 灵魂词每分钟同步失败:', r.error);
+    }
+    return;
+  }
 
   if (cron === '0 * * * *') {
     const r = await writeGlobalCountryStatsToKV(env);
     if (r.success) console.log('[Worker] ✅ 国家累积 KV 写入完成');
     else console.warn('[Worker] ⚠️ 国家累积 KV 写入失败:', r.error);
+
+    const soulR = await runSoulWordHourlyRollup(env);
+    if (soulR.success) {
+      if ((soulR.synced ?? 0) > 0) console.log('[Worker] ✅ 灵魂词每小时汇总完成:', soulR.synced, '条');
+    } else console.warn('[Worker] ⚠️ 灵魂词每小时汇总失败:', soulR.error);
     return;
   }
 
@@ -9405,6 +9818,26 @@ app.get('/api/v2/internal/refresh-kv', async (c) => {
   }
 });
 
+/** 手动同步灵魂词：STATS_STORE soul: 前缀 → Supabase upsert_soul_word_hits，成功后清理 KV */
+app.get('/api/v2/sync-soul-words', async (c) => {
+  try {
+    const env = c.env as Env;
+    const r = await syncSoulWordsFromKV(env);
+    if (r.success) {
+      return c.json({
+        success: true,
+        synced: r.synced ?? 0,
+        deleted: r.deleted ?? 0,
+        message: `已同步 ${r.synced ?? 0} 条，清理 KV ${r.deleted ?? 0} 个 Key`,
+        at: new Date().toISOString(),
+      });
+    }
+    return c.json({ success: false, error: r.error || '同步失败', at: new Date().toISOString() }, 500);
+  } catch (e: any) {
+    return c.json({ success: false, error: e?.message || '未知错误', at: new Date().toISOString() }, 500);
+  }
+});
+
 /**
  * 路由：存活检查 & 状态（兼容原有 worker.js）
  * 功能：返回总用户数和 API 状态
@@ -9433,6 +9866,7 @@ app.get('/', async (c) => {
             globalAverage: '/api/global-average',
             randomPrompt: '/api/random_prompt',
             refreshKv: '/api/v2/internal/refresh-kv',
+            syncSoulWords: '/api/v2/sync-soul-words',
           },
         });
       } catch (error) {
@@ -9450,6 +9884,7 @@ app.get('/', async (c) => {
         globalAverage: '/api/global-average',
         randomPrompt: '/api/random_prompt',
         refreshKv: '/api/v2/internal/refresh-kv',
+        syncSoulWords: '/api/v2/sync-soul-words',
       },
     });
   } catch (error: any) {
