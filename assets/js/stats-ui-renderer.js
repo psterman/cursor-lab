@@ -9,6 +9,7 @@
 
     if (typeof window.__drawerExpanded === 'undefined') window.__drawerExpanded = true;
     if (typeof window.__selectedCountry === 'undefined') window.__selectedCountry = null;
+    if (typeof window.__cloudRenderToken === 'undefined') window.__cloudRenderToken = 0;
 
     function _hexToRgba(hex, alpha) {
         var m = (hex || '').replace(/^#/, '').match(/^([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
@@ -61,9 +62,65 @@
     }
 
     /**
+     * 绘制词云：开始时暴力清空画布，再调用 WordCloud；避免与上一次绘制竞态。
+     * 若使用 wordcloud2.js，其默认 clearCanvas: true 会在库内清空，此处仍显式 clearRect 确保旧内容被清掉。
+     */
+    function drawWordCloud(canvas, list, level, emptyEl, baseHex) {
+        if (!canvas || !list || list.length === 0) return;
+        var ctx = canvas.getContext('2d');
+        if (ctx) {
+            ctx.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
+        }
+        if (typeof WordCloud === 'undefined') {
+            if (emptyEl) {
+                emptyEl.textContent = '暂无数据（未加载 WordCloud2.js）';
+                emptyEl.classList.remove('hidden');
+            }
+            return;
+        }
+        var maxW = Math.max.apply(null, list.map(function(item) { return Number(item[1]) || 0; })) || 1;
+        var wordToRatio = {};
+        list.forEach(function(item) {
+            var w = Number(item[1]) || 0;
+            wordToRatio[item[0]] = maxW > 0 ? w / maxW : 0.5;
+        });
+        try {
+            WordCloud(canvas, {
+                list: list,
+                clearCanvas: true,
+                gridSize: 4,
+                weightFactor: function(weight) { return Math.max(12, Math.min(80, 10 + Math.log2((weight || 0) + 1) * 14)); },
+                fontFamily: '"Microsoft YaHei", "微软雅黑", SimHei, sans-serif',
+                color: function(word) {
+                    var ratio = wordToRatio[word] != null ? wordToRatio[word] : 0.5;
+                    var alpha = 0.5 + 0.5 * Math.pow(ratio, 0.7);
+                    return _hexToRgba(baseHex, alpha);
+                },
+                rotateRatio: 0.6,
+                backgroundColor: 'transparent',
+                minSize: 12,
+                drawOutOfBound: false,
+                shrinkToFit: false,
+                ellipticity: 0.8
+            });
+        } catch (err) {
+            console.warn('[WordCloud] 本国词云渲染失败:', err);
+            if (emptyEl) {
+                emptyEl.textContent = '暂无数据';
+                emptyEl.classList.remove('hidden');
+            }
+        }
+    }
+
+    /**
      * 本国词云三身份 Tab：渲染前先执行 fetchCountryKeywords，再用 WordCloud2 渲染；右侧抽屉列表用动态数据填充。
+     * __isCloudLoading 为 true 时严禁保底/硬编码渲染，仅显示 loading 或空白。
      */
     function _renderNationalIdentityCloud(level) {
+        if (window.__isCloudLoading) {
+            showCloudLoadingHint();
+            return;
+        }
         var container = document.getElementById('vibe-cloud50-container');
         var canvas = document.getElementById('national-identity-cloud-canvas');
         if (!container) return;
@@ -77,11 +134,10 @@
         var meta = document.getElementById('vibe-cloud50-meta');
         var data = window.__countryKeywordsByLevel && Array.isArray(window.__countryKeywordsByLevel[level]) ? window.__countryKeywordsByLevel[level] : [];
         if (data.length === 0) {
-            var countryCode = (window.__currentCountryCode || window.__selectedCountry || '').trim();
             var svc = window.StatsDataService;
             if (svc && typeof svc.fetchCountryKeywords === 'function') {
                 showCloudLoadingHint();
-                svc.fetchCountryKeywords(countryCode).then(function() {
+                svc.fetchCountryKeywords().then(function() {
                     hideCloudLoadingHint();
                     fillSoulWordsList(level);
                     _renderNationalIdentityCloud(level);
@@ -92,11 +148,14 @@
                 });
                 return;
             }
-            if (canvas.getContext) canvas.getContext('2d').clearRect(0, 0, canvas.width || 0, canvas.height || 0);
-            if (meta) meta.textContent = '--';
-            if (empty) {
-                empty.textContent = '暂无数据';
-                empty.classList.remove('hidden');
+            if (!window.__isCloudLoading) {
+                var ctx = canvas.getContext('2d');
+                if (ctx) ctx.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
+                if (meta) meta.textContent = '--';
+                if (empty) {
+                    empty.textContent = '暂无数据';
+                    empty.classList.remove('hidden');
+                }
             }
             return;
         }
@@ -105,8 +164,6 @@
         if (meta) meta.textContent = 'N=' + data.length;
         var colorByLevel = { Novice: '#10b981', Professional: '#3b82f6', Architect: '#5b21b6', globalNative: '#8b5cf6', native: '#8b5cf6' };
         var baseHex = colorByLevel[level] || '#10b981';
-        var maxW = Math.max.apply(null, data.map(function(x) { return Number(x.weight) || 0; })) || 1;
-        // WordCloud2.js 要求 list 为二维数组 [['词', 权重], ...]，此处从 [{phrase, weight}] 转换
         var list = data.map(function(x) {
             var phrase = String(x.phrase || x.word || '').trim();
             var weight = Number(x.weight || x.count || 0) || 0;
@@ -131,43 +188,7 @@
         canvas.height = height;
         var ctx = canvas.getContext('2d');
         if (ctx) ctx.clearRect(0, 0, width, height);
-        if (typeof WordCloud === 'undefined') {
-            if (empty) {
-                empty.textContent = '暂无数据（未加载 WordCloud2.js）';
-                empty.classList.remove('hidden');
-            }
-            return;
-        }
-        try {
-            var wordToRatio = {};
-            list.forEach(function(item, i) {
-                var w = Number(item[1]) || 0;
-                wordToRatio[item[0]] = maxW > 0 ? w / maxW : 0.5;
-            });
-            WordCloud(canvas, {
-                list: list,
-                gridSize: 4,
-                weightFactor: function(weight) { return Math.max(12, Math.min(80, 10 + Math.log2((weight || 0) + 1) * 14)); },
-                fontFamily: '"Microsoft YaHei", "微软雅黑", SimHei, sans-serif',
-                color: function(word) {
-                    var ratio = wordToRatio[word] != null ? wordToRatio[word] : 0.5;
-                    var alpha = 0.5 + 0.5 * Math.pow(ratio, 0.7);
-                    return _hexToRgba(baseHex, alpha);
-                },
-                rotateRatio: 0.6,
-                backgroundColor: 'transparent',
-                minSize: 12,
-                drawOutOfBound: false,
-                shrinkToFit: false,
-                ellipticity: 0.8
-            });
-        } catch (err) {
-            console.warn('[WordCloud] 本国词云渲染失败:', err);
-            if (empty) {
-                empty.textContent = '暂无数据';
-                empty.classList.remove('hidden');
-            }
-        }
+        drawWordCloud(canvas, list, level, empty, baseHex);
     }
 
     function showCloudLoadingHint() {

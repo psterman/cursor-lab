@@ -225,13 +225,12 @@
     }
 
     /**
-     * 国家关键词/词云：仅从 Supabase RPC get_user_soul_words 获取，phrase + hit_count 按 hit_count 降序供词云中心显示。
-     * 若用户选择了国家，在客户端按 country 过滤（RPC 当前仅支持 p_fingerprint）。
-     * @param {string} countryCode - ISO2，可选，用于客户端过滤
+     * 国家关键词/词云：仅凭 vibe_fp 向 Supabase RPC get_user_soul_words 获取该用户全部记录（不传国家参数）。
+     * 拿到数据后根据 window.__selectedCountry（用户在大屏点击的国家）在前端 .filter() 过滤，实现「指纹随人走」。
      * @returns {Promise<object>} - { Novice, Professional, Architect, globalNative } 已用 adaptCloudData 转换
      */
-    function fetchCountryKeywords(countryCode) {
-        var effectiveCountry = (countryCode && String(countryCode).trim()) || (window.__selectedCountry && String(window.__selectedCountry).trim()) || '';
+    function fetchCountryKeywords() {
+        window.__isCloudLoading = true;
         var ids = getUserIdAndFingerprint();
         var fp = ids.fp;
         var supabase = window.supabase || window.supabaseClient;
@@ -243,6 +242,7 @@
         };
 
         if (!supabase || typeof supabase.rpc !== 'function' || !fp) {
+            window.__isCloudLoading = false;
             window.__countryKeywordsByLevel = emptyResult;
             window.__nationalCloudData = emptyResult;
             return Promise.resolve(emptyResult);
@@ -253,13 +253,15 @@
             var rows = (result && result.data && Array.isArray(result.data)) ? result.data : [];
             if (err) {
                 console.warn('[StatsDataService] get_user_soul_words RPC 失败:', err);
+                window.__isCloudLoading = false;
                 window.__countryKeywordsByLevel = emptyResult;
                 window.__nationalCloudData = emptyResult;
                 return emptyResult;
             }
-            var countryFilter = effectiveCountry ? String(effectiveCountry).toUpperCase() : '';
-            if (countryFilter) {
-                rows = rows.filter(function(r) { return (r.country || '').toUpperCase() === countryFilter; });
+            // 仅按用户在大屏点击的国家过滤，不向 Supabase 传国家
+            var selectedCountry = (window.__selectedCountry && String(window.__selectedCountry).trim()) ? String(window.__selectedCountry).toUpperCase() : '';
+            if (selectedCountry) {
+                rows = rows.filter(function(r) { return (r.country || '').toUpperCase() === selectedCountry; });
             }
             rows.sort(function(a, b) { return (b.hit_count || 0) - (a.hit_count || 0); });
             var mapped = rows.map(function(r) { return { phrase: r.phrase, count: r.hit_count }; });
@@ -270,11 +272,13 @@
                 Architect: adapted,
                 globalNative: adapted
             };
+            window.__isCloudLoading = false;
             window.__countryKeywordsByLevel = out;
             window.__nationalCloudData = out;
             return out;
         }).catch(function(e) {
             console.warn('[StatsDataService] fetchCountryKeywords 异常:', e);
+            window.__isCloudLoading = false;
             window.__countryKeywordsByLevel = emptyResult;
             window.__nationalCloudData = emptyResult;
             return emptyResult;

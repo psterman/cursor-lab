@@ -2824,9 +2824,8 @@ app.post('/api/v2/analyze', async (c) => {
           });
 
           // 【同步存储】必须 await 以确保后续认领操作能找到数据
-          // 【原子更新 Upsert】始终基于 fingerprint 作为唯一冲突键（ON CONFLICT fingerprint）
-          // 如果记录已存在，则更新现有记录的 user_id 和统计数据，而不是创建新行
-          const conflictKey = 'fingerprint';
+          // 【原子更新 Upsert】已登录 GitHub 以 id（github_id）为唯一键更新，未登录以 fingerprint 为唯一键更新
+          const conflictKey = useUserIdForUpsert && authenticatedUserId ? 'id' : 'fingerprint';
           const supabaseUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=${conflictKey}`;
           
           try {
