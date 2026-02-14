@@ -43,19 +43,26 @@
         }
         if (empty) empty.classList.add('hidden');
         if (meta) meta.textContent = 'N=' + data.length;
-        var colorByLevel = { Novice: '#10b981', Professional: '#3b82f6', Architect: '#5b21b6' };
+        var colorByLevel = { Novice: '#10b981', Professional: '#3b82f6', Architect: '#5b21b6', globalNative: '#8b5cf6', native: '#8b5cf6' };
         var baseHex = colorByLevel[level] || '#10b981';
-        var maxW = Math.max.apply(null, data.map(function(x) { return x.weight || 0; })) || 1;
+        var maxW = Math.max.apply(null, data.map(function(x) { return Number(x.weight) || 0; })) || 1;
+        // WordCloud2.js 要求 list 为二维数组 [['词', 权重], ...]，此处从 [{phrase, weight}] 转换
         var list = data.map(function(x) {
-            var w = Number(x.weight) || 0;
-            var size = Math.max(12, Math.min(80, 10 + Math.log2(w + 1) * 14));
-            return [String(x.phrase || '').trim(), size];
+            var phrase = String(x.phrase || x.word || '').trim();
+            var weight = Number(x.weight || x.count || 0) || 0;
+            return [phrase, weight];
         }).filter(function(item) { return item[0].length > 0 && item[1] > 0; });
         if (list.length === 0) return;
         var width = container.offsetWidth || 0;
         var height = container.offsetHeight || 0;
         if (width <= 0 || height <= 0) {
+            container.style.minHeight = container.style.minHeight || '200px';
             requestAnimationFrame(function() {
+                var w2 = container.offsetWidth || 0;
+                var h2 = container.offsetHeight || 0;
+                if ((w2 <= 0 || h2 <= 0) && container.style.minHeight !== '260px') {
+                    container.style.minHeight = '260px';
+                }
                 if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud(level);
             });
             return;
@@ -66,7 +73,7 @@
         if (ctx) ctx.clearRect(0, 0, width, height);
         if (typeof WordCloud === 'undefined') {
             if (empty) {
-                empty.textContent = '暂无该国词云数据';
+                empty.textContent = '暂无该国词云数据（未加载 WordCloud2.js）';
                 empty.classList.remove('hidden');
             }
             return;
@@ -74,13 +81,13 @@
         try {
             var wordToRatio = {};
             list.forEach(function(item, i) {
-                var w = Number(data[i] && data[i].weight) || 0;
+                var w = Number(item[1]) || 0;
                 wordToRatio[item[0]] = maxW > 0 ? w / maxW : 0.5;
             });
             WordCloud(canvas, {
                 list: list,
                 gridSize: 4,
-                weightFactor: function(size) { return Math.max(12, Math.min(80, size)); },
+                weightFactor: function(weight) { return Math.max(12, Math.min(80, 10 + Math.log2((weight || 0) + 1) * 14)); },
                 fontFamily: '"Microsoft YaHei", "微软雅黑", SimHei, sans-serif',
                 color: function(word) {
                     var ratio = wordToRatio[word] != null ? wordToRatio[word] : 0.5;

@@ -955,7 +955,7 @@ var _loc = window.location;
                                 Novice: dataAdapterFn(ilc.Novice || []),
                                 Professional: dataAdapterFn(ilc.Professional || []),
                                 Architect: dataAdapterFn(ilc.Architect || []),
-                                globalNative: []
+                                globalNative: dataAdapterFn(ilc.globalNative || ilc.native || [])
                             };
                                 
                                 // 构建降级 payload（仅包含词云数据）
@@ -1024,6 +1024,15 @@ var _loc = window.location;
                 if (isAbnormalTotalcharssum) {
                     delete data.totalcharssum;
                 }
+                // switchView('country') 获取数据后的回调：同步右上角国家名
+                var res = data;
+                if (res._meta && res._meta.countryName) {
+                    var badgeEl = document.getElementById('current-country-badge');
+                    if (badgeEl) badgeEl.innerText = res._meta.countryName;
+                }
+                if (res && res._meta && (res.jiafang_count != null || res.ketao_count != null) && !res.countryTotals) {
+                    res.countryTotals = { jiafang_count: res.jiafang_count, ketao_count: res.ketao_count, no: res.jiafang_count, please: res.ketao_count, _meta: res._meta };
+                }
                 console.log('[Debug] 统计原始数据:', data);
                 if (data.latest_records && data.latest_records.length > 0) {
                     console.log('[Debug] 第一人数据（检查字段名）:', data.latest_records[0]);
@@ -1046,6 +1055,11 @@ var _loc = window.location;
                                     ? `Analyzed ${(sayN / 10000).toFixed(1)} ×10k chars`
                                     : `已累计分析 ${(sayN / 10000).toFixed(1)} 万字`;
                             }
+                            if (cachedData._meta && cachedData._meta.countryName) {
+                                var cachedBadge = document.getElementById('current-country-badge');
+                                if (cachedBadge) cachedBadge.innerText = cachedData._meta.countryName;
+                            }
+                            if (typeof window._renderNationalIdentityCloud === 'function') window._renderNationalIdentityCloud('Professional');
                         }
                     } catch (e) { /* ignore */ }
                     return;
@@ -1143,10 +1157,9 @@ var _loc = window.location;
                             }
                         }
                         if (cloudLoadingHint) cloudLoadingHint.classList.add('hidden');
-                        // 数据准备好后，必须显式调用 _renderNationalIdentityCloud() 进行重绘
-                        var currentLevel = (window.__currentNationalIdentityLevel || 'Novice');
-                        if (typeof _renderNationalIdentityCloud === 'function') {
-                            _renderNationalIdentityCloud(currentLevel);
+                        // 数据准备好后，强制触发词云重绘（Professional）
+                        if (typeof window._renderNationalIdentityCloud === 'function') {
+                            window._renderNationalIdentityCloud('Professional');
                         }
                         
                         // 更新空状态提示
@@ -1738,7 +1751,8 @@ var _loc = window.location;
                             `;
                         };
 
-                        // 国家累计：右侧抽屉所有数值（ai, say, day, no, please）严格从 payload.countryTotals 读取
+                        // 国家累计：右侧抽屉所有数值（ai, say, day）及进度条严格从 payload.countryTotals 读取
+                        // 进度条/数值优先使用接口字段 ketao_count、jiafang_count（兼容 no/please）
                         // 注意：后端 countryTotalsRanks 键名是 avg_user_message_length，需要兼容
                         // 【修复】使用 hasValidTotals 确保数据真正有效，而非仅判断对象存在
                         const totalsHtml = hasValidTotals
@@ -4944,6 +4958,13 @@ var _loc = window.location;
         }
 
         function showDrawersWithCountryData(countryCode, countryName, overrideRightData, options) {
+            // 国家名徽章：有数据时立即更新，避免延迟
+            if (overrideRightData != null && typeof overrideRightData === 'object' && overrideRightData._meta && overrideRightData._meta.countryName) {
+                try {
+                    var sb = document.getElementById('current-country-badge');
+                    if (sb) sb.innerText = overrideRightData._meta.countryName;
+                } catch (e) { /* ignore */ }
+            }
             // 统一入口：有传入数据时先归一化并写入全局，供后续卡片与 renderCardsStaggered 使用
             if (overrideRightData != null && typeof overrideRightData === 'object') {
                 var normalizedData = normalizeStats(overrideRightData);
@@ -19071,7 +19092,7 @@ var _loc = window.location;
                                     Novice: dataAdapter(ilc.Novice || []), 
                                     Professional: dataAdapter(ilc.Professional || []), 
                                     Architect: dataAdapter(ilc.Architect || []), 
-                                    globalNative: [] 
+                                    globalNative: dataAdapter(ilc.globalNative || ilc.native || []) 
                                 };
                                 if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud(window.__currentNationalIdentityLevel || 'Novice');
                                 if (empty) empty.classList.add('hidden');

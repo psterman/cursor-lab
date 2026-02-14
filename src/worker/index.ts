@@ -13,7 +13,7 @@ import { getRankResult, RANK_DATA } from './rank';
 // 直接从 rank-content.ts 导入 RANK_RESOURCES（rank.ts 已导入但未导出）
 import { RANK_RESOURCES } from '../rank-content';
 import { identifyUserByFingerprint, identifyUserByUserId, identifyUserByUsername, bindFingerprintToUser, updateUserByFingerprint, migrateFingerprintToUserId, identifyUserByClaimToken } from './fingerprint-service';
-import { getIdentityWordSets } from './identityWordBanks';
+import { getIdentityWordSets, matchChatToIdentityKeywords, type IdentityWordBankLang } from './identityWordBanks';
 
 // Cloudflare Workers 类型定义（兼容性处理）
 type KVNamespace = {
@@ -2369,6 +2369,11 @@ app.post('/api/v2/analyze', async (c) => {
       interactionStyleDesc: isZh ? `交互风格为${dimensions.F >= 70 ? 'Warm' : dimensions.F >= 40 ? 'Balanced' : 'Cold'}，${dimensions.F >= 70 ? '你与AI的交互非常友好和礼貌' : dimensions.F >= 40 ? '你与AI的交互保持平衡' : '你与AI的交互较为直接和简洁'}` : `Interaction style is ${dimensions.F >= 70 ? 'Warm' : dimensions.F >= 40 ? 'Balanced' : 'Cold'}, ${dimensions.F >= 70 ? 'your interaction with AI is very friendly and polite' : dimensions.F >= 40 ? 'your interaction with AI is balanced' : 'your interaction with AI is direct and concise'}`,
     };
 
+    // 【身份词云】若 stats.identityLevelCloud 存在 Architect/Senior 等高阶键，合并到 Professional，确保前端读 Professional 能拿到数据
+    if (finalStats && finalStats.identityLevelCloud) {
+      finalStats.identityLevelCloud = normalizeIdentityLevelCloudForFrontend(finalStats.identityLevelCloud);
+    }
+
     // 【V6 协议】构建返回结果（包含 answer_book、analysis、semanticFingerprint）
     // 注意：claimToken 将在后续的数据库写入逻辑中生成，这里先不包含
     const result: any = {
@@ -2431,6 +2436,17 @@ app.post('/api/v2/analyze', async (c) => {
         // 【重构】详细统计数据数组，包含每个维度的称号和吐槽文案
         detailedStats: detailedStats,
       }
+    };
+
+    // 【身份词库】提前计算匹配结果，供异步入库与 debug_info 使用（便于区分“没匹配到”与“存不进去”）
+    const fullTextForIdentity = userMessages.map((m: any) => m.text || m.content || '').join('\n');
+    const identityLang: IdentityWordBankLang = isMainlyEnglish(fullTextForIdentity) ? 'en' : 'zh';
+    const identityMatches = matchChatToIdentityKeywords(fullTextForIdentity, identityLang);
+    const wordSets = getIdentityWordSets(identityLang);
+    (result as any).debug_info = {
+      identity_match_count: identityMatches.length,
+      identity_lang: identityLang,
+      word_set_sizes: { novice: wordSets.novice.size, professional: wordSets.professional.size, architect: wordSets.architect.size },
     };
 
     // 【异步存储】使用 waitUntil 异步写入 Supabase
@@ -2769,6 +2785,8 @@ app.post('/api/v2/analyze', async (c) => {
             payload.country_code = countryCodeForDb;
           }
 
+          // 【身份词库】使用已提前计算好的 identityMatches（带 category），见上方 debug_info
+
           // ============================
           // 行为快照：snapshot_country（用于“国别聚合”而非用户当前国籍）
           // 优先级：前端显式 snapshot_country/manual_region > manual_location > ip_location > Global
@@ -2931,6 +2949,34 @@ app.post('/api/v2/analyze', async (c) => {
                   console.warn('[Worker] ⚠️ 词云缓冲区处理失败:', err.message);
                 }
               })(),
+              // 【身份词库】异步入库 keyword_logs：遍历命中关键词，RPC upsert_keyword_log_identity；参数名与 DB 一致：p_phrase, p_category, p_ip_location, p_fingerprint
+              (async () => {
+                if (!identityMatches.length) return;
+                const ipLocation = (payload.ip_location && /^[A-Za-z]{2}$/.test(String(payload.ip_location).trim()))
+                  ? String(payload.ip_location).trim().toUpperCase()
+                  : (countryCodeForDb || '');
+                const fp = (payload.fingerprint && String(payload.fingerprint).trim()) ? String(payload.fingerprint).trim() : null;
+                const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/upsert_keyword_log_identity`;
+                const headers = buildSupabaseHeaders(env, { 'Content-Type': 'application/json' });
+                console.log('[Worker] [keyword_logs] 待入库词条数量:', identityMatches.length, '样本:', identityMatches.slice(0, 5).map(m => ({ phrase: m.phrase, category: m.category })));
+                for (const { phrase, category } of identityMatches) {
+                  try {
+                    await fetchSupabaseJson(env, rpcUrl, {
+                      method: 'POST',
+                      headers,
+                      body: JSON.stringify({
+                        p_phrase: phrase,
+                        p_category: category,
+                        p_ip_location: ipLocation,
+                        p_fingerprint: fp,
+                      }),
+                    });
+                  } catch (err: any) {
+                    console.warn('[Worker] [keyword_logs] RPC 单条写入失败:', { phrase, category, error: err?.message });
+                  }
+                }
+                console.log('[Worker] ✅ keyword_logs 身份关键词写入完成:', { count: identityMatches.length, ip_location: ipLocation || '(空)' });
+              })(),
             ]);
 
             // 刷新触发：写入完成后异步调用 RPC 刷新视图
@@ -3045,6 +3091,293 @@ app.post('/api/v2/analyze', async (c) => {
     }, 500);
   }
 });
+
+/** 国家码 -> 中文名（供 /api/v2/summary _meta.countryName 使用） */
+const COUNTRY_CODE_TO_NAME: Record<string, string> = {
+  CN: '中国', US: '美国', JP: '日本', KR: '韩国', GB: '英国', DE: '德国', FR: '法国',
+  IN: '印度', SG: '新加坡', AU: '澳大利亚', CA: '加拿大', RU: '俄罗斯', BR: '巴西',
+};
+
+const IDENTITY_CATEGORIES = ['Novice', 'Professional', 'Architect'] as const;
+
+/** 将任意 vibe_lexicon 形状规范为 { Novice, Professional, Architect }，供右侧抽屉按身份 Tab 展示 */
+function normalizeVibeLexiconToIdentity(raw: any): { Novice: any[]; Professional: any[]; Architect: any[] } {
+  const empty: any[] = [];
+  if (!raw || typeof raw !== 'object') {
+    return { Novice: empty, Professional: empty, Architect: empty };
+  }
+  const toArr = (x: any): any[] => {
+    if (Array.isArray(x)) return x;
+    if (x && typeof x === 'object' && !Array.isArray(x)) return Object.entries(x).map(([k, v]) => (typeof v === 'object' && v && 'phrase' in v) ? v : { phrase: k, weight: Number(v) || 1 });
+    return empty;
+  };
+  return {
+    Novice: toArr(raw.Novice ?? raw.slang_list ?? raw.slang ?? raw.novice),
+    Professional: toArr(raw.Professional ?? raw.mantra_top ?? raw.mantra ?? raw.professional),
+    Architect: toArr(raw.Architect ?? raw.architect ?? raw.sv_slang ?? []),
+  };
+}
+
+/** 将 vibe_lexicon 规范为 summary 接口要求：{ Novice: [{ phrase, count }], ... }，每类按 count 降序 */
+function formatVibeLexiconForSummary(lex: { Novice: any[]; Professional: any[]; Architect: any[] }): { Novice: Array<{ phrase: string; count: number }>; Professional: Array<{ phrase: string; count: number }>; Architect: Array<{ phrase: string; count: number }> } {
+  const toCountArr = (arr: any[]): Array<{ phrase: string; count: number }> =>
+    (arr || [])
+      .map((x: any) => ({ phrase: String(x?.phrase ?? x?.word ?? '').trim(), count: Number(x?.count ?? x?.weight ?? 1) || 0 }))
+      .filter((x) => x.phrase.length > 0)
+      .sort((a, b) => b.count - a.count);
+  return {
+    Novice: toCountArr(lex.Novice),
+    Professional: toCountArr(lex.Professional),
+    Architect: toCountArr(lex.Architect),
+  };
+}
+
+/** 高阶身份键名（非 Novice）：这些键的数据需同时映射到 Professional，供前端固定读取 Professional 时能拿到 */
+const IDENTITY_LEVEL_KEYS_NON_NOVICE = ['Professional', 'Architect', 'Senior', 'Expert', 'Master'] as const;
+
+/**
+ * 规范化 identityLevelCloud：若存在 Architect、Senior 等高阶键，将其数据同时合并到 Professional 下，
+ * 确保返回的 JSON 包含前端预期的 Professional 字段；内部项统一为 { word, count } 格式不变。
+ */
+function normalizeIdentityLevelCloudForFrontend(ilc: any): Record<string, Array<{ word: string; count: number }>> {
+  if (!ilc || typeof ilc !== 'object') return ilc || {};
+  const out = { ...ilc } as Record<string, any>;
+  const toWordCount = (x: any): { word: string; count: number } => {
+    const word = String(x?.word ?? x?.phrase ?? '').trim();
+    const count = Number(x?.count ?? x?.weight ?? 0) || 0;
+    return { word, count };
+  };
+  const byWord = new Map<string, number>();
+  for (const key of IDENTITY_LEVEL_KEYS_NON_NOVICE) {
+    const arr = out[key];
+    if (!Array.isArray(arr)) continue;
+    for (const item of arr) {
+      const { word, count } = toWordCount(item);
+      if (word) byWord.set(word, (byWord.get(word) || 0) + count);
+    }
+  }
+  if (byWord.size > 0) {
+    out.Professional = Array.from(byWord.entries())
+      .map(([word, count]) => ({ word, count }))
+      .sort((a, b) => b.count - a.count);
+  } else if (out.Professional == null && (out.Architect ?? out.Senior ?? out.Expert ?? out.Master)) {
+    out.Professional = [];
+  }
+  return out as Record<string, Array<{ word: string; count: number }>>;
+}
+
+/** 将 vibe_lexicon（Novice/Professional/Architect 数组，项为 phrase/count 或 phrase/weight）转为 identityLevelCloud 形状（word + count），供前端 stats2 读取 */
+function vibeLexiconToIdentityLevelCloud(vibeLexicon: any): Record<string, Array<{ word: string; count: number }>> {
+  const empty: Array<{ word: string; count: number }> = [];
+  if (!vibeLexicon || typeof vibeLexicon !== 'object') return { Novice: empty, Professional: empty, Architect: empty };
+  const toWordCount = (arr: any[]): Array<{ word: string; count: number }> =>
+    (arr || []).map((x: any) => ({
+      word: String(x?.word ?? x?.phrase ?? '').trim(),
+      count: Number(x?.count ?? x?.weight ?? 0) || 0,
+    })).filter((x) => x.word.length > 0);
+  const raw = {
+    Novice: toWordCount(vibeLexicon.Novice ?? vibeLexicon.slang_list ?? []),
+    Professional: toWordCount(vibeLexicon.Professional ?? vibeLexicon.mantra_top ?? []),
+    Architect: toWordCount(vibeLexicon.Architect ?? []),
+  };
+  return normalizeIdentityLevelCloudForFrontend(raw);
+}
+
+/**
+ * GET /api/v2/summary
+ * 按国家返回 vibe_lexicon。优先从视图 v_keyword_stats_by_country 查询，不足时从 user_analysis.stats.identityLevelCloud 聚合兜底。
+ * 返回的 vibe_lexicon 必为 { Novice: [{ phrase, count }], Professional: [], Architect: [] }，每类按 count 降序。
+ */
+async function handleSummary(c: any): Promise<Response> {
+  const env = c.env;
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+    return c.json({ success: false, error: 'Supabase 未配置' }, 500);
+  }
+  const countryRaw = (c.req.query('country') || '').trim();
+  const countryCode = countryRaw.toUpperCase();
+  if (!/^[A-Z]{2}$/.test(countryCode)) {
+    return c.json({ success: false, error: 'country 必填且为 2 位国家码' }, 400);
+  }
+
+  let vibeLexiconRaw: any = null;
+
+  // 1. 缓存：country_lexicon_cache
+  try {
+    const cacheUrl = new URL(`${env.SUPABASE_URL}/rest/v1/country_lexicon_cache`);
+    cacheUrl.searchParams.set('select', 'lexicon_json');
+    cacheUrl.searchParams.set('country_code', `eq.${countryCode}`);
+    cacheUrl.searchParams.set('limit', '1');
+    const cacheRows = await fetchSupabaseJson<any[]>(
+      env,
+      cacheUrl.toString(),
+      { headers: buildSupabaseHeaders(env) },
+      SUPABASE_FETCH_TIMEOUT_MS
+    ).catch(() => []);
+    const cacheRow = Array.isArray(cacheRows) && cacheRows.length > 0 ? cacheRows[0] : null;
+    if (cacheRow && cacheRow.lexicon_json != null) {
+      vibeLexiconRaw = typeof cacheRow.lexicon_json === 'string'
+        ? (() => { try { return JSON.parse(cacheRow.lexicon_json); } catch { return cacheRow.lexicon_json; } })()
+        : cacheRow.lexicon_json;
+    }
+  } catch (e) {
+    console.warn('[Worker] /api/v2/summary country_lexicon_cache 查询失败:', e);
+  }
+
+  // 2. 优先从视图 v_keyword_stats_by_country 查询（country_code 已大写，分类与库中 'Novice'/'Professional'/'Architect' 一致）
+  if (vibeLexiconRaw == null) {
+    try {
+      const viewUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_keyword_stats_by_country`);
+      viewUrl.searchParams.set('select', 'phrase,category,hit_count');
+      viewUrl.searchParams.set('country_code', `eq.${countryCode}`);
+      viewUrl.searchParams.set('order', 'hit_count.desc');
+      viewUrl.searchParams.set('limit', '500');
+      const viewRows = await fetchSupabaseJson<any[]>(
+        env,
+        viewUrl.toString(),
+        { headers: buildSupabaseHeaders(env) },
+        SUPABASE_FETCH_TIMEOUT_MS
+      ).catch(() => []);
+      const rows = Array.isArray(viewRows) ? viewRows : [];
+      if (rows.length > 0) {
+        const byCat: { Novice: Array<{ phrase: string; count: number }>; Professional: Array<{ phrase: string; count: number }>; Architect: Array<{ phrase: string; count: number }> } = {
+          Novice: [],
+          Professional: [],
+          Architect: [],
+        };
+        for (const r of rows) {
+          const phrase = String(r?.phrase ?? '').trim();
+          const cat = String(r?.category ?? '').trim();
+          const count = Number(r?.hit_count ?? r?.count ?? 1) || 1;
+          if (!phrase || !cat) continue;
+          if (cat === 'Novice') byCat.Novice.push({ phrase, count });
+          else if (cat === 'Professional') byCat.Professional.push({ phrase, count });
+          else if (cat === 'Architect') byCat.Architect.push({ phrase, count });
+        }
+        vibeLexiconRaw = byCat;
+      }
+    } catch (e) {
+      console.warn('[Worker] /api/v2/summary v_keyword_stats_by_country 查询失败:', e);
+    }
+  }
+
+  // 3. 兜底：从 user_analysis 查该国最近记录，聚合 stats.identityLevelCloud 按词频汇总
+  if (vibeLexiconRaw == null || (vibeLexiconRaw && [vibeLexiconRaw.Novice, vibeLexiconRaw.Professional, vibeLexiconRaw.Architect].every((a) => !Array.isArray(a) || a.length === 0))) {
+    try {
+      const uaUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
+      uaUrl.searchParams.set('select', 'stats');
+      uaUrl.searchParams.set('or', `(country_code.eq.${countryCode},ip_location.eq.${countryCode},manual_location.eq.${countryCode},current_location.eq.${countryCode})`);
+      uaUrl.searchParams.set('order', 'updated_at.desc');
+      uaUrl.searchParams.set('limit', '200');
+      const uaRows = await fetchSupabaseJson<any[]>(
+        env,
+        uaUrl.toString(),
+        { headers: buildSupabaseHeaders(env) },
+        SUPABASE_FETCH_TIMEOUT_MS
+      ).catch(() => []);
+      const list = Array.isArray(uaRows) ? uaRows : [];
+      const wordCounts: { Novice: Map<string, number>; Professional: Map<string, number>; Architect: Map<string, number> } = {
+        Novice: new Map(),
+        Professional: new Map(),
+        Architect: new Map(),
+      };
+      for (const row of list) {
+        const stats = row?.stats;
+        if (!stats || typeof stats !== 'object') continue;
+        const ilc = stats.identityLevelCloud;
+        if (!ilc || typeof ilc !== 'object') continue;
+        for (const level of IDENTITY_CATEGORIES) {
+          const levelData = ilc[level];
+          if (!Array.isArray(levelData)) continue;
+          for (const item of levelData) {
+            const phrase = String(item?.word ?? item?.phrase ?? '').trim();
+            const count = Number(item?.count ?? item?.weight ?? 0) || 0;
+            if (phrase.length > 0 && count > 0) {
+              const m = wordCounts[level];
+              m.set(phrase, (m.get(phrase) || 0) + count);
+            }
+          }
+        }
+      }
+      const hasAny = [...wordCounts.Novice.entries(), ...wordCounts.Professional.entries(), ...wordCounts.Architect.entries()].length > 0;
+      if (hasAny) {
+        vibeLexiconRaw = {
+          Novice: Array.from(wordCounts.Novice.entries()).map(([phrase, count]) => ({ phrase, count })).sort((a, b) => b.count - a.count),
+          Professional: Array.from(wordCounts.Professional.entries()).map(([phrase, count]) => ({ phrase, count })).sort((a, b) => b.count - a.count),
+          Architect: Array.from(wordCounts.Architect.entries()).map(([phrase, count]) => ({ phrase, count })).sort((a, b) => b.count - a.count),
+        };
+      }
+    } catch (e) {
+      console.warn('[Worker] /api/v2/summary user_analysis identityLevelCloud 聚合失败:', e);
+    }
+  }
+
+  // 4. 单用户保底：该国仅 1 人时从 personality_data / personality.vibe_lexicon 取
+  if (vibeLexiconRaw == null) {
+    try {
+      const uaListUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
+      uaListUrl.searchParams.set('select', 'fingerprint,personality_data,personality');
+      uaListUrl.searchParams.set('or', `(country_code.eq.${countryCode},ip_location.eq.${countryCode},manual_location.eq.${countryCode},current_location.eq.${countryCode})`);
+      uaListUrl.searchParams.set('limit', '2');
+      const uaRows = await fetchSupabaseJson<any[]>(
+        env,
+        uaListUrl.toString(),
+        { headers: buildSupabaseHeaders(env) },
+        SUPABASE_FETCH_TIMEOUT_MS
+      ).catch(() => []);
+      const list = Array.isArray(uaRows) ? uaRows : [];
+      if (list.length === 1) {
+        const row = list[0];
+        const pd = row?.personality_data;
+        if (pd && typeof pd === 'object' && (pd as any).vibe_lexicon) {
+          vibeLexiconRaw = (pd as any).vibe_lexicon;
+        } else if (row?.personality?.vibe_lexicon) {
+          vibeLexiconRaw = row.personality.vibe_lexicon;
+        }
+      }
+    } catch (e) {
+      console.warn('[Worker] /api/v2/summary 单用户 vibe_lexicon 保底失败:', e);
+    }
+  }
+
+  const normalized = normalizeVibeLexiconToIdentity(vibeLexiconRaw);
+  const vibeLexicon = formatVibeLexiconForSummary(normalized);
+  // 向后兼容：部分前端仍读 mantra_top / slang_list
+  (vibeLexicon as any).mantra_top = vibeLexicon.Professional;
+  (vibeLexicon as any).slang_list = vibeLexicon.Novice;
+
+  // 4. 数据聚合：该国 user_analysis 汇总 jiafang_count / ketao_count
+  let totalno = 0;
+  let totalplease = 0;
+  try {
+    const aggUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
+    aggUrl.searchParams.set('select', 'jiafang_count,ketao_count');
+    aggUrl.searchParams.set('or', `(country_code.eq.${countryCode},ip_location.eq.${countryCode},manual_location.eq.${countryCode},current_location.eq.${countryCode})`);
+    const aggRows = await fetchSupabaseJson<any[]>(
+      env,
+      aggUrl.toString(),
+      { headers: buildSupabaseHeaders(env) },
+      SUPABASE_FETCH_TIMEOUT_MS
+    ).catch(() => []);
+    const rows = Array.isArray(aggRows) ? aggRows : [];
+    totalno = rows.reduce((s, r) => s + (Number(r.jiafang_count) || 0), 0);
+    totalplease = rows.reduce((s, r) => s + (Number(r.ketao_count) || 0), 0);
+  } catch (e) {
+    console.warn('[Worker] /api/v2/summary 聚合统计失败:', e);
+  }
+
+  // 别名映射：totalno 总和 -> jiafang_count，totalplease 总和 -> ketao_count
+  const countryName = COUNTRY_CODE_TO_NAME[countryCode] || countryCode;
+
+  return c.json({
+    success: true,
+    vibe_lexicon: vibeLexicon ?? { Novice: [], Professional: [], Architect: [] },
+    jiafang_count: totalno,
+    ketao_count: totalplease,
+    _meta: { countryCode, countryName },
+  }, 200, { 'Cache-Control': 'public, max-age=60' });
+}
+
+app.get('/api/v2/summary', handleSummary);
 
 /**
  * POST /api/update-location
@@ -4334,6 +4667,26 @@ function normalizeRegion(locationParam?: string | null): string {
   // 只保留常见安全字符，避免异常输入污染维度；尽量保留原始大小写习惯
   const cleaned = raw.replace(/[^a-zA-Z0-9_-]/g, '');
   return cleaned || 'Global';
+}
+
+/** 判定 userContent 是否主要为英文（用于选择 Novice/Professional/Architect 词库语言） */
+function isMainlyEnglish(text: string): boolean {
+  if (!text || typeof text !== 'string') return false;
+  const trimmed = text.trim();
+  if (!trimmed.length) return false;
+  let asciiLetters = 0;
+  let totalLetters = 0;
+  for (const ch of trimmed) {
+    const code = ch.codePointAt(0) ?? 0;
+    if ((code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a)) {
+      asciiLetters++;
+      totalLetters++;
+    } else if (code >= 0x4e00 && code <= 0x9fff) totalLetters += 1; // CJK 基本
+    else if (code >= 0x3400 && code <= 0x4dbf) totalLetters += 1;   // CJK 扩展 A
+    else if (code > 0x7f) totalLetters += 1;                         // 其他非 ASCII 字母
+  }
+  if (totalLetters === 0) return false;
+  return asciiLetters / totalLetters >= 0.5;
 }
 
 /**
@@ -6016,26 +6369,29 @@ app.get('/api/v2/stats/keywords', async (c) => {
       const ilc = stats.identityLevelCloud;
       if (!ilc || typeof ilc !== 'object') continue;
 
-      // 遍历各等级的词云数据（Novice, Professional, Architect）
-      for (const level of ['Novice', 'Professional', 'Architect'] as const) {
+      // 遍历各等级：Novice / Professional / Architect，以及 Senior、Expert、Master（高阶键合并到 Professional，满足前端固定读 Professional）
+      const levelsToAggregate = ['Novice', 'Professional', 'Architect', 'Senior', 'Expert', 'Master'] as const;
+      for (const level of levelsToAggregate) {
         const levelData = ilc[level];
         if (!Array.isArray(levelData)) continue;
 
         for (const item of levelData) {
-          // 适配不同数据格式：{word, count} 或 {phrase, weight}
           const phrase = String(item?.word ?? item?.phrase ?? '').trim();
           const count = Number(item?.count ?? item?.weight ?? 0) || 0;
-          
-          // 只处理有效的词汇（长度 > 1 且 count > 0）
-          if (phrase.length > 1 && count > 0) {
-            const current = wordCounts[level].get(phrase) || 0;
-            wordCounts[level].set(phrase, current + count);
+          if (phrase.length <= 1 || count <= 0) continue;
+          if (level === 'Novice') {
+            wordCounts.Novice.set(phrase, (wordCounts.Novice.get(phrase) || 0) + count);
+          } else {
+            wordCounts.Professional.set(phrase, (wordCounts.Professional.get(phrase) || 0) + count);
+            if (level === 'Architect') {
+              wordCounts.Architect.set(phrase, (wordCounts.Architect.get(phrase) || 0) + count);
+            }
           }
         }
       }
     }
 
-    // 将聚合后的数据格式化为前端需要的格式
+    // 格式化为前端所需：phrase + weight（adaptCloudData 兼容 word/count 与 phrase/weight）
     for (const level of ['Novice', 'Professional', 'Architect'] as const) {
       const map = wordCounts[level];
       out[level] = Array.from(map.entries())
@@ -6155,6 +6511,7 @@ app.get('/api/country-summary', async (c) => {
     let totalCountries = 0;
     let totals: any;
     let countryTotalsRanks: any;
+    let vibeLexicon: any = undefined;
 
     // SUM/RANK 仅在请求带 cc 或 country 参数时生效，不修改 Global 视图的 fetch 逻辑
     let viewCountryRow: any = null;
@@ -6400,6 +6757,44 @@ app.get('/api/country-summary', async (c) => {
             work_days: safeRank(1, 1),
             _meta: { totalCountries: 1, no_competition: countryTotalUsers <= 1 },
           };
+
+          // 词云：优先查 country_lexicon_cache，无则且仅 1 用户时用该用户 vibe_lexicon
+          try {
+            const cacheUrl = new URL(`${env.SUPABASE_URL}/rest/v1/country_lexicon_cache`);
+            cacheUrl.searchParams.set('select', 'lexicon_json');
+            cacheUrl.searchParams.set('country_code', `eq.${cc}`);
+            cacheUrl.searchParams.set('limit', '1');
+            const cacheRows = await fetchSupabaseJson<any[]>(
+              env,
+              cacheUrl.toString(),
+              { headers: buildSupabaseHeaders(env) },
+              SUPABASE_FETCH_TIMEOUT_MS
+            ).catch(() => []);
+            const cacheRow = Array.isArray(cacheRows) && cacheRows.length > 0 ? cacheRows[0] : null;
+            if (cacheRow && cacheRow.lexicon_json != null) {
+              vibeLexicon = typeof cacheRow.lexicon_json === 'string'
+                ? (() => { try { return JSON.parse(cacheRow.lexicon_json); } catch { return cacheRow.lexicon_json; } })()
+                : cacheRow.lexicon_json;
+            } else if (countryTotalUsers === 1 && directRows[0]?.fingerprint) {
+              const fp = String(directRows[0].fingerprint).trim();
+              if (fp) {
+                const uaUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
+                uaUrl.searchParams.set('select', 'personality');
+                uaUrl.searchParams.set('fingerprint', `eq.${encodeURIComponent(fp)}`);
+                uaUrl.searchParams.set('limit', '1');
+                const uaRows = await fetchSupabaseJson<any[]>(
+                  env,
+                  uaUrl.toString(),
+                  { headers: buildSupabaseHeaders(env) },
+                  SUPABASE_FETCH_TIMEOUT_MS
+                ).catch(() => []);
+                const uaRow = Array.isArray(uaRows) && uaRows.length > 0 ? uaRows[0] : null;
+                if (uaRow?.personality?.vibe_lexicon) vibeLexicon = uaRow.personality.vibe_lexicon;
+              }
+            }
+          } catch (lexErr) {
+            console.warn('[Worker] country_lexicon_cache / 单用户 vibe_lexicon 查询失败:', lexErr);
+          }
         }
       } catch (directErr) {
         console.warn('[Worker] 直接查询视图降级失败:', directErr);
@@ -6432,6 +6827,36 @@ app.get('/api/country-summary', async (c) => {
         work_days: safeRank(1, 1),
         _meta: { totalCountries: 1, no_competition: noCompetition },
       };
+    }
+
+    // 【国家透视词云】有国家码但尚未取得 vibeLexicon 时，从视图 v_keyword_stats_by_country 拉取，保证返回 identityLevelCloud（含 Professional）
+    if (hasExplicitCc && vibeLexicon == null && env.SUPABASE_URL && env.SUPABASE_KEY) {
+      try {
+        const viewUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_keyword_stats_by_country`);
+        viewUrl.searchParams.set('select', 'phrase,category,hit_count');
+        viewUrl.searchParams.set('country_code', `eq.${cc}`);
+        viewUrl.searchParams.set('order', 'hit_count.desc');
+        viewUrl.searchParams.set('limit', '500');
+        const viewRows = await fetchSupabaseJson<any[]>(env, viewUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
+        const rows = Array.isArray(viewRows) ? viewRows : [];
+        if (rows.length > 0) {
+          const byCat: { Novice: Array<{ phrase: string; count: number }>; Professional: Array<{ phrase: string; count: number }>; Architect: Array<{ phrase: string; count: number }> } = {
+            Novice: [], Professional: [], Architect: [],
+          };
+          for (const r of rows) {
+            const phrase = String(r?.phrase ?? '').trim();
+            const cat = String(r?.category ?? '').trim();
+            const count = Number(r?.hit_count ?? 1) || 1;
+            if (!phrase || !cat) continue;
+            if (cat === 'Novice') byCat.Novice.push({ phrase, count });
+            else if (cat === 'Professional') byCat.Professional.push({ phrase, count });
+            else if (cat === 'Architect') byCat.Architect.push({ phrase, count });
+          }
+          vibeLexicon = byCat;
+        }
+      } catch (e) {
+        console.warn('[Worker] country-summary v_keyword_stats_by_country 词云查询失败:', e);
+      }
     }
 
     // 【强制类型转换】使用 Number() 强制转换所有数值（尤其是 total_say/total_chars）
@@ -7143,6 +7568,8 @@ app.get('/api/country-summary', async (c) => {
           work_days: Number(totals.work_days_sum ?? 0) || 0,
           jiafang_count: Number(totals.jiafang_count_sum ?? 0) || 0,
           ketao_count: Number(totals.ketao_count_sum ?? 0) || 0,
+          totalno: Number(totals.jiafang_count_sum ?? 0) || 0,
+          totalplease: Number(totals.ketao_count_sum ?? 0) || 0,
           avg_user_message_length: Number(totals.avg_user_message_length_sum ?? 0) || 0,
           ai: Number(totals.total_messages_sum ?? 0) || 0,
           say: Number(totals.total_chars_sum ?? 0) || 0,
@@ -7159,6 +7586,8 @@ app.get('/api/country-summary', async (c) => {
           work_days: totaldays,
           jiafang_count: totalno,
           ketao_count: totalplease,
+          totalno,
+          totalplease,
           avg_user_message_length: computedCountryTotals.avg_user_message_length,
           ai: msg_count,
           say: totalchars,
@@ -7248,6 +7677,9 @@ app.get('/api/country-summary', async (c) => {
       },
       country_level: kvCountry?.country_level ?? undefined,
       no_competition: countryTotalsRanks?._meta?.no_competition ?? false,
+      vibe_lexicon: vibeLexicon ?? undefined,
+      // 【国家透视词云】前端 stats-ui-renderer 固定读 identityLevelCloud.Professional；从 vibe_lexicon 构建并规范化（Architect 等合并到 Professional），统一 word/count
+      identityLevelCloud: vibeLexicon ? vibeLexiconToIdentityLevelCloud(vibeLexicon) : { Novice: [], Professional: [], Architect: [] },
       // 优先使用 KV 中的 countryDataByCode，如果 KV 无数据但 RPC 降级成功，则手动构建当前国家的数据
       countryDataByCode: buildCountryDataByCode(kvCountry) ?? (totals?.source === 'RPC_FALLBACK' && countryTotalsRanks ? {
         [cc]: {

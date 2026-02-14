@@ -1400,7 +1400,7 @@
                                 Novice: dataAdapterFn(ilc.Novice || []),
                                 Professional: dataAdapterFn(ilc.Professional || []),
                                 Architect: dataAdapterFn(ilc.Architect || []),
-                                globalNative: []
+                                globalNative: dataAdapterFn(ilc.globalNative || ilc.native || [])
                             };
                                 
                                 // 构建降级 payload（仅包含词云数据）
@@ -1660,16 +1660,46 @@
                                 
                                 // 适配后端返回的数据格式
                                 if (kwPayload && typeof kwPayload === 'object') {
-                                    window.__countryKeywordsByLevel = {
-                                        Novice: adaptCloudData(kwPayload.Novice || []),
-                                        Professional: adaptCloudData(kwPayload.Professional || []),
-                                        Architect: adaptCloudData(kwPayload.Architect || []),
-                                        globalNative: adaptCloudData(kwPayload.globalNative || [])
-                                    };
-                                    apiSuccess = true;
-                                } else {
-                                    window.__countryKeywordsByLevel = null;
+                                    var novice = adaptCloudData(kwPayload.Novice || []);
+                                    var professional = adaptCloudData(kwPayload.Professional || []);
+                                    var architect = adaptCloudData(kwPayload.Architect || []);
+                                    var globalNative = adaptCloudData(kwPayload.globalNative || []);
+                                    var hasAny = novice.length + professional.length + architect.length + globalNative.length > 0;
+                                    if (hasAny) {
+                                        window.__countryKeywordsByLevel = {
+                                            Novice: novice,
+                                            Professional: professional,
+                                            Architect: architect,
+                                            globalNative: globalNative
+                                        };
+                                        apiSuccess = true;
+                                    }
+                                    // API 返回空对象或全空数组时，尝试 localStorage 兜底（如中国区暂无云端数据）
+                                    if (!hasAny) {
+                                        var lastStr = localStorage.getItem('last_analysis_data');
+                                        if (lastStr) {
+                                            try {
+                                                var lastData = JSON.parse(lastStr);
+                                                var localCC = (lastData && lastData.country_code) ? String(lastData.country_code).toUpperCase() : '';
+                                                var curCC = countryCode ? String(countryCode).toUpperCase() : '';
+                                                if (!curCC || localCC === curCC) {
+                                                    var ilc = (lastData && lastData.stats && lastData.stats.identityLevelCloud) || (lastData && lastData.identityLevelCloud) || null;
+                                                    if (ilc && typeof ilc === 'object') {
+                                                        window.__countryKeywordsByLevel = {
+                                                            Novice: adaptCloudData(ilc.Novice || []),
+                                                            Professional: adaptCloudData(ilc.Professional || []),
+                                                            Architect: adaptCloudData(ilc.Architect || []),
+                                                            globalNative: adaptCloudData(ilc.globalNative || ilc.native || [])
+                                                        };
+                                                        apiSuccess = true;
+                                                        console.log('[updateCountryDashboard] 本国词云 API 为空，已用 last_analysis_data 兜底');
+                                                    }
+                                                }
+                                            } catch (e3) { /* ignore */ }
+                                        }
+                                    }
                                 }
+                                if (!apiSuccess && !window.__countryKeywordsByLevel) window.__countryKeywordsByLevel = null;
                             } else if (kwResp.status === 404) {
                                 // API 404：强制触发本地词云渲染
                                 console.warn('[updateCountryDashboard] 本国词云 API 返回 404，切换到本地保底模式');
@@ -1702,7 +1732,7 @@
                                                 Novice: adaptCloudData(ilc.Novice || []),
                                                 Professional: adaptCloudData(ilc.Professional || []),
                                                 Architect: adaptCloudData(ilc.Architect || []),
-                                                globalNative: adaptCloudData(ilc.globalNative || [])
+                                                globalNative: adaptCloudData(ilc.globalNative || ilc.native || [])
                                             };
                                             apiSuccess = true; // 标记为成功（使用本地数据）
                                             console.log('[updateCountryDashboard] ✅ 已从 localStorage 加载本地词云数据 (country_code: ' + localCountryCode + ')');
@@ -1714,11 +1744,10 @@
                             }
                         }
                         
-                        // 数据准备好后，必须显式调用 _renderNationalIdentityCloud() 进行重绘
+                        // 数据准备好后，必须显式调用 _renderNationalIdentityCloud() 进行重绘（与 Tab 点击同源，优先用 window 挂载）
                         var currentLevel = (window.__currentNationalIdentityLevel || 'Novice');
-                        if (typeof _renderNationalIdentityCloud === 'function') {
-                            _renderNationalIdentityCloud(currentLevel);
-                        }
+                        var renderCloud = window._renderNationalIdentityCloud || (typeof _renderNationalIdentityCloud === 'function' ? _renderNationalIdentityCloud : null);
+                        if (renderCloud) renderCloud(currentLevel);
                         
                         // 更新空状态提示
                         if (emptyCloudEl && window.__countryKeywordsByLevel) {
@@ -1736,9 +1765,8 @@
                             // 如果 API 失败且本地也没有数据，显示空状态
                             emptyCloudEl.textContent = '暂无该国词云数据';
                             emptyCloudEl.classList.remove('hidden');
-                            if (typeof _renderNationalIdentityCloud === 'function') {
-                                _renderNationalIdentityCloud('Novice');
-                            }
+                            var renderCloudEmpty = window._renderNationalIdentityCloud || (typeof _renderNationalIdentityCloud === 'function' ? _renderNationalIdentityCloud : null);
+                            if (renderCloudEmpty) renderCloudEmpty('Novice');
                         }
                         
                         // 隐藏加载提示
@@ -20193,17 +20221,17 @@
         })();
 
         (function bindNationalIdentityTabs() {
-            var tabsEl = document.getElementById('national-identity-tabs');
-            if (!tabsEl || tabsEl.dataset.bound) return;
-            tabsEl.dataset.bound = '1';
+            if (document.body.dataset.nationalIdentityTabsBound) return;
+            document.body.dataset.nationalIdentityTabsBound = '1';
             window.__currentNationalIdentityLevel = window.__currentNationalIdentityLevel || 'Novice';
             var colorByLevel = { Novice: '#10b981', Professional: '#3b82f6', Architect: '#5b21b6' };
-            tabsEl.addEventListener('click', function(e) {
+            document.addEventListener('click', function(e) {
                 var btn = e.target && e.target.closest && e.target.closest('.national-identity-tab');
                 if (!btn || !btn.dataset.level) return;
                 var level = btn.dataset.level;
                 window.__currentNationalIdentityLevel = level;
-                var all = tabsEl.querySelectorAll('.national-identity-tab');
+                var tabsEl = btn.closest && btn.closest('#national-identity-tabs');
+                var all = tabsEl ? tabsEl.querySelectorAll('.national-identity-tab') : [btn];
                 all.forEach(function(b) {
                     b.classList.remove('border-[var(--accent-terminal)]', 'bg-[var(--accent-terminal)]/20', 'text-[var(--accent-terminal)]');
                     b.classList.add('border-white/10', 'bg-transparent', 'text-zinc-400');
@@ -20214,7 +20242,8 @@
                 btn.style.borderColor = hex;
                 btn.style.backgroundColor = hex + '26';
                 btn.style.color = hex;
-                if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud(level);
+                var render = window._renderNationalIdentityCloud || (typeof _renderNationalIdentityCloud === 'function' ? _renderNationalIdentityCloud : null);
+                if (render) render(level);
             });
         })();
 
@@ -20523,7 +20552,7 @@
                                     Novice: dataAdapter(ilc.Novice || []), 
                                     Professional: dataAdapter(ilc.Professional || []), 
                                     Architect: dataAdapter(ilc.Architect || []), 
-                                    globalNative: [] 
+                                    globalNative: dataAdapter(ilc.globalNative || ilc.native || []) 
                                 };
                                 if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud(window.__currentNationalIdentityLevel || 'Novice');
                                 if (empty) empty.classList.add('hidden');

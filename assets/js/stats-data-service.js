@@ -9,13 +9,14 @@
 
     /**
      * 字段适配器：将 Supabase/后端格式转为 WordCloud2 所需 { phrase, weight }
-     * @param {Array|Object} list - 原始列表或键值对象
+     * 支持对象格式（如 { "YYDS": 10 }）：使用 Object.keys().map 转为 [{ word: key, count: value }]
+     * @param {Array|Object} list - 原始列表或键值对象 { "词": 权重 }
      * @returns {Array<{phrase: string, weight: number}>}
      */
     function adaptCloudData(list) {
         if (!list) return [];
         if (!Array.isArray(list)) {
-            if (typeof list === 'object') {
+            if (typeof list === 'object' && list !== null) {
                 list = Object.keys(list).map(function(key) {
                     return { word: key, count: list[key] };
                 });
@@ -127,9 +128,10 @@
         var API_ENDPOINT = base || '/';
         var cName = (opts.countryName && String(opts.countryName).trim()) || '';
         var ids = getUserIdAndFingerprint();
+        // 国家视图：主请求使用 /api/v2/summary?country= 获取 vibe_lexicon 与聚合；全球仍用 global-average
         var url = effectiveIsGlobal
             ? API_ENDPOINT + 'api/global-average'
-            : API_ENDPOINT + 'api/country-summary?country=' + encodeURIComponent(target_country) + (cName ? '&country_name=' + encodeURIComponent(cName) : '') + (ids.uid ? '&user_id=' + encodeURIComponent(ids.uid) : '') + (ids.fp ? '&fingerprint=' + encodeURIComponent(ids.fp) : '') + '&_ts=' + Date.now();
+            : API_ENDPOINT + 'api/v2/summary?country=' + encodeURIComponent(target_country) + '&_ts=' + Date.now();
 
         var isLocalUser = target_country && (
             String(target_country) === String(localStorage.getItem('user_manual_location') || (window.currentUserCountry) || '').toUpperCase()
@@ -147,7 +149,22 @@
         return fetch(url, { signal: signal }).then(function(resp) {
             if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
             if (resp.ok) {
-                return resp.json();
+                return resp.json().then(function(data) {
+                    if (data && data.vibe_lexicon && typeof data.vibe_lexicon === 'object') {
+                        try {
+                            if (!window.__countryKeywordsByLevel) window.__countryKeywordsByLevel = {};
+                            window.__countryKeywordsByLevel['Professional'] = adaptCloudData(data.vibe_lexicon.mantra_top);
+                            window.__countryKeywordsByLevel['Novice'] = adaptCloudData(data.vibe_lexicon.slang_list);
+                        } catch (e) { /* ignore */ }
+                    }
+                    if (!effectiveIsGlobal && data && data._meta && (data.jiafang_count != null || data.ketao_count != null)) {
+                        data.countryTotals = data.countryTotals || {};
+                        data.countryTotals.jiafang_count = data.jiafang_count != null ? data.jiafang_count : data.countryTotals.jiafang_count;
+                        data.countryTotals.ketao_count = data.ketao_count != null ? data.ketao_count : data.countryTotals.ketao_count;
+                        data.countryTotals._meta = data._meta;
+                    }
+                    return data;
+                });
             }
             var status = resp.status;
             if ((status === 404 || status >= 500) && isLocalUser) {
@@ -221,7 +238,7 @@
                         Novice: adaptCloudData(ilc.Novice || []),
                         Professional: adaptCloudData(ilc.Professional || []),
                         Architect: adaptCloudData(ilc.Architect || []),
-                        globalNative: adaptCloudData(ilc.globalNative || [])
+                        globalNative: adaptCloudData(ilc.globalNative || ilc.native || [])
                     };
                 }
             }
