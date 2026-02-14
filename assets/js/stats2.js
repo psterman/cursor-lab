@@ -1529,11 +1529,12 @@
                     return;
                 }
 
-                // 请求成功后同步 lastRequestCountry / lastFetchedCountry（调度中心），并清除重试标志
+                // 请求成功后同步 lastRequestCountry / lastFetchedCountry（调度中心），并清除该国“加载失败”标记
                 if (!effectiveIsGlobal && countryCode) {
                     state.lastRequestCountry = String(countryCode).toUpperCase();
                     state.lastFetchedCountry = state.lastRequestCountry;
                     lastRequestCountry = state.lastRequestCountry; // 向后兼容
+                    try { if (window.__drawerLastFailCc === String(countryCode).toUpperCase()) { window.__drawerLastFailCc = null; window.__drawerLastFailTs = null; } } catch (_) {}
                     lastFetchedCountry = state.lastFetchedCountry; // 向后兼容
                     // 动态标题同步：根据当前语言与 countryCode 从 countryNameMap 取译名，强制更新抽屉标题
                     try {
@@ -2712,6 +2713,7 @@
                 console.error('[CountryDashboard] ❌ 更新失败:', err);
                 const message = (err && err.message) ? String(err.message) : '网络异常或服务器错误';
                 if (statusEl) statusEl.textContent = (currentLang === 'en' ? 'Network error' : '网络异常');
+                try { if (countryCode && /^[A-Z]{2}$/.test(String(countryCode))) { window.__drawerLastFailCc = String(countryCode).toUpperCase(); window.__drawerLastFailTs = Date.now(); } } catch (_) {}
                 renderErrorState(message);
                 try {
                     const totalsBox = document.getElementById('rtCountryTotals');
@@ -4558,9 +4560,10 @@
                     const d = ev?.detail || {};
                     const cc = String(d.code || '').trim().toUpperCase();
                     if (!/^[A-Z]{2}$/.test(cc)) return;
-                    // 防抖：同国家 500ms 内不重复刷新，避免光标拖拽/地图交互导致一直刷新
+                    // 防抖：同国家 500ms 内不重复刷新；若该国最近加载失败则允许立即重试（避免“网络不稳”后必须多次点击）
                     const now = Date.now();
-                    if (window.__lastCountrySwitchCc === cc && (now - (window.__lastCountrySwitchTs || 0)) < 500) return;
+                    const isRetryAfterFail = window.__drawerLastFailCc === cc && (now - (window.__drawerLastFailTs || 0)) < 30000;
+                    if (window.__lastCountrySwitchCc === cc && (now - (window.__lastCountrySwitchTs || 0)) < 500 && !isRetryAfterFail) return;
                     window.__lastCountrySwitchCc = cc;
                     window.__lastCountrySwitchTs = now;
 
@@ -5576,10 +5579,11 @@
                 try { localStorage.setItem('left_drawer_open', 'true'); localStorage.setItem('right_drawer_open', 'true'); } catch (e) { /* ignore */ }
                 return;
             }
-            // 防抖：同国家 500ms 内不重复全量刷新，避免一直刷新无法加载数据
+            // 防抖：同国家 500ms 内不重复全量刷新；若该国最近加载失败则允许立即重试
             if (!summaryOnly) {
                 const now = Date.now();
-                if (window.__lastDrawerOpenCc === ccUpper && (now - (window.__lastDrawerOpenTs || 0)) < 500) {
+                const isRetryAfterFail = window.__drawerLastFailCc === ccUpper && (now - (window.__drawerLastFailTs || 0)) < 30000;
+                if (window.__lastDrawerOpenCc === ccUpper && (now - (window.__lastDrawerOpenTs || 0)) < 500 && !isRetryAfterFail) {
                     const leftDrawer = document.getElementById('left-drawer');
                     const rightDrawer = document.getElementById('right-drawer');
                     if (leftDrawer) leftDrawer.classList.add('active');
@@ -9059,14 +9063,21 @@
                         };
                     }).filter(d => d.name && (d.totalMessages > 0 || d.rank));
                 } else {
-                    processedData = (locationData || []).map(item => ({
-                        name: (countryNameMap && countryNameMap[item.name] ? countryNameMap[item.name].en : (item.name === 'USA' ? 'United States of America' : item.name)),
-                        value: item.value || 0,
-                        totalMessages: item.value || 0,
-                        rank: item.rank || null
-                    }));
+                    processedData = (locationData || []).map(item => {
+                        const name = (countryNameMap && countryNameMap[item.name] ? countryNameMap[item.name].en : (item.name === 'USA' ? 'United States of America' : item.name));
+                        const code = item.countryCode || item.code || (typeof resolveCountryCodeFromMapName === 'function' ? resolveCountryCodeFromMapName(item.name || name) : null);
+                        return {
+                            name: name,
+                            value: item.value || 0,
+                            totalMessages: item.value || 0,
+                            rank: item.rank || null,
+                            countryCode: code ? String(code).toUpperCase() : null
+                        };
+                    });
                 }
                 const useRankColors = !!(countryStats && countryStats.length > 0);
+                if (!window.__mapCountrySummaryCache) window.__mapCountrySummaryCache = new Map();
+                if (!window.__mapCountrySummaryPending) window.__mapCountrySummaryPending = new Set();
                 const maxVal = Math.max(20, ...processedData.map(d => d.value || 0));
                 const totalCountries = processedData.length;
 
@@ -9103,20 +9114,50 @@
                                 const rankLabel = currentLang === 'en' ? 'Global Rank' : '全球排名';
                                 const dimLabel = currentLang === 'en' ? 'Top Dimension' : '最突出维度';
                                 const activeNodesLabel = getI18nText('tooltip.active_nodes') || (currentLang === 'en' ? 'Active Nodes' : '活跃节点');
+                                const nf = typeof Intl !== 'undefined' && Intl.NumberFormat ? new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN', { maximumFractionDigits: 0 }) : { format: function(n) { return String(Math.round(Number(n))); } };
                                 let tooltipContent;
-                                if (currentChampionInfo && currentChampionInfo.countryName === name) {
+                                var summary = (code && window.__mapCountrySummaryCache) ? window.__mapCountrySummaryCache.get(code) : null;
+                                if (!summary && code && window.__countrySummaryCache) {
+                                    var drawerHit = window.__countrySummaryCache.get(code);
+                                    if (drawerHit && drawerHit.summary) {
+                                        summary = drawerHit.summary;
+                                        if (window.__mapCountrySummaryCache) window.__mapCountrySummaryCache.set(code, summary);
+                                    }
+                                }
+                                var pending = (code && window.__mapCountrySummaryPending) ? window.__mapCountrySummaryPending.has(code) : false;
+                                if (summary && summary.countryTotals && typeof summary.countryTotals === 'object') {
+                                    var ct = summary.countryTotals;
+                                    var totalUsers = Number(ct.totalUsers ?? ct.total_users ?? 0) || 0;
+                                    var ai = Number(ct.ai ?? ct.total_messages ?? ct.totalMessages ?? 0) || 0;
+                                    var say = Number(ct.say ?? ct.total_chars ?? ct.totalChars ?? 0) || 0;
+                                    var no = Number(ct.no ?? ct.jiafang_count ?? ct.jiafangCount ?? 0) || 0;
+                                    var please = Number(ct.please ?? ct.ketao_count ?? ct.ketaoCount ?? 0) || 0;
+                                    var day = Number(ct.day ?? ct.work_days ?? ct.workDays ?? 0) || 0;
+                                    var devLabel = currentLang === 'en' ? 'Developers' : '开发者数';
+                                    var aiLabel = currentLang === 'en' ? 'Messages' : '调戏AI';
+                                    var sayLabel = currentLang === 'en' ? 'Chars' : '累计字数';
+                                    var noLabel = currentLang === 'en' ? 'Jiafang' : '甲方';
+                                    var pleaseLabel = currentLang === 'en' ? 'Ketao' : '磕头';
+                                    var dayLabel = currentLang === 'en' ? 'Work days' : '上岗天数';
+                                    tooltipContent = '<div class="font-mono text-xs"><div class="text-[#00ff41] font-bold mb-2">' + escapeHtml(label) + '</div>' +
+                                        '<div class="text-zinc-400 text-[10px]">' + escapeHtml(devLabel) + ': ' + nf.format(totalUsers) + '</div>' +
+                                        '<div class="text-zinc-400 text-[10px]">' + escapeHtml(aiLabel) + ': ' + nf.format(ai) + '</div>' +
+                                        '<div class="text-zinc-400 text-[10px]">' + escapeHtml(sayLabel) + ': ' + nf.format(say) + '</div>' +
+                                        '<div class="text-zinc-400 text-[10px]">' + escapeHtml(noLabel) + ': ' + nf.format(no) + ' · ' + escapeHtml(pleaseLabel) + ': ' + nf.format(please) + '</div>' +
+                                        '<div class="text-zinc-400 text-[10px]">' + escapeHtml(dayLabel) + ': ' + nf.format(day) + '</div></div>';
+                                } else if (currentChampionInfo && currentChampionInfo.countryName === name) {
                                     const feedback = currentChampionInfo.feedback ? JSON.parse(currentChampionInfo.feedback) : null;
                                     const recordLabel = getI18nText('tooltip.record') || (currentLang === 'en' ? 'Record' : '战绩');
                                     const roastLabel = getI18nText('tooltip.roast') || (currentLang === 'en' ? 'Roast' : '吐槽');
                                     const translatedFbLabel = feedback ? translateRankFeedbackLabel(currentChampionInfo.dimId, feedback.label, currentChampionInfo.championValue) : '';
                                     tooltipContent = `<div class="font-mono text-xs"><div class="text-[#00ff41] font-bold mb-1">🏆 ${currentChampionInfo.championName}</div><div class="text-white mb-1">${label}${proxyLabel}</div><div class="text-zinc-400 text-[10px] mb-1">${escapeHtml(activeNodesLabel)}: ${totalMessages}</div><div class="text-zinc-400 text-[10px] mb-1">${escapeHtml(recordLabel)}: ${currentChampionInfo.championValue}</div>${feedback ? `<div class="text-zinc-500 text-[9px] mt-2 pt-2 border-t border-zinc-700"><div class="text-[#00ff41]">${escapeHtml(roastLabel)}${translatedFbLabel ? ' · ' + escapeHtml(translatedFbLabel) : ''}</div><div class="text-white">${escapeHtml(String(feedback.title || '').trim())}</div></div>` : ''}</div>`;
                                 } else if (useRankColors) {
-                                    tooltipContent = `<div class="font-mono text-xs"><b>${label}</b>${proxyLabel}<br/>${msgsLabel}: ${new Intl.NumberFormat().format(totalMessages)}`;
+                                    tooltipContent = `<div class="font-mono text-xs"><b>${label}</b>${proxyLabel}<br/>${msgsLabel}: ${nf.format(totalMessages)}`;
                                     const denom = (typeof totalCountries !== 'undefined' && totalCountries > 0) ? totalCountries : 195;
                                     if (rank != null && rank > 0) tooltipContent += `<br/>${rankLabel}: #${rank}/${denom}`;
-                                    tooltipContent += `<br/>${dimLabel}: --</div>`;
+                                    tooltipContent += pending ? `<br/><span class="text-zinc-500">${currentLang === 'en' ? 'Loading...' : '加载中...'}</span></div>` : `<br/>${dimLabel}: --</div>`;
                                 } else {
-                                    tooltipContent = `<div class="font-mono text-xs">${label}${proxyLabel}<br/>${escapeHtml(activeNodesLabel)}: ${totalMessages}</div>`;
+                                    tooltipContent = `<div class="font-mono text-xs">${label}${proxyLabel}<br/>${escapeHtml(activeNodesLabel)}: ${nf.format(totalMessages)}${pending ? '<br/><span class="text-zinc-500">' + (currentLang === 'en' ? 'Loading...' : '加载中...') + '</span>' : ''}</div>`;
                                 }
                                 return tooltipContent;
                             }
@@ -9240,16 +9281,31 @@
                     } catch (_) { updatedEl.style.display = 'none'; }
                 } else if (updatedEl) updatedEl.style.display = 'none';
 
-                // 添加鼠标悬浮高亮效果
+                // 添加鼠标悬浮高亮效果，并拉取该国实时摘要供 tooltip 显示
                 mapChart.off('mouseover');
                 mapChart.on('mouseover', (params) => {
                     if (params.seriesType === 'map' && params.name) {
                         try {
-                            // 高亮当前悬浮的国家
-                            mapChart.dispatchAction({
-                                type: 'highlight',
-                                name: params.name
-                            });
+                            mapChart.dispatchAction({ type: 'highlight', name: params.name });
+                            var dataItem = params.data || {};
+                            var code = dataItem.countryCode || (typeof resolveCountryCodeFromMapName === 'function' ? resolveCountryCodeFromMapName(params.name) : null);
+                            if (code && /^[A-Z]{2}$/.test(String(code).toUpperCase())) {
+                                code = String(code).toUpperCase();
+                                if (window.__mapCountrySummaryCache && !window.__mapCountrySummaryCache.has(code) && window.__mapCountrySummaryPending && !window.__mapCountrySummaryPending.has(code) && typeof fetchCountrySummaryV3 === 'function') {
+                                    window.__mapCountrySummaryPending.add(code);
+                                    var seriesIndex = params.seriesIndex;
+                                    var dataIndex = params.dataIndex;
+                                    fetchCountrySummaryV3(code).then(function(s) {
+                                        if (window.__mapCountrySummaryCache) window.__mapCountrySummaryCache.set(code, s || {});
+                                        if (window.__mapCountrySummaryPending) window.__mapCountrySummaryPending.delete(code);
+                                        try {
+                                            mapChart.dispatchAction({ type: 'showTip', seriesIndex: seriesIndex, dataIndex: dataIndex });
+                                        } catch (_) {}
+                                    }).catch(function() {
+                                        if (window.__mapCountrySummaryPending) window.__mapCountrySummaryPending.delete(code);
+                                    });
+                                }
+                            }
                         } catch (e) {
                             console.warn('[Map] ⚠️ 悬浮高亮失败:', e);
                         }
@@ -11643,8 +11699,9 @@
                     localStorage.setItem(cacheKey, JSON.stringify({ data: normalized, time: Date.now() }));
                 } catch (e) { /* 忽略存储错误 */ }
                 
-                // 标记端点健康
+                // 标记端点健康，并清除该国“加载失败”标记以便后续防抖正常
                 if (apiManager) apiManager.markHealthy(baseEndpoint, true);
+                try { if (window.__drawerLastFailCc === cc) { window.__drawerLastFailCc = null; window.__drawerLastFailTs = null; } } catch (_) {}
                 
                 console.log(`[CountrySummary] ✅ ${cc} 加载成功`);
                 return normalized && typeof normalized === 'object' ? normalized : null;
@@ -11662,9 +11719,10 @@
                     return fetchCountrySummaryV3(countryCode, attempt + 1);
                 }
 
-                // 超时/网络错误时在右侧抽屉显示友好提示（不只在控制台）
+                // 超时/网络错误时在右侧抽屉显示友好提示，并记录失败以便允许立即重试（点击地图或重试）
                 const statusEl = document.getElementById('rtDataStatus');
-                if (statusEl) statusEl.textContent = (currentLang === 'en' ? 'Network unstable, retry or refresh' : '网络连接不稳定，请稍后或刷新');
+                if (statusEl) statusEl.textContent = (currentLang === 'en' ? 'Network unstable. Click map again to retry' : '网络不稳，可再次点击地图重试');
+                try { window.__drawerLastFailCc = cc; window.__drawerLastFailTs = Date.now(); } catch (_) {}
 
                 // 错误分类提示
                 if (e.name === 'AbortError') {
@@ -14074,7 +14132,7 @@
         function openMessageSender(toId, toName) {
             var overlay = document.createElement('div');
             overlay.className = 'message-input-overlay';
-            overlay.style.zIndex = '1001';
+            overlay.style.zIndex = '20001';
             overlay.onclick = function(e) {
                 if (e.target === overlay) overlay.remove();
             };
@@ -14344,9 +14402,10 @@
                 popup.remove();
                 currentPopupElement = null;
             }
-            // 创建遮罩层
+            // 创建遮罩层（置于最高层，避免被活跃节点/抽屉遮挡）
             const overlay = document.createElement('div');
             overlay.className = 'message-input-overlay';
+            overlay.style.zIndex = '20001';
             overlay.onclick = (e) => {
                 if (e.target === overlay) {
                     overlay.remove();
