@@ -66,11 +66,9 @@ const copyI18nPlugin = () => {
 };
 
 export default defineConfig({
-  // 部署配置（GitHub Pages）
-  // 根据实际部署的仓库名设置 base 路径
-  // 开发模式使用 '/'，生产模式使用仓库名
-  // 实际仓库：https://psterman.github.io/cursor-lab/
-  base: process.env.NODE_ENV === 'production' ? '/cursor-lab/' : '/',
+  // 部署配置（GitHub Pages）：使用相对路径 base，任意仓库名/子路径下都能正常加载资源
+  // 开发用 '/'，生产用 './' 避免 /cursor-lab/ 等绝对路径在非该仓库下 404
+  base: process.env.NODE_ENV === 'production' ? './' : '/',
   // 开发服务器配置
   server: {
     port: 3000,

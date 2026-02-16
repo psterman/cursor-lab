@@ -599,6 +599,44 @@
             letter-spacing: 0.5px;
         }
 
+        .drawer-header-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .drawer-refresh-btn {
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--border-ui);
+            border-radius: 50%;
+            color: var(--accent-terminal);
+            cursor: pointer;
+            transition: all 0.2s;
+            background: transparent;
+            padding: 0;
+        }
+        .drawer-refresh-btn:hover {
+            background: rgba(0, 255, 65, 0.12);
+            border-color: var(--accent-terminal);
+        }
+        .drawer-refresh-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .drawer-refresh-icon {
+            width: 18px;
+            height: 18px;
+        }
+        .drawer-refresh-btn.loading .drawer-refresh-icon {
+            animation: drawer-refresh-spin 0.8s linear infinite;
+        }
+        @keyframes drawer-refresh-spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
         .drawer-close-btn {
             width: 36px;
             height: 36px;

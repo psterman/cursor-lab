@@ -50,7 +50,7 @@
     <script src="https://unpkg.com/lucide@latest" async></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" async></script>
     
-  <link rel="stylesheet" crossorigin href="/cursor-lab/assets/stats2-DT7T4xSZ.css">
+  <link rel="stylesheet" crossorigin href="./assets/stats2-DSO3n42e.css">
 </head>
 <body class="p-4 md:p-8">
     <!-- 顶部固定 Header -->
@@ -91,10 +91,10 @@
             <!-- 语言切换按钮 -->
             <div class="flex gap-2 items-center">
                 <button type="button" id="btn-zh" class="lang-flag-btn active" title="中文" aria-label="中文" data-lang="zh">
-                    <img src="/cursor-lab/assets/zh-BUU2yN9i.png" alt="中文" />
+                    <img src="./assets/zh-BUU2yN9i.png" alt="中文" />
                 </button>
                 <button type="button" id="btn-en" class="lang-flag-btn" title="English" aria-label="English" data-lang="en">
-                    <img src="/cursor-lab/assets/us-DYKU2e25.png" alt="English" />
+                    <img src="./assets/us-DYKU2e25.png" alt="English" />
                 </button>
             </div>
         </div>
@@ -259,7 +259,12 @@
                     <span class="drawer-icon">🔍</span>
                     <span class="drawer-title-text" id="right-drawer-title" data-i18n="drawer.details">详细信息</span>
                 </div>
-                <div class="drawer-close-btn" onclick="closeDrawers()">✕</div>
+                <div class="drawer-header-actions">
+                    <button type="button" class="drawer-refresh-btn" id="right-drawer-refresh-btn" onclick="typeof refreshRightDrawerContent === 'function' && refreshRightDrawerContent()" title="刷新" aria-label="刷新">
+                        <svg class="drawer-refresh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                    </button>
+                    <div class="drawer-close-btn" onclick="closeDrawers()">✕</div>
+                </div>
             </div>
             
             <!-- 【新增】Tab 导航栏 -->
