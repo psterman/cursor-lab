@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite';
-import { copyFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'fs';
+import { copyFileSync, mkdirSync, existsSync, readdirSync, statSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 // 自定义插件：复制 i18n.js、身份级别词库 JSON 和 assets/js 到 dist 目录
@@ -60,6 +60,26 @@ const copyI18nPlugin = () => {
         }
       } catch (e) {
         console.error('[Vite] ⚠️ 复制 assets/css 失败:', e);
+      }
+
+      // 修正 dist/stats2.html 中的 CSS 引用路径
+      // Vite 会把 assets/css/stats2.css 打包成 ./assets/stats2-[hash].css（丢失部分样式）
+      // 需要改回引用完整复制的 assets/css/stats2.css
+      try {
+        const stats2HtmlPath = join(process.cwd(), 'dist', 'stats2.html');
+        if (existsSync(stats2HtmlPath)) {
+          let html = readFileSync(stats2HtmlPath, 'utf-8');
+          // 匹配 Vite 生成的带 hash 的 CSS 引用，替换为复制的完整 CSS
+          // 注意：不使用 test() + replace() 组合（test 会移动 lastIndex 导致 replace 失效）
+          const cssPattern = /href=["']\.\/assets\/stats2-[A-Za-z0-9_-]+\.css["']/g;
+          const newHtml = html.replace(cssPattern, 'href="assets/css/stats2.css"');
+          if (newHtml !== html) {
+            writeFileSync(stats2HtmlPath, newHtml, 'utf-8');
+            console.log('[Vite] ✅ 已修正 stats2.html 的 CSS 引用路径');
+          }
+        }
+      } catch (e) {
+        console.error('[Vite] ⚠️ 修正 CSS 路径失败:', e);
       }
     }
   };
