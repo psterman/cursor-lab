@@ -3583,6 +3583,34 @@ export class VibeCodingerAnalyzer {
           avg_payload: 0
         };
       }
+      // 【灵魂词仅 3 条】从 main.js 的 soulWords 上传：每段位 1 词，含词频；指纹由后端写入
+      const soulWords = vibeResult?.soulWords;
+      if (soulWords && Array.isArray(soulWords) && soulWords.length > 0) {
+        const Novice = [];
+        const Professional = [];
+        const Architect = [];
+        for (let i = 0; i < soulWords.length; i++) {
+          const w = soulWords[i];
+          if (!w || !w.p) continue;
+          const word = String(w.p).trim();
+          const count = Number(w.v) || 0;
+          const level = String(w.c || '').trim();
+          const item = { word, count };
+          if (level === 'Novice') Novice.push(item);
+          else if (level === 'Professional') Professional.push(item);
+          else if (level === 'Architect') Architect.push(item);
+        }
+        statsToUpload.identityLevelCloud = { Novice, Professional, Architect };
+      } else {
+        const ilc = vibeResult?.identityLevelCloud || vibeResult?.statistics?.identityLevelCloud;
+        if (ilc && typeof ilc === 'object') {
+          statsToUpload.identityLevelCloud = {
+            Novice: Array.isArray(ilc.Novice) ? ilc.Novice.slice(0, 1).map(x => ({ word: x?.word ?? x?.phrase ?? '', count: Number(x?.count ?? x?.weight ?? 0) || 0 })) : [],
+            Professional: Array.isArray(ilc.Professional) ? ilc.Professional.slice(0, 1).map(x => ({ word: x?.word ?? x?.phrase ?? '', count: Number(x?.count ?? x?.weight ?? 0) || 0 })) : [],
+            Architect: Array.isArray(ilc.Architect) ? ilc.Architect.slice(0, 1).map(x => ({ word: x?.word ?? x?.phrase ?? '', count: Number(x?.count ?? x?.weight ?? 0) || 0 })) : []
+          };
+        }
+      }
       
       // 【V6 上报协议对齐】构建完整的 Payload，包含 fingerprint, dimensions, stats, meta
       // 从 vibeResult 中提取完整数据
@@ -3690,6 +3718,10 @@ export class VibeCodingerAnalyzer {
         })(),
       };
 
+      // 【霸天/脱发/新手 唯一代表词】main.js onAnalyzeComplete 写入的 representativeWords 一并上报，供 personality_data 使用
+      if (vibeResult?.representativeWords && typeof vibeResult.representativeWords === 'object') {
+        uploadData.representativeWords = vibeResult.representativeWords;
+      }
       // 【分类词库】从 analysis.cloud50 构建 vibe_lexicon，格式 { w, v } 节省空间
       const cloud50 = (vibeResult && Array.isArray(vibeResult.cloud50)) ? vibeResult.cloud50 : [];
       const toItem = (c) => ({ w: c.name, v: c.value });

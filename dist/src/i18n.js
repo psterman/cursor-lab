@@ -181,7 +181,7 @@ export const I18N = {
     preview: {
       personalityLabel: '人格鉴定结果',
       analyzing: '分析中...',
-      noMatchDescription: '根据您的 LPDEF 五维语义指纹暂未匹配到具体人格标签，可点击「查看完整报告」查看下方五维雷达图与维度得分了解详情。',
+      deciphering: '正在破译你的人格密码...',
       globalRank: '全网排名',
       fullReport: '查看完整报告',
       diagnosisTitle: '专家诊断',
@@ -227,7 +227,6 @@ export const I18N = {
       timesUnit: '次',
       personUnit: '人',
       rankUnit: '名',
-      rankLabel: '名次',
       numberUnits: {
         trillion: '万亿',
         hundredBillion: '千亿',
@@ -433,7 +432,7 @@ export const I18N = {
     preview: {
       personalityLabel: 'Personality Verdict',
       analyzing: 'Analyzing...',
-      noMatchDescription: 'No specific personality label matched for your LPDEF profile yet. Tap "View Full Report" to see the five-dimension radar and scores for details.',
+      deciphering: 'Deciphering your personality...',
       globalRank: 'Global Rank',
       fullReport: 'View Full Report',
       diagnosisTitle: 'Expert Diagnosis',
@@ -476,7 +475,6 @@ export const I18N = {
       userTechStack: '🛠️ User Tech Stack Top 10',
       personUnit: 'UV',
       rankUnit: '#',
-      rankLabel: 'Rank',
       personalityUnlockSuffix: '%',
       dayUnit: 'days',
       techUnit: 'techs',

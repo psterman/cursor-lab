@@ -217,10 +217,37 @@
                     <!-- 国家列表将通过 JavaScript 动态填充，默认收起，点击搜索框后展开 -->
                 </div>
             </div>
-            <div class="drawer-body" id="left-drawer-body">
-                <!-- 内容将通过 JavaScript 动态填充 -->
-                <!-- 矩阵绿天梯榜区域（静态挂载） -->
-                <div id="global-ranking-area" class="mt-8 space-y-6 block"></div>
+            <div class="drawer-body left-drawer-body" id="left-drawer-body">
+                <!-- 上方可滚动：矩阵绿天梯榜 -->
+                <div class="left-drawer-scroll" id="left-drawer-scroll">
+                    <div id="global-ranking-area" class="space-y-6 block"></div>
+                </div>
+                <!-- 最下方：本国词云卡片（左抽屉风格、自适应高度） -->
+                <div class="left-drawer-wordcloud-card" id="left-drawer-wordcloud-wrap">
+                    <div class="left-drawer-wordcloud-header">
+                        <span class="left-drawer-wordcloud-title" data-t="panel.wordcloud">本国词云</span>
+                        <span class="left-drawer-wordcloud-hint" id="vibe-country-hint">国家：--</span>
+                    </div>
+                    <div class="left-drawer-wordcloud-inner">
+                        <div class="left-drawer-wordcloud-meta-row">
+                            <span class="left-drawer-wordcloud-label" data-i18n="panel.national_cloud_50">本国词云 50</span>
+                            <span class="left-drawer-wordcloud-meta font-mono" id="vibe-cloud50-meta">--</span>
+                        </div>
+                        <div id="national-identity-tabs" class="left-drawer-wordcloud-tabs">
+                            <button type="button" class="national-identity-tab left-drawer-wordcloud-tab" data-level="Novice" data-t="lexicon.novice">小白</button>
+                            <button type="button" class="national-identity-tab left-drawer-wordcloud-tab" data-level="Professional" data-t="lexicon.pro">脱发</button>
+                            <button type="button" class="national-identity-tab left-drawer-wordcloud-tab" data-level="Architect" data-t="lexicon.arch">霸天</button>
+                        </div>
+                        <div class="left-drawer-wordcloud-canvas-wrap" id="vibe-cloud50-container">
+                            <canvas id="canvas-novice" data-level="Novice" aria-hidden="false"></canvas>
+                            <canvas id="canvas-pro" data-level="Professional" style="display: none;" aria-hidden="true"></canvas>
+                            <canvas id="canvas-arch" data-level="Architect" style="display: none;" aria-hidden="true"></canvas>
+                            <canvas id="national-identity-cloud-canvas" style="display: none;" aria-hidden="true"></canvas>
+                            <div id="cloud-loading-hint" class="left-drawer-cloud-loading hidden">加载中...</div>
+                        </div>
+                        <div id="vibe-cloud50-empty" class="left-drawer-wordcloud-empty hidden" data-t="hotlist.building">正在扫描该国开发者指纹...</div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -232,7 +259,12 @@
                     <span class="drawer-icon">🔍</span>
                     <span class="drawer-title-text" id="right-drawer-title" data-i18n="drawer.details">详细信息</span>
                 </div>
-                <div class="drawer-close-btn" onclick="closeDrawers()">✕</div>
+                <div class="drawer-header-actions">
+                    <button type="button" class="drawer-refresh-btn" id="right-drawer-refresh-btn" onclick="typeof refreshRightDrawerContent === 'function' && refreshRightDrawerContent()" title="刷新" aria-label="刷新">
+                        <svg class="drawer-refresh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                    </button>
+                    <div class="drawer-close-btn" onclick="closeDrawers()">✕</div>
+                </div>
             </div>
             
             <!-- 【新增】Tab 导航栏 -->
@@ -452,30 +484,9 @@
                         <div class="bg-zinc-950/60 border border-zinc-800 p-2 mb-4" id="vibe-burst-root">
                             <div class="flex items-center justify-between mb-2">
                                 <div class="text-[11px] text-zinc-400 uppercase tracking-widest" data-t="hotlist.title">黑话榜</div>
-                                <div class="text-[10px] text-zinc-500" id="vibe-country-hint">国家：--</div>
                             </div>
 
-                            <!-- 上方：该国词云按 Novice/Professional/Architect 视图（WordCloud2 + 三 Tab） -->
-                            <div class="border border-white/10 bg-zinc-950/30 p-2 mb-3">
-                                <div class="flex items-center justify-between mb-2">
-                                    <div class="text-[10px] text-zinc-500 uppercase tracking-widest" data-i18n="panel.national_cloud_50">本国词云</div>
-                                    <div class="text-[10px] text-zinc-600 font-mono" id="vibe-cloud50-meta">--</div>
-                                </div>
-                                <div id="national-identity-tabs" class="flex gap-1 mb-2">
-                                    <button type="button" class="national-identity-tab px-2 py-1 text-[10px] rounded border font-medium hover:opacity-90" data-level="Novice" data-t="lexicon.novice" style="border-color:#10b981;background-color:rgba(16,185,129,0.15);color:#10b981">小白</button>
-                                    <button type="button" class="national-identity-tab px-2 py-1 text-[10px] rounded border border-white/10 bg-transparent text-zinc-400 hover:bg-white/5" data-level="Professional" data-t="lexicon.pro">脱发</button>
-                                    <button type="button" class="national-identity-tab px-2 py-1 text-[10px] rounded border border-white/10 bg-transparent text-zinc-400 hover:bg-white/5" data-level="Architect" data-t="lexicon.arch">霸天</button>
-                                </div>
-                                <div id="vibe-cloud50-container" style="height: 260px; width: 100%; position: relative;">
-                                    <canvas id="national-identity-cloud-canvas" style="display: block; width: 100%; height: 100%;"></canvas>
-                                    <div id="cloud-loading-hint" class="hidden absolute inset-0 flex items-center justify-center bg-zinc-950/50 text-zinc-400 text-xs">
-                                        加载中...
-                                    </div>
-                                </div>
-                                <div id="vibe-cloud50-empty" class="hidden text-zinc-500 text-sm p-3 italic" data-t="hotlist.building">
-                                    正在扫描该国开发者指纹...
-                                </div>
-                            </div>
+                            <!-- 本国词云已移至左侧抽屉 -->
 
                             <!-- 下方：文字榜单（分类词库 Top 10，Tab 切换功德簿/黑话/口头禅） -->
                             <div class="border border-white/10 bg-zinc-950/30 p-2">

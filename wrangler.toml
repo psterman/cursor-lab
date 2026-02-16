@@ -22,16 +22,16 @@ preview_id = "e6f9014fb49b45eb83c8288f1d1cc1d4" # 新增这一行
 
 # 灵魂词上报专用 KV（24h TTL，与 STATS_STORE 分离以保持独立过期策略）
 [[kv_namespaces]]
-binding = "KV_VIBE"
-id = "991ddbdb18fa4b50998c722a7332f4c0"  # 可与 STATS_STORE 共用，或创建新 namespace 后替换
-preview_id = "e6f9014fb49b45eb83c8288f1d1cc1d4"
+binding = "KV_VIBE_PROD"
+id = "f9cac5f94024451a9229253ae2367683"  # 可与 STATS_STORE 共用，或创建新 namespace 后替换
+
 # [第二阶段] 定期汇总任务
 # * * * * * = 每分钟：灵魂词 STATS_STORE → Supabase 同步（syncSoulWordsFromKV）
 # 0 * * * * = 每小时整点：国家累积写入 KV（GLOBAL_COUNTRY_STATS）+ KV_VIBE 灵魂词汇总
 # */10 * * * * = 每 10 分钟：国家累计 rollup（refresh_country_stats_current）
 # 注意：Cron 触发器需要 Worker 付费计划（Free 计划不支持）
 [triggers]
-crons = ["* * * * *"]
+crons = ["0 * * * *"]
 
 # [保留原有] D1 数据库：答案之书
 [[d1_databases]]

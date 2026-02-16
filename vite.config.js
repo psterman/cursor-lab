@@ -1,8 +1,8 @@
 import { defineConfig } from 'vite';
-import { copyFileSync, mkdirSync, existsSync } from 'fs';
+import { copyFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 
-// 自定义插件：复制 i18n.js 和身份级别词库 JSON 到 dist 目录
+// 自定义插件：复制 i18n.js、身份级别词库 JSON 和 assets/js 到 dist 目录
 const copyI18nPlugin = () => {
   return {
     name: 'copy-i18n',
@@ -24,6 +24,42 @@ const copyI18nPlugin = () => {
             console.log(`[Vite] ✅ 已复制 ${name} 到 dist/`);
           }
         } catch (e) { /* ignore */ }
+      }
+      // 复制 assets/js 到 dist/assets/js（stats2.html 依赖的脚本）
+      try {
+        const srcJsDir = join(process.cwd(), 'assets', 'js');
+        const distJsDir = join(process.cwd(), 'dist', 'assets', 'js');
+        if (existsSync(srcJsDir)) {
+          mkdirSync(distJsDir, { recursive: true });
+          const files = readdirSync(srcJsDir);
+          for (const file of files) {
+            const srcFile = join(srcJsDir, file);
+            if (statSync(srcFile).isFile()) {
+              copyFileSync(srcFile, join(distJsDir, file));
+            }
+          }
+          console.log(`[Vite] ✅ 已复制 assets/js/ 到 dist/assets/js/ (${files.length} 个文件)`);
+        }
+      } catch (e) {
+        console.error('[Vite] ⚠️ 复制 assets/js 失败:', e);
+      }
+      // 复制 assets/css 到 dist/assets/css（stats2.html 依赖的样式）
+      try {
+        const srcCssDir = join(process.cwd(), 'assets', 'css');
+        const distCssDir = join(process.cwd(), 'dist', 'assets', 'css');
+        if (existsSync(srcCssDir)) {
+          mkdirSync(distCssDir, { recursive: true });
+          const files = readdirSync(srcCssDir);
+          for (const file of files) {
+            const srcFile = join(srcCssDir, file);
+            if (statSync(srcFile).isFile()) {
+              copyFileSync(srcFile, join(distCssDir, file));
+            }
+          }
+          console.log(`[Vite] ✅ 已复制 assets/css/ 到 dist/assets/css/ (${files.length} 个文件)`);
+        }
+      } catch (e) {
+        console.error('[Vite] ⚠️ 复制 assets/css 失败:', e);
       }
     }
   };

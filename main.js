@@ -935,15 +935,29 @@ class VibeCodingApp {
       window.vibeResults = normalizeIdentityLevelCloud(ilc);
       selectedIdentityLevel = 'Novice';
 
-      // 【三级别各取最高频一词】在 identityLevelCloud 生成后立即执行，脱钩渲染
-      // 即使 renderIdentityLevelCloud 因找不到 Canvas 退出，上报也会运行
-      var selectedWords = pickTopWordPerLevel(ilc);
+      // 【霸天/脱发/新手 强制唯一代表词】遍历用户词频匹配 Novice/Professional/Architect 词库，每类取最高频一词；无命中则从词库随机取「潜伏」
+      var levelKw = (context && context.levelKeywords) || (typeof window !== 'undefined' && window.__identityLevelKeywords) || null;
+      var selectedWords = [];
+      var representativeWords = {};
+      if (levelKw && levelKw.Novice && levelKw.Professional && levelKw.Architect) {
+        var matchResult = pickOneWordPerLevelFromMatch(ilc, levelKw);
+        selectedWords = matchResult.selectedWords;
+        representativeWords = matchResult.representativeWords || {};
+        if (Object.keys(representativeWords).length > 0) {
+          result.representativeWords = representativeWords;
+        }
+      } else {
+        selectedWords = pickTopWordPerLevel(ilc);
+      }
+      var allowedLevels = ['Novice', 'Professional', 'Architect'];
+      var soulWordsOnly = selectedWords.filter(function (w) { return w && w.c && allowedLevels.indexOf(w.c) !== -1; }).slice(0, 3);
+      if (soulWordsOnly.length > 0) result.soulWords = soulWordsOnly;
       var country = (result && (result.ip_location || result.statistics?.ip_location || result.stats?.ip_location)) || (typeof window !== 'undefined' && window.lastAnalysisResult && window.lastAnalysisResult.ip_location) ? String((result && (result.ip_location || result.statistics?.ip_location || result.stats?.ip_location)) || (window.lastAnalysisResult && window.lastAnalysisResult.ip_location) || '').trim().toUpperCase() : '';
       if (!country || !/^[A-Za-z]{2}$/.test(country)) country = '';
-      if (selectedWords.length > 0) {
-        console.log('[Main] 高频词上传：已选取 ' + selectedWords.length + ' 个词', selectedWords.map(function (w) { return w.p + '(' + w.c + ')'; }));
+      if (soulWordsOnly.length > 0) {
+        console.log('[Main] 高频词上传：仅上传 3 词（词频+指纹）', soulWordsOnly.map(function (w) { return w.p + '(' + w.v + ')'; }));
       }
-      reportSoulWord(selectedWords, country).catch(function (err) { console.error('[Main] 灵魂词上报失败:', err); });
+      reportSoulWord(soulWordsOnly.length ? soulWordsOnly : selectedWords, country).catch(function (err) { console.error('[Main] 灵魂词上报失败:', err); });
 
       // 渲染词云（可选，取决于页面是否有 Canvas）
       if (typeof renderIdentityLevelCloud === 'function') {
@@ -1375,9 +1389,22 @@ class VibeCodingApp {
       if (typeof renderIdentityLevelCloud === 'function') {
         renderIdentityLevelCloud('Novice');
       }
-      // 【灵魂词提炼与上报】异步执行，不阻塞 UI
-      const soulDataSync = extractSoulWord(result);
-      if (soulDataSync) reportSoulWord(soulDataSync).catch(console.error);
+      // 【霸天/脱发/新手 强制唯一代表词】与 onAnalyzeComplete 一致：匹配词库取每类最高频一词，无命中则随机
+      var levelKwSync = (context && context.levelKeywords) || (typeof window !== 'undefined' && window.__identityLevelKeywords) || null;
+      var selectedWordsSync = [];
+      if (levelKwSync && levelKwSync.Novice && levelKwSync.Professional && levelKwSync.Architect) {
+        var matchSync = pickOneWordPerLevelFromMatch(ilcSync, levelKwSync);
+        selectedWordsSync = matchSync.selectedWords;
+        if (matchSync.representativeWords && Object.keys(matchSync.representativeWords).length > 0) {
+          result.representativeWords = matchSync.representativeWords;
+        }
+      } else {
+        var single = extractSoulWord(result);
+        if (single) selectedWordsSync = [single];
+      }
+      var countrySync = (result && (result.ip_location || result.statistics?.ip_location || result.stats?.ip_location)) ? String(result.ip_location || result.statistics?.ip_location || result.stats?.ip_location || '').trim().toUpperCase() : '';
+      if (!countrySync || !/^[A-Za-z]{2}$/.test(countrySync)) countrySync = '';
+      if (selectedWordsSync.length > 0) reportSoulWord(selectedWordsSync, countrySync).catch(console.error);
     }
 
     // 【V6 适配】确保 stats 对象被正确保存
@@ -5786,7 +5813,7 @@ function normalizeIdentityLevelCloud(ilc) {
 }
 
 /**
- * 【三级别各取最高频一词】从 identityLevelCloud 的 Novice、Architect、Native 中各取 count 最大的一个词
+ * 【三级别各取最高频一词】从 identityLevelCloud 的 Novice、Architect、Native 中各取 count 最大的一个词（兼容旧逻辑）
  * @param {Object} ilc - identityLevelCloud 对象
  * @returns {Array<{ p: string, c: string, v: number }>} 最多 3 个词，用于上报
  */
@@ -5795,6 +5822,7 @@ function pickTopWordPerLevel(ilc) {
   var selectedWords = [];
   var levels = [
     { key: 'Novice', name: 'Novice' },
+    { key: 'Professional', name: 'Professional' },
     { key: 'Architect', name: 'Architect' },
     { key: 'native', name: 'Native' }
   ];
@@ -5828,6 +5856,63 @@ function pickTopWordPerLevel(ilc) {
     }
   }
   return selectedWords;
+}
+
+/**
+ * 【霸天/脱发/新手 强制唯一代表词】遍历用户词频，分别匹配 Novice/Professional/Architect 词库，
+ * 每个分类筛选出且仅一个频率最高的词；若无命中则从对应 JSON 词库随机取一词作为「潜伏」展示。
+ * @param {Object} ilc - identityLevelCloud，含 Novice/Professional/Architect 数组或对象
+ * @param {{ Novice: string[], Professional: string[], Architect: string[] }} levelKeywords - 三级别词库
+ * @returns {{ selectedWords: Array<{ p: string, c: string, v: number }>, representativeWords: { Novice?: string, Professional?: string, Architect?: string } }}
+ */
+function pickOneWordPerLevelFromMatch(ilc, levelKeywords) {
+  var selectedWords = [];
+  var representativeWords = {};
+  if (!ilc || typeof ilc !== 'object' || !levelKeywords || typeof levelKeywords !== 'object') {
+    return { selectedWords: [], representativeWords: {} };
+  }
+  var levels = ['Novice', 'Professional', 'Architect'];
+  for (var i = 0; i < levels.length; i++) {
+    var levelKey = levels[i];
+    var keywords = levelKeywords[levelKey];
+    if (!Array.isArray(keywords) || keywords.length === 0) continue;
+    var keywordSet = new Set(keywords.map(function (k) { return String(k || '').trim().toLowerCase(); }));
+    var arr = ilc[levelKey];
+    var items = [];
+    if (Array.isArray(arr)) {
+      items = arr.map(function (x) {
+        var word = x.word != null ? String(x.word) : (x[0] != null ? String(x[0]) : '');
+        var count = x.count != null ? Number(x.count) : (x[1] != null ? Number(x[1]) : 0);
+        return { word: word.trim(), count: count };
+      });
+    } else if (arr && typeof arr === 'object') {
+      items = Object.entries(arr).map(function (e) {
+        return { word: String(e[0]).trim(), count: Number(e[1]) || 0 };
+      });
+    }
+    var hit = null;
+    for (var j = 0; j < items.length; j++) {
+      var w = items[j].word;
+      if (!w) continue;
+      if (!keywordSet.has(w.toLowerCase())) continue;
+      if (!hit || items[j].count > hit.count) hit = items[j];
+    }
+    var word = '';
+    var count = 0;
+    if (hit && hit.word) {
+      word = hit.word;
+      count = hit.count;
+    } else {
+      word = keywords[Math.floor(Math.random() * keywords.length)];
+      if (typeof word !== 'string') word = String(word || '').trim();
+      count = 0;
+    }
+    if (word) {
+      representativeWords[levelKey] = word;
+      selectedWords.push({ p: word, c: levelKey, v: count });
+    }
+  }
+  return { selectedWords: selectedWords, representativeWords: representativeWords };
 }
 
 /**

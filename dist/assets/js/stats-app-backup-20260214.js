@@ -1,325 +1,6 @@
-/**
- * stats2.js - 从 stats2.html 提取的 JavaScript 逻辑
- * 使用 IIFE 封装，防止全局变量污染
- */
 (function() {
-    'use strict';
-    
-    var __globalRankingsCache = null;
-    /** 本国词云原始数据缓存，与 __countryKeywordsByLevel 同步，便于控制台检查 */
-    var __nationalCloudData = null;
-    if (typeof window !== 'undefined') window.__nationalCloudData = null;
-    /** 右抽屉本国词云 Tab 中文文案 → 英文 Key，与 API 段位一致（首字母大写） */
-    var levelMap = { '小白': 'Novice', '脱发': 'Professional', '霸天': 'Architect' };
-
-    // 物理隔离环境：修复 eval5 冲突，在 IIFE 最顶层添加 _loc 变量
-    // 严禁在代码中对 _loc 或 window.location 进行属性赋值，防止触发 eval5 的 "Cannot create property 'location' on string" 报错
-    var _loc = window.location;
-    
-    // 注意：window.location 是浏览器内置对象，无法通过 Object.defineProperty 保护
-    // 因此我们通过以下方式防止 eval5 错误：
-    // 1. 所有代码使用 _loc 变量而不是 window.location
-    // 2. 增强的错误处理机制捕获并屏蔽所有 eval5 相关错误
-    // 3. 拦截 console.error 防止错误输出到控制台
-    
-    // 将所有全局函数暴露到 window 对象，确保 onclick 事件能正确映射
-
-
-    // ============================================
-    // Script Block Separator
-    // ============================================
-
-
-    /**
-     * 【Auth 拦截器】GitHub OAuth 回调后从 Hash 捕获 access_token，持久化并清理 URL
-     * Supabase 返回的是 # 号后的 Hash，不用 URLSearchParams(search)。
-     */
-    (function () {
-      var hash = typeof window !== 'undefined' && _loc && _loc.hash;
-      if (!hash || hash.length < 2) return;
-      var params = {};
-      hash.slice(1).split('&').forEach(function (pair) {
-        var i = pair.indexOf('=');
-        if (i !== -1) params[decodeURIComponent(pair.slice(0, i))] = decodeURIComponent((pair.slice(i + 1) || '').replace(/\+/g, ' '));
-      });
-      var accessToken = params.access_token || params['access_token'];
-      var refreshToken = params.refresh_token || params['refresh_token'];
-      if (!accessToken) return;
-      try {
-        localStorage.setItem('vibe_github_access_token', accessToken);
-        if (refreshToken) localStorage.setItem('vibe_github_refresh_token', refreshToken);
-        console.log('[Auth] ✅ 已从 Hash 捕获 access_token 并写入 vibe_github_access_token');
-      } catch (e) {
-        console.warn('[Auth] 写入 token 失败:', e);
-      }
-      try {
-        var parts = accessToken.split('.');
-        if (parts.length >= 2) {
-          var payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-          var padded = payload + Array((4 - payload.length % 4) % 4 + 1).join('=');
-          var json = atob(padded);
-          var data = JSON.parse(json);
-          var meta = data.user_metadata || {};
-          var avatar = meta.avatar_url || meta.avatar || '';
-          var name = meta.user_name || meta.full_name || meta.name || data.email || '';
-          if (avatar || name) {
-            var cache = { avatar: avatar, name: name, at: Date.now() };
-            try { localStorage.setItem('vibe_github_user_cache', JSON.stringify(cache)); } catch (_) {}
-            if (typeof window !== 'undefined') {
-              window.__vibeGitHubUser = cache;
-            }
-          }
-        }
-      } catch (_) {}
-      try {
-        if (typeof window !== 'undefined' && window.history && window.history.replaceState) {
-          var url = _loc.pathname + (_loc.search || '');
-          window.history.replaceState(null, '', url);
-          console.log('[Auth] ✅ 已清理地址栏 Hash');
-        }
-      } catch (_) {}
-    })();
-    
-
-    // --- Script Block ---
-    // 【已迁移】全局错误处理与 eval5 屏蔽 → stats-libs.min.js
-
-    /**
-     * 代理检测器：检测用户是否有科学上网能力
-     * 针对 V2EX/技术用户群体优化
-     */
-    window.PROXY_DETECTOR = {
-        // 可用于检测的 "干净" 域名（国内能访问但国外更快）
-        testUrls: [
-            'https://www.google.com/generate_204',  // Google 204 页面，国内被墙
-            'https://github.com/favicon.ico',        // GitHub，国内慢/不稳定
-            'https://raw.githubusercontent.com/github/fetch/master/favicon.ico'
-        ],
-        
-        // 检测是否有代理（需 CSP connect-src 允许 https://www.google.com）
-        async detect(timeout = 1500) {
-            console.log('[ProxyDetect] 🔍 检测网络环境...');
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), timeout);
-            try {
-                const start = performance.now();
-                await fetch('https://www.google.com/generate_204', {
-                    mode: 'no-cors',
-                    signal: controller.signal
-                });
-                clearTimeout(timer);
-                const latency = Math.round(performance.now() - start);
-                console.log(`[ProxyDetect] ✅ 检测到代理 (${latency}ms)`);
-                return { hasProxy: true, latency };
-            } catch (err) {
-                clearTimeout(timer);
-                console.log('[ProxyDetect] ❌ 无代理或代理未生效');
-                return { hasProxy: false, latency: null };
-            }
-        },
-        
-        // 根据代理状态返回最佳 API 端点
-        async getOptimalEndpoint() {
-            const { hasProxy } = await this.detect();
-            
-            // 有代理 → 直接使用 Cloudflare（最佳体验）
-            if (hasProxy) {
-                return {
-                    url: document.querySelector('meta[name="api-endpoint"]')?.content || '',
-                    timeout: 10000,  // 正常超时
-                    useCache: false  // 不缓存，获取最新数据
-                };
-            }
-            
-            // 无代理 → 快速失败，使用本地缓存（不加载演示数据）
-            return {
-                url: null,
-                timeout: 2000,   // 2秒快速失败
-                useCache: true,  // 使用本地缓存
-                fallback: false  // 不使用演示数据
-            };
-        }
-    };
-    
-    // 页面加载时自动检测
-    window._proxyCheck = window.PROXY_DETECTOR.detect();
-    
-
-    // --- Script Block ---
-
-
-    /**
-     * API 端点管理器：自动检测可用端点并切换
-     */
-    window.API_ENDPOINT_MANAGER = {
-        endpoints: [],
-        currentIndex: 0,
-        healthStatus: new Map(),
-        
-        // 初始化端点列表
-        init() {
-            const primary = document.querySelector('meta[name="api-endpoint"]')?.content;
-            const backup = document.querySelector('meta[name="api-endpoint-backup"]')?.content;
-            
-            this.endpoints = [];
-            if (primary) this.endpoints.push(primary);
-            if (backup) {
-                backup.split(',').forEach(url => {
-                    url = url.trim();
-                    if (url && !this.endpoints.includes(url)) this.endpoints.push(url);
-                });
-            }
-            
-            // 默认端点（如果都没有配置）
-            if (this.endpoints.length === 0) {
-                this.endpoints.push('https://cursor-clinical-analysis.psterman.workers.dev/');
-            }
-            
-            console.log('[API] 可用端点:', this.endpoints);
-            return this.getCurrent();
-        },
-        
-        // 获取当前端点
-        getCurrent() {
-            if (this.endpoints.length === 0) this.init();
-            return this.endpoints[this.currentIndex] || this.endpoints[0];
-        },
-        
-        // 切换到下一个端点
-        switchNext() {
-            this.currentIndex = (this.currentIndex + 1) % this.endpoints.length;
-            console.log(`[API] 切换到端点 ${this.currentIndex + 1}/${this.endpoints.length}: ${this.getCurrent()}`);
-            return this.getCurrent();
-        },
-        
-        // 标记端点健康状态
-        markHealthy(url, healthy) {
-            this.healthStatus.set(url, { healthy, time: Date.now() });
-        },
-        
-        // 获取健康的端点（优先）
-        getHealthy() {
-            for (let i = 0; i < this.endpoints.length; i++) {
-                const idx = (this.currentIndex + i) % this.endpoints.length;
-                const url = this.endpoints[idx];
-                const status = this.healthStatus.get(url);
-                // 如果端点5分钟内标记为不健康，跳过
-                if (status && !status.healthy && (Date.now() - status.time < 300000)) {
-                    continue;
-                }
-                this.currentIndex = idx;
-                return url;
-            }
-            // 所有端点都不健康，返回当前端点
-            return this.getCurrent();
-        }
-    };
-    
-    // 初始化
-    window.API_ENDPOINT_MANAGER.init();
-    
-    // 全局辅助函数：获取当前 API 端点
-    window.getApiEndpoint = function() {
-        return window.API_ENDPOINT_MANAGER ? window.API_ENDPOINT_MANAGER.getCurrent() : 
-            (document.querySelector('meta[name="api-endpoint"]')?.content || '');
-    };
-    
-    /**
-     * 全局 API 请求包装器：统一处理超时、重试、端点切换
-     * @param {string} path - API 路径（如 /api/country-summary）
-     * @param {Object} options - fetch 选项
-     * @returns {Promise<Response>}
-     */
-    window.apiFetch = async function(path, options = {}) {
-        const manager = window.API_ENDPOINT_MANAGER;
-        const maxRetries = manager ? Math.min(manager.endpoints.length, 2) : 1;
-        let lastError;
-        
-        // 快速失败模式（国内网络优化）
-        const fastFail = document.querySelector('meta[name="api-fast-fail"]')?.content === 'true';
-        const defaultTimeout = fastFail ? 3000 : 10000; // 3秒快速失败
-        
-        for (let i = 0; i < maxRetries; i++) {
-            let base = window.getApiEndpoint();
-            // 规范化 URL 拼接
-            if (base && !base.endsWith('/')) base += '/';
-            if (path.startsWith('/')) path = path.slice(1);
-            const url = (base || '/') + path;
-            
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), options.timeout || defaultTimeout);
-            
-            try {
-                const res = await fetch(url, {
-                    ...options,
-                    signal: controller.signal,
-                    headers: {
-                        'Accept': 'application/json',
-                        ...(options.headers || {})
-                    }
-                });
-                clearTimeout(timeoutId);
-                
-                if (res.ok) {
-                    if (window.API_ENDPOINT_MANAGER) window.API_ENDPOINT_MANAGER.markHealthy(base, true);
-                    return res;
-                }
-                
-                // 5xx 错误视为服务端故障，尝试切换
-                if (res.status >= 500 && window.API_ENDPOINT_MANAGER) {
-                    console.warn(`[API] 端点 ${base} 返回 ${res.status}，尝试切换...`);
-                    window.API_ENDPOINT_MANAGER.markHealthy(base, false);
-                    window.API_ENDPOINT_MANAGER.switchNext();
-                    continue; // 触发下一次循环重试
-                }
-                
-                return res; // 4xx 错误直接返回
-            } catch (err) {
-                clearTimeout(timeoutId);
-                console.warn(`[API] 请求失败 (${base}):`, err.name === 'AbortError' ? '超时' : err.message);
-                
-                if (window.API_ENDPOINT_MANAGER) {
-                    window.API_ENDPOINT_MANAGER.markHealthy(base, false);
-                    if (i < maxRetries - 1) {
-                         window.API_ENDPOINT_MANAGER.switchNext();
-                         await new Promise(r => setTimeout(r, 500)); // 避让
-                         continue;
-                    }
-                }
-                lastError = err;
-            }
-        }
-        
-        throw lastError || new Error('API request failed');
-    };
-
-    /** 缓存策略：若本地存在 manual_location 则上报，否则由后端 CF 自动识别 */
-    /** 【核心修复】使用 /api/update-location 而非 /api/v2/analyze，避免生成低数值数据 */
-    window.reportManualLocationIfCached = async function() {
-        try {
-            var ml = (typeof localStorage !== 'undefined' && localStorage.getItem('manual_location')) || '';
-            ml = (ml && String(ml).trim()).toUpperCase();
-            if (!ml || !/^[A-Z]{2}$/.test(ml)) return;
-            var fp = (typeof localStorage !== 'undefined' && (localStorage.getItem('user_fingerprint') || window.fpId)) || '';
-            var base = (window.getApiEndpoint && window.getApiEndpoint()) || (document.querySelector('meta[name="api-endpoint"]')?.content || '');
-            if (base && base.endsWith('/')) base = base.slice(0, -1);
-            await fetch((base || '') + '/api/update-location', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fingerprint: fp || null, new_cc: ml })
-            });
-        } catch (e) { /* ignore */ }
-    };
-    
-
-    // --- Script Block ---
-
-
-    // 【已迁移】RESOURCE_CONFIG、loadScript、loadResource、_resourceLoader → stats-libs.min.js
-    // 页面需先加载 stats-libs.min.js，此处依赖 window._resourceLoader 已由 libs 启动
-
-    // --- Script Block ---
-
+'use strict';
+var _loc = window.location;
     // 【强制选籍拦截】DOMContentLoaded 最开始：无 user_country_fixed 则全屏国籍选择弹窗并锁定滚动，有则设 currentCountryCode 初始化
     (function() {
         function closeCountryPickerModal() {
@@ -359,103 +40,14 @@
     // --- Script Block ---
 
 
-    /**
-     * 展示用户详情大弹窗：头像、名称、仓库数、更新日期、Star 总数、GitHub 主页、私信按钮。
-     * @param {Object} opts - { avatarUrl, login, name, public_repos, updated_at, stars, toId }
-     */
-    function showUserDetailModal(opts) {
-        var modal = document.getElementById('user-modal');
-        var body = document.getElementById('user-modal-body');
-        if (!modal || !body) return;
-        var escapeHtml = (typeof window.escapeHtml === 'function') ? window.escapeHtml : function(s) {
-            if (s == null || s === '') return '';
-            var div = document.createElement('div');
-            div.textContent = s;
-            return div.innerHTML;
-        };
-        var avatarUrl = opts.avatarUrl || opts.avatar_url || '';
-        var login = opts.login || opts.githubId || opts.dataUserId || '';
-        var name = opts.name || opts.login || login;
-        var publicRepos = opts.public_repos != null ? opts.public_repos : (opts.publicRepos != null ? opts.publicRepos : '—');
-        var updatedAt = opts.updated_at || opts.updatedAt || '—';
-        var stars = opts.stars != null ? opts.stars : (opts.totalStars != null ? opts.totalStars : '—');
-        var toId = opts.toId || opts.fingerprint || login;
-        var githubUrl = 'https://github.com/' + (login ? encodeURIComponent(login) : '');
-        if (typeof updatedAt === 'string' && updatedAt !== '—' && updatedAt.length > 10) {
-            try { updatedAt = new Date(updatedAt).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }); } catch (_) {}
-        }
-        body.innerHTML = [
-            '<div class="flex flex-col gap-4" style="min-width:280px;">',
-            '<div class="flex items-center gap-4">',
-            '<a href="' + escapeHtml(githubUrl) + '" target="_blank" rel="noopener" style="flex-shrink:0;">',
-            '<img src="' + escapeHtml(avatarUrl || '') + '" alt="' + escapeHtml(name) + '" style="width:64px;height:64px;border-radius:50%;object-fit:cover;" onerror="this.onerror=null;this.src=\'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect fill=%22%23333%22 width=%2264%22 height=%2264%22/%3E%3Ctext x=%2232%22 y=%2236%22 fill=%22%23999%22 text-anchor=%22middle%22 font-size=%2214%22%3E?%3C/text%3E%3C/svg%3E\';" />',
-            '</a>',
-            '<div class="flex-1 min-w-0">',
-            '<div style="color:#00ff41;font-weight:600;font-size:14px;">' + escapeHtml(name || login || '') + '</div>',
-            '<div style="color:rgba(255,255,255,0.5);font-size:12px;">@' + escapeHtml(login || '') + '</div>',
-            '</div>',
-            '</div>',
-            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;color:rgba(255,255,255,0.7);">',
-            '<div>仓库数</div><div class="text-right" data-detail-repos>' + escapeHtml(String(publicRepos)) + '</div>',
-            '<div>更新日期</div><div class="text-right" data-detail-updated>' + escapeHtml(String(updatedAt)) + '</div>',
-            '<div>Star 总数</div><div class="text-right">' + escapeHtml(String(stars)) + '</div>',
-            '</div>',
-            '<div class="flex gap-2 flex-wrap">',
-            '<a href="' + escapeHtml(githubUrl) + '" target="_blank" rel="noopener" class="inline-block px-4 py-2 rounded border text-xs font-bold" style="border-color:#00ff41;color:#00ff41;">GitHub 主页</a>',
-            '<button type="button" id="user-modal-dm-btn" class="inline-block px-4 py-2 rounded border text-xs font-bold" style="border-color:#00ff41;color:#00ff41;background:transparent;cursor:pointer;">私信</button>',
-            '</div>',
-            '</div>'
-        ].join('');
-        modal.classList.remove('hidden');
-        var dmBtn = document.getElementById('user-modal-dm-btn');
-        if (dmBtn) {
-            dmBtn.addEventListener('click', function() {
-                if (typeof openMessageSender === 'function') {
-                    openMessageSender(toId, name || login);
-                } else {
-                    window.open(githubUrl, '_blank');
-                }
-            });
-        }
-        if (login) {
-            fetch('https://api.github.com/users/' + encodeURIComponent(login), { headers: { Accept: 'application/vnd.github.v3+json' } })
-                .then(function(r) { return r.ok ? r.json() : null; })
-                .then(function(gh) {
-                    if (!gh || !body.parentNode) return;
-                    var repos = gh.public_repos != null ? gh.public_repos : '—';
-                    var updated = (gh.updated_at && gh.updated_at !== '—') ? (function() { try { return new Date(gh.updated_at).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }); } catch (_) { return gh.updated_at; } })() : '—';
-                    var repoEl = body.querySelector('[data-detail-repos]');
-                    var updatedEl = body.querySelector('[data-detail-updated]');
-                    if (repoEl) repoEl.textContent = repos;
-                    if (updatedEl) updatedEl.textContent = updated;
-                })
-                .catch(function() {});
-        }
-    }
-    window.showUserDetailModal = showUserDetailModal;
-
-    // 事件委托：头像点击优先打开用户详情大弹窗（捕获阶段，避免被 toggleUserPopup 抢占）
+    // 事件委托：头像点击打开 user-modal，避免动态节点绑定失效
     document.addEventListener('click', function(e) {
         var avatarTrigger = e.target.closest('.user-avatar-trigger');
-        if (!avatarTrigger) return;
-        e.stopPropagation();
-        e.preventDefault();
-        var modal = document.getElementById('user-modal');
-        if (!modal) return;
-        var login = avatarTrigger.getAttribute('data-github-id') || avatarTrigger.getAttribute('data-user-id') || '';
-        var name = avatarTrigger.getAttribute('data-user-name') || login;
-        var avatarUrl = avatarTrigger.getAttribute('data-avatar-url') || '';
-        var toId = avatarTrigger.getAttribute('data-to-id') || avatarTrigger.getAttribute('data-fingerprint') || login;
-        showUserDetailModal({
-            avatarUrl: avatarUrl,
-            login: login,
-            name: name,
-            toId: toId,
-            public_repos: '—',
-            updated_at: '—',
-            stars: '—'
-        });
-    }, true);
+        if (avatarTrigger) {
+            var modal = document.getElementById('user-modal');
+            if (modal) modal.classList.remove('hidden');
+        }
+    });
     document.addEventListener('DOMContentLoaded', function() {
         var closeBtn = document.getElementById('user-modal-close');
         var modal = document.getElementById('user-modal');
@@ -1007,10 +599,9 @@
                 } catch { return ''; }
             })();
             const cName = (typeof currentDrawerCountry !== 'undefined' && currentDrawerCountry && currentDrawerCountry.name) ? currentDrawerCountry.name : '';
-            const refreshLexicon = !!(opts && opts.refreshLexicon);
             const url = effectiveIsGlobal
                 ? `${API_ENDPOINT}api/global-average`
-                : `${API_ENDPOINT}api/country-summary?country=${encodeURIComponent(target_country)}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${uid ? `&user_id=${encodeURIComponent(uid)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}${refreshLexicon ? '&refresh=true' : ''}&_ts=${Date.now()}`;
+                : `${API_ENDPOINT}api/country-summary?country=${encodeURIComponent(target_country)}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${uid ? `&user_id=${encodeURIComponent(uid)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}&_ts=${Date.now()}`;
 
             // DOM 绑定点
             const usersValEl = document.getElementById('rtDiagnosedTotal');
@@ -1475,18 +1066,79 @@
                     }
                 }
                 
-                // 【404/超时降级】仅保留 countryTotals 等基础 payload，不再用 localStorage 词库填充 __countryKeywordsByLevel（只等真实数据或显示暂无数据）
+                // 【404/超时降级】如果 fetch 失败且是本地用户，从 localStorage 读取保底数据（优先使用 StatsDataService）
                 if (fetchError && fetchError.fallback && isLocalUser) {
                     try {
-                        payload = {
-                            countryTotals: { totalUsers: 1, ai: 1 },
-                            __fallback: true,
-                            __source: 'localStorage'
-                        };
-                        payload.__isFallback = true;
-                        if (statusEl) statusEl.textContent = getI18nText('panel.data_cached') || 'DATA: CACHED (本地)';
+                        var lastData = null;
+                        var ilc = null;
+                        if (window.StatsDataService && typeof window.StatsDataService.getLastAnalysisData === 'function') {
+                            var lastResult = window.StatsDataService.getLastAnalysisData();
+                            lastData = lastResult.data;
+                            ilc = lastResult.identityLevelCloud;
+                        } else {
+                            var lastStr = localStorage.getItem('last_analysis_data');
+                            if (lastStr) {
+                                lastData = JSON.parse(lastStr);
+                                ilc = (lastData && lastData.stats && lastData.stats.identityLevelCloud) || (lastData && lastData.identityLevelCloud) || null;
+                            }
+                        }
+                        if (lastData && ilc && typeof ilc === 'object') {
+                            var dataAdapterFn = (window.StatsDataService && window.StatsDataService.adaptCloudData) || dataAdapter;
+                            const adaptedData = {
+                                Novice: dataAdapterFn(ilc.Novice || []),
+                                Professional: dataAdapterFn(ilc.Professional || []),
+                                Architect: dataAdapterFn(ilc.Architect || []),
+                                globalNative: []
+                            };
+                                
+                                // 构建降级 payload（仅包含词云数据）
+                                payload = {
+                                    countryTotals: {
+                                        totalUsers: 1,
+                                        ai: 1
+                                    },
+                                    __fallback: true,
+                                    __source: 'localStorage'
+                                };
+                                
+                                // 设置词云数据
+                                if (!window.__countryKeywordsByLevel) {
+                                    window.__countryKeywordsByLevel = {};
+                                }
+                                window.__countryKeywordsByLevel = adaptedData;
+                                
+                                console.log('[updateCountryDashboard] ✅ 已从 localStorage 加载保底数据');
+                                
+                                // 渲染词云
+                                if (typeof _renderNationalIdentityCloud === 'function') {
+                                    _renderNationalIdentityCloud(window.__currentNationalIdentityLevel || 'Novice');
+                                }
+                                
+                                const emptyCloudEl = document.getElementById('vibe-cloud50-empty');
+                                if (emptyCloudEl) {
+                                    const total = (adaptedData.Novice || []).length + 
+                                                 (adaptedData.Professional || []).length + 
+                                                 (adaptedData.Architect || []).length + 
+                                                 (adaptedData.globalNative || []).length;
+                                    if (total === 0) {
+                                        emptyCloudEl.textContent = '暂无词云数据';
+                                        emptyCloudEl.classList.remove('hidden');
+                                    } else {
+                                        emptyCloudEl.classList.add('hidden');
+                                    }
+                                }
+                                
+                                // 更新状态
+                                if (statusEl) statusEl.textContent = getI18nText('panel.data_cached') || 'DATA: CACHED (本地)';
+                                
+                                // 继续执行后续逻辑，但标记为降级模式
+                                payload.__isFallback = true;
+                            } else {
+                                throw new Error('localStorage 中无有效词云数据或 last_analysis_data');
+                            }
                     } catch (fallbackErr) {
                         console.warn('[updateCountryDashboard] 本地保底模式失败:', fallbackErr);
+                        // 如果降级也失败，继续抛出原始错误
                         throw fetchError.error || fetchErr;
                     }
                 }
@@ -1499,23 +1151,6 @@
                 const root = (payload && typeof payload === 'object') ? payload : {};
                 const nested = (root && typeof root.data === 'object' && root.data) ? root.data : {};
                 const data = { ...root, ...nested };
-                // 请求校验：返回的 country_code 与当前选中国家不一致则丢弃，防止网络延迟导致错误数据写入
-                var countryCodeMismatch = false;
-                if (!effectiveIsGlobal && countryCode && data && data.country_code != null) {
-                    var respCc = String(data.country_code).trim().toUpperCase();
-                    if (respCc !== String(countryCode).trim().toUpperCase()) countryCodeMismatch = true;
-                }
-                if (countryCodeMismatch) {
-                    try {
-                        var wc = document.getElementById('vibe-cloud50-container');
-                        var emptyEl = document.getElementById('vibe-cloud50-empty');
-                        if (emptyEl) { emptyEl.textContent = (currentLang === 'en' ? 'Data does not match selected country' : '数据与当前国家不一致，请重试'); emptyEl.classList.remove('hidden'); }
-                        if (wc) wc.removeAttribute('data-loading');
-                    } catch (_) {}
-                    state.isProcessingUpdate = false;
-                    isProcessingUpdate = false;
-                    return;
-                }
                 // 含 totalcharssum 且数值异常时不使用该字段覆盖 UI，但不阻断加载（避免抽屉/地图无法加载）
                 const totalcharssumVal = data.totalcharssum;
                 const isAbnormalTotalcharssum = totalcharssumVal != null && Number(totalcharssumVal) > 10000000;
@@ -1549,12 +1184,11 @@
                     return;
                 }
 
-                // 请求成功后同步 lastRequestCountry / lastFetchedCountry（调度中心），并清除该国“加载失败”标记
+                // 请求成功后同步 lastRequestCountry / lastFetchedCountry（调度中心），并清除重试标志
                 if (!effectiveIsGlobal && countryCode) {
                     state.lastRequestCountry = String(countryCode).toUpperCase();
                     state.lastFetchedCountry = state.lastRequestCountry;
                     lastRequestCountry = state.lastRequestCountry; // 向后兼容
-                    try { if (window.__drawerLastFailCc === String(countryCode).toUpperCase()) { window.__drawerLastFailCc = null; window.__drawerLastFailTs = null; } } catch (_) {}
                     lastFetchedCountry = state.lastFetchedCountry; // 向后兼容
                     // 动态标题同步：根据当前语言与 countryCode 从 countryNameMap 取译名，强制更新抽屉标题
                     try {
@@ -1608,9 +1242,6 @@
                         return;
                     }
                     if (!effectiveIsGlobal && countryCode) {
-                        // 强制初始化：请求开始前设为空对象，防止 reading property of null
-                        window.__countryKeywordsByLevel = {};
-                        window.__nationalCloudData = null;
                         var wordCloudContainer = document.getElementById('vibe-cloud50-container');
                         var emptyCloudEl = document.getElementById('vibe-cloud50-empty');
                         var topRankContainer = document.getElementById('vibe-top10-list');
@@ -1631,200 +1262,48 @@
                             var emptyEl = document.getElementById('vibe-top10-empty');
                             if (emptyEl) emptyEl.classList.add('hidden');
                         }
-                        
-                        // 当前用户指纹，用于词云「灵魂带走」高亮（词来自该用户则金色 + 1.5~2x 字号）
-                        var currentUserFpForCloud = '';
-                        try {
-                            if (window.StatsDataService && typeof window.StatsDataService.getUserIdAndFingerprint === 'function') {
-                                currentUserFpForCloud = (window.StatsDataService.getUserIdAndFingerprint().fp || '').toString().trim();
-                            }
-                            if (!currentUserFpForCloud) currentUserFpForCloud = (localStorage.getItem('vibe_fp') || localStorage.getItem('user_fingerprint') || (typeof window.fpId !== 'undefined' ? window.fpId : '')).toString().trim();
-                        } catch (e) { /* ignore */ }
-                        // 增强数据适配器 (adaptCloudData)：{ word, count, fingerprints? } -> { phrase, weight, fingerprints?, scaleWeight? }
-                        const adaptCloudData = (list) => {
-                            if (!list) return [];
-                            if (!Array.isArray(list)) {
-                                if (typeof list === 'object') {
-                                    list = Object.entries(list).map(function([key, value]) {
-                                        return { word: key, count: value };
-                                    });
-                                } else {
-                                    return [];
-                                }
-                            }
-                            return list.map(function(item) {
-                                if (!item || typeof item !== 'object') return null;
-                                var phrase = (item.word != null ? String(item.word) : (item.phrase != null ? String(item.phrase) : (item.w != null ? String(item.w) : (item[0] != null ? String(item[0]) : ''))));
-                                if (!phrase && typeof item === 'object') {
-                                    var keys = Object.keys(item).filter(function(k) { return k !== 'count' && k !== 'weight' && k !== 'v' && k !== 'fingerprints' && k !== 'fingerprint'; });
-                                    if (keys.length > 0) phrase = String(keys[0]);
-                                }
-                                var weight = Number(item.count != null ? item.count : (item.weight != null ? item.weight : (item.v != null ? item.v : (item[1] != null ? item[1] : 0)))) || 0;
-                                phrase = String(phrase || '').trim();
-                                if (!phrase) return null;
-                                var fingerprints = Array.isArray(item.fingerprints) ? item.fingerprints : (item.fingerprint != null ? [String(item.fingerprint).trim()] : undefined);
-                                var isMine = currentUserFpForCloud && fingerprints && fingerprints.indexOf(currentUserFpForCloud) >= 0;
-                                if (!isMine && item.fingerprint != null && String(item.fingerprint).trim() === currentUserFpForCloud) isMine = true;
-                                var scaleWeight = isMine ? 1.8 : 1;
-                                var out = { phrase: phrase, weight: weight, scaleWeight: scaleWeight };
-                                if (fingerprints && fingerprints.length) out.fingerprints = fingerprints;
-                                return out;
-                            }).filter(Boolean);
-                        };
-                        
-                        // 显示加载提示（数据加载中时卡片显示 loading，拿到数据后再执行渲染）
+                        window.__countryKeywordsByLevel = null;
                         var cloudLoadingHint = document.getElementById('cloud-loading-hint');
-                        if (cloudLoadingHint) { cloudLoadingHint.classList.remove('hidden'); cloudLoadingHint.textContent = '加载中...'; }
-                        
+                        if (cloudLoadingHint) cloudLoadingHint.classList.remove('hidden');
                         var apiSuccess = false;
-                        // 路径校验：从 country-summary 的 response.identityLevelCloud 直接读取（兼容 response.data.identityLevelCloud）
-                        var response = payload || data;
-                        var ilc = (response && typeof response === 'object' && response.identityLevelCloud)
-                            ? response.identityLevelCloud
-                            : (response && response.data && typeof response.data === 'object' && response.data.identityLevelCloud)
-                                ? response.data.identityLevelCloud
-                                : null;
-                        if (ilc && typeof ilc === 'object') {
-                            // 段位映射：与 API 返回值首字母大小写一致（Novice, Professional, Architect）
-                            var rawNovice = ilc.Novice ?? ilc.novice ?? [];
-                            var rawPro = ilc.Professional ?? ilc.professional ?? [];
-                            var rawArch = ilc.Architect ?? ilc.architect ?? [];
-                            var novice = adaptCloudData(rawNovice);
-                            var professional = adaptCloudData(rawPro);
-                            var architect = adaptCloudData(rawArch);
-                            var hasAny = novice.length + professional.length + architect.length > 0;
-                            if (hasAny) {
-                                window.__countryKeywordsByLevel = {
-                                    Novice: novice,
-                                    Professional: professional,
-                                    Architect: architect,
-                                    globalNative: adaptCloudData(ilc.globalNative || ilc.globalnative || [])
-                                };
-                                window.__nationalCloudData = window.__countryKeywordsByLevel;
-                                apiSuccess = true;
-                                var resp = payload || data;
-                                window.__countryTotalUsers = Number(resp?.countryTotals?.totalUsers ?? resp?.countryTotals?.total_users ?? resp?.totalUsers ?? resp?.total_users ?? 0) || 0;
-                                console.log('Keywords loaded:', window.__countryKeywordsByLevel);
-                            }
-                        }
-                        // 若 country-summary 未带 identityLevelCloud，再请求 keywords 接口兜底
-                        if (!apiSuccess) {
-                            var kwApiBase = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content)) || API_ENDPOINT || '';
-                            kwApiBase = (kwApiBase && kwApiBase.trim()) ? (kwApiBase.trim().endsWith('/') ? kwApiBase.trim() : kwApiBase.trim() + '/') : '/';
+                        if (window.StatsDataService && typeof window.StatsDataService.fetchCountryKeywords === 'function') {
                             try {
-                                var kwResp = await fetch(kwApiBase + 'api/v2/stats/keywords?region=' + encodeURIComponent(countryCode) + '&_t=' + Date.now(), { cache: 'no-store' });
-                                if (kwResp.ok) {
-                                    var rawPayload = await kwResp.json();
-                                    var kwPayload = (rawPayload && rawPayload.data) ? rawPayload.data : rawPayload;
-                                    if (kwPayload && typeof kwPayload === 'object') {
-                                        // 支持两种格式：直接格式 {Novice: [...]} 或嵌套格式 {identityLevelCloud: {Novice: [...]}}
-                                        var cloudData = kwPayload.identityLevelCloud || kwPayload;
-                                        var novice = adaptCloudData(cloudData.Novice || []);
-                                        var professional = adaptCloudData(cloudData.Professional || []);
-                                        var architect = adaptCloudData(cloudData.Architect || []);
-                                        var globalNative = adaptCloudData(cloudData.globalNative || cloudData.native || []);
-                                        var hasAny = novice.length + professional.length + architect.length + globalNative.length > 0;
-                                        if (hasAny) {
-                                            window.__countryKeywordsByLevel = { Novice: novice, Professional: professional, Architect: architect, globalNative: globalNative };
-                                            window.__nationalCloudData = window.__countryKeywordsByLevel;
-                                            apiSuccess = true;
-                                            console.log('Keywords loaded:', window.__countryKeywordsByLevel);
-                                        }
-                                    }
-                                }
-                            } catch (apiErr) {
-                                console.warn('[updateCountryDashboard] 本国词云 keywords 兜底失败:', apiErr);
-                            }
-                            if (!apiSuccess) {
-                                window.__countryKeywordsByLevel = { Novice: [], Professional: [], Architect: [], globalNative: [] };
-                                window.__nationalCloudData = null;
-                                var ccForRetry = String(countryCode || '').trim().toUpperCase();
-                                if (/^[A-Z]{2}$/.test(ccForRetry)) {
-                                    try {
-                                        var tried = window.__countryCloudRefreshTried || {};
-                                        if (!tried[ccForRetry]) {
-                                            tried[ccForRetry] = true;
-                                            window.__countryCloudRefreshTried = tried;
-                                            setTimeout(function() {
-                                                updateCountryDashboard(ccForRetry, (currentDrawerCountry && currentDrawerCountry.name) || ccForRetry, null, { forceRefresh: true, refreshLexicon: true });
-                                            }, 300);
-                                        }
-                                    } catch (e) { /* ignore */ }
-                                }
+                                var kw = await window.StatsDataService.fetchCountryKeywords(countryCode);
+                                window.__countryKeywordsByLevel = kw;
+                                apiSuccess = true;
+                            } catch (e) {
+                                console.warn('[updateCountryDashboard] 本国词云 API 失败:', e);
                             }
                         }
-                        
-                        // 【身份优先】请求的国家与当前用户 country_code 一致时，将用户私有词云（user_analysis/identityLevelCloud）强行混入展示列表，并标记 1.5x 视觉权重
-                        (function injectPrivateCloudWhenSameCountry() {
-                            if (!window.__countryKeywordsByLevel) return;
-                            var reqCc = String(countryCode || '').trim().toUpperCase();
-                            if (!reqCc || reqCc.length !== 2) return;
-                            var userCc = (window.currentUser && (window.currentUser.country_code || window.currentUser.current_location || window.currentUser.manual_location || window.currentUser.ip_location))
-                                || (window.currentUserData && (window.currentUserData.country_code || window.currentUserData.current_location || window.currentUserData.manual_location))
-                                ? String((window.currentUser || window.currentUserData).country_code || (window.currentUser || window.currentUserData).current_location || (window.currentUser || window.currentUserData).manual_location || (window.currentUser || window.currentUserData).ip_location || '').trim().toUpperCase()
-                                : '';
-                            if (userCc.length !== 2 || userCc !== reqCc) return;
-                            var lastData = (window.StatsDataService && typeof window.StatsDataService.getLastAnalysisData === 'function') ? window.StatsDataService.getLastAnalysisData() : null;
-                            var ilc = (lastData && lastData.identityLevelCloud) ? lastData.identityLevelCloud : (lastData && lastData.data && lastData.data.stats && lastData.data.stats.identityLevelCloud) ? lastData.data.stats.identityLevelCloud : null;
-                            if (!ilc || typeof ilc !== 'object') return;
-                            var tiers = ['Novice', 'Professional', 'Architect'];
-                            for (var t = 0; t < tiers.length; t++) {
-                                var key = tiers[t];
-                                var arr = Array.isArray(ilc[key]) ? ilc[key] : [];
-                                if (arr.length === 0) continue;
-                                var existing = window.__countryKeywordsByLevel[key] || [];
-                                var byPhrase = {};
-                                existing.forEach(function(item) { byPhrase[String(item.phrase || item.word || '').trim()] = true; });
-                                for (var i = 0; i < arr.length; i++) {
-                                    var w = String(arr[i].word != null ? arr[i].word : arr[i].phrase || '').trim();
-                                    if (!w) continue;
-                                    var wt = Number(arr[i].count != null ? arr[i].count : arr[i].weight || 0) || 0;
-                                    var itemFp = arr[i].fingerprint != null ? String(arr[i].fingerprint).trim() : '';
-                                    if (!byPhrase[w]) {
-                                        existing.push({ phrase: w, weight: wt, scaleWeight: 1.5, fingerprint: itemFp || undefined });
-                                        byPhrase[w] = true;
-                                    }
-                                }
-                                window.__countryKeywordsByLevel[key] = existing;
-                            }
-                            window.__nationalCloudData = window.__countryKeywordsByLevel;
-                        })();
-                        
-                        // 若词云 KV 数据超过 1 小时，后台静默触发一次 refresh 以轮换 Dynamic 池
-                        var summaryResponse = payload || data;
-                        if (!effectiveIsGlobal && summaryResponse && summaryResponse._meta && summaryResponse._meta.lexicon_updated_at) {
-                            var lexTs = Date.parse(summaryResponse._meta.lexicon_updated_at);
-                            if (!isNaN(lexTs) && (Date.now() - lexTs) > 3600000) {
-                                var refreshUrl = (url.indexOf('refresh=true') !== -1 ? url : url + (url.indexOf('?') >= 0 ? '&' : '?') + 'refresh=true');
-                                fetch(refreshUrl, { method: 'GET' }).catch(function() {});
-                            }
+                        if (cloudLoadingHint) cloudLoadingHint.classList.add('hidden');
+                        // 数据准备好后，必须显式调用 _renderNationalIdentityCloud() 进行重绘
+                        var currentLevel = (window.__currentNationalIdentityLevel || 'Novice');
+                        if (typeof _renderNationalIdentityCloud === 'function') {
+                            _renderNationalIdentityCloud(currentLevel);
                         }
                         
-                        // 数据准备好后，必须显式调用 _renderNationalIdentityCloud() 进行重绘（与 Tab 点击同源，优先用 window 挂载）
-                        var currentLevel = (window.__currentNationalIdentityLevel || 'Architect');
-                        var renderCloud = window._renderNationalIdentityCloud || (typeof _renderNationalIdentityCloud === 'function' ? _renderNationalIdentityCloud : null);
-                        if (renderCloud) renderCloud(currentLevel);
-                        
-                        // 更新空状态提示（兜底：identityLevelCloud 为空时显示「暂无灵魂词，快去分析吧」）
+                        // 更新空状态提示
                         if (emptyCloudEl && window.__countryKeywordsByLevel) {
                             var total = (window.__countryKeywordsByLevel.Novice || []).length + 
                                       (window.__countryKeywordsByLevel.Professional || []).length + 
                                       (window.__countryKeywordsByLevel.Architect || []).length + 
                                       (window.__countryKeywordsByLevel.globalNative || []).length;
                             if (total === 0) {
-                                emptyCloudEl.textContent = '暂无灵魂词，快去分析吧';
+                                emptyCloudEl.textContent = '暂无该国词云数据';
                                 emptyCloudEl.classList.remove('hidden');
                             } else {
                                 emptyCloudEl.classList.add('hidden');
                             }
                         } else if (!apiSuccess && emptyCloudEl) {
-                            emptyCloudEl.textContent = '暂无灵魂词，快去分析吧';
+                            // 如果 API 失败且本地也没有数据，显示空状态
+                            emptyCloudEl.textContent = '暂无该国词云数据';
                             emptyCloudEl.classList.remove('hidden');
-                            var renderCloudEmpty = window._renderNationalIdentityCloud || (typeof _renderNationalIdentityCloud === 'function' ? _renderNationalIdentityCloud : null);
-                            if (renderCloudEmpty) renderCloudEmpty('Novice');
+                            if (typeof _renderNationalIdentityCloud === 'function') {
+                                _renderNationalIdentityCloud('Novice');
+                            }
                         }
                         
-                        // 拿到数据后再执行渲染并隐藏加载状态
+                        // 隐藏加载提示
                         if (cloudLoadingHint) cloudLoadingHint.classList.add('hidden');
                         if (wordCloudContainer) wordCloudContainer.removeAttribute('data-loading');
                         // 排行榜：调用 get_national_lexicon(countryCode, type)，默认 merit_board
@@ -2185,11 +1664,8 @@
                         const ranks = payload2.myCountryRanks || payload2.data?.myCountryRanks || null;
                         var remoteVals = payload2.myCountryValues || payload2.data?.myCountryValues || {};
                         var myCountryFromApi = payload2.myCountry || payload2.data?.myCountry || {};
-                        // 【核心修复】绑定 GitHub + 切换国家后：优先用 allData 中同人的最强记录作为 baseUser，避免弱数据覆盖
-                        var rawBase = window.currentUserData || window.currentUser || {};
-                        var baseUser = (typeof getBestUserRecordForStats === 'function' ? getBestUserRecordForStats(rawBase) : null) || rawBase;
-                        // 【核心保护】使用安全合并，防止远程低数值覆盖本地/GitHub已有的核心数据
-                        var merged = safeMaxMergeUserData(baseUser, Object.assign({}, remoteVals, myCountryFromApi));
+                        var baseUser = window.currentUserData || window.currentUser || {};
+                        var merged = Object.assign({}, baseUser, remoteVals, myCountryFromApi);
                         merged.vibe_rank = merged.vibe_rank ?? merged.vibeRank ?? payload2.vibe_rank ?? payload2.vibeRank ?? payload2.data?.vibe_rank ?? payload2.data?.vibeRank
                             ?? (function() {
                                 var list = payload2.latest_records ?? payload2.latestRecords ?? payload2.data?.latest_records ?? [];
@@ -2216,24 +1692,18 @@
                             window.currentUserCountry = latestCC;
                         }
                         try { window.currentUserData = merged; window.currentUser = merged; } catch (e) { /* ignore */ }
-                        if (window.currentUserData && window.allData && Array.isArray(window.allData)) {
-                            const myIndex = window.allData.findIndex(u =>
-                                (u.id && window.currentUserData.id && String(u.id) === String(window.currentUserData.id)) ||
-                                (u.fingerprint && u.fingerprint === window.currentUserData.fingerprint) ||
-                                (u.github_username && u.github_username === window.currentUserData.github_username) ||
-                                (u.user_name && window.currentUserData.user_name && String(u.user_name).toLowerCase() === String(window.currentUserData.user_name).toLowerCase())
-                            );
-                            if (myIndex !== -1) {
-                                // 【核心修复】用安全合并更新 allData，防止 merged 中的低值覆盖 allData 已有的强数据
-                                window.allData[myIndex] = safeMaxMergeUserData(window.allData[myIndex], merged);
-                                if (latestCC != null && String(latestCC).trim() !== '') {
+                        if (window.currentUserData && latestCC != null && String(latestCC).trim() !== '') {
+                            window.currentUserData.current_location = latestCC;
+                            if (window.allData && Array.isArray(window.allData)) {
+                                const myIndex = window.allData.findIndex(u =>
+                                    (u.fingerprint && u.fingerprint === window.currentUserData.fingerprint) ||
+                                    (u.github_username && u.github_username === window.currentUserData.github_username)
+                                );
+                                if (myIndex !== -1) {
                                     window.allData[myIndex].current_location = latestCC;
-                                    window.currentUserData.current_location = latestCC;
                                     console.log('[Fix] 已同步全局缓存中的国籍为:', latestCC);
                                 }
                             }
-                        } else if (window.currentUserData && latestCC != null && String(latestCC).trim() !== '') {
-                            window.currentUserData.current_location = latestCC;
                         }
                         var localStats = window.last_local_stats;
                         var st = (localStats && localStats.payload && (Date.now() - (localStats.ts || 0)) < 300000) ? (localStats.payload.stats || {}) : null;
@@ -2434,13 +1904,10 @@
                         // 国家视图成功后：仅定向调用 renderUserStatsCards/排名更新。严禁调用 refreshUserStats，否则会重新拉取并覆盖已同步的 allData 缓存。
                         if (!effectiveIsGlobal) {
                             try {
-                                // 【核心修复】绑定 GitHub + 切换国家后：优先用 allData 中同人的最强记录
-                                var rawBase2 = window.currentUserData || window.currentUser || {};
-                                var baseUser = (typeof getBestUserRecordForStats === 'function' ? getBestUserRecordForStats(rawBase2) : null) || rawBase2;
+                                var baseUser = window.currentUserData || window.currentUser || {};
                                 var myVals = payload2.myCountryValues || payload2.data?.myCountryValues || {};
                                 var myCountry = payload2.myCountry || payload2.data?.myCountry || {};
-                                // 【核心保护】使用安全合并，防止远程低数值覆盖本地/GitHub已有的核心数据
-                                var merged = safeMaxMergeUserData(baseUser, Object.assign({}, myVals, myCountry));
+                                var merged = Object.assign({}, baseUser, myVals, myCountry);
                                 if (merged.personality_name === undefined && merged.personalityName === undefined) {
                                     merged.personalityName = merged.personality_name = (baseUser.personality_name || baseUser.personalityName || (currentLang === 'en' ? 'Unknown Title' : '未知人格'));
                                 }
@@ -2791,7 +2258,6 @@
                 console.error('[CountryDashboard] ❌ 更新失败:', err);
                 const message = (err && err.message) ? String(err.message) : '网络异常或服务器错误';
                 if (statusEl) statusEl.textContent = (currentLang === 'en' ? 'Network error' : '网络异常');
-                try { if (countryCode && /^[A-Z]{2}$/.test(String(countryCode))) { window.__drawerLastFailCc = String(countryCode).toUpperCase(); window.__drawerLastFailTs = Date.now(); } } catch (_) {}
                 renderErrorState(message);
                 try {
                     const totalsBox = document.getElementById('rtCountryTotals');
@@ -2878,23 +2344,8 @@
         const SUPABASE_URL = 'https://dtcplfhcgnxdzpigmotb.supabase.co';
         const SUPABASE_KEY = 'sb_publishable_-rrlujgXDNxqb-UsMJckNw_G2rn2e8x';
         
-        // 默认头像常量（匿名受害者：使用内置 SVG，避免依赖外链 identicon）
-        const DEFAULT_AVATAR = "data:image/svg+xml;utf8," + encodeURIComponent(`
-            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-              <defs>
-                <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0" stop-color="#00ff41" stop-opacity="0.9"/>
-                  <stop offset="1" stop-color="#00b7ff" stop-opacity="0.9"/>
-                </linearGradient>
-              </defs>
-              <rect x="2" y="2" width="60" height="60" rx="14" fill="#0a0a0a" stroke="url(#g)" stroke-width="2"/>
-              <circle cx="24" cy="28" r="5" fill="#e5e7eb"/>
-              <circle cx="40" cy="28" r="5" fill="#e5e7eb"/>
-              <rect x="20" y="40" width="24" height="6" rx="3" fill="#e5e7eb" opacity="0.9"/>
-              <path d="M18 18h28" stroke="#00ff41" stroke-opacity="0.55" stroke-width="3" stroke-linecap="round"/>
-              <path d="M18 50h28" stroke="#00ff41" stroke-opacity="0.25" stroke-width="3" stroke-linecap="round"/>
-            </svg>
-        `);
+        // 默认头像常量（已提取至 stats-constants.js）
+        const DEFAULT_AVATAR = (window.STATS_CONSTANTS && window.STATS_CONSTANTS.DEFAULT_AVATAR) || '';
         
         // 无效用户名的默认值列表（这些值不应该请求GitHub头像）
         const INVALID_USERNAME_VALUES = ['自动上报用户', 'Anonymous', 'Guest', 'guest', 'anonymous', ''];
@@ -4375,9 +3826,6 @@
             const prev = _getAnchoredCountryFromStorage();
             if (prev === cc && !meta?.force) return;
 
-            // 【核心】同步 __selectedCountry 供 fetchCountryKeywords 等国别数据接口使用
-            try { window.__selectedCountry = cc; } catch (e) {}
-
             // 母国锚定更新：写入 anchored_country（兼容 selected_country）
             _setAnchoredCountry(cc);
 
@@ -4508,10 +3956,8 @@
             const displayName = getDisplayName();
 
             // Step A：缓存 + UI 即时反馈（状态同步中心：user_manual_location 必须为 toUpperCase）
-            // 【核心】同步 __selectedCountry 供 fetchCountryKeywords 等国别数据接口使用，避免切换后仍请求旧国家
             try {
                 window.currentUserCountry = code;
-                window.__selectedCountry = code;
                 localStorage.setItem('user_manual_location', code.toUpperCase());
                 localStorage.setItem('user_selected_country', code);
                 localStorage.setItem('manual_location', code);
@@ -4556,12 +4002,21 @@
                 if (typeof setOrUpdateCurrentLocationCursor === 'function') setOrUpdateCurrentLocationCursor(code);
                 if (typeof saveCountryToSupabase === 'function') await saveCountryToSupabase(code);
 
-                // 【核心修复】切换国籍时不再调用 /api/v2/analyze，因为：
-                // 1. /api/update-location 已经足以同步国籍到数据库
-                // 2. analyze 会发送 minimal chatData=['.']，可能生成低数值数据覆盖已有的高数值
-                // 3. 用户切换国籍只需要更新位置，而非重新分析数据
-                console.log('[CountrySwitch] 仅使用 update-location 同步国籍，跳过 analyze 以保护用户数据');
-                await new Promise(r => setTimeout(r, 300));
+                const base = (document.querySelector('meta[name="api-endpoint"]')?.content || '').replace(/\/$/, '');
+                const _fp = localStorage.getItem('user_fingerprint') || window.fpId || '';
+                const analyzeUrl = base ? base + '/api/v2/analyze?fingerprint=' + encodeURIComponent(_fp) + '&_t=' + Date.now() : '/api/v2/analyze?fingerprint=' + encodeURIComponent(_fp) + '&_t=' + Date.now();
+                const authHeader = supabaseClient ? (await supabaseClient.auth.getSession()).data?.session?.access_token : null;
+                const res = await fetch(analyzeUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...(authHeader ? { 'Authorization': 'Bearer ' + authHeader } : {}) },
+                    body: JSON.stringify({
+                        chatData: [{ role: 'USER', text: '.' }],
+                        manual_location: code,
+                        fingerprint: _fp || null
+                    })
+                });
+                if (!res.ok) console.warn('[CountrySwitch] analyze 上报非 2xx:', res.status);
+                await new Promise(r => setTimeout(r, 800));
             } catch (reportErr) {
                 console.warn('[CountrySwitch] 上报或延时失败:', reportErr);
                 await new Promise(r => setTimeout(r, 500));
@@ -4634,10 +4089,9 @@
                     const d = ev?.detail || {};
                     const cc = String(d.code || '').trim().toUpperCase();
                     if (!/^[A-Z]{2}$/.test(cc)) return;
-                    // 防抖：同国家 500ms 内不重复刷新；若该国最近加载失败则允许立即重试（避免“网络不稳”后必须多次点击）
+                    // 防抖：同国家 500ms 内不重复刷新，避免光标拖拽/地图交互导致一直刷新
                     const now = Date.now();
-                    const isRetryAfterFail = window.__drawerLastFailCc === cc && (now - (window.__drawerLastFailTs || 0)) < 30000;
-                    if (window.__lastCountrySwitchCc === cc && (now - (window.__lastCountrySwitchTs || 0)) < 500 && !isRetryAfterFail) return;
+                    if (window.__lastCountrySwitchCc === cc && (now - (window.__lastCountrySwitchTs || 0)) < 500) return;
                     window.__lastCountrySwitchCc = cc;
                     window.__lastCountrySwitchTs = now;
 
@@ -5412,9 +4866,6 @@
 
         // 保存当前打开抽屉的国家信息，用于刷新
         let currentDrawerCountry = { code: null, name: null };
-        /** 国家透视下自动刷新右侧面板的定时器（不通过按钮），离开国家视图时清除 */
-        var countryPanelAutoRefreshTimer = null;
-        var COUNTRY_PANEL_AUTO_REFRESH_INTERVAL_MS = 60000;
 
         /**
          * 显示抽屉并填充国家数据和维度卡片
@@ -5457,127 +4908,6 @@
             });
             return out;
         }
-
-        /**
-         * 【核心保护】安全合并用户数据：对核心数值字段取较大值，防止新数据/低数值覆盖已有的本地/GitHub数据
-         * 适用场景：登录后数据同步、刷新用户数据、迁移数据合并
-         * @param {object} existing - 已有的用户数据（本地缓存/GitHub）
-         * @param {object} incoming - 新拉取的远程数据
-         * @returns {object} 安全合并后的数据
-         */
-        function safeMaxMergeUserData(existing, incoming) {
-            if (!existing || typeof existing !== 'object') return incoming || {};
-            if (!incoming || typeof incoming !== 'object') return existing;
-
-            // 需要"取较大值"保护的核心数值字段
-            const maxProtectedFields = [
-                // LPDEF 五维分数
-                'l_score', 'p_score', 'd_score', 'e_score', 'f_score',
-                'l', 'p', 'd', 'e', 'f',
-                'L', 'P', 'D', 'E', 'F',
-                // 消息/字符统计
-                'total_messages', 'totalMessages', 'total_analysis', 'totalAnalysis',
-                'total_chars', 'totalChars', 'total_roast_words', 'totalRoastWords',
-                'question_message_count', 'questionMessageCount',
-                // 工作天数
-                'work_days', 'workDays', 'usage_days', 'usageDays', 'days',
-                // 加方/客套词数
-                'jiafang_count', 'jiafangCount', 'ketao_count', 'ketaoCount',
-                // 排名（取较小值，即更好的排名）- 特殊处理
-                // 'vibe_rank', 'vibeRank' - 这些需要取较小值
-            ];
-
-            // 需要"取较小值"保护的排名字段（排名越小越好）
-            const minProtectedFields = [
-                'vibe_rank', 'vibeRank', 'avg_rank', 'avgRank',
-                'country_rank', 'countryRank', 'global_rank', 'globalRank'
-            ];
-
-            // 基础合并：先用 spread 合并
-            const merged = { ...existing, ...incoming };
-
-            // 对 maxProtectedFields 取较大值
-            maxProtectedFields.forEach(function(field) {
-                const existingVal = Number(existing[field]);
-                const incomingVal = Number(incoming[field]);
-                const existingValid = Number.isFinite(existingVal) && existingVal > 0;
-                const incomingValid = Number.isFinite(incomingVal) && incomingVal > 0;
-
-                if (existingValid && incomingValid) {
-                    // 两者都有效，取较大值
-                    merged[field] = Math.max(existingVal, incomingVal);
-                } else if (existingValid && !incomingValid) {
-                    // 仅已有值有效，保留已有值
-                    merged[field] = existingVal;
-                } else if (!existingValid && incomingValid) {
-                    // 仅新值有效，使用新值
-                    merged[field] = incomingVal;
-                }
-                // 两者都无效时，保持 merged 中的值（可能是 incoming 的值）
-            });
-
-            // 对 minProtectedFields 取较小值（排名越小越好）
-            minProtectedFields.forEach(function(field) {
-                const existingVal = Number(existing[field]);
-                const incomingVal = Number(incoming[field]);
-                const existingValid = Number.isFinite(existingVal) && existingVal > 0;
-                const incomingValid = Number.isFinite(incomingVal) && incomingVal > 0;
-
-                if (existingValid && incomingValid) {
-                    // 两者都有效，取较小值（更好的排名）
-                    merged[field] = Math.min(existingVal, incomingVal);
-                } else if (existingValid && !incomingValid) {
-                    // 仅已有值有效，保留已有值
-                    merged[field] = existingVal;
-                } else if (!existingValid && incomingValid) {
-                    // 仅新值有效，使用新值
-                    merged[field] = incomingVal;
-                }
-            });
-
-            // 保护非空字符串字段（人格名称、身份等）
-            const nonEmptyProtectedFields = [
-                'personality_name', 'personalityName',
-                'personality_type', 'personalityType',
-                'lpdef', 'vibe_index_str', 'vibeIndexStr',
-                'user_name', 'userName', 'github_username'
-            ];
-            nonEmptyProtectedFields.forEach(function(field) {
-                const existingVal = existing[field];
-                const incomingVal = incoming[field];
-                const existingHas = existingVal != null && String(existingVal).trim() !== '';
-                const incomingHas = incomingVal != null && String(incomingVal).trim() !== '';
-
-                if (existingHas && !incomingHas) {
-                    // 已有值有效但新值为空，保留已有值
-                    merged[field] = existingVal;
-                }
-            });
-
-            // 深度合并嵌套对象（personality, stats, dimensions 等）
-            const deepMergeFields = ['personality', 'personality_data', 'personalityData', 'stats', 'dimensions'];
-            deepMergeFields.forEach(function(field) {
-                const existingObj = existing[field];
-                const incomingObj = incoming[field];
-                if (existingObj && typeof existingObj === 'object' && incomingObj && typeof incomingObj === 'object') {
-                    merged[field] = safeMaxMergeUserData(existingObj, incomingObj);
-                } else if (existingObj && typeof existingObj === 'object' && (!incomingObj || typeof incomingObj !== 'object')) {
-                    // 已有对象存在但新值为空，保留已有值
-                    merged[field] = existingObj;
-                }
-            });
-
-            console.log('[SafeMerge] 数据保护合并完成', {
-                existingMsgs: existing.total_messages,
-                incomingMsgs: incoming.total_messages,
-                mergedMsgs: merged.total_messages
-            });
-
-            return merged;
-        }
-
-        // 暴露到全局，供其他模块使用
-        window.safeMaxMergeUserData = safeMaxMergeUserData;
 
         /**
          * 从 lastData / rightDrawerData 多层级拼凑完整数据：countryTotals > sub 累加(_sum) > root > sub
@@ -5774,11 +5104,10 @@
                 try { localStorage.setItem('left_drawer_open', 'true'); localStorage.setItem('right_drawer_open', 'true'); } catch (e) { /* ignore */ }
                 return;
             }
-            // 防抖：同国家 500ms 内不重复全量刷新；若该国最近加载失败则允许立即重试
+            // 防抖：同国家 500ms 内不重复全量刷新，避免一直刷新无法加载数据
             if (!summaryOnly) {
                 const now = Date.now();
-                const isRetryAfterFail = window.__drawerLastFailCc === ccUpper && (now - (window.__drawerLastFailTs || 0)) < 30000;
-                if (window.__lastDrawerOpenCc === ccUpper && (now - (window.__lastDrawerOpenTs || 0)) < 500 && !isRetryAfterFail) {
+                if (window.__lastDrawerOpenCc === ccUpper && (now - (window.__lastDrawerOpenTs || 0)) < 500) {
                     const leftDrawer = document.getElementById('left-drawer');
                     const rightDrawer = document.getElementById('right-drawer');
                     if (leftDrawer) leftDrawer.classList.add('active');
@@ -5887,20 +5216,8 @@
                     </div>
                 `;
                 if (leftBody) {
-                    // 【保护词云卡片】清空 leftBody 前先将词云卡片移到临时位置，清空后再移回来
-                    const wordcloudCard = document.getElementById('left-drawer-wordcloud-wrap');
-                    const tempHolder = document.createDocumentFragment();
-                    if (wordcloudCard && wordcloudCard.parentNode) {
-                        tempHolder.appendChild(wordcloudCard);
-                    }
-                    
                     leftBody.innerHTML = skeletonHTML;
                     leftBody.classList.add('drawer-loading');
-                    
-                    // 将词云卡片移回 leftBody（保留所有事件监听器）
-                    if (tempHolder.childNodes.length > 0) {
-                        leftBody.appendChild(tempHolder);
-                    }
                 }
                 if (rightBody) {
                     // 【重构】使用新的全球视图内容容器
@@ -6279,16 +5596,12 @@
                             
                             if (matchedUser) {
                                 console.log('[Drawer] ✅ 重新匹配到用户:', matchedUser.user_name || matchedUser.name);
-                                // 【核心保护】使用安全合并，防止allData中数据覆盖已有的高数值
-                                var existingUser = window.currentUser || window.currentUserData || {};
-                                var mergedUser = (typeof safeMaxMergeUserData === 'function')
-                                    ? safeMaxMergeUserData(existingUser, matchedUser)
-                                    : Object.assign({}, existingUser, matchedUser);
-                                window.currentUser = mergedUser;
+                                // 更新全局变量
+                                window.currentUser = matchedUser;
                                 // 重新渲染统计卡片
                                 const leftBody = document.getElementById('left-drawer-body');
                                 if (leftBody) {
-                                    renderUserStatsCards(leftBody, getBestUserRecordForStats(mergedUser));
+                                    renderUserStatsCards(leftBody, matchedUser);
                                 }
                             }
                         }).catch(err => {
@@ -6312,15 +5625,10 @@
 
                             if (matchedUser) {
                                 console.log('[Drawer] ✅ 重新匹配到 GitHub 用户:', matchedUser.user_name || matchedUser.name);
-                                // 【核心保护】使用安全合并，防止覆盖已有的高数值
-                                var existingUser = window.currentUser || window.currentUserData || {};
-                                var mergedUser = (typeof safeMaxMergeUserData === 'function')
-                                    ? safeMaxMergeUserData(existingUser, matchedUser)
-                                    : Object.assign({}, existingUser, matchedUser);
-                                window.currentUser = mergedUser;
+                                window.currentUser = matchedUser;
                                 const leftBody = document.getElementById('left-drawer-body');
                                 if (leftBody) {
-                                    renderUserStatsCards(leftBody, getBestUserRecordForStats(mergedUser));
+                                    renderUserStatsCards(leftBody, getBestUserRecordForStats(matchedUser));
                                 }
                                 return;
                             }
@@ -6337,15 +5645,10 @@
                                         .then(({ data: dbUser }) => {
                                             if (!dbUser) return;
                                             console.log('[Drawer] ✅ Supabase 兜底找到 GitHub 用户:', dbUser.user_name || dbUser.name);
-                                            // 【核心保护】使用安全合并，防止覆盖已有的高数值
-                                            var existingUser = window.currentUser || window.currentUserData || {};
-                                            var mergedUser = (typeof safeMaxMergeUserData === 'function')
-                                                ? safeMaxMergeUserData(existingUser, dbUser)
-                                                : Object.assign({}, existingUser, dbUser);
-                                            window.currentUser = mergedUser;
+                                            window.currentUser = dbUser;
                                             const leftBody2 = document.getElementById('left-drawer-body');
                                             if (leftBody2) {
-                                                renderUserStatsCards(leftBody2, getBestUserRecordForStats(mergedUser));
+                                                renderUserStatsCards(leftBody2, getBestUserRecordForStats(dbUser));
                                             }
                                         })
                                         .catch(() => {});
@@ -6417,15 +5720,10 @@
                                     .then(({ data: dbUser }) => {
                                         if (!dbUser) return;
                                         console.log('[Drawer] ✅ Supabase 最终兜底找到 GitHub 用户:', dbUser.user_name || dbUser.name);
-                                        // 【核心保护】使用安全合并，防止覆盖已有的高数值
-                                        var existingUser = window.currentUser || window.currentUserData || {};
-                                        var mergedUser = (typeof safeMaxMergeUserData === 'function')
-                                            ? safeMaxMergeUserData(existingUser, dbUser)
-                                            : Object.assign({}, existingUser, dbUser);
-                                        window.currentUser = mergedUser;
+                                        window.currentUser = dbUser;
                                         const leftBody = document.getElementById('left-drawer-body');
                                         if (leftBody) {
-                                            renderUserStatsCards(leftBody, getBestUserRecordForStats(mergedUser));
+                                            renderUserStatsCards(leftBody, getBestUserRecordForStats(dbUser));
                                         }
                                     })
                                     .catch(() => {});
@@ -6722,50 +6020,6 @@
                     <div class="drawer-item-label mb-3">${escapeHtml((i18n[currentLang] && i18n[currentLang]['recent-activity']) ? i18n[currentLang]['recent-activity'] : (currentLang === 'en' ? 'Live Activity Feed' : '实时诊断活动'))}</div>
                     <div id="drawer-recentActivity" class="flex-1 overflow-y-auto max-h-[400px] text-[10px] font-mono space-y-3 pr-2"></div>
                 `;
-                
-                // 【词云卡片自适应定位兜底】插入实时诊断活动之前，确保词云卡片在正确位置
-                // 如果「我的数据统计」已存在，词云应在其之后；否则词云在身份配置卡片之后
-                try {
-                    const wordcloudCard = document.getElementById('left-drawer-wordcloud-wrap');
-                    console.log('[Identity] 词云卡片兜底检查:', {
-                        找到词云卡片: !!wordcloudCard,
-                        词云卡片可见: wordcloudCard ? window.getComputedStyle(wordcloudCard).display : 'N/A',
-                        父节点: wordcloudCard?.parentNode?.id || 'N/A'
-                    });
-                    
-                    if (wordcloudCard) {
-                        const existingStatsCards = leftBody.querySelectorAll('.drawer-item');
-                        let myStatsCard = null;
-                        existingStatsCards.forEach(card => {
-                            const label = card.querySelector('.drawer-item-label');
-                            if (label && label.textContent === '我的数据统计') {
-                                myStatsCard = card;
-                            }
-                        });
-                        
-                        // 如果找到「我的数据统计」，词云插在它之后；否则插在身份配置卡片之后
-                        const targetCard = myStatsCard || leftBody.querySelector('.drawer-item');
-                        if (targetCard && targetCard.nextSibling !== wordcloudCard) {
-                            if (targetCard.nextSibling) {
-                                leftBody.insertBefore(wordcloudCard, targetCard.nextSibling);
-                            } else {
-                                leftBody.appendChild(wordcloudCard);
-                            }
-                            
-                            // 确保词云卡片可见
-                            wordcloudCard.style.display = '';
-                            wordcloudCard.style.visibility = 'visible';
-                            
-                            console.log('[Identity] ✅ 词云卡片已自适应移至', myStatsCard ? '「我的数据统计」' : '「身份配置」', 
-                                '之后，当前位置索引:', Array.from(leftBody.children).indexOf(wordcloudCard));
-                        }
-                    } else {
-                        console.warn('[Identity] ⚠️ 未找到词云卡片元素 #left-drawer-wordcloud-wrap');
-                    }
-                } catch (e) {
-                    console.warn('[Identity] ⚠️ 词云卡片定位调整失败:', e);
-                }
-                
                 leftBody.appendChild(activityCard);
                 
                 // 触发渐入动画
@@ -6894,14 +6148,9 @@
                                 const onUserFound = (dbUser) => {
                                     if (!dbUser) return;
                                     console.log('[Drawer] ✅ 从 v_unified_analysis_v2 找到用户:', dbUser.user_name || dbUser.name);
-                                    // 【核心保护】使用安全合并，防止覆盖已有的高数值
-                                    var existingUser = window.currentUser || window.currentUserData || {};
-                                    var mergedUser = (typeof safeMaxMergeUserData === 'function')
-                                        ? safeMaxMergeUserData(existingUser, dbUser)
-                                        : Object.assign({}, existingUser, dbUser);
-                                    window.currentUser = mergedUser;
+                                    window.currentUser = dbUser;
                                     const lb = document.getElementById('left-drawer-body');
-                                    if (lb) renderUserStatsCards(lb, getBestUserRecordForStats(mergedUser));
+                                    if (lb) renderUserStatsCards(lb, getBestUserRecordForStats(dbUser));
                                 };
                                 // 1) 按 fingerprint 查（使用 v_unified_analysis_v2 获取 vibe_rank）
                                 if (currentFingerprint) {
@@ -7300,14 +6549,9 @@
                             if (cu.id) q = q.eq('id', cu.id); else q = q.eq('fingerprint', cu.fingerprint);
                             q.maybeSingle().then(function (r) {
                                 if (r && r.data) {
-                                    // 【核心保护】使用安全合并，防止从DB拉取的数据覆盖本地已有的高数值
-                                    var existingUser = window.currentUser || window.currentUserData || {};
-                                    var mergedUser = (typeof safeMaxMergeUserData === 'function')
-                                        ? safeMaxMergeUserData(existingUser, r.data)
-                                        : Object.assign({}, existingUser, r.data);
-                                    window.currentUser = mergedUser;
-                                    window.currentUserData = mergedUser;
-                                    if (typeof renderRankCards === 'function') renderRankCards(mergedUser);
+                                    window.currentUser = r.data;
+                                    window.currentUserData = r.data;
+                                    if (typeof renderRankCards === 'function') renderRankCards(r.data);
                                 }
                             }).catch(function () {});
                         }
@@ -7343,23 +6587,8 @@
          * 先调用 showDrawersWithCountryData 填充左侧个人数据，再把右侧切为国家透视。
          * @param {string} code - 国家代码，如 'US'
          * @param {string} name - 国家名称，如 'United States'
-         * @param {{ forceRefresh?: boolean }} opts - 可选；forceRefresh 为 true 时强制拉取最新数据（如地图点击）
          */
-        function switchToCountryView(code, name, opts) {
-            opts = opts && typeof opts === 'object' ? opts : {};
-            // 切换国旗时立即清空词云缓存与 Canvas，显示 Loading，防止旧国家数据残留
-            try {
-                window.__countryKeywordsByLevel = null;
-                var wc = document.getElementById('vibe-cloud50-container');
-                var canvas = document.getElementById('national-identity-cloud-canvas');
-                var emptyEl = document.getElementById('vibe-cloud50-empty');
-                if (canvas && canvas.getContext) {
-                    var ctx = canvas.getContext('2d');
-                    if (ctx) ctx.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
-                }
-                if (emptyEl) { emptyEl.textContent = '正在扫描该国开发者指纹...'; emptyEl.classList.remove('hidden'); }
-                if (wc) { wc.setAttribute('data-loading', 'true'); }
-            } catch (e) { /* ignore */ }
+        function switchToCountryView(code, name) {
             showDrawersWithCountryData(code, name);
             currentViewState = 'COUNTRY';
             const rightDrawer = document.getElementById('right-drawer');
@@ -7380,18 +6609,13 @@
             if (rightTitle) rightTitle.textContent = displayName;
 
             renderCountryRightPanel(code, displayName);
-            // 地图点击时强制刷新；其他入口缓存优先 + 静默更新
-            var dashboardOpts = opts.forceRefresh ? { force: true, silent: false } : { preferCache: true, silent: true };
-            try { updateCountryDashboard(code, null, dashboardOpts); } catch (e) { /* ignore */ }
+            // 触发国家抽屉数据拉取（缓存优先 + 静默更新）
+            try { updateCountryDashboard(code, null, { preferCache: true, silent: true }); } catch (e) { /* ignore */ }
 
             selectedCountry = code === 'US' ? 'US' : code;
             currentDrawerCountry.code = code;
             currentDrawerCountry.name = displayName;
-            try {
-                window.currentUserCountry = String(code || '').trim().toUpperCase();
-                // 【核心】同步 __selectedCountry 供 fetchCountryKeywords 等国别数据接口使用
-                window.__selectedCountry = code;
-            } catch (e) { /* ignore */ }
+            try { window.currentUserCountry = String(code || '').trim().toUpperCase(); } catch (e) { /* ignore */ }
             // 【新增】更新顶部视图切换按钮
             updateHeaderViewToggleBtn();
             console.log('[Drawer] 国家透视已打开:', name);
@@ -7535,68 +6759,9 @@
         function refreshCountryRightPanel() {
             if (currentViewState !== 'COUNTRY') return;
             if (!currentDrawerCountry || !currentDrawerCountry.code) return;
-            // 锁定当前国家，避免异步流程中 currentDrawerCountry 被覆盖导致切回 US
-            var code = String(currentDrawerCountry.code).trim().toUpperCase();
-            var name = currentDrawerCountry.name || (countryNameMap && countryNameMap[code] ? (currentLang === 'zh' ? countryNameMap[code].zh : countryNameMap[code].en) : code);
-            renderCountryRightPanel(code, name);
-            try { updateCountryDashboard(code, null, { force: true }); } catch (e) { /* ignore */ }
+            renderCountryRightPanel(currentDrawerCountry.code, currentDrawerCountry.name);
+            try { updateCountryDashboard(currentDrawerCountry.code); } catch (e) { /* ignore */ }
         }
-
-        /**
-         * 右抽屉顶部刷新按钮：按当前视图刷新内容（国家/全球/排行榜）
-         */
-        function refreshRightDrawerContent() {
-            var btn = document.getElementById('right-drawer-refresh-btn');
-            if (btn) {
-                btn.disabled = true;
-                btn.classList.add('loading');
-            }
-            var done = function() {
-                setTimeout(function() {
-                    if (btn) {
-                        btn.disabled = false;
-                        btn.classList.remove('loading');
-                    }
-                }, 400);
-            };
-            var view = typeof currentViewState === 'string' ? currentViewState : '';
-            if (view === 'COUNTRY' && currentDrawerCountry && currentDrawerCountry.code) {
-                try { refreshCountryRightPanel(); } catch (e) { /* ignore */ }
-                done();
-                return;
-            }
-            if (view === 'RANKING') {
-                try {
-                    if (typeof renderRankingView === 'function') renderRankingView();
-                } catch (e) { /* ignore */ }
-                done();
-                return;
-            }
-            if (view === 'GLOBAL') {
-                var globalCode = (currentDrawerCountry && currentDrawerCountry.code) ? String(currentDrawerCountry.code).trim().toUpperCase() : null;
-                var globalName = (currentDrawerCountry && currentDrawerCountry.name) || null;
-                if (!globalCode) {
-                    var userCountry = window.currentUserCountry || (window.currentUser && (window.currentUser.country_code || window.currentUser.ip_location)) || (window.currentUserData && (window.currentUserData.country_code || window.currentUserData.ip_location)) || 'US';
-                    if (userCountry && /^[A-Z]{2}$/.test(String(userCountry).trim().toUpperCase())) {
-                        globalCode = String(userCountry).trim().toUpperCase();
-                        globalName = countryNameMap && countryNameMap[globalCode] ? (currentLang === 'zh' ? countryNameMap[globalCode].zh : countryNameMap[globalCode].en) : globalCode;
-                    }
-                }
-                if (globalCode && globalName && typeof fetchCountrySummaryV3 === 'function') {
-                    fetchCountrySummaryV3(globalCode).then(function(summary) {
-                        if (summary && (summary.countryTotals || (summary.data && summary.data.countryTotals)) && typeof showDrawersWithCountryData === 'function') {
-                            showDrawersWithCountryData(globalCode, globalName, summary, { summaryOnly: true });
-                        }
-                        done();
-                    }).catch(function() { done(); });
-                } else {
-                    done();
-                }
-                return;
-            }
-            done();
-        }
-        window.refreshRightDrawerContent = refreshRightDrawerContent;
 
         /**
          * 【新增】三 Tab 视图切换函数
@@ -7625,20 +6790,6 @@
             // 更新当前视图状态（同步到 state 对象）
             state.currentViewState = targetView;
             currentViewState = targetView; // 向后兼容
-
-            // 国家透视下自动刷新右侧面板（不通过按钮）；离开国家视图时清除定时器
-            if (countryPanelAutoRefreshTimer) {
-                clearInterval(countryPanelAutoRefreshTimer);
-                countryPanelAutoRefreshTimer = null;
-            }
-            if (targetView === 'COUNTRY' && currentDrawerCountry && currentDrawerCountry.code) {
-                countryPanelAutoRefreshTimer = setInterval(function() {
-                    if (currentViewState !== 'COUNTRY' || !currentDrawerCountry || !currentDrawerCountry.code) return;
-                    var rightDrawer = document.getElementById('right-drawer');
-                    if (!rightDrawer || !rightDrawer.classList.contains('active')) return;
-                    try { refreshCountryRightPanel(); } catch (e) { /* ignore */ }
-                }, typeof COUNTRY_PANEL_AUTO_REFRESH_INTERVAL_MS !== 'undefined' ? COUNTRY_PANEL_AUTO_REFRESH_INTERVAL_MS : 60000);
-            }
             
             // 获取所有面板和 Tab 按钮
             const panels = {
@@ -7706,52 +6857,18 @@
                             showDrawersWithCountryData(globalCode, globalName, getLatestGlobalData(), { summaryOnly: true });
                         }
                     }
-                    
-                    // 【新增】全球视图加载后，尝试加载用户灵魂词云
-                    if (typeof window.autoLoadMySoulWords === 'function') {
-                        setTimeout(function() {
-                            window.autoLoadMySoulWords().catch(function(e) {
-                                console.warn('[switchView] 加载灵魂词失败:', e);
-                            });
-                        }, 500);
-                    }
                     break;
                     
                 case 'country':
-                    // 国家视图：若无当前国家则用用户国家或 CN 兜底，确保本国词云有 country 可请求
-                    var defaultCountryCode = (currentDrawerCountry && currentDrawerCountry.code) ? String(currentDrawerCountry.code).trim().toUpperCase() : '';
-                    if (!/^[A-Z]{2}$/.test(defaultCountryCode)) {
-                        defaultCountryCode = (window.currentUserCountry && /^[A-Z]{2}$/.test(String(window.currentUserCountry).trim())) ? String(window.currentUserCountry).trim().toUpperCase()
-                            : (window.currentUser && (window.currentUser.country_code || window.currentUser.current_location || window.currentUser.ip_location) && /^[A-Z]{2}$/.test(String(window.currentUser.country_code || window.currentUser.current_location || window.currentUser.ip_location).trim())) ? String(window.currentUser.country_code || window.currentUser.current_location || window.currentUser.ip_location).trim().toUpperCase()
-                            : (localStorage.getItem('user_manual_location') && /^[A-Z]{2}$/.test(String(localStorage.getItem('user_manual_location')).trim())) ? String(localStorage.getItem('user_manual_location')).trim().toUpperCase()
-                            : 'CN';
-                        if (currentDrawerCountry && typeof currentDrawerCountry === 'object') {
-                            currentDrawerCountry.code = defaultCountryCode;
-                            currentDrawerCountry.name = (countryNameMap && countryNameMap[defaultCountryCode]) ? (currentLang === 'zh' ? countryNameMap[defaultCountryCode].zh : countryNameMap[defaultCountryCode].en) : defaultCountryCode;
-                        }
-                    }
-                    // 单一请求源：通过 switchToCountryView 触发 updateCountryDashboard
+                    // 国家视图：单一请求源，仅通过 switchToCountryView 触发 updateCountryDashboard；此处仅渲染骨架，不重复请求
                     const countryMount = document.getElementById('countryTemplateMount');
                     if (currentDrawerCountry.code && currentDrawerCountry.name) {
                         if (countryMount && !countryMount.innerHTML.trim() && !window.__renderingCountryView) {
                             window.__renderingCountryView = true;
                             switchToCountryView(currentDrawerCountry.code, currentDrawerCountry.name);
                             setTimeout(() => { window.__renderingCountryView = false; }, 100);
-                        } else if (countryMount && window.__renderingCountryView !== true) {
-                            updateCountryDashboard(currentDrawerCountry.code, currentDrawerCountry.name, null, { forceRefresh: false });
                         }
                     }
-                    // 触发国家视图显示事件，通知词云组件自动加载数据
-                    setTimeout(function() {
-                        window.dispatchEvent(new CustomEvent('countryviewshown', { 
-                            detail: { country: currentDrawerCountry.code, name: currentDrawerCountry.name } 
-                        }));
-                    }, 100);
-                    // 强制重绘：右侧抽屉打开时显式再调一次词云渲染（使 canvas 按当前尺寸重绘）
-                    setTimeout(function() {
-                        var renderCloud = window._renderNationalIdentityCloud || (typeof _renderNationalIdentityCloud === 'function' ? _renderNationalIdentityCloud : null);
-                        if (renderCloud) renderCloud(window.__currentNationalIdentityLevel || 'Architect');
-                    }, 150);
                     break;
                     
                 case 'ranking':
@@ -9441,21 +8558,14 @@
                         };
                     }).filter(d => d.name && (d.totalMessages > 0 || d.rank));
                 } else {
-                    processedData = (locationData || []).map(item => {
-                        const name = (countryNameMap && countryNameMap[item.name] ? countryNameMap[item.name].en : (item.name === 'USA' ? 'United States of America' : item.name));
-                        const code = item.countryCode || item.code || (typeof resolveCountryCodeFromMapName === 'function' ? resolveCountryCodeFromMapName(item.name || name) : null);
-                        return {
-                            name: name,
-                            value: item.value || 0,
-                            totalMessages: item.value || 0,
-                            rank: item.rank || null,
-                            countryCode: code ? String(code).toUpperCase() : null
-                        };
-                    });
+                    processedData = (locationData || []).map(item => ({
+                        name: (countryNameMap && countryNameMap[item.name] ? countryNameMap[item.name].en : (item.name === 'USA' ? 'United States of America' : item.name)),
+                        value: item.value || 0,
+                        totalMessages: item.value || 0,
+                        rank: item.rank || null
+                    }));
                 }
                 const useRankColors = !!(countryStats && countryStats.length > 0);
-                if (!window.__mapCountrySummaryCache) window.__mapCountrySummaryCache = new Map();
-                if (!window.__mapCountrySummaryPending) window.__mapCountrySummaryPending = new Set();
                 const maxVal = Math.max(20, ...processedData.map(d => d.value || 0));
                 const totalCountries = processedData.length;
 
@@ -9492,50 +8602,20 @@
                                 const rankLabel = currentLang === 'en' ? 'Global Rank' : '全球排名';
                                 const dimLabel = currentLang === 'en' ? 'Top Dimension' : '最突出维度';
                                 const activeNodesLabel = getI18nText('tooltip.active_nodes') || (currentLang === 'en' ? 'Active Nodes' : '活跃节点');
-                                const nf = typeof Intl !== 'undefined' && Intl.NumberFormat ? new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN', { maximumFractionDigits: 0 }) : { format: function(n) { return String(Math.round(Number(n))); } };
                                 let tooltipContent;
-                                var summary = (code && window.__mapCountrySummaryCache) ? window.__mapCountrySummaryCache.get(code) : null;
-                                if (!summary && code && window.__countrySummaryCache) {
-                                    var drawerHit = window.__countrySummaryCache.get(code);
-                                    if (drawerHit && drawerHit.summary) {
-                                        summary = drawerHit.summary;
-                                        if (window.__mapCountrySummaryCache) window.__mapCountrySummaryCache.set(code, summary);
-                                    }
-                                }
-                                var pending = (code && window.__mapCountrySummaryPending) ? window.__mapCountrySummaryPending.has(code) : false;
-                                if (summary && summary.countryTotals && typeof summary.countryTotals === 'object') {
-                                    var ct = summary.countryTotals;
-                                    var totalUsers = Number(ct.totalUsers ?? ct.total_users ?? 0) || 0;
-                                    var ai = Number(ct.ai ?? ct.total_messages ?? ct.totalMessages ?? 0) || 0;
-                                    var say = Number(ct.say ?? ct.total_chars ?? ct.totalChars ?? 0) || 0;
-                                    var no = Number(ct.no ?? ct.jiafang_count ?? ct.jiafangCount ?? 0) || 0;
-                                    var please = Number(ct.please ?? ct.ketao_count ?? ct.ketaoCount ?? 0) || 0;
-                                    var day = Number(ct.day ?? ct.work_days ?? ct.workDays ?? 0) || 0;
-                                    var devLabel = currentLang === 'en' ? 'Developers' : '开发者数';
-                                    var aiLabel = currentLang === 'en' ? 'Messages' : '调戏AI';
-                                    var sayLabel = currentLang === 'en' ? 'Chars' : '累计字数';
-                                    var noLabel = currentLang === 'en' ? 'Jiafang' : '甲方';
-                                    var pleaseLabel = currentLang === 'en' ? 'Ketao' : '磕头';
-                                    var dayLabel = currentLang === 'en' ? 'Work days' : '上岗天数';
-                                    tooltipContent = '<div class="font-mono text-xs"><div class="text-[#00ff41] font-bold mb-2">' + escapeHtml(label) + '</div>' +
-                                        '<div class="text-zinc-400 text-[10px]">' + escapeHtml(devLabel) + ': ' + nf.format(totalUsers) + '</div>' +
-                                        '<div class="text-zinc-400 text-[10px]">' + escapeHtml(aiLabel) + ': ' + nf.format(ai) + '</div>' +
-                                        '<div class="text-zinc-400 text-[10px]">' + escapeHtml(sayLabel) + ': ' + nf.format(say) + '</div>' +
-                                        '<div class="text-zinc-400 text-[10px]">' + escapeHtml(noLabel) + ': ' + nf.format(no) + ' · ' + escapeHtml(pleaseLabel) + ': ' + nf.format(please) + '</div>' +
-                                        '<div class="text-zinc-400 text-[10px]">' + escapeHtml(dayLabel) + ': ' + nf.format(day) + '</div></div>';
-                                } else if (currentChampionInfo && currentChampionInfo.countryName === name) {
+                                if (currentChampionInfo && currentChampionInfo.countryName === name) {
                                     const feedback = currentChampionInfo.feedback ? JSON.parse(currentChampionInfo.feedback) : null;
                                     const recordLabel = getI18nText('tooltip.record') || (currentLang === 'en' ? 'Record' : '战绩');
                                     const roastLabel = getI18nText('tooltip.roast') || (currentLang === 'en' ? 'Roast' : '吐槽');
                                     const translatedFbLabel = feedback ? translateRankFeedbackLabel(currentChampionInfo.dimId, feedback.label, currentChampionInfo.championValue) : '';
                                     tooltipContent = `<div class="font-mono text-xs"><div class="text-[#00ff41] font-bold mb-1">🏆 ${currentChampionInfo.championName}</div><div class="text-white mb-1">${label}${proxyLabel}</div><div class="text-zinc-400 text-[10px] mb-1">${escapeHtml(activeNodesLabel)}: ${totalMessages}</div><div class="text-zinc-400 text-[10px] mb-1">${escapeHtml(recordLabel)}: ${currentChampionInfo.championValue}</div>${feedback ? `<div class="text-zinc-500 text-[9px] mt-2 pt-2 border-t border-zinc-700"><div class="text-[#00ff41]">${escapeHtml(roastLabel)}${translatedFbLabel ? ' · ' + escapeHtml(translatedFbLabel) : ''}</div><div class="text-white">${escapeHtml(String(feedback.title || '').trim())}</div></div>` : ''}</div>`;
                                 } else if (useRankColors) {
-                                    tooltipContent = `<div class="font-mono text-xs"><b>${label}</b>${proxyLabel}<br/>${msgsLabel}: ${nf.format(totalMessages)}`;
+                                    tooltipContent = `<div class="font-mono text-xs"><b>${label}</b>${proxyLabel}<br/>${msgsLabel}: ${new Intl.NumberFormat().format(totalMessages)}`;
                                     const denom = (typeof totalCountries !== 'undefined' && totalCountries > 0) ? totalCountries : 195;
                                     if (rank != null && rank > 0) tooltipContent += `<br/>${rankLabel}: #${rank}/${denom}`;
-                                    tooltipContent += pending ? `<br/><span class="text-zinc-500">${currentLang === 'en' ? 'Loading...' : '加载中...'}</span></div>` : `<br/>${dimLabel}: --</div>`;
+                                    tooltipContent += `<br/>${dimLabel}: --</div>`;
                                 } else {
-                                    tooltipContent = `<div class="font-mono text-xs">${label}${proxyLabel}<br/>${escapeHtml(activeNodesLabel)}: ${nf.format(totalMessages)}${pending ? '<br/><span class="text-zinc-500">' + (currentLang === 'en' ? 'Loading...' : '加载中...') + '</span>' : ''}</div>`;
+                                    tooltipContent = `<div class="font-mono text-xs">${label}${proxyLabel}<br/>${escapeHtml(activeNodesLabel)}: ${totalMessages}</div>`;
                                 }
                                 return tooltipContent;
                             }
@@ -9659,31 +8739,16 @@
                     } catch (_) { updatedEl.style.display = 'none'; }
                 } else if (updatedEl) updatedEl.style.display = 'none';
 
-                // 添加鼠标悬浮高亮效果，并拉取该国实时摘要供 tooltip 显示
+                // 添加鼠标悬浮高亮效果
                 mapChart.off('mouseover');
                 mapChart.on('mouseover', (params) => {
                     if (params.seriesType === 'map' && params.name) {
                         try {
-                            mapChart.dispatchAction({ type: 'highlight', name: params.name });
-                            var dataItem = params.data || {};
-                            var code = dataItem.countryCode || (typeof resolveCountryCodeFromMapName === 'function' ? resolveCountryCodeFromMapName(params.name) : null);
-                            if (code && /^[A-Z]{2}$/.test(String(code).toUpperCase())) {
-                                code = String(code).toUpperCase();
-                                if (window.__mapCountrySummaryCache && !window.__mapCountrySummaryCache.has(code) && window.__mapCountrySummaryPending && !window.__mapCountrySummaryPending.has(code) && typeof fetchCountrySummaryV3 === 'function') {
-                                    window.__mapCountrySummaryPending.add(code);
-                                    var seriesIndex = params.seriesIndex;
-                                    var dataIndex = params.dataIndex;
-                                    fetchCountrySummaryV3(code).then(function(s) {
-                                        if (window.__mapCountrySummaryCache) window.__mapCountrySummaryCache.set(code, s || {});
-                                        if (window.__mapCountrySummaryPending) window.__mapCountrySummaryPending.delete(code);
-                                        try {
-                                            mapChart.dispatchAction({ type: 'showTip', seriesIndex: seriesIndex, dataIndex: dataIndex });
-                                        } catch (_) {}
-                                    }).catch(function() {
-                                        if (window.__mapCountrySummaryPending) window.__mapCountrySummaryPending.delete(code);
-                                    });
-                                }
-                            }
+                            // 高亮当前悬浮的国家
+                            mapChart.dispatchAction({
+                                type: 'highlight',
+                                name: params.name
+                            });
                         } catch (e) {
                             console.warn('[Map] ⚠️ 悬浮高亮失败:', e);
                         }
@@ -10068,9 +9133,9 @@
                                 if (typeof showDrawersWithCountryData === 'function') {
                                     showDrawersWithCountryData(ccUpper, countryName);
                                 }
-                                // 进入国家透视视图并强制刷新该国数据（点击地图即切换并刷新）
+                                // 进入国家透视视图（但不切换国籍）
                                 if (typeof switchToCountryView === 'function') {
-                                    switchToCountryView(ccUpper, countryName, { forceRefresh: true });
+                                    switchToCountryView(ccUpper, countryName);
                                 }
                                 // 切换视图到国家透视
                                 if (typeof switchView === 'function') {
@@ -11689,32 +10754,35 @@
             try {
                 const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content || '';
                 const base = apiEndpoint.endsWith('/') ? apiEndpoint.slice(0, -1) : apiEndpoint;
+                var _afp = '';
+                try { _afp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+                const analyzeUrl = base ? `${base}/api/v2/analyze?fingerprint=${encodeURIComponent(_afp)}&_t=${Date.now()}` : '/api/v2/analyze?fingerprint=' + encodeURIComponent(_afp) + '&_t=' + Date.now();
                 
                 let fingerprint = null;
                 try {
                     fingerprint = localStorage.getItem('user_fingerprint') || window.fpId || null;
                 } catch (e) {}
                 
-                // 【核心修复】使用 /api/update-location 而非 /api/v2/analyze 保存位置
-                // 避免 analyze 的 minimal chatData=['.'] 生成低数值数据覆盖已有数据
                 const payload = {
-                    fingerprint: fingerprint,
-                    new_cc: countryCode || null,
+                    chatData: [{ role: 'USER', text: '.' }],
+                    manual_location: countryCode || null,
                     manual_lat: lat,
-                    manual_lng: lng
+                    manual_lng: lng,
+                    fingerprint: fingerprint
                 };
                 
-                // 如果已登录 GitHub，添加 user_id
+                // 如果已登录 GitHub，添加 id
                 if (supabaseClient) {
                     try {
                         const { data: { session } } = await supabaseClient.auth.getSession();
                         if (session && session.user) {
-                            payload.user_id = session.user.id;
+                            payload.id = session.user.id;
+                            payload.user_identity = 'github';
                         }
                     } catch (e) {}
                 }
                 
-                const res = await fetch(base ? `${base}/api/update-location` : '/api/update-location', {
+                const res = await fetch(analyzeUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
@@ -11917,25 +10985,16 @@
             try {
                 fingerprint = localStorage.getItem('user_fingerprint') || window.fpId || null;
             } catch (e) {}
-            
-            // 【核心修复】使用 /api/update-location 而非 /api/v2/analyze，避免生成低数值数据
+            const analyzeUrl = base ? `${base}/api/v2/analyze?fingerprint=${encodeURIComponent(fingerprint || '')}&_t=${Date.now()}` : '/api/v2/analyze?fingerprint=' + encodeURIComponent(fingerprint || '') + '&_t=' + Date.now();
             const payload = {
-                fingerprint: fingerprint,
-                new_cc: countryCode || null,
+                chatData: [{ role: 'USER', text: '.' }],
+                manual_location: countryCode || null,
                 manual_lat: lat,
-                manual_lng: lng
+                manual_lng: lng,
+                fingerprint: fingerprint
             };
-            // 如果已登录 GitHub，添加 user_id
-            if (typeof supabaseClient !== 'undefined' && supabaseClient) {
-                try {
-                    const { data: { session } } = await supabaseClient.auth.getSession();
-                    if (session && session.user) {
-                        payload.user_id = session.user.id;
-                    }
-                } catch (e) {}
-            }
             try {
-                const res = await fetch(base ? `${base}/api/update-location` : '/api/update-location', {
+                const res = await fetch(analyzeUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
@@ -11943,6 +11002,7 @@
                 if (!res.ok) {
                     console.warn('[Calibration] ⚠️ 校准接口返回非 2xx:', res.status);
                 } else {
+                    const data = await res.json().catch(() => ({}));
                     // 【新增】锁定标志：防止后续异步操作覆盖
                     localStorage.setItem('loc_locked', 'true');
                     window.__cursorLocked = true; // 设置全局锁定标志
@@ -12082,9 +11142,8 @@
                     localStorage.setItem(cacheKey, JSON.stringify({ data: normalized, time: Date.now() }));
                 } catch (e) { /* 忽略存储错误 */ }
                 
-                // 标记端点健康，并清除该国“加载失败”标记以便后续防抖正常
+                // 标记端点健康
                 if (apiManager) apiManager.markHealthy(baseEndpoint, true);
-                try { if (window.__drawerLastFailCc === cc) { window.__drawerLastFailCc = null; window.__drawerLastFailTs = null; } } catch (_) {}
                 
                 console.log(`[CountrySummary] ✅ ${cc} 加载成功`);
                 return normalized && typeof normalized === 'object' ? normalized : null;
@@ -12102,10 +11161,9 @@
                     return fetchCountrySummaryV3(countryCode, attempt + 1);
                 }
 
-                // 超时/网络错误时在右侧抽屉显示友好提示，并记录失败以便允许立即重试（点击地图或重试）
+                // 超时/网络错误时在右侧抽屉显示友好提示（不只在控制台）
                 const statusEl = document.getElementById('rtDataStatus');
-                if (statusEl) statusEl.textContent = (currentLang === 'en' ? 'Network unstable. Click map again to retry' : '网络不稳，可再次点击地图重试');
-                try { window.__drawerLastFailCc = cc; window.__drawerLastFailTs = Date.now(); } catch (_) {}
+                if (statusEl) statusEl.textContent = (currentLang === 'en' ? 'Network unstable, retry or refresh' : '网络连接不稳定，请稍后或刷新');
 
                 // 错误分类提示
                 if (e.name === 'AbortError') {
@@ -13431,8 +12489,7 @@
                             });
 
                             if (index !== -1) {
-                                // 【核心保护】使用安全合并，防止 Realtime 推送的新/低数值覆盖已有本地/GitHub 数据
-                                window.allData[index] = (typeof safeMaxMergeUserData === 'function' ? safeMaxMergeUserData : (a, b) => ({ ...a, ...b }))(window.allData[index], updatedRecord);
+                                window.allData[index] = { ...window.allData[index], ...updatedRecord };
                                 console.log(`[Realtime] ✅ 已更新 window.allData 中的记录 (索引: ${index})`);
                             } else {
                                 window.allData.unshift(updatedRecord);
@@ -13504,10 +12561,8 @@
                                 if (isCurrentUser) {
                                     console.log('[Realtime] ✅ 检测到当前用户数据更新，刷新排名卡片');
                                     
-                                    // 【核心保护】使用安全合并，防止 Realtime 推送的低数值覆盖已有的本地/GitHub 数据
-                                    const existingUser = window.currentUser || {};
-                                    const mergedCurrent = (typeof safeMaxMergeUserData === 'function' ? safeMaxMergeUserData : (a, b) => ({ ...a, ...b }))(existingUser, updatedRecord);
-                                    window.currentUser = mergedCurrent;
+                                    // 更新全局变量
+                                    window.currentUser = updatedRecord;
                                     window.currentUserMatchedByFingerprint = matchedByFingerprint;
                                     
                                     // 更新 window.allData 中的对应记录
@@ -13524,15 +12579,15 @@
                                     });
                                     
                                     if (updateIndex !== -1) {
-                                        allData[updateIndex] = (typeof safeMaxMergeUserData === 'function' ? safeMaxMergeUserData : (a, b) => ({ ...a, ...b }))(allData[updateIndex], mergedCurrent);
+                                        allData[updateIndex] = updatedRecord;
                                         window.allData = allData;
                                     } else {
                                         // 如果没找到，说明上面的 upsert 已做过（或匹配条件不同）；这里不再 push，避免重复
                                         window.allData = allData;
                                     }
                                     
-                                    // 使用安全合并后的记录渲染，确保卡片数字能够实时变动
-                                    renderRankCards(mergedCurrent);
+                                    // 使用更新后的记录直接渲染，确保卡片数字能够实时变动
+                                    renderRankCards(updatedRecord);
                                 } else {
                                     console.debug('[Realtime] ℹ️ 更新的记录不是当前用户，跳过排名卡片刷新');
                                 }
@@ -14150,6 +13205,7 @@
                         data-avatar-url="${escapeHtml(avatarUrl)}"
                         data-status="${status}"
                         data-status-label="${statusConfig.label}"
+                        onclick="toggleUserPopup(event, ${index})"
                     >
                         <img 
                             src="${avatarUrl}" 
@@ -14518,7 +13574,7 @@
         function openMessageSender(toId, toName) {
             var overlay = document.createElement('div');
             overlay.className = 'message-input-overlay';
-            overlay.style.zIndex = '20001';
+            overlay.style.zIndex = '1001';
             overlay.onclick = function(e) {
                 if (e.target === overlay) overlay.remove();
             };
@@ -14788,10 +13844,9 @@
                 popup.remove();
                 currentPopupElement = null;
             }
-            // 创建遮罩层（置于最高层，避免被活跃节点/抽屉遮挡）
+            // 创建遮罩层
             const overlay = document.createElement('div');
             overlay.className = 'message-input-overlay';
-            overlay.style.zIndex = '20001';
             overlay.onclick = (e) => {
                 if (e.target === overlay) {
                     overlay.remove();
@@ -15284,14 +14339,52 @@
                             username: githubUsername
                         });
                         
-                        // 【自动合并】检测到指纹 + GitHub 登录后直接执行迁移，不再弹出确认框
+                        // 【合并确认弹窗】在迁移前检查是否需要用户确认
                         const claimToken = localStorage.getItem('vibe_claim_token');
                         const hasLocalData = claimToken || currentFp;
                         const localDataExists = localStorage.getItem('last_analysis_data') || claimToken;
+                        
+                        // 【认领备选】有 claimToken 用认领，无则用本地 fingerprint 作为备选，确保匿名数据能合并到 GitHub
+                        // 如果需要确认，先显示弹窗
                         if (hasLocalData && localDataExists) {
-                            console.log('[Auth] ✅ 检测到本地数据，自动合并到 GitHub 账号');
-                        } else {
-                            console.log('[Auth] ℹ️ 无本地新数据，直接迁移');
+                            const shouldMerge = await new Promise((resolve) => {
+                                const dialog = document.createElement('div');
+                                dialog.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50';
+                                dialog.id = 'merge-confirm-dialog';
+                                dialog.innerHTML = `
+                                    <div class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+                                        <h3 class="text-lg font-semibold text-gray-900 mb-2">数据合并确认</h3>
+                                        <p class="text-sm text-gray-600 mb-4">检测到您有未归档的战绩，是否合并到 GitHub 账号？</p>
+                                        <div class="flex gap-3 justify-end">
+                                            <button class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors" id="merge-cancel">取消</button>
+                                            <button class="px-4 py-2 text-sm font-medium text-black bg-[var(--accent-terminal)] rounded-md hover:bg-[var(--accent-terminal)]/80 transition-colors" id="merge-confirm">合并</button>
+                                        </div>
+                                    </div>
+                                `;
+                                document.body.appendChild(dialog);
+                                
+                                const removeDialog = () => {
+                                    const dialogElement = document.getElementById('merge-confirm-dialog');
+                                    if (dialogElement && dialogElement.parentNode) {
+                                        dialogElement.parentNode.removeChild(dialogElement);
+                                    }
+                                };
+                                
+                                dialog.querySelector('#merge-confirm')?.addEventListener('click', () => {
+                                    removeDialog();
+                                    resolve(true);
+                                });
+                                
+                                dialog.querySelector('#merge-cancel')?.addEventListener('click', () => {
+                                    removeDialog();
+                                    resolve(false);
+                                });
+                            });
+                            
+                            if (!shouldMerge) {
+                                console.log('[Auth] ℹ️ 用户取消合并，跳过迁移');
+                                return;
+                            }
                         }
                         
                         // 显示同步遮罩
@@ -15451,25 +14544,20 @@
                                     allData.splice(oldIndex, 1);
                                 }
                                 
-                                // 添加或更新迁移后的用户数据（使用安全合并，取核心数值的较大值）
+                                // 添加或更新迁移后的用户数据
                                 const newIndex = allData.findIndex(item => item.id === githubUserId);
                                 if (newIndex !== -1) {
-                                    allData[newIndex] = safeMaxMergeUserData(allData[newIndex], migratedUser);
+                                    allData[newIndex] = { ...allData[newIndex], ...migratedUser };
                                 } else {
                                     allData.push(migratedUser);
                                 }
                                 window.allData = allData;
                                 
-                                // 【核心修复】使用合并后的记录作为 currentUser，而非原始 migratedUser（防止弱数据覆盖）
-                                const finalUser = (newIndex !== -1) ? allData[newIndex] : migratedUser;
-                                window.currentUser = finalUser;
-                                window.currentUserData = finalUser;
+                                // 设置当前用户为迁移后的用户
+                                window.currentUser = migratedUser;
                                 window.currentUserMatchedByFingerprint = false; // 现在是通过 GitHub OAuth 匹配的
                                 
                                 console.log('[Auth] ✅ 身份合并完成，历史数据已迁移到 GitHub User ID');
-                                
-                                // 【核心】标记迁移完成时间，供 switchGlobalCountry 在短时间内跳过 analyze 上报，避免覆盖
-                                try { window.__migrationJustCompletedAt = Date.now(); } catch (_) {}
                                 
                                 // 【顺序重组】Step B: 调用 autoReportSelf（上报当前地理位置，确保 GitHub 账号有了 lat/lng）
                                 // 【去重】若本页已执行过自动上报则跳过，避免 fingerprint/github 数据在后台生成两次
@@ -15670,20 +14758,14 @@
                         );
                         
                         if (index !== -1) {
-                            // 【核心保护】使用安全合并，防止新数据/低数值覆盖已有的本地/GitHub数据
-                            allData[index] = safeMaxMergeUserData(allData[index], updatedUser);
+                            allData[index] = { ...allData[index], ...updatedUser };
                         } else {
                             allData.push(updatedUser);
                         }
                         window.allData = allData;
                         
-                        // 【关键修复】使用合并后的记录作为 currentUser，确保左侧抽屉能显示 allData 中已有的维度/人格/箴言等完整数据
-                        // 【核心保护】同时与现有 window.currentUser 合并，防止覆盖 index 传递的高数值数据
-                        var baseRecord = (index !== -1) ? allData[index] : updatedUser;
-                        var existingCurrent = window.currentUser || window.currentUserData || {};
-                        window.currentUser = (typeof safeMaxMergeUserData === 'function')
-                            ? safeMaxMergeUserData(existingCurrent, baseRecord)
-                            : Object.assign({}, existingCurrent, baseRecord);
+                        // 【关键修复】使用合并后的记录作为 currentUser，确保左侧抽屉能显示 allData 中已有的维度/人格/箴言等完整数据（而非仅 upsert 返回的简略字段）
+                        window.currentUser = (index !== -1) ? allData[index] : updatedUser;
                         window.currentUserMatchedByFingerprint = true;
                         
                         // 【Task 1】清除本地的 user_fingerprint 缓存，统一使用 Supabase User ID
@@ -15734,21 +14816,12 @@
                                                     const patched = { ...updatedUser };
                                                     if (cachedDims) patched.dimensions = cachedDims;
                                                     if (cachedStats) patched.stats = cachedStats;
-                                                    // 【核心保护】使用安全合并，防止覆盖已有的高数值
-                                                    var existingCurr = window.currentUser || window.currentUserData || {};
-                                                    window.currentUser = (typeof safeMaxMergeUserData === 'function')
-                                                        ? safeMaxMergeUserData(existingCurr, patched)
-                                                        : Object.assign({}, existingCurr, patched);
+                                                    window.currentUser = patched;
                                                     
                                                     const allData2 = window.allData || [];
                                                     const userIndex2 = allData2.findIndex(item => item.id === patched.id);
-                                                    if (userIndex2 !== -1) {
-                                                        allData2[userIndex2] = (typeof safeMaxMergeUserData === 'function')
-                                                            ? safeMaxMergeUserData(allData2[userIndex2], patched)
-                                                            : Object.assign({}, allData2[userIndex2], patched);
-                                                    } else {
-                                                        allData2.push(patched);
-                                                    }
+                                                    if (userIndex2 !== -1) allData2[userIndex2] = { ...allData2[userIndex2], ...patched };
+                                                    else allData2.push(patched);
                                                     window.allData = allData2;
                                                     
                                                     if (typeof window.refreshUserStats === 'function') {
@@ -15783,16 +14856,16 @@
                                                     console.log('[Auth] 🔑 影子令牌已保存到本地:', analyzeResult.claim_token.substring(0, 8) + '...');
                                                 }
                                                 
-                                                // 更新 updatedUser 数据（使用安全合并，防止分析结果覆盖更高值的本地数据）
+                                                // 更新 updatedUser 数据
                                                 if (analyzeResult.dimensions) {
-                                                    updatedUser = (typeof safeMaxMergeUserData === 'function' ? safeMaxMergeUserData : (a, b) => ({ ...a, ...b }))(updatedUser, analyzeResult);
+                                                    updatedUser = { ...updatedUser, ...analyzeResult };
                                                     window.currentUser = updatedUser;
                                                     
                                                     // 更新 allData
                                                     const allData = window.allData || [];
                                                     const userIndex = allData.findIndex(item => item.id === updatedUser.id);
                                                     if (userIndex !== -1) {
-                                                        allData[userIndex] = (typeof safeMaxMergeUserData === 'function' ? safeMaxMergeUserData : (a, b) => ({ ...a, ...b }))(allData[userIndex], updatedUser);
+                                                        allData[userIndex] = updatedUser;
                                                     } else {
                                                         allData.push(updatedUser);
                                                     }
@@ -15867,17 +14940,13 @@
                             // 如果 refreshUserStats 没有设置 currentUser，使用 updatedUser
                             if (!window.currentUser && updatedUser) {
                                 console.log('[Auth] 🔄 refreshUserStats 未设置 currentUser，使用 updatedUser');
-                                // 【核心保护】与现有数据合并，防止覆盖高数值
-                                var existingData = window.currentUserData || {};
-                                window.currentUser = (typeof safeMaxMergeUserData === 'function')
-                                    ? safeMaxMergeUserData(existingData, updatedUser)
-                                    : Object.assign({}, existingData, updatedUser);
+                                window.currentUser = updatedUser;
                                 
-                                // 更新 allData（使用安全合并，防止覆盖更高值的本地数据）
+                                // 更新 allData
                                 const allData = window.allData || [];
                                 const userIndex = allData.findIndex(item => item.id === updatedUser.id);
                                 if (userIndex !== -1) {
-                                    allData[userIndex] = (typeof safeMaxMergeUserData === 'function' ? safeMaxMergeUserData : (a, b) => ({ ...a, ...b }))(allData[userIndex], updatedUser);
+                                    allData[userIndex] = updatedUser;
                                 } else {
                                     allData.push(updatedUser);
                                 }
@@ -16488,11 +15557,8 @@
                 // ============================================
                 console.log('[GitHub] 🔄 开始刷新全局数据和 UI...');
                 
-                // 6.1 更新全局用户数据（使用安全合并，防止覆盖高数值）
-                var existingGh = window.currentUser || window.currentUserData || {};
-                window.currentUser = (typeof safeMaxMergeUserData === 'function')
-                    ? safeMaxMergeUserData(existingGh, updatedUser)
-                    : Object.assign({}, existingGh, updatedUser);
+                // 6.1 更新全局用户数据
+                window.currentUser = updatedUser;
                 window.currentUserMatchedByFingerprint = true;
                 
                 // 6.2 更新 window.allData 中的对应记录
@@ -16504,9 +15570,8 @@
                 );
                 
                 if (index !== -1) {
-                    // 【核心保护】使用安全合并，防止新数据/低数值覆盖已有的本地/GitHub数据
-                    allData[index] = safeMaxMergeUserData(allData[index], updatedUser);
-                    console.log('[GitHub] ✅ 已更新 allData 中的记录（安全合并），索引:', index);
+                    allData[index] = { ...allData[index], ...updatedUser };
+                    console.log('[GitHub] ✅ 已更新 allData 中的记录，索引:', index);
                 } else {
                     allData.push(updatedUser);
                     console.log('[GitHub] ✅ 已添加新记录到 allData');
@@ -18003,13 +17068,8 @@
                                     return;
                                 }
                                 console.log('[UserStats] ✅ 已获取完整用户记录，刷新统计卡片:', dbUser.user_name || dbUser.name);
-                                // 【核心保护】使用安全合并，防止覆盖已有的高数值
-                                var existingUser = window.currentUser || window.currentUserData || {};
-                                var mergedUser = (typeof safeMaxMergeUserData === 'function')
-                                    ? safeMaxMergeUserData(existingUser, dbUser)
-                                    : Object.assign({}, existingUser, dbUser);
-                                try { window.currentUser = mergedUser; } catch { /* ignore */ }
-                                renderUserStatsCards(leftBody, getBestUserRecordForStats(mergedUser));
+                                try { window.currentUser = dbUser; } catch { /* ignore */ }
+                                renderUserStatsCards(leftBody, getBestUserRecordForStats(dbUser));
                             })
                             .catch((e) => {
                                 console.warn('[UserStats] ⚠️ v_unified_analysis_v2 查询失败:', e);
@@ -19061,37 +18121,6 @@
                         window.tailwind.config.refresh();
                     }
                 } catch (e) { /* ignore */ }
-                
-                // 【词云卡片自适应定位】将词云卡片移到「我的数据统计」之后、「实时诊断活动」之前
-                try {
-                    const wordcloudCard = document.getElementById('left-drawer-wordcloud-wrap');
-                    console.log('[UserStats] 词云卡片查找结果:', {
-                        找到词云卡片: !!wordcloudCard,
-                        词云卡片可见: wordcloudCard ? window.getComputedStyle(wordcloudCard).display : 'N/A',
-                        父节点: wordcloudCard?.parentNode?.id || 'N/A',
-                        statsCard存在: !!statsCard,
-                        statsCard父节点正确: statsCard?.parentNode === leftBody
-                    });
-                    
-                    if (wordcloudCard && statsCard && statsCard.parentNode === leftBody) {
-                        // 将词云卡片移到「我的数据统计」卡片之后
-                        if (statsCard.nextSibling) {
-                            leftBody.insertBefore(wordcloudCard, statsCard.nextSibling);
-                        } else {
-                            leftBody.appendChild(wordcloudCard);
-                        }
-                        
-                        // 确保词云卡片可见
-                        wordcloudCard.style.display = '';
-                        wordcloudCard.style.visibility = 'visible';
-                        
-                        console.log('[UserStats] ✅ 词云卡片已自适应移至「我的数据统计」之后，当前位置索引:', 
-                            Array.from(leftBody.children).indexOf(wordcloudCard));
-                    }
-                } catch (e) {
-                    console.warn('[UserStats] ⚠️ 词云卡片定位调整失败:', e);
-                }
-                
                 console.log('[UserStats] ✅ 用户统计卡片已渲染');
             } catch (error) {
                 console.error('[UserStats] ❌ 渲染用户统计卡片失败:', error);
@@ -20012,11 +19041,10 @@
                         } else if (dbUser) {
                             console.log('[LPDEF] ✅ 从 Supabase 查询到用户:', dbUser.user_name || dbUser.name);
                             
-                            // 将查询到的用户添加到 allData（使用安全合并）
+                            // 将查询到的用户添加到 allData
                             const existingIndex = allData.findIndex(item => item.id === dbUser.id);
                             if (existingIndex !== -1) {
-                                // 【核心保护】使用安全合并，防止新数据/低数值覆盖已有的本地/GitHub数据
-                                allData[existingIndex] = safeMaxMergeUserData(allData[existingIndex], dbUser);
+                                allData[existingIndex] = { ...allData[existingIndex], ...dbUser };
                             } else {
                                 allData.push(dbUser);
                             }
@@ -20086,11 +19114,6 @@
                 
                 // 保存匹配方式到全局变量，供 renderRankCards 使用
                 if (currentUser) {
-                    // 【核心保护】使用安全合并，防止allData中数据覆盖已有的高数值（如index传递的数据）
-                    var existingUser = window.currentUser || window.currentUserData || {};
-                    currentUser = (typeof safeMaxMergeUserData === 'function')
-                        ? safeMaxMergeUserData(existingUser, currentUser)
-                        : Object.assign({}, existingUser, currentUser);
                     window.currentUser = currentUser;
                     window.currentUserMatchedByFingerprint = matchedByFingerprint;
                 }
@@ -20154,13 +19177,12 @@
                                         // 更新 currentUser 对象
                                         currentUser.github_username = localGitHubName;
                                         currentUser.user_name = localGitHubName;
-                                        // 更新 window.allData 中的对应记录（使用安全合并）
+                                        // 更新 window.allData 中的对应记录
                                         const index = allData.findIndex(u => 
                                             (u.fingerprint || u.user_identity || u.id) === updateValue
                                         );
                                         if (index !== -1) {
-                                            // 【核心保护】使用安全合并，防止新数据/低数值覆盖已有的本地/GitHub数据
-                                            allData[index] = safeMaxMergeUserData(allData[index], currentUser);
+                                            allData[index] = { ...allData[index], ...currentUser };
                                             window.allData = allData;
                                         }
                                     }
@@ -20174,11 +19196,6 @@
                 
                 // 7. 保存匹配结果到全局变量
                 if (currentUser) {
-                    // 【核心保护】使用安全合并，防止allData中数据覆盖已有的高数值（如index传递的数据）
-                    var existingUser2 = window.currentUser || window.currentUserData || {};
-                    currentUser = (typeof safeMaxMergeUserData === 'function')
-                        ? safeMaxMergeUserData(existingUser2, currentUser)
-                        : Object.assign({}, existingUser2, currentUser);
                     window.currentUser = currentUser;
                     window.currentUserMatchedByFingerprint = matchedByFingerprint;
                     console.log('[Rank] ✅ 用户匹配成功，已设置全局变量');
@@ -20636,7 +19653,7 @@
             if (items.length === 0) {
                 ol.innerHTML = '';
                 if (empty) {
-                    empty.textContent = '暂无灵魂词，快去分析吧';
+                    empty.textContent = '暂无该国词云数据';
                     empty.classList.remove('hidden');
                 }
                 if (meta) meta.textContent = '--';
@@ -20700,19 +19717,17 @@
         })();
 
         (function bindNationalIdentityTabs() {
-            if (document.body.dataset.nationalIdentityTabsBound) return;
-            document.body.dataset.nationalIdentityTabsBound = '1';
-            window.__currentNationalIdentityLevel = window.__currentNationalIdentityLevel || 'Architect';
+            var tabsEl = document.getElementById('national-identity-tabs');
+            if (!tabsEl || tabsEl.dataset.bound) return;
+            tabsEl.dataset.bound = '1';
+            window.__currentNationalIdentityLevel = window.__currentNationalIdentityLevel || 'Novice';
             var colorByLevel = { Novice: '#10b981', Professional: '#3b82f6', Architect: '#5b21b6' };
-            document.addEventListener('click', function(e) {
+            tabsEl.addEventListener('click', function(e) {
                 var btn = e.target && e.target.closest && e.target.closest('.national-identity-tab');
-                if (!btn) return;
-                var currentText = (btn.textContent || '').trim();
-                var level = (typeof levelMap !== 'undefined' && levelMap[currentText]) ? levelMap[currentText] : (btn.dataset.level || 'Architect');
-                level = (level === 'Professional' || level === 'Architect') ? level : 'Novice';
+                if (!btn || !btn.dataset.level) return;
+                var level = btn.dataset.level;
                 window.__currentNationalIdentityLevel = level;
-                var tabsEl = btn.closest && btn.closest('#national-identity-tabs');
-                var all = tabsEl ? tabsEl.querySelectorAll('.national-identity-tab') : [btn];
+                var all = tabsEl.querySelectorAll('.national-identity-tab');
                 all.forEach(function(b) {
                     b.classList.remove('border-[var(--accent-terminal)]', 'bg-[var(--accent-terminal)]/20', 'text-[var(--accent-terminal)]');
                     b.classList.add('border-white/10', 'bg-transparent', 'text-zinc-400');
@@ -20723,113 +19738,8 @@
                 btn.style.borderColor = hex;
                 btn.style.backgroundColor = hex + '26';
                 btn.style.color = hex;
-                var cloudLoadingHint = document.getElementById('cloud-loading-hint');
-                if (cloudLoadingHint) { cloudLoadingHint.classList.add('hidden'); cloudLoadingHint.textContent = ''; }
-                var render = window._renderNationalIdentityCloud || (typeof _renderNationalIdentityCloud === 'function' ? _renderNationalIdentityCloud : null);
-                if (render) render(level);
+                if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud(level);
             });
-        })();
-
-        /**
-         * 【修复】自动预加载本国词云数据
-         * 确保在页面加载、左抽屉打开或切换到国家视图时，自动同步国家并获取/渲染词云数据
-         */
-        (function autoPreloadNationalCloud() {
-            // 避免重复预加载
-            if (window.__nationalCloudPreloaded) return;
-            window.__nationalCloudPreloaded = true;
-            
-            // 默认使用 Architect（霸天）级别
-            window.__currentNationalIdentityLevel = window.__currentNationalIdentityLevel || 'Architect';
-            
-            function syncSelectedCountryForCloud() {
-                try {
-                    if (window.__selectedCountry && /^[A-Z]{2}$/.test(String(window.__selectedCountry))) return;
-                    if (window.currentDrawerCountry && window.currentDrawerCountry.code)
-                        window.__selectedCountry = String(window.currentDrawerCountry.code).trim().toUpperCase();
-                    if (!window.__selectedCountry)
-                        window.__selectedCountry = (localStorage.getItem('user_selected_country') || localStorage.getItem('user_manual_location') || '').trim().toUpperCase();
-                } catch (e) {}
-            }
-            function updateLeftDrawerCountryHint(region) {
-                var hint = document.getElementById('vibe-country-hint');
-                if (!hint || !region || !/^[A-Z]{2}$/.test(region)) return;
-                try {
-                    var loc = (typeof currentLang === 'string' && currentLang === 'en') ? 'en' : 'zh-CN';
-                    var dn = new Intl.DisplayNames([loc], { type: 'region' });
-                    var label = dn.of(region) || region;
-                    var prefix = typeof getI18nText === 'function' ? getI18nText('panel.nation_prefix') : 'NATION';
-                    hint.textContent = (prefix || '国家') + ': ' + label;
-                } catch (e) { hint.textContent = '国家: ' + region; }
-            }
-            
-            function tryPreload() {
-                syncSelectedCountryForCloud();
-                var svc = window.StatsDataService;
-                var defaultLevel = window.__currentNationalIdentityLevel || 'Architect';
-                
-                // 检查是否已经有数据
-                if (window.__countryKeywordsByLevel && 
-                    (window.__countryKeywordsByLevel[defaultLevel] || []).length > 0) {
-                    var render = window._renderNationalIdentityCloud || 
-                        (typeof _renderNationalIdentityCloud === 'function' ? _renderNationalIdentityCloud : null);
-                    if (render) {
-                        render(defaultLevel);
-                        updateLeftDrawerCountryHint(window.__selectedCountry);
-                    }
-                    return;
-                }
-                
-                if (svc && typeof svc.fetchCountryKeywords === 'function') {
-                    var empty = document.getElementById('vibe-cloud50-empty');
-                    if (empty) {
-                        empty.textContent = '正在扫描该国开发者指纹...';
-                        empty.classList.remove('hidden');
-                    }
-                    
-                    svc.fetchCountryKeywords().then(function() {
-                        var render = window._renderNationalIdentityCloud || 
-                            (typeof _renderNationalIdentityCloud === 'function' ? _renderNationalIdentityCloud : null);
-                        if (render) {
-                            render(defaultLevel);
-                            updateLeftDrawerCountryHint(window.__selectedCountry);
-                        }
-                    }).catch(function(err) {
-                        console.warn('[autoPreloadNationalCloud] 预加载词云数据失败:', err);
-                        empty = document.getElementById('vibe-cloud50-empty');
-                        if (empty) {
-                            empty.textContent = '暂无灵魂词，快去分析吧';
-                            empty.classList.remove('hidden');
-                        }
-                    });
-                }
-            }
-            
-            if (document.readyState === 'complete' || document.readyState === 'interactive') {
-                setTimeout(tryPreload, 250);
-            } else {
-                document.addEventListener('DOMContentLoaded', function() {
-                    setTimeout(tryPreload, 250);
-                });
-            }
-            
-            window.addEventListener('countryviewshown', function() {
-                setTimeout(tryPreload, 100);
-            });
-            
-            // 左抽屉打开时同步国家并刷新词云（解决仅打开左抽屉未选国家时词云不加载）
-            var leftDrawerEl = document.getElementById('left-drawer');
-            if (leftDrawerEl) {
-                var obs = new MutationObserver(function(mutations) {
-                    mutations.forEach(function(m) {
-                        if (m.attributeName === 'class' && leftDrawerEl.classList.contains('active')) {
-                            setTimeout(tryPreload, 150);
-                        }
-                    });
-                });
-                obs.observe(leftDrawerEl, { attributes: true });
-            }
-            window.__tryPreloadNationalCloud = tryPreload;
         })();
 
         function _hexToRgba(hex, alpha) {
@@ -20838,145 +19748,38 @@
             return 'rgba(' + parseInt(m[1], 16) + ',' + parseInt(m[2], 16) + ',' + parseInt(m[3], 16) + ',' + (alpha != null ? alpha : 0.8) + ')';
         }
 
-        var LEVEL_TO_KEY_WC = { Novice: 'Novice', Professional: 'Professional', Architect: 'Architect', Pro: 'Professional', novice: 'Novice', pro: 'Professional', architect: 'Architect' };
-        var LEVEL_TO_CANVAS_ID_WC = { Novice: 'canvas-novice', Professional: 'canvas-pro', Architect: 'canvas-arch' };
         function _renderNationalIdentityCloud(level) {
-            var levelKey = LEVEL_TO_KEY_WC[level] || (level === 'Professional' || level === 'Architect' ? level : 'Novice');
-            var cloudLoadingHint = document.getElementById('cloud-loading-hint');
-            if (cloudLoadingHint) { cloudLoadingHint.classList.add('hidden'); cloudLoadingHint.textContent = ''; }
             var container = document.getElementById('vibe-cloud50-container');
-            var canvasId = LEVEL_TO_CANVAS_ID_WC[levelKey] || 'canvas-novice';
-            var canvas = document.getElementById(canvasId);
-            if (!canvas) canvas = document.getElementById('national-identity-cloud-canvas');
+            var canvas = document.getElementById('national-identity-cloud-canvas');
             if (!container) return;
             if (!canvas) {
                 canvas = document.createElement('canvas');
-                canvas.id = canvasId;
-                canvas.setAttribute('data-level', levelKey);
+                canvas.id = 'national-identity-cloud-canvas';
                 canvas.setAttribute('style', 'display:block;width:100%;height:100%');
                 container.appendChild(canvas);
             }
-            ['canvas-novice', 'canvas-pro', 'canvas-arch'].forEach(function(id) {
-                var el = document.getElementById(id);
-                if (el) { el.style.display = id === canvasId ? 'block' : 'none'; el.setAttribute('aria-hidden', id === canvasId ? 'false' : 'true'); }
-            });
             var empty = document.getElementById('vibe-cloud50-empty');
             var meta = document.getElementById('vibe-cloud50-meta');
-            
-            // 【调试】记录当前渲染的国家和等级，便于排查数据混乱问题
-            var currentCountry = window.__selectedCountry || localStorage.getItem('user_selected_country') || localStorage.getItem('user_manual_location') || 'UNKNOWN';
-            console.log('[NationalCloud] 渲染本国词云 - 国家:', currentCountry, '等级:', levelKey, '数据源:', window.__countryKeywordsByLevel ? 'KV缓存' : '空');
-            
-            var data = (window.__countryKeywordsByLevel && window.__countryKeywordsByLevel[levelKey]) ? window.__countryKeywordsByLevel[levelKey] : [];
-            if (!Array.isArray(data)) data = [];
+            var data = window.__countryKeywordsByLevel && Array.isArray(window.__countryKeywordsByLevel[level]) ? window.__countryKeywordsByLevel[level] : [];
             if (data.length === 0) {
-                // 【Professional 隔离】当 level 为 Professional 时，仅允许使用 __countryKeywordsByLevel.Professional；空则显示「正在潜伏」，严禁回退到用户 Index 词云或自动拉取
-                if (levelKey === 'Professional') {
-                    if (canvas.getContext) {
-                        var ctxPro = canvas.getContext('2d');
-                        if (ctxPro) ctxPro.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
-                    }
-                    if (meta) meta.textContent = '--';
-                    if (empty) {
-                        empty.textContent = '正在潜伏';
-                        empty.classList.remove('hidden');
-                    }
-                    return;
-                }
-                // 非 Professional：数据为空时尝试自动获取
-                var svc = window.StatsDataService;
-                if (svc && typeof svc.fetchCountryKeywords === 'function' && !window.__isCloudLoading) {
-                    if (empty) {
-                        empty.textContent = '正在扫描该国开发者指纹...';
-                        empty.classList.remove('hidden');
-                    }
-                    svc.fetchCountryKeywords().then(function(result) {
-                        var hasData = result && (
-                            (result.Novice && result.Novice.length > 0) ||
-                            (result.Professional && result.Professional.length > 0) ||
-                            (result.Architect && result.Architect.length > 0) ||
-                            (result.globalNative && result.globalNative.length > 0)
-                        );
-                        if (hasData) {
-                            _renderNationalIdentityCloud(level);
-                        } else {
-                            if (empty) {
-                                empty.textContent = '正在同步词库...';
-                                empty.classList.remove('hidden');
-                            }
-                            setTimeout(function() {
-                                _renderNationalIdentityCloud(level);
-                            }, 800);
-                        }
-                    }).catch(function(err) {
-                        console.warn('[_renderNationalIdentityCloud] 获取词云数据失败:', err);
-                        if (empty) {
-                            empty.textContent = '加载失败，重试中...';
-                            empty.classList.remove('hidden');
-                        }
-                        setTimeout(function() {
-                            _renderNationalIdentityCloud(level);
-                        }, 1500);
-                    });
-                    return;
-                }
-                if (canvas.getContext) {
-                    var ctx = canvas.getContext('2d');
-                    if (ctx) ctx.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
-                }
+                if (canvas.getContext) canvas.getContext('2d').clearRect(0, 0, canvas.width || 0, canvas.height || 0);
                 if (meta) meta.textContent = '--';
                 if (empty) {
-                    empty.textContent = '正在拉取词云...';
+                    empty.textContent = '暂无该国词云数据';
                     empty.classList.remove('hidden');
                 }
-                setTimeout(function() {
-                    _renderNationalIdentityCloud(level);
-                }, 600);
                 return;
             }
             if (empty) empty.classList.add('hidden');
             if (meta) meta.textContent = 'N=' + data.length;
             var colorByLevel = { Novice: '#10b981', Professional: '#3b82f6', Architect: '#5b21b6' };
-            var baseHex = colorByLevel[levelKey] || '#5b21b6';
-            var currentUserFp = '';
-            try {
-                if (window.StatsDataService && typeof window.StatsDataService.getUserIdAndFingerprint === 'function') {
-                    currentUserFp = (window.StatsDataService.getUserIdAndFingerprint().fp || '').toString().trim();
-                }
-                if (!currentUserFp) currentUserFp = (localStorage.getItem('vibe_fp') || localStorage.getItem('user_fingerprint') || window.fpId || '').toString().trim();
-            } catch (e) { /* ignore */ }
-            var normalized = data.map(function(x) {
-                var phrase = (x.phrase != null ? String(x.phrase) : (x.word != null ? String(x.word) : '')).trim();
-                var weight = Number(x.weight != null ? x.weight : (x.count != null ? x.count : 0)) || 0;
-                var scaleWeight = x.scaleWeight != null ? Number(x.scaleWeight) : 1;
-                if (!Number.isFinite(scaleWeight) || scaleWeight <= 0) scaleWeight = 1;
-                // 【核心匹配】通过 fingerprint 或 fingerprints 数组匹配当前用户，高亮其贡献的词
-                var isUserWord = false;
-                if (currentUserFp) {
-                    // 检查单个 fingerprint 字段
-                    if (x.fingerprint && String(x.fingerprint).trim() === currentUserFp) {
-                        isUserWord = true;
-                    }
-                    // 检查 fingerprints 数组（后端聚合时返回的多用户贡献列表）
-                    if (!isUserWord && Array.isArray(x.fingerprints)) {
-                        for (var i = 0; i < x.fingerprints.length; i++) {
-                            if (String(x.fingerprints[i]).trim() === currentUserFp) {
-                                isUserWord = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-                if (isUserWord) scaleWeight = 1.5;
-                return { phrase: phrase, weight: weight, scaleWeight: scaleWeight, isUserWord: isUserWord };
-            }).filter(function(x) { return x.phrase.length > 0; });
-            var maxW = Math.max.apply(null, normalized.map(function(x) { return x.weight; })) || 1;
-            var list = normalized.map(function(x) {
-                var baseSize = Math.max(12, Math.min(80, 10 + Math.log2(x.weight + 1) * 14));
-                var size = Math.round(baseSize * (x.scaleWeight || 1));
-                size = Math.max(12, Math.min(80, size));
-                return [x.phrase, size];
-            }).filter(function(item) { return item[0].length > 0 && item[1] >= 0; });
+            var baseHex = colorByLevel[level] || '#10b981';
+            var maxW = Math.max.apply(null, data.map(function(x) { return x.weight || 0; })) || 1;
+            var list = data.map(function(x) {
+                var w = Number(x.weight) || 0;
+                var size = Math.max(12, Math.min(80, 10 + Math.log2(w + 1) * 14));
+                return [String(x.phrase || '').trim(), size];
+            }).filter(function(item) { return item[0].length > 0 && item[1] > 0; });
             if (list.length === 0) return;
             var width = container.offsetWidth || 0;
             var height = container.offsetHeight || 0;
@@ -20990,69 +19793,41 @@
             canvas.height = height;
             var ctx = canvas.getContext('2d');
             if (ctx) ctx.clearRect(0, 0, width, height);
-                if (typeof WordCloud === 'undefined') {
+            if (typeof WordCloud === 'undefined') {
                 if (empty) {
-                    empty.textContent = '暂无灵魂词，快去分析吧';
+                    empty.textContent = '暂无该国词云数据';
                     empty.classList.remove('hidden');
                 }
                 return;
             }
             try {
                 var wordToRatio = {};
-                var wordToHighlight = {};
                 list.forEach(function(item, i) {
-                    var w = (normalized[i] && normalized[i].weight) ? normalized[i].weight : 0;
+                    var w = Number(data[i] && data[i].weight) || 0;
                     wordToRatio[item[0]] = maxW > 0 ? w / maxW : 0.5;
-                    if (normalized[i] && normalized[i].scaleWeight && normalized[i].scaleWeight > 1) wordToHighlight[item[0]] = true;
                 });
-                var wordCount = list.length;
-                var countryTotalUsers = (typeof window.__countryTotalUsers === 'number' && window.__countryTotalUsers > 0) ? window.__countryTotalUsers : 0;
-                var gridSize = 4;
-                if (wordCount <= 5 || countryTotalUsers <= 3) gridSize = 10;
-                else if (wordCount <= 12 || countryTotalUsers <= 15) gridSize = 6;
-                var minSize = 12;
-                if (wordCount >= 15 && maxW > 1) minSize = 10;
-                if (ctx) {
-                    ctx.shadowColor = 'rgba(255,215,0,0.4)';
-                    ctx.shadowBlur = 2;
-                    ctx.shadowOffsetX = 0;
-                    ctx.shadowOffsetY = 1;
-                }
                 WordCloud(canvas, {
                     list: list,
-                    gridSize: gridSize,
-                    weightFactor: function(size) { return Math.max(minSize, Math.min(80, size)); },
+                    gridSize: 4,
+                    weightFactor: function(size) { return Math.max(12, Math.min(80, size)); },
                     fontFamily: '"Microsoft YaHei", "微软雅黑", SimHei, sans-serif',
                     color: function(word) {
-                        if (wordToHighlight[word]) return _hexToRgba('#FFD700', 0.95);
                         var ratio = wordToRatio[word] != null ? wordToRatio[word] : 0.5;
                         var alpha = 0.5 + 0.5 * Math.pow(ratio, 0.7);
                         return _hexToRgba(baseHex, alpha);
                     },
                     rotateRatio: 0.6,
                     backgroundColor: 'transparent',
-                    minSize: minSize,
+                    minSize: 12,
                     drawOutOfBound: false,
                     shrinkToFit: false,
                     ellipticity: 0.8
                 });
-                if (ctx) {
-                    ctx.shadowColor = 'transparent';
-                    ctx.shadowBlur = 0;
-                    ctx.shadowOffsetX = 0;
-                    ctx.shadowOffsetY = 0;
-                }
             } catch (err) {
                 console.warn('[WordCloud] 本国词云渲染失败:', err);
                 if (empty) {
-                    empty.textContent = '暂无灵魂词，快去分析吧';
+                    empty.textContent = '暂无该国词云数据';
                     empty.classList.remove('hidden');
-                }
-                if (ctx) {
-                    ctx.shadowColor = 'transparent';
-                    ctx.shadowBlur = 0;
-                    ctx.shadowOffsetX = 0;
-                    ctx.shadowOffsetY = 0;
                 }
             }
         }
@@ -21065,7 +19840,7 @@
             if (typeof echarts === 'undefined') {
                 if (meta) meta.textContent = 'ECharts missing';
                 if (empty) {
-                    empty.textContent = '暂无灵魂词，快去分析吧';
+                    empty.textContent = '暂无该国词云数据';
                     empty.classList.remove('hidden');
                 }
                 return;
@@ -21201,7 +19976,7 @@
                 var isCountryRegion = (region && String(region).length === 2);
                 _renderTop10List(top10);
                 if (isCountryRegion && window.__countryKeywordsByLevel && typeof _renderNationalIdentityCloud === 'function') {
-                    _renderNationalIdentityCloud(window.__currentNationalIdentityLevel || 'Architect');
+                    _renderNationalIdentityCloud(window.__currentNationalIdentityLevel || 'Novice');
                 } else {
                     var cloud50 = isCountryRegion
                         ? (Array.isArray(window.__latestCloud50) ? window.__latestCloud50 : [])
@@ -21237,7 +20012,6 @@
             try { setTimeout(() => _setVibeRefreshing(false), 700); } catch { /* ignore */ }
 
             window.__countryKeywordsByLevel = null;
-            window.__nationalCloudData = null;
             if (empty) {
                 empty.textContent = '正在扫描该国开发者指纹...';
                 empty.classList.remove('hidden');
@@ -21248,35 +20022,18 @@
                 var API_ENDPOINT = _getApiEndpoint();
                 var kwResp = await fetch(API_ENDPOINT + 'api/v2/stats/keywords?region=' + encodeURIComponent(region) + '&_t=' + Date.now(), { cache: 'no-store' });
                 if (!kwResp.ok) throw new Error('keywords ' + kwResp.status);
-                var rawPayload = await kwResp.json();
-                var kwPayload = (rawPayload && rawPayload.data) ? rawPayload.data : rawPayload;
-                var adapt = (window.StatsDataService && window.StatsDataService.adaptCloudData) ? window.StatsDataService.adaptCloudData : function(arr) { return Array.isArray(arr) ? arr : []; };
-                if (kwPayload && typeof kwPayload === 'object') {
-                    // 支持两种格式：直接格式 {Novice: [...]} 或嵌套格式 {identityLevelCloud: {Novice: [...]}}
-                    var cloudData = kwPayload.identityLevelCloud || kwPayload;
-                    window.__countryKeywordsByLevel = {
-                        Novice: adapt(cloudData.Novice || []),
-                        Professional: adapt(cloudData.Professional || []),
-                        Architect: adapt(cloudData.Architect || []),
-                        globalNative: adapt(cloudData.globalNative || cloudData.native || [])
-                    };
-                    window.__nationalCloudData = window.__countryKeywordsByLevel;
-                } else {
-                    window.__countryKeywordsByLevel = null;
-                    window.__nationalCloudData = null;
-                }
-                var currentLevel = window.__currentNationalIdentityLevel || 'Architect';
-                var renderFn = window._renderNationalIdentityCloud || (typeof _renderNationalIdentityCloud !== 'undefined' ? _renderNationalIdentityCloud : null);
-                if (renderFn) renderFn(currentLevel);
+                var kwPayload = await kwResp.json();
+                window.__countryKeywordsByLevel = kwPayload && typeof kwPayload === 'object' ? kwPayload : null;
+                var currentLevel = window.__currentNationalIdentityLevel || 'Novice';
+                if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud(currentLevel);
                 var total = 0;
                 if (window.__countryKeywordsByLevel) {
                     total = (window.__countryKeywordsByLevel.Novice || []).length + (window.__countryKeywordsByLevel.Professional || []).length + (window.__countryKeywordsByLevel.Architect || []).length + (window.__countryKeywordsByLevel.globalNative || []).length;
                 }
                 if (empty && total > 0) empty.classList.add('hidden');
-                if (total === 0 && empty) { empty.textContent = '暂无灵魂词，快去分析吧'; empty.classList.remove('hidden'); }
+                if (total === 0 && empty) empty.classList.remove('hidden');
             } catch (e) {
                 window.__countryKeywordsByLevel = null;
-                window.__nationalCloudData = null;
                 var isLocalUser = (region === (localStorage.getItem('user_manual_location') || window.currentUserCountry || '').toUpperCase());
                 try {
                     if (isLocalUser) {
@@ -21290,19 +20047,18 @@
                                     Novice: dataAdapter(ilc.Novice || []), 
                                     Professional: dataAdapter(ilc.Professional || []), 
                                     Architect: dataAdapter(ilc.Architect || []), 
-                                    globalNative: dataAdapter(ilc.globalNative || ilc.native || []) 
+                                    globalNative: [] 
                                 };
-                                window.__nationalCloudData = window.__countryKeywordsByLevel;
-                                if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud(window.__currentNationalIdentityLevel || 'Architect');
+                                if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud(window.__currentNationalIdentityLevel || 'Novice');
                                 if (empty) empty.classList.add('hidden');
                             }
                         }
                     }
                 } catch (e2) { console.warn('[refreshVibeCard] 本国词云 localStorage 兜底失败:', e2); }
                 if (!window.__countryKeywordsByLevel) {
-                    if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud('Architect');
+                    if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud('Novice');
                     if (empty) {
-                        empty.textContent = '暂无灵魂词，快去分析吧';
+                        empty.textContent = '暂无该国词云数据';
                         empty.classList.remove('hidden');
                     }
                 }
@@ -21337,7 +20093,7 @@
                     try { _renderTop10List([]); } catch { /* ignore */ }
                     try { _renderCloud50(region, []); } catch { /* ignore */ }
                     if (empty) {
-                    empty.textContent = '暂无灵魂词，快去分析吧';
+                    empty.textContent = '暂无该国词云数据';
                     empty.classList.remove('hidden');
                 }
                 }
@@ -21348,7 +20104,7 @@
                 window.addEventListener('resize', () => {
                     try { vibeCloudChart && vibeCloudChart.resize(); } catch {}
                     if (window.__countryKeywordsByLevel && typeof _renderNationalIdentityCloud === 'function') {
-                        _renderNationalIdentityCloud(window.__currentNationalIdentityLevel || 'Architect');
+                        _renderNationalIdentityCloud(window.__currentNationalIdentityLevel || 'Novice');
                     }
                 });
             }
@@ -22508,11 +21264,10 @@
                                     currentUser = dbUser;
                                     matchedByGitHub = true;
                                     
-                                    // 添加到 allData（使用安全合并）
+                                    // 添加到 allData
                                     const existingIndex = allData.findIndex(item => item.id === githubUserId);
                                     if (existingIndex !== -1) {
-                                        // 【核心保护】使用安全合并，防止新数据/低数值覆盖已有的本地/GitHub数据
-                                        allData[existingIndex] = safeMaxMergeUserData(allData[existingIndex], dbUser);
+                                        allData[existingIndex] = { ...allData[existingIndex], ...dbUser };
                                     } else {
                                         allData.push(dbUser);
                                     }
@@ -22568,12 +21323,6 @@
                 }
                 
                 if (currentUser) {
-                    // 【核心保护】使用安全合并，防止allData中数据覆盖已有的高数值（如index传递的数据）
-                    var existingUserRefresh = window.currentUser || window.currentUserData || {};
-                    currentUser = (typeof safeMaxMergeUserData === 'function')
-                        ? safeMaxMergeUserData(existingUserRefresh, currentUser)
-                        : Object.assign({}, existingUserRefresh, currentUser);
-                    
                     // 【地理锁】优先读取 localStorage 中的 manual_location（绑定 GitHub）
                     // 只要 loc_locked 或 loc_fixed 为 true，必须优先读取本地保存的经纬度，禁止被 IP-API 的返回结果覆盖
                     const isLocked = localStorage.getItem('loc_locked') === 'true' || localStorage.getItem('loc_fixed') === 'true';
@@ -22614,9 +21363,8 @@
                                 ? window.safeGetCountry(window.currentUserData || currentUser)
                                 : (currentUser.current_location || currentUser.manual_location || currentUser.country_code || currentDrawerCountry?.code || 'US');
                             const inCountryView = (typeof currentViewState === 'string' && currentViewState === 'COUNTRY');
-                            // 国家透视下优先保留右侧当前展示的国家，避免被 API 返回的 currentCC(如 US) 覆盖导致切回美国
                             const drawerCode = inCountryView
-                                ? (String(currentDrawerCountry?.code || '').trim().toUpperCase() || currentCC)
+                                ? (currentDrawerCountry?.code || currentCC)
                                 : currentCC;
                             const drawerName = drawerCode && (typeof countryNameMap !== 'undefined' && countryNameMap[drawerCode])
                                 ? (currentLang === 'zh' ? countryNameMap[drawerCode].zh : countryNameMap[drawerCode].en)
@@ -22728,14 +21476,7 @@
     // 优先使用 StatsUIRenderer 提供的实现，其次使用本 IIFE 内定义
     if (window.StatsUIRenderer) {
         window.toggleDrawer = window.StatsUIRenderer.toggleDrawer;
-        var origCloseDrawers = window.StatsUIRenderer.closeDrawers;
-        window.closeDrawers = function(clearSelection) {
-            if (typeof countryPanelAutoRefreshTimer !== 'undefined' && countryPanelAutoRefreshTimer) {
-                clearInterval(countryPanelAutoRefreshTimer);
-                countryPanelAutoRefreshTimer = null;
-            }
-            if (typeof origCloseDrawers === 'function') origCloseDrawers(clearSelection);
-        };
+        window.closeDrawers = window.StatsUIRenderer.closeDrawers;
         window._renderNationalIdentityCloud = window.StatsUIRenderer._renderNationalIdentityCloud;
         window.initWordCloud = window.StatsUIRenderer.initWordCloud;
     }
@@ -22763,143 +21504,4 @@
     
     console.log('[IIFE] 全局函数暴露完成');
     
-})();
-
-// ==================== 用户灵魂词云功能 ====================
-(function() {
-    /**
-     * 从 Worker 获取用户的灵魂词统计
-     * @returns {Promise<Array>} 返回词云数据数组
-     */
-    async function fetchMySoulWords() {
-        var fingerprint = '';
-        try {
-            fingerprint = localStorage.getItem('user_fingerprint') || '';
-        } catch (e) {
-            console.warn('[SoulWords] 无法获取 fingerprint:', e);
-        }
-        
-        if (!fingerprint) {
-            console.warn('[SoulWords] fingerprint 为空，跳过查询');
-            return [];
-        }
-
-        try {
-            var response = await fetch(`/api/v2/my-soul-words?f=${encodeURIComponent(fingerprint)}`);
-            if (!response.ok) {
-                console.warn('[SoulWords] 查询失败:', response.status);
-                return [];
-            }
-            var result = await response.json();
-            if (result.status === 'success' && Array.isArray(result.data)) {
-                console.log('[SoulWords] 获取到', result.data.length, '个灵魂词');
-                return result.data;
-            }
-            return [];
-        } catch (err) {
-            console.error('[SoulWords] 查询异常:', err);
-            return [];
-        }
-    }
-
-    /**
-     * 渲染用户灵魂词云到指定 Canvas
-     * @param {string} canvasId - Canvas 元素 ID
-     * @param {Array} data - 词云数据 [{ phrase, hit_count }, ...]
-     */
-    function renderMySoulWordsCloud(canvasId, data) {
-        if (!data || data.length === 0) {
-            console.log('[SoulWords] 无数据，跳过渲染');
-            return;
-        }
-
-        var canvas = document.getElementById(canvasId);
-        if (!canvas) {
-            console.warn('[SoulWords] Canvas 未找到:', canvasId);
-            return;
-        }
-
-        // 检查 WordCloud 库是否可用
-        if (typeof WordCloud === 'undefined') {
-            console.warn('[SoulWords] WordCloud 库未加载');
-            return;
-        }
-
-        // 转换为 WordCloud 格式 [[word, size], ...]
-        var wordList = data.map(function(item) {
-            return [item.phrase, item.hit_count];
-        });
-
-        // 设置 Canvas 尺寸
-        var container = canvas.parentElement;
-        var width = (container && container.offsetWidth) ? container.offsetWidth : 400;
-        var height = (container && container.offsetHeight) ? container.offsetHeight : 400;
-        canvas.width = width;
-        canvas.height = height;
-
-        // 渲染词云
-        try {
-            WordCloud(canvas, {
-                list: wordList,
-                gridSize: Math.round(16 * width / 1024),
-                weightFactor: function(size) {
-                    return Math.pow(size, 0.5) * width / 50;
-                },
-                fontFamily: '"Microsoft YaHei", "微软雅黑", sans-serif',
-                color: function() {
-                    // 矩阵绿主题
-                    var colors = ['#00ff41', '#00cc33', '#33ff66', '#66ff99'];
-                    return colors[Math.floor(Math.random() * colors.length)];
-                },
-                rotateRatio: 0.3,
-                rotationSteps: 2,
-                backgroundColor: 'transparent',
-                minSize: 12
-            });
-            console.log('[SoulWords] 词云渲染完成');
-        } catch (err) {
-            console.error('[SoulWords] 词云渲染失败:', err);
-        }
-    }
-
-    /**
-     * 当右侧抽屉打开时自动加载并渲染用户灵魂词云
-     */
-    async function autoLoadMySoulWords() {
-        var rightDrawer = document.getElementById('right-drawer');
-        if (!rightDrawer || !rightDrawer.classList.contains('active')) {
-            return;
-        }
-
-        var data = await fetchMySoulWords();
-        if (data && data.length > 0) {
-            // 尝试在国家词云 Canvas 下方插入个人词云区域
-            var nationalCloudCanvas = document.getElementById('national-identity-cloud-canvas');
-            if (nationalCloudCanvas) {
-                var container = nationalCloudCanvas.parentElement;
-                if (container && !document.getElementById('my-soul-words-container')) {
-                    var myCloudHtml = `
-                        <div id="my-soul-words-container" class="border border-white/10 bg-zinc-950/30 p-2 mt-3">
-                            <div class="flex items-center justify-between mb-2">
-                                <div class="text-[10px] text-zinc-500 uppercase tracking-widest">我的灵魂词</div>
-                                <div class="text-[10px] text-zinc-600 font-mono">${data.length} 个词</div>
-                            </div>
-                            <canvas id="my-soul-words-canvas" style="width: 100%; height: 200px;"></canvas>
-                        </div>
-                    `;
-                    container.insertAdjacentHTML('afterend', myCloudHtml);
-                }
-            }
-            
-            // 渲染词云
-            renderMySoulWordsCloud('my-soul-words-canvas', data);
-        }
-    }
-
-    // 暴露到全局
-    window.fetchMySoulWords = fetchMySoulWords;
-    window.renderMySoulWordsCloud = renderMySoulWordsCloud;
-    window.autoLoadMySoulWords = autoLoadMySoulWords;
-
-    console.log('[SoulWords] 灵魂词功能已加载');
 })();

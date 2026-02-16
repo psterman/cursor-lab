@@ -7765,18 +7765,42 @@
                         const hasLocalData = claimToken || currentFp;
                         const localDataExists = localStorage.getItem('last_analysis_data') || claimToken;
                         
+                        // 【新逻辑】异地登录自动合并，跳过弹窗
+                        let shouldAutoMerge = false;
+                        
+                        if (githubUserId) {
+                            try {
+                                const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content || 
+                                                  'https://cursor-clinical-analysis.psterman.workers.dev/';
+                                const checkBindingUrl = `${apiEndpoint}api/github/check-binding?userId=${encodeURIComponent(githubUserId)}&username=${encodeURIComponent(githubUsername || '')}&_t=${Date.now()}`;
+                                console.log('[Auth] 🔍 检查 GitHub 绑定状态:', checkBindingUrl);
+                                
+                                const checkResp = await fetch(checkBindingUrl);
+                                const checkData = await checkResp.json();
+                                console.log('[Auth] 🔍 GitHub 绑定检查结果:', checkData);
+                                
+                                if (checkData.hasBinding) {
+                                    console.log('[Auth] ✅ GitHub 账号已有绑定记录，异地登录自动合并');
+                                    shouldAutoMerge = true;
+                                }
+                            } catch (e) {
+                                console.warn('[Auth] ⚠️ 检查绑定失败，默认显示弹窗:', e);
+                            }
+                        }
+                        
                         // 【严格校验迁移逻辑】检查是否有影子令牌
                         // 注意:新的强制认领机制只认 claimToken,不再支持纯指纹迁移
-                        if (!claimToken) {
-                            // 【修复】无 claim_token 时不弹“无用弹窗”，直接静默跳过迁移
-                            // 说明：用户可能只是想登录查看数据；没有待认领数据并不需要阻塞交互。
+                        if (!claimToken && !shouldAutoMerge) {
+                            // 【修复】无 claim_token 且非异地登录时，不弹"无用弹窗"，直接静默跳过迁移
                             console.warn('[Auth] ℹ️ 本地无 claim_token，跳过数据认领（静默，无弹窗）');
                             migrationSuccess = false;
                             // 继续后续正常流程（更新 UI / 尝试拉取用户数据）
-                        } else
+                        } else if (shouldAutoMerge) {
+                            console.log('[Auth] ✅ 异地登录自动合并');
+                        }
                         
-                        // 如果需要确认，先显示弹窗
-                        if (hasLocalData && localDataExists) {
+                        // 如果不是自动合并，且本地有新数据，才显示弹窗
+                        if (!shouldAutoMerge && hasLocalData && localDataExists) {
                             const shouldMerge = await new Promise((resolve) => {
                                 const dialog = document.createElement('div');
                                 dialog.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50';

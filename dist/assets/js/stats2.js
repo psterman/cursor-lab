@@ -7543,62 +7543,6 @@
         }
 
         /**
-         * 右抽屉顶部刷新按钮：按当前视图刷新内容（国家/全球/排行榜）
-         */
-        function refreshRightDrawerContent() {
-            var btn = document.getElementById('right-drawer-refresh-btn');
-            if (btn) {
-                btn.disabled = true;
-                btn.classList.add('loading');
-            }
-            var done = function() {
-                setTimeout(function() {
-                    if (btn) {
-                        btn.disabled = false;
-                        btn.classList.remove('loading');
-                    }
-                }, 400);
-            };
-            var view = typeof currentViewState === 'string' ? currentViewState : '';
-            if (view === 'COUNTRY' && currentDrawerCountry && currentDrawerCountry.code) {
-                try { refreshCountryRightPanel(); } catch (e) { /* ignore */ }
-                done();
-                return;
-            }
-            if (view === 'RANKING') {
-                try {
-                    if (typeof renderRankingView === 'function') renderRankingView();
-                } catch (e) { /* ignore */ }
-                done();
-                return;
-            }
-            if (view === 'GLOBAL') {
-                var globalCode = (currentDrawerCountry && currentDrawerCountry.code) ? String(currentDrawerCountry.code).trim().toUpperCase() : null;
-                var globalName = (currentDrawerCountry && currentDrawerCountry.name) || null;
-                if (!globalCode) {
-                    var userCountry = window.currentUserCountry || (window.currentUser && (window.currentUser.country_code || window.currentUser.ip_location)) || (window.currentUserData && (window.currentUserData.country_code || window.currentUserData.ip_location)) || 'US';
-                    if (userCountry && /^[A-Z]{2}$/.test(String(userCountry).trim().toUpperCase())) {
-                        globalCode = String(userCountry).trim().toUpperCase();
-                        globalName = countryNameMap && countryNameMap[globalCode] ? (currentLang === 'zh' ? countryNameMap[globalCode].zh : countryNameMap[globalCode].en) : globalCode;
-                    }
-                }
-                if (globalCode && globalName && typeof fetchCountrySummaryV3 === 'function') {
-                    fetchCountrySummaryV3(globalCode).then(function(summary) {
-                        if (summary && (summary.countryTotals || (summary.data && summary.data.countryTotals)) && typeof showDrawersWithCountryData === 'function') {
-                            showDrawersWithCountryData(globalCode, globalName, summary, { summaryOnly: true });
-                        }
-                        done();
-                    }).catch(function() { done(); });
-                } else {
-                    done();
-                }
-                return;
-            }
-            done();
-        }
-        window.refreshRightDrawerContent = refreshRightDrawerContent;
-
-        /**
          * 【新增】三 Tab 视图切换函数
          * 处理全球、国家、排行榜三个视图的切换
          * @param {string} view - 'global' | 'country' | 'ranking'
@@ -15284,14 +15228,82 @@
                             username: githubUsername
                         });
                         
-                        // 【自动合并】检测到指纹 + GitHub 登录后直接执行迁移，不再弹出确认框
+                        // 【合并确认弹窗】在迁移前检查是否需要用户确认
                         const claimToken = localStorage.getItem('vibe_claim_token');
                         const hasLocalData = claimToken || currentFp;
                         const localDataExists = localStorage.getItem('last_analysis_data') || claimToken;
-                        if (hasLocalData && localDataExists) {
-                            console.log('[Auth] ✅ 检测到本地数据，自动合并到 GitHub 账号');
+                        
+                        // 【新逻辑】异地登录自动合并，跳过弹窗
+                        // 1. 先检查 GitHub 账号是否已被绑定（异地登录场景）
+                        // 2. 如果已绑定，直接合并，跳过弹窗
+                        // 3. 如果未绑定且本地有新数据，才显示弹窗
+                        let shouldAutoMerge = false;
+                        
+                        if (githubUserId) {
+                            try {
+                                const apiEndpoint = document.querySelector('meta[name="api-endpoint"]')?.content || 
+                                                  'https://cursor-clinical-analysis.psterman.workers.dev/';
+                                const checkBindingUrl = `${apiEndpoint}api/github/check-binding?userId=${encodeURIComponent(githubUserId)}&username=${encodeURIComponent(githubUsername || '')}&_t=${Date.now()}`;
+                                console.log('[Auth] 🔍 检查 GitHub 绑定状态:', checkBindingUrl);
+                                
+                                const checkResp = await fetch(checkBindingUrl);
+                                const checkData = await checkResp.json();
+                                console.log('[Auth] 🔍 GitHub 绑定检查结果:', checkData);
+                                
+                                // 如果 GitHub 账号已被绑定过（异地登录），直接合并
+                                if (checkData.hasBinding) {
+                                    console.log('[Auth] ✅ GitHub 账号已有绑定记录，异地登录自动合并');
+                                    shouldAutoMerge = true;
+                                }
+                            } catch (e) {
+                                console.warn('[Auth] ⚠️ 检查绑定失败，默认显示弹窗:', e);
+                            }
+                        }
+                        
+                        // 如果不是自动合并，且本地有新数据，才显示弹窗
+                        if (!shouldAutoMerge && hasLocalData && localDataExists) {
+                            const shouldMerge = await new Promise((resolve) => {
+                                const dialog = document.createElement('div');
+                                dialog.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50';
+                                dialog.id = 'merge-confirm-dialog';
+                                dialog.innerHTML = `
+                                    <div class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+                                        <h3 class="text-lg font-semibold text-gray-900 mb-2">数据合并确认</h3>
+                                        <p class="text-sm text-gray-600 mb-4">检测到您有未归档的战绩，是否合并到 GitHub 账号？</p>
+                                        <div class="flex gap-3 justify-end">
+                                            <button class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors" id="merge-cancel">取消</button>
+                                            <button class="px-4 py-2 text-sm font-medium text-black bg-[var(--accent-terminal)] rounded-md hover:bg-[var(--accent-terminal)]/80 transition-colors" id="merge-confirm">合并</button>
+                                        </div>
+                                    </div>
+                                `;
+                                document.body.appendChild(dialog);
+                                
+                                const removeDialog = () => {
+                                    const dialogElement = document.getElementById('merge-confirm-dialog');
+                                    if (dialogElement && dialogElement.parentNode) {
+                                        dialogElement.parentNode.removeChild(dialogElement);
+                                    }
+                                };
+                                
+                                dialog.querySelector('#merge-confirm')?.addEventListener('click', () => {
+                                    removeDialog();
+                                    resolve(true);
+                                });
+                                
+                                dialog.querySelector('#merge-cancel')?.addEventListener('click', () => {
+                                    removeDialog();
+                                    resolve(false);
+                                });
+                            });
+                            
+                            if (!shouldMerge) {
+                                console.log('[Auth] ℹ️ 用户取消合并，跳过迁移');
+                                return;
+                            }
+                        } else if (shouldAutoMerge) {
+                            console.log('[Auth] ✅ 异地登录自动合并，跳过弹窗');
                         } else {
-                            console.log('[Auth] ℹ️ 无本地新数据，直接迁移');
+                            console.log('[Auth] ℹ️ 无需合并（本地无新数据）');
                         }
                         
                         // 显示同步遮罩
