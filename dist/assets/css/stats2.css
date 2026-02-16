@@ -3,9 +3,8 @@
    ============================================
 */
 
-/* @import 必须在所有其他规则之前（CSS 规范要求） */
+/* @import 必须在所有其他规则之前；仅用 fonts.googleapis.com 以符合 CSP，不引入 fonts.loli.net */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap');
-@import url('https://fonts.loli.net/css2?family=JetBrains+Mono:wght@400;700&display=swap');
 
 /* Tailwind 基础实用类 */
 *,::before,::after{box-sizing:border-box;border-width:0;border-style:solid}
