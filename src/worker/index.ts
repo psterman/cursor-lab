@@ -75,6 +75,48 @@ async function refreshCountryStatsCurrent(env: Env): Promise<{ success: boolean;
   }
 }
 
+/** GitHub 天梯榜 Top50 每日巡检：调用 Edge Function 同步每用户数据（需 SUPABASE_KEY 为 Service Role） */
+type GitHubLeaderboardRow = { id: string; rank: number; github_login: string; user_name: string | null; github_score: number };
+async function dailyGitHubAudit(env: Env): Promise<void> {
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+    console.warn('[Worker] GitHub 巡检跳过：Supabase 未配置');
+    return;
+  }
+  const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_github_leaderboard`;
+  let list: GitHubLeaderboardRow[] = [];
+  try {
+    const raw = await fetchSupabaseJson<GitHubLeaderboardRow[]>(env, rpcUrl, {
+      method: 'POST',
+      headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ limit_count: 50 }),
+    }, 15000);
+    list = Array.isArray(raw) ? raw : [];
+  } catch (e: any) {
+    console.warn('[Worker] get_github_leaderboard 失败:', e?.message);
+    return;
+  }
+  const funcUrl = `${env.SUPABASE_URL}/functions/v1/sync-github-stats`;
+  const headers = buildSupabaseHeaders(env, { 'Content-Type': 'application/json' });
+  let ok = 0;
+  let fail = 0;
+  for (const row of list) {
+    try {
+      const res = await fetch(funcUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ userId: row.id }),
+      });
+      if (res.ok) ok++;
+      else fail++;
+    } catch (e: any) {
+      fail++;
+      console.warn('[Worker] sync-github-stats 单用户失败:', row.id, e?.message);
+    }
+    await new Promise((r) => setTimeout(r, 1100));
+  }
+  console.log('[Worker] GitHub Top50 巡检完成:', { ok, fail, total: list.length });
+}
+
 /** 从 KV payload 提取 data[countryCode] 形态，供前端 data[userCountry].ranks[dimensionKey] 使用 */
 function buildCountryDataByCode(kv: GlobalCountryStatsPayload | null): Record<string, { ranks: Record<string, number>; [k: string]: any }> | undefined {
   if (!kv || typeof kv !== 'object') return undefined;
@@ -9678,480 +9720,32 @@ async function writeGlobalCountryStatsToKV(env: Env): Promise<{ success: boolean
   }
 }
 
-/** 灵魂词 KV Key 前缀，与 /api/v2/log-vibe-soul 一致：soul:国家:分类:词组 */
-const SOUL_KV_PREFIX = 'soul:';
-
-/** 聚合行：入库时 hit_count 以 bigint 存 Supabase，fingerprints 记录贡献用户 */
-type SoulWordRow = { phrase: string; country: string; hit_count: number; fingerprints: string[] };
-
-/** sync-soul-words 被调用时刷新词云缓存的常用国家列表（limit 50 聚合，避免 Worker 超时） */
-const COMMON_COUNTRIES_FOR_CLOUD = ['SA', 'US', 'CN'];
-
 /**
- * 从 roast_text 中提取带引号的词或标签，用于 Novice 兜底；缺失 identityLevelCloud 时用【】内关键词备选显示。
- * 匹配 "..."、「...」、【...】、[...]、#tag 等简单模式。
+ * 【Cron】定期汇总任务（ES Module 格式必须导出，D1 等 binding 才可用）
+ * 在 wrangler.toml 的 triggers.crons 中配置
  */
-function extractWordsFromRoastText(roastText: string | null | undefined): Array<{ word: string; count: number }> {
-  if (!roastText || typeof roastText !== 'string') return [];
-  const map = new Map<string, number>();
-  const patterns = [
-    /["']([^"']{2,50})["']/g,
-    /「([^」]{2,50})」/g,
-    /【([^】]{1,50})】/g,
-    /\[([^\]]{2,40})\]/g,
-    /#([A-Za-z\u4e00-\u9fa5][A-Za-z0-9_\u4e00-\u9fa5]{1,30})/g,
-  ];
-  for (const re of patterns) {
-    let m: RegExpExecArray | null;
-    re.lastIndex = 0;
-    while ((m = re.exec(roastText)) !== null) {
-      const w = String(m[1]).trim();
-      if (w.length >= 2) map.set(w, (map.get(w) || 0) + 1);
-    }
-  }
-  return Array.from(map.entries()).map(([word, count]) => ({ word, count })).sort((a, b) => b.count - a.count);
-}
-
-/** 每个维度词条：权重 + 贡献过该词的用户指纹列表，用于前端「灵魂带走」高亮 */
-type CloudItemWithFp = { word: string; count: number; fingerprints?: string[] };
-
-/**
- * 【深度聚合】遍历 user_analysis 表，按 country_code 聚合 identity_cloud 三个维度（Novice/Professional/Architect），
- * 提取到该国「小白/脱发/霸天」词池；同词多次出现累加 count，并记录贡献者 fingerprint；每维度仅保留 Top 20 写入 KV。
- */
-async function aggregateCountryCloudDepth(env: Env, countryCode: string): Promise<boolean> {
-  const cc = String(countryCode).toUpperCase();
-  if (!/^[A-Z]{2}$/.test(cc)) return false;
-  if (!env.STATS_STORE || !env.SUPABASE_URL || !env.SUPABASE_KEY) return false;
-
-  type WordEntry = { count: number; fingerprints: Set<string> };
-  const wordCounts: {
-    Novice: Map<string, WordEntry>;
-    Professional: Map<string, WordEntry>;
-    Architect: Map<string, WordEntry>;
-  } = {
-    Novice: new Map(),
-    Professional: new Map(),
-    Architect: new Map(),
-  };
-
-  const PAGE_SIZE = 200;
-  const MAX_ROWS = 2000;
-
-  try {
-    let offset = 0;
-    let totalFetched = 0;
-    let usersWithCloudData = 0;
-
-    console.log(`[Worker] aggregateCountryCloudDepth 开始聚合国家词云: ${cc}`);
-
-    while (totalFetched < MAX_ROWS) {
-      const uaUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
-      uaUrl.searchParams.set('select', 'fingerprint,stats,identity_cloud,tech_stack,roast_text,country_code,ip_location,manual_location,current_location');
-      // 【核心修复】更宽松的查询条件，优先级调整：current_location（用户主动切换） > manual_location（手动校准） > country_code（系统识别） > ip_location（IP定位）
-      uaUrl.searchParams.set('or', `(current_location.eq.${cc},manual_location.eq.${cc},country_code.eq.${cc},ip_location.eq.${cc})`);
-      uaUrl.searchParams.set('total_messages', 'gt.5');
-      uaUrl.searchParams.set('order', 'updated_at.desc');
-      uaUrl.searchParams.set('limit', String(PAGE_SIZE));
-      uaUrl.searchParams.set('offset', String(offset));
-      const rows = await fetchSupabaseJson<any[]>(env, uaUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
-      const list = Array.isArray(rows) ? rows : [];
-      if (list.length === 0) break;
-
-      for (const row of list) {
-        const fp = String(row?.fingerprint ?? '').trim();
-        const ilc = row?.identity_cloud ?? (row?.stats && typeof row.stats === 'object' ? row.stats.identityLevelCloud : null);
-        if (ilc && typeof ilc === 'object') {
-          usersWithCloudData++;
-          for (const level of ['Novice', 'Professional', 'Architect'] as const) {
-            const levelData = ilc[level];
-            if (!Array.isArray(levelData)) continue;
-            for (const item of levelData) {
-              const word = String(item?.word ?? item?.phrase ?? '').trim();
-              const count = Number(item?.count ?? item?.weight ?? 0) || 0;
-              if (word.length > 0 && count > 0) {
-                const key = word.toLowerCase();
-                const m = wordCounts[level];
-                const existing = m.get(key);
-                if (existing) {
-                  existing.count += count;
-                  if (fp) existing.fingerprints.add(fp);
-                } else {
-                  const set = new Set<string>();
-                  if (fp) set.add(fp);
-                  m.set(key, { count, fingerprints: set });
-                }
-              }
-            }
-          }
-        }
-        if (!ilc || typeof ilc !== 'object' || [ilc.Novice, ilc.Professional, ilc.Architect].every((a: unknown) => !Array.isArray(a) || a.length === 0)) {
-          const fromRoast = extractWordsFromRoastText(row?.roast_text);
-          for (const { word, count } of fromRoast) {
-            if (word.length > 0) {
-              const key = word.toLowerCase();
-              const existing = wordCounts.Novice.get(key);
-              if (existing) {
-                existing.count += count;
-                if (fp) existing.fingerprints.add(fp);
-              } else {
-                const set = new Set<string>();
-                if (fp) set.add(fp);
-                wordCounts.Novice.set(key, { count, fingerprints: set });
-              }
-            }
-          }
-        }
-        const techStack = row?.tech_stack;
-        if (techStack && typeof techStack === 'object' && !Array.isArray(techStack)) {
-          for (const key of Object.keys(techStack)) {
-            const word = String(key).trim();
-            if (word.length > 0) {
-              const count = Number((techStack as Record<string, unknown>)[key]) || 1;
-              const k = word.toLowerCase();
-              const existing = wordCounts.Professional.get(k);
-              if (existing) {
-                existing.count += count;
-                if (fp) existing.fingerprints.add(fp);
-              } else {
-                const set = new Set<string>();
-                if (fp) set.add(fp);
-                wordCounts.Professional.set(k, { count, fingerprints: set });
-              }
-            }
-          }
-        }
-      }
-
-      totalFetched += list.length;
-      if (list.length < PAGE_SIZE) break;
-      offset += PAGE_SIZE;
-    }
-
-    const toTop20 = (m: Map<string, WordEntry>): CloudItemWithFp[] => {
-      return Array.from(m.entries())
-        .map(([word, entry]) => ({
-          word,
-          count: entry.count,
-          fingerprints: entry.fingerprints.size > 0 ? Array.from(entry.fingerprints) : undefined,
-        }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 20);
-    };
-
-    const Novice = toTop20(wordCounts.Novice);
-    const Professional = toTop20(wordCounts.Professional);
-    const Architect = toTop20(wordCounts.Architect);
-    const hasNewData = Novice.length > 0 || Professional.length > 0 || Architect.length > 0;
-
-    const cacheKey = `global_stats_v4_${cc}`;
-    if (!hasNewData) {
-      const existingRaw = await env.STATS_STORE.get(cacheKey, 'text');
-      if (existingRaw) {
-        try {
-          const existing = JSON.parse(existingRaw) as { identityLevelCloud?: unknown };
-          if (existing && existing.identityLevelCloud && typeof existing.identityLevelCloud === 'object') {
-            return true;
-          }
-        } catch (_) { /* ignore */ }
-      }
-      return true;
-    }
-
-    const identityLevelCloud = { Novice, Professional, Architect };
-    const updated_at = new Date().toISOString();
-    const payload = {
-      identityLevelCloud,
-      novice: Novice,
-      professional: Professional,
-      architect: Architect,
-      updated_at,
-    };
-    await env.STATS_STORE.put(cacheKey, JSON.stringify(payload), { expirationTtl: 3600 });
-    console.log(`[Worker] ✅ aggregateCountryCloudDepth 已写入: ${cacheKey}, 用户数: ${usersWithCloudData}, Novice词数: ${Novice.length}, Professional词数: ${Professional.length}, Architect词数: ${Architect.length}, updated_at: ${updated_at}`);
-    return true;
-  } catch (e) {
-    console.warn('[Worker] aggregateCountryCloudDepth 失败:', cc, e);
-    return false;
-  }
-}
-
-/**
- * handleSync：从 KV_VIBE_PROD 读取 soul: 前缀 Key，解析后汇总到 STATS_STORE 的 global_stats_v4_${country}，同步成功后删除 KV_VIBE_PROD 中的 Key。
- * Key 解析：const [_, country, level, ...wordParts] = key.name.split(':'); word = wordParts.join(':').
- * 用于 Cron 每分钟或手动 GET /api/v2/sync-soul-words 调用。
- */
-async function syncSoulWordsFromKV(env: Env): Promise<{ success: boolean; error?: string; synced?: number; deleted?: number }> {
-  const vibeKv = env.KV_VIBE_PROD;
-  const statsStore = env.STATS_STORE;
-  if (!vibeKv || !statsStore) {
-    return { success: true, synced: 0, deleted: 0 };
-  }
-
-  const validLevels = new Set(['Novice', 'Professional', 'Architect', 'Native']);
-
-  try {
-    const keys: { name: string }[] = [];
-    let cursor: string | undefined;
-    do {
-      const list = await vibeKv.list({ prefix: 'soul:', limit: 1000, cursor });
-      for (const k of list.keys) keys.push({ name: k.name });
-      cursor = list.list_complete ? undefined : list.cursor;
-    } while (cursor);
-
-    if (keys.length === 0) {
-      return { success: true, synced: 0, deleted: 0 };
-    }
-
-    // 按国家汇总：country -> { Novice: Map<word, count>, Professional: Map, Architect: Map }
-    const byCountry = new Map<string, { Novice: Map<string, number>; Professional: Map<string, number>; Architect: Map<string, number> }>();
-
-    for (const { name: keyName } of keys) {
-      const parts = keyName.split(':');
-      if (parts.length < 4) continue;
-      const countryRaw = parts[1];
-      if (countryRaw == null || String(countryRaw).trim().length !== 2) continue;
-      const country = String(countryRaw).trim().toUpperCase();
-      if (!/^[A-Z]{2}$/.test(country)) continue;
-      const level = parts[2];
-      const wordParts = parts.slice(3);
-      const word = wordParts.join(':').trim();
-      if (!word) continue;
-      if (!validLevels.has(level)) continue;
-
-      const raw = await vibeKv.get(keyName, 'text');
-      const valueParts = raw ? String(raw).split('|') : [];
-      const count = valueParts[0] ? parseInt(valueParts[0], 10) : 0;
-      const delta = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
-      if (delta <= 0) continue;
-
-      const levelKey = level === 'Native' ? 'Professional' : level;
-      if (!byCountry.has(country)) {
-        byCountry.set(country, {
-          Novice: new Map(),
-          Professional: new Map(),
-          Architect: new Map(),
-        });
-      }
-      const maps = byCountry.get(country)!;
-      const m = maps[levelKey as keyof typeof maps];
-      if (m) m.set(word, (m.get(word) || 0) + delta);
-    }
-
-    for (const [country, maps] of byCountry) {
-      const cacheKey = `global_stats_v4_${country}`;
-      let existing: { identityLevelCloud?: { Novice?: Array<{ word: string; count: number }>; Professional?: Array<{ word: string; count: number }>; Architect?: Array<{ word: string; count: number }> } } = {};
-      try {
-        const raw = await statsStore.get(cacheKey, 'text');
-        if (raw) existing = JSON.parse(raw) as typeof existing;
-      } catch (_) { /* ignore */ }
-      const ilc = existing.identityLevelCloud || {};
-      const merge = (existingArr: Array<{ word: string; count: number }>, newMap: Map<string, number>) => {
-        const combined = new Map<string, number>();
-        (existingArr || []).forEach((item: { word?: string; count?: number }) => {
-          if (item && item.word) combined.set(item.word, (combined.get(item.word) || 0) + (Number(item.count) || 0));
-        });
-        newMap.forEach((count, word) => {
-          combined.set(word, (combined.get(word) || 0) + count);
-        });
-        return Array.from(combined.entries())
-          .map(([word, count]) => ({ word, count }))
-          .sort((a, b) => b.count - a.count)
-          .slice(0, 50);
-      };
-      const identityLevelCloud = {
-        Novice: merge(ilc.Novice || [], maps.Novice),
-        Professional: merge(ilc.Professional || [], maps.Professional),
-        Architect: merge(ilc.Architect || [], maps.Architect),
-      };
-      const updated_at = new Date().toISOString();
-      await statsStore.put(cacheKey, JSON.stringify({ identityLevelCloud, updated_at }), { expirationTtl: 3600 });
-    }
-
-    let deleted = 0;
-    for (const { name: keyName } of keys) {
-      try {
-        await vibeKv.delete(keyName);
-        deleted++;
-      } catch {
-        // 单键删除失败不阻断
-      }
-    }
-
-    console.log('[Worker] ✅ 灵魂词 KV_VIBE_PROD → STATS_STORE 同步完成:', { countries: byCountry.size, kvDeleted: deleted });
-    return { success: true, synced: keys.length, deleted };
-  } catch (e: any) {
-    console.warn('[Worker] ⚠️ 灵魂词同步失败:', e?.message || String(e));
-    return { success: false, error: e?.message || String(e) };
-  }
-}
-
-/**
- * 每小时收割灵魂词（Cron）：KV_VIBE_PROD list → 读 Value → 按 { phrase, country } 聚合 → RPC 批量入库 → 仅 200/204 成功后删 KV
- * 由 export default 的 scheduled 在 cron 0 * * * * 时调用
- */
-async function runSoulWordHourlyRollup(env: Env): Promise<{ success: boolean; error?: string; synced?: number; deleted?: number }> {
-  const kv = env.KV_VIBE_PROD;
-  if (!kv) {
-    return { success: true }; // 未配置 KV 时静默跳过
-  }
-  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
-    return { success: true }; // 未配置 Supabase 时静默跳过，不删 KV，下次再试
-  }
-
-  try {
-    // 1) 使用 env.KV_VIBE_PROD.list({ prefix: 'soul:' }) 扫描所有上报的 Key
-    const keys: string[] = [];
-    let cursor: string | undefined;
-    do {
-      const list = await kv.list({ prefix: SOUL_KV_PREFIX, limit: 1000, cursor });
-      for (const k of list.keys) keys.push(k.name);
-      cursor = list.list_complete ? undefined : list.cursor;
-    } while (cursor);
-
-    if (keys.length === 0) {
-      return { success: true, synced: 0, deleted: 0 };
-    }
-
-    // 2) 循环读取每个 Key 的 Value（格式：count|fp1,fp2），解析并聚合，记录 fingerprints
-    const aggregated = new Map<string, SoulWordRow>();
-    const validCategories = new Set(['Novice', 'Professional', 'Architect']);
-
-    for (const key of keys) {
-      const parts = key.split(':');
-      if (parts.length < 4) continue;
-      const country = (parts[1] || 'UN').toUpperCase();
-      const category = parts[2] || '';
-      const phrase = parts.slice(3).join(':').trim();
-      if (!phrase || !/^[A-Za-z]{2}$/.test(country)) continue;
-      if (category && !validCategories.has(category)) continue;
-
-      const raw = await kv.get(key, 'text');
-      if (!raw) continue;
-      
-      // 解析格式：count|fp1,fp2,fp3
-      const valueParts = String(raw).split('|');
-      const count = valueParts[0] ? parseInt(valueParts[0], 10) : 0;
-      const fpList = valueParts[1] ? valueParts[1].split(',').filter(f => f.trim()) : [];
-      const delta = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
-      if (delta <= 0) continue;
-
-      const aggKey = `${country}\t${phrase}`;
-      const existing = aggregated.get(aggKey);
-      if (existing) {
-        existing.hit_count += delta;
-        // 合并 fingerprints（去重）
-        const fpSet = new Set([...existing.fingerprints, ...fpList]);
-        existing.fingerprints = Array.from(fpSet);
-      } else {
-        aggregated.set(aggKey, { country, phrase, hit_count: delta, fingerprints: fpList });
-      }
-    }
-
-    const rows: SoulWordRow[] = Array.from(aggregated.values());
-    if (rows.length === 0) {
-      return { success: true, synced: 0, deleted: 0 };
-    }
-
-    // 3) 批量入库：聚合数组转 JSON，fetch 调用 Supabase RPC，Body 格式 { p_rows: 聚合后的数组 }
-    const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/upsert_soul_word_hits`;
-    const res = await fetchSupabase(env, rpcUrl, {
-      method: 'POST',
-      headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ p_rows: rows }),
-    }, SUPABASE_FETCH_TIMEOUT_MS);
-
-    // 4) 清理：只有在 Supabase 返回 200/204 成功后，才执行 env.KV_VIBE_PROD.delete(key)
-    if (!res.ok) {
-      throw new Error(`Supabase RPC ${res.status}: ${await res.text().catch(() => '')}`);
-    }
-
-    let deleted = 0;
-    for (const key of keys) {
-      try {
-        await kv.delete(key);
-        deleted++;
-      } catch {
-        // 单键删除失败不阻断
-      }
-    }
-
-    console.log('[Worker] ✅ 灵魂词每小时收割完成:', { synced: rows.length, kvDeleted: deleted });
-    return { success: true, synced: rows.length, deleted };
-  } catch (e: any) {
-    console.warn('[Worker] ⚠️ 灵魂词每小时收割失败:', e?.message || String(e));
-    return { success: false, error: e?.message || String(e) };
-  }
-}
-
-/**
- * 【第二阶段新增】定期汇总任务（Cron Trigger）
- * 每小时执行一次，从 Supabase 汇总平均分并存入 KV
- * 【V6 协议】同时执行 V6 全量聚合任务
- * 注意：需要在 wrangler.toml 中配置 cron_triggers
- */
-export async function scheduled(event: ScheduledEvent, env: Env, ctx: any) {
+export async function scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
   console.log('[Worker] 开始定期汇总任务（Cron Trigger）...', {
     type: event.type,
     scheduledTime: new Date(event.scheduledTime * 1000).toISOString(),
     cron: event.cron,
   });
-
-  // 多 Cron 支持：
-  // - * * * * *：每分钟灵魂词 STATS_STORE → Supabase 同步
-  // - 0 * * * *：国家累积写入 KV（GLOBAL_COUNTRY_STATS），全球排行每小时更新
-  // - */10 * * * *：国家累计 rollup（refresh_country_stats_current）
   const cron = String(event.cron || '').trim();
-
-  if (cron === '* * * * *') {
-    const r = await syncSoulWordsFromKV(env);
-    if (r.success && (r.synced ?? 0) > 0) {
-      console.log('[Worker] ✅ 灵魂词每分钟同步完成:', r.synced, '条, 清理 KV', r.deleted, '个');
-    } else if (!r.success) {
-      console.warn('[Worker] ⚠️ 灵魂词每分钟同步失败:', r.error);
-    }
-    return;
-  }
-
-  if (cron === '0 * * * *') {
-    const r = await writeGlobalCountryStatsToKV(env);
-    if (r.success) console.log('[Worker] ✅ 国家累积 KV 写入完成');
-    else console.warn('[Worker] ⚠️ 国家累积 KV 写入失败:', r.error);
-
-    const soulR = await runSoulWordHourlyRollup(env);
-    if (soulR.success) {
-      if ((soulR.synced ?? 0) > 0) console.log('[Worker] ✅ 灵魂词每小时汇总完成:', soulR.synced, '条');
-    } else console.warn('[Worker] ⚠️ 灵魂词每小时汇总失败:', soulR.error);
-
-    const MAX_COUNTRIES_AGGREGATE = 50;
-    const kvCountry = await getGlobalCountryStatsFromKV(env);
-    const countryLevel = kvCountry?.country_level ?? [];
-    const codes = countryLevel
-      .slice(0, MAX_COUNTRIES_AGGREGATE)
-      .map((it: any) => String(it?.country_code ?? '').trim().toUpperCase())
-      .filter((cc: string) => /^[A-Z]{2}$/.test(cc));
-    for (const cc of codes) {
-      await aggregateCountryCloudDepth(env, cc);
-    }
-    if (codes.length > 0) console.log('[Worker] ✅ 各国词云 KV(global_stats_v4_*) 已刷新:', codes.length, '国');
-    return;
-  }
-
   if (cron === '*/10 * * * *') {
     const r = await refreshCountryStatsCurrent(env);
     if (r.success) console.log('[Worker] ✅ 国家累计 rollup 刷新完成');
     else console.warn('[Worker] ⚠️ 国家累计 rollup 刷新失败:', r.error);
     return;
   }
-
-  // 默认：执行原有聚合任务（兼容旧 cron 配置）
+  if (cron === '0 2 * * *') {
+    ctx.waitUntil(dailyGitHubAudit(env));
+    return;
+  }
   const result = await performAggregation(env);
   const v6Result = await performV6Aggregation(env);
   const countryRollup = await refreshCountryStatsCurrent(env);
-  const kvWrite = await writeGlobalCountryStatsToKV(env);
-
   if (result.success && v6Result.success && countryRollup.success) {
-    console.log('[Worker] ✅ 定期汇总任务完成（包含 V6 + 国家 rollup）', kvWrite.success ? '+ KV 国家累积' : '');
+    console.log('[Worker] ✅ 定期汇总任务完成（包含 V6 + 国家 rollup）');
   } else {
     console.error('[Worker] ❌ 定期汇总任务失败:', {
       aggregation: result.error,
@@ -10161,284 +9755,8 @@ export async function scheduled(event: ScheduledEvent, env: Env, ctx: any) {
   }
 }
 
-/**
- * 路由：手动触发汇总任务（用于测试）
- * 功能：手动触发汇总逻辑，从 Supabase 获取数据并存入 KV
- * 访问方式：GET /cdn-cgi/handler/scheduled
- */
-app.get('/cdn-cgi/handler/scheduled', async (c) => {
-  try {
-    const env = c.env;
-    console.log('[Worker] 手动触发汇总任务...');
-    
-    const result = await performAggregation(env);
-    
-    if (result.success) {
-      return c.json({
-        status: 'success',
-        message: '汇总任务执行成功',
-        globalAverage: result.globalAverage,
-        timestamp: new Date().toISOString(),
-      });
-    } else {
-      return c.json({
-        status: 'error',
-        error: result.error || '汇总任务执行失败',
-        timestamp: new Date().toISOString(),
-      }, 500);
-    }
-  } catch (error: any) {
-    console.error('[Worker] 手动触发汇总任务失败:', error);
-    return c.json({
-      status: 'error',
-      error: error.message || '未知错误',
-      timestamp: new Date().toISOString(),
-    }, 500);
-  }
-});
-
-/**
- * 路由：手动刷新国家累计 rollup（用于测试）
- * 访问方式：GET /cdn-cgi/handler/refresh-country-rollup
- */
-app.get('/cdn-cgi/handler/refresh-country-rollup', async (c) => {
-  try {
-    const env = c.env;
-    const r = await refreshCountryStatsCurrent(env);
-    if (r.success) {
-      return c.json({ status: 'success', message: '国家累计 rollup 刷新成功', at: new Date().toISOString() });
-    }
-    return c.json({ status: 'error', error: r.error || '刷新失败', at: new Date().toISOString() }, 500);
-  } catch (e: any) {
-    return c.json({ status: 'error', error: e?.message || '未知错误', at: new Date().toISOString() }, 500);
-  }
-});
-
-/** 预热接口：将国家累积写入 KV GLOBAL_COUNTRY_STATS */
-app.get('/api/v2/internal/refresh-kv', async (c) => {
-  try {
-    const env = c.env;
-    const r = await writeGlobalCountryStatsToKV(env);
-    if (r.success) {
-      return c.json({ status: 'success', message: 'GLOBAL_COUNTRY_STATS 已写入 KV', at: new Date().toISOString() });
-    }
-    return c.json({ status: 'error', error: r.error || '写入失败', at: new Date().toISOString() }, 500);
-  } catch (e: any) {
-    return c.json({ status: 'error', error: e?.message || '未知错误', at: new Date().toISOString() }, 500);
-  }
-});
-
-/** 手动同步灵魂词：STATS_STORE soul: 前缀 → Supabase；成功后执行深度聚合，刷新常用国家词云缓存（global_stats_v4_SA 等）。 */
-app.get('/api/v2/sync-soul-words', async (c) => {
-  try {
-    const env = c.env as Env;
-    const r = await syncSoulWordsFromKV(env);
-    if (r.success) {
-      for (const countryCode of COMMON_COUNTRIES_FOR_CLOUD) {
-        await aggregateCountryCloudDepth(env, countryCode);
-      }
-      return c.json({
-        success: true,
-        synced: r.synced ?? 0,
-        deleted: r.deleted ?? 0,
-        message: `已同步 ${r.synced ?? 0} 条，清理 KV ${r.deleted ?? 0} 个 Key，已刷新常用国家词云`,
-        at: new Date().toISOString(),
-      });
-    }
-    return c.json({ success: false, error: r.error || '同步失败', at: new Date().toISOString() }, 500);
-  } catch (e: any) {
-    return c.json({ success: false, error: e?.message || '未知错误', at: new Date().toISOString() }, 500);
-  }
-});
-
-/**
- * 路由：存活检查 & 状态（兼容原有 worker.js）
- * 功能：返回总用户数和 API 状态
- */
-app.get('/', async (c) => {
-  try {
-    const env = c.env;
-    
-    // 如果配置了 Supabase，查询总用户数
-    if (env.SUPABASE_URL && env.SUPABASE_KEY) {
-      try {
-        const res = await fetch(`${env.SUPABASE_URL}/rest/v1/v_global_stats_v6?select=totalUsers`, {
-          headers: { 
-            'apikey': env.SUPABASE_KEY, 
-            'Authorization': `Bearer ${env.SUPABASE_KEY}` 
-          }
-        });
-        const data = await res.json();
-        return c.json({
-          status: 'success',
-          totalUsers: data[0]?.totalUsers || 0,
-          message: 'Cursor Vibe API is active',
-          endpoints: {
-            analyze: '/api/analyze',
-            v2Analyze: '/api/v2/analyze',
-            globalAverage: '/api/global-average',
-            randomPrompt: '/api/random_prompt',
-            refreshKv: '/api/v2/internal/refresh-kv',
-            syncSoulWords: '/api/v2/sync-soul-words',
-          },
-        });
-      } catch (error) {
-        console.warn('[Worker] 获取总用户数失败:', error);
-      }
-    }
-    
-    // 降级：返回基本信息
-    return c.json({
-      status: 'success',
-      message: 'Vibe Codinger Worker API v2.0',
-      endpoints: {
-        analyze: '/api/analyze',
-        v2Analyze: '/api/v2/analyze',
-        globalAverage: '/api/global-average',
-        randomPrompt: '/api/random_prompt',
-        refreshKv: '/api/v2/internal/refresh-kv',
-        syncSoulWords: '/api/v2/sync-soul-words',
-      },
-    });
-  } catch (error: any) {
-    return c.json({
-      status: 'error',
-      error: error.message || '未知错误',
-    }, 500);
-  }
-});
-
-/**
- * 【数据清洗】GET/POST /api/admin/repair-identity
- * 扫描 user_analysis，将相同 user_name 或同指纹簇中 total_messages < 2 的记录合并到大账号，删除冗余记录。
- */
-async function handleRepairIdentity(env: Env): Promise<{ merged: number; deleted: number; error?: string }> {
-  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) return { merged: 0, deleted: 0, error: 'Supabase 未配置' };
-  const smallUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?select=id,user_name,fingerprint,total_messages,total_chars,stats&total_messages=lt.2&order=user_name.asc`;
-  const smallRows = await fetchSupabaseJson<any[]>(env, smallUrl, { headers: buildSupabaseHeaders(env) }, 15000).catch(() => []);
-  const list = Array.isArray(smallRows) ? smallRows : [];
-  let merged = 0;
-  let deleted = 0;
-  const byName = new Map<string, any[]>();
-  for (const row of list) {
-    const name = String(row?.user_name ?? '').trim() || '__empty__';
-    if (!byName.has(name)) byName.set(name, []);
-    byName.get(name)!.push(row);
-  }
-  for (const [userName, group] of byName) {
-    if (group.length <= 1) continue;
-    const nameQ = userName === '__empty__' ? 'user_name=is.null' : `user_name=eq.${encodeURIComponent(userName)}`;
-    const bigUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?select=id,user_name,total_messages,total_chars&${nameQ}&total_messages=gte.2&limit=1`;
-    const bigRows = await fetchSupabaseJson<any[]>(env, bigUrl, { headers: buildSupabaseHeaders(env) }, 5000).catch(() => []);
-    const bigOne = Array.isArray(bigRows) && bigRows.length > 0 ? bigRows[0] : null;
-    const main = bigOne || group.reduce((a, b) => (Number(a?.total_messages) ?? 0) >= (Number(b?.total_messages) ?? 0) ? a : b);
-    const small = group.filter((r: any) => r?.id !== main?.id);
-    for (const s of small) {
-      const mainMsg = Number(main?.total_messages) ?? 0;
-      const mainChars = Number(main?.total_chars) ?? 0;
-      const addMsg = Number(s?.total_messages) ?? 0;
-      const addChars = Number(s?.total_chars) ?? 0;
-      try {
-        const patchUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(main.id)}`;
-        await fetch(patchUrl, {
-          method: 'PATCH',
-          headers: { ...buildSupabaseHeaders(env), 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            total_messages: mainMsg + addMsg,
-            total_chars: mainChars + addChars,
-            updated_at: new Date().toISOString(),
-          }),
-        });
-        merged++;
-      } catch (_) { /* ignore */ }
-      try {
-        const delUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(s.id)}`;
-        const res = await fetch(delUrl, { method: 'DELETE', headers: buildSupabaseHeaders(env) });
-        if (res.ok) deleted++;
-      } catch (_) { /* ignore */ }
-    }
-  }
-  return { merged, deleted };
-}
-
-app.get('/api/admin/repair-identity', async (c) => {
-  try {
-    const out = await handleRepairIdentity(c.env as Env);
-    return c.json({ success: !out.error, ...out, at: new Date().toISOString() });
-  } catch (e: any) {
-    return c.json({ success: false, error: e?.message || '未知错误', at: new Date().toISOString() }, 500);
-  }
-});
-
-app.post('/api/admin/repair-identity', async (c) => {
-  try {
-    const out = await handleRepairIdentity(c.env as Env);
-    return c.json({ success: !out.error, ...out, at: new Date().toISOString() });
-  } catch (e: any) {
-    return c.json({ success: false, error: e?.message || '未知错误', at: new Date().toISOString() }, 500);
-  }
-});
-
+/** ES Module 格式：必须 default 导出 { fetch, scheduled }，D1/KV 等 binding 才可用 */
 export default {
-  fetch: app.fetch, // Hono 完美支持这种简写
-  scheduled: scheduled // 必须显式导出这个函数，否则 Cron 触发器不会生效
+  fetch: app.fetch,
+  scheduled,
 };
-
-/**
- * 【V6.0 新增】GET /api/v2/keyword-location
- * 功能：查询关键词的地理分布
- * 参数：keyword - 关键词
- * 返回：{ status: 'success', data: [{ location, count }] }
- */
-app.get('/api/v2/keyword-location', async (c) => {
-  const env = c.env;
-  const keyword = c.req.query('keyword') || '';
-
-  if (!keyword || keyword.length < 2) {
-    return c.json({ status: 'error', error: 'keyword 参数必填且至少 2 个字符' }, 400);
-  }
-
-  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
-    return c.json({ status: 'error', error: 'Supabase 未配置' }, 500);
-  }
-
-  try {
-    // 从 keyword_logs 表查询该关键词的地理分布
-    // 假设 keyword_logs 表有 fingerprint 字段可以关联到 user_analysis 表获取 location
-    const url = new URL(`${env.SUPABASE_URL}/rest/v1/keyword_logs`);
-    url.searchParams.set('select', 'phrase,created_at');
-    url.searchParams.set('phrase', `eq.${encodeURIComponent(keyword)}`);
-    url.searchParams.set('order', 'created_at.desc');
-    url.searchParams.set('limit', '1000');
-
-    const rows = await fetchSupabaseJson<any[]>(env, url.toString(), {
-      headers: buildSupabaseHeaders(env),
-    });
-
-    // 从 fingerprint 聚合地理分布
-    // 注意：这需要实际有 location 字段，这里返回模拟数据作为占位
-    const locationMap = new Map<string, number>();
-
-    // 如果 keyword_logs 没有直接的位置信息，返回模拟数据
-    // 实际项目中应该关联 user_analysis 表获取 ip_location 或 manual_location
-    const mockLocations = [
-      { location: 'CN', count: Math.floor(Math.random() * 50) + 10 },
-      { location: 'US', count: Math.floor(Math.random() * 30) + 5 },
-      { location: 'GB', count: Math.floor(Math.random() * 15) + 3 },
-      { location: 'DE', count: Math.floor(Math.random() * 10) + 2 },
-    ];
-
-    // 按 count 排序
-    const sortedLocations = mockLocations
-      .sort((a, b) => b.count - a.count);
-
-    return c.json({
-      status: 'success',
-      keyword,
-      data: sortedLocations,
-    });
-  } catch (error: any) {
-    console.warn('[Worker] ⚠️ 查询关键词地理分布失败:', error);
-    return c.json({ status: 'error', error: error?.message || '查询失败' }, 500);
-  }
-});

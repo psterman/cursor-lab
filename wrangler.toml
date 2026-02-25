@@ -31,7 +31,9 @@ id = "f9cac5f94024451a9229253ae2367683"  # 可与 STATS_STORE 共用，或创建
 # */10 * * * * = 每 10 分钟：国家累计 rollup（refresh_country_stats_current）
 # 注意：Cron 触发器需要 Worker 付费计划（Free 计划不支持）
 [triggers]
-crons = ["0 * * * *"]
+# 每小时: 国家累计 + 灵魂词汇总
+# 每日 02:00: GitHub 天梯榜 Top50 巡检
+crons = ["0 * * * *", "0 2 * * *"]
 
 # [保留原有] D1 数据库：答案之书
 [[d1_databases]]

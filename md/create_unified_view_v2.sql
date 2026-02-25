@@ -27,7 +27,8 @@ WITH base_data AS (
         lat AS raw_lat,
         lng AS raw_lng,
         manual_location, manual_lat, manual_lng,
-        created_at, updated_at
+        created_at, updated_at,
+        github_stars, github_forks, github_watchers, github_followers, github_score, github_synced_at, github_login
     FROM public.user_analysis
     ORDER BY COALESCE(fingerprint, id::text), user_identity DESC, created_at DESC
 ),
@@ -43,6 +44,7 @@ unified AS (
         jiafang_count, ketao_count,
         vibe_index_str, lpdef,
         ip_location,
+        github_stars, github_forks, github_watchers, github_followers, github_score, github_synced_at, github_login,
         COALESCE(manual_lat, raw_lat) AS lat,
         COALESCE(manual_lng, raw_lng) AS lng,
         manual_location, manual_lat, manual_lng,
@@ -123,14 +125,13 @@ CREATE INDEX IF NOT EXISTS idx_user_analysis_github_lookup
 ON public.user_analysis(user_identity, id) 
 WHERE user_identity = 'github';
 
--- 步骤 4: 验证视图已创建
+-- 步骤 4: 验证视图已创建（information_schema.views 无 table_type 列）
 SELECT 
-    table_name,
-    table_type,
-    view_definition
+    table_schema,
+    table_name
 FROM information_schema.views
 WHERE table_schema = 'public' 
-AND table_name = 'v_unified_analysis_v2';
+  AND table_name = 'v_unified_analysis_v2';
 
 -- 步骤 5: 测试查询（可选）
 -- SELECT COUNT(*) as total_users FROM public.v_unified_analysis_v2;

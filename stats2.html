@@ -273,6 +273,10 @@
                     <span class="tab-icon">🏆</span>
                     <span class="tab-text" data-t="tab.ranking" data-i18n="tab.ranking">排行榜</span>
                 </button>
+                <button type="button" class="drawer-tab" data-tab="leaderboard" onclick="switchView('leaderboard')">
+                    <span class="tab-icon">⚔</span>
+                    <span class="tab-text" data-t="tab.leaderboard" data-i18n="tab.leaderboard">天梯榜</span>
+                </button>
                 <button type="button" class="drawer-tab" data-tab="global" onclick="switchView('global')">
                     <span class="tab-icon">🌍</span>
                     <span class="tab-text" data-t="tab.global" data-i18n="tab.global">全球</span>
@@ -297,6 +301,14 @@
                     <div id="countryTemplateMount" class="flex-1 min-h-0 px-4 py-4 pb-4" style="font-family: 'JetBrains Mono', monospace;"></div>
                 </div>
                 
+                <!-- GitHub 战力天梯榜 -->
+                <div id="panel-leaderboard-view" class="right-drawer-panel hidden flex-col h-full overflow-y-auto">
+                    <div class="p-4 border-b border-[#00ff41]/20">
+                        <h2 class="text-[#00ff41] text-lg m-0">🏆 GitHub 天梯榜</h2>
+                        <p class="text-zinc-500 text-xs mt-1">综合得分 = Star×10 + Fork×5 + Watch×2 + Follower×1</p>
+                    </div>
+                    <div id="leaderboard-list" class="flex-1 overflow-y-auto p-2" style="max-height:calc(100vh - 200px);"></div>
+                </div>
                 <!-- 【新增】排行榜视图 - 六个全球排行榜卡片 + 高分图谱 -->
                 <div id="panel-ranking-view" class="right-drawer-panel hidden flex-col h-full overflow-y-auto">
                     <div id="panel-ranking-content" class="flex-1 flex flex-col gap-4 min-h-0 p-4">

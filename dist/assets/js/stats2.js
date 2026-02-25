@@ -5410,8 +5410,9 @@
             return card;
         }
 
-        // 保存当前打开抽屉的国家信息，用于刷新
+        // 保存当前打开抽屉的国家信息，用于刷新（暴露到 window 供左侧抽屉内联 onclick 使用）
         let currentDrawerCountry = { code: null, name: null };
+        if (typeof window !== 'undefined') window.currentDrawerCountry = currentDrawerCountry;
         /** 国家透视下自动刷新右侧面板的定时器（不通过按钮），离开国家视图时清除 */
         var countryPanelAutoRefreshTimer = null;
         var COUNTRY_PANEL_AUTO_REFRESH_INTERVAL_MS = 60000;
@@ -6570,30 +6571,36 @@
                         }
                     </div>
                     
-                    <!-- 状态切换按钮（简约：仅用选中态表达当前状态） -->
+                    <!-- 状态切换按钮（简约：仅用选中态表达当前状态；带 status-btn data-status 供 setUserStatus 更新样式） -->
                     <div class="drawer-item-label mb-2">${currentLang === 'zh' ? '状态' : 'Status'}</div>
                     <div class="flex gap-1.5">
                         <button 
-                            title="${(USER_STATUSES.idle && (currentLang === 'zh' ? USER_STATUSES.idle.descZh : USER_STATUSES.idle.descEn)) || ''}"
-                            onclick="setUserStatus('idle'); if(currentDrawerCountry.code) showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);"
-                            class="flex-1 px-2 py-1.5 bg-zinc-900/50 border ${currentStatus === 'idle' ? 'border-[#00ff41]' : 'border-zinc-800'} text-[10px] font-bold uppercase tracking-wider hover:border-[#00ff41] transition-colors"
+                            type="button"
+                            data-status="idle"
+                            class="status-btn flex-1 px-2 py-1.5 bg-zinc-900/50 border ${currentStatus === 'idle' ? 'border-[#00ff41]' : 'border-zinc-800'} text-[10px] font-bold uppercase tracking-wider hover:border-[#00ff41] transition-colors"
                             style="color: ${currentStatus === 'idle' ? '#00ff41' : '#71717a'};"
+                            title="${(USER_STATUSES.idle && (currentLang === 'zh' ? USER_STATUSES.idle.descZh : USER_STATUSES.idle.descEn)) || ''}"
+                            onclick="setUserStatus('idle');"
                         >
                             🟢 ${currentLang === 'zh' ? '在线' : 'Online'}
                         </button>
                         <button 
-                            title="${(USER_STATUSES.busy && (currentLang === 'zh' ? USER_STATUSES.busy.descZh : USER_STATUSES.busy.descEn)) || ''}"
-                            onclick="setUserStatus('busy'); if(currentDrawerCountry.code) showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);"
-                            class="flex-1 px-2 py-1.5 bg-zinc-900/50 border ${currentStatus === 'busy' ? 'border-[#ff8c00]' : 'border-zinc-800'} text-[10px] font-bold uppercase tracking-wider hover:border-[#ff8c00] transition-colors"
+                            type="button"
+                            data-status="busy"
+                            class="status-btn flex-1 px-2 py-1.5 bg-zinc-900/50 border ${currentStatus === 'busy' ? 'border-[#ff8c00]' : 'border-zinc-800'} text-[10px] font-bold uppercase tracking-wider hover:border-[#ff8c00] transition-colors"
                             style="color: ${currentStatus === 'busy' ? '#ff8c00' : '#71717a'};"
+                            title="${(USER_STATUSES.busy && (currentLang === 'zh' ? USER_STATUSES.busy.descZh : USER_STATUSES.busy.descEn)) || ''}"
+                            onclick="setUserStatus('busy');"
                         >
                             🟠 ${currentLang === 'zh' ? '忙碌' : 'Busy'}
                         </button>
                         <button 
-                            title="${(USER_STATUSES.sprint && (currentLang === 'zh' ? USER_STATUSES.sprint.descZh : USER_STATUSES.sprint.descEn)) || ''}"
-                            onclick="setUserStatus('sprint'); if(currentDrawerCountry.code) showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);"
-                            class="flex-1 px-2 py-1.5 bg-zinc-900/50 border ${currentStatus === 'sprint' ? 'border-[#71717a]' : 'border-zinc-800'} text-[10px] font-bold uppercase tracking-wider hover:border-[#71717a] transition-colors"
+                            type="button"
+                            data-status="sprint"
+                            class="status-btn flex-1 px-2 py-1.5 bg-zinc-900/50 border ${currentStatus === 'sprint' ? 'border-[#71717a]' : 'border-zinc-800'} text-[10px] font-bold uppercase tracking-wider hover:border-[#71717a] transition-colors"
                             style="color: ${currentStatus === 'sprint' ? '#71717a' : '#71717a'};"
+                            title="${(USER_STATUSES.sprint && (currentLang === 'zh' ? USER_STATUSES.sprint.descZh : USER_STATUSES.sprint.descEn)) || ''}"
+                            onclick="setUserStatus('sprint');"
                         >
                             ⚫ ${currentLang === 'zh' ? '离线' : 'Offline'}
                         </button>
@@ -7337,6 +7344,7 @@
                 console.warn('[Drawer] showDrawersWithCountryData 异常:', drawerErr);
             }
         }
+        if (typeof window !== 'undefined') window.showDrawersWithCountryData = showDrawersWithCountryData;
 
         /**
          * 切换到「国家数据透视」模式（右侧抽屉显示该国雷达图 + 战神榜）
@@ -7626,6 +7634,17 @@
             state.currentViewState = targetView;
             currentViewState = targetView; // 向后兼容
 
+            // 【优化】移除自动刷新定时器，避免后台资源浪费
+            // 用户需要数据时手动刷新页面或点击刷新按钮
+            if (countryPanelAutoRefreshTimer) {
+                clearInterval(countryPanelAutoRefreshTimer);
+                countryPanelAutoRefreshTimer = null;
+            }
+            
+            // 获取所有面板和 Tab 按钮
+            state.currentViewState = targetView;
+            currentViewState = targetView; // 向后兼容
+
             // 国家透视下自动刷新右侧面板（不通过按钮）；离开国家视图时清除定时器
             if (countryPanelAutoRefreshTimer) {
                 clearInterval(countryPanelAutoRefreshTimer);
@@ -7644,7 +7663,8 @@
             const panels = {
                 global: document.getElementById('panel-global-view'),
                 country: document.getElementById('panel-country-view'),
-                ranking: document.getElementById('panel-ranking-view')
+                ranking: document.getElementById('panel-ranking-view'),
+                leaderboard: document.getElementById('panel-leaderboard-view')
             };
             const tabs = document.querySelectorAll('.drawer-tab');
             
@@ -7762,6 +7782,15 @@
                     console.log('[switchView] window.stats2AppLoaded:', window.stats2AppLoaded);
                     renderRankingView();
                     break;
+                case 'leaderboard':
+                    // GitHub 天梯榜视图
+                    console.log('[switchView] 触发 leaderboard 视图');
+                    if (typeof loadGitHubLeaderboard === 'function') {
+                        loadGitHubLeaderboard();
+                    } else if (typeof window.loadGitHubLeaderboard === 'function') {
+                        window.loadGitHubLeaderboard();
+                    }
+                    break;
             }
             
             console.log('[switchView] 已切换到:', view);
@@ -7818,6 +7847,65 @@
             
             console.log('[renderRankingView] 排行榜渲染完成');
         }
+
+        /**
+         * 加载 GitHub 天梯榜（Top50）并渲染到 #leaderboard-list
+         */
+        async function loadGitHubLeaderboard() {
+            var listEl = document.getElementById('leaderboard-list');
+            if (!listEl) {
+                console.warn('[loadGitHubLeaderboard] #leaderboard-list 不存在');
+                return;
+            }
+            listEl.innerHTML = '<div class="text-zinc-500 text-sm py-4 text-center">加载中...</div>';
+            var sb = (typeof supabaseClient !== 'undefined' && supabaseClient) ? supabaseClient : (window.supabase || null);
+            if (!sb || typeof sb.rpc !== 'function') {
+                listEl.innerHTML = '<div class="text-zinc-500 text-sm py-4 text-center">未连接数据库</div>';
+                return;
+            }
+            try {
+                var res = await sb.rpc('get_github_leaderboard', { limit_count: 50 });
+                var data = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
+                var err = res && res.error;
+                if (err) {
+                    listEl.innerHTML = '<div class="text-red-400 text-sm py-4 text-center">' + (err.message || '加载失败') + '</div>';
+                    return;
+                }
+                if (!Array.isArray(data) || data.length === 0) {
+                    console.warn('Leaderboard is empty in DB');
+                    listEl.innerHTML = '<div class="text-zinc-500 text-sm py-4 text-center">暂无排行数据，同步 GitHub 后即可上榜</div>';
+                    return;
+                }
+                var rankColor = function(i) {
+                    if (i === 0) return '#FFD700';
+                    if (i === 1) return '#C0C0C0';
+                    if (i === 2) return '#CD7F32';
+                    return 'rgba(255,255,255,0.7)';
+                };
+                var esc = function(s) {
+                    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                };
+                listEl.innerHTML = data.map(function(user, idx) {
+                    var rank = user.rank != null ? user.rank : (idx + 1);
+                    var name = user.user_name || user.github_login || ('@' + (user.github_login || ''));
+                    var bg = idx < 3 ? 'rgba(0,255,65,0.1)' : 'rgba(0,255,65,0.02)';
+                    return '<div class="leaderboard-item flex items-center gap-3 p-3 rounded-lg mb-2" style="background:' + bg + ';">' +
+                        '<div class="w-10 text-lg font-bold" style="color:' + rankColor(idx) + ';">#' + rank + '</div>' +
+                        '<img src="' + esc(user.avatar_url || ('https://github.com/' + (user.github_login || '') + '.png')) + '" alt="" class="w-10 h-10 rounded-full object-cover" onerror="this.src=\'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 40 40%22%3E%3Crect fill=%22%23333%22 width=%2240%22 height=%2240%22/%3E%3C/svg%3E\'">' +
+                        '<div class="flex-1 min-w-0">' +
+                        '<div class="text-[#00ff41] font-semibold truncate">' + esc(name) + '</div>' +
+                        '<div class="text-[10px] text-zinc-500">&#9733;' + (user.github_stars || 0) + ' &#9861;' + (user.github_forks || 0) + ' &#128065;' + (user.github_watchers || 0) + ' &#128101;' + (user.github_followers || 0) + '</div>' +
+                        '</div>' +
+                        '<div class="text-right"><div class="text-[#00ff41] text-lg font-bold">' + (user.github_score || 0) + '</div></div>' +
+                        '</div>';
+                }).join('');
+                console.log('[loadGitHubLeaderboard] ✅ 渲染完成，共 ' + data.length + ' 条');
+            } catch (e) {
+                console.error('[loadGitHubLeaderboard] ❌ 加载失败:', e);
+                listEl.innerHTML = '<div class="text-red-400 text-sm py-4 text-center">' + (e && e.message ? e.message : '加载失败') + '</div>';
+            }
+        }
+        if (typeof window !== 'undefined') window.loadGitHubLeaderboard = loadGitHubLeaderboard;
 
         // ==========================================
         // 矩阵绿天梯榜相关函数和常量
@@ -13579,7 +13667,7 @@
                             // 调试日志：输出所有同步到的用户
                             console.log('[Presence] 当前同步到的所有用户:', newState);
                             
-                            // 计算在线人数：遍历所有状态对象并计算总数（使用 user_name 去重）
+                            // 计算在线人数：遍历所有状态对象并计算总数（使用 user_name 去重；排除离线 sprint）
                             const userMap = new Map();
                             if (newState) {
                                 Object.keys(newState).forEach((key) => {
@@ -13588,7 +13676,7 @@
                                     
                                     entries.forEach(entry => {
                                         if (!entry || !entry.online_at) return;
-                                        // 使用 user_name 作为去重键
+                                        if ((entry.status || 'idle') === 'sprint') return; // 离线用户不计入在线人数、不出现在活跃节点
                                         const userName = entry.user_name || entry.github_id || entry.github_username || 'Guest';
                                         if (!userMap.has(userName) || new Date(entry.online_at) > new Date(userMap.get(userName).online_at)) {
                                             userMap.set(userName, entry);
@@ -13597,7 +13685,6 @@
                                 });
                             }
                             
-                            // 注意：不排除当前用户自己，因为用户要求在列表中可见
                             const onlineCount = userMap.size;
                             console.log('[Presence] 👥 在线人数同步（去重后，包含自己）:', onlineCount);
 
@@ -13761,18 +13848,16 @@
             currentUserStatus = status;
             localStorage.setItem('user_status', status);
             
-            // 更新按钮样式
+            // 更新按钮样式（依赖左侧抽屉内 .status-btn 与 data-status）
+            const color = (USER_STATUSES[status] && (USER_STATUSES[status].status_color || USER_STATUSES[status].color)) || '#00ff41';
             document.querySelectorAll('.status-btn').forEach(btn => {
-                btn.classList.remove('active');
                 const btnStatus = btn.getAttribute('data-status');
                 if (btnStatus === status) {
-                    btn.classList.add('active');
-                    const statusConfig = USER_STATUSES[status];
-                    btn.style.borderColor = statusConfig.color;
-                    btn.style.color = statusConfig.color;
+                    btn.style.borderColor = color;
+                    btn.style.color = color;
                 } else {
                     btn.style.borderColor = '';
-                    btn.style.color = '';
+                    btn.style.color = '#71717a';
                 }
             });
             
@@ -13803,7 +13888,8 @@
             
             console.log('[Status] ✅ 用户状态已更新:', status, USER_STATUSES[status]);
         }
-        
+        if (typeof window !== 'undefined') window.setUserStatus = setUserStatus;
+
         /**
          * 初始化状态按钮样式
          */
@@ -14108,10 +14194,15 @@
             // 转换为数组
             const allUsers = Array.from(userMap.values());
             
-            // 过滤掉离线用户（sprint状态）
+            const myStatus = localStorage.getItem('user_status') || 'idle';
+            const myId = localStorage.getItem('github_username') || null;
+            // 过滤掉离线用户（sprint）；本人为离线时也从列表中移除自己，使本人和其他人都看不到
             const visibleUsers = allUsers.filter(user => {
                 const status = user.status || 'idle';
-                return status !== 'sprint'; // 完全隐藏离线用户
+                if (status === 'sprint') return false;
+                const userName = user.user_name || user.github_username || user.github_id || '';
+                if (myStatus === 'sprint' && (userName === myId || user.github_username === myId || user.github_id === myId)) return false;
+                return true;
             });
             
             // 如果没有用户，显示空状态
@@ -18986,7 +19077,7 @@
                     ` : ''}
                 `;
                 
-                // 先移除旧的统计卡片（如果存在）
+                // 先移除旧的统计卡片和 GitHub 战力卡片（如果存在）
                 const existingStatsCards = leftBody.querySelectorAll('.drawer-item');
                 existingStatsCards.forEach(card => {
                     const label = card.querySelector('.drawer-item-label');
@@ -18994,6 +19085,7 @@
                         card.remove();
                     }
                 });
+                leftBody.querySelectorAll('.github-power-card').forEach(function(c) { c.remove(); });
                 
                 // 将统计卡片插入到身份配置卡片之后，添加渐进式动画
                 statsCard.classList.add('clinic-card');
@@ -19013,6 +19105,51 @@
                     statsCard.style.opacity = '1';
                     statsCard.style.transform = 'translateY(0)';
                 });
+
+                // GitHub 战力卡片（仅登录用户显示，数据来自后端同步）
+                var gStars = currentUserData.github_stars ?? currentUserData.githubStars ?? 0;
+                var gForks = currentUserData.github_forks ?? currentUserData.githubForks ?? 0;
+                var gWatchers = currentUserData.github_watchers ?? currentUserData.githubWatchers ?? 0;
+                var gFollowers = currentUserData.github_followers ?? currentUserData.githubFollowers ?? 0;
+                var gScore = currentUserData.github_score ?? currentUserData.githubScore ?? 0;
+                var gSyncedAt = currentUserData.github_synced_at ?? currentUserData.githubSyncedAt ?? null;
+                var gRank = currentUserData.github_rank ?? currentUserData.githubRank ?? null;
+                var ghLabel = (typeof getI18nText === 'function' && getI18nText('github.power')) ? getI18nText('github.power') : 'GitHub 战力';
+                var syncBtnLabel = (typeof getI18nText === 'function' && getI18nText('github.sync')) ? getI18nText('github.sync') : (gSyncedAt ? '刷新' : '同步');
+                var cooldownHtml = '';
+                if (gSyncedAt) {
+                    var nextSync = new Date(gSyncedAt).getTime() + 24 * 60 * 60 * 1000;
+                    if (Date.now() < nextSync) {
+                        var hoursLeft = Math.ceil((nextSync - Date.now()) / (60 * 60 * 1000));
+                        cooldownHtml = '<div class="text-[11px] mt-2" style="color:rgba(255,165,0,0.8);">&#9201; ' + (currentLang === 'en' ? 'Cooldown: ' + hoursLeft + 'h left' : '冷却中，' + hoursLeft + ' 小时后可刷新') + '</div>';
+                    }
+                }
+                var githubPowerCard = document.createElement('div');
+                githubPowerCard.className = 'drawer-item github-power-card';
+                githubPowerCard.setAttribute('data-github-power', '1');
+                githubPowerCard.style.cssText = 'background:rgba(0,255,65,0.05);padding:16px;border-radius:8px;margin-top:12px;border:1px solid rgba(0,255,65,0.15);';
+                githubPowerCard.innerHTML = [
+                    '<div class="flex justify-between items-center mb-3">',
+                    '<h3 class="text-[#00ff41] text-base font-semibold m-0">' + esc(ghLabel) + '</h3>',
+                    '<button type="button" id="sync-github-btn" class="px-3 py-1 rounded text-xs font-bold border border-[#00ff41] text-[#00ff41] bg-transparent cursor-pointer hover:bg-[#00ff41]/10">' + esc(syncBtnLabel) + '</button>',
+                    '</div>',
+                    '<div class="grid grid-cols-2 gap-2 text-sm" style="color:rgba(255,255,255,0.85);">',
+                    '<div>&#9733; Stars</div><div class="text-right">' + (Number(gStars) || 0) + '</div>',
+                    '<div>&#9861; Forks</div><div class="text-right">' + (Number(gForks) || 0) + '</div>',
+                    '<div>&#128065; Watchers</div><div class="text-right">' + (Number(gWatchers) || 0) + '</div>',
+                    '<div>&#128101; Followers</div><div class="text-right">' + (Number(gFollowers) || 0) + '</div>',
+                    '</div>',
+                    '<div class="mt-3 pt-3 border-t border-[#00ff41]/20">',
+                    '<div class="text-[#00ff41] text-xl font-bold">' + (currentLang === 'en' ? 'Score: ' : '综合得分: ') + (Number(gScore) || 0) + '</div>',
+                    (gRank != null && gRank !== '' ? '<div class="text-[10px] mt-1" style="color:rgba(255,255,255,0.7);">' + (currentLang === 'en' ? 'Global rank: #' : '全球排名: #') + esc(String(gRank)) + '</div>' : ''),
+                    cooldownHtml,
+                    '</div>'
+                ].join('');
+                if (statsCard.nextSibling) {
+                    leftBody.insertBefore(githubPowerCard, statsCard.nextSibling);
+                } else {
+                    leftBody.appendChild(githubPowerCard);
+                }
 
                 // 上岗天数：抽屉打开后也要“实时增长”（无需手动刷新）
                 try {
@@ -20604,6 +20741,28 @@
         // ==========================================
         let vibeCloudChart = null;
         let vibeCloudAbort = null;
+        
+        // 【性能优化】词云数据缓存（按国家代码缓存，避免重复请求）
+        const _vibeCloudCache = new Map();
+        const _VIBE_CACHE_TTL = 60000; // 60秒缓存有效期
+        
+        function _getVibeCloudCache(region) {
+            const cached = _vibeCloudCache.get(region);
+            if (cached && (Date.now() - cached.ts < _VIBE_CACHE_TTL)) {
+                return cached.data;
+            }
+            return null;
+        }
+        
+        function _setVibeCloudCache(region, data) {
+            _vibeCloudCache.set(region, { data, ts: Date.now() });
+            // 清理超过10个的旧缓存
+            if (_vibeCloudCache.size > 10) {
+                const oldest = Array.from(_vibeCloudCache.entries())
+                    .sort((a, b) => a[1].ts - b[1].ts)[0];
+                if (oldest) _vibeCloudCache.delete(oldest[0]);
+            }
+        }
 
         function _setVibeRefreshing(on) {
             try {
@@ -20883,9 +21042,11 @@
                     }
                     return;
                 }
-                // 非 Professional：数据为空时尝试自动获取
+                // 非 Professional：数据为空时尝试自动获取（限制重试次数）
+                window.__cloudRetryCount = (window.__cloudRetryCount || 0);
                 var svc = window.StatsDataService;
-                if (svc && typeof svc.fetchCountryKeywords === 'function' && !window.__isCloudLoading) {
+                if (svc && typeof svc.fetchCountryKeywords === 'function' && !window.__isCloudLoading && window.__cloudRetryCount < 2) {
+                    window.__cloudRetryCount++;
                     if (empty) {
                         empty.textContent = '正在扫描该国开发者指纹...';
                         empty.classList.remove('hidden');
@@ -20898,8 +21059,9 @@
                             (result.globalNative && result.globalNative.length > 0)
                         );
                         if (hasData) {
+                            window.__cloudRetryCount = 0;
                             _renderNationalIdentityCloud(level);
-                        } else {
+                        } else if (window.__cloudRetryCount < 2) {
                             if (empty) {
                                 empty.textContent = '正在同步词库...';
                                 empty.classList.remove('hidden');
@@ -20907,16 +21069,28 @@
                             setTimeout(function() {
                                 _renderNationalIdentityCloud(level);
                             }, 800);
+                        } else {
+                            if (empty) {
+                                empty.textContent = '暂无灵魂词，快去分析吧';
+                                empty.classList.remove('hidden');
+                            }
                         }
                     }).catch(function(err) {
                         console.warn('[_renderNationalIdentityCloud] 获取词云数据失败:', err);
-                        if (empty) {
-                            empty.textContent = '加载失败，重试中...';
-                            empty.classList.remove('hidden');
+                        if (window.__cloudRetryCount < 2) {
+                            if (empty) {
+                                empty.textContent = '加载失败，重试中...';
+                                empty.classList.remove('hidden');
+                            }
+                            setTimeout(function() {
+                                _renderNationalIdentityCloud(level);
+                            }, 1500);
+                        } else {
+                            if (empty) {
+                                empty.textContent = '暂无灵魂词，快去分析吧';
+                                empty.classList.remove('hidden');
+                            }
                         }
-                        setTimeout(function() {
-                            _renderNationalIdentityCloud(level);
-                        }, 1500);
                     });
                     return;
                 }
@@ -20926,12 +21100,9 @@
                 }
                 if (meta) meta.textContent = '--';
                 if (empty) {
-                    empty.textContent = '正在拉取词云...';
+                    empty.textContent = '暂无灵魂词，快去分析吧';
                     empty.classList.remove('hidden');
                 }
-                setTimeout(function() {
-                    _renderNationalIdentityCloud(level);
-                }, 600);
                 return;
             }
             if (empty) empty.classList.add('hidden');
@@ -21098,10 +21269,11 @@
             if (meta) meta.textContent = `N=${raw.length}`;
 
             let words = applyLogFontSize(raw, (w) => w?.value ?? 0);
-            try { container.innerHTML = ''; } catch { /* ignore */ }
-            _disposeChart(vibeCloudChart);
-            // 不指定主题：避免 theme 未注册导致渲染失败
-            vibeCloudChart = echarts.init(container, null, { renderer: 'canvas' });
+            // 【性能优化】复用 ECharts 实例，避免反复销毁重建
+            if (!vibeCloudChart || vibeCloudChart.isDisposed()) {
+                try { container.innerHTML = ''; } catch { /* ignore */ }
+                vibeCloudChart = echarts.init(container, null, { renderer: 'canvas' });
+            }
 
             const maxVal = Math.max(...words.map((w) => Number(w.value) || 0), 1);
             const getColor = (value) => {
@@ -21223,7 +21395,8 @@
             } catch { /* ignore */ }
         };
 
-        window.refreshVibeCard = async function refreshVibeCard(countryCode) {
+        window.refreshVibeCard = async function refreshVibeCard(countryCode, opts) {
+            opts = opts || {};
             const region = String(countryCode || currentDrawerCountry?.code || '').trim().toUpperCase();
             const empty = document.getElementById('vibe-cloud50-empty');
 
@@ -21232,60 +21405,73 @@
                 try { if (empty) empty.classList.remove('hidden'); } catch { /* ignore */ }
                 return;
             }
+            
+            // 【性能优化】检查缓存，避免重复请求
+            if (!opts.forceRefresh) {
+                const cached = _getVibeCloudCache(region);
+                if (cached) {
+                    console.log('[refreshVibeCard] 命中缓存:', region);
+                    _applyVibeCloudData(region, cached, empty);
+                    return;
+                }
+            }
 
             _setVibeRefreshing(true);
-            try { setTimeout(() => _setVibeRefreshing(false), 700); } catch { /* ignore */ }
-
-            window.__countryKeywordsByLevel = null;
-            window.__nationalCloudData = null;
+            
+            var canvas = document.getElementById('national-identity-cloud-canvas');
+            if (canvas && canvas.getContext) { try { canvas.getContext('2d').clearRect(0, 0, canvas.width || 0, canvas.height || 0); } catch (_) {} }
             if (empty) {
                 empty.textContent = '正在扫描该国开发者指纹...';
                 empty.classList.remove('hidden');
             }
-            var canvas = document.getElementById('national-identity-cloud-canvas');
-            if (canvas && canvas.getContext) { try { canvas.getContext('2d').clearRect(0, 0, canvas.width || 0, canvas.height || 0); } catch (_) {} }
-            try {
-                var API_ENDPOINT = _getApiEndpoint();
-                var kwResp = await fetch(API_ENDPOINT + 'api/v2/stats/keywords?region=' + encodeURIComponent(region) + '&_t=' + Date.now(), { cache: 'no-store' });
-                if (!kwResp.ok) throw new Error('keywords ' + kwResp.status);
-                var rawPayload = await kwResp.json();
-                var kwPayload = (rawPayload && rawPayload.data) ? rawPayload.data : rawPayload;
-                var adapt = (window.StatsDataService && window.StatsDataService.adaptCloudData) ? window.StatsDataService.adaptCloudData : function(arr) { return Array.isArray(arr) ? arr : []; };
-                if (kwPayload && typeof kwPayload === 'object') {
-                    // 支持两种格式：直接格式 {Novice: [...]} 或嵌套格式 {identityLevelCloud: {Novice: [...]}}
-                    var cloudData = kwPayload.identityLevelCloud || kwPayload;
-                    window.__countryKeywordsByLevel = {
-                        Novice: adapt(cloudData.Novice || []),
-                        Professional: adapt(cloudData.Professional || []),
-                        Architect: adapt(cloudData.Architect || []),
-                        globalNative: adapt(cloudData.globalNative || cloudData.native || [])
-                    };
-                    window.__nationalCloudData = window.__countryKeywordsByLevel;
-                } else {
-                    window.__countryKeywordsByLevel = null;
-                    window.__nationalCloudData = null;
-                }
-                var currentLevel = window.__currentNationalIdentityLevel || 'Architect';
-                var renderFn = window._renderNationalIdentityCloud || (typeof _renderNationalIdentityCloud !== 'undefined' ? _renderNationalIdentityCloud : null);
-                if (renderFn) renderFn(currentLevel);
-                var total = 0;
-                if (window.__countryKeywordsByLevel) {
-                    total = (window.__countryKeywordsByLevel.Novice || []).length + (window.__countryKeywordsByLevel.Professional || []).length + (window.__countryKeywordsByLevel.Architect || []).length + (window.__countryKeywordsByLevel.globalNative || []).length;
-                }
-                if (empty && total > 0) empty.classList.add('hidden');
-                if (total === 0 && empty) { empty.textContent = '暂无灵魂词，快去分析吧'; empty.classList.remove('hidden'); }
-            } catch (e) {
+            
+            // 【性能优化】并行请求 keywords 和 top10 数据
+            var API_ENDPOINT = _getApiEndpoint();
+            try { vibeCloudAbort && vibeCloudAbort.abort && vibeCloudAbort.abort(); } catch { /* ignore */ }
+            vibeCloudAbort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+            
+            const fetchKeywords = fetch(
+                API_ENDPOINT + 'api/v2/stats/keywords?region=' + encodeURIComponent(region) + '&_t=' + Date.now(), 
+                { cache: 'no-store', signal: vibeCloudAbort ? vibeCloudAbort.signal : undefined }
+            ).then(r => r.ok ? r.json() : null).catch(() => null);
+            
+            const fetchTop10 = (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function')
+                ? supabaseClient.rpc('get_country_keywords', { target_code: region }).then(res => res?.data).catch(() => null)
+                : fetch(
+                    API_ENDPOINT + 'api/global-average?country_code=' + encodeURIComponent(region) + '&_t=' + Date.now(),
+                    { cache: 'no-store', signal: vibeCloudAbort ? vibeCloudAbort.signal : undefined }
+                  ).then(r => r.ok ? r.json() : null).then(p => p?.data?.top10 || p?.top10 || []).catch(() => []);
+            
+            // 并行等待两个请求
+            const [kwResult, top10Result] = await Promise.all([fetchKeywords, fetchTop10]);
+            
+            _setVibeRefreshing(false);
+            
+            // 处理词云数据
+            var kwPayload = (kwResult && kwResult.data) ? kwResult.data : kwResult;
+            var adapt = (window.StatsDataService && window.StatsDataService.adaptCloudData) ? window.StatsDataService.adaptCloudData : function(arr) { return Array.isArray(arr) ? arr : []; };
+            
+            if (kwPayload && typeof kwPayload === 'object') {
+                var cloudData = kwPayload.identityLevelCloud || kwPayload;
+                window.__countryKeywordsByLevel = {
+                    Novice: adapt(cloudData.Novice || []),
+                    Professional: adapt(cloudData.Professional || []),
+                    Architect: adapt(cloudData.Architect || []),
+                    globalNative: adapt(cloudData.globalNative || cloudData.native || [])
+                };
+                window.__nationalCloudData = window.__countryKeywordsByLevel;
+            } else {
                 window.__countryKeywordsByLevel = null;
                 window.__nationalCloudData = null;
+                // 尝试 localStorage 兜底
                 var isLocalUser = (region === (localStorage.getItem('user_manual_location') || window.currentUserCountry || '').toUpperCase());
-                try {
-                    if (isLocalUser) {
+                if (isLocalUser) {
+                    try {
                         var lastStr = localStorage.getItem('last_analysis_data');
                         if (lastStr) {
                             var lastData = JSON.parse(lastStr);
                             var ilc = (lastData && lastData.stats && lastData.stats.identityLevelCloud) || (lastData && lastData.identityLevelCloud) || null;
                             if (ilc && typeof ilc === 'object') {
-                                // 【使用 dataAdapter】统一数据格式转换
                                 window.__countryKeywordsByLevel = { 
                                     Novice: dataAdapter(ilc.Novice || []), 
                                     Professional: dataAdapter(ilc.Professional || []), 
@@ -21293,55 +21479,48 @@
                                     globalNative: dataAdapter(ilc.globalNative || ilc.native || []) 
                                 };
                                 window.__nationalCloudData = window.__countryKeywordsByLevel;
-                                if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud(window.__currentNationalIdentityLevel || 'Architect');
-                                if (empty) empty.classList.add('hidden');
                             }
                         }
-                    }
-                } catch (e2) { console.warn('[refreshVibeCard] 本国词云 localStorage 兜底失败:', e2); }
-                if (!window.__countryKeywordsByLevel) {
-                    if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud('Architect');
-                    if (empty) {
-                        empty.textContent = '暂无灵魂词，快去分析吧';
-                        empty.classList.remove('hidden');
-                    }
+                    } catch (e2) { console.warn('[refreshVibeCard] 本国词云 localStorage 兜底失败:', e2); }
                 }
             }
-            if (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function') {
-                try {
-                    var top10Data = [];
-                    var kwRes = await supabaseClient.rpc('get_country_keywords', { target_code: region });
-                    var kwData = (kwRes && kwRes.data != null) ? kwRes.data : null;
-                    if (kwData && Array.isArray(kwData) && kwData.length > 0) {
-                        top10Data = kwData.slice(0, 10).map(function(x) { return { phrase: (x && x.tag) ? String(x.tag).trim() : '', hitCount: Number(x && x.weight) || 0 }; }).filter(function(x) { return x.phrase && x.hitCount > 0; });
-                        window.__latestTop10 = top10Data;
-                    }
-                    if (typeof _renderTop10List === 'function') _renderTop10List(top10Data);
-                } catch (_) {
-                    if (typeof _renderTop10List === 'function') _renderTop10List([]);
-                }
-            } else {
-                try { vibeCloudAbort && vibeCloudAbort.abort && vibeCloudAbort.abort(); } catch { /* ignore */ }
-                vibeCloudAbort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-                try {
-                    var API_ENDPOINT = _getApiEndpoint();
-                    var url = API_ENDPOINT + 'api/global-average?country_code=' + encodeURIComponent(region) + '&_t=' + Date.now();
-                    var resp = await fetch(url, { cache: 'no-store', signal: vibeCloudAbort ? vibeCloudAbort.signal : undefined });
-                    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                    var payload = await resp.json().catch(function() { return null; });
-                    var data = payload && payload.data != null ? payload.data : payload || {};
-                    window.__latestTop10 = Array.isArray(data.top10) ? data.top10 : null;
-                    window.__latestCloud50 = null;
-                    window.renderVibeCardFromData(region, { top10: data.top10 || [], cloud50: [] });
-                } catch (e) {
-                    try { _renderTop10List([]); } catch { /* ignore */ }
-                    try { _renderCloud50(region, []); } catch { /* ignore */ }
-                    if (empty) {
-                    empty.textContent = '暂无灵魂词，快去分析吧';
-                    empty.classList.remove('hidden');
-                }
-                }
+            
+            // 处理 Top10 数据
+            var top10Data = [];
+            if (Array.isArray(top10Result) && top10Result.length > 0) {
+                top10Data = top10Result.slice(0, 10).map(function(x) { 
+                    return { 
+                        phrase: String(x?.tag ?? x?.phrase ?? '').trim(), 
+                        hitCount: Number(x?.weight ?? x?.hit_count ?? x?.hitCount ?? 0) || 0 
+                    }; 
+                }).filter(function(x) { return x.phrase && x.hitCount > 0; });
             }
+            window.__latestTop10 = top10Data;
+            
+            // 缓存结果
+            _setVibeCloudCache(region, { 
+                countryKeywordsByLevel: window.__countryKeywordsByLevel, 
+                top10Data: top10Data 
+            });
+            
+            // 渲染词云
+            var currentLevel = window.__currentNationalIdentityLevel || 'Architect';
+            var renderFn = window._renderNationalIdentityCloud || (typeof _renderNationalIdentityCloud !== 'undefined' ? _renderNationalIdentityCloud : null);
+            if (renderFn) renderFn(currentLevel);
+            
+            // 更新空状态
+            var total = 0;
+            if (window.__countryKeywordsByLevel) {
+                total = (window.__countryKeywordsByLevel.Novice || []).length + 
+                        (window.__countryKeywordsByLevel.Professional || []).length + 
+                        (window.__countryKeywordsByLevel.Architect || []).length + 
+                        (window.__countryKeywordsByLevel.globalNative || []).length;
+            }
+            if (empty && total > 0) empty.classList.add('hidden');
+            if (total === 0 && empty) { empty.textContent = '暂无灵魂词，快去分析吧'; empty.classList.remove('hidden'); }
+            
+            // 渲染 Top10
+            if (typeof _renderTop10List === 'function') _renderTop10List(top10Data);
 
             if (!window.__vibeCloudResizeBound) {
                 window.__vibeCloudResizeBound = true;
@@ -21353,6 +21532,29 @@
                 });
             }
         };
+        
+        // 从缓存恢复数据的辅助函数
+        function _applyVibeCloudData(region, cached, empty) {
+            window.__countryKeywordsByLevel = cached.countryKeywordsByLevel;
+            window.__nationalCloudData = cached.countryKeywordsByLevel;
+            window.__latestTop10 = cached.top10Data;
+            
+            var currentLevel = window.__currentNationalIdentityLevel || 'Architect';
+            var renderFn = window._renderNationalIdentityCloud || (typeof _renderNationalIdentityCloud !== 'undefined' ? _renderNationalIdentityCloud : null);
+            if (renderFn) renderFn(currentLevel);
+            
+            var total = 0;
+            if (window.__countryKeywordsByLevel) {
+                total = (window.__countryKeywordsByLevel.Novice || []).length + 
+                        (window.__countryKeywordsByLevel.Professional || []).length + 
+                        (window.__countryKeywordsByLevel.Architect || []).length + 
+                        (window.__countryKeywordsByLevel.globalNative || []).length;
+            }
+            if (empty && total > 0) empty.classList.add('hidden');
+            if (total === 0 && empty) { empty.textContent = '暂无灵魂词，快去分析吧'; empty.classList.remove('hidden'); }
+            
+            if (typeof _renderTop10List === 'function') _renderTop10List(cached.top10Data || []);
+        }
 
         async function loadWordCloud() {
             // 新版：语义爆发卡片（Top10 + Cloud50）
@@ -21551,9 +21753,11 @@
                 } else {
                     // 回退：使用词云展示关键词
                     const words = applyLogFontSize(combined0, (w) => w?.value ?? 0);
-                    nationalContainer.innerHTML = '';
-                    _disposeChart(nationalSentenceChart);
-                    nationalSentenceChart = echarts.init(nationalContainer, 'dark', { renderer: 'canvas' });
+                    // 【性能优化】复用 ECharts 实例
+                    if (!nationalSentenceChart || nationalSentenceChart.isDisposed()) {
+                        nationalContainer.innerHTML = '';
+                        nationalSentenceChart = echarts.init(nationalContainer, 'dark', { renderer: 'canvas' });
+                    }
 
                 const maxVal = Math.max(...words.map((w) => w.value));
                 const getColor = (category, value) => {
@@ -22903,3 +23107,72 @@
 
     console.log('[SoulWords] 灵魂词功能已加载');
 })();
+
+// GitHub 同步按钮事件处理器（事件委托）
+document.addEventListener('click', function(e) {
+    var btn = (e.target && e.target.id === 'sync-github-btn') ? e.target : (e.target && e.target.closest && e.target.closest('#sync-github-btn'));
+    if (!btn) return;
+
+    var supabase = (typeof supabaseClient !== 'undefined' && supabaseClient) ? supabaseClient : (window.supabase || null);
+    if (!supabase || typeof supabase.auth !== 'object') {
+        alert('请先登录 GitHub');
+        return;
+    }
+
+    btn.disabled = true;
+    var originalText = btn.textContent;
+    btn.textContent = '同步中...';
+
+    supabase.auth.getSession().then(function(sess) {
+        var session = sess && sess.data && sess.data.session;
+        if (!session || !session.user) {
+            alert('请先登录 GitHub');
+            btn.disabled = false;
+            btn.textContent = originalText;
+            return Promise.reject(new Error('Not logged in'));
+        }
+        var userId = session.user.id;
+        var providerToken = session.provider_token || '';
+        
+        return supabase.functions.invoke('sync-github-stats', {
+            body: { userId: userId, providerToken: providerToken }
+        }).then(function(res) {
+            if (res && res.error) {
+                console.error('[SyncGitHub] Error:', res.error);
+                alert('同步失败: ' + (res.error.message || res.error));
+            } else if (res && res.data && res.data.error) {
+                console.error('[SyncGitHub] Data error:', res.data.error);
+                alert('同步失败: ' + res.data.error);
+            } else {
+                console.log('[SyncGitHub] Success:', res && res.data);
+                if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
+                else if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard();
+
+                // Refetch user data and re-render left panel
+                var leftBody = document.getElementById('left-drawer-body');
+                var cu = window.currentUser || window.currentUserData;
+                if (leftBody && cu && typeof renderUserStatsCards === 'function') {
+                    supabase.from('user_analysis').select('github_stars,github_forks,github_watchers,github_followers,github_score,github_synced_at,github_login').eq('id', userId).single().then(function(r) {
+                        if (r.data && cu) {
+                            var merged = Object.assign({}, cu, r.data);
+                            try { window.currentUser = merged; window.currentUserData = merged; } catch (e) {}
+                            if (typeof getBestUserRecordForStats === 'function') {
+                                renderUserStatsCards(leftBody, getBestUserRecordForStats(merged));
+                            } else {
+                                renderUserStatsCards(leftBody, merged);
+                            }
+                        }
+                    }).catch(function(err) {
+                        console.warn('[SyncGitHub] Failed to refetch user data:', err);
+                    });
+                }
+            }
+            btn.disabled = false;
+            btn.textContent = originalText;
+        });
+    }).catch(function(err) {
+        console.error('[SyncGitHub] Exception:', err);
+        btn.disabled = false;
+        btn.textContent = originalText;
+    });
+});

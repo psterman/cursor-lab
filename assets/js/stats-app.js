@@ -147,7 +147,62 @@ var _loc = window.location;
             modal.addEventListener('click', function(ev) { if (ev.target === modal) modal.classList.add('hidden'); });
         }
     });
-    
+
+    // GitHub 战力同步按钮：调用 Edge Function，需传入 session.provider_token
+    document.addEventListener('click', function(e) {
+        var btn = e.target.id === 'sync-github-btn' ? e.target : (e.target.closest && e.target.closest('#sync-github-btn'));
+        if (!btn) return;
+        e.preventDefault();
+        var supabase = (typeof supabaseClient !== 'undefined' && supabaseClient) ? supabaseClient : (window.supabase || null);
+        if (!supabase || typeof supabase.functions.invoke !== 'function') {
+            alert(typeof getI18nText === 'function' ? (getI18nText('github.need_login') || '请先登录') : '请先登录');
+            return;
+        }
+        var userId = (window.currentUser && window.currentUser.id) ? window.currentUser.id : (window.currentUserData && window.currentUserData.id ? window.currentUserData.id : null);
+        if (!userId) {
+            alert(typeof getI18nText === 'function' ? (getI18nText('github.need_login') || '请先登录') : '请先登录');
+            return;
+        }
+        btn.disabled = true;
+        btn.textContent = (typeof getI18nText === 'function' && getI18nText('github.syncing')) ? getI18nText('github.syncing') : '同步中...';
+        supabase.auth.getSession().then(function(sess) {
+            var providerToken = (sess.data && sess.data.session && sess.data.session.provider_token) ? sess.data.session.provider_token : '';
+            return supabase.functions.invoke('sync-github-stats', { body: { userId: userId, providerToken: providerToken } });
+        }).then(function(res) {
+            var err = res && res.error;
+            var data = res && res.data;
+            if (err) {
+                alert(err.message || (typeof getI18nText === 'function' ? (getI18nText('github.sync_fail') || '同步失败') : '同步失败'));
+            } else if (data && data.error) {
+                alert(data.error);
+            } else {
+                if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
+                var leftBody = document.getElementById('left-drawer-body');
+                var cu = window.currentUser || window.currentUserData;
+                if (supabase && typeof supabase.from === 'function' && userId && leftBody && typeof renderUserStatsCards === 'function') {
+                    supabase.from('user_analysis').select('github_stars,github_forks,github_watchers,github_followers,github_score,github_synced_at,github_login').eq('id', userId).single().then(function(r) {
+                        if (r.data && cu) {
+                            var merged = Object.assign({}, cu, r.data);
+                            try { window.currentUser = merged; window.currentUserData = merged; } catch (e) {}
+                            renderUserStatsCards(leftBody, getBestUserRecordForStats(merged));
+                        } else if (cu) {
+                            renderUserStatsCards(leftBody, getBestUserRecordForStats(cu));
+                        }
+                    }).catch(function() {
+                        if (cu) renderUserStatsCards(leftBody, getBestUserRecordForStats(cu));
+                    });
+                } else if (leftBody && cu) {
+                    renderUserStatsCards(leftBody, getBestUserRecordForStats(cu));
+                }
+            }
+            btn.disabled = false;
+            btn.textContent = (typeof getI18nText === 'function' && getI18nText('github.sync')) ? getI18nText('github.sync') : '刷新';
+        }).catch(function(e) {
+            alert(e && e.message ? e.message : (typeof getI18nText === 'function' ? (getI18nText('github.sync_fail') || '同步失败') : '同步失败'));
+            btn.disabled = false;
+            btn.textContent = (typeof getI18nText === 'function' && getI18nText('github.sync')) ? getI18nText('github.sync') : '刷新';
+        });
+    });
 
     // --- Script Block ---
 
@@ -2453,6 +2508,12 @@ var _loc = window.location;
                 'tab.global': '全球',
                 'tab.country': '国家',
                 'tab.ranking': '排行榜',
+                'tab.leaderboard': '天梯榜',
+                'github.power': 'GitHub 战力',
+                'github.sync': '刷新',
+                'github.syncing': '同步中...',
+                'github.need_login': '请先登录',
+                'github.sync_fail': '同步失败',
                 
                 // Buttons / panel header / hotlist / PK
                 'btn.back_global': '[返回全网]',
@@ -2528,6 +2589,12 @@ var _loc = window.location;
                 'tab.ranking': '排行榜',
                 'tab.global': '全球',
                 'tab.country': '国家',
+                'tab.leaderboard': '天梯榜',
+                'github.power': 'GitHub 战力',
+                'github.sync': '刷新',
+                'github.syncing': '同步中...',
+                'github.need_login': '请先登录',
+                'github.sync_fail': '同步失败',
                 'btn.refresh': '刷新',
 
                 // Drawer / Panels
@@ -2717,6 +2784,12 @@ var _loc = window.location;
                 'tab.global': 'Global',
                 'tab.country': 'Country',
                 'tab.ranking': 'Ranking',
+                'tab.leaderboard': 'Leaderboard',
+                'github.power': 'GitHub Power',
+                'github.sync': 'Sync',
+                'github.syncing': 'Syncing...',
+                'github.need_login': 'Please sign in first',
+                'github.sync_fail': 'Sync failed',
                 
                 // Buttons / panel header / hotlist / PK
                 'btn.back_global': '[Back to Global]',
@@ -6938,7 +7011,8 @@ var _loc = window.location;
             const panels = {
                 global: document.getElementById('panel-global-view'),
                 country: document.getElementById('panel-country-view'),
-                ranking: document.getElementById('panel-ranking-view')
+                ranking: document.getElementById('panel-ranking-view'),
+                leaderboard: document.getElementById('panel-leaderboard-view')
             };
             const tabs = document.querySelectorAll('.drawer-tab');
             
@@ -7022,10 +7096,67 @@ var _loc = window.location;
                     console.log('[switchView] window.stats2AppLoaded:', window.stats2AppLoaded);
                     renderRankingView();
                     break;
+                case 'leaderboard':
+                    if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
+                    break;
             }
             
             console.log('[switchView] 已切换到:', view);
         }
+
+        /**
+         * 加载 GitHub 天梯榜（Top50）并渲染到 #leaderboard-list
+         */
+        async function loadGitHubLeaderboard() {
+            var listEl = document.getElementById('leaderboard-list');
+            if (!listEl) return;
+            listEl.innerHTML = '<div class="text-zinc-500 text-sm py-4 text-center">加载中...</div>';
+            var supabase = (typeof supabaseClient !== 'undefined' && supabaseClient) ? supabaseClient : (window.supabase || null);
+            if (!supabase || typeof supabase.rpc !== 'function') {
+                listEl.innerHTML = '<div class="text-zinc-500 text-sm py-4 text-center">未连接数据库</div>';
+                return;
+            }
+            try {
+                var res = await supabase.rpc('get_github_leaderboard', { limit_count: 50 });
+                var data = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
+                var err = res && res.error;
+                if (err) {
+                    listEl.innerHTML = '<div class="text-red-400 text-sm py-4 text-center">' + (err.message || '加载失败') + '</div>';
+                    return;
+                }
+                if (!Array.isArray(data) || data.length === 0) {
+                    console.warn('Leaderboard is empty in DB');
+                    listEl.innerHTML = '<div class="text-zinc-500 text-sm py-4 text-center">暂无排行数据，同步 GitHub 后即可上榜</div>';
+                    return;
+                }
+                var rankColor = function(i) {
+                    if (i === 0) return '#FFD700';
+                    if (i === 1) return '#C0C0C0';
+                    if (i === 2) return '#CD7F32';
+                    return 'rgba(255,255,255,0.7)';
+                };
+                var esc = function(s) {
+                    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                };
+                listEl.innerHTML = data.map(function(user, idx) {
+                    var rank = user.rank != null ? user.rank : (idx + 1);
+                    var name = user.user_name || user.github_login || ('@' + (user.github_login || ''));
+                    var bg = idx < 3 ? 'rgba(0,255,65,0.1)' : 'rgba(0,255,65,0.02)';
+                    return '<div class="leaderboard-item flex items-center gap-3 p-3 rounded-lg mb-2" style="background:' + bg + ';">' +
+                        '<div class="w-10 text-lg font-bold" style="color:' + rankColor(idx) + ';">#' + rank + '</div>' +
+                        '<img src="' + esc(user.avatar_url || ('https://github.com/' + (user.github_login || '') + '.png')) + '" alt="" class="w-10 h-10 rounded-full object-cover" onerror="this.src=\'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 40 40%22%3E%3Crect fill=%22%23333%22 width=%2240%22 height=%2240%22/%3E%3C/svg%3E\'">' +
+                        '<div class="flex-1 min-w-0">' +
+                        '<div class="text-[#00ff41] font-semibold truncate">' + esc(name) + '</div>' +
+                        '<div class="text-[10px] text-zinc-500">&#9733;' + (user.github_stars || 0) + ' &#9861;' + (user.github_forks || 0) + ' &#128065;' + (user.github_watchers || 0) + ' &#128101;' + (user.github_followers || 0) + '</div>' +
+                        '</div>' +
+                        '<div class="text-right"><div class="text-[#00ff41] text-lg font-bold">' + (user.github_score || 0) + '</div></div>' +
+                        '</div>';
+                }).join('');
+            } catch (e) {
+                listEl.innerHTML = '<div class="text-red-400 text-sm py-4 text-center">' + (e && e.message ? e.message : '加载失败') + '</div>';
+            }
+        }
+        if (typeof window !== 'undefined') window.loadGitHubLeaderboard = loadGitHubLeaderboard;
 
         /**
          * 【新增】渲染排行榜视图
@@ -17455,7 +17586,7 @@ var _loc = window.location;
                     ` : ''}
                 `;
                 
-                // 先移除旧的统计卡片（如果存在）
+                // 先移除旧的统计卡片与 GitHub 战力卡片（如果存在）
                 const existingStatsCards = leftBody.querySelectorAll('.drawer-item');
                 existingStatsCards.forEach(card => {
                     const label = card.querySelector('.drawer-item-label');
@@ -17463,6 +17594,7 @@ var _loc = window.location;
                         card.remove();
                     }
                 });
+                leftBody.querySelectorAll('.github-power-card').forEach(function(c) { c.remove(); });
                 
                 // 将统计卡片插入到身份配置卡片之后，添加渐进式动画
                 statsCard.classList.add('clinic-card');
@@ -17482,6 +17614,51 @@ var _loc = window.location;
                     statsCard.style.opacity = '1';
                     statsCard.style.transform = 'translateY(0)';
                 });
+
+                // GitHub 战力卡片（仅登录用户显示，数据来自后端同步）
+                var gStars = currentUserData.github_stars ?? currentUserData.githubStars ?? 0;
+                var gForks = currentUserData.github_forks ?? currentUserData.githubForks ?? 0;
+                var gWatchers = currentUserData.github_watchers ?? currentUserData.githubWatchers ?? 0;
+                var gFollowers = currentUserData.github_followers ?? currentUserData.githubFollowers ?? 0;
+                var gScore = currentUserData.github_score ?? currentUserData.githubScore ?? 0;
+                var gSyncedAt = currentUserData.github_synced_at ?? currentUserData.githubSyncedAt ?? null;
+                var gRank = currentUserData.github_rank ?? currentUserData.githubRank ?? null;
+                var ghLabel = (typeof getI18nText === 'function' && getI18nText('github.power')) ? getI18nText('github.power') : 'GitHub 战力';
+                var syncBtnLabel = (typeof getI18nText === 'function' && getI18nText('github.sync')) ? getI18nText('github.sync') : (gSyncedAt ? '刷新' : '同步');
+                var cooldownHtml = '';
+                if (gSyncedAt) {
+                    var nextSync = new Date(gSyncedAt).getTime() + 24 * 60 * 60 * 1000;
+                    if (Date.now() < nextSync) {
+                        var hoursLeft = Math.ceil((nextSync - Date.now()) / (60 * 60 * 1000));
+                        cooldownHtml = '<div class="text-[11px] mt-2" style="color:rgba(255,165,0,0.8);">&#9201; ' + (currentLang === 'en' ? 'Cooldown: ' + hoursLeft + 'h left' : '冷却中，' + hoursLeft + ' 小时后可刷新') + '</div>';
+                    }
+                }
+                var githubPowerCard = document.createElement('div');
+                githubPowerCard.className = 'drawer-item github-power-card';
+                githubPowerCard.setAttribute('data-github-power', '1');
+                githubPowerCard.style.cssText = 'background:rgba(0,255,65,0.05);padding:16px;border-radius:8px;margin-top:12px;border:1px solid rgba(0,255,65,0.15);';
+                githubPowerCard.innerHTML = [
+                    '<div class="flex justify-between items-center mb-3">',
+                    '<h3 class="text-[#00ff41] text-base font-semibold m-0">' + esc(ghLabel) + '</h3>',
+                    '<button type="button" id="sync-github-btn" class="px-3 py-1 rounded text-xs font-bold border border-[#00ff41] text-[#00ff41] bg-transparent cursor-pointer hover:bg-[#00ff41]/10">' + esc(syncBtnLabel) + '</button>',
+                    '</div>',
+                    '<div class="grid grid-cols-2 gap-2 text-sm" style="color:rgba(255,255,255,0.85);">',
+                    '<div>&#9733; Stars</div><div class="text-right">' + (Number(gStars) || 0) + '</div>',
+                    '<div>&#9861; Forks</div><div class="text-right">' + (Number(gForks) || 0) + '</div>',
+                    '<div>&#128065; Watchers</div><div class="text-right">' + (Number(gWatchers) || 0) + '</div>',
+                    '<div>&#128101; Followers</div><div class="text-right">' + (Number(gFollowers) || 0) + '</div>',
+                    '</div>',
+                    '<div class="mt-3 pt-3 border-t border-[#00ff41]/20">',
+                    '<div class="text-[#00ff41] text-xl font-bold">' + (currentLang === 'en' ? 'Score: ' : '综合得分: ') + (Number(gScore) || 0) + '</div>',
+                    (gRank != null && gRank !== '' ? '<div class="text-[10px] mt-1" style="color:rgba(255,255,255,0.7);">' + (currentLang === 'en' ? 'Global rank: #' : '全球排名: #') + esc(String(gRank)) + '</div>' : ''),
+                    cooldownHtml,
+                    '</div>'
+                ].join('');
+                if (statsCard.nextSibling) {
+                    leftBody.insertBefore(githubPowerCard, statsCard.nextSibling);
+                } else {
+                    leftBody.appendChild(githubPowerCard);
+                }
 
                 // 上岗天数：抽屉打开后也要“实时增长”（无需手动刷新）
                 try {
