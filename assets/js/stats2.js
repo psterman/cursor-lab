@@ -6508,9 +6508,10 @@
                 const currentStatus = localStorage.getItem('user_status') || 'idle';
                 const statusConfig = USER_STATUSES[currentStatus] || USER_STATUSES.idle;
                 
-                // 创建 user_identity_config 卡片
+                // 创建 user_identity_config 卡片（头像、GitHub、状态、私信、CONFIG 标签）
                 const identityCard = document.createElement('div');
                 identityCard.className = 'drawer-item';
+                identityCard.setAttribute('data-card', 'identity-config');
                 identityCard.innerHTML = `
                     <div class="flex items-center justify-between mb-3">
                         <span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">🕶️</span>
@@ -6635,12 +6636,21 @@
                     leftBody.classList.remove('drawer-loading');
                     const skeletons = leftBody.querySelectorAll('.drawer-skeleton-card');
                     skeletons.forEach(s => s.remove());
+                    // 若已有身份配置卡（如 summaryOnly 或重复进入），不重复追加，仅确保存在
+                    const existingIdentity = leftBody.querySelector('.drawer-item[data-card="identity-config"]');
+                    if (existingIdentity) {
+                        // 已存在则跳过追加，避免重复头像/GitHub/状态/私信卡片
+                        identityCard.classList.add('clinic-card');
+                        identityCard.style.opacity = '0';
+                        identityCard.style.transform = 'translateY(12px)';
+                        existingIdentity.replaceWith(identityCard);
+                    } else {
+                        identityCard.classList.add('clinic-card');
+                        identityCard.style.opacity = '0';
+                        identityCard.style.transform = 'translateY(12px)';
+                        leftBody.appendChild(identityCard);
+                    }
                 }
-                
-                identityCard.classList.add('clinic-card');
-                identityCard.style.opacity = '0';
-                identityCard.style.transform = 'translateY(12px)';
-                leftBody.appendChild(identityCard);
                 
                 // 触发渐入动画
                 requestAnimationFrame(() => {
@@ -6744,14 +6754,15 @@
                         const existingStatsCards = leftBody.querySelectorAll('.drawer-item');
                         let myStatsCard = null;
                         existingStatsCards.forEach(card => {
+                            if (card.getAttribute('data-card') === 'identity-config') return;
                             const label = card.querySelector('.drawer-item-label');
-                            if (label && label.textContent === '我的数据统计') {
+                            if (label && (label.textContent === '我的数据统计' || label.textContent === 'My Stats')) {
                                 myStatsCard = card;
                             }
                         });
                         
                         // 如果找到「我的数据统计」，词云插在它之后；否则插在身份配置卡片之后
-                        const targetCard = myStatsCard || leftBody.querySelector('.drawer-item');
+                        const targetCard = myStatsCard || leftBody.querySelector('.drawer-item[data-card="identity-config"]') || leftBody.querySelector('.drawer-item');
                         if (targetCard && targetCard.nextSibling !== wordcloudCard) {
                             if (targetCard.nextSibling) {
                                 leftBody.insertBefore(wordcloudCard, targetCard.nextSibling);
@@ -16166,9 +16177,9 @@
                 document.querySelector('[data-auth-container]')
             ].filter(Boolean);
             
-            // 如果没有专门的容器，在左侧抽屉中更新
+            // 如果没有专门的容器，在左侧抽屉中更新（优先定位身份配置卡：头像、GitHub、状态、私信）
             const leftBody = document.getElementById('left-drawer-body');
-            const identityCard = leftBody ? leftBody.querySelector('.drawer-item:first-child') : null;
+            const identityCard = leftBody ? (leftBody.querySelector('.drawer-item[data-card="identity-config"]') || leftBody.querySelector('.drawer-item:first-child')) : null;
             
             if (userInfo) {
                 // 已登录状态：显示用户信息
@@ -16177,7 +16188,7 @@
                     // 更新左侧抽屉中的身份卡片
                 const leftBody = document.getElementById('left-drawer-body');
                 if (leftBody) {
-                    const identityCard = leftBody.querySelector('.drawer-item:first-child');
+                    const identityCard = leftBody.querySelector('.drawer-item[data-card="identity-config"]') || leftBody.querySelector('.drawer-item:first-child');
                     if (identityCard) {
                         const userInfoSection = identityCard.querySelector('.mb-3.pb-3.border-b');
                         const loginSection = identityCard.querySelector('#auth-login-section') || 
@@ -16212,7 +16223,7 @@
                 // 更新左侧抽屉中的身份卡片
                 const leftBody = document.getElementById('left-drawer-body');
                 if (leftBody) {
-                    const identityCard = leftBody.querySelector('.drawer-item:first-child');
+                    const identityCard = leftBody.querySelector('.drawer-item[data-card="identity-config"]') || leftBody.querySelector('.drawer-item:first-child');
                     if (identityCard) {
                         const userInfoSection = identityCard.querySelector('.mb-3.pb-3.border-b');
                         const loginSection = identityCard.querySelector('#auth-login-section') || 
@@ -18147,19 +18158,20 @@
                         </div>
                     `;
                     
-                    // 先移除旧的统计卡片（如果存在）
+                    // 先移除旧的统计/加载卡片（不触碰身份配置卡）
                     const existingStatsCards = leftBody.querySelectorAll('.drawer-item');
                     existingStatsCards.forEach(card => {
+                        if (card.getAttribute('data-card') === 'identity-config') return;
                         const label = card.querySelector('.drawer-item-label');
-                        if (label && (label.textContent === '我的数据统计' || label.textContent === '数据同步中')) {
+                        if (label && (label.textContent === '我的数据统计' || label.textContent === 'My Stats' || label.textContent === '数据同步中')) {
                             card.remove();
                         }
                     });
                     
                     // 将加载卡片插入到身份配置卡片之后
-                    const identityCard = leftBody.querySelector('.drawer-item');
-                    if (identityCard && identityCard.nextSibling) {
-                        leftBody.insertBefore(loadingCard, identityCard.nextSibling);
+                    const identityCardForLoading = leftBody.querySelector('.drawer-item[data-card="identity-config"]') || leftBody.querySelector('.drawer-item');
+                    if (identityCardForLoading && identityCardForLoading.nextSibling) {
+                        leftBody.insertBefore(loadingCard, identityCardForLoading.nextSibling);
                     } else {
                         leftBody.appendChild(loadingCard);
                     }
@@ -18202,15 +18214,16 @@
 
                     const existingStatsCards = leftBody.querySelectorAll('.drawer-item');
                     existingStatsCards.forEach(card => {
+                        if (card.getAttribute('data-card') === 'identity-config') return;
                         const label = card.querySelector('.drawer-item-label');
-                        if (label && (label.textContent === '我的数据统计' || label.textContent === '数据同步中')) {
+                        if (label && (label.textContent === '我的数据统计' || label.textContent === 'My Stats' || label.textContent === '数据同步中')) {
                             card.remove();
                         }
                     });
 
-                    const identityCard = leftBody.querySelector('.drawer-item');
-                    if (identityCard && identityCard.nextSibling) {
-                        leftBody.insertBefore(connectingCard, identityCard.nextSibling);
+                    const identityCardForConn = leftBody.querySelector('.drawer-item[data-card="identity-config"]') || leftBody.querySelector('.drawer-item');
+                    if (identityCardForConn && identityCardForConn.nextSibling) {
+                        leftBody.insertBefore(connectingCard, identityCardForConn.nextSibling);
                     } else {
                         leftBody.appendChild(connectingCard);
                     }
@@ -18239,18 +18252,19 @@
                         </div>
                     `;
 
-                    // 清理旧卡片并插入
+                    // 清理旧卡片并插入（不触碰身份配置卡）
                     const existingStatsCards = leftBody.querySelectorAll('.drawer-item');
                     existingStatsCards.forEach(card => {
+                        if (card.getAttribute('data-card') === 'identity-config') return;
                         const label = card.querySelector('.drawer-item-label');
-                        if (label && (label.textContent === '我的数据统计' || label.textContent === '数据同步中')) {
+                        if (label && (label.textContent === '我的数据统计' || label.textContent === 'My Stats' || label.textContent === '数据同步中')) {
                             card.remove();
                         }
                     });
 
-                    const identityCard = leftBody.querySelector('.drawer-item');
-                    if (identityCard && identityCard.nextSibling) {
-                        leftBody.insertBefore(emptyCard, identityCard.nextSibling);
+                    const identityCardForEmpty = leftBody.querySelector('.drawer-item[data-card="identity-config"]') || leftBody.querySelector('.drawer-item');
+                    if (identityCardForEmpty && identityCardForEmpty.nextSibling) {
+                        leftBody.insertBefore(emptyCard, identityCardForEmpty.nextSibling);
                     } else {
                         leftBody.appendChild(emptyCard);
                     }
@@ -19082,22 +19096,24 @@
                     ` : ''}
                 `;
                 
-                // 先移除旧的统计卡片和 GitHub 战力卡片（如果存在）
+                // 先移除旧的统计卡片和 GitHub 战力卡片（不触碰身份配置卡：头像、GitHub、状态、私信）
                 const existingStatsCards = leftBody.querySelectorAll('.drawer-item');
+                const statsLabelZh = '我的数据统计';
+                const statsLabelEn = 'My Stats';
                 existingStatsCards.forEach(card => {
+                    if (card.getAttribute('data-card') === 'identity-config') return;
                     const label = card.querySelector('.drawer-item-label');
-                    if (label && label.textContent === '我的数据统计') {
+                    if (label && (label.textContent === statsLabelZh || label.textContent === statsLabelEn)) {
                         card.remove();
                     }
                 });
                 leftBody.querySelectorAll('.github-power-card').forEach(function(c) { c.remove(); });
                 
-                // 将统计卡片插入到身份配置卡片之后，添加渐进式动画
+                // 将统计卡片插入到身份配置卡片之后（优先定位 data-card=identity-config）
                 statsCard.classList.add('clinic-card');
                 statsCard.style.opacity = '0';
                 statsCard.style.transform = 'translateY(12px)';
-                
-                const identityCard = leftBody.querySelector('.drawer-item');
+                const identityCard = leftBody.querySelector('.drawer-item[data-card="identity-config"]') || leftBody.querySelector('.drawer-item');
                 if (identityCard && identityCard.nextSibling) {
                     leftBody.insertBefore(statsCard, identityCard.nextSibling);
                 } else {
