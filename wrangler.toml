@@ -10,6 +10,7 @@ compatibility_date = "2024-04-03"
 SUPABASE_URL = "https://dtcplfhcgnxdzpigmotb.supabase.co"
 # SUPABASE_KEY 建议在后台添加为 Secret，不要写在明文配置文件里
 # 设置方法：wrangler secret put SUPABASE_KEY
+# GitHub 同步写 user_analysis 时建议使用 Service Role 以绕过 RLS：wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 
 # [第二阶段] KV 绑定：这是缓存"全网均值"的关键
 # 注意：需要在 Cloudflare Dashboard 中创建 KV namespace

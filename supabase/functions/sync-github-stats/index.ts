@@ -46,10 +46,12 @@ function score(stars: number, forks: number, watchers: number, followers: number
 }
 
 async function fetchGitHubStats(login: string, token: string): Promise<{
+  login: string;
   stars: number;
   forks: number;
   watchers: number;
   followers: number;
+  avatarUrl: string;
 } | { error: string }> {
   let stars = 0,
     forks = 0,
@@ -107,7 +109,14 @@ async function fetchGitHubStats(login: string, token: string): Promise<{
     after = next.endCursor;
   } while (after);
 
-  return { stars, forks, watchers, followers };
+  return {
+    login,
+    stars,
+    forks,
+    watchers,
+    followers,
+    avatarUrl: `https://github.com/${login}.png`
+  };
 }
 
 Deno.serve(async (req) => {
@@ -220,19 +229,34 @@ Deno.serve(async (req) => {
     }
 
     const githubScore = score(stats.stars, stats.forks, stats.watchers, stats.followers);
+    const now = new Date().toISOString();
+    // 构造一个基础版本的 github_stats，以便 UI 能正常显示核心数据
+    const githubStats = {
+      login: githubLogin,
+      totalRepoStars: stats.stars,
+      totalForks: stats.forks,
+      totalWatchers: stats.watchers,
+      followers: stats.followers,
+      github_score: githubScore,
+      syncedAt: now,
+      avatarUrl: stats.avatarUrl || `https://github.com/${githubLogin}.png`
+    };
+
     const admin = createClient(supabaseUrl, supabaseServiceKey);
     const { error: updateError } = await admin
       .from("user_analysis")
-      .update({
+      .upsert({
+        id: userId,
         github_stars: stats.stars,
         github_forks: stats.forks,
         github_watchers: stats.watchers,
         github_followers: stats.followers,
         github_score: githubScore,
-        github_synced_at: new Date().toISOString(),
+        github_synced_at: now,
+        last_sync_at: now,
         github_login: githubLogin,
-      })
-      .eq("id", userId);
+        github_stats: githubStats,
+      });
 
     if (updateError) {
       return new Response(

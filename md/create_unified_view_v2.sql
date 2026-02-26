@@ -44,7 +44,7 @@ unified AS (
         jiafang_count, ketao_count,
         vibe_index_str, lpdef,
         ip_location,
-        github_stars, github_forks, github_watchers, github_followers, github_score, github_synced_at, github_login,
+        github_stars, github_forks, github_watchers, github_followers, github_score, github_synced_at, github_login, github_stats,
         COALESCE(manual_lat, raw_lat) AS lat,
         COALESCE(manual_lng, raw_lng) AS lng,
         manual_location, manual_lat, manual_lng,
@@ -91,6 +91,7 @@ SELECT
     manual_location, manual_lat, manual_lng,
     country_code, created_at, updated_at,
     vibe_index,
+    github_stars, github_forks, github_watchers, github_followers, github_score, github_synced_at, github_login, github_stats,
     CASE WHEN vibe_index IS NOT NULL THEN
         (SELECT COUNT(*) + 1 FROM unified u2 WHERE u2.vibe_index > unified.vibe_index)
     ELSE NULL END AS vibe_rank,

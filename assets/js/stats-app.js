@@ -17615,49 +17615,31 @@ var _loc = window.location;
                     statsCard.style.transform = 'translateY(0)';
                 });
 
-                // GitHub 战力卡片（仅登录用户显示，数据来自后端同步）
-                var gStars = currentUserData.github_stars ?? currentUserData.githubStars ?? 0;
-                var gForks = currentUserData.github_forks ?? currentUserData.githubForks ?? 0;
-                var gWatchers = currentUserData.github_watchers ?? currentUserData.githubWatchers ?? 0;
-                var gFollowers = currentUserData.github_followers ?? currentUserData.githubFollowers ?? 0;
-                var gScore = currentUserData.github_score ?? currentUserData.githubScore ?? 0;
-                var gSyncedAt = currentUserData.github_synced_at ?? currentUserData.githubSyncedAt ?? null;
-                var gRank = currentUserData.github_rank ?? currentUserData.githubRank ?? null;
-                var ghLabel = (typeof getI18nText === 'function' && getI18nText('github.power')) ? getI18nText('github.power') : 'GitHub 战力';
-                var syncBtnLabel = (typeof getI18nText === 'function' && getI18nText('github.sync')) ? getI18nText('github.sync') : (gSyncedAt ? '刷新' : '同步');
-                var cooldownHtml = '';
-                if (gSyncedAt) {
-                    var nextSync = new Date(gSyncedAt).getTime() + 24 * 60 * 60 * 1000;
-                    if (Date.now() < nextSync) {
-                        var hoursLeft = Math.ceil((nextSync - Date.now()) / (60 * 60 * 1000));
-                        cooldownHtml = '<div class="text-[11px] mt-2" style="color:rgba(255,165,0,0.8);">&#9201; ' + (currentLang === 'en' ? 'Cooldown: ' + hoursLeft + 'h left' : '冷却中，' + hoursLeft + ' 小时后可刷新') + '</div>';
+                // GitHub Combat 卡片（22 项数据，由 renderGithubCard 渲染；无数据时显示 Sync to unlock）
+                leftBody.querySelectorAll('.github-power-card').forEach(function(c) { c.remove(); });
+                leftBody.querySelectorAll('.github-combat-card').forEach(function(c) { c.remove(); });
+                if (typeof window.renderGithubCard === 'function') {
+                    var apiBase = (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content) || '';
+                    apiBase = String(apiBase).trim().replace(/\/$/, '');
+                    var githubCardEl = window.renderGithubCard(currentUserData.github_stats || null, {
+                        container: leftBody,
+                        onRefresh: function() {
+                            return fetch(apiBase ? apiBase + '/api/github/sync' : '/api/github/sync', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    accessToken: (window.__githubAccessToken || '').trim(),
+                                    userId: (currentUserData.user_name || currentUserData.login || '').trim(),
+                                    fingerprint: currentUserData.fingerprint || '',
+                                    id: currentUserData.id || ''
+                                })
+                            }).then(function(r) { return r.json(); });
+                        }
+                    });
+                    if (githubCardEl && statsCard.nextSibling) {
+                        leftBody.removeChild(githubCardEl);
+                        leftBody.insertBefore(githubCardEl, statsCard.nextSibling);
                     }
-                }
-                var githubPowerCard = document.createElement('div');
-                githubPowerCard.className = 'drawer-item github-power-card';
-                githubPowerCard.setAttribute('data-github-power', '1');
-                githubPowerCard.style.cssText = 'background:rgba(0,255,65,0.05);padding:16px;border-radius:8px;margin-top:12px;border:1px solid rgba(0,255,65,0.15);';
-                githubPowerCard.innerHTML = [
-                    '<div class="flex justify-between items-center mb-3">',
-                    '<h3 class="text-[#00ff41] text-base font-semibold m-0">' + esc(ghLabel) + '</h3>',
-                    '<button type="button" id="sync-github-btn" class="px-3 py-1 rounded text-xs font-bold border border-[#00ff41] text-[#00ff41] bg-transparent cursor-pointer hover:bg-[#00ff41]/10">' + esc(syncBtnLabel) + '</button>',
-                    '</div>',
-                    '<div class="grid grid-cols-2 gap-2 text-sm" style="color:rgba(255,255,255,0.85);">',
-                    '<div>&#9733; Stars</div><div class="text-right">' + (Number(gStars) || 0) + '</div>',
-                    '<div>&#9861; Forks</div><div class="text-right">' + (Number(gForks) || 0) + '</div>',
-                    '<div>&#128065; Watchers</div><div class="text-right">' + (Number(gWatchers) || 0) + '</div>',
-                    '<div>&#128101; Followers</div><div class="text-right">' + (Number(gFollowers) || 0) + '</div>',
-                    '</div>',
-                    '<div class="mt-3 pt-3 border-t border-[#00ff41]/20">',
-                    '<div class="text-[#00ff41] text-xl font-bold">' + (currentLang === 'en' ? 'Score: ' : '综合得分: ') + (Number(gScore) || 0) + '</div>',
-                    (gRank != null && gRank !== '' ? '<div class="text-[10px] mt-1" style="color:rgba(255,255,255,0.7);">' + (currentLang === 'en' ? 'Global rank: #' : '全球排名: #') + esc(String(gRank)) + '</div>' : ''),
-                    cooldownHtml,
-                    '</div>'
-                ].join('');
-                if (statsCard.nextSibling) {
-                    leftBody.insertBefore(githubPowerCard, statsCard.nextSibling);
-                } else {
-                    leftBody.appendChild(githubPowerCard);
                 }
 
                 // 上岗天数：抽屉打开后也要“实时增长”（无需手动刷新）

@@ -23,7 +23,8 @@ WITH base AS (
     -- 一致性：country_code 仅来自 manual_location 或 ip_location（均为 ISO2）
     country_code,
     created_at, updated_at,
-    vibe_index, vibe_rank, vibe_percentile
+    vibe_index, vibe_rank, vibe_percentile,
+    github_stars, github_forks, github_watchers, github_followers, github_score, github_synced_at, github_login, github_stats
   FROM public.v_unified_analysis_v2
 ),
 ranked AS (

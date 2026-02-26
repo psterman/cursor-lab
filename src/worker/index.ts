@@ -14,6 +14,7 @@ import { getRankResult, RANK_DATA } from './rank';
 import { RANK_RESOURCES } from '../rank-content';
 import { identifyUserByFingerprint, identifyUserByUserId, identifyUserByUsername, bindFingerprintToUser, updateUserByFingerprint, migrateFingerprintToUserId, identifyUserByClaimToken } from './fingerprint-service';
 import { getIdentityWordSets, matchChatToIdentityKeywords, type IdentityWordBankLang } from './identityWordBanks';
+import { syncGithubCombatStats } from './github-sync-service';
 
 // Cloudflare Workers 类型定义（兼容性处理）
 type KVNamespace = {
@@ -52,6 +53,8 @@ type ExecutionContext = {
 export type Env = {
   SUPABASE_URL?: string;
   SUPABASE_KEY?: string;
+  /** GitHub 同步写 user_analysis 时强制使用 Service Role，绕过 RLS */
+  SUPABASE_SERVICE_ROLE_KEY?: string;
   STATS_STORE?: KVNamespace; // KV 存储（国家汇总、全局统计等）
   CONTENT_STORE?: KVNamespace; // KV 存储（第三阶段：文案库）
   KV_VIBE_PROD?: KVNamespace; // 灵魂词上报与同步专用 KV（与 wrangler.toml binding 一致）
@@ -3905,7 +3908,7 @@ app.post('/api/fingerprint/bind', async (c) => {
   try {
     const env = c.env;
     const body = await c.req.json();
-    const { githubUsername, fingerprint } = body;
+    const { githubUsername, fingerprint, githubAccessToken } = body;
 
     if (!githubUsername || !fingerprint) {
       return c.json({
@@ -3926,6 +3929,25 @@ app.post('/api/fingerprint/bind', async (c) => {
     const userData = await bindFingerprintToUser(githubUsername, fingerprint, env);
 
     if (userData) {
+      if (githubAccessToken && env.SUPABASE_URL && env.SUPABASE_KEY) {
+        const ctx = c.executionCtx;
+        if (ctx && typeof ctx.waitUntil === 'function') {
+          ctx.waitUntil(
+            syncGithubCombatStats(githubAccessToken, githubUsername, env, {
+              id: userData.id,
+              fingerprint: fingerprint,
+            })
+              .then((result) => {
+                if (result.success) {
+                  console.log('[GitHub Sync] ✅ Synced:', result.cached ? 'cached' : 'fresh', githubUsername);
+                } else {
+                  console.warn('[GitHub Sync] ⚠️ Failed:', result.error, githubUsername);
+                }
+              })
+              .catch((err) => console.error('[GitHub Sync] ❌ Error:', err?.message, githubUsername))
+          );
+        }
+      }
       return c.json({
         status: 'success',
         data: userData,
@@ -3943,6 +3965,60 @@ app.post('/api/fingerprint/bind', async (c) => {
     return c.json({
       status: 'error',
       error: error.message || '未知错误',
+      errorCode: 'INTERNAL_ERROR',
+    }, 500);
+  }
+});
+
+/**
+ * 路由：POST /api/github/sync
+ * 功能：同步 GitHub Combat 统计（22 项指标），8 小时内返回缓存
+ * Body: { accessToken, id?: UUID, userId?: GitHub login, fingerprint? }，优先用 id (UUID) 定位记录
+ */
+app.post('/api/github/sync', async (c) => {
+  try {
+    const env = c.env;
+    const body = await c.req.json().catch(() => ({}));
+    const accessToken = body?.accessToken ?? body?.access_token ?? '';
+    const id = body?.id ?? ''; // 数据库 user_analysis.id (UUID)，优先用于定位
+    const userId = body?.userId ?? body?.user_id ?? body?.username ?? body?.user_name ?? '';
+    const fingerprint = body?.fingerprint ?? '';
+
+    if (!accessToken) {
+      return c.json({
+        status: 'error',
+        error: 'accessToken 必填',
+        errorCode: 'MISSING_PARAMETERS',
+      }, 400);
+    }
+    if (!id && !userId && !fingerprint) {
+      return c.json({
+        status: 'error',
+        error: 'id (UUID)、userId 或 fingerprint 至少填一项以定位记录',
+        errorCode: 'MISSING_PARAMETERS',
+      }, 400);
+    }
+
+    const result = await syncGithubCombatStats(accessToken, String(userId || '').trim(), env, { id: id || undefined, fingerprint });
+
+    if (result.success) {
+      return c.json({
+        status: 'success',
+        data: result.data,
+        cached: result.cached === true,
+      });
+    }
+    console.error('[Worker] /api/github/sync 失败:', { error: result.error, errorCode: result.error ?? 'SYNC_FAILED' });
+    return c.json({
+      status: 'error',
+      error: result.error ?? 'SYNC_FAILED',
+      errorCode: result.error ?? 'SYNC_FAILED',
+    }, 500);
+  } catch (error: any) {
+    console.error('[Worker] /api/github/sync 错误:', error);
+    return c.json({
+      status: 'error',
+      error: error?.message ?? '未知错误',
       errorCode: 'INTERNAL_ERROR',
     }, 500);
   }
