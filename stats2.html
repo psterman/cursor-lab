@@ -301,13 +301,13 @@
                     <div id="countryTemplateMount" class="flex-1 min-h-0 px-4 py-4 pb-4" style="font-family: 'JetBrains Mono', monospace;"></div>
                 </div>
                 
-                <!-- GitHub 战力天梯榜 -->
+                <!-- 天梯榜：22 个细分榜单卡片，带昨日|全网 Tab -->
                 <div id="panel-leaderboard-view" class="right-drawer-panel hidden flex-col h-full overflow-y-auto">
-                    <div class="p-4 border-b border-[#00ff41]/20">
-                        <h2 class="text-[#00ff41] text-lg m-0">🏆 GitHub 天梯榜</h2>
-                        <p class="text-zinc-500 text-xs mt-1">综合得分 = Star×10 + Fork×5 + Watch×2 + Follower×1</p>
+                    <div class="p-4 border-b border-[#00ff41]/20 flex-shrink-0">
+                        <h2 class="text-[#00ff41] text-lg m-0">🏆 天梯榜</h2>
+                        <p class="text-zinc-500 text-xs mt-1">22 维度 · 昨日最强 / 全网最强</p>
                     </div>
-                    <div id="leaderboard-list" class="flex-1 overflow-y-auto p-2" style="max-height:calc(100vh - 200px);"></div>
+                    <div id="leaderboards-grid" class="flex-1 overflow-y-auto p-4 min-h-0" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; align-content: start;"></div>
                 </div>
                 <!-- 【新增】排行榜视图 - 六个全球排行榜卡片 + 高分图谱 -->
                 <div id="panel-ranking-view" class="right-drawer-panel hidden flex-col h-full overflow-y-auto">

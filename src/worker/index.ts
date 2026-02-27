@@ -9797,6 +9797,29 @@ async function writeGlobalCountryStatsToKV(env: Env): Promise<{ success: boolean
 }
 
 /**
+ * 天梯榜快照刷新：调用 Supabase RPC refresh_leaderboard_snapshots()
+ * 计算 22 维度 x daily/all_time 的 Top10 并写入 leaderboard_snapshots 表
+ */
+async function refreshLeaderboardSnapshots(env: Env): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (!env.SUPABASE_URL || !env.SUPABASE_KEY) return { success: false, error: 'Supabase 未配置' };
+    const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/refresh_leaderboard_snapshots`;
+    const res = await fetchSupabaseJson<{ ok?: boolean; count?: number }>(env, rpcUrl, {
+      method: 'POST',
+      headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({}),
+    }, SUPABASE_FETCH_TIMEOUT_MS * 2);
+    if (res && (res as any).ok) {
+      console.log('[Worker] ✅ 天梯榜快照刷新完成');
+      return { success: true };
+    }
+    return { success: false, error: 'RPC 返回异常' };
+  } catch (e: any) {
+    return { success: false, error: e?.message || String(e) };
+  }
+}
+
+/**
  * 【Cron】定期汇总任务（ES Module 格式必须导出，D1 等 binding 才可用）
  * 在 wrangler.toml 的 triggers.crons 中配置
  */
@@ -9816,6 +9839,10 @@ export async function scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionC
   if (cron === '0 2 * * *') {
     ctx.waitUntil(dailyGitHubAudit(env));
     return;
+  }
+  if (cron === '0 * * * *') {
+    const lbResult = await refreshLeaderboardSnapshots(env);
+    if (!lbResult.success) console.warn('[Worker] ⚠️ 天梯榜快照刷新失败:', lbResult.error);
   }
   const result = await performAggregation(env);
   const v6Result = await performV6Aggregation(env);

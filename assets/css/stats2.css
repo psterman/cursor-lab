@@ -235,6 +235,106 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
             border-radius: var(--radius-card) 0 0 0;
         }
 
+        /* 天梯榜 22 卡片网格 */
+        #leaderboards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1rem;
+            align-content: start;
+            font-family: var(--font-mono-stack);
+        }
+        .leaderboard-card {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            border-radius: var(--radius-card);
+        }
+        .leaderboard-card .card-title-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+        .leaderboard-card .card-title {
+            color: var(--accent-terminal);
+            font-size: 13px;
+            font-weight: 600;
+            flex: 1;
+            min-width: 0;
+        }
+        .leaderboard-card-tabs {
+            display: flex;
+            gap: 2px;
+        }
+        .leaderboard-card-tabs button {
+            padding: 2px 8px;
+            font-size: 10px;
+            border: 1px solid rgba(0, 255, 65, 0.35);
+            background: transparent;
+            color: rgba(255, 255, 255, 0.6);
+            cursor: pointer;
+            border-radius: 2px;
+            font-family: var(--font-mono-stack);
+        }
+        .leaderboard-card-tabs button:hover {
+            color: var(--accent-terminal);
+            border-color: var(--accent-terminal);
+        }
+        .leaderboard-card-tabs button.active {
+            background: rgba(0, 255, 65, 0.15);
+            color: var(--accent-terminal);
+            border-color: var(--accent-terminal);
+        }
+        .leaderboard-card-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+        .leaderboard-card-list li {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(0, 255, 65, 0.08);
+            font-size: 12px;
+        }
+        .leaderboard-card-list li:last-child { border-bottom: none; }
+        .leaderboard-card-list .rank-medal { font-size: 14px; flex-shrink: 0; width: 24px; text-align: center; }
+        .leaderboard-card-list .rank-num { width: 22px; color: rgba(255,255,255,0.5); font-size: 11px; flex-shrink: 0; }
+        .leaderboard-card-list .user-name {
+            flex: 1;
+            min-width: 0;
+            color: var(--accent-terminal);
+            cursor: pointer;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .leaderboard-card-list .user-name:hover { text-decoration: underline; }
+        .leaderboard-card-list .user-value { color: rgba(255,255,255,0.85); font-weight: 500; flex-shrink: 0; }
+        .leaderboard-card-updated {
+            margin-top: auto;
+            padding-top: 8px;
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+        .leaderboard-card-my-rank {
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px dashed rgba(0, 255, 65, 0.2);
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+        @keyframes fade-in-up {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .leaderboard-list-animate {
+            animation: fade-in-up 0.25s ease-out forwards;
+        }
+
         #map-container {
             position: fixed;
             top: 0;

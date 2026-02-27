@@ -7690,62 +7690,220 @@
             console.log('[renderRankingView] 排行榜渲染完成');
         }
 
+        /** 22 个天梯维度 key（与后端 leaderboard_snapshots 一致） */
+        var LEADERBOARD_METRIC_KEYS = [
+            'stars', 'commits', 'prs', 'languages', 'vibe_index', 'l_score', 'p_score', 'd_score', 'e_score', 'f_score',
+            'work_days', 'jiafang_count', 'ketao_count', 'chars_avg', 'total_messages', 'total_chars', 'github_score',
+            'closed_issues', 'public_repos', 'followers', 'commit_velocity', 'pr_reviews'
+        ];
+        /** 维度 key -> 中文榜单名（汉化） */
+        var LEADERBOARD_METRIC_LABELS = {
+            stars: '🌌 星标总量榜',
+            commits: '🧱 代码高产榜',
+            prs: '🤝 协作专家榜',
+            languages: '💻 技术广度榜',
+            vibe_index: '🔥 灵性指数榜',
+            l_score: '🧠 逻辑鬼才榜',
+            p_score: '🧘 抗压生存榜',
+            d_score: '🔍 细节控制榜',
+            e_score: '🎭 情绪稳定榜',
+            f_score: '🎯 极速专注榜',
+            work_days: '📅 卷王打卡榜',
+            jiafang_count: '🏢 甲方克星榜',
+            ketao_count: '💬 客套大师榜',
+            chars_avg: '✍️ 文档战神榜',
+            total_messages: '💬 话痨榜',
+            total_chars: '📜 社畜榜',
+            github_score: '⚔ 战力榜',
+            closed_issues: '📌 闭环榜',
+            public_repos: '📦 仓库榜',
+            followers: '👥 粉丝榜',
+            commit_velocity: '🚀 提交速度榜',
+            pr_reviews: '👀 评审榜'
+        };
+
+        /** 打开左侧抽屉并展示对应用户详情（点击榜单用户名时调用） */
+        function openUserDrawer(userId, user) {
+            if (!userId && user) userId = user.id || user.user_id;
+            if (!userId) return;
+            var login = (user && (user.github_login || user.user_name)) || userId;
+            if (typeof showUserDetailModal === 'function') {
+                showUserDetailModal({
+                    toId: userId,
+                    login: login,
+                    name: user && user.user_name ? user.user_name : login,
+                    avatarUrl: user && user.avatar_url ? user.avatar_url : ('https://github.com/' + encodeURIComponent(String(login).split('/').pop()) + '.png')
+                });
+            }
+            var leftDrawer = document.getElementById('left-drawer');
+            if (leftDrawer && !leftDrawer.classList.contains('active')) {
+                leftDrawer.classList.add('active');
+                try { localStorage.setItem('left_drawer_open', 'true'); } catch (e) {}
+            }
+        }
+        if (typeof window !== 'undefined') window.openUserDrawer = openUserDrawer;
+
+        /** 按 metric_key 分组的快照缓存：{ [metric_key]: { daily: { top_data, updated_at }, all_time: { top_data, updated_at } } } */
+        var __leaderboardSnapshots = null;
+
         /**
-         * 加载 GitHub 天梯榜（Top50）并渲染到 #leaderboard-list
+         * 从 leaderboard_snapshots 表拉取 44 条记录，按 metric_key 分组，每个维度下存 daily / all_time 的 top_data
+         */
+        async function fetchAllLeaderboardSnapshots() {
+            var sb = (typeof supabaseClient !== 'undefined' && supabaseClient) ? supabaseClient : (window.supabase || null);
+            if (!sb || typeof sb.from !== 'function') return null;
+            try {
+                var res = await sb.from('leaderboard_snapshots').select('*');
+                var data = (res && res.data) ? res.data : [];
+                if (res && res.error) {
+                    console.warn('[Leaderboard] select error:', res.error);
+                    return null;
+                }
+                var grouped = {};
+                (data || []).forEach(function(row) {
+                    var key = row.metric_key;
+                    var type = row.ranking_type === 'daily' ? 'daily' : 'all_time';
+                    if (!key) return;
+                    if (!grouped[key]) grouped[key] = { daily: {}, all_time: {} };
+                    grouped[key][type] = {
+                        top_data: Array.isArray(row.top_data) ? row.top_data : [],
+                        updated_at: row.updated_at || ''
+                    };
+                });
+                __leaderboardSnapshots = grouped;
+                return grouped;
+            } catch (e) {
+                console.error('[Leaderboard] fetchAllLeaderboardSnapshots:', e);
+                return null;
+            }
+        }
+
+        function esc(s) {
+            if (s == null) return '';
+            return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        /**
+         * 渲染单个天梯榜卡片：标题 + 昨日|全网 Tab + 列表(1-10 名) + 更新于 + 我的排名
+         * @param {string} metricKey - 维度 key
+         * @param {HTMLElement} container - 卡片挂载的父节点（#leaderboards-grid 内的子项容器）
+         */
+        function renderLeaderboardCard(metricKey, container) {
+            var label = LEADERBOARD_METRIC_LABELS[metricKey] || ('榜 ' + metricKey);
+            var snap = __leaderboardSnapshots || {};
+            var byMetric = snap[metricKey] || { daily: {}, all_time: {} };
+            var dailySnap = byMetric.daily || {};
+            var allTimeSnap = byMetric.all_time || {};
+            var topDataDaily = Array.isArray(dailySnap.top_data) ? dailySnap.top_data : [];
+            var topDataAllTime = Array.isArray(allTimeSnap.top_data) ? allTimeSnap.top_data : [];
+            var currentUserId = (typeof localStorage !== 'undefined' && localStorage.getItem('github_user_id')) || (localStorage && localStorage.getItem('supabase_user_id')) || (window.currentUserData && (window.currentUserData.id || window.currentUserData.userId)) || '';
+
+            var card = document.createElement('div');
+            card.className = 'leaderboard-card hacker-border p-4 rounded-sm bg-zinc-900/40';
+            card.setAttribute('data-metric', metricKey);
+            card.innerHTML =
+                '<div class="card-title-row">' +
+                '<span class="card-title">' + esc(label) + '</span>' +
+                '<div class="leaderboard-card-tabs" role="tablist">' +
+                '<button type="button" class="lb-tab active" data-type="daily" aria-selected="true">昨日</button>' +
+                '<button type="button" class="lb-tab" data-type="all_time" aria-selected="false">全网</button>' +
+                '</div></div>' +
+                '<ul class="leaderboard-card-list lb-list" aria-live="polite"></ul>' +
+                '<div class="leaderboard-card-updated lb-updated"></div>' +
+                '<div class="leaderboard-card-my-rank lb-my-rank" style="display:none;"></div>';
+
+            var listEl = card.querySelector('.lb-list');
+            var updatedEl = card.querySelector('.lb-updated');
+            var myRankEl = card.querySelector('.lb-my-rank');
+
+            function fillList(rankingType) {
+                var list = rankingType === 'daily' ? topDataDaily : topDataAllTime;
+                var snapItem = rankingType === 'daily' ? dailySnap : allTimeSnap;
+                var updatedAt = snapItem.updated_at || '';
+                if (updatedAt && updatedAt.length >= 10) {
+                    try { updatedAt = new Date(updatedAt).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }); } catch (_) {}
+                }
+                listEl.classList.add('leaderboard-list-animate');
+                listEl.innerHTML = '';
+                var medals = ['🥇', '🥈', '🥉'];
+                (list.slice(0, 10) || []).forEach(function(row, idx) {
+                    var li = document.createElement('li');
+                    var rank = idx + 1;
+                    var medal = rank <= 3 ? medals[rank - 1] : '';
+                    var name = row.user_name || row.github_login || row.id || ('#' + rank);
+                    var val = row.value != null ? Number(row.value) : (row.value);
+                    if (typeof val === 'number' && (val % 1 !== 0)) val = val.toFixed(1);
+                    li.innerHTML =
+                        '<span class="rank-medal">' + (medal || '') + '</span>' +
+                        '<span class="rank-num">#' + rank + '</span>' +
+                        '<span class="user-name" role="button" tabindex="0" data-user-id="' + esc(row.id || '') + '" data-user-name="' + esc(name) + '">' + esc(name) + '</span>' +
+                        '<span class="user-value">' + esc(String(val ?? '—')) + '</span>';
+                    listEl.appendChild(li);
+                    var nameEl = li.querySelector('.user-name');
+                    if (nameEl) {
+                        nameEl.addEventListener('click', function() {
+                            var uid = nameEl.getAttribute('data-user-id');
+                            var uname = nameEl.getAttribute('data-user-name');
+                            if (typeof openUserDrawer === 'function') openUserDrawer(uid || uname, { id: uid, user_name: uname, github_login: uname });
+                        });
+                    }
+                });
+                updatedEl.textContent = updatedAt ? '更新于：' + updatedAt : '';
+                var inTop10 = currentUserId && list.some(function(r) { return (r.id && String(r.id) === String(currentUserId)) || (r.user_name && String(r.user_name) === String(currentUserId)); });
+                if (currentUserId && !inTop10 && list.length > 0) {
+                    var firstVal = list[0] && list[0].value != null ? Number(list[0].value) : 0;
+                    myRankEl.style.display = 'block';
+                    myRankEl.textContent = '#99+ 我的排名 (差距: —)';
+                } else {
+                    myRankEl.style.display = 'none';
+                }
+                setTimeout(function() { listEl.classList.remove('leaderboard-list-animate'); }, 300);
+            }
+
+            card.querySelectorAll('.lb-tab').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    var type = btn.getAttribute('data-type');
+                    card.querySelectorAll('.lb-tab').forEach(function(b) { b.classList.remove('active'); b.setAttribute('aria-selected', 'false'); });
+                    btn.classList.add('active');
+                    btn.setAttribute('aria-selected', 'true');
+                    fillList(type);
+                });
+            });
+
+            fillList('daily');
+            if (container) container.appendChild(card);
+            return card;
+        }
+
+        /**
+         * 加载并渲染 22 个天梯榜卡片：从 leaderboard_snapshots 表拉取，按 metric_key 分组后循环渲染卡片；无 #leaderboards-grid 时在天梯榜 Tab 内创建
          */
         async function loadGitHubLeaderboard() {
-            var listEl = document.getElementById('leaderboard-list');
-            if (!listEl) {
-                console.warn('[loadGitHubLeaderboard] #leaderboard-list 不存在');
+            var panel = document.getElementById('panel-leaderboard-view');
+            var gridEl = document.getElementById('leaderboards-grid');
+            if (!gridEl && panel) {
+                gridEl = document.createElement('div');
+                gridEl.id = 'leaderboards-grid';
+                gridEl.className = 'flex-1 overflow-y-auto p-4 min-h-0';
+                gridEl.style.cssText = 'display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; align-content: start;';
+                panel.appendChild(gridEl);
+            }
+            if (!gridEl) {
+                console.warn('[loadGitHubLeaderboard] 未找到 #leaderboards-grid 且无法创建');
                 return;
             }
-            listEl.innerHTML = '<div class="text-zinc-500 text-sm py-4 text-center">加载中...</div>';
-            var sb = (typeof supabaseClient !== 'undefined' && supabaseClient) ? supabaseClient : (window.supabase || null);
-            if (!sb || typeof sb.rpc !== 'function') {
-                listEl.innerHTML = '<div class="text-zinc-500 text-sm py-4 text-center">未连接数据库</div>';
+            gridEl.innerHTML = '<div class="col-span-full text-zinc-500 text-sm py-8 text-center" style="grid-column:1/-1;">加载中...</div>';
+            var snap = await fetchAllLeaderboardSnapshots();
+            gridEl.innerHTML = '';
+            if (!snap || typeof snap !== 'object') {
+                gridEl.innerHTML = '<div class="col-span-full text-zinc-500 text-sm py-8 text-center" style="grid-column:1/-1;">未连接数据库或暂无快照</div>';
                 return;
             }
-            try {
-                var res = await sb.rpc('get_github_leaderboard', { limit_count: 50 });
-                var data = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
-                var err = res && res.error;
-                if (err) {
-                    listEl.innerHTML = '<div class="text-red-400 text-sm py-4 text-center">' + (err.message || '加载失败') + '</div>';
-                    return;
-                }
-                if (!Array.isArray(data) || data.length === 0) {
-                    console.warn('Leaderboard is empty in DB');
-                    listEl.innerHTML = '<div class="text-zinc-500 text-sm py-4 text-center">暂无排行数据，同步 GitHub 后即可上榜</div>';
-                    return;
-                }
-                var rankColor = function(i) {
-                    if (i === 0) return '#FFD700';
-                    if (i === 1) return '#C0C0C0';
-                    if (i === 2) return '#CD7F32';
-                    return 'rgba(255,255,255,0.7)';
-                };
-                var esc = function(s) {
-                    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-                };
-                listEl.innerHTML = data.map(function(user, idx) {
-                    var rank = user.rank != null ? user.rank : (idx + 1);
-                    var name = user.user_name || user.github_login || ('@' + (user.github_login || ''));
-                    var bg = idx < 3 ? 'rgba(0,255,65,0.1)' : 'rgba(0,255,65,0.02)';
-                    return '<div class="leaderboard-item flex items-center gap-3 p-3 rounded-lg mb-2" style="background:' + bg + ';">' +
-                        '<div class="w-10 text-lg font-bold" style="color:' + rankColor(idx) + ';">#' + rank + '</div>' +
-                        '<img src="' + esc(user.avatar_url || ('https://github.com/' + (user.github_login || '') + '.png')) + '" alt="" class="w-10 h-10 rounded-full object-cover" onerror="this.src=\'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 40 40%22%3E%3Crect fill=%22%23333%22 width=%2240%22 height=%2240%22/%3E%3C/svg%3E\'">' +
-                        '<div class="flex-1 min-w-0">' +
-                        '<div class="text-[#00ff41] font-semibold truncate">' + esc(name) + '</div>' +
-                        '<div class="text-[10px] text-zinc-500">&#9733;' + (user.github_stars || 0) + ' &#9861;' + (user.github_forks || 0) + ' &#128065;' + (user.github_watchers || 0) + ' &#128101;' + (user.github_followers || 0) + '</div>' +
-                        '</div>' +
-                        '<div class="text-right"><div class="text-[#00ff41] text-lg font-bold">' + (user.github_score || 0) + '</div></div>' +
-                        '</div>';
-                }).join('');
-                console.log('[loadGitHubLeaderboard] ✅ 渲染完成，共 ' + data.length + ' 条');
-            } catch (e) {
-                console.error('[loadGitHubLeaderboard] ❌ 加载失败:', e);
-                listEl.innerHTML = '<div class="text-red-400 text-sm py-4 text-center">' + (e && e.message ? e.message : '加载失败') + '</div>';
+            var i = 0;
+            for (i = 0; i < LEADERBOARD_METRIC_KEYS.length; i++) {
+                renderLeaderboardCard(LEADERBOARD_METRIC_KEYS[i], gridEl);
             }
+            console.log('[Leaderboard] ✅ 22 个榜单卡片渲染完成');
         }
         if (typeof window !== 'undefined') window.loadGitHubLeaderboard = loadGitHubLeaderboard;
 
