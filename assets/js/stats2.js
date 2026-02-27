@@ -6508,220 +6508,51 @@
                 const currentStatus = localStorage.getItem('user_status') || 'idle';
                 const statusConfig = USER_STATUSES[currentStatus] || USER_STATUSES.idle;
                 
-                // 创建 user_identity_config 卡片（头像、GitHub、状态、私信、CONFIG 标签）
-                const identityCard = document.createElement('div');
-                identityCard.className = 'drawer-item';
-                identityCard.setAttribute('data-card', 'identity-config');
-                identityCard.innerHTML = `
-                    <div class="flex items-center justify-between mb-3">
-                        <span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">🕶️</span>
-                        <span class="text-[8px] leading-none text-[#00ff41] border border-[#00ff41]/40 px-1 py-0.5 tracking-widest uppercase bg-[#00ff41]/5">
-                            ${escapeHtml(getI18nText('badge.config') || 'CONFIG')}
-                        </span>
-                    </div>
-                    
-                    <div class="drawer-item-label mb-2">用户身份配置</div>
-                    
-                    <!-- 用户信息（GitHub 或指纹） -->
-                    <div class="mb-3 pb-3 border-b border-[#00ff41]/10">
-                        <div class="flex items-center gap-3">
-                            <div class="w-9 h-9 rounded-full overflow-hidden border border-[#00ff41]/30 flex-shrink-0">
-                                <img 
-                                    src="${avatarUrl}" 
-                                    alt="Avatar" 
-                                    class="w-full h-full object-cover"
-                                    onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
-                                />
-                            </div>
-                            <div class="flex-1 min-w-0">
-                                <div class="drawer-item-value text-sm truncate flex items-center">${displayName}${badgeHtml}</div>
-                                <div class="drawer-item-desc text-[8px]">${displayLabel}</div>
-                            </div>
-                            <button 
-                                onclick="typeof openInboxDrawer === 'function' && openInboxDrawer()"
-                                class="inbox-indicator w-9 h-9 flex items-center justify-center bg-transparent border-none text-[#00ff41] hover:text-[#00ff41]/80 transition-colors flex-shrink-0 cursor-pointer p-0 relative"
-                                title="${currentLang === 'zh' ? '收件箱' : 'Inbox'}"
-                            >✉</button>
-                            ${githubUsername && isValidGitHubUsername(githubUsername, userIdentity)
-                                ? `
-                                <button 
-                                    onclick="logout()"
-                                    class="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-[8px] text-zinc-300 hover:text-white transition-colors rounded"
-                                    title="退出登录"
-                                >
-                                    退出
-                                </button>
-                                `
-                                : ''
-                            }
-                        </div>
-                        <!-- 用户国家/地区：国旗 + 自动识别 / 用户校准 -->
-                        <div id="user-country-flag" class="flex items-center gap-2 mt-2 text-[10px]"></div>
-                        ${githubUsername && isValidGitHubUsername(githubUsername, userIdentity)
-                            ? `
-                            <a 
-                                href="https://github.com/${githubUsername}" 
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                class="mt-2 inline-block text-[9px] text-[#00ff41]/70 hover:text-[#00ff41] transition-colors font-mono"
-                            >
-                                github.com/${githubUsername}
-                            </a>
-                            `
-                            : ''
-                        }
-                    </div>
-                    
-                    <!-- 状态切换按钮（简约：仅用选中态表达当前状态；带 status-btn data-status 供 setUserStatus 更新样式） -->
-                    <div class="drawer-item-label mb-2">${currentLang === 'zh' ? '状态' : 'Status'}</div>
-                    <div class="flex gap-1.5">
-                        <button 
-                            type="button"
-                            data-status="idle"
-                            class="status-btn flex-1 px-2 py-1.5 bg-zinc-900/50 border ${currentStatus === 'idle' ? 'border-[#00ff41]' : 'border-zinc-800'} text-[10px] font-bold uppercase tracking-wider hover:border-[#00ff41] transition-colors"
-                            style="color: ${currentStatus === 'idle' ? '#00ff41' : '#71717a'};"
-                            title="${(USER_STATUSES.idle && (currentLang === 'zh' ? USER_STATUSES.idle.descZh : USER_STATUSES.idle.descEn)) || ''}"
-                            onclick="setUserStatus('idle');"
-                        >
-                            🟢 ${currentLang === 'zh' ? '在线' : 'Online'}
-                        </button>
-                        <button 
-                            type="button"
-                            data-status="busy"
-                            class="status-btn flex-1 px-2 py-1.5 bg-zinc-900/50 border ${currentStatus === 'busy' ? 'border-[#ff8c00]' : 'border-zinc-800'} text-[10px] font-bold uppercase tracking-wider hover:border-[#ff8c00] transition-colors"
-                            style="color: ${currentStatus === 'busy' ? '#ff8c00' : '#71717a'};"
-                            title="${(USER_STATUSES.busy && (currentLang === 'zh' ? USER_STATUSES.busy.descZh : USER_STATUSES.busy.descEn)) || ''}"
-                            onclick="setUserStatus('busy');"
-                        >
-                            🟠 ${currentLang === 'zh' ? '忙碌' : 'Busy'}
-                        </button>
-                        <button 
-                            type="button"
-                            data-status="sprint"
-                            class="status-btn flex-1 px-2 py-1.5 bg-zinc-900/50 border ${currentStatus === 'sprint' ? 'border-[#71717a]' : 'border-zinc-800'} text-[10px] font-bold uppercase tracking-wider hover:border-[#71717a] transition-colors"
-                            style="color: ${currentStatus === 'sprint' ? '#71717a' : '#71717a'};"
-                            title="${(USER_STATUSES.sprint && (currentLang === 'zh' ? USER_STATUSES.sprint.descZh : USER_STATUSES.sprint.descEn)) || ''}"
-                            onclick="setUserStatus('sprint');"
-                        >
-                            ⚫ ${currentLang === 'zh' ? '离线' : 'Offline'}
-                        </button>
-                    </div>
-                    
-                    <!-- GitHub OAuth 登录区域 -->
-                    <div class="mt-3 pt-3 border-t border-[#00ff41]/10" id="auth-login-section">
-                        ${githubUsername && isValidGitHubUsername(githubUsername, userIdentity) 
-                            ? ''
-                            : `
-                            <!-- 未登录状态：显示 GitHub 登录按钮 -->
-                            <div class="drawer-item-label mb-2">GitHub 登录</div>
-                            <button 
-                                onclick="loginWithGitHub()"
-                                class="w-full px-4 py-3 bg-[#24292e] hover:bg-[#2f363d] border border-[#444d56] rounded-md text-white text-sm font-semibold flex items-center justify-center gap-2 transition-all duration-200 hover:scale-105 active:scale-95 shadow-lg hover:shadow-xl"
-                            >
-                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                    <path fill-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clip-rule="evenodd"></path>
-                                </svg>
-                                <span>使用 GitHub 登录</span>
-                            </button>
-                            <div class="text-[8px] text-[#00ff41]/40 mt-2 text-center">
-                                安全、快速、一键登录
-                            </div>
-                            `
-                        }
-                    </div>
-                `;
-                
-                // 移除骨架屏并添加渐入动画
+                // 身份数据传入 GitHub Combat 卡片（私信、GitHub 登录、退出、链接、国家、状态、徽章、图标均移入该卡片）
+                const identityData = {
+                    avatarUrl: avatarUrl,
+                    displayName: displayName,
+                    displayLabel: displayLabel,
+                    badgeHtml: badgeHtml,
+                    githubUsername: githubUsername,
+                    isLoggedIn: !!(githubUsername && isValidGitHubUsername(githubUsername, userIdentity)),
+                    currentStatus: currentStatus,
+                    defaultAvatar: DEFAULT_AVATAR
+                };
+                let drawerCountryCode = '';
+                let drawerCountryName = '';
+                let drawerCountryIsManual = false;
+                const selectedCountrySt2 = localStorage.getItem('user_selected_country');
+                if (selectedCountrySt2) {
+                    drawerCountryCode = selectedCountrySt2.toUpperCase();
+                    drawerCountryName = countryNameMap[drawerCountryCode] ? (currentLang === 'zh' ? countryNameMap[drawerCountryCode].zh : countryNameMap[drawerCountryCode].en) : drawerCountryCode;
+                    drawerCountryIsManual = true;
+                }
+                if (!drawerCountryCode && localStorage.getItem('loc_fixed') === 'true' && localStorage.getItem('loc_locked') === 'true') {
+                    drawerCountryCode = (localStorage.getItem('manual_location') || '').toUpperCase();
+                    if (drawerCountryCode) {
+                        drawerCountryName = countryNameMap[drawerCountryCode] ? (currentLang === 'zh' ? countryNameMap[drawerCountryCode].zh : countryNameMap[drawerCountryCode].en) : drawerCountryCode;
+                        drawerCountryIsManual = true;
+                    }
+                }
+                if (!drawerCountryCode && currentUser && currentUser.manual_location) {
+                    drawerCountryCode = (currentUser.manual_location || '').toUpperCase();
+                    if (drawerCountryCode) {
+                        drawerCountryName = countryNameMap[drawerCountryCode] ? (currentLang === 'zh' ? countryNameMap[drawerCountryCode].zh : countryNameMap[drawerCountryCode].en) : drawerCountryCode;
+                        drawerCountryIsManual = true;
+                    }
+                }
+                if (!drawerCountryCode && currentUser && (currentUser.country_code || currentUser.ip_location)) {
+                    drawerCountryCode = (currentUser.country_code || currentUser.ip_location || '').toUpperCase();
+                    if (drawerCountryCode) {
+                        drawerCountryName = countryNameMap[drawerCountryCode] ? (currentLang === 'zh' ? countryNameMap[drawerCountryCode].zh : countryNameMap[drawerCountryCode].en) : drawerCountryCode;
+                        drawerCountryIsManual = !!(currentUser.manual_location || currentUser.manual_lat != null);
+                    }
+                }
                 if (leftBody) {
                     leftBody.classList.remove('drawer-loading');
                     const skeletons = leftBody.querySelectorAll('.drawer-skeleton-card');
                     skeletons.forEach(s => s.remove());
-                    // 若已有身份配置卡（如 summaryOnly 或重复进入），不重复追加，仅确保存在
-                    const existingIdentity = leftBody.querySelector('.drawer-item[data-card="identity-config"]');
-                    if (existingIdentity) {
-                        // 已存在则跳过追加，避免重复头像/GitHub/状态/私信卡片
-                        identityCard.classList.add('clinic-card');
-                        identityCard.style.opacity = '0';
-                        identityCard.style.transform = 'translateY(12px)';
-                        existingIdentity.replaceWith(identityCard);
-                    } else {
-                        identityCard.classList.add('clinic-card');
-                        identityCard.style.opacity = '0';
-                        identityCard.style.transform = 'translateY(12px)';
-                        leftBody.appendChild(identityCard);
-                    }
-                }
-                
-                // 触发渐入动画
-                requestAnimationFrame(() => {
-                    identityCard.style.transition = 'opacity 0.35s ease-out, transform 0.35s ease-out';
-                    identityCard.style.opacity = '1';
-                    identityCard.style.transform = 'translateY(0)';
-                });
-
-                // 填充用户国家/地区：优先使用下拉菜单选择的国家
-                if (typeof updateUserCountryFlag === 'function') {
-                    let countryCode = '';
-                    let countryName = '';
-                    let isManual = false;
-
-                    // 优先级 1: 下拉菜单选择的国家（user_selected_country）
-                    const selectedCountry = localStorage.getItem('user_selected_country');
-                    if (selectedCountry) {
-                        countryCode = selectedCountry.toUpperCase();
-                        if (countryNameMap[countryCode]) {
-                            countryName = currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en;
-                        } else {
-                            countryName = countryCode;
-                        }
-                        isManual = true; // 用户手动选择的国家视为用户校准
-                    }
-
-                    // 优先级 2: localStorage 中的手动校准信息（旧逻辑，兼容性保留）
-                    if (!countryCode && localStorage.getItem('loc_fixed') === 'true' && localStorage.getItem('loc_locked') === 'true') {
-                        countryCode = localStorage.getItem('manual_location') || '';
-                        if (countryCode) {
-                            countryCode = countryCode.toUpperCase();
-                            if (countryNameMap[countryCode]) {
-                                countryName = currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en;
-                            } else {
-                                countryName = countryCode;
-                            }
-                            isManual = true;
-                        }
-                    }
-
-                    // 优先级 3: currentUser 中的手动校准信息
-                    if (!countryCode && currentUser) {
-                        countryCode = currentUser.manual_location || '';
-                        if (countryCode) {
-                            countryCode = countryCode.toUpperCase();
-                            if (countryNameMap[countryCode]) {
-                                countryName = currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en;
-                            } else {
-                                countryName = countryCode;
-                            }
-                            isManual = true;
-                        }
-                    }
-
-                    // 优先级 4: currentUser 中的国家代码（自动识别）
-                    if (!countryCode && currentUser) {
-                        countryCode = currentUser.country_code || currentUser.ip_location || '';
-                        if (countryCode) {
-                            countryCode = countryCode.toUpperCase();
-                            if (countryNameMap[countryCode]) {
-                                countryName = currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en;
-                            } else {
-                                countryName = countryCode;
-                            }
-                            isManual = !!(currentUser.manual_location || currentUser.manual_lat != null);
-                        }
-                    }
-
-                    if (countryCode) {
-                        updateUserCountryFlag(countryCode, countryName, isManual);
-                    }
                 }
 
                 // 添加实时诊断活动卡片（带渐入动画）
@@ -19113,12 +18944,7 @@
                 statsCard.classList.add('clinic-card');
                 statsCard.style.opacity = '0';
                 statsCard.style.transform = 'translateY(12px)';
-                const identityCard = leftBody.querySelector('.drawer-item[data-card="identity-config"]') || leftBody.querySelector('.drawer-item');
-                if (identityCard && identityCard.nextSibling) {
-                    leftBody.insertBefore(statsCard, identityCard.nextSibling);
-                } else {
-                    leftBody.appendChild(statsCard);
-                }
+                leftBody.insertBefore(statsCard, leftBody.firstChild);
                 
                 // 触发渐入动画
                 requestAnimationFrame(() => {
@@ -19127,11 +18953,49 @@
                     statsCard.style.transform = 'translateY(0)';
                 });
 
-                // GitHub Combat 卡片（22 项数据，优先从 github_stats 读取；空则 Loading + 自动同步；兼容 github_stars/github_score 保底）
+                // GitHub Combat 卡片（22 项数据 + 身份区：私信、GitHub 登录、退出、链接、国家、状态、徽章、图标）
                 leftBody.querySelectorAll('.github-combat-card').forEach(function(c) { c.remove(); });
                 if (typeof window.renderGithubCard === 'function') {
                     var apiBase = (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content) || '';
                     apiBase = String(apiBase).trim().replace(/\/$/, '');
+                    var defaultAvatarSt2 = (window.STATS_CONSTANTS && window.STATS_CONSTANTS.DEFAULT_AVATAR) || '';
+                    var ghUserSt2 = (typeof localStorage !== 'undefined' && localStorage.getItem('github_username')) || '';
+                    var userIdentitySt2 = (currentUserData && currentUserData.user_identity) || null;
+                    var isFpOnlySt2 = !ghUserSt2 || (typeof isValidGitHubUsername === 'function' && !isValidGitHubUsername(ghUserSt2, userIdentitySt2));
+                    var fpSt2 = (typeof localStorage !== 'undefined' && localStorage.getItem('user_fingerprint')) || '';
+                    var fpPrefixSt2 = fpSt2 ? fpSt2.substring(0, 6).toUpperCase() : '';
+                    var dispNameSt2 = isFpOnlySt2 && fpSt2 ? ('匿名专家 ' + fpPrefixSt2) : (ghUserSt2 || '未设置');
+                    var dispLabelSt2 = isFpOnlySt2 && fpSt2 ? '设备指纹' : 'GitHub ID';
+                    var avUrlSt2 = isFpOnlySt2 && fpSt2 ? ('https://api.dicebear.com/7.x/identicon/svg?seed=' + encodeURIComponent(fpSt2)) : (ghUserSt2 && typeof getGitHubAvatarUrl === 'function' ? getGitHubAvatarUrl(ghUserSt2) : defaultAvatarSt2);
+                    var totalMsgsSt2 = Number(currentUserData && (currentUserData.total_messages != null ? currentUserData.total_messages : currentUserData.totalMessages)) || 0;
+                    var badgeSt2 = totalMsgsSt2 >= 500 ? '<span class="inline-flex items-center ml-1 animate-pulse" style="filter: drop-shadow(0 0 5px rgba(255,0,0,0.6));" title="病入膏肓">🏆</span>' : (totalMsgsSt2 < 10 && totalMsgsSt2 > 0 ? '<span class="inline-flex items-center ml-1 text-[#00ff41]/50" title="病情可控">🌱</span>' : '');
+                    var curStatusSt2 = (typeof localStorage !== 'undefined' && localStorage.getItem('user_status')) || 'idle';
+                    var identityForCardSt2 = {
+                        avatarUrl: avUrlSt2,
+                        displayName: dispNameSt2,
+                        displayLabel: dispLabelSt2,
+                        badgeHtml: badgeSt2,
+                        githubUsername: ghUserSt2,
+                        isLoggedIn: !!(ghUserSt2 && (typeof isValidGitHubUsername !== 'function' || isValidGitHubUsername(ghUserSt2, userIdentitySt2))),
+                        currentStatus: curStatusSt2,
+                        defaultAvatar: defaultAvatarSt2
+                    };
+                    var drawerCountryCodeSt2 = '', drawerCountryNameSt2 = '', drawerCountryIsManualSt2 = false;
+                    try {
+                        var selSt2 = localStorage.getItem('user_selected_country');
+                        if (selSt2) {
+                            drawerCountryCodeSt2 = selSt2.toUpperCase();
+                            drawerCountryNameSt2 = (typeof countryNameMap !== 'undefined' && countryNameMap[drawerCountryCodeSt2]) ? (typeof currentLang !== 'undefined' && currentLang === 'en' ? countryNameMap[drawerCountryCodeSt2].en : countryNameMap[drawerCountryCodeSt2].zh) : drawerCountryCodeSt2;
+                            drawerCountryIsManualSt2 = true;
+                        }
+                        if (!drawerCountryCodeSt2 && currentUserData && (currentUserData.manual_location || currentUserData.country_code || currentUserData.ip_location)) {
+                            drawerCountryCodeSt2 = (currentUserData.manual_location || currentUserData.country_code || currentUserData.ip_location || '').toUpperCase();
+                            if (drawerCountryCodeSt2 && typeof countryNameMap !== 'undefined' && countryNameMap[drawerCountryCodeSt2]) {
+                                drawerCountryNameSt2 = typeof currentLang !== 'undefined' && currentLang === 'en' ? countryNameMap[drawerCountryCodeSt2].en : countryNameMap[drawerCountryCodeSt2].zh;
+                            } else if (drawerCountryCodeSt2) drawerCountryNameSt2 = drawerCountryCodeSt2;
+                            drawerCountryIsManualSt2 = !!(currentUserData.manual_location || currentUserData.manual_lat != null);
+                        }
+                    } catch (e) {}
                     var handleGithubSync = function() {
                         var token = (window.__githubAccessToken || (typeof localStorage !== 'undefined' && localStorage.getItem('github_token')) || '').trim();
                         return fetch(apiBase ? apiBase + '/api/github/sync' : '/api/github/sync', {
@@ -19154,13 +19018,14 @@
                     var githubStats = currentUserData.github_stats;
                     var hasValidStats = githubStats && typeof githubStats === 'object' && Object.keys(githubStats).length > 0 && githubStats.login;
                     var githubCardEl;
+                    var cardOpts = { container: leftBody, onRefresh: handleGithubSync, lang: typeof currentLang !== 'undefined' ? currentLang : 'en', insertFirst: true, identity: identityForCardSt2 };
                     if (hasValidStats) {
-                        githubCardEl = window.renderGithubCard(githubStats, { container: leftBody, onRefresh: handleGithubSync });
+                        githubCardEl = window.renderGithubCard(githubStats, cardOpts);
                     } else {
                         if (typeof window.renderGithubCardLoading === 'function') {
-                            window.renderGithubCardLoading(leftBody);
+                            window.renderGithubCardLoading(leftBody, { lang: typeof currentLang !== 'undefined' ? currentLang : 'en', insertFirst: true });
                         } else {
-                            window.renderGithubCard(null, { container: leftBody });
+                            window.renderGithubCard(null, cardOpts);
                         }
                         var token = (window.__githubAccessToken || (typeof localStorage !== 'undefined' && localStorage.getItem('github_token')) || '').trim();
                         var userIdForSync = (currentUserData.user_name || currentUserData.login || currentUserData.github_login || '').trim();
@@ -19168,7 +19033,7 @@
                         if (token && needAutoSync && (userIdForSync || (currentUserData.id && currentUserData.id.trim()))) {
                             handleGithubSync().then(function(result) {
                                 if (result && result.success && result.data) {
-                                    window.renderGithubCard(result.data, { container: leftBody, onRefresh: handleGithubSync });
+                                    window.renderGithubCard(result.data, cardOpts);
                                     setTimeout(function() {
                                         if (typeof window.refreshUserStats === 'function') window.refreshUserStats().catch(function(err) { console.warn('[GitHub Sync] refreshUserStats:', err); });
                                         if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard(); else if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
@@ -19183,7 +19048,7 @@
                                         publicRepos: 0, privateRepos: 0, languageDistribution: [],
                                         accountAge: 0, syncedAt: '', organizations: []
                                     };
-                                    window.renderGithubCard(fallback, { container: leftBody, onRefresh: handleGithubSync });
+                                    window.renderGithubCard(fallback, cardOpts);
                                 }
                             }).catch(function() {
                                 var fallback = {
@@ -19194,7 +19059,7 @@
                                     publicRepos: 0, privateRepos: 0, languageDistribution: [],
                                     accountAge: 0, syncedAt: '', organizations: []
                                 };
-                                window.renderGithubCard(fallback, { container: leftBody, onRefresh: handleGithubSync });
+                                window.renderGithubCard(fallback, cardOpts);
                             });
                         } else {
                             var fallback = {
@@ -19205,13 +19070,16 @@
                                 publicRepos: 0, privateRepos: 0, languageDistribution: [],
                                 accountAge: 0, syncedAt: '', organizations: []
                             };
-                            githubCardEl = window.renderGithubCard(fallback, { container: leftBody, onRefresh: handleGithubSync });
+                            githubCardEl = window.renderGithubCard(fallback, cardOpts);
                         }
                     }
-                    if (githubCardEl && statsCard.nextSibling) {
-                        leftBody.removeChild(githubCardEl);
-                        leftBody.insertBefore(githubCardEl, statsCard.nextSibling);
-                    }
+                }
+
+                if (typeof updateUserCountryFlag === 'function') {
+                    var dc = typeof drawerCountryCodeSt2 !== 'undefined' ? drawerCountryCodeSt2 : (typeof drawerCountryCode !== 'undefined' ? drawerCountryCode : '');
+                    var dn = typeof drawerCountryNameSt2 !== 'undefined' ? drawerCountryNameSt2 : (typeof drawerCountryName !== 'undefined' ? drawerCountryName : '');
+                    var dm = typeof drawerCountryIsManualSt2 !== 'undefined' ? drawerCountryIsManualSt2 : (typeof drawerCountryIsManual !== 'undefined' ? drawerCountryIsManual : false);
+                    if (dc || dn) updateUserCountryFlag(dc, dn, dm);
                 }
 
                 // 上岗天数：抽屉打开后也要“实时增长”（无需手动刷新）
