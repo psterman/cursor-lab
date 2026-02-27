@@ -287,6 +287,15 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
             color: var(--accent-terminal);
             border-color: var(--accent-terminal);
         }
+        .metric-annotation {
+            font-size: 9px;
+            color: var(--text-muted);
+            font-family: var(--font-mono-stack);
+            border-left: 1px solid rgba(0, 255, 65, 0.2);
+            padding-left: 6px;
+            margin-bottom: 8px;
+            line-height: 1.2;
+        }
         .leaderboard-card-list {
             list-style: none;
             margin: 0;

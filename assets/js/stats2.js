@@ -7722,6 +7722,32 @@
             pr_reviews: '👀 评审榜'
         };
 
+        /** 维度 key -> 数据注释：来源 / 算法 / 意义（微缩文案） */
+        var LEADERBOARD_METRIC_ANNOTATIONS = {
+            stars: { source: 'GitHub GraphQL v4', method: 'SUM(repo_stars)', meaning: '衡量开发者在开源社区的综合影响力与代码受认可度。' },
+            commits: { source: 'GitHub GraphQL v4', method: 'contributionsCollection.totalCommitContributions', meaning: '反映代码提交活跃度与持续产出能力。' },
+            prs: { source: 'GitHub GraphQL v4', method: 'pullRequests(states:MERGED).totalCount', meaning: '衡量协作贡献与代码合并质量。' },
+            languages: { source: 'GitHub GraphQL v4', method: '仓库 languageDistribution 种类数', meaning: '反映技术栈广度与多语言能力。' },
+            vibe_index: { source: '神经网络语义分析 (VibeCheck v2)', method: '0.25×L+0.2×P+0.25×D+0.15×E+0.15×F', meaning: '综合人格维度的灵性/职场适配指数。' },
+            l_score: { source: '神经网络语义分析 (VibeCheck v2)', method: '语义维度 L', meaning: '逻辑严密性与结构化表达倾向。' },
+            p_score: { source: '神经网络语义分析 (VibeCheck v2)', method: '语义维度 P', meaning: '抗压与任务坚持度。' },
+            d_score: { source: '神经网络语义分析 (VibeCheck v2)', method: '语义维度 D', meaning: '细节关注与把控倾向。' },
+            e_score: { source: '神经网络语义分析 (VibeCheck v2)', method: '语义维度 E', meaning: '情绪稳定性与沟通风格。' },
+            f_score: { source: '神经网络语义分析 (VibeCheck v2)', method: '语义维度 F', meaning: '专注力与执行效率倾向。' },
+            work_days: { source: '神经网络语义分析 (VibeCheck v2)', method: '活跃天数或上报上岗天数', meaning: '反映使用时长与投入程度。' },
+            jiafang_count: { source: '神经网络语义分析 (VibeCheck v2)', method: '关键词「不/必须/赶紧」等出现频次', meaning: '甲方式表达强度。' },
+            ketao_count: { source: '神经网络语义分析 (VibeCheck v2)', method: '关键词「请/谢谢/辛苦」等出现频次', meaning: '礼貌用语与客套程度。' },
+            chars_avg: { source: '神经网络语义分析 (VibeCheck v2)', method: 'total_chars / total_messages', meaning: '单次平均输出长度，反映表达厚度。' },
+            total_messages: { source: '神经网络语义分析 (VibeCheck v2)', method: '对话回合数', meaning: '互动频次与参与度。' },
+            total_chars: { source: '神经网络语义分析 (VibeCheck v2)', method: '用户输出总字符数', meaning: '总表达量与内容规模。' },
+            github_score: { source: 'GitHub GraphQL v4', method: 'Star×10 + Fork×5 + Watch×2 + Follower×1', meaning: '综合 GitHub 战力加权分。' },
+            closed_issues: { source: 'GitHub GraphQL v4', method: 'issues(states:CLOSED).totalCount', meaning: '问题闭环与项目管理能力。' },
+            public_repos: { source: 'GitHub GraphQL v4', method: '公开仓库总数', meaning: '开源项目规模。' },
+            followers: { source: 'GitHub GraphQL v4', method: 'followers.totalCount', meaning: '社区影响力与关注度。' },
+            commit_velocity: { source: 'GitHub GraphQL v4', method: '单位时间提交密度', meaning: '开发节奏与产出效率。' },
+            pr_reviews: { source: 'GitHub GraphQL v4', method: 'totalPullRequestReviewContributions', meaning: '代码评审参与度。' }
+        };
+
         /** 打开左侧抽屉并展示对应用户详情（点击榜单用户名时调用） */
         function openUserDrawer(userId, user) {
             if (!userId && user) userId = user.id || user.user_id;
@@ -7798,6 +7824,8 @@
             var topDataAllTime = Array.isArray(allTimeSnap.top_data) ? allTimeSnap.top_data : [];
             var currentUserId = (typeof localStorage !== 'undefined' && localStorage.getItem('github_user_id')) || (localStorage && localStorage.getItem('supabase_user_id')) || (window.currentUserData && (window.currentUserData.id || window.currentUserData.userId)) || '';
 
+            var ann = LEADERBOARD_METRIC_ANNOTATIONS[metricKey] || { source: '—', method: '—', meaning: '—' };
+            var annotationText = '来源: ' + esc(ann.source) + ' | 算法: ' + esc(ann.method) + ' | 意义: ' + esc(ann.meaning);
             var card = document.createElement('div');
             card.className = 'leaderboard-card hacker-border p-4 rounded-sm bg-zinc-900/40';
             card.setAttribute('data-metric', metricKey);
@@ -7808,6 +7836,7 @@
                 '<button type="button" class="lb-tab active" data-type="daily" aria-selected="true">昨日</button>' +
                 '<button type="button" class="lb-tab" data-type="all_time" aria-selected="false">全网</button>' +
                 '</div></div>' +
+                '<div class="metric-annotation" title="' + esc(annotationText) + '">' + annotationText + '</div>' +
                 '<ul class="leaderboard-card-list lb-list" aria-live="polite"></ul>' +
                 '<div class="leaderboard-card-updated lb-updated"></div>' +
                 '<div class="leaderboard-card-my-rank lb-my-rank" style="display:none;"></div>';
