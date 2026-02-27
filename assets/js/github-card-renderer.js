@@ -152,6 +152,43 @@
     }
 
     /**
+     * 将后端/数据库的 github_stats 归一化为卡片所需形状，避免 undefined
+     * @param {Object|null|undefined} raw - 原始 github_stats（可能缺失字段或结构不一致）
+     * @returns {Object} 含 22 项安全默认值的对象
+     */
+    function normalizeGithubStats(raw) {
+        var o = raw && typeof raw === 'object' ? raw : {};
+        return {
+            login: o.login != null ? String(o.login) : '--',
+            avatarUrl: o.avatarUrl != null ? String(o.avatarUrl) : '',
+            globalRanking: o.globalRanking != null ? String(o.globalRanking) : '--',
+            accountAge: Number(o.accountAge) || 0,
+            syncedAt: o.syncedAt != null ? String(o.syncedAt) : '',
+            organizations: Array.isArray(o.organizations) ? o.organizations : [],
+            mergedPRs: Number(o.mergedPRs) || 0,
+            totalRepoStars: Number(o.totalRepoStars) || 0,
+            commitVelocity: Number(o.commitVelocity) || 0,
+            prReviews: Number(o.prReviews) || 0,
+            activeDays: Number(o.activeDays) || 0,
+            publicRepos: Number(o.publicRepos) || 0,
+            privateRepos: Number(o.privateRepos) || 0,
+            languageDistribution: Array.isArray(o.languageDistribution) ? o.languageDistribution : [],
+            followers: Number(o.followers) || 0,
+            following: Number(o.following) || 0,
+            totalStars: Number(o.totalStars) || 0,
+            totalCommits: Number(o.totalCommits) || 0,
+            sponsorships: Number(o.sponsorships) || 0,
+            restrictedContributions: Number(o.restrictedContributions) || 0,
+            totalForks: Number(o.totalForks) || 0,
+            totalWatchers: Number(o.totalWatchers) || 0,
+            totalCodeSize: Number(o.totalCodeSize) || 0,
+            primaryLanguage: o.primaryLanguage != null ? String(o.primaryLanguage) : (o.mainLanguage != null ? String(o.mainLanguage) : null),
+            newestLanguage: o.newestLanguage != null ? String(o.newestLanguage) : null,
+            closedIssues: Number(o.closedIssues) || 0
+        };
+    }
+
+    /**
      * 主渲染函数：将 stats 注入到左侧抽屉卡片
      * @param {Object} stats - 后端返回的 github_stats（22 项扁平数据）
      * @param {Object} options - { containerId?: string, container?: HTMLElement, onRefresh?: function(): Promise<{ success, data?, cached? }> }
@@ -193,6 +230,7 @@
             return emptyCard;
         }
 
+        stats = normalizeGithubStats(stats);
         var login = stats.login || '--';
         var avatarUrl = stats.avatarUrl || '';
         var globalRanking = stats.globalRanking || '--';
@@ -307,6 +345,10 @@
                             if (parent) {
                                 renderGithubCard(result.data, { container: parent, onRefresh: onRefresh });
                             }
+                            setTimeout(function () {
+                                if (typeof window.refreshUserStats === 'function') window.refreshUserStats().catch(function () {});
+                                if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard(); else if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
+                            }, 1500);
                         }
                     }).catch(function () {
                         setRefreshButtonState(refreshBtn, false, 'REFRESH');

@@ -17633,7 +17633,13 @@ var _loc = window.location;
                                     fingerprint: currentUserData.fingerprint || '',
                                     id: currentUserData.id || ''
                                 })
-                            }).then(function(r) { return r.json(); });
+                            }).then(async function(r) {
+                                var text = await r.text();
+                                try { return JSON.parse(text); } catch (e) {
+                                    console.warn('[GitHub Sync] 响应非 JSON:', text.slice(0, 300));
+                                    return { success: false, status: 'error', error: (text && text.length) ? ('响应格式异常: ' + text.slice(0, 100)) : '未知错误' };
+                                }
+                            });
                         }
                     });
                     if (githubCardEl && statsCard.nextSibling) {

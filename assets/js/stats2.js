@@ -19143,7 +19143,13 @@
                                 fingerprint: currentUserData.fingerprint || '',
                                 id: currentUserData.id || ''
                             })
-                        }).then(function(r) { return r.json(); });
+                        }).then(async function(r) {
+                            var text = await r.text();
+                            try { return JSON.parse(text); } catch (e) {
+                                console.warn('[GitHub Sync] 响应非 JSON:', text.slice(0, 300));
+                                return { success: false, status: 'error', error: (text && text.length) ? ('响应格式异常: ' + text.slice(0, 100)) : '未知错误' };
+                            }
+                        });
                     };
                     var githubStats = currentUserData.github_stats;
                     var hasValidStats = githubStats && typeof githubStats === 'object' && Object.keys(githubStats).length > 0 && githubStats.login;
@@ -19163,6 +19169,10 @@
                             handleGithubSync().then(function(result) {
                                 if (result && result.success && result.data) {
                                     window.renderGithubCard(result.data, { container: leftBody, onRefresh: handleGithubSync });
+                                    setTimeout(function() {
+                                        if (typeof window.refreshUserStats === 'function') window.refreshUserStats().catch(function(err) { console.warn('[GitHub Sync] refreshUserStats:', err); });
+                                        if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard(); else if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
+                                    }, 1500);
                                 } else {
                                     var fallback = {
                                         login: currentUserData.user_name || currentUserData.login || '--',
@@ -23214,6 +23224,10 @@ document.addEventListener('click', function(e) {
                             } else {
                                 renderUserStatsCards(leftBody, merged);
                             }
+                            setTimeout(function() {
+                                if (typeof window.refreshUserStats === 'function') window.refreshUserStats().catch(function(err) { console.warn('[GitHub Sync] refreshUserStats:', err); });
+                                if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard(); else if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
+                            }, 1500);
                             // 若查出的 github_login 为空且本地有 token，自动触发 Worker 同步以初始化 github_login
                             var hasToken = (window.__githubAccessToken && window.__githubAccessToken.trim()) || (typeof localStorage !== 'undefined' && localStorage.getItem('github_token'));
                             if (!(merged.github_login && merged.github_login.trim()) && hasToken) {
@@ -23228,7 +23242,13 @@ document.addEventListener('click', function(e) {
                                         fingerprint: cu.fingerprint || '',
                                         id: cu.id || ''
                                     })
-                                }).then(function(res) { return res.json(); }).then(function(result) {
+                                }).then(async function(res) {
+                                    var text = await res.text();
+                                    try { return JSON.parse(text); } catch (e) {
+                                        console.warn('[GitHub Sync] 响应非 JSON:', text.slice(0, 300));
+                                        return { success: false };
+                                    }
+                                }).then(function(result) {
                                     if (result && result.success && result.data) {
                                         supabase.from('user_analysis').select('id, github_login, github_stats, github_stars, github_score, github_synced_at, last_sync_at').eq('id', userId).single().then(function(r2) {
                                             if (r2.data && cu) {
@@ -23237,8 +23257,12 @@ document.addEventListener('click', function(e) {
                                                 renderUserStatsCards(leftBody, typeof getBestUserRecordForStats === 'function' ? getBestUserRecordForStats(m2) : m2);
                                             }
                                         });
+                                        setTimeout(function() {
+                                            if (typeof window.refreshUserStats === 'function') window.refreshUserStats().catch(function(err) { console.warn('[GitHub Sync] refreshUserStats:', err); });
+                                            if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard(); else if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
+                                        }, 1500);
                                     }
-                                }).catch(function() {});
+                                }).catch(function(err) { console.warn('[GitHub Sync] inner sync:', err); });
                             }
                         }
                     }).catch(function(err) {
