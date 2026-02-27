@@ -157,6 +157,29 @@
             <div id="user-modal-body"><!-- 由 JS 填充 --></div>
         </div>
     </div>
+
+    <!-- 天梯榜全榜单 Modal：黑客风格，全屏半透明，中心长列表 -->
+    <div id="global-leaderboard-modal" class="global-leaderboard-modal hidden" aria-hidden="true">
+        <div class="global-leaderboard-modal-backdrop"></div>
+        <div class="global-leaderboard-modal-box">
+            <div class="global-leaderboard-modal-header">
+                <h3 class="global-leaderboard-modal-title" id="global-leaderboard-modal-title">全榜单</h3>
+                <button type="button" class="global-leaderboard-modal-close" id="global-leaderboard-modal-close" aria-label="关闭">✕</button>
+            </div>
+            <div class="global-leaderboard-modal-toolbar">
+                <input type="text" class="global-leaderboard-search" id="global-leaderboard-search" placeholder="输入 ID / 用户名 搜索" autocomplete="off" />
+                <button type="button" class="global-leaderboard-btn-goto-me" id="global-leaderboard-goto-me">定位到我</button>
+            </div>
+            <div class="global-leaderboard-list-wrap" id="global-leaderboard-list-wrap">
+                <table class="global-leaderboard-table" id="global-leaderboard-table">
+                    <thead><tr><th>#</th><th>用户</th><th>数值</th></tr></thead>
+                    <tbody id="global-leaderboard-tbody"></tbody>
+                </table>
+                <div class="global-leaderboard-loading" id="global-leaderboard-loading" style="display:none;">加载中...</div>
+                <div class="global-leaderboard-end" id="global-leaderboard-end" style="display:none;">— 已到底 —</div>
+            </div>
+        </div>
+    </div>
     
     
     <!-- 左右赛博朋克抽屉 -->
@@ -327,6 +350,27 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 天梯榜「全部」二级抽屉：滑入式，right -450px → 0 -->
+    <div id="leaderboard-detail-drawer" class="secondary-drawer leaderboard-detail-drawer" aria-hidden="true">
+        <div class="secondary-drawer-inner">
+            <div class="secondary-drawer-header">
+                <h3 class="secondary-drawer-title" id="leaderboard-detail-drawer-title">全榜单</h3>
+                <button type="button" class="secondary-drawer-close" id="leaderboard-detail-drawer-close" aria-label="关闭">✕</button>
+            </div>
+            <div class="secondary-drawer-toolbar">
+                <button type="button" class="secondary-drawer-btn-goto-me" id="leaderboard-detail-goto-me">定位到我</button>
+            </div>
+            <div class="secondary-drawer-list-wrap" id="leaderboard-detail-list-wrap">
+                <table class="secondary-drawer-table" id="leaderboard-detail-table">
+                    <thead><tr><th>#</th><th>用户</th><th>数值</th></tr></thead>
+                    <tbody id="leaderboard-detail-tbody"></tbody>
+                </table>
+                <div class="secondary-drawer-loading" id="leaderboard-detail-loading" style="display:none;">加载中...</div>
+                <div class="secondary-drawer-end" id="leaderboard-detail-end" style="display:none;">— 已到底 —</div>
             </div>
         </div>
     </div>

@@ -7722,30 +7722,30 @@
             pr_reviews: '👀 评审榜'
         };
 
-        /** 维度 key -> 数据注释：来源 / 算法 / 意义（微缩文案） */
+        /** 维度 key -> 说明（算法与意义合一，用于卡片底部注解） */
         var LEADERBOARD_METRIC_ANNOTATIONS = {
-            stars: { source: 'GitHub GraphQL v4', method: 'SUM(repo_stars)', meaning: '衡量开发者在开源社区的综合影响力与代码受认可度。' },
-            commits: { source: 'GitHub GraphQL v4', method: 'contributionsCollection.totalCommitContributions', meaning: '反映代码提交活跃度与持续产出能力。' },
-            prs: { source: 'GitHub GraphQL v4', method: 'pullRequests(states:MERGED).totalCount', meaning: '衡量协作贡献与代码合并质量。' },
-            languages: { source: 'GitHub GraphQL v4', method: '仓库 languageDistribution 种类数', meaning: '反映技术栈广度与多语言能力。' },
-            vibe_index: { source: '神经网络语义分析 (VibeCheck v2)', method: '0.25×L+0.2×P+0.25×D+0.15×E+0.15×F', meaning: '综合人格维度的灵性/职场适配指数。' },
-            l_score: { source: '神经网络语义分析 (VibeCheck v2)', method: '语义维度 L', meaning: '逻辑严密性与结构化表达倾向。' },
-            p_score: { source: '神经网络语义分析 (VibeCheck v2)', method: '语义维度 P', meaning: '抗压与任务坚持度。' },
-            d_score: { source: '神经网络语义分析 (VibeCheck v2)', method: '语义维度 D', meaning: '细节关注与把控倾向。' },
-            e_score: { source: '神经网络语义分析 (VibeCheck v2)', method: '语义维度 E', meaning: '情绪稳定性与沟通风格。' },
-            f_score: { source: '神经网络语义分析 (VibeCheck v2)', method: '语义维度 F', meaning: '专注力与执行效率倾向。' },
-            work_days: { source: '神经网络语义分析 (VibeCheck v2)', method: '活跃天数或上报上岗天数', meaning: '反映使用时长与投入程度。' },
-            jiafang_count: { source: '神经网络语义分析 (VibeCheck v2)', method: '关键词「不/必须/赶紧」等出现频次', meaning: '甲方式表达强度。' },
-            ketao_count: { source: '神经网络语义分析 (VibeCheck v2)', method: '关键词「请/谢谢/辛苦」等出现频次', meaning: '礼貌用语与客套程度。' },
-            chars_avg: { source: '神经网络语义分析 (VibeCheck v2)', method: 'total_chars / total_messages', meaning: '单次平均输出长度，反映表达厚度。' },
-            total_messages: { source: '神经网络语义分析 (VibeCheck v2)', method: '对话回合数', meaning: '互动频次与参与度。' },
-            total_chars: { source: '神经网络语义分析 (VibeCheck v2)', method: '用户输出总字符数', meaning: '总表达量与内容规模。' },
-            github_score: { source: 'GitHub GraphQL v4', method: 'Star×10 + Fork×5 + Watch×2 + Follower×1', meaning: '综合 GitHub 战力加权分。' },
-            closed_issues: { source: 'GitHub GraphQL v4', method: 'issues(states:CLOSED).totalCount', meaning: '问题闭环与项目管理能力。' },
-            public_repos: { source: 'GitHub GraphQL v4', method: '公开仓库总数', meaning: '开源项目规模。' },
-            followers: { source: 'GitHub GraphQL v4', method: 'followers.totalCount', meaning: '社区影响力与关注度。' },
-            commit_velocity: { source: 'GitHub GraphQL v4', method: '单位时间提交密度', meaning: '开发节奏与产出效率。' },
-            pr_reviews: { source: 'GitHub GraphQL v4', method: 'totalPullRequestReviewContributions', meaning: '代码评审参与度。' }
+            stars: { method: 'SUM(repo_stars)', meaning: '衡量开发者在开源社区的综合影响力与代码受认可度。' },
+            commits: { method: 'contributionsCollection.totalCommitContributions', meaning: '反映代码提交活跃度与持续产出能力。' },
+            prs: { method: 'pullRequests(states:MERGED).totalCount', meaning: '衡量协作贡献与代码合并质量。' },
+            languages: { method: '仓库 languageDistribution 种类数', meaning: '反映技术栈广度与多语言能力。' },
+            vibe_index: { method: '0.25×L+0.2×P+0.25×D+0.15×E+0.15×F', meaning: '综合人格维度的灵性/职场适配指数。' },
+            l_score: { method: '语义维度 L', meaning: '逻辑严密性与结构化表达倾向。' },
+            p_score: { method: '语义维度 P', meaning: '抗压与任务坚持度。' },
+            d_score: { method: '语义维度 D', meaning: '细节关注与把控倾向。' },
+            e_score: { method: '语义维度 E', meaning: '情绪稳定性与沟通风格。' },
+            f_score: { method: '语义维度 F', meaning: '专注力与执行效率倾向。' },
+            work_days: { method: '活跃天数或上报上岗天数', meaning: '反映使用时长与投入程度。' },
+            jiafang_count: { method: '关键词「不/必须/赶紧」等出现频次', meaning: '甲方式表达强度。' },
+            ketao_count: { method: '关键词「请/谢谢/辛苦」等出现频次', meaning: '礼貌用语与客套程度。' },
+            chars_avg: { method: 'total_chars / total_messages', meaning: '单次平均输出长度，反映表达厚度。' },
+            total_messages: { method: '对话回合数', meaning: '互动频次与参与度。' },
+            total_chars: { method: '用户输出总字符数', meaning: '总表达量与内容规模。' },
+            github_score: { method: 'Star×10 + Fork×5 + Watch×2 + Follower×1', meaning: '综合 GitHub 战力加权分。' },
+            closed_issues: { method: 'issues(states:CLOSED).totalCount', meaning: '问题闭环与项目管理能力。' },
+            public_repos: { method: '公开仓库总数', meaning: '开源项目规模。' },
+            followers: { method: 'followers.totalCount', meaning: '社区影响力与关注度。' },
+            commit_velocity: { method: '单位时间提交密度', meaning: '开发节奏与产出效率。' },
+            pr_reviews: { method: 'totalPullRequestReviewContributions', meaning: '代码评审参与度。' }
         };
 
         /** 打开左侧抽屉并展示对应用户详情（点击榜单用户名时调用） */
@@ -7824,20 +7824,21 @@
             var topDataAllTime = Array.isArray(allTimeSnap.top_data) ? allTimeSnap.top_data : [];
             var currentUserId = (typeof localStorage !== 'undefined' && localStorage.getItem('github_user_id')) || (localStorage && localStorage.getItem('supabase_user_id')) || (window.currentUserData && (window.currentUserData.id || window.currentUserData.userId)) || '';
 
-            var ann = LEADERBOARD_METRIC_ANNOTATIONS[metricKey] || { source: '—', method: '—', meaning: '—' };
-            var annotationText = '来源: ' + esc(ann.source) + ' | 算法: ' + esc(ann.method) + ' | 意义: ' + esc(ann.meaning);
+            var ann = LEADERBOARD_METRIC_ANNOTATIONS[metricKey] || { method: '—', meaning: '—' };
+            var descriptionText = (ann.method ? esc(ann.method) : '') + (ann.meaning ? (ann.method ? '。' : '') + esc(ann.meaning) : '');
             var card = document.createElement('div');
             card.className = 'leaderboard-card hacker-border p-4 rounded-sm bg-zinc-900/40';
             card.setAttribute('data-metric', metricKey);
             card.innerHTML =
                 '<div class="card-title-row">' +
                 '<span class="card-title">' + esc(label) + '</span>' +
-                '<div class="leaderboard-card-tabs" role="tablist">' +
+                '<div class="leaderboard-card-actions">' +
                 '<button type="button" class="lb-tab active" data-type="daily" aria-selected="true">昨日</button>' +
                 '<button type="button" class="lb-tab" data-type="all_time" aria-selected="false">全网</button>' +
+                '<button type="button" class="lb-btn-more" data-metric="' + esc(metricKey) + '" title="全榜单">&#9776;</button>' +
                 '</div></div>' +
-                '<div class="metric-annotation" title="' + esc(annotationText) + '">' + annotationText + '</div>' +
                 '<ul class="leaderboard-card-list lb-list" aria-live="polite"></ul>' +
+                '<div class="metric-annotation" title="' + esc(descriptionText) + '">说明: ' + descriptionText + '</div>' +
                 '<div class="leaderboard-card-updated lb-updated"></div>' +
                 '<div class="leaderboard-card-my-rank lb-my-rank" style="display:none;"></div>';
 
@@ -7898,11 +7899,461 @@
                     fillList(type);
                 });
             });
+            var btnMore = card.querySelector('.lb-btn-more');
+            if (btnMore) {
+                btnMore.addEventListener('click', function() {
+                    var activeTab = card.querySelector('.lb-tab.active');
+                    var rankingType = (activeTab && activeTab.getAttribute('data-type')) || 'all_time';
+                    if (typeof openLeaderboardDetail === 'function') openLeaderboardDetail(metricKey, rankingType, label);
+                });
+            }
 
             fillList('daily');
             if (container) container.appendChild(card);
             return card;
         }
+
+        /** 全榜单 Modal 状态 */
+        var __globalLeaderboardMetric = '';
+        var __globalLeaderboardRankingType = 'all_time';
+        var __globalLeaderboardStartIndex = 0;
+        var __globalLeaderboardRows = [];
+        var __globalLeaderboardLoading = false;
+        var __globalLeaderboardHasMore = true;
+        var __globalLeaderboardPageSize = 50;
+
+        /**
+         * 打开全榜单 Modal，锁定背景滚动，加载第一页
+         */
+        function openGlobalLeaderboardModal(metricKey, rankingType, titleLabel) {
+            var modal = document.getElementById('global-leaderboard-modal');
+            var titleEl = document.getElementById('global-leaderboard-modal-title');
+            var tbody = document.getElementById('global-leaderboard-tbody');
+            var loadingEl = document.getElementById('global-leaderboard-loading');
+            var endEl = document.getElementById('global-leaderboard-end');
+            var searchInput = document.getElementById('global-leaderboard-search');
+            if (!modal || !tbody) return;
+            __globalLeaderboardMetric = metricKey || '';
+            __globalLeaderboardRankingType = rankingType || 'all_time';
+            __globalLeaderboardStartIndex = 0;
+            __globalLeaderboardRows = [];
+            __globalLeaderboardHasMore = true;
+            if (titleEl) titleEl.textContent = (titleLabel || LEADERBOARD_METRIC_LABELS[metricKey] || '全榜单') + ' · 全榜单';
+            if (searchInput) searchInput.value = '';
+            tbody.innerHTML = '';
+            if (loadingEl) loadingEl.style.display = 'none';
+            if (endEl) endEl.style.display = 'none';
+            modal.classList.remove('hidden');
+            modal.setAttribute('aria-hidden', 'false');
+            document.body.classList.add('body-scroll-lock');
+            loadGlobalLeaderboardPage(true);
+            var listWrap = document.getElementById('global-leaderboard-list-wrap');
+            if (listWrap) listWrap.scrollTop = 0;
+        }
+
+        /**
+         * 关闭全榜单 Modal，解锁背景滚动
+         */
+        function closeGlobalLeaderboardModal() {
+            var modal = document.getElementById('global-leaderboard-modal');
+            if (!modal) return;
+            modal.classList.add('hidden');
+            modal.setAttribute('aria-hidden', 'true');
+            document.body.classList.remove('body-scroll-lock');
+        }
+
+        /**
+         * 分页加载：调用 get_leaderboard_page RPC，追加或替换表格行（极简 DOM）
+         */
+        function loadGlobalLeaderboardPage(replace) {
+            if (__globalLeaderboardLoading || (!__globalLeaderboardHasMore && !replace)) return;
+            var tbody = document.getElementById('global-leaderboard-tbody');
+            var loadingEl = document.getElementById('global-leaderboard-loading');
+            var endEl = document.getElementById('global-leaderboard-end');
+            if (!tbody) return;
+            __globalLeaderboardLoading = true;
+            if (loadingEl) loadingEl.style.display = 'block';
+            var startIndex = replace ? 0 : __globalLeaderboardStartIndex;
+            var sb = (typeof supabaseClient !== 'undefined' && supabaseClient) ? supabaseClient : (window.supabase || null);
+            if (!sb || !sb.rpc) {
+                __globalLeaderboardLoading = false;
+                if (loadingEl) loadingEl.style.display = 'none';
+                return;
+            }
+            sb.rpc('get_leaderboard_page', {
+                p_metric_name: __globalLeaderboardMetric,
+                p_ranking_type: __globalLeaderboardRankingType,
+                p_start_index: startIndex,
+                p_limit: __globalLeaderboardPageSize
+            }).then(function(res) {
+                __globalLeaderboardLoading = false;
+                if (loadingEl) loadingEl.style.display = 'none';
+                var data = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
+                if (res && res.error) {
+                    console.warn('[Leaderboard] get_leaderboard_page error:', res.error);
+                    return;
+                }
+                if (replace) {
+                    __globalLeaderboardRows = [];
+                    tbody.innerHTML = '';
+                }
+                var list = Array.isArray(data) ? data : [];
+                list.forEach(function(row) {
+                    __globalLeaderboardRows.push(row);
+                    var tr = document.createElement('tr');
+                    tr.setAttribute('data-rank', row.rank);
+                    tr.setAttribute('data-id', row.id || '');
+                    tr.setAttribute('data-user', (row.user_name || row.github_login || '').toLowerCase());
+                    tr.innerHTML =
+                        '<td class="col-rank">#' + esc(String(row.rank)) + '</td>' +
+                        '<td class="col-user" data-user-id="' + esc(row.id || '') + '" data-user-name="' + esc(row.user_name || row.github_login || '') + '">' + esc(row.user_name || row.github_login || row.id || '—') + '</td>' +
+                        '<td class="col-value">' + esc(String(row.value != null ? (Number(row.value) % 1 !== 0 ? Number(row.value).toFixed(1) : row.value) : '—')) + '</td>';
+                    tbody.appendChild(tr);
+                    var userCell = tr.querySelector('.col-user');
+                    if (userCell) userCell.addEventListener('click', function() {
+                        var uid = userCell.getAttribute('data-user-id');
+                        var uname = userCell.getAttribute('data-user-name');
+                        if (typeof openUserDrawer === 'function') openUserDrawer(uid || uname, { id: uid, user_name: uname, github_login: uname });
+                    });
+                });
+                __globalLeaderboardStartIndex = startIndex + list.length;
+                if (list.length < __globalLeaderboardPageSize) {
+                    __globalLeaderboardHasMore = false;
+                    if (endEl) endEl.style.display = 'block';
+                }
+            }).catch(function(e) {
+                __globalLeaderboardLoading = false;
+                if (loadingEl) loadingEl.style.display = 'none';
+                console.error('[Leaderboard] get_leaderboard_page:', e);
+            });
+        }
+
+        /**
+         * 滚动到底部自动加载更多
+         */
+        function setupGlobalLeaderboardInfiniteScroll() {
+            var wrap = document.getElementById('global-leaderboard-list-wrap');
+            if (!wrap) return;
+            wrap.addEventListener('scroll', function() {
+                if (!__globalLeaderboardHasMore || __globalLeaderboardLoading) return;
+                var el = wrap;
+                if (el.scrollHeight - el.scrollTop <= el.clientHeight + 80) loadGlobalLeaderboardPage(false);
+            });
+        }
+
+        /**
+         * 搜索：根据 ID/用户名过滤已加载行（显示/隐藏）
+         */
+        function filterGlobalLeaderboardSearch(keyword) {
+            var tbody = document.getElementById('global-leaderboard-tbody');
+            if (!tbody) return;
+            var k = (keyword || '').toLowerCase().trim();
+            var rows = tbody.querySelectorAll('tr');
+            rows.forEach(function(tr) {
+                var id = (tr.getAttribute('data-id') || '').toLowerCase();
+                var user = (tr.getAttribute('data-user') || '').toLowerCase();
+                var show = !k || id.indexOf(k) >= 0 || user.indexOf(k) >= 0;
+                tr.style.display = show ? '' : 'none';
+            });
+        }
+
+        /**
+         * 定位到我：请求当前用户排名，加载对应页并滚动到该行
+         */
+        function gotoMyRankInGlobalLeaderboard() {
+            var currentUserId = (typeof localStorage !== 'undefined' && localStorage.getItem('github_user_id')) || (localStorage && localStorage.getItem('supabase_user_id')) || (window.currentUserData && (window.currentUserData.id || window.currentUserData.userId)) || '';
+            if (!currentUserId) {
+                alert('请先登录或绑定身份后再使用「定位到我」');
+                return;
+            }
+            var sb = (typeof supabaseClient !== 'undefined' && supabaseClient) ? supabaseClient : (window.supabase || null);
+            if (!sb || !sb.rpc) return;
+            var loadingEl = document.getElementById('global-leaderboard-loading');
+            if (loadingEl) loadingEl.style.display = 'block';
+            sb.rpc('get_leaderboard_my_rank', {
+                p_metric_name: __globalLeaderboardMetric,
+                p_user_id: currentUserId,
+                p_ranking_type: __globalLeaderboardRankingType
+            }).then(function(res) {
+                if (loadingEl) loadingEl.style.display = 'none';
+                var data = (res && res.data) ? res.data : res;
+                var rank = data && data.rank != null ? Number(data.rank) : 0;
+                if (!rank) {
+                    alert('未找到您的排名');
+                    return;
+                }
+                var startIndex = Math.max(0, rank - 26);
+                __globalLeaderboardStartIndex = 0;
+                __globalLeaderboardRows = [];
+                __globalLeaderboardHasMore = true;
+                var tbody = document.getElementById('global-leaderboard-tbody');
+                if (tbody) tbody.innerHTML = '';
+                sb.rpc('get_leaderboard_page', {
+                    p_metric_name: __globalLeaderboardMetric,
+                    p_ranking_type: __globalLeaderboardRankingType,
+                    p_start_index: startIndex,
+                    p_limit: __globalLeaderboardPageSize
+                }).then(function(pageRes) {
+                    var list = (pageRes && pageRes.data) ? pageRes.data : (Array.isArray(pageRes) ? pageRes : []);
+                    __globalLeaderboardRows = list;
+                    __globalLeaderboardStartIndex = startIndex + list.length;
+                    if (!tbody) return;
+                    list.forEach(function(row) {
+                        var tr = document.createElement('tr');
+                        tr.setAttribute('data-rank', row.rank);
+                        tr.setAttribute('data-id', row.id || '');
+                        tr.setAttribute('data-user', (row.user_name || row.github_login || '').toLowerCase());
+                        if (Number(row.rank) === rank) tr.classList.add('highlight-my-rank');
+                        tr.innerHTML =
+                            '<td class="col-rank">#' + esc(String(row.rank)) + '</td>' +
+                            '<td class="col-user" data-user-id="' + esc(row.id || '') + '" data-user-name="' + esc(row.user_name || row.github_login || '') + '">' + esc(row.user_name || row.github_login || row.id || '—') + '</td>' +
+                            '<td class="col-value">' + esc(String(row.value != null ? (Number(row.value) % 1 !== 0 ? Number(row.value).toFixed(1) : row.value) : '—')) + '</td>';
+                        tbody.appendChild(tr);
+                        var userCell = tr.querySelector('.col-user');
+                        if (userCell) userCell.addEventListener('click', function() {
+                            var uid = userCell.getAttribute('data-user-id');
+                            var uname = userCell.getAttribute('data-user-name');
+                            if (typeof openUserDrawer === 'function') openUserDrawer(uid || uname, { id: uid, user_name: uname, github_login: uname });
+                        });
+                    });
+                    var listWrap = document.getElementById('global-leaderboard-list-wrap');
+                    var highlight = tbody.querySelector('tr.highlight-my-rank');
+                    if (listWrap && highlight) {
+                        highlight.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                    }
+                });
+            }).catch(function(e) {
+                if (loadingEl) loadingEl.style.display = 'none';
+                console.error('[Leaderboard] get_leaderboard_my_rank:', e);
+            });
+        }
+
+        function initGlobalLeaderboardModal() {
+            var modal = document.getElementById('global-leaderboard-modal');
+            var closeBtn = document.getElementById('global-leaderboard-modal-close');
+            var backdrop = modal && modal.querySelector('.global-leaderboard-modal-backdrop');
+            var searchInput = document.getElementById('global-leaderboard-search');
+            var gotoMeBtn = document.getElementById('global-leaderboard-goto-me');
+            if (closeBtn) closeBtn.addEventListener('click', closeGlobalLeaderboardModal);
+            if (backdrop) backdrop.addEventListener('click', closeGlobalLeaderboardModal);
+            if (searchInput) searchInput.addEventListener('input', function() { filterGlobalLeaderboardSearch(this.value); });
+            if (gotoMeBtn) gotoMeBtn.addEventListener('click', gotoMyRankInGlobalLeaderboard);
+            setupGlobalLeaderboardInfiniteScroll();
+        }
+        if (typeof window !== 'undefined') {
+            window.openGlobalLeaderboardModal = openGlobalLeaderboardModal;
+            window.closeGlobalLeaderboardModal = closeGlobalLeaderboardModal;
+        }
+        document.addEventListener('DOMContentLoaded', function() { initGlobalLeaderboardModal(); });
+
+        /** 二级抽屉状态（全榜单） */
+        var __detailMetric = '';
+        var __detailRankingType = 'all_time';
+        var __detailStartIndex = 0;
+        var __detailLoading = false;
+        var __detailHasMore = true;
+        var __detailPageSize = 50;
+
+        function getCurrentLeaderboardUserId() {
+            return (typeof localStorage !== 'undefined' && localStorage.getItem('github_user_id')) ||
+                (localStorage && localStorage.getItem('supabase_user_id')) ||
+                (window.currentUserData && (window.currentUserData.id || window.currentUserData.userId)) || '';
+        }
+
+        /**
+         * 打开二级抽屉「全榜单」，拉取第一页并渲染；长列表中自动为当前登录用户行应用 .my-rank-highlight
+         */
+        function openLeaderboardDetail(metricKey, rankingType, titleLabel) {
+            var drawer = document.getElementById('leaderboard-detail-drawer');
+            var titleEl = document.getElementById('leaderboard-detail-drawer-title');
+            var tbody = document.getElementById('leaderboard-detail-tbody');
+            var loadingEl = document.getElementById('leaderboard-detail-loading');
+            var endEl = document.getElementById('leaderboard-detail-end');
+            if (!drawer || !tbody) return;
+            __detailMetric = metricKey || '';
+            __detailRankingType = rankingType || 'all_time';
+            __detailStartIndex = 0;
+            __detailHasMore = true;
+            if (titleEl) titleEl.textContent = (titleLabel || LEADERBOARD_METRIC_LABELS[metricKey] || '全榜单') + ' · 全部';
+            tbody.innerHTML = '';
+            if (loadingEl) loadingEl.style.display = 'none';
+            if (endEl) endEl.style.display = 'none';
+            drawer.classList.add('active');
+            drawer.setAttribute('aria-hidden', 'false');
+            loadLeaderboardDetailPage(true);
+            var listWrap = document.getElementById('leaderboard-detail-list-wrap');
+            if (listWrap) listWrap.scrollTop = 0;
+        }
+
+        function closeLeaderboardDetail() {
+            var drawer = document.getElementById('leaderboard-detail-drawer');
+            if (!drawer) return;
+            drawer.classList.remove('active');
+            drawer.setAttribute('aria-hidden', 'true');
+        }
+
+        /**
+         * 二级抽屉分页加载：rpc('get_leaderboard_page')，渲染时对当前用户行应用 .my-rank-highlight
+         */
+        function loadLeaderboardDetailPage(replace) {
+            if (__detailLoading || (!__detailHasMore && !replace)) return;
+            var tbody = document.getElementById('leaderboard-detail-tbody');
+            var loadingEl = document.getElementById('leaderboard-detail-loading');
+            var endEl = document.getElementById('leaderboard-detail-end');
+            if (!tbody) return;
+            __detailLoading = true;
+            if (loadingEl) loadingEl.style.display = 'block';
+            var startIndex = replace ? 0 : __detailStartIndex;
+            var sb = (typeof supabaseClient !== 'undefined' && supabaseClient) ? supabaseClient : (window.supabase || null);
+            if (!sb || !sb.rpc) {
+                __detailLoading = false;
+                if (loadingEl) loadingEl.style.display = 'none';
+                return;
+            }
+            var currentUserId = getCurrentLeaderboardUserId();
+            sb.rpc('get_leaderboard_page', {
+                p_metric_name: __detailMetric,
+                p_ranking_type: __detailRankingType,
+                p_start_index: startIndex,
+                p_limit: __detailPageSize
+            }).then(function(res) {
+                __detailLoading = false;
+                if (loadingEl) loadingEl.style.display = 'none';
+                var data = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
+                if (res && res.error) {
+                    console.warn('[Leaderboard] get_leaderboard_page error:', res.error);
+                    return;
+                }
+                if (replace) tbody.innerHTML = '';
+                var list = Array.isArray(data) ? data : [];
+                list.forEach(function(row) {
+                    var isMe = currentUserId && (
+                        (row.id && String(row.id) === String(currentUserId)) ||
+                        (row.user_name && String(row.user_name) === String(currentUserId))
+                    );
+                    var tr = document.createElement('tr');
+                    if (isMe) tr.classList.add('my-rank-highlight');
+                    tr.setAttribute('data-rank', row.rank);
+                    tr.setAttribute('data-id', row.id || '');
+                    tr.setAttribute('data-user', (row.user_name || row.github_login || '').toLowerCase());
+                    tr.innerHTML =
+                        '<td class="col-rank">#' + esc(String(row.rank)) + '</td>' +
+                        '<td class="col-user" data-user-id="' + esc(row.id || '') + '" data-user-name="' + esc(row.user_name || row.github_login || '') + '">' + esc(row.user_name || row.github_login || row.id || '—') + '</td>' +
+                        '<td class="col-value">' + esc(String(row.value != null ? (Number(row.value) % 1 !== 0 ? Number(row.value).toFixed(1) : row.value) : '—')) + '</td>';
+                    tbody.appendChild(tr);
+                    var userCell = tr.querySelector('.col-user');
+                    if (userCell) userCell.addEventListener('click', function() {
+                        var uid = userCell.getAttribute('data-user-id');
+                        var uname = userCell.getAttribute('data-user-name');
+                        if (typeof openUserDrawer === 'function') openUserDrawer(uid || uname, { id: uid, user_name: uname, github_login: uname });
+                    });
+                });
+                __detailStartIndex = startIndex + list.length;
+                if (list.length < __detailPageSize) {
+                    __detailHasMore = false;
+                    if (endEl) endEl.style.display = 'block';
+                }
+            }).catch(function(e) {
+                __detailLoading = false;
+                if (loadingEl) loadingEl.style.display = 'none';
+                console.error('[Leaderboard] get_leaderboard_page:', e);
+            });
+        }
+
+        /**
+         * 二级抽屉「定位到我」：计算 Offset 并加载对应页，滚动到当前用户行
+         */
+        function gotoMyRankInLeaderboardDetail() {
+            var currentUserId = getCurrentLeaderboardUserId();
+            if (!currentUserId) {
+                alert('请先登录或绑定身份后再使用「定位到我」');
+                return;
+            }
+            var sb = (typeof supabaseClient !== 'undefined' && supabaseClient) ? supabaseClient : (window.supabase || null);
+            if (!sb || !sb.rpc) return;
+            var loadingEl = document.getElementById('leaderboard-detail-loading');
+            var tbody = document.getElementById('leaderboard-detail-tbody');
+            if (loadingEl) loadingEl.style.display = 'block';
+            sb.rpc('get_leaderboard_my_rank', {
+                p_metric_name: __detailMetric,
+                p_user_id: currentUserId,
+                p_ranking_type: __detailRankingType
+            }).then(function(res) {
+                if (loadingEl) loadingEl.style.display = 'none';
+                var data = (res && res.data) ? res.data : res;
+                var rank = data && data.rank != null ? Number(data.rank) : 0;
+                if (!rank) {
+                    alert('未找到您的排名');
+                    return;
+                }
+                var startIndex = Math.max(0, rank - 26);
+                __detailStartIndex = 0;
+                __detailHasMore = true;
+                if (tbody) tbody.innerHTML = '';
+                sb.rpc('get_leaderboard_page', {
+                    p_metric_name: __detailMetric,
+                    p_ranking_type: __detailRankingType,
+                    p_start_index: startIndex,
+                    p_limit: __detailPageSize
+                }).then(function(pageRes) {
+                    var list = (pageRes && pageRes.data) ? pageRes.data : (Array.isArray(pageRes) ? pageRes : []);
+                    __detailStartIndex = startIndex + list.length;
+                    var currentUserId2 = getCurrentLeaderboardUserId();
+                    if (!tbody) return;
+                    list.forEach(function(row) {
+                        var isMe = currentUserId2 && (
+                            (row.id && String(row.id) === String(currentUserId2)) ||
+                            (row.user_name && String(row.user_name) === String(currentUserId2))
+                        );
+                        var tr = document.createElement('tr');
+                        if (isMe) tr.classList.add('my-rank-highlight');
+                        tr.setAttribute('data-rank', row.rank);
+                        tr.setAttribute('data-id', row.id || '');
+                        tr.setAttribute('data-user', (row.user_name || row.github_login || '').toLowerCase());
+                        tr.innerHTML =
+                            '<td class="col-rank">#' + esc(String(row.rank)) + '</td>' +
+                            '<td class="col-user" data-user-id="' + esc(row.id || '') + '" data-user-name="' + esc(row.user_name || row.github_login || '') + '">' + esc(row.user_name || row.github_login || row.id || '—') + '</td>' +
+                            '<td class="col-value">' + esc(String(row.value != null ? (Number(row.value) % 1 !== 0 ? Number(row.value).toFixed(1) : row.value) : '—')) + '</td>';
+                        tbody.appendChild(tr);
+                        var userCell = tr.querySelector('.col-user');
+                        if (userCell) userCell.addEventListener('click', function() {
+                            var uid = userCell.getAttribute('data-user-id');
+                            var uname = userCell.getAttribute('data-user-name');
+                            if (typeof openUserDrawer === 'function') openUserDrawer(uid || uname, { id: uid, user_name: uname, github_login: uname });
+                        });
+                    });
+                    var listWrap = document.getElementById('leaderboard-detail-list-wrap');
+                    var myRow = tbody.querySelector('tr.my-rank-highlight');
+                    if (listWrap && myRow) myRow.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                });
+            }).catch(function(e) {
+                if (loadingEl) loadingEl.style.display = 'none';
+                console.error('[Leaderboard] get_leaderboard_my_rank:', e);
+            });
+        }
+
+        function setupLeaderboardDetailInfiniteScroll() {
+            var wrap = document.getElementById('leaderboard-detail-list-wrap');
+            if (!wrap) return;
+            wrap.addEventListener('scroll', function() {
+                if (!__detailHasMore || __detailLoading) return;
+                var el = wrap;
+                if (el.scrollHeight - el.scrollTop <= el.clientHeight + 80) loadLeaderboardDetailPage(false);
+            });
+        }
+
+        function initLeaderboardDetailDrawer() {
+            var closeBtn = document.getElementById('leaderboard-detail-drawer-close');
+            var gotoMeBtn = document.getElementById('leaderboard-detail-goto-me');
+            if (closeBtn) closeBtn.addEventListener('click', closeLeaderboardDetail);
+            if (gotoMeBtn) gotoMeBtn.addEventListener('click', gotoMyRankInLeaderboardDetail);
+            setupLeaderboardDetailInfiniteScroll();
+        }
+        if (typeof window !== 'undefined') {
+            window.openLeaderboardDetail = openLeaderboardDetail;
+            window.closeLeaderboardDetail = closeLeaderboardDetail;
+        }
+        document.addEventListener('DOMContentLoaded', function() { initLeaderboardDetailDrawer(); });
 
         /**
          * 加载并渲染 22 个天梯榜卡片：从 leaderboard_snapshots 表拉取，按 metric_key 分组后循环渲染卡片；无 #leaderboards-grid 时在天梯榜 Tab 内创建
@@ -9296,15 +9747,28 @@
         // 添加 ESC 键关闭抽屉（当没有弹窗打开时）
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
-                // 检查是否有弹窗打开，如果有则不关闭抽屉
+                // 检查是否有弹窗打开，如果有则不关闭抽屉（关闭用户详情弹窗时也不关闭左右抽屉）
                 const userDetailModal = document.getElementById('user-ranking-detail-modal');
                 const rankingDetailModal = document.getElementById('ranking-detail-modal');
-                // 检查弹窗是否存在且可见（active 类）
+                const userModal = document.getElementById('user-modal');
                 if (userDetailModal && userDetailModal.classList.contains('active')) {
-                    return; // 有弹窗打开时，不关闭抽屉
+                    return;
                 }
                 if (rankingDetailModal && rankingDetailModal.classList.contains('active')) {
-                    return; // 有弹窗打开时，不关闭抽屉
+                    return;
+                }
+                if (userModal && !userModal.classList.contains('hidden')) {
+                    return;
+                }
+                var globalLbModal = document.getElementById('global-leaderboard-modal');
+                if (globalLbModal && !globalLbModal.classList.contains('hidden')) {
+                    if (typeof closeGlobalLeaderboardModal === 'function') closeGlobalLeaderboardModal();
+                    return;
+                }
+                var detailDrawer = document.getElementById('leaderboard-detail-drawer');
+                if (detailDrawer && detailDrawer.classList.contains('active')) {
+                    if (typeof closeLeaderboardDetail === 'function') closeLeaderboardDetail();
+                    return;
                 }
                 closeDrawers();
             }
@@ -9338,13 +9802,16 @@
                 return;
             }
             
-            // 【修复】检查是否点击了用户详情弹窗或其他弹窗
+            // 【修复】检查是否点击了用户详情弹窗或其他弹窗（关闭这些弹窗时不关闭左右抽屉）
             const userDetailModal = document.getElementById('user-ranking-detail-modal');
             const rankingDetailModal = document.getElementById('ranking-detail-modal');
+            const userModal = document.getElementById('user-modal');
+            const globalLbModal = document.getElementById('global-leaderboard-modal');
             const isModalClick = (userDetailModal && (userDetailModal.contains(e.target) || e.target === userDetailModal)) ||
-                                 (rankingDetailModal && (rankingDetailModal.contains(e.target) || e.target === rankingDetailModal));
+                                 (rankingDetailModal && (rankingDetailModal.contains(e.target) || e.target === rankingDetailModal)) ||
+                                 (userModal && !userModal.classList.contains('hidden') && (userModal.contains(e.target) || e.target === userModal)) ||
+                                 (globalLbModal && !globalLbModal.classList.contains('hidden') && (globalLbModal.contains(e.target) || e.target === globalLbModal));
             if (isModalClick) {
-                // 点击弹窗时不关闭抽屉
                 return;
             }
             
