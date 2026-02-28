@@ -19,9 +19,19 @@ STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
-  -- 占位：无聚合表时返回单行 has_valid_data=false，前端用 data.avg_* / globalAverage 兜底；有表后改为基于 v_country_stats 等聚合
-  SELECT false AS has_valid_data, NULL::numeric AS avg_l, NULL::numeric AS avg_p, NULL::numeric AS avg_d, NULL::numeric AS avg_e, NULL::numeric AS avg_f
-  WHERE target_country_code IS NOT NULL AND length(trim(target_country_code)) > 0
+  -- 有表后改为基于 user_analysis 等聚合
+  SELECT 
+    COUNT(*) > 0 AS has_valid_data,
+    COALESCE(AVG(l_score), 50.0)::numeric AS avg_l,
+    COALESCE(AVG(p_score), 50.0)::numeric AS avg_p,
+    COALESCE(AVG(d_score), 50.0)::numeric AS avg_d,
+    COALESCE(AVG(e_score), 50.0)::numeric AS avg_e,
+    COALESCE(AVG(f_score), 50.0)::numeric AS avg_f
+  FROM user_analysis
+  WHERE country_code = target_country_code
+     OR ip_location = target_country_code
+     OR manual_location = target_country_code
+     OR current_location = target_country_code
   LIMIT 1;
 $$;
 

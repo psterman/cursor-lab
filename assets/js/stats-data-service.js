@@ -427,7 +427,15 @@
             }).catch(function() { return emptyResult; });
         }
 
+        var timeout = setTimeout(function() {
+            if (window.__isCloudLoading) {
+                console.warn('[StatsDataService] fetchCountryKeywords 超时 (10s)');
+                window.__isCloudLoading = false;
+            }
+        }, 10000);
+
         return fetch(summaryUrl).then(function(resp) {
+            clearTimeout(timeout);
             if (!resp.ok) return tryKeywordsApi().then(function(out) { return setResult(out); });
             return resp.json().then(function(data) {
                 var ilc = (data && data.identityLevelCloud) ? data.identityLevelCloud : (data && data.vibe_lexicon) ? data.vibe_lexicon : null;
@@ -441,9 +449,11 @@
                 return tryKeywordsApi().then(function(out) { return setResult(out); });
             }).catch(function() { return tryKeywordsApi().then(function(out) { return setResult(out); }); });
         }).catch(function(e) {
+            clearTimeout(timeout);
             console.warn('[StatsDataService] fetchCountryKeywords 后端 summary 失败:', e);
             return tryKeywordsApi().then(function(out) { return setResult(out); });
         }).finally(function() {
+            clearTimeout(timeout);
             try { window.__isCloudLoading = false; } catch (err) {}
         });
     }

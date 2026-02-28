@@ -7389,13 +7389,39 @@ app.get('/api/country-summary', async (c) => {
       // 国家视图：优先按该国 current_location/country_code 聚合 L/P/D/E/F 平均
       if (hasExplicitCc && cc) {
         const countryAvgUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
-        countryAvgUrl.searchParams.set('select', 'avg_l:avg(l_score),avg_p:avg(p_score),avg_d:avg(d_score),avg_e:avg(e_score),avg_f:avg(f_score)');
+        // PostgREST 不支持在普通表上直接使用 avg() 语法，需拉取对应数据在此聚合
+        countryAvgUrl.searchParams.set('select', 'l_score,p_score,d_score,e_score,f_score');
         countryAvgUrl.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc},manual_location.eq.${cc},current_location.eq.${cc})`);
+        countryAvgUrl.searchParams.set('limit', '5000');
         const countryRows = await fetchSupabaseJson<any[]>(env, countryAvgUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
-        const countryR0 = Array.isArray(countryRows) ? (countryRows[0] || null) : null;
-        if (applyAvgFromRow(countryR0)) {
-          // 已用该国维度平均覆盖 avgDims，跳过全站查询
-        } else {
+        
+        let hasValidData = false;
+        if (Array.isArray(countryRows) && countryRows.length > 0) {
+          let sum_l = 0, sum_p = 0, sum_d = 0, sum_e = 0, sum_f = 0;
+          let validCount = 0;
+          for (const r of countryRows) {
+            sum_l += Number(r.l_score) || 50;
+            sum_p += Number(r.p_score) || 50;
+            sum_d += Number(r.d_score) || 50;
+            sum_e += Number(r.e_score) || 50;
+            sum_f += Number(r.f_score) || 50;
+            validCount++;
+          }
+          if (validCount > 0) {
+            const countryR0 = {
+              avg_l: sum_l / validCount,
+              avg_p: sum_p / validCount,
+              avg_d: sum_d / validCount,
+              avg_e: sum_e / validCount,
+              avg_f: sum_f / validCount
+            };
+            if (applyAvgFromRow(countryR0)) {
+              hasValidData = true;
+            }
+          }
+        }
+        
+        if (!hasValidData) {
           // 该国无有效维度数据，回退全站平均
           const avgUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
           avgUrl.searchParams.set('select', 'avg_l:avg(l_score),avg_p:avg(p_score),avg_d:avg(d_score),avg_e:avg(e_score),avg_f:avg(f_score)');
