@@ -359,9 +359,243 @@
     // --- Script Block ---
 
 
+    /** 赛博战力报告：全局缓存 */
+    if (typeof window.userCache === 'undefined') { window.userCache = {}; }
+    var USER_CACHE_TTL_MS = 5 * 60 * 1000;
+
+    function resolveUserIdForReport(identifier, cb) {
+        if (!identifier) { cb(null); return; }
+        var supabase = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+        if (!supabase || typeof supabase.from !== 'function') { cb(null); return; }
+        var s = String(identifier).trim();
+        if (!s) { cb(null); return; }
+        if (/^[0-9a-fA-F-]{32,}$/.test(s) || /^\d+$/.test(s)) { cb(s); return; }
+        supabase.from('user_analysis').select('id').eq('fingerprint', s).limit(1).maybeSingle().then(function(r) {
+            if (r && r.data && r.data.id) { cb(r.data.id); return; }
+            supabase.from('user_analysis').select('id').eq('user_name', s).limit(1).maybeSingle().then(function(r2) {
+                cb(r2 && r2.data && r2.data.id ? r2.data.id : null);
+            });
+        });
+    }
+
+    function fetchUserAnalysisForReport(userId, cb) {
+        var cached = window.userCache[userId];
+        if (cached && (Date.now() - cached.ts) < USER_CACHE_TTL_MS) { cb(cached.data); return; }
+        var supabase = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+        if (!supabase || typeof supabase.from !== 'function') { cb(null); return; }
+        supabase.from('user_analysis').select('*').eq('id', userId).single().then(function(r) {
+            if (r.error || !r.data) { cb(null); return; }
+            window.userCache[userId] = { data: r.data, ts: Date.now() };
+            cb(r.data);
+        });
+    }
+
+    function fetchAndMergeRanksForReport(userId, data, cb) {
+        var supabase = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+        if (!supabase || typeof supabase.rpc !== 'function') { cb(data); return; }
+        var base = (data.cached_ranks != null) ? (typeof data.cached_ranks === 'string' ? (function() { try { return JSON.parse(data.cached_ranks); } catch (_) { return {}; } })() : data.cached_ranks) : {};
+        if (!base || typeof base !== 'object') base = {};
+        var merged = {};
+        for (var k in base) merged[k] = base[k];
+
+        function mergeLeaderboardAndDone() {
+            data.cached_ranks = merged;
+            cb(data);
+        }
+
+        function runLeaderboardRanks() {
+            var leaderboardMetrics = [
+                { metric: 'public_repos', rankKey: 'public_repos_rank' },
+                { metric: 'stars', rankKey: 'stars_rank' },
+                { metric: 'followers', rankKey: 'followers_rank' },
+                { metric: 'languages', rankKey: 'lang_breadth_rank' }
+            ];
+            var pending = leaderboardMetrics.length;
+            if (pending === 0) { mergeLeaderboardAndDone(); return; }
+            leaderboardMetrics.forEach(function(item) {
+                supabase.rpc('get_leaderboard_my_rank', {
+                    p_metric_name: item.metric,
+                    p_user_id: userId,
+                    p_ranking_type: 'all_time'
+                }).then(function(res) {
+                    var row = (res && res.data != null) ? res.data : res;
+                    if (row && (row.rank != null || row.rank === 0)) merged[item.rankKey] = Number(row.rank);
+                    pending--;
+                    if (pending === 0) mergeLeaderboardAndDone();
+                }).catch(function() {
+                    pending--;
+                    if (pending === 0) mergeLeaderboardAndDone();
+                });
+            });
+        }
+
+        var body6d = { p_user_id: userId };
+        if (data.fingerprint) body6d.p_fingerprint = data.fingerprint;
+        supabase.rpc('get_user_ranks_6d', body6d).then(function(r) {
+            if (!r.error && r.data && typeof r.data === 'object') {
+                var raw = r.data;
+                if (raw.ketao_count && (raw.ketao_count.rank_global != null || raw.ketao_count.rank_country != null)) merged.ketao_rank = raw.ketao_count.rank_global != null ? raw.ketao_count.rank_global : raw.ketao_count.rank_country;
+                if (raw.work_days && (raw.work_days.rank_global != null || raw.work_days.rank_country != null)) merged.work_days_rank = raw.work_days.rank_global != null ? raw.work_days.rank_global : raw.work_days.rank_country;
+                if (raw.total_messages && raw.total_messages.rank_global != null) merged.total_messages_rank = raw.total_messages.rank_global;
+                if (raw.total_chars && raw.total_chars.rank_global != null) merged.total_chars_rank = raw.total_chars.rank_global;
+                if (raw.avg_user_message_length && raw.avg_user_message_length.rank_global != null) merged.avg_user_message_length_rank = raw.avg_user_message_length.rank_global;
+                if (raw.jiafang_count && raw.jiafang_count.rank_global != null) merged.jiafang_count_rank = raw.jiafang_count.rank_global;
+            }
+            runLeaderboardRanks();
+        }).catch(function() {
+            runLeaderboardRanks();
+        });
+    }
+
+    function getCyberReportSkeletonHtml() {
+        var card = '<div class="bg-zinc-900/50 border border-green-500/20 rounded p-3"><div class="h-3 bg-zinc-700 rounded w-1/2 mb-2"></div><div class="h-5 bg-zinc-700 rounded w-3/4"></div></div>';
+        var cards = [];
+        for (var i = 0; i < 11; i++) cards.push(card);
+        return '<div class="animate-pulse space-y-4" style="min-height: 300px;">' +
+            '<div class="h-12 bg-zinc-800 rounded w-2/3"></div>' +
+            '<div class="h-9 bg-zinc-800 rounded w-1/2"></div>' +
+            '<div class="grid grid-cols-2 gap-3">' + cards.join('') + '</div>' +
+            '<div class="h-16 bg-zinc-800 rounded"></div></div>';
+    }
+
+    function getRankDisplay(ranks, keyOrKeys) {
+        if (!ranks || typeof ranks !== 'object') return '#--';
+        var keys = Array.isArray(keyOrKeys) ? keyOrKeys : [keyOrKeys];
+        for (var i = 0; i < keys.length; i++) {
+            var v = ranks[keys[i]];
+            if (v !== undefined && v !== null && v !== '') return '#' + Number(v);
+        }
+        return '#--';
+    }
+
+    function formatCodeSize(bytes) {
+        if (bytes === undefined || bytes === null || bytes === '') return '—';
+        var n = Number(bytes);
+        if (Number.isNaN(n)) return '—';
+        if (n >= 1024 * 1024) return (n / (1024 * 1024)).toFixed(2) + ' MB';
+        if (n >= 1024) return (n / 1024).toFixed(2) + ' KB';
+        return n + ' B';
+    }
+
+    function renderCyberPowerReportBody(data) {
+        var body = document.getElementById('user-modal-body');
+        var titleEl = document.querySelector('#user-modal .user-modal-content h3');
+        if (!body) return;
+        if (titleEl) titleEl.textContent = '赛博战力报告';
+        var escapeHtml = (typeof window.escapeHtml === 'function') ? window.escapeHtml : function(s) {
+            if (s == null || s === '') return '';
+            var d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        };
+        var gs = (data && data.github_stats) ? (typeof data.github_stats === 'string' ? (function() { try { return JSON.parse(data.github_stats); } catch (_) { return {}; } })() : data.github_stats) : {};
+        var ranks = (data && data.cached_ranks) ? (typeof data.cached_ranks === 'string' ? (function() { try { return JSON.parse(data.cached_ranks); } catch (_) { return {}; } })() : data.cached_ranks) : {};
+        var langDist = gs.languageDistribution || {};
+        var langBreadth = typeof langDist === 'object' && langDist !== null ? Object.keys(langDist).length : 0;
+        var DEFAULT_AVATAR = (typeof window.DEFAULT_AVATAR !== 'undefined') ? window.DEFAULT_AVATAR : '';
+
+        var repoUpdatedAt = (gs.updated_at != null || gs.updatedAt != null) ? (function() {
+            var raw = gs.updated_at || gs.updatedAt;
+            if (typeof raw !== 'string' || raw.length < 10) return '—';
+            try { return new Date(raw).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }); } catch (_) { return raw; }
+        })() : '—';
+
+        var items = [
+            { label: '仓库数', value: gs.publicRepos != null ? String(gs.publicRepos) : '—', rankKeys: ['public_repos_rank', 'publicReposRank'] },
+            { label: '星标总数', value: data.github_stars != null ? Number(data.github_stars).toLocaleString() : '—', rankKeys: ['stars_rank', 'starsRank'] },
+            { label: 'Fork 数量', value: gs.totalForks != null ? String(gs.totalForks) : '—', rankKeys: ['forks_rank', 'forksRank'] },
+            { label: '代码总量', value: formatCodeSize(gs.totalCodeSize), rankKeys: ['code_size_rank', 'codeSizeRank'] },
+            { label: '30日活跃度', value: gs.activeDays != null ? String(gs.activeDays) : '—', rankKeys: ['active_days_rank', 'activeDaysRank'] },
+            { label: '粉丝数量', value: gs.followers != null ? String(gs.followers) : '—', rankKeys: ['followers_rank', 'followersRank'] },
+            { label: '技术广度', value: String(langBreadth), rankKeys: ['lang_breadth_rank', 'langBreadthRank'] },
+            { label: '赛博磕头', value: data.ketao_count != null ? Number(data.ketao_count).toLocaleString() : '—', rankKeys: ['ketao_rank', 'ketaoRank', 'please'] },
+            { label: '上岗天数', value: data.work_days != null ? String(data.work_days) : '—', rankKeys: ['work_days_rank', 'work_days', 'workDaysRank', 'day'] }
+        ];
+
+        var answerContent = '';
+        var roastText = (data.roast_text != null && data.roast_text !== '') ? String(data.roast_text) : '';
+        try {
+            var pd = data.personality_data;
+            var personalityData = typeof pd === 'string' ? JSON.parse(pd) : pd;
+            var answerBook = personalityData && (personalityData.answer_book || personalityData.answerBook);
+            if (answerBook && typeof answerBook === 'object') {
+                answerContent = answerBook.content != null ? String(answerBook.content) : (answerBook.text != null ? String(answerBook.text) : '');
+            }
+        } catch (_) {}
+
+        var displayName = data.user_name ? '@' + escapeHtml(data.user_name) : (data.fingerprint ? 'user_' + escapeHtml(String(data.fingerprint).slice(0, 8)) : '—');
+        var avatarUrl = (data.user_name && /^[a-zA-Z0-9-]+$/.test(data.user_name)) ? ('https://github.com/' + encodeURIComponent(data.user_name) + '.png?size=64') : DEFAULT_AVATAR;
+
+        var gridHtml = items.map(function(it) {
+            var rankDisplay = getRankDisplay(ranks, it.rankKeys || [it.rankKey]);
+            return '<div class="bg-zinc-900/50 border border-green-500/20 rounded p-3">' +
+                '<div class="text-zinc-400 text-xs mb-1">' + escapeHtml(it.label) + '</div>' +
+                '<div class="flex items-baseline justify-between gap-2 flex-wrap">' +
+                '<span class="text-white font-mono text-sm">' + escapeHtml(it.value) + '</span>' +
+                '<span class="font-mono text-xs" style="color:#00ff41">' + escapeHtml(rankDisplay) + '</span>' +
+                '</div></div>';
+        }).join('');
+
+        gridHtml += '<div class="bg-zinc-900/50 border border-green-500/20 rounded p-3"><div class="text-zinc-400 text-xs mb-1">仓库更新日期</div><div class="flex items-baseline justify-between gap-2 flex-wrap"><span class="text-white font-mono text-sm">' + escapeHtml(repoUpdatedAt) + '</span><span class="font-mono text-xs" style="color:#00ff41">#--</span></div></div>';
+
+        var githubUrl = (data.user_name && /^[a-zA-Z0-9-]+$/.test(data.user_name)) ? ('https://github.com/' + encodeURIComponent(data.user_name)) : '';
+        var toId = data.user_name || data.fingerprint || data.id || '';
+
+        var actionRow = '<div class="flex items-center gap-2 flex-wrap mt-4">' +
+            (githubUrl ? '<a href="' + escapeHtml(githubUrl) + '" target="_blank" rel="noopener" class="inline-block px-4 py-2 rounded border border-green-500/50 text-[#00ff41] text-xs font-mono hover:bg-green-500/10 transition-colors">GitHub 主页</a>' : '') +
+            (toId ? '<button type="button" class="cyber-report-dm-btn inline-block px-4 py-2 rounded border border-green-500/50 text-[#00ff41] text-xs font-mono hover:bg-green-500/10 transition-colors" data-to-id="' + escapeHtml(toId) + '">私信</button>' : '') +
+            '</div>';
+
+        var evaluationHtml = (answerContent || roastText) ? ('<div class="italic border-l-4 border-green-500 bg-green-500/10 p-4 mt-4 rounded-r">' +
+            (answerContent ? '<div class="mb-2">' + escapeHtml(answerContent) + '</div>' : '') +
+            (roastText ? '<div class="text-zinc-400 text-sm">' + escapeHtml(roastText) + '</div>' : '') +
+            '</div>') : '';
+
+        body.innerHTML =
+            '<div class="flex items-center gap-3 mb-4">' +
+            '<img src="' + escapeHtml(avatarUrl) + '" alt="" class="w-12 h-12 rounded-full border-2 border-green-500/50 object-cover flex-shrink-0" onerror="this.onerror=null;this.src=\'' + escapeHtml(DEFAULT_AVATAR) + '\';" />' +
+            '<div class="text-[#00ff41] font-mono font-semibold min-w-0">' + displayName + '</div>' +
+            '</div>' +
+            actionRow +
+            '<div class="grid grid-cols-2 gap-3 mt-4">' + gridHtml + '</div>' +
+            evaluationHtml;
+
+        body.querySelectorAll('.cyber-report-dm-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var id = btn.getAttribute('data-to-id');
+                if (id && typeof openMessageInput === 'function') openMessageInput(id);
+            });
+        });
+    }
+
+    window.openCyberPowerReport = function(identifier) {
+        var modal = document.getElementById('user-modal');
+        var body = document.getElementById('user-modal-body');
+        if (!modal || !body) return;
+        var titleEl = document.querySelector('#user-modal .user-modal-content h3');
+        if (titleEl) titleEl.textContent = '赛博战力报告';
+        modal.classList.remove('hidden');
+        body.innerHTML = getCyberReportSkeletonHtml();
+
+        resolveUserIdForReport(identifier, function(userId) {
+            if (!userId) {
+                body.innerHTML = '<div class="text-zinc-400 text-sm py-4">未找到对应用户或数据不可用</div>';
+                return;
+            }
+            fetchUserAnalysisForReport(userId, function(data) {
+                if (!data) {
+                    body.innerHTML = '<div class="text-zinc-400 text-sm py-4">加载失败，请稍后重试</div>';
+                    return;
+                }
+                fetchAndMergeRanksForReport(userId, data, function(dataWithRanks) {
+                    renderCyberPowerReportBody(dataWithRanks);
+                });
+            });
+        });
+    };
+
     /**
-     * 展示用户详情大弹窗：头像、名称、仓库数、更新日期、Star 总数、GitHub 主页、私信按钮。
-     * @param {Object} opts - { avatarUrl, login, name, public_repos, updated_at, stars, toId }
+     * 展示用户详情大弹窗（旧版兜底）：头像、名称、仓库数、更新日期、Star 总数、GitHub 主页、私信按钮。
      */
     function showUserDetailModal(opts) {
         var modal = document.getElementById('user-modal');
@@ -434,7 +668,7 @@
     }
     window.showUserDetailModal = showUserDetailModal;
 
-    // 事件委托：头像点击优先打开用户详情大弹窗（捕获阶段，避免被 toggleUserPopup 抢占）
+    // 事件委托：头像点击优先打开赛博战力报告（捕获阶段），无报告时兜底为旧版用户详情
     document.addEventListener('click', function(e) {
         var avatarTrigger = e.target.closest('.user-avatar-trigger');
         if (!avatarTrigger) return;
@@ -446,15 +680,20 @@
         var name = avatarTrigger.getAttribute('data-user-name') || login;
         var avatarUrl = avatarTrigger.getAttribute('data-avatar-url') || '';
         var toId = avatarTrigger.getAttribute('data-to-id') || avatarTrigger.getAttribute('data-fingerprint') || login;
-        showUserDetailModal({
-            avatarUrl: avatarUrl,
-            login: login,
-            name: name,
-            toId: toId,
-            public_repos: '—',
-            updated_at: '—',
-            stars: '—'
-        });
+        var id = login || toId;
+        if (id && typeof window.openCyberPowerReport === 'function') {
+            window.openCyberPowerReport(id);
+        } else {
+            showUserDetailModal({
+                avatarUrl: avatarUrl,
+                login: login,
+                name: name,
+                toId: toId,
+                public_repos: '—',
+                updated_at: '—',
+                stars: '—'
+            });
+        }
     }, true);
     document.addEventListener('DOMContentLoaded', function() {
         var closeBtn = document.getElementById('user-modal-close');
@@ -18104,7 +18343,7 @@
                         q.maybeSingle()
                             .then(({ data: dbUser }) => {
                                 if (!dbUser) {
-                                    console.warn('[UserStats] ⚠️ v_unified_analysis_v2 未找到用户记录:', candidateUserName);
+                                    console.debug('[UserStats] v_unified_analysis_v2 未找到用户记录:', candidateUserName);
                                     // 继续走后续渲染（会显示“暂无云端数据”卡片）
                                     renderUserStatsCards(leftBody, { ...currentUserData, __unifiedFetchAttempted: true });
                                     return;
@@ -18232,7 +18471,7 @@
 
                 // GitHub 用户仍无维度且已尝试补全：不要显示“同步中”，改为“暂无云端汇总数据”（提示用户先跑一次分析）
                 if ((!hasDimensions || isDefaultScores) && isGitHubUser && !currentUserData.id && currentUserData.__unifiedFetchAttempted) {
-                    console.warn('[UserStats] ⚠️ GitHub 用户暂无云端汇总数据（可能尚未跑过分析或数据仍未入库）:', candidateUserName);
+                    console.debug('[UserStats] GitHub 用户暂无云端汇总数据（可能尚未跑过分析或数据仍未入库）:', candidateUserName);
 
                     const emptyCard = document.createElement('div');
                     emptyCard.className = 'drawer-item';

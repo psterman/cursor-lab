@@ -2988,23 +2988,28 @@
         </div>
     </div>
     
-    <!-- 用户详情浮层（预留在 HTML 中，由事件委托打开；内容可由 JS 填充） -->
+    <!-- 赛博战力报告弹窗（固定尺寸防变形，头像点击打开） -->
     <div id="user-modal" class="hidden" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 180; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; pointer-events: auto;">
-        <div class="user-modal-content" style="background: rgba(5, 5, 5, 0.95); border: 1px solid rgba(0, 255, 65, 0.45); border-radius: 8px; padding: 24px; max-width: 90%; max-height: 85vh; overflow: auto;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                <h3 style="color: #00ff41; font-family: 'JetBrains Mono', monospace; font-size: 14px; margin: 0;">用户详情</h3>
+        <div class="user-modal-content" style="background: rgba(5, 5, 5, 0.95); border: 1px solid rgba(0, 255, 65, 0.45); border-radius: 8px; padding: 24px; width: min(90vw, 440px); min-width: 360px; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-shrink: 0;">
+                <h3 style="color: #00ff41; font-family: 'JetBrains Mono', monospace; font-size: 14px; margin: 0;">赛博战力报告</h3>
                 <button type="button" id="user-modal-close" style="background: none; border: none; color: #00ff41; font-size: 20px; cursor: pointer;">✕</button>
             </div>
-            <div id="user-modal-body"><!-- 由 JS 填充 --></div>
+            <div id="user-modal-body" style="min-height: 320px; overflow-y: auto; overflow-x: hidden;"><!-- 由 JS 填充 --></div>
         </div>
     </div>
     <script>
-    // 事件委托：头像点击打开 user-modal，避免动态节点绑定失效
+    // 事件委托：头像点击打开赛博战力报告（优先 openCyberPowerReport，否则仅打开弹窗）
     document.addEventListener('click', function(e) {
         var avatarTrigger = e.target.closest('.user-avatar-trigger');
         if (avatarTrigger) {
-            var modal = document.getElementById('user-modal');
-            if (modal) modal.classList.remove('hidden');
+            var id = avatarTrigger.getAttribute('data-user-id') || avatarTrigger.getAttribute('data-fingerprint') || '';
+            if (typeof window.openCyberPowerReport === 'function' && id) {
+                window.openCyberPowerReport(id);
+            } else {
+                var modal = document.getElementById('user-modal');
+                if (modal) modal.classList.remove('hidden');
+            }
         }
     });
     document.addEventListener('DOMContentLoaded', function() {

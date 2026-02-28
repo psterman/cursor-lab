@@ -11639,8 +11639,245 @@
             container.appendChild(card);
         }
 
+        /** 赛博战力报告：全局缓存，key 为 user_analysis.id，value 为 { data, ts } */
+        if (typeof window.userCache === 'undefined') {
+            window.userCache = {};
+        }
+        const USER_CACHE_TTL_MS = 5 * 60 * 1000; // 5 分钟
+
         /**
-         * 处理矩阵绿天梯榜头像点击事件
+         * 解析 identifier 得到 user_analysis 表主键 id（先尝试视为 id，再按 fingerprint / user_name 查询）
+         */
+        async function resolveUserId(identifier) {
+            if (!identifier || !supabaseClient || typeof supabaseClient.from !== 'function') return null;
+            const s = String(identifier).trim();
+            if (!s) return null;
+            // 若像 UUID 或纯数字/GitHub 数字 id，直接当作 id 用
+            if (/^[0-9a-fA-F-]{32,}$/.test(s) || /^\d+$/.test(s)) {
+                return s;
+            }
+            const { data: byFp } = await supabaseClient.from('user_analysis').select('id').eq('fingerprint', s).limit(1).maybeSingle();
+            if (byFp && byFp.id) return byFp.id;
+            const { data: byName } = await supabaseClient.from('user_analysis').select('id').eq('user_name', s).limit(1).maybeSingle();
+            if (byName && byName.id) return byName.id;
+            return null;
+        }
+
+        /**
+         * 获取单条 user_analysis：先查缓存，未命中或过期则 .eq('id', userId).single() 并写入缓存
+         */
+        async function fetchUserAnalysisForReport(userId) {
+            const cached = window.userCache[userId];
+            if (cached && (Date.now() - cached.ts) < USER_CACHE_TTL_MS) {
+                return cached.data;
+            }
+            if (!supabaseClient || typeof supabaseClient.from !== 'function') return null;
+            const { data, error } = await supabaseClient.from('user_analysis').select('*').eq('id', userId).single();
+            if (error || !data) return null;
+            window.userCache[userId] = { data, ts: Date.now() };
+            return data;
+        }
+
+        /**
+         * 通过 RPC get_user_ranks_6d + get_leaderboard_my_rank（天梯榜）拉取排名并合并到 data.cached_ranks
+         */
+        async function fetchAndMergeRanksForReport(userId, data) {
+            if (!supabaseClient || typeof supabaseClient.rpc !== 'function') return data;
+            const base = (data.cached_ranks != null) ? (typeof data.cached_ranks === 'string' ? (() => { try { return JSON.parse(data.cached_ranks); } catch (_) { return {}; } })() : data.cached_ranks) : {};
+            const merged = { ...(base && typeof base === 'object' ? base : {}) };
+
+            const body6d = { p_user_id: userId };
+            if (data.fingerprint) body6d.p_fingerprint = data.fingerprint;
+            try {
+                const { data: raw, error } = await supabaseClient.rpc('get_user_ranks_6d', body6d);
+                if (!error && raw && typeof raw === 'object') {
+                    if (raw.ketao_count && (raw.ketao_count.rank_global != null || raw.ketao_count.rank_country != null)) merged.ketao_rank = raw.ketao_count.rank_global != null ? raw.ketao_count.rank_global : raw.ketao_count.rank_country;
+                    if (raw.work_days && (raw.work_days.rank_global != null || raw.work_days.rank_country != null)) merged.work_days_rank = raw.work_days.rank_global != null ? raw.work_days.rank_global : raw.work_days.rank_country;
+                    if (raw.total_messages && raw.total_messages.rank_global != null) merged.total_messages_rank = raw.total_messages.rank_global;
+                    if (raw.total_chars && raw.total_chars.rank_global != null) merged.total_chars_rank = raw.total_chars.rank_global;
+                    if (raw.avg_user_message_length && raw.avg_user_message_length.rank_global != null) merged.avg_user_message_length_rank = raw.avg_user_message_length.rank_global;
+                    if (raw.jiafang_count && raw.jiafang_count.rank_global != null) merged.jiafang_count_rank = raw.jiafang_count.rank_global;
+                }
+            } catch (_) {}
+
+            const leaderboardMetrics = [
+                { metric: 'public_repos', rankKey: 'public_repos_rank' },
+                { metric: 'stars', rankKey: 'stars_rank' },
+                { metric: 'followers', rankKey: 'followers_rank' },
+                { metric: 'languages', rankKey: 'lang_breadth_rank' }
+            ];
+            const results = await Promise.allSettled(leaderboardMetrics.map(({ metric }) =>
+                supabaseClient.rpc('get_leaderboard_my_rank', { p_metric_name: metric, p_user_id: userId, p_ranking_type: 'all_time' })
+            ));
+            results.forEach((res, i) => {
+                if (res.status === 'fulfilled' && res.value?.data != null) {
+                    const row = res.value.data;
+                    if (row && (row.rank != null || row.rank === 0)) merged[leaderboardMetrics[i].rankKey] = Number(row.rank);
+                }
+            });
+
+            data.cached_ranks = merged;
+            return data;
+        }
+
+        /** 骨架屏 HTML（与报告内容同高防变形，带 animate-pulse） */
+        function getCyberReportSkeletonHtml() {
+            const card = '<div class="bg-zinc-900/50 border border-green-500/20 rounded p-3"><div class="h-3 bg-zinc-700 rounded w-1/2 mb-2"></div><div class="h-5 bg-zinc-700 rounded w-3/4"></div></div>';
+            const cards = Array(11).fill(card).join('');
+            return '<div class="animate-pulse space-y-4" style="min-height: 300px;">' +
+                '<div class="h-12 bg-zinc-800 rounded w-2/3"></div>' +
+                '<div class="h-9 bg-zinc-800 rounded w-1/2"></div>' +
+                '<div class="grid grid-cols-2 gap-3">' + cards + '</div>' +
+                '<div class="h-16 bg-zinc-800 rounded"></div></div>';
+        }
+
+        /** 从 row 中取 cached_ranks 的排名，支持多 key 兜底（后端可能用不同字段名），不存在显示 #-- */
+        function getRankDisplay(ranks, keyOrKeys) {
+            if (!ranks || typeof ranks !== 'object') return '#--';
+            const keys = Array.isArray(keyOrKeys) ? keyOrKeys : [keyOrKeys];
+            for (let i = 0; i < keys.length; i++) {
+                const v = ranks[keys[i]];
+                if (v !== undefined && v !== null && v !== '') return '#' + Number(v);
+            }
+            return '#--';
+        }
+
+        /** 代码总量单位转换（字节 -> KB/MB） */
+        function formatCodeSize(bytes) {
+            if (bytes === undefined || bytes === null || bytes === '') return '—';
+            const n = Number(bytes);
+            if (Number.isNaN(n)) return '—';
+            if (n >= 1024 * 1024) return (n / (1024 * 1024)).toFixed(2) + ' MB';
+            if (n >= 1024) return (n / 1024).toFixed(2) + ' KB';
+            return n + ' B';
+        }
+
+        /**
+         * 渲染赛博战力报告内容到 #user-modal-body
+         * @param {Object} data - user_analysis 单条记录
+         */
+        function renderCyberPowerReportBody(data) {
+            const body = document.getElementById('user-modal-body');
+            const titleEl = document.querySelector('#user-modal .user-modal-content h3');
+            if (!body) return;
+            if (titleEl) titleEl.textContent = '赛博战力报告';
+
+            const esc = typeof window.escapeHtml === 'function' ? window.escapeHtml : (s) => {
+                if (s == null || s === '') return '';
+                const d = document.createElement('div');
+                d.textContent = s;
+                return d.innerHTML;
+            };
+
+            const gs = (data && data.github_stats) ? (typeof data.github_stats === 'string' ? (() => { try { return JSON.parse(data.github_stats); } catch (_) { return {}; } })() : data.github_stats) : {};
+            const ranks = (data && data.cached_ranks) ? (typeof data.cached_ranks === 'string' ? (() => { try { return JSON.parse(data.cached_ranks); } catch (_) { return {}; } })() : data.cached_ranks) : {};
+            const langDist = gs.languageDistribution || (gs.languageDistribution !== undefined ? gs.languageDistribution : {});
+            const langBreadth = typeof langDist === 'object' && langDist !== null ? Object.keys(langDist).length : 0;
+
+            const repoUpdatedAt = (gs.updated_at != null || gs.updatedAt != null) ? (function() {
+                const raw = gs.updated_at || gs.updatedAt;
+                if (typeof raw !== 'string' || raw.length < 10) return '—';
+                try { return new Date(raw).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }); } catch (_) { return raw; }
+            })() : '—';
+
+            const items = [
+                { label: '仓库数', value: gs.publicRepos != null ? String(gs.publicRepos) : '—', rankKeys: ['public_repos_rank', 'publicReposRank'] },
+                { label: '星标总数', value: data.github_stars != null ? Number(data.github_stars).toLocaleString() : '—', rankKeys: ['stars_rank', 'starsRank'] },
+                { label: 'Fork 数量', value: gs.totalForks != null ? String(gs.totalForks) : '—', rankKeys: ['forks_rank', 'forksRank'] },
+                { label: '代码总量', value: formatCodeSize(gs.totalCodeSize), rankKeys: ['code_size_rank', 'codeSizeRank'] },
+                { label: '30日活跃度', value: gs.activeDays != null ? String(gs.activeDays) : '—', rankKeys: ['active_days_rank', 'activeDaysRank'] },
+                { label: '粉丝数量', value: gs.followers != null ? String(gs.followers) : '—', rankKeys: ['followers_rank', 'followersRank'] },
+                { label: '技术广度', value: String(langBreadth), rankKeys: ['lang_breadth_rank', 'langBreadthRank'] },
+                { label: '赛博磕头', value: data.ketao_count != null ? Number(data.ketao_count).toLocaleString() : '—', rankKeys: ['ketao_rank', 'ketaoRank', 'please'] },
+                { label: '上岗天数', value: data.work_days != null ? String(data.work_days) : '—', rankKeys: ['work_days_rank', 'work_days', 'workDaysRank', 'day'] }
+            ];
+
+            let answerContent = '';
+            let roastText = (data.roast_text != null && data.roast_text !== '') ? String(data.roast_text) : '';
+            try {
+                const pd = data.personality_data;
+                const personalityData = typeof pd === 'string' ? JSON.parse(pd) : pd;
+                const answerBook = personalityData && (personalityData.answer_book || personalityData.answerBook);
+                if (answerBook && typeof answerBook === 'object') {
+                    answerContent = answerBook.content != null ? String(answerBook.content) : (answerBook.text != null ? String(answerBook.text) : '');
+                }
+            } catch (_) {}
+
+            const displayName = data.user_name ? '@' + esc(data.user_name) : (data.fingerprint ? 'user_' + esc(String(data.fingerprint).slice(0, 8)) : '—');
+            const avatarUrl = (data.user_name && /^[a-zA-Z0-9-]+$/.test(data.user_name)) ? ('https://github.com/' + encodeURIComponent(data.user_name) + '.png?size=64') : (typeof DEFAULT_AVATAR !== 'undefined' ? DEFAULT_AVATAR : '');
+
+            let gridHtml = items.map(function (it) {
+                const rankDisplay = getRankDisplay(ranks, it.rankKeys || [it.rankKey]);
+                return '<div class="bg-zinc-900/50 border border-green-500/20 rounded p-3">' +
+                    '<div class="text-zinc-400 text-xs mb-1">' + esc(it.label) + '</div>' +
+                    '<div class="flex items-baseline justify-between gap-2 flex-wrap">' +
+                    '<span class="text-white font-mono text-sm">' + esc(it.value) + '</span>' +
+                    '<span class="font-mono text-xs" style="color:#00ff41">' + esc(rankDisplay) + '</span>' +
+                    '</div></div>';
+            }).join('');
+
+            gridHtml += '<div class="bg-zinc-900/50 border border-green-500/20 rounded p-3"><div class="text-zinc-400 text-xs mb-1">仓库更新日期</div><div class="flex items-baseline justify-between gap-2 flex-wrap"><span class="text-white font-mono text-sm">' + esc(repoUpdatedAt) + '</span><span class="font-mono text-xs" style="color:#00ff41">#--</span></div></div>';
+
+            const githubUrl = (data.user_name && /^[a-zA-Z0-9-]+$/.test(data.user_name)) ? ('https://github.com/' + encodeURIComponent(data.user_name)) : '';
+            const toId = data.user_name || data.fingerprint || data.id || '';
+
+            const actionRow = '<div class="flex items-center gap-2 flex-wrap mt-4">' +
+                (githubUrl ? '<a href="' + esc(githubUrl) + '" target="_blank" rel="noopener" class="inline-block px-4 py-2 rounded border border-green-500/50 text-[#00ff41] text-xs font-mono hover:bg-green-500/10 transition-colors">GitHub 主页</a>' : '') +
+                (toId && typeof openMessageInput === 'function' ? '<button type="button" class="cyber-report-dm-btn inline-block px-4 py-2 rounded border border-green-500/50 text-[#00ff41] text-xs font-mono hover:bg-green-500/10 transition-colors" data-to-id="' + esc(toId) + '">私信</button>' : '') +
+                '</div>';
+
+            const evaluationHtml = (answerContent || roastText) ? ('<div class="italic border-l-4 border-green-500 bg-green-500/10 p-4 mt-4 rounded-r">' +
+                (answerContent ? '<div class="mb-2">' + esc(answerContent) + '</div>' : '') +
+                (roastText ? '<div class="text-zinc-400 text-sm">' + esc(roastText) + '</div>' : '') +
+                '</div>') : '';
+
+            body.innerHTML =
+                '<div class="flex items-center gap-3 mb-4">' +
+                '<img src="' + esc(avatarUrl) + '" alt="" class="w-12 h-12 rounded-full border-2 border-green-500/50 object-cover flex-shrink-0" onerror="this.onerror=null;this.src=\'' + (typeof DEFAULT_AVATAR !== 'undefined' ? DEFAULT_AVATAR : '') + '\';" />' +
+                '<div class="text-[#00ff41] font-mono font-semibold min-w-0">' + displayName + '</div>' +
+                '</div>' +
+                actionRow +
+                '<div class="grid grid-cols-2 gap-3 mt-4">' + gridHtml + '</div>' +
+                evaluationHtml;
+
+            body.querySelectorAll('.cyber-report-dm-btn').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    const id = btn.getAttribute('data-to-id');
+                    if (id && typeof openMessageInput === 'function') openMessageInput(id);
+                });
+            });
+        }
+
+        /**
+         * 打开赛博战力报告弹窗：先展示骨架屏，再解析 userId、查缓存/请求、渲染
+         * @param {string} identifier - user_analysis.id、fingerprint 或 user_name
+         */
+        window.openCyberPowerReport = async function(identifier) {
+            const modal = document.getElementById('user-modal');
+            const body = document.getElementById('user-modal-body');
+            if (!modal || !body) return;
+
+            modal.classList.remove('hidden');
+            body.innerHTML = getCyberReportSkeletonHtml();
+
+            const userId = await resolveUserId(identifier);
+            if (!userId) {
+                body.innerHTML = '<div class="text-zinc-400 text-sm py-4">未找到对应用户或数据不可用</div>';
+                return;
+            }
+
+            const data = await fetchUserAnalysisForReport(userId);
+            if (!data) {
+                body.innerHTML = '<div class="text-zinc-400 text-sm py-4">加载失败，请稍后重试</div>';
+                return;
+            }
+
+            const dataWithRanks = await fetchAndMergeRanksForReport(userId, data);
+            renderCyberPowerReportBody(dataWithRanks);
+        };
+
+        /**
+         * 处理矩阵绿天梯榜头像点击事件：打开赛博战力报告弹窗，并可选更新左侧抽屉
          * @param {string} fingerprint - 用户指纹
          */
         window.handleMatrixAvatarClick = async function(fingerprint) {
@@ -11648,14 +11885,12 @@
                 console.warn('[MatrixLadders] ⚠️ 缺少 fingerprint 参数');
                 return;
             }
-
+            if (typeof window.openCyberPowerReport === 'function') {
+                window.openCyberPowerReport(fingerprint);
+            }
             try {
-                if (!supabaseClient || typeof supabaseClient.from !== 'function') {
-                    console.warn('[MatrixLadders] ⚠️ Supabase 客户端未初始化');
-                    return;
-                }
+                if (!supabaseClient || typeof supabaseClient.from !== 'function') return;
 
-                // 获取用户数据
                 const { data, error } = await supabaseClient
                     .from('user_analysis')
                     .select('*')
@@ -11663,39 +11898,17 @@
                     .limit(1)
                     .single();
 
-                if (error || !data) {
-                    console.error('[MatrixLadders] ❌ 获取用户数据失败:', error);
-                    // 降级：使用 toggleUserPreview
-                    if (typeof toggleUserPreview === 'function') {
-                        toggleUserPreview(fingerprint);
-                    }
-                    return;
-                }
+                if (error || !data) return;
 
-                // 更新左侧抽屉显示该用户的统计卡片
                 const leftBody = document.getElementById('left-drawer-body');
                 if (leftBody && typeof renderUserStatsCards === 'function') {
                     renderUserStatsCards(leftBody, getBestUserRecordForStats(data));
-                    // 隐藏天梯榜区域，显示用户详情
                     const rankingArea = document.getElementById('global-ranking-area');
-                    if (rankingArea) {
-                        rankingArea.classList.add('hidden');
-                    }
+                    if (rankingArea) rankingArea.classList.add('hidden');
                 }
-
-                // 如果存在 updateDrawerUI 函数，调用它
-                if (typeof updateDrawerUI === 'function') {
-                    updateDrawerUI(data);
-                } else if (typeof toggleUserPreview === 'function') {
-                    // 降级：使用 toggleUserPreview
-                    toggleUserPreview(fingerprint);
-                }
-            } catch (error) {
-                console.error('[MatrixLadders] ❌ 处理头像点击失败:', error);
-                // 降级：使用 toggleUserPreview
-                if (typeof toggleUserPreview === 'function') {
-                    toggleUserPreview(fingerprint);
-                }
+                if (typeof updateDrawerUI === 'function') updateDrawerUI(data);
+            } catch (err) {
+                console.error('[MatrixLadders] ❌ 处理头像点击失败:', err);
             }
         };
 

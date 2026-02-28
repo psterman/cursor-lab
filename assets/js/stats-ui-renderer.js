@@ -138,6 +138,7 @@
             showCloudLoadingHint();
             return;
         }
+        var currentLang = (typeof window.currentLang !== 'undefined' ? window.currentLang : 'zh');
         var levelKey = LEVEL_TO_KEY[level] || (level === 'Professional' || level === 'Architect' ? level : 'Novice');
         var container = document.getElementById('vibe-cloud50-container');
         var canvasId = LEVEL_TO_CANVAS_ID[levelKey] || 'canvas-novice';
