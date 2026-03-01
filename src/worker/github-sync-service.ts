@@ -379,12 +379,14 @@ function processGitHubData(viewer: any): ProcessedGitHubStats {
 /**
  * 将数据持久化到 Supabase。github_stats 为 JSONB，写入对象必须明确包含 github_stats 字段。
  * 优先使用 SUPABASE_SERVICE_ROLE_KEY 以绕过 RLS；使用 supabase-js upsert，错误时返回 { success: false, error }，不 throw。
+ * 当 countryCode 存在时，会写入 manual_location、country_code，用于「选籍+登录」一体化回调注入。
  */
 async function persistToSupabase(
   githubLogin: string,
   stats: ProcessedGitHubStats,
   env: Env,
-  identifiers: { id?: string; fingerprint?: string } = {}
+  identifiers: { id?: string; fingerprint?: string } = {},
+  countryCode?: string
 ): Promise<{ success: boolean; error?: string; uniqueViolation?: boolean }> {
   const supabaseKey = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_KEY || env.SUPABASE_ANON_KEY;
   if (!env.SUPABASE_URL || !supabaseKey) {
@@ -407,6 +409,10 @@ async function persistToSupabase(
   }
   if (!(data as any).user_name) {
     (data as any).user_name = githubLogin;
+  }
+  if (countryCode && /^[A-Z]{2}$/.test(countryCode)) {
+    (data as any).manual_location = countryCode;
+    (data as any).country_code = countryCode;
   }
   console.log('[GitHub Sync] 准备写入的 payload:', JSON.stringify(data).length > 2000 ? JSON.stringify(data).slice(0, 2000) + '...[truncated]' : JSON.stringify(data));
 
@@ -469,12 +475,14 @@ async function persistToSupabase(
  * @param accessToken - GitHub OAuth access token
  * @param userId - GitHub login（与 user_analysis.user_name 对应）
  * @param env - Worker 环境（SUPABASE_URL, SUPABASE_KEY）
+ * @param countryCode - 可选，选籍+登录一体化时传入，会写入 manual_location/country_code
  */
 export async function syncGithubCombatStats(
   accessToken: string,
   userId: string, // github login
   env: Env,
-  identifiers: { id?: string; fingerprint?: string } = {}
+  identifiers: { id?: string; fingerprint?: string } = {},
+  countryCode?: string
 ): Promise<{ success: boolean; data?: ProcessedGitHubStats; error?: string; cached?: boolean }> {
   try {
     console.log('[GitHub Sync] 开始同步任务，目标用户 ID:', identifiers.id);
@@ -523,8 +531,8 @@ export async function syncGithubCombatStats(
       return { success: false, error: 'Processed stats missing login field, skip write' };
     }
 
-    console.log('[GitHub Sync] 准备写入 ID:', identifiers.id);
-    const persistResult = await persistToSupabase(githubLogin, processedStats, env, identifiers);
+    console.log('[GitHub Sync] 准备写入 ID:', identifiers.id, countryCode ? ', country_code: ' + countryCode : '');
+    const persistResult = await persistToSupabase(githubLogin, processedStats, env, identifiers, countryCode);
     if (!persistResult.success) {
       return { success: false, error: persistResult.error ?? '写入失败' };
     }

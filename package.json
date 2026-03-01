@@ -11,6 +11,7 @@
     "prebuild": "npm run generate-content",
     "worker:dev": "wrangler dev",
     "worker:deploy": "wrangler deploy",
+    "worker:deploy:ci": "powershell -ExecutionPolicy Bypass -File ./scripts/deploy-worker.ps1",
     "worker:tail": "wrangler tail",
     "worker:test": "powershell -ExecutionPolicy Bypass -File ./test-worker.ps1"
   },

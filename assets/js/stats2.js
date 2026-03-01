@@ -301,7 +301,7 @@
 
     // --- Script Block ---
 
-    // 【强制选籍拦截】DOMContentLoaded 最开始：无 user_country_fixed 则全屏国籍选择弹窗并锁定滚动，有则设 currentCountryCode 初始化
+    // 【一体化选籍+登录拦截】渲染统计数据前检查：无 selected_country 或无 supabase_session 则强制显示国家选择弹窗
     (function() {
         function closeCountryPickerModal() {
             var modal = document.getElementById('country-selector-modal');
@@ -313,20 +313,24 @@
             if (btn) { closeCountryPickerModal(); }
         });
         function run() {
-            var fixed = null;
-            try { fixed = localStorage.getItem('user_country_fixed'); } catch (e) {}
-            if (fixed && fixed.length >= 2) {
-                try { window.currentCountryCode = String(fixed).trim().toUpperCase(); } catch (e) {}
+            var selectedCountry = null;
+            try { selectedCountry = localStorage.getItem('selected_country'); } catch (e) {}
+            if (selectedCountry && String(selectedCountry).trim().length >= 2) {
+                try {
+                    window.currentCountryCode = String(selectedCountry).trim().toUpperCase();
+                    localStorage.setItem('user_country_fixed', window.currentCountryCode);
+                } catch (e) {}
                 return;
             }
             var modal = document.getElementById('country-selector-modal');
             if (modal) {
+                window.__countryPickerForced = true;
+                window.__countrySelectorSelectedCode = '';
                 modal.style.display = 'block';
                 modal.style.position = 'fixed';
                 modal.style.top = '0'; modal.style.left = '0'; modal.style.right = '0'; modal.style.bottom = '0';
                 modal.style.zIndex = '200';
                 try { document.body.style.overflow = 'hidden'; document.documentElement.style.overflow = 'hidden'; } catch (e) {}
-                window.__countryPickerForced = true;
             }
         }
         if (document.readyState === 'loading') {
@@ -12300,12 +12304,25 @@
         /**
          * 初始化国家选择器浮窗
          */
+        function updateCountrySelectorGitHubButtonState() {
+            try {
+                const btn = document.getElementById('country-selector-github-save-btn');
+                if (!btn) return;
+                const code = (window.__countrySelectorSelectedCode || '').trim().toUpperCase();
+                const enabled = window.__countryPickerForced && /^[A-Z]{2}$/.test(code);
+                btn.disabled = !enabled;
+                btn.style.opacity = enabled ? '1' : '0.6';
+                btn.style.cursor = enabled ? 'pointer' : 'not-allowed';
+            } catch (e) {}
+        }
+        
         function initCountrySelector() {
             try {
                 const modal = document.getElementById('country-selector-modal');
                 const closeBtn = document.getElementById('country-selector-close');
                 const searchInput = document.getElementById('country-search-input');
                 const listContainer = document.getElementById('country-list-container');
+                const githubSaveBtn = document.getElementById('country-selector-github-save-btn');
                 
                 if (!modal || !closeBtn || !searchInput || !listContainer) return;
                 
@@ -12323,6 +12340,27 @@
                     }
                 });
                 
+                // 「使用 GitHub 登录并保存」按钮：仅在选择国家且为强制选籍模式时可用
+                if (githubSaveBtn) {
+                    githubSaveBtn.addEventListener('click', function() {
+                        const code = (window.__countrySelectorSelectedCode || '').trim().toUpperCase();
+                        if (!/^[A-Z]{2}$/.test(code) || !window.__countryPickerForced) return;
+                        try {
+                            localStorage.setItem('selected_country', code);
+                            localStorage.setItem('user_country_fixed', code);
+                            localStorage.setItem('user_manual_location', code);
+                            localStorage.setItem('user_selected_country', code);
+                        } catch (e) {}
+                        if (typeof window.loginWithGitHub === 'function') {
+                            window.loginWithGitHub();
+                        } else if (typeof loginWithGitHub === 'function') {
+                            loginWithGitHub();
+                        } else {
+                            console.warn('[CountrySelector] loginWithGitHub 未就绪');
+                        }
+                    });
+                }
+                
                 // 搜索功能
                 let searchTimeout = null;
                 searchInput.addEventListener('input', (e) => {
@@ -12332,8 +12370,9 @@
                     }, 200);
                 });
                 
-                // 渲染国家列表
+                // 渲染国家列表（会绑定 item 点击，其中强制模式下仅更新选中状态）
                 renderCountryList('');
+                updateCountrySelectorGitHubButtonState();
             } catch (e) {
                 console.warn('[CountrySelector] ⚠️ initCountrySelector 失败:', e);
             }
@@ -12399,10 +12438,13 @@
                         return nameZh.includes(query) || nameEn.includes(query) || code.includes(query);
                     });
                 
-                // 渲染
+                // 强制选籍模式下高亮以 __countrySelectorSelectedCode 为准
+                const forcedSelectedCode = (window.__countrySelectorSelectedCode || '').trim().toUpperCase();
                 listContainer.innerHTML = filtered.map(c => {
                     const displayName = (currentLang === 'zh' && c.nameZh) ? `${c.nameZh} (${c.code})` : `${c.nameEn} (${c.code})`;
-                    const isSelected = (window.currentUser?.manual_location || localStorage.getItem('manual_location') || '').toUpperCase() === c.code.toUpperCase();
+                    const isSelected = window.__countryPickerForced
+                        ? (forcedSelectedCode === c.code.toUpperCase())
+                        : ((window.currentUser?.manual_location || localStorage.getItem('manual_location') || '').toUpperCase() === c.code.toUpperCase());
                     return `
                         <div class="country-item ${isSelected ? 'selected' : ''}" data-code="${c.code}" data-name="${c.nameEn}">
                             ${displayName}
@@ -12410,11 +12452,17 @@
                     `;
                 }).join('');
                 
-                // 绑定点击事件
+                // 绑定点击事件：强制选籍模式下仅更新选中状态并启用「使用 GitHub 登录并保存」按钮
                 listContainer.querySelectorAll('.country-item').forEach(item => {
                     item.addEventListener('click', () => {
                         const code = item.getAttribute('data-code');
                         const name = item.getAttribute('data-name');
+                        if (window.__countryPickerForced) {
+                            window.__countrySelectorSelectedCode = (code || '').trim().toUpperCase();
+                            if (typeof updateCountrySelectorGitHubButtonState === 'function') updateCountrySelectorGitHubButtonState();
+                            renderCountryList(searchQuery);
+                            return;
+                        }
                         selectCountryFromSelector(code, name);
                     });
                 });
@@ -21071,23 +21119,46 @@
                     if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
                         await handleAuthStateChange(session);
                         
-                        // 【Task 3】当 event === 'SIGNED_IN' 时，显式调用一次 window.refreshUserStats() 和 fetchAllData()
                         if (event === 'SIGNED_IN') {
+                            // 【一体化选籍】回调后：若 localStorage 有 selected_country，立即调用 sync 将国家写入当前用户记录（含 fingerprint + github_login，ON CONFLICT 注入）
+                            var pendingCountry = null;
+                            try { pendingCountry = localStorage.getItem('selected_country'); } catch (e) {}
+                            if (session && pendingCountry && String(pendingCountry).trim().length >= 2) {
+                                var apiBase = (document.querySelector('meta[name="api-endpoint"]')?.content || '').trim();
+                                if (apiBase.endsWith('/')) apiBase = apiBase.slice(0, -1);
+                                var token = (session.provider_token || '').trim();
+                                var githubLogin = (session.user?.user_metadata?.user_name || session.user?.user_metadata?.full_name || session.user?.email || '').trim();
+                                if (!githubLogin && session.user?.identities && session.user.identities[0]) githubLogin = (session.user.identities[0].identity_data?.user_name || session.user.identities[0].identity_data?.preferred_username || '').trim();
+                                var fp = (window.fpId || '').trim() || (function(){ try { return localStorage.getItem('user_fingerprint') || ''; } catch(e){ return ''; }})();
+                                if (token && (session.user?.id || githubLogin)) {
+                                    try {
+                                        var syncRes = await fetch(apiBase ? apiBase + '/api/github/sync' : '/api/github/sync', {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({
+                                                accessToken: token,
+                                                userId: githubLogin || '',
+                                                id: session.user?.id || '',
+                                                fingerprint: fp,
+                                                country_code: String(pendingCountry).trim().toUpperCase()
+                                            })
+                                        });
+                                        if (syncRes.ok) console.log('[Auth] ✅ 选籍+登录回调：国家已同步');
+                                    } catch (e) { console.warn('[Auth] 选籍 sync 请求失败:', e); }
+                                }
+                            }
+                            // 【Task 3】当 event === 'SIGNED_IN' 时，显式调用一次 window.refreshUserStats() 和 fetchAllData()
                             console.log('[Auth] 🔄 用户登录成功，触发数据刷新...');
                             try {
-                                // 先刷新全局数据
                                 if (typeof fetchData === 'function') {
                                     await fetchData();
                                     console.log('[Auth] ✅ fetchData 执行完成');
                                 }
-                                
-                                // 再刷新用户统计数据
                                 if (typeof window.refreshUserStats === 'function') {
                                     try {
                                         await window.refreshUserStats();
                                         console.log('[Auth] ✅ refreshUserStats 执行完成');
                                     } catch (refreshError) {
-                                        // 【修复 AbortError】特殊处理 AbortError
                                         if (refreshError.name === 'AbortError' || refreshError.message?.includes('aborted')) {
                                             console.log('[Auth] ℹ️ refreshUserStats 被取消（可能是页面刷新导致）');
                                         } else {
@@ -21096,7 +21167,6 @@
                                     }
                                 }
                             } catch (refreshError) {
-                                // 【修复 AbortError】特殊处理 AbortError
                                 if (refreshError.name === 'AbortError' || refreshError.message?.includes('aborted')) {
                                     console.log('[Auth] ℹ️ 数据刷新被取消（可能是页面刷新导致）');
                                 } else {

@@ -4060,7 +4060,7 @@ app.post('/api/fingerprint/bind', async (c) => {
 /**
  * 路由：POST /api/github/sync
  * 功能：同步 GitHub Combat 统计（22 项指标），8 小时内返回缓存
- * Body: { accessToken, id?: UUID, userId?: GitHub login, fingerprint? }，优先用 id (UUID) 定位记录
+ * Body: { accessToken, id?: UUID, userId?: GitHub login, fingerprint?, country_code? }，优先用 id (UUID) 定位记录；带 country_code 时写入/更新国家字段
  */
 app.post('/api/github/sync', async (c) => {
   try {
@@ -4070,6 +4070,8 @@ app.post('/api/github/sync', async (c) => {
     const id = body?.id ?? ''; // 数据库 user_analysis.id (UUID)，优先用于定位
     const userId = body?.userId ?? body?.user_id ?? body?.username ?? body?.user_name ?? '';
     const fingerprint = body?.fingerprint ?? '';
+    const countryCode = (body?.country_code ?? '').trim().toUpperCase();
+    const countryCodeValid = countryCode.length === 2 && /^[A-Z]{2}$/.test(countryCode);
 
     if (!accessToken) {
       return c.json({
@@ -4086,7 +4088,7 @@ app.post('/api/github/sync', async (c) => {
       }, 400);
     }
 
-    const result = await syncGithubCombatStats(accessToken, String(userId || '').trim(), env, { id: id || undefined, fingerprint });
+    const result = await syncGithubCombatStats(accessToken, String(userId || '').trim(), env, { id: id || undefined, fingerprint }, countryCodeValid ? countryCode : undefined);
 
     if (result.success) {
       return c.json({
