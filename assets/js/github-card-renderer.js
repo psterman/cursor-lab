@@ -338,11 +338,19 @@
 
     /**
      * 将后端/数据库的 github_stats 归一化为卡片所需形状，避免 undefined
-     * @param {Object|null|undefined} raw - 原始 github_stats（可能缺失字段或结构不一致）
+     * @param {Object|string|null|undefined} raw - 原始 github_stats（可能为 JSON 字符串、或嵌套在 stats 下、或缺失字段）
      * @returns {Object} 含 22 项安全默认值的对象
      */
     function normalizeGithubStats(raw) {
+        if (typeof raw === 'string') {
+            try { raw = raw ? JSON.parse(raw) : {}; } catch (e) { raw = {}; }
+        }
+        // 兼容从 user_analysis 整行传入：取 github_stats 或 stats.github_stats
         var o = raw && typeof raw === 'object' ? raw : {};
+        if (o && (o.github_stats != null || (o.stats && o.stats.github_stats != null))) {
+            o = o.github_stats != null ? (typeof o.github_stats === 'string' ? (function() { try { return JSON.parse(o.github_stats); } catch (e) { return {}; } })() : o.github_stats) : (o.stats && (typeof o.stats.github_stats === 'string' ? (function() { try { return JSON.parse(o.stats.github_stats); } catch (e) { return {}; } })() : o.stats.github_stats));
+        }
+        o = o && typeof o === 'object' ? o : {};
         return {
             login: o.login != null ? String(o.login) : '--',
             avatarUrl: o.avatarUrl != null ? String(o.avatarUrl) : '',

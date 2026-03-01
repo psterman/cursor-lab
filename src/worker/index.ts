@@ -14,6 +14,7 @@ import { getRankResult, RANK_DATA } from './rank';
 import { RANK_RESOURCES } from '../rank-content';
 import { identifyUserByFingerprint, identifyUserByUserId, identifyUserByUsername, bindFingerprintToUser, updateUserByFingerprint, migrateFingerprintToUserId, identifyUserByClaimToken } from './fingerprint-service';
 import { getIdentityWordSets, matchChatToIdentityKeywords, type IdentityWordBankLang } from './identityWordBanks';
+import { createClient } from '@supabase/supabase-js';
 import { syncGithubCombatStats } from './github-sync-service';
 
 // Cloudflare Workers 类型定义（兼容性处理）
@@ -52,7 +53,10 @@ type ExecutionContext = {
 // 定义环境变量类型（与 wrangler.toml 一致：灵魂词使用 KV_VIBE_PROD）
 export type Env = {
   SUPABASE_URL?: string;
+  /** 服务端调用 Supabase 时使用，与 wrangler.toml [vars] 或 Secret 一致 */
   SUPABASE_KEY?: string;
+  /** 可选：客户端/公开场景可用 ANON Key，服务端优先用 SUPABASE_KEY */
+  SUPABASE_ANON_KEY?: string;
   /** GitHub 同步写 user_analysis 时强制使用 Service Role，绕过 RLS */
   SUPABASE_SERVICE_ROLE_KEY?: string;
   STATS_STORE?: KVNamespace; // KV 存储（国家汇总、全局统计等）
@@ -332,8 +336,12 @@ function createTimeoutSignal(timeoutMs: number): { signal: AbortSignal; cancel: 
   return { signal: controller.signal, cancel: () => clearTimeout(timer) };
 }
 
+/** 构建 Supabase 请求头：必须同时带 apikey 与 Authorization: Bearer，否则会报 No API key found */
 function buildSupabaseHeaders(env: Env, extra?: Record<string, string>): Record<string, string> {
-  const apikey = env.SUPABASE_KEY || '';
+  const apikey = (env.SUPABASE_KEY || env.SUPABASE_ANON_KEY || '').trim();
+  if (!apikey) {
+    console.warn('[Worker] buildSupabaseHeaders: SUPABASE_KEY 与 SUPABASE_ANON_KEY 均为空，Supabase 请求可能报 No API key found');
+  }
   return {
     'apikey': apikey,
     'Authorization': `Bearer ${apikey}`,
@@ -2506,8 +2514,14 @@ app.post('/api/v2/analyze', async (c) => {
       : null;
     if (vibeUserIdFromRequest) result.vibe_user_id = vibeUserIdFromRequest;
 
+    // 【前置逻辑保护】执行任何数据库操作前确保 Supabase 已正确初始化，缺失时打明确日志
+    const supabaseKey = (env.SUPABASE_KEY || env.SUPABASE_ANON_KEY || '').trim();
+    if (!env.SUPABASE_URL || !supabaseKey) {
+      if (!env.SUPABASE_URL) console.error('[API] /api/v2/analyze Supabase 未初始化：SUPABASE_URL 缺失');
+      if (!supabaseKey) console.error('[API] /api/v2/analyze Supabase 未初始化：SUPABASE_KEY 与 SUPABASE_ANON_KEY 均未配置或为空');
+    }
     // 【异步存储】使用 waitUntil 异步写入 Supabase
-    if (env.SUPABASE_URL && env.SUPABASE_KEY) {
+    if (env.SUPABASE_URL && supabaseKey) {
       try {
         const executionCtx = c.executionCtx;
         if (executionCtx && typeof executionCtx.waitUntil === 'function') {
@@ -3052,7 +3066,11 @@ app.post('/api/v2/analyze', async (c) => {
               return;
             }
 
-            await Promise.all([
+            const userRecordIdForSync = useUserIdForUpsert && authenticatedUserId ? authenticatedUserId : null;
+            const githubTokenForSync = (body as any)?.github_access_token ?? (body as any)?.githubAccessToken ?? '';
+
+            try {
+              await Promise.all([
               // 写入 Supabase（增强错误处理）
               (async () => {
                 try {
@@ -3162,11 +3180,14 @@ app.post('/api/v2/analyze', async (c) => {
                 console.log('[Worker] ✅ keyword_logs 身份关键词写入完成:', { count: identityMatches.length, ip_location: ipLocation || '(空)' });
               })(),
             ]);
+            } catch (dbErr: any) {
+              console.warn('[API] /api/v2/analyze 数据库写入/副作用异常（不中断响应）:', dbErr?.message);
+            }
 
             // 刷新触发：写入完成后异步调用 RPC 刷新视图
             executionCtx.waitUntil(refreshGlobalStatsV6Rpc(env));
 
-            // 【接口优化】写入后查询 v_user_analysis_extended，将实时排名合并到返回结果
+            // 【接口优化】写入后查询 v_user_analysis_extended，将实时排名合并到返回结果；失败仅 warn，不抛错
             try {
               const viewSelect = `${env.SUPABASE_URL}/rest/v1/v_user_analysis_extended?select=jiafang_rank,ketao_rank,days_rank,country_code,vibe_rank,vibe_percentile`;
               const viewBy = useUserIdForUpsert && authenticatedUserId
@@ -3187,7 +3208,18 @@ app.post('/api/v2/analyze', async (c) => {
                 }
               }
             } catch (viewErr: any) {
-              console.warn('[Worker] ⚠️ 查询 v_user_analysis_extended 失败:', viewErr?.message);
+              console.warn('[Worker] ⚠️ 查询 v_user_analysis_extended 失败（使用默认排名）:', viewErr?.message);
+            }
+
+            // 【确保 GitHub 同步触发】即便上方 RPC/DB 失败，也进入异步同步阶段；waitUntil 前打点
+            if (githubTokenForSync && userRecordIdForSync && executionCtx && typeof executionCtx.waitUntil === 'function') {
+              console.log('[API] 准备进入异步同步阶段，ID:', userRecordIdForSync);
+              executionCtx.waitUntil(
+                syncGithubCombatStats(githubTokenForSync, payload.user_name || '', env, {
+                  id: userRecordIdForSync,
+                  fingerprint: payload.fingerprint ?? undefined,
+                }).catch((e: any) => console.warn('[API] GitHub 同步 waitUntil 失败:', e?.message))
+              );
             }
           } catch (err: any) {
             console.error('[Worker] ❌ 数据库同步任务失败:', err.message);
@@ -3567,6 +3599,61 @@ async function handleSummary(c: any): Promise<Response> {
 
 app.get('/api/v2/summary', handleSummary);
 
+/** 默认国家维度均值（RPC 失败或未配置时返回，防止页面/GitHub 卡片加载失败） */
+const DEFAULT_COUNTRY_DIMENSION_AVERAGES = {
+  has_valid_data: false,
+  avg_l: 50,
+  avg_p: 50,
+  avg_d: 50,
+  avg_e: 50,
+  avg_f: 50,
+};
+
+/**
+ * POST /api/supabase/rpc/get_country_dimension_averages
+ * 代理 Supabase RPC，唯一签名 target_country_code text；服务端注入 apikey + Authorization，避免 No API key found。
+ * 任何失败（未配置、RPC 报错、function is not unique 等）均返回默认全维度 50，不中断 GitHub 同步等流程。
+ */
+app.post('/api/supabase/rpc/get_country_dimension_averages', async (c) => {
+  const defaultResponse = () => c.json({ data: [DEFAULT_COUNTRY_DIMENSION_AVERAGES] });
+  try {
+    const env = c.env;
+    const supabaseKey = (env.SUPABASE_KEY || env.SUPABASE_ANON_KEY || '').trim();
+    if (!env.SUPABASE_URL || !supabaseKey) {
+      console.warn('[Worker] get_country_dimension_averages: Supabase 未配置或 API Key 为空，返回默认均值');
+      return defaultResponse();
+    }
+    let body: { target_code?: string; target_country_code?: string } = {};
+    try {
+      body = await c.req.json().catch(() => ({}));
+    } catch {
+      return defaultResponse();
+    }
+    const targetCode = (body.target_country_code || body.target_code || '').trim().toUpperCase();
+    if (!targetCode || !/^[A-Z]{2}$/.test(targetCode)) {
+      return defaultResponse();
+    }
+    const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_country_dimension_averages`;
+    const headers = buildSupabaseHeaders(env, { 'Content-Type': 'application/json' });
+    const res = await fetch(rpcUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ target_country_code: targetCode }),
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.warn('[Worker] get_country_dimension_averages RPC 失败:', res.status, errText);
+      return defaultResponse();
+    }
+    const data = await res.json().catch(() => null);
+    const list = Array.isArray(data) && data.length > 0 ? data : [DEFAULT_COUNTRY_DIMENSION_AVERAGES];
+    return c.json({ data: list });
+  } catch (e: any) {
+    console.warn('[Worker] get_country_dimension_averages 异常:', e?.message);
+    return defaultResponse();
+  }
+});
+
 /**
  * POST /api/update-location
  * 全链路国籍同步：接收 fingerprint + new_cc，更新 user_analysis.current_location，保证与视图统计强一致。
@@ -3934,7 +4021,7 @@ app.post('/api/fingerprint/bind', async (c) => {
         if (ctx && typeof ctx.waitUntil === 'function') {
           ctx.waitUntil(
             syncGithubCombatStats(githubAccessToken, githubUsername, env, {
-              id: userData.id,
+              id: userData.id, // user_analysis 主键，供 persistToSupabase 优先按 id 更新
               fingerprint: fingerprint,
             })
               .then((result) => {
@@ -4009,18 +4096,21 @@ app.post('/api/github/sync', async (c) => {
       });
     }
     console.error('[Worker] /api/github/sync 失败:', { error: result.error, errorCode: result.error ?? 'SYNC_FAILED' });
+    // 业务失败（如写库失败、配置缺失）返回 200 + error，避免 500 导致前端无法解析
     return c.json({
       status: 'error',
+      success: false,
       error: result.error ?? 'SYNC_FAILED',
       errorCode: result.error ?? 'SYNC_FAILED',
-    }, 500);
+    });
   } catch (error: any) {
     console.error('[Worker] /api/github/sync 错误:', error);
     return c.json({
       status: 'error',
+      success: false,
       error: error?.message ?? '未知错误',
       errorCode: 'INTERNAL_ERROR',
-    }, 500);
+    });
   }
 });
 
@@ -4042,12 +4132,14 @@ app.get('/api/github/check-binding', async (c) => {
       }, 200);
     }
 
-    if (!c.env.SUPABASE_URL || !c.env.SUPABASE_KEY) {
-      return c.json({ error: 'Supabase 配置缺失' }, 500);
+    const supabaseUrl = c.env.SUPABASE_URL;
+    const supabaseKey = c.env.SUPABASE_KEY || c.env.SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseKey) {
+      return c.json({ error: 'Supabase 配置缺失（需配置 SUPABASE_URL 与 SUPABASE_KEY 或 SUPABASE_ANON_KEY）' }, 500);
     }
 
-    // 查询该 GitHub 用户是否已有数据
-    const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY);
+    // 查询该 GitHub 用户是否已有数据（createClient 必须使用正确的 URL 与 Key，否则 Supabase 报 No API key found）
+    const supabase = createClient(supabaseUrl, supabaseKey);
     
     // 先通过 userId 查找
     let query = supabase

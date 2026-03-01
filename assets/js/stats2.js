@@ -15,6 +15,11 @@
     // 物理隔离环境：修复 eval5 冲突，在 IIFE 最顶层添加 _loc 变量
     // 严禁在代码中对 _loc 或 window.location 进行属性赋值，防止触发 eval5 的 "Cannot create property 'location' on string" 报错
     var _loc = window.location;
+
+    /** SWR 核心常量与原子锁（Stale-While-Revalidate，GitHub 22 项战力秒开 + 静默更新） */
+    var VIBE_STATS2_SWR_CACHE_KEY = 'vibe_stats2_swr_cache';
+    var VIBE_SWR_MAX_AGE_MS = 30 * 60 * 1000;
+    var isRevalidating = false;
     
     // 注意：window.location 是浏览器内置对象，无法通过 Object.defineProperty 保护
     // 因此我们通过以下方式防止 eval5 错误：
@@ -31,8 +36,9 @@
 
 
     /**
-     * 【Auth 拦截器】GitHub OAuth 回调后从 Hash 捕获 access_token，持久化并清理 URL
-     * Supabase 返回的是 # 号后的 Hash，不用 URLSearchParams(search)。
+     * 【Auth】OAuth 回调时仅将 provider_token（GitHub）存入 github_token 供战力同步用。
+     * 不解析、不保存 access_token/refresh_token，不清理 Hash，由 Supabase SDK 自动处理 session。
+     * 严禁将 provider_token 或 GitHub token 传给 supabase.auth.setSession。
      */
     (function () {
       var hash = typeof window !== 'undefined' && _loc && _loc.hash;
@@ -42,42 +48,17 @@
         var i = pair.indexOf('=');
         if (i !== -1) params[decodeURIComponent(pair.slice(0, i))] = decodeURIComponent((pair.slice(i + 1) || '').replace(/\+/g, ' '));
       });
-      var accessToken = params.access_token || params['access_token'];
-      var refreshToken = params.refresh_token || params['refresh_token'];
-      if (!accessToken) return;
+      var providerToken = params.provider_token || params['provider_token'];
+      if (!providerToken) return;
       try {
-        localStorage.setItem('vibe_github_access_token', accessToken);
-        if (refreshToken) localStorage.setItem('vibe_github_refresh_token', refreshToken);
-        console.log('[Auth] ✅ 已从 Hash 捕获 access_token 并写入 vibe_github_access_token');
+        localStorage.setItem('vibe_github_access_token', providerToken);
+        localStorage.setItem('github_token', providerToken);
+        if (typeof window !== 'undefined') window.__githubAccessToken = providerToken;
+        console.log('[Auth] ✅ 已从 Hash 仅保存 provider_token 至 github_token（战力同步用），Session 由 Supabase SDK 处理');
       } catch (e) {
-        console.warn('[Auth] 写入 token 失败:', e);
+        console.warn('[Auth] 写入 github_token 失败:', e);
       }
-      try {
-        var parts = accessToken.split('.');
-        if (parts.length >= 2) {
-          var payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-          var padded = payload + Array((4 - payload.length % 4) % 4 + 1).join('=');
-          var json = atob(padded);
-          var data = JSON.parse(json);
-          var meta = data.user_metadata || {};
-          var avatar = meta.avatar_url || meta.avatar || '';
-          var name = meta.user_name || meta.full_name || meta.name || data.email || '';
-          if (avatar || name) {
-            var cache = { avatar: avatar, name: name, at: Date.now() };
-            try { localStorage.setItem('vibe_github_user_cache', JSON.stringify(cache)); } catch (_) {}
-            if (typeof window !== 'undefined') {
-              window.__vibeGitHubUser = cache;
-            }
-          }
-        }
-      } catch (_) {}
-      try {
-        if (typeof window !== 'undefined' && window.history && window.history.replaceState) {
-          var url = _loc.pathname + (_loc.search || '');
-          window.history.replaceState(null, '', url);
-          console.log('[Auth] ✅ 已清理地址栏 Hash');
-        }
-      } catch (_) {}
+      // 不清理 Hash，让 Supabase SDK 自动解析 #access_token 等并设置 session
     })();
     
 
@@ -1820,16 +1801,36 @@
                         : Object.assign({}, window.cachedSummary || {}, data);
                 } catch (e) { /* ignore */ }
 
-                // 国家视图：拉取 get_country_dimension_averages(target_code) 作为雷达图真实数据源
-                let countryDimensionAverages = null;
-                if (!effectiveIsGlobal && countryCode && typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function') {
-                    try {
-                        const dimRes = await supabaseClient.rpc('get_country_dimension_averages', { target_code: countryCode });
-                        if (dimRes && dimRes.data != null) countryDimensionAverages = dimRes.data;
-                    } catch (e) { console.warn('[updateCountryDashboard] get_country_dimension_averages RPC 失败:', e); }
+                // 国家视图：get_country_dimension_averages 使用相对路径 /api/...，自动指向当前环境（生产即生产 Worker 代理）
+                const DEFAULT_DIMENSION_AVERAGES = { has_valid_data: false, avg_l: 50, avg_p: 50, avg_d: 50, avg_e: 50, avg_f: 50 };
+                let record;
+                try {
+                    let countryDimensionAverages = null;
+                    if (!effectiveIsGlobal && countryCode) {
+                        try {
+                            const proxyRes = await fetch('/api/supabase/rpc/get_country_dimension_averages', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ target_country_code: countryCode })
+                            });
+                            if (proxyRes.ok) {
+                                const json = await proxyRes.json();
+                                if (json && json.data != null) countryDimensionAverages = json.data;
+                            }
+                        } catch (e) { console.warn('[updateCountryDashboard] get_country_dimension_averages 代理请求失败:', e); }
+                        if (countryDimensionAverages == null && typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function') {
+                            try {
+                                const dimRes = await supabaseClient.rpc('get_country_dimension_averages', { target_country_code: countryCode });
+                                if (dimRes && dimRes.data != null) countryDimensionAverages = dimRes.data;
+                            } catch (e) { console.warn('[updateCountryDashboard] get_country_dimension_averages RPC 失败:', e); }
+                        }
+                        if (countryDimensionAverages == null) countryDimensionAverages = [DEFAULT_DIMENSION_AVERAGES];
+                    }
+                    record = (Array.isArray(countryDimensionAverages) ? countryDimensionAverages[0] : countryDimensionAverages) || DEFAULT_DIMENSION_AVERAGES;
+                } catch (e) {
+                    console.warn('[updateCountryDashboard] get_country_dimension_averages 整体异常，使用默认均值:', e);
+                    record = DEFAULT_DIMENSION_AVERAGES;
                 }
-                // 返回值可能是数组 [{ avg_e: "54.00", has_valid_data: true, ... }]，取首条
-                const record = (Array.isArray(countryDimensionAverages) ? countryDimensionAverages[0] : countryDimensionAverages) || null;
 
                 // =========================
                 // 语义爆发（黑话榜）数据源：国家视图词云仅来源于 get_country_keywords RPC，禁止使用 data.cloud50 或 detailedStats 性格标签
@@ -16071,6 +16072,25 @@
                     
                     // 保存到 localStorage（兼容旧代码）
                     localStorage.setItem('github_username', githubUsername);
+                    // 战力同步必须用 GitHub 的 access_token，不能用 Supabase 的 session.access_token（JWT），否则 GitHub API 会 401
+                    if (session.provider_token) {
+                        try {
+                            localStorage.setItem('github_token', session.provider_token);
+                            window.__githubAccessToken = session.provider_token;
+                            console.log('[Auth] ✅ 已保存 session.provider_token 至 github_token / __githubAccessToken');
+                        } catch (e) { console.warn('[Auth] ⚠️ 保存 github_token 失败:', e); }
+                    } else {
+                        var fromVibe = typeof localStorage !== 'undefined' && localStorage.getItem('vibe_github_access_token');
+                        if (fromVibe) {
+                            try {
+                                localStorage.setItem('github_token', fromVibe);
+                                window.__githubAccessToken = fromVibe;
+                                console.log('[Auth] ✅ 无 provider_token，已用 OAuth 回调的 vibe_github_access_token 作为战力同步 token');
+                            } catch (e) { console.warn('[Auth] ⚠️ 保存 github_token 失败:', e); }
+                        } else {
+                            console.warn('[Auth] ⚠️ 无 provider_token 且无 vibe_github_access_token，战力同步可能 401；请确保使用 GitHub OAuth 登录且回调 URL 带 access_token');
+                        }
+                    }
                     
                     // 【变量修正】统一使用 currentFp 变量
                     // 【修复】确保在调用 migrate 接口前，代码能够正确从 localStorage 获取 user_fingerprint
@@ -18086,6 +18106,14 @@
                 if (typeof showDrawersWithCountryData === 'function') {
                     showDrawersWithCountryData(code, name);
                 }
+                // 【GitHub 战力渲染兼容】showDrawersWithCountryData 之后：若 currentUser 含 github_stats 则强制再次注入左侧抽屉，防止主渲染流程清空 SWR 已渲染内容
+                var leftBody = document.getElementById('left-drawer-body');
+                var gs = (data && data.stats && data.stats.github_stats) || (data && data.github_stats) || (window.currentUser && window.currentUser.github_stats);
+                if (leftBody && gs && typeof gs === 'object' && typeof window.renderGithubCard === 'function') {
+                    try {
+                        window.renderGithubCard(gs, { container: leftBody, insertFirst: true, lang: (typeof currentLang !== 'undefined' ? currentLang : 'en') });
+                    } catch (re) { if (typeof console !== 'undefined' && console.warn) console.warn('[SWR] renderDashboard renderGithubCard 失败:', re); }
+                }
             } catch (e) { /* ignore */ }
 
             // 注意：LPDEF 专家卡片将在 window.onload 的身份检查后渲染
@@ -18230,10 +18258,171 @@
         };
 
         /**
+         * 递归深度合并：将 source 合并到 target，确保 API 部分更新不会抹除缓存中已有的其他统计项。
+         * 兼容 eval5：仅用 ES5 语法，无可选链。
+         */
+        function deepMergeGithubStats(target, source) {
+            if (source === null || source === undefined) return target;
+            if (typeof source !== 'object') return source;
+            if (Array.isArray(source)) return source;
+            try {
+                var out = target && typeof target === 'object' && !Array.isArray(target) ? JSON.parse(JSON.stringify(target)) : {};
+                var keys = Object.keys(source);
+                for (var i = 0; i < keys.length; i++) {
+                    var k = keys[i];
+                    var srcVal = source[k];
+                    var tgtVal = out[k];
+                    if (srcVal !== null && typeof srcVal === 'object' && !Array.isArray(srcVal) && tgtVal !== null && typeof tgtVal === 'object' && !Array.isArray(tgtVal)) {
+                        out[k] = deepMergeGithubStats(tgtVal, srcVal);
+                    } else {
+                        out[k] = srcVal;
+                    }
+                }
+                return out;
+            } catch (e) {
+                if (typeof console !== 'undefined' && console.warn) console.warn('[SWR] deepMergeGithubStats:', e);
+                return target || {};
+            }
+        }
+
+        /**
+         * 从 localStorage 读取 SWR 缓存：必须将 cache.github_stats 深度合并到 currentUser，并立即触发 renderUserStatsCards
+         */
+        function loadFromSWRCache() {
+            try {
+                var raw = localStorage.getItem(VIBE_STATS2_SWR_CACHE_KEY);
+                if (!raw) return;
+                var cache = JSON.parse(raw);
+                if (!cache || !cache.userRecord) return;
+                var userRecord = cache.userRecord;
+                if (cache.github_stats && typeof cache.github_stats === 'object') {
+                    userRecord = Object.assign({}, userRecord, { github_stats: deepMergeGithubStats(userRecord.github_stats, cache.github_stats) });
+                }
+                window.currentUser = userRecord;
+                window.currentUserData = userRecord;
+                if (window.allData && Array.isArray(window.allData)) {
+                    var idx = window.allData.findIndex(function(u) {
+                        return (u.id && userRecord.id && String(u.id) === String(userRecord.id)) ||
+                            (u.fingerprint && userRecord.fingerprint && String(u.fingerprint) === String(userRecord.fingerprint)) ||
+                            (u.user_name && userRecord.user_name && String((u.user_name || '').toLowerCase()) === String((userRecord.user_name || '').toLowerCase()));
+                    });
+                    if (idx >= 0) window.allData[idx] = (typeof safeMaxMergeUserData === 'function' ? safeMaxMergeUserData(window.allData[idx], userRecord) : Object.assign({}, window.allData[idx], userRecord));
+                    else window.allData.push(userRecord);
+                } else {
+                    window.allData = [userRecord];
+                }
+                var leftBody = document.getElementById('left-drawer-body');
+                if (leftBody && typeof renderUserStatsCards === 'function') {
+                    var best = typeof getBestUserRecordForStats === 'function' ? getBestUserRecordForStats(userRecord) : userRecord;
+                    renderUserStatsCards(leftBody, best);
+                }
+                console.log('[SWR] ✅ 已从缓存展示界面');
+            } catch (e) { if (typeof console !== 'undefined' && console.warn) console.warn('[SWR] loadFromSWRCache:', e); }
+        }
+
+        /** 将当前用户数据写入 SWR 缓存 */
+        function persistSWRCache() {
+            try {
+                var cu = window.currentUser || window.currentUserData;
+                if (!cu) return;
+                var payload = {
+                    userRecord: cu,
+                    github_stats: (cu.github_stats && typeof cu.github_stats === 'object') ? cu.github_stats : null,
+                    cachedAt: Date.now()
+                };
+                localStorage.setItem(VIBE_STATS2_SWR_CACHE_KEY, JSON.stringify(payload));
+            } catch (e) { if (typeof console !== 'undefined' && console.warn) console.warn('[SWR] persistSWRCache:', e); }
+        }
+
+        /**
+         * 异步校验（Revalidate）：仅在缓存过期或缺少有效 github_stats.login 时发起请求；
+         * 并发锁 isRevalidating 防止重复调用；成功后先更新 window.currentUser，再静默刷新左侧抽屉 GitHub 卡片，严禁全量刷新
+         */
+        async function revalidateSWRCache() {
+            if (isRevalidating) return;
+            isRevalidating = true;
+            try {
+                var raw = localStorage.getItem(VIBE_STATS2_SWR_CACHE_KEY);
+                var cache = raw ? (function() { try { return JSON.parse(raw); } catch (e) { return null; } })() : null;
+                var now = Date.now();
+                var cachedAt = cache && typeof cache.cachedAt === 'number' ? cache.cachedAt : 0;
+                var hasValidGithubStats = cache && cache.github_stats && typeof cache.github_stats === 'object' && !!cache.github_stats.login;
+                var isStale = (now - cachedAt) > VIBE_SWR_MAX_AGE_MS;
+                if (!isStale && hasValidGithubStats) return;
+
+                var apiEndpoint = '';
+                try {
+                    if (typeof window.getApiEndpoint === 'function') apiEndpoint = window.getApiEndpoint() || '';
+                    if (!apiEndpoint) {
+                        var metaEl = document.querySelector('meta[name="api-endpoint"]');
+                        apiEndpoint = (metaEl && metaEl.getAttribute('content')) || '';
+                    }
+                } catch (_) {}
+                if (apiEndpoint && apiEndpoint.endsWith('/')) apiEndpoint = apiEndpoint.slice(0, -1);
+                var fp = '';
+                try { fp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+                var lastAnalysis = null;
+                try { var la = localStorage.getItem('last_analysis_data'); if (la) lastAnalysis = JSON.parse(la); } catch (_) {}
+                var ghUser = (localStorage.getItem('github_username') || '').trim();
+                var body = {
+                    fingerprint: fp,
+                    chatData: (lastAnalysis && Array.isArray(lastAnalysis.chatData) && lastAnalysis.chatData.length > 0) ? lastAnalysis.chatData : ['.'],
+                    lang: (lastAnalysis && lastAnalysis.lang) ? lastAnalysis.lang : (localStorage.getItem('appLanguage') || 'zh-CN'),
+                    dimensions: lastAnalysis && lastAnalysis.dimensions ? lastAnalysis.dimensions : undefined,
+                    stats: lastAnalysis && lastAnalysis.stats ? lastAnalysis.stats : undefined
+                };
+                if (ghUser) body.userName = ghUser;
+                if (typeof supabaseClient !== 'undefined' && supabaseClient) {
+                    try {
+                        var sessRes = await supabaseClient.auth.getSession();
+                        var sessData = sessRes && sessRes.data;
+                        var session = sessData && sessData.session;
+                        if (session && session.access_token) body._authToken = session.access_token;
+                    } catch (_) {}
+                }
+                var analyzeUrl = apiEndpoint ? (apiEndpoint + '/api/v2/analyze?fingerprint=' + encodeURIComponent(fp) + '&_t=' + now) : ('/api/v2/analyze?fingerprint=' + encodeURIComponent(fp) + '&_t=' + now);
+                var headers = { 'Content-Type': 'application/json' };
+                if (body._authToken) { headers['Authorization'] = 'Bearer ' + body._authToken; delete body._authToken; }
+                var res = await fetch(analyzeUrl, { method: 'POST', headers: headers, body: JSON.stringify(body) });
+                if (!res.ok) {
+                    if (typeof console !== 'undefined' && console.warn) console.warn('[SWR] revalidate 请求失败，保留缓存展示:', res.status, res.statusText);
+                    return;
+                }
+                var analyzeResult = await res.json().catch(function() { return null; });
+                if (!analyzeResult || (analyzeResult.status && analyzeResult.status === 'error')) {
+                    if (typeof console !== 'undefined' && console.warn) console.warn('[SWR] revalidate 返回错误，保留缓存展示:', analyzeResult && analyzeResult.error);
+                    return;
+                }
+
+                if (typeof window.refreshUserStats === 'function') {
+                    await window.refreshUserStats().catch(function(err) {
+                        if (typeof console !== 'undefined' && console.warn) console.warn('[SWR] refreshUserStats 失败，保留缓存:', err);
+                    });
+                }
+                var cu = window.currentUser || window.currentUserData;
+                if (cu) {
+                    try { persistSWRCache(); } catch (pe) { if (typeof console !== 'undefined' && console.warn) console.warn('[SWR] persistSWRCache 失败:', pe); }
+                    var leftBody = document.getElementById('left-drawer-body');
+                    if (leftBody && cu.github_stats && typeof cu.github_stats === 'object' && typeof window.renderGithubCard === 'function') {
+                        try {
+                            window.renderGithubCard(cu.github_stats, { container: leftBody, insertFirst: true, lang: typeof currentLang !== 'undefined' ? currentLang : 'en' });
+                        } catch (re) { if (typeof console !== 'undefined' && console.warn) console.warn('[SWR] renderGithubCard 失败:', re); }
+                    }
+                }
+                console.log('[SWR] ✅ 已 revalidate 并更新缓存与抽屉');
+            } catch (e) {
+                if (typeof console !== 'undefined' && console.warn) console.warn('[SWR] revalidateSWRCache 异常，保留缓存展示:', e);
+            } finally {
+                isRevalidating = false;
+            }
+        }
+
+        /**
          * 获取并渲染大盘数据
          * 基于 index.ts 的接口返回格式（数据直接返回，不包裹在 data 字段中）
          */
         async function fetchData() {
+            loadFromSWRCache();
             // 【性能保护】锁定标志，防止网络慢时用户多次触发刷新导致请求堆积
             if (window.__globalStatsUpdating) {
                 if (window.__fetchDataPromise) return await window.__fetchDataPromise;
@@ -18298,6 +18487,11 @@
                         });
                     }
                 } catch { /* ignore */ }
+
+                // 【SWR】缓存超过 30 分钟或缺少 github_stats.login 时异步 revalidate，失败仅打日志不抛错
+                revalidateSWRCache().catch(function(err) {
+                    if (typeof console !== 'undefined' && console.warn) console.warn('[SWR] revalidateSWRCache 异步失败:', err);
+                });
 
             } catch (err) {
                 console.error('[ERROR] Dashboard 渲染崩溃:', err);
@@ -18670,6 +18864,9 @@
                 if (u.personality || u.personality_data || u.personalityData) s += 2;
                 if (u.answer_book || u.answerBook) s += 1;
                 if (u.personality_name || u.personalityName) s += 1;
+                // 【GitHub 战力】有有效 github_stats 的记录优先，确保左侧抽屉能显示 22 项战力卡片
+                var gs = u.github_stats;
+                if (gs && typeof gs === 'object' && (gs.login || gs.totalRepoStars !== undefined)) s += 5;
 
                 return s;
             };
@@ -18685,6 +18882,17 @@
                 }
             }
             best = best || user;
+            // 【合并 github_stats】若 best 没有有效 github_stats，从同人任一条记录中取，避免左侧抽屉战力卡片无数据
+            var bestGs = best.github_stats;
+            if (!bestGs || typeof bestGs !== 'object' || !bestGs.login) {
+                for (var gi = 0; gi < candidates.length; gi++) {
+                    var cand = candidates[gi];
+                    if (cand && cand.github_stats && typeof cand.github_stats === 'object' && cand.github_stats.login) {
+                        best = Object.assign({}, best, { github_stats: cand.github_stats });
+                        break;
+                    }
+                }
+            }
             // 【Cloudflare 上岗天数】优先采用同人记录中 work_days 最大的值，避免 DB 旧记录为 1 时始终显示 1 天
             const maxWorkDaysCandidate = candidates.reduce((a, c) => {
                 const d = c && (c.work_days ?? c.usage_days ?? c.usageDays ?? c.days);
@@ -19890,8 +20098,31 @@
                             drawerCountryIsManualSt2 = !!(currentUserData.manual_location || currentUserData.manual_lat != null);
                         }
                     } catch (e) {}
-                    var handleGithubSync = function() {
-                        var token = (window.__githubAccessToken || (typeof localStorage !== 'undefined' && localStorage.getItem('github_token')) || '').trim();
+                    var handleGithubSync = async function() {
+                        var token = (window.__githubAccessToken || (typeof localStorage !== 'undefined' && localStorage.getItem('github_token')) || (typeof localStorage !== 'undefined' && localStorage.getItem('vibe_github_access_token')) || '').trim();
+                        if (!token && typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.auth.getSession === 'function') {
+                            try {
+                                var sess = await supabaseClient.auth.getSession();
+                                var s = sess && sess.data && sess.data.session;
+                                if (s && s.provider_token) {
+                                    token = (s.provider_token || '').trim();
+                                    if (token) {
+                                        try {
+                                            localStorage.setItem('github_token', token);
+                                            window.__githubAccessToken = token;
+                                            console.log('[GitHub Sync] 已从 getSession 补全 provider_token');
+                                        } catch (e) {}
+                                    }
+                                }
+                                if (!token && typeof localStorage !== 'undefined') token = (localStorage.getItem('vibe_github_access_token') || '').trim();
+                            } catch (e) {
+                                console.warn('[GitHub Sync] getSession 补全 token 失败:', e);
+                            }
+                        }
+                        if (!token || !token.length) {
+                            alert('需要重新使用 GitHub 登录以授权战力同步');
+                            return { success: false, error: 'accessToken 必填' };
+                        }
                         return fetch(apiBase ? apiBase + '/api/github/sync' : '/api/github/sync', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -19903,10 +20134,34 @@
                             })
                         }).then(async function(r) {
                             var text = await r.text();
-                            try { return JSON.parse(text); } catch (e) {
+                            if (!r.ok) {
+                                console.error('[GitHub Sync] 后端返回错误:', r.status, text);
+                                if (r.status === 500) {
+                                    console.error('[GitHub Sync] 500 原始报错:', text);
+                                }
+                                var errMsg = text || ('HTTP ' + r.status);
+                                try {
+                                    var errJson = JSON.parse(text);
+                                    if (errJson && errJson.error) errMsg = errJson.error;
+                                } catch (e) {}
+                                var isUniqueViolation = errMsg.indexOf('UNIQUE_VIOLATION_FINGERPRINT') !== -1 || /duplicate key|unique constraint|violates unique constraint/i.test(errMsg);
+                                var tip = isUniqueViolation ? '正在合并游客数据，请稍后刷新。' : (errMsg.indexOf('401') !== -1 || errMsg.indexOf('Bad credentials') !== -1) ? 'GitHub 凭证无效（401），请退出后重新用 GitHub 登录一次以刷新授权。' : (errMsg.indexOf('RLS') !== -1 || errMsg.indexOf('permission') !== -1) ? '数据库权限受限（RLS 拦截），请检查服务端配置。' : (errMsg.indexOf('Token') !== -1 || errMsg.indexOf('accessToken') !== -1) ? 'Token 失效或未授权，请重新使用 GitHub 登录。' : errMsg;
+                                alert('战力同步失败：' + tip);
+                                return { success: false, status: 'error', error: text || ('HTTP ' + r.status) };
+                            }
+                            var parsed;
+                            try { parsed = JSON.parse(text); } catch (e) {
                                 console.warn('[GitHub Sync] 响应非 JSON:', text.slice(0, 300));
                                 return { success: false, status: 'error', error: (text && text.length) ? ('响应格式异常: ' + text.slice(0, 100)) : '未知错误' };
                             }
+                            if (parsed && (parsed.success === false || parsed.status === 'error')) {
+                                console.error('[GitHub Sync] 同步失败:', parsed.error);
+                                var errStr = String(parsed.error || '');
+                                var isUniqueViolation = errStr.indexOf('UNIQUE_VIOLATION_FINGERPRINT') !== -1 || /duplicate key|unique constraint|violates unique constraint/i.test(errStr);
+                                var tip = isUniqueViolation ? '正在合并游客数据，请稍后刷新。' : (errStr.indexOf('RLS') !== -1 || errStr.indexOf('permission') !== -1 || errStr.indexOf('Database error') !== -1) ? '数据库权限受限（可能为 RLS 拦截），请检查服务端 SUPABASE_SERVICE_ROLE_KEY。' : (errStr.indexOf('401') !== -1 || errStr.indexOf('Bad credentials') !== -1) ? 'GitHub 凭证无效（401），请退出后重新使用 GitHub 登录一次以刷新授权。' : (errStr.indexOf('Token') !== -1 || errStr.indexOf('accessToken') !== -1) ? 'Token 失效或未授权，请重新使用 GitHub 登录。' : (parsed.error || '未知错误');
+                                alert('战力同步失败：' + tip);
+                            }
+                            return parsed;
                         });
                     };
                     var githubStats = currentUserData.github_stats;
@@ -19921,10 +20176,9 @@
                         } else {
                             window.renderGithubCard(null, cardOpts);
                         }
-                        var token = (window.__githubAccessToken || (typeof localStorage !== 'undefined' && localStorage.getItem('github_token')) || '').trim();
                         var userIdForSync = (currentUserData.user_name || currentUserData.login || currentUserData.github_login || '').trim();
                         var needAutoSync = !(currentUserData.github_login && currentUserData.github_login.trim()) || !hasValidStats;
-                        if (token && needAutoSync && (userIdForSync || (currentUserData.id && currentUserData.id.trim()))) {
+                        if (needAutoSync && (userIdForSync || (currentUserData.id && currentUserData.id.trim()))) {
                             handleGithubSync().then(function(result) {
                                 if (result && result.success && result.data) {
                                     window.renderGithubCard(result.data, cardOpts);
@@ -20796,27 +21050,7 @@
                 // 检查当前会话
                 try {
                     let { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
-                    // 【GitHub 回调修复】若 URL 的 Hash 已被 IIFE 写入 localStorage，用 setSession 恢复会话，使登录生效
-                    if (!session && !sessionError) {
-                        try {
-                            const savedAccess = localStorage.getItem('vibe_github_access_token');
-                            const savedRefresh = localStorage.getItem('vibe_github_refresh_token');
-                            if (savedAccess && savedRefresh) {
-                                const { data: setData, error: setErr } = await supabaseClient.auth.setSession({
-                                    access_token: savedAccess,
-                                    refresh_token: savedRefresh
-                                });
-                                if (!setErr && setData && setData.session) {
-                                    session = setData.session;
-                                    console.log('[Auth] ✅ 已从 localStorage 恢复 GitHub 会话（Hash 回调）');
-                                } else if (setErr) {
-                                    console.warn('[Auth] setSession 失败:', setErr.message);
-                                }
-                            }
-                        } catch (e) {
-                            console.warn('[Auth] 恢复会话失败:', e);
-                        }
-                    }
+                    // 不再用 localStorage 的 token 调用 setSession：vibe_github_access_token 可能是 GitHub token，传给人 setSession 会报 Invalid JWT；Session 由 Supabase SDK 从 URL Hash 自动处理
                     if (sessionError) {
                         console.warn('[Auth] ⚠️ 获取会话失败:', sessionError);
                     } else if (session) {
@@ -23622,7 +23856,7 @@
                     window.currentUser = currentUser;
                     window.currentUserData = currentUser;
                     window.currentUserMatchedByFingerprint = !matchedByGitHub; // 如果通过 GitHub 匹配，则设为 false
-                    
+                    persistSWRCache();
                     // 【Master Key】如果当前用户有数据且已识别，确保持久化存储其指纹（作为万能钥匙）
                     const totalMsgs = currentUser.total_messages || currentUser.stats?.total_messages || 0;
                     if (totalMsgs > 0 && currentUser.fingerprint) {
@@ -23977,7 +24211,7 @@ document.addEventListener('click', function(e) {
                 var leftBody = document.getElementById('left-drawer-body');
                 var cu = window.currentUser || window.currentUserData;
                 if (leftBody && cu && typeof renderUserStatsCards === 'function') {
-                    supabase.from('user_analysis').select('id, github_login, github_stats, github_stars, github_score, github_synced_at, last_sync_at').eq('id', userId).single().then(function(r) {
+                    supabase.from('user_analysis').select('id, github_login, github_stats, github_stars, github_score, github_synced_at, last_sync_at').eq('id', userId).single().then(async function(r) {
                         if (r.data && cu) {
                             var merged = Object.assign({}, cu, r.data);
                             try { window.currentUser = merged; window.currentUserData = merged; } catch (e) {}
@@ -23991,15 +24225,29 @@ document.addEventListener('click', function(e) {
                                 if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard(); else if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
                             }, 1500);
                             // 若查出的 github_login 为空且本地有 token，自动触发 Worker 同步以初始化 github_login
-                            var hasToken = (window.__githubAccessToken && window.__githubAccessToken.trim()) || (typeof localStorage !== 'undefined' && localStorage.getItem('github_token'));
-                            if (!(merged.github_login && merged.github_login.trim()) && hasToken) {
+                            var accessTokenForSync = (window.__githubAccessToken && window.__githubAccessToken.trim()) || (typeof localStorage !== 'undefined' && localStorage.getItem('github_token')) || '';
+                            accessTokenForSync = accessTokenForSync.trim();
+                            if (!(merged.github_login && merged.github_login.trim()) && (accessTokenForSync || (supabase && typeof supabase.auth.getSession === 'function'))) {
+                                if (!accessTokenForSync && supabase && typeof supabase.auth.getSession === 'function') {
+                                    try {
+                                        var sessRes = await supabase.auth.getSession();
+                                        var sessData = sessRes && sessRes.data && sessRes.data.session;
+                                        if (sessData && sessData.provider_token) {
+                                            accessTokenForSync = sessData.provider_token.trim();
+                                            try { localStorage.setItem('github_token', accessTokenForSync); window.__githubAccessToken = accessTokenForSync; } catch (e) {}
+                                        }
+                                    } catch (e) { console.warn('[GitHub Sync] getSession 补全 token 失败:', e); }
+                                }
+                                if (!accessTokenForSync || !accessTokenForSync.length) {
+                                    console.warn('[GitHub Sync] 无有效 accessToken，跳过自动同步；请重新使用 GitHub 登录以授权战力同步');
+                                } else {
                                 var apiBase = (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content) || '';
                                 apiBase = String(apiBase).trim().replace(/\/$/, '');
                                 fetch(apiBase ? apiBase + '/api/github/sync' : '/api/github/sync', {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({
-                                        accessToken: (window.__githubAccessToken || localStorage.getItem('github_token') || '').trim(),
+                                        accessToken: accessTokenForSync,
                                         userId: (cu.user_name || cu.github_login || '').trim(),
                                         fingerprint: cu.fingerprint || '',
                                         id: cu.id || ''
@@ -24025,6 +24273,7 @@ document.addEventListener('click', function(e) {
                                         }, 1500);
                                     }
                                 }).catch(function(err) { console.warn('[GitHub Sync] inner sync:', err); });
+                                }
                             }
                         }
                     }).catch(function(err) {

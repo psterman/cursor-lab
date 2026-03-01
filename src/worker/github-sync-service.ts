@@ -2,8 +2,10 @@
  * GitHub Combat Stats 同步服务
  * 通过 GitHub GraphQL API 抓取 22 项用户数据，轻量计算后写入 Supabase user_analysis 表
  * 支持 8 小时刷新冷却，处理逻辑目标 <20ms
+ * 写库必须使用 SUPABASE_SERVICE_ROLE_KEY 以绕过 RLS。
  */
 
+import { createClient } from '@supabase/supabase-js';
 import type { Env } from './index';
 
 const GITHUB_API_TIMEOUT_MS = 15000;
@@ -40,12 +42,11 @@ export interface ProcessedGitHubStats {
   syncedAt: string;
 }
 
-/** GraphQL 查询：viewer 下 22 项 1–2 星数据 */
+/** GraphQL 查询：仅 read:user + user:email，不请求任何 name/avatarUrl（否则需 read:org） */
 const GITHUB_VIEWER_QUERY = `
 query ViewerCombatStats {
   viewer {
     login
-    avatarUrl(size: 80)
     createdAt
     followers { totalCount }
     following { totalCount }
@@ -65,26 +66,13 @@ query ViewerCombatStats {
         }
       }
     }
-    organizations(first: 5) {
-      nodes {
-        name
-        avatarUrl(size: 40)
-      }
-    }
     repositories(first: 100, orderBy: { field: STARGAZERS, direction: DESC }, ownerAffiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER]) {
       nodes {
         stargazerCount
         forkCount
         watchers { totalCount }
         isPrivate
-        primaryLanguage { name }
         createdAt
-        languages(first: 5) {
-          edges {
-            size
-            node { name }
-          }
-        }
       }
     }
     pullRequests(states: [MERGED]) { totalCount }
@@ -260,7 +248,7 @@ function processGitHubData(viewer: any): ProcessedGitHubStats {
   const syncedAt = now.toISOString();
 
   const login = viewer?.login ?? '';
-  const avatarUrl = viewer?.avatarUrl ?? '';
+  const avatarUrl = viewer?.avatarUrl || (login ? `https://github.com/${login}.png` : '');
   const createdAt = viewer?.createdAt ? new Date(viewer.createdAt) : null;
   const accountAge = createdAt ? Math.floor((now.getTime() - createdAt.getTime()) / (24 * 60 * 60 * 1000)) : 0;
   const followers = viewer?.followers?.totalCount ?? 0;
@@ -354,7 +342,7 @@ function processGitHubData(viewer: any): ProcessedGitHubStats {
   const organizations = orgNodes.slice(0, 5).map((o: any) => ({
     name: o?.name ?? '',
     avatarUrl: o?.avatarUrl ?? '',
-  }));
+  })); // 未请求 read:org 时 orgNodes 为空，organizations 为 []
 
   const globalRanking = calculateGlobalRanking(totalRepoStars);
 
@@ -388,145 +376,92 @@ function processGitHubData(viewer: any): ProcessedGitHubStats {
   };
 }
 
-/** 写入 user_analysis：单次 PATCH 同时更新所有 GitHub 相关字段
- *  - github_stats: JSONB 格式（ProcessedGitHubStats 对象，PostgREST 自动序列化）
- *  - github_login: GitHub 用户名（用于天梯榜查询）
- *  - github_score: 综合战力分
- *  - github_stars: 总仓库星数
- *  - last_sync_at: 同步时间（冷却判断依据）
- *  查询策略：优先按 user_name 更新；若影响行数为 0（Prefer: return=representation 时检查），
- *  说明用户记录不存在或 user_name 字段不匹配——记录日志便于排查。
- */
 /**
- * 将数据持久化到 Supabase。
- * 主键优先使用 id (UUID)；强制使用 SUPABASE_SERVICE_ROLE_KEY 以绕过 RLS。
+ * 将数据持久化到 Supabase。github_stats 为 JSONB，写入对象必须明确包含 github_stats 字段。
+ * 优先使用 SUPABASE_SERVICE_ROLE_KEY 以绕过 RLS；使用 supabase-js upsert，错误时返回 { success: false, error }，不 throw。
  */
 async function persistToSupabase(
   githubLogin: string,
   stats: ProcessedGitHubStats,
   env: Env,
   identifiers: { id?: string; fingerprint?: string } = {}
-): Promise<void> {
-  const supabaseKey = env.SUPABASE_SERVICE_ROLE_KEY;
+): Promise<{ success: boolean; error?: string; uniqueViolation?: boolean }> {
+  const supabaseKey = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_KEY || env.SUPABASE_ANON_KEY;
   if (!env.SUPABASE_URL || !supabaseKey) {
-    console.warn('[GitHub Sync] 持久化跳过：缺少 SUPABASE_URL 或 SUPABASE_SERVICE_ROLE_KEY');
-    return;
+    const errMsg = '缺少 SUPABASE_URL 或 SUPABASE_SERVICE_ROLE_KEY/SUPABASE_KEY/SUPABASE_ANON_KEY';
+    console.error('[GitHub Sync]', errMsg);
+    return { success: false, error: errMsg };
   }
 
   const syncedAt = new Date().toISOString();
-  const githubScore = calculateGithubScore(stats);
-  const normalizedLogin = githubLogin.trim().toLowerCase();
-
-  // 必须包含 github_login，确保同步成功后数据库 null 被填补
-  const payload = {
-    github_login: githubLogin,
+  const data: Record<string, unknown> = {
     github_stats: stats,
-    github_stars: stats.totalRepoStars ?? 0,
-    github_forks: stats.totalForks ?? 0,
-    github_watchers: stats.totalWatchers ?? 0,
-    github_followers: stats.followers ?? 0,
-    github_score: githubScore,
-    last_sync_at: syncedAt,
+    github_login: githubLogin,
     github_synced_at: syncedAt,
   };
+  if (identifiers.id != null && identifiers.id !== '' && /^[0-9a-f-]{36}$/i.test(identifiers.id)) {
+    data.id = identifiers.id;
+  }
+  if (identifiers.fingerprint) {
+    data.fingerprint = identifiers.fingerprint;
+  }
+  if (!(data as any).user_name) {
+    (data as any).user_name = githubLogin;
+  }
+  console.log('[GitHub Sync] 准备写入的 payload:', JSON.stringify(data).length > 2000 ? JSON.stringify(data).slice(0, 2000) + '...[truncated]' : JSON.stringify(data));
 
-  const headers = {
-    'apikey': supabaseKey,
-    'Authorization': `Bearer ${supabaseKey}`,
-    'Content-Type': 'application/json',
-    'Prefer': 'return=representation',
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_KEY || env.SUPABASE_ANON_KEY);
+  const onConflict = identifiers.id != null && identifiers.id !== '' && /^[0-9a-f-]{36}$/i.test(identifiers.id)
+    ? 'id'
+    : identifiers.fingerprint
+      ? 'fingerprint'
+      : null;
+  if (!onConflict) {
+    console.error('[GitHub Sync] 无法 upsert：缺少 id 或 fingerprint');
+    return { success: false, error: '缺少 id 或 fingerprint' };
+  }
+
+  const doUpsert = async (): Promise<{ success: boolean; error?: string; uniqueViolation?: boolean }> => {
+    const { data: rows, error } = await supabase
+      .from('user_analysis')
+      .upsert(data, { onConflict: onConflict as 'id' | 'fingerprint', ignoreDuplicates: false });
+    if (error) {
+      console.error('[Supabase Error]', error.message, error.details);
+      const msg = error.message || '';
+      const isDuplicateFingerprint = /duplicate key|unique constraint|violates unique constraint/i.test(msg) && /fingerprint/i.test(msg);
+      return { success: false, error: `Database error: ${error.message}`, uniqueViolation: !!isDuplicateFingerprint };
+    }
+    console.log('[GitHub Sync] ✅ Supabase 写入成功:', rows ? (Array.isArray(rows) && rows[0] ? { id: (rows[0] as any).id, github_login: (rows[0] as any).github_login } : 'no representation') : 'no representation');
+    return { success: true };
   };
 
-  const tryUpdate = async (filter: string) => {
-    try {
-      const url = `${env.SUPABASE_URL}/rest/v1/user_analysis?${filter}`;
-      const res = await fetch(url, {
-        method: 'PATCH',
-        headers,
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) return null;
-      const data = await res.json();
-      return Array.isArray(data) && data.length > 0 ? data[0] : null;
-    } catch {
-      return null;
-    }
-  };
-
-  let updatedRow: any = null;
-
-  // 数据库定位：必须用 id (UUID)，因 github_login 常为 null
-  // 1. 主键：仅按 id (UUID) 定位记录
-  if (identifiers.id && /^[0-9a-f-]{36}$/i.test(identifiers.id)) {
-    updatedRow = await tryUpdate(`id=eq.${encodeURIComponent(identifiers.id)}`);
-  }
-
-  // 2. 退路：按 fingerprint
-  if (!updatedRow && identifiers.fingerprint) {
-    updatedRow = await tryUpdate(`fingerprint=eq.${encodeURIComponent(identifiers.fingerprint)}`);
-  }
-
-  // 3. 退路：按 user_name（不依赖 github_login）
-  if (!updatedRow && githubLogin) {
-    updatedRow = await tryUpdate(`user_name=ilike.${encodeURIComponent(githubLogin)}`);
-  }
-  if (!updatedRow && normalizedLogin) {
-    updatedRow = await tryUpdate(`user_name=eq.${encodeURIComponent(normalizedLogin)}`);
-  }
-
-  // --- 新增：如果仍未找到匹配记录，则执行 INSERT ---
-  if (!updatedRow) {
-    console.log('[GitHub Sync] ℹ️ 找不到匹配记录，尝试执行插入...');
-    
-    // 构造插入的完整 payload
-    const insertPayload: any = { ...payload };
-    
-    // 优先设置主键 ID
-    if (identifiers.id && /^[0-9a-f-]{36}$/i.test(identifiers.id)) {
-      insertPayload.id = identifiers.id;
-    }
-    
-    // 设置 fingerprint
-    if (identifiers.fingerprint) {
-      insertPayload.fingerprint = identifiers.fingerprint;
-    }
-    
-    // 确保有 user_name（通常是必填字段或极重要的关联字段）
-    if (!insertPayload.user_name) {
-      insertPayload.user_name = githubLogin;
-    }
-
-    try {
-      const url = `${env.SUPABASE_URL}/rest/v1/user_analysis`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { ...headers, 'Prefer': 'return=representation' },
-        body: JSON.stringify(insertPayload),
-      });
-      
-      if (res.ok) {
-        const data = await res.json();
-        updatedRow = Array.isArray(data) && data.length > 0 ? data[0] : null;
-      } else {
-        const errText = await res.text();
-        console.error('[GitHub Sync] ❌ 插入记录失败:', errText);
+  try {
+    let result = await doUpsert();
+    if (result.success) return result;
+    if (result.uniqueViolation && identifiers.fingerprint) {
+      const { data: anonymousRows } = await supabase
+        .from('user_analysis')
+        .select('id')
+        .eq('fingerprint', identifiers.fingerprint)
+        .or('user_identity.is.null,user_identity.neq.github')
+        .limit(1);
+      const toDelete = Array.isArray(anonymousRows) && anonymousRows.length > 0 ? anonymousRows[0] : null;
+      if (toDelete && (toDelete as any).id) {
+        const delId = (toDelete as any).id;
+        console.log('[GitHub Sync] 指纹冲突：删除匿名行后重试', delId);
+        await supabase.from('user_analysis').delete().eq('id', delId);
+        result = await doUpsert();
+        if (result.success) return result;
       }
-    } catch (e) {
-      console.error('[GitHub Sync] ❌ 插入记录出现异常:', e);
+      return { success: false, error: 'UNIQUE_VIOLATION_FINGERPRINT', uniqueViolation: true };
     }
+    return { success: false, error: result.error };
+  } catch (err: any) {
+    console.error('[GitHub Sync Error]', err);
+    const msg = err?.message ?? String(err);
+    const uniqueViolation = /duplicate key|unique constraint|violates unique constraint/i.test(msg);
+    return { success: false, error: msg, uniqueViolation };
   }
-
-  if (!updatedRow) {
-    console.warn('[GitHub Sync] ⚠️ 最终无法找到或创建匹配记录进行同步:', { githubLogin, ...identifiers });
-    throw new Error('RECORD_SET_FAILED');
-  }
-
-  console.log('[GitHub Sync] ✅ Supabase 写入成功:', {
-    id: updatedRow.id,
-    user_name: updatedRow.user_name,
-    github_login: updatedRow.github_login,
-    score: payload.github_score,
-  });
 }
 
 /**
@@ -542,13 +477,14 @@ export async function syncGithubCombatStats(
   identifiers: { id?: string; fingerprint?: string } = {}
 ): Promise<{ success: boolean; data?: ProcessedGitHubStats; error?: string; cached?: boolean }> {
   try {
+    console.log('[GitHub Sync] 开始同步任务，目标用户 ID:', identifiers.id);
     if (!accessToken?.trim()) {
       return { success: false, error: 'Missing accessToken' };
     }
     if (!userId?.trim() && !identifiers?.id && !identifiers?.fingerprint) {
       return { success: false, error: 'Missing userId or identifiers (id/fingerprint)' };
     }
-    const supabaseKey = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_KEY;
+    const supabaseKey = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_KEY || env.SUPABASE_ANON_KEY;
     if (!env.SUPABASE_URL || !supabaseKey) {
       return { success: false, error: 'Supabase not configured' };
     }
@@ -569,7 +505,11 @@ export async function syncGithubCombatStats(
       githubLogin,
     });
     if (cooldown.cached && cooldown.data) {
-      return { success: true, data: cooldown.data, cached: true };
+      const data = cooldown.data;
+      if (typeof data === 'object' && data !== null && Object.keys(data).length > 0) {
+        return { success: true, data, cached: true };
+      }
+      // 数据为空，无视冷却时间，强制重新抓取
     }
 
     const start = performance.now();
@@ -579,7 +519,15 @@ export async function syncGithubCombatStats(
       console.warn('[GitHub Sync] Processing exceeded 20ms:', elapsed.toFixed(2), 'ms');
     }
 
-    await persistToSupabase(githubLogin, processedStats, env, identifiers);
+    if (!processedStats?.login || String(processedStats.login).trim() === '') {
+      return { success: false, error: 'Processed stats missing login field, skip write' };
+    }
+
+    console.log('[GitHub Sync] 准备写入 ID:', identifiers.id);
+    const persistResult = await persistToSupabase(githubLogin, processedStats, env, identifiers);
+    if (!persistResult.success) {
+      return { success: false, error: persistResult.error ?? '写入失败' };
+    }
 
     return { success: true, data: processedStats };
   } catch (e: any) {
@@ -592,8 +540,9 @@ export async function syncGithubCombatStats(
     }
     if (e?.code === 'TIMEOUT' || msg.includes('timeout')) {
       const cooldown = await checkSyncCooldown(env, { userId: identifiers?.id, githubLogin: String(userId).trim() });
-      if (cooldown.cached && cooldown.data) {
-        return { success: true, data: cooldown.data, cached: true };
+      const fallbackData = cooldown.data;
+      if (cooldown.cached && fallbackData && typeof fallbackData === 'object' && Object.keys(fallbackData).length > 0) {
+        return { success: true, data: fallbackData, cached: true };
       }
       return { success: false, error: 'GitHub API timeout' };
     }

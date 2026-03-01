@@ -28,6 +28,7 @@
     "wrangler": "^4.60.0"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
     "chart.js": "^4.5.1",
     "graphql": "^16.13.0",
     "graphql-request": "^7.4.0",

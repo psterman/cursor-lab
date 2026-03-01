@@ -3,14 +3,21 @@ name = "cursor-clinical-analysis"
 main = "src/worker/index.ts"
 compatibility_date = "2024-04-03"
 
-# [第一阶段] 环境变量：通过这里统一管理 Supabase
-# 提示：生产环境的 SUPABASE_KEY 建议在 Cloudflare 网页后台设置为 "Secret" 以保证安全
-# 访问路径：Workers & Pages → cursor-clinical-analysis → Settings → Variables → Secrets
+# [第一阶段] 环境变量：Supabase 必须正确配置，否则会出现 No API key found
+# 访问路径：Workers & Pages → cursor-clinical-analysis → Settings → Variables and Secrets
+# - SUPABASE_URL：可在 [vars] 中写死，或与 KEY 一起用 Secret
+# - SUPABASE_KEY：服务端调用 Supabase 时使用（apikey + Authorization: Bearer），必须设置否则 RPC/rest 报 No API key found
+#   建议在后台添加为 Secret：wrangler secret put SUPABASE_KEY
+# - SUPABASE_ANON_KEY：可选，与 SUPABASE_KEY 二选一即可；若只配 ANON 则 buildSupabaseHeaders 会使用 ANON
+# - SUPABASE_SERVICE_ROLE_KEY：GitHub 同步写 user_analysis 时使用（绕过 RLS）。若未在 Cloudflare 后台设置此 Secret，
+#   写入可能因 RLS 权限不足被拒绝并导致 500。请在 Dashboard → Workers → 本项目 → Settings → Variables and Secrets
+#   中添加 Secret：wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 [vars]
 SUPABASE_URL = "https://dtcplfhcgnxdzpigmotb.supabase.co"
-# SUPABASE_KEY 建议在后台添加为 Secret，不要写在明文配置文件里
-# 设置方法：wrangler secret put SUPABASE_KEY
-# GitHub 同步写 user_analysis 时建议使用 Service Role 以绕过 RLS：wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+# 以下 Key 至少配置其一（推荐 Secret）：wrangler secret put SUPABASE_KEY
+# 若 GitHub 战力同步报 500，请同时设置 SUPABASE_SERVICE_ROLE_KEY 或确保 SUPABASE_KEY 为 Service Role 以绕过 RLS
+# SUPABASE_KEY = ""
+# SUPABASE_ANON_KEY = ""
 
 # [第二阶段] KV 绑定：这是缓存"全网均值"的关键
 # 注意：需要在 Cloudflare Dashboard 中创建 KV namespace

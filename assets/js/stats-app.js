@@ -1229,16 +1229,36 @@ var _loc = window.location;
                         : Object.assign({}, window.cachedSummary || {}, data);
                 } catch (e) { /* ignore */ }
 
-                // 国家视图：拉取 get_country_dimension_averages(target_code) 作为雷达图真实数据源
-                let countryDimensionAverages = null;
-                if (!effectiveIsGlobal && countryCode && typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function') {
-                    try {
-                        const dimRes = await supabaseClient.rpc('get_country_dimension_averages', { target_code: countryCode });
-                        if (dimRes && dimRes.data != null) countryDimensionAverages = dimRes.data;
-                    } catch (e) { console.warn('[updateCountryDashboard] get_country_dimension_averages RPC 失败:', e); }
+                // 国家视图：拉取 get_country_dimension_averages（唯一签名 target_country_code）；可选 RPC，任何报错用默认 50 不中断 GitHub 同步
+                const DEFAULT_DIMENSION_AVERAGES = { has_valid_data: false, avg_l: 50, avg_p: 50, avg_d: 50, avg_e: 50, avg_f: 50 };
+                let record;
+                try {
+                    let countryDimensionAverages = null;
+                    if (!effectiveIsGlobal && countryCode) {
+                        try {
+                            const proxyRes = await fetch('/api/supabase/rpc/get_country_dimension_averages', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ target_country_code: countryCode })
+                            });
+                            if (proxyRes.ok) {
+                                const json = await proxyRes.json();
+                                if (json && json.data != null) countryDimensionAverages = json.data;
+                            }
+                        } catch (e) { console.warn('[updateCountryDashboard] get_country_dimension_averages 代理请求失败:', e); }
+                        if (countryDimensionAverages == null && typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function') {
+                            try {
+                                const dimRes = await supabaseClient.rpc('get_country_dimension_averages', { target_country_code: countryCode });
+                                if (dimRes && dimRes.data != null) countryDimensionAverages = dimRes.data;
+                            } catch (e) { console.warn('[updateCountryDashboard] get_country_dimension_averages RPC 失败:', e); }
+                        }
+                        if (countryDimensionAverages == null) countryDimensionAverages = [DEFAULT_DIMENSION_AVERAGES];
+                    }
+                    record = (Array.isArray(countryDimensionAverages) ? countryDimensionAverages[0] : countryDimensionAverages) || DEFAULT_DIMENSION_AVERAGES;
+                } catch (e) {
+                    console.warn('[updateCountryDashboard] get_country_dimension_averages 整体异常，使用默认均值:', e);
+                    record = DEFAULT_DIMENSION_AVERAGES;
                 }
-                // 返回值可能是数组 [{ avg_e: "54.00", has_valid_data: true, ... }]，取首条
-                const record = (Array.isArray(countryDimensionAverages) ? countryDimensionAverages[0] : countryDimensionAverages) || null;
 
                 // =========================
                 // 语义爆发（黑话榜）数据源：国家视图词云仅来源于 get_country_keywords RPC，禁止使用 data.cloud50 或 detailedStats 性格标签
