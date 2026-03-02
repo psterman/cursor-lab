@@ -46,6 +46,7 @@
             languageDna: '语言 DNA',
             activeForDays: '已活跃 {n} 天',
             synced: '同步于',
+            repoUpdatedAt: '仓库更新日期',
             configBadge: 'CONFIG',
             identityConfig: '用户身份配置',
             inbox: '收件箱',
@@ -93,6 +94,7 @@
             languageDna: 'Language DNA',
             activeForDays: 'Active for {n} days',
             synced: 'Synced',
+            repoUpdatedAt: 'Repo updated',
             configBadge: 'CONFIG',
             identityConfig: 'Identity',
             inbox: 'Inbox',
@@ -312,6 +314,22 @@
     }
 
     /**
+     * 格式化仓库更新日期（ISO → 本地化日期或相对时间）
+     */
+    function formatRepoUpdatedAt(isoStr, lang) {
+        lang = lang || getLang({});
+        if (!isoStr) return '--';
+        try {
+            var d = new Date(isoStr);
+            if (isNaN(d.getTime())) return '--';
+            var opts = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' };
+            return d.toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', opts);
+        } catch (e) {
+            return '--';
+        }
+    }
+
+    /**
      * 渲染 Language DNA 渐变条：5px 高，按 Top 5 百分比切分，hover 显示语言名；空数据或异常时显示占位文案
      */
     function renderLangDna(languageDistribution, lang) {
@@ -377,7 +395,8 @@
             totalCodeSize: Number(o.totalCodeSize) || 0,
             primaryLanguage: o.primaryLanguage != null ? String(o.primaryLanguage) : (o.mainLanguage != null ? String(o.mainLanguage) : null),
             newestLanguage: o.newestLanguage != null ? String(o.newestLanguage) : null,
-            closedIssues: Number(o.closedIssues) || 0
+            closedIssues: Number(o.closedIssues) || 0,
+            latest_repo_updated_at: o.latest_repo_updated_at != null ? String(o.latest_repo_updated_at) : ''
         };
     }
 
@@ -433,6 +452,7 @@
         var globalRanking = stats.globalRanking || '--';
         var accountAge = Number(stats.accountAge) || 0;
         var syncedAt = stats.syncedAt || '';
+        var latestRepoUpdatedAt = stats.latest_repo_updated_at || '';
         var orgs = Array.isArray(stats.organizations) ? stats.organizations : [];
         var mergedPRs = Number(stats.mergedPRs) || 0;
         var totalRepoStars = Number(stats.totalRepoStars) || 0;
@@ -558,9 +578,9 @@
             '    <div class="text-[10px] text-zinc-500 uppercase mb-1">' + esc(t(lang, 'languageDna')) + '</div>',
             '    ' + renderLangDna(langDist, lang),
             '  </div>',
-            '  <div class="status-bar flex justify-between text-[10px] text-zinc-500">',
-            '    <span>' + esc(t(lang, 'activeForDays').replace('{n}', accountAge > 0 ? accountAge.toLocaleString() : '0')) + '</span>',
-            '    <span>' + esc(t(lang, 'synced')) + ': ' + formatSyncedAt(syncedAt, lang) + '</span>',
+            '  <div class="status-bar flex flex-col gap-1 text-[10px] text-zinc-500">',
+            '    <div class="flex justify-between"><span>' + esc(t(lang, 'activeForDays').replace('{n}', accountAge > 0 ? accountAge.toLocaleString() : '0')) + '</span><span>' + esc(t(lang, 'synced')) + ': ' + formatSyncedAt(syncedAt, lang) + '</span></div>',
+            '    <div class="repo-updated-at"><span class="uppercase text-zinc-500">' + esc(t(lang, 'repoUpdatedAt')) + '</span>: ' + formatRepoUpdatedAt(latestRepoUpdatedAt, lang) + '</div>',
             '  </div>',
             '</div>',
             '<div class="flex justify-end mt-3">',

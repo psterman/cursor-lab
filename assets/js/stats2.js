@@ -344,9 +344,35 @@
     // --- Script Block ---
 
 
-    /** 赛博战力报告：全局缓存 */
+    /** 赛博战力报告：全局缓存 + localStorage 缓存优先（避免 GitHub 同步延迟卡骨架屏） */
     if (typeof window.userCache === 'undefined') { window.userCache = {}; }
     var USER_CACHE_TTL_MS = 5 * 60 * 1000;
+    var REPORT_REQUEST_TIMEOUT_MS = 8000;
+    var CYBER_REPORT_STORAGE_PREFIX = 'vibe_cyber_report_';
+
+    /** 从 localStorage 读取战力报告缓存（支持 id / fingerprint / user_name 任一 key） */
+    function getReportFromLocalStorage(identifier) {
+        if (!identifier || typeof localStorage === 'undefined') return null;
+        try {
+            var key = CYBER_REPORT_STORAGE_PREFIX + String(identifier).trim();
+            var raw = localStorage.getItem(key);
+            if (!raw) return null;
+            var data = JSON.parse(raw);
+            return data && typeof data === 'object' ? data : null;
+        } catch (_) { return null; }
+    }
+
+    /** 将战力报告写入 localStorage（按 id、fingerprint、user_name 多 key 存，便于点击时任意 identifier 命中） */
+    function saveReportToLocalStorage(dataWithRanks) {
+        if (!dataWithRanks || typeof localStorage === 'undefined') return;
+        try {
+            var json = JSON.stringify(dataWithRanks);
+            var keys = [dataWithRanks.id, dataWithRanks.fingerprint, dataWithRanks.user_name].filter(Boolean);
+            for (var i = 0; i < keys.length; i++) {
+                localStorage.setItem(CYBER_REPORT_STORAGE_PREFIX + keys[i], json);
+            }
+        } catch (_) {}
+    }
 
     function resolveUserIdForReport(identifier, cb) {
         if (!identifier) { cb(null); return; }
@@ -554,6 +580,10 @@
         });
     }
 
+    /**
+     * 打开赛博战力报告弹窗：缓存优先——先用 localStorage 立即渲染，严禁因 GitHub/接口延迟卡骨架屏；
+     * 后台再请求并刷新；请求超时强制释放加载状态。
+     */
     window.openCyberPowerReport = function(identifier) {
         var modal = document.getElementById('user-modal');
         var body = document.getElementById('user-modal-body');
@@ -561,19 +591,43 @@
         var titleEl = document.querySelector('#user-modal .user-modal-content h3');
         if (titleEl) titleEl.textContent = '赛博战力报告';
         modal.classList.remove('hidden');
-        body.innerHTML = getCyberReportSkeletonHtml();
+
+        var cached = getReportFromLocalStorage(identifier);
+        var renderedFromCache = false;
+        if (cached) {
+            renderCyberPowerReportBody(cached);
+            renderedFromCache = true;
+        } else {
+            body.innerHTML = getCyberReportSkeletonHtml();
+        }
+
+        var timeoutId = null;
+        var released = false;
+        function forceReleaseLoading(msg) {
+            if (released) return;
+            released = true;
+            if (timeoutId) clearTimeout(timeoutId);
+            if (!renderedFromCache && body) {
+                body.innerHTML = '<div class="text-zinc-400 text-sm py-4">' + (msg || '加载超时，请稍后重试') + '</div>';
+            }
+        }
+
+        timeoutId = setTimeout(function() { forceReleaseLoading('请求超时，请稍后重试'); }, REPORT_REQUEST_TIMEOUT_MS);
 
         resolveUserIdForReport(identifier, function(userId) {
             if (!userId) {
-                body.innerHTML = '<div class="text-zinc-400 text-sm py-4">未找到对应用户或数据不可用</div>';
+                forceReleaseLoading('未找到对应用户或数据不可用');
                 return;
             }
             fetchUserAnalysisForReport(userId, function(data) {
                 if (!data) {
-                    body.innerHTML = '<div class="text-zinc-400 text-sm py-4">加载失败，请稍后重试</div>';
+                    forceReleaseLoading('加载失败，请稍后重试');
                     return;
                 }
                 fetchAndMergeRanksForReport(userId, data, function(dataWithRanks) {
+                    if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
+                    released = true;
+                    saveReportToLocalStorage(dataWithRanks);
                     renderCyberPowerReportBody(dataWithRanks);
                 });
             });
@@ -20242,7 +20296,7 @@
                                         totalRepoStars: Number(currentUserData.github_stars) || 0,
                                         mergedPRs: 0, commitVelocity: 0, prReviews: 0, activeDays: 0,
                                         publicRepos: 0, privateRepos: 0, languageDistribution: [],
-                                        accountAge: 0, syncedAt: '', organizations: []
+                                        accountAge: 0, syncedAt: '', latest_repo_updated_at: '', organizations: []
                                     };
                                     window.renderGithubCard(fallback, cardOpts);
                                 }
@@ -20253,7 +20307,7 @@
                                     totalRepoStars: Number(currentUserData.github_stars) || 0,
                                     mergedPRs: 0, commitVelocity: 0, prReviews: 0, activeDays: 0,
                                     publicRepos: 0, privateRepos: 0, languageDistribution: [],
-                                    accountAge: 0, syncedAt: '', organizations: []
+                                    accountAge: 0, syncedAt: '', latest_repo_updated_at: '', organizations: []
                                 };
                                 window.renderGithubCard(fallback, cardOpts);
                             });
@@ -20264,7 +20318,7 @@
                                 totalRepoStars: Number(currentUserData.github_stars) || 0,
                                 mergedPRs: 0, commitVelocity: 0, prReviews: 0, activeDays: 0,
                                 publicRepos: 0, privateRepos: 0, languageDistribution: [],
-                                accountAge: 0, syncedAt: '', organizations: []
+                                accountAge: 0, syncedAt: '', latest_repo_updated_at: '', organizations: []
                             };
                             githubCardEl = window.renderGithubCard(fallback, cardOpts);
                         }

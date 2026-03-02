@@ -11644,6 +11644,41 @@
             window.userCache = {};
         }
         const USER_CACHE_TTL_MS = 5 * 60 * 1000; // 5 分钟
+        const REPORT_REQUEST_TIMEOUT_MS = 8000;
+        const CYBER_REPORT_STORAGE_PREFIX = 'vibe_cyber_report_';
+
+        /** 从 localStorage 读取战力报告缓存（支持 id / fingerprint / user_name 任一 key） */
+        function getReportFromLocalStorage(identifier) {
+            if (!identifier || typeof localStorage === 'undefined') return null;
+            try {
+                const key = CYBER_REPORT_STORAGE_PREFIX + String(identifier).trim();
+                const raw = localStorage.getItem(key);
+                if (!raw) return null;
+                const data = JSON.parse(raw);
+                return data && typeof data === 'object' ? data : null;
+            } catch (_) { return null; }
+        }
+
+        /** 将战力报告写入 localStorage（按 id、fingerprint、user_name 多 key 存，便于点击时任意 identifier 命中） */
+        function saveReportToLocalStorage(dataWithRanks) {
+            if (!dataWithRanks || typeof localStorage === 'undefined') return;
+            try {
+                const json = JSON.stringify(dataWithRanks);
+                const keys = [dataWithRanks.id, dataWithRanks.fingerprint, dataWithRanks.user_name].filter(Boolean);
+                for (let i = 0; i < keys.length; i++) {
+                    localStorage.setItem(CYBER_REPORT_STORAGE_PREFIX + keys[i], json);
+                }
+            } catch (_) {}
+        }
+
+        /** 带超时的 Promise：超时后 reject，便于强制释放加载状态 */
+        function withTimeout(promise, ms, msg) {
+            let timeoutId;
+            const timeout = new Promise((_, reject) => {
+                timeoutId = setTimeout(() => reject(new Error(msg || '请求超时')), ms);
+            });
+            return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+        }
 
         /**
          * 解析 identifier 得到 user_analysis 表主键 id（先尝试视为 id，再按 fingerprint / user_name 查询）
@@ -11849,7 +11884,8 @@
         }
 
         /**
-         * 打开赛博战力报告弹窗：先展示骨架屏，再解析 userId、查缓存/请求、渲染
+         * 打开赛博战力报告弹窗：缓存优先——先用 localStorage 立即渲染，严禁因 GitHub/接口延迟卡骨架屏；
+         * 后台再请求并刷新；请求超时强制释放加载状态。
          * @param {string} identifier - user_analysis.id、fingerprint 或 user_name
          */
         window.openCyberPowerReport = async function(identifier) {
@@ -11858,22 +11894,38 @@
             if (!modal || !body) return;
 
             modal.classList.remove('hidden');
-            body.innerHTML = getCyberReportSkeletonHtml();
 
-            const userId = await resolveUserId(identifier);
-            if (!userId) {
-                body.innerHTML = '<div class="text-zinc-400 text-sm py-4">未找到对应用户或数据不可用</div>';
-                return;
+            const cached = getReportFromLocalStorage(identifier);
+            let renderedFromCache = false;
+            if (cached) {
+                renderCyberPowerReportBody(cached);
+                renderedFromCache = true;
+            } else {
+                body.innerHTML = getCyberReportSkeletonHtml();
             }
 
-            const data = await fetchUserAnalysisForReport(userId);
-            if (!data) {
-                body.innerHTML = '<div class="text-zinc-400 text-sm py-4">加载失败，请稍后重试</div>';
-                return;
-            }
+            const runFetch = async () => {
+                const userId = await resolveUserId(identifier);
+                if (!userId) throw new Error('未找到对应用户或数据不可用');
+                const data = await fetchUserAnalysisForReport(userId);
+                if (!data) throw new Error('加载失败，请稍后重试');
+                return fetchAndMergeRanksForReport(userId, data);
+            };
 
-            const dataWithRanks = await fetchAndMergeRanksForReport(userId, data);
-            renderCyberPowerReportBody(dataWithRanks);
+            try {
+                const dataWithRanks = await withTimeout(
+                    runFetch(),
+                    REPORT_REQUEST_TIMEOUT_MS,
+                    '请求超时，请稍后重试'
+                );
+                saveReportToLocalStorage(dataWithRanks);
+                renderCyberPowerReportBody(dataWithRanks);
+            } catch (err) {
+                if (!renderedFromCache && body) {
+                    const msg = err && err.message ? err.message : '加载超时，请稍后重试';
+                    body.innerHTML = '<div class="text-zinc-400 text-sm py-4">' + (typeof msg === 'string' ? msg : '加载超时，请稍后重试') + '</div>';
+                }
+            }
         };
 
         /**

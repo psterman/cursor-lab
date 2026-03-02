@@ -40,6 +40,8 @@ export interface ProcessedGitHubStats {
   organizations: { name: string; avatarUrl: string }[];
   globalRanking: string;
   syncedAt: string;
+  /** 最近一次推送的仓库时间（ISO 字符串），来自 orderBy: PUSHED_AT 的第一条 */
+  latest_repo_updated_at: string | null;
 }
 
 /** GraphQL 查询：仅 read:user + user:email，不请求任何 name/avatarUrl（否则需 read:org） */
@@ -73,6 +75,11 @@ query ViewerCombatStats {
         watchers { totalCount }
         isPrivate
         createdAt
+      }
+    }
+    latestPushedRepos: repositories(first: 1, orderBy: { field: PUSHED_AT, direction: DESC }, ownerAffiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER]) {
+      nodes {
+        pushedAt
       }
     }
     pullRequests(states: [MERGED]) { totalCount }
@@ -345,6 +352,7 @@ function processGitHubData(viewer: any): ProcessedGitHubStats {
   })); // 未请求 read:org 时 orgNodes 为空，organizations 为 []
 
   const globalRanking = calculateGlobalRanking(totalRepoStars);
+  const latestRepoUpdatedAt = viewer?.latestPushedRepos?.nodes?.[0]?.pushedAt ?? null;
 
   return {
     login,
@@ -373,6 +381,7 @@ function processGitHubData(viewer: any): ProcessedGitHubStats {
     organizations,
     globalRanking,
     syncedAt,
+    latest_repo_updated_at: latestRepoUpdatedAt,
   };
 }
 

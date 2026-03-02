@@ -13,6 +13,12 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
 .flex{display:flex}.grid{display:grid}.hidden{display:none}.block{display:block}
 #user-modal.hidden{display:none!important}
 #user-modal:not(.hidden){display:flex!important;align-items:center;justify-content:center;z-index:20000}
+/* 战力报告弹窗滚动条：赛博风格，与左抽屉一致 */
+#user-modal-body::-webkit-scrollbar{width:8px}
+#user-modal-body::-webkit-scrollbar-track{background:rgba(0,0,0,0.4);border-radius:4px}
+#user-modal-body::-webkit-scrollbar-thumb{background:rgba(0,255,65,0.6);border-radius:4px}
+#user-modal-body::-webkit-scrollbar-thumb:hover{background:rgba(0,255,65,0.85)}
+#user-modal-body{scrollbar-width:thin;scrollbar-color:rgba(0,255,65,0.6) rgba(0,0,0,0.4)}
 .h-full{height:100%}.w-full{width:100%}.max-w-\[1600px\]{max-width:1600px}
 .flex-1{flex:1 1 0%}.flex-col{flex-direction:column}
 .items-center{align-items:center}.justify-center{justify-content:center}.justify-between{justify-content:space-between}
