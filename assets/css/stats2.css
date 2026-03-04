@@ -19,6 +19,14 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
 #user-modal-body::-webkit-scrollbar-thumb{background:rgba(0,255,65,0.6);border-radius:4px}
 #user-modal-body::-webkit-scrollbar-thumb:hover{background:rgba(0,255,65,0.85)}
 #user-modal-body{scrollbar-width:thin;scrollbar-color:rgba(0,255,65,0.6) rgba(0,0,0,0.4)}
+#user-modal-body .cyber-report-card{min-height:4.5rem;display:flex;flex-direction:column}
+#user-modal-body .cyber-report-card .truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#user-modal-body .cyber-report-card .flex-shrink-0{flex-shrink:0}
+#user-modal-body .cyber-report-card .min-w-0{min-width:0}
+#user-modal-body .cyber-report-card .flex-1{flex:1 1 0%}
+#user-modal-body .cyber-report-card .min-h-0{min-height:0}
+#user-modal-body .cyber-report-card .text-\[10px\]{font-size:10px}
+#user-modal-body .cyber-report-card .mt-0\.5{margin-top:2px}
 .h-full{height:100%}.w-full{width:100%}.max-w-\[1600px\]{max-width:1600px}
 .flex-1{flex:1 1 0%}.flex-col{flex-direction:column}
 .items-center{align-items:center}.justify-center{justify-content:center}.justify-between{justify-content:space-between}
@@ -1952,6 +1960,11 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
         #systemDays.skeleton,
         #cityCount.skeleton {
             min-height: 1.6rem;
+        }
+
+        /* 数值变动 300ms 渐变，避免生硬替换 */
+        .stat-value-transition {
+            transition: opacity 0.3s ease;
         }
 
         @keyframes scan-sweep {

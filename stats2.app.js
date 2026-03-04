@@ -11816,15 +11816,15 @@
             })() : '—';
 
             const items = [
-                { label: '仓库数', value: gs.publicRepos != null ? String(gs.publicRepos) : '—', rankKeys: ['public_repos_rank', 'publicReposRank'] },
-                { label: '星标总数', value: data.github_stars != null ? Number(data.github_stars).toLocaleString() : '—', rankKeys: ['stars_rank', 'starsRank'] },
-                { label: 'Fork 数量', value: gs.totalForks != null ? String(gs.totalForks) : '—', rankKeys: ['forks_rank', 'forksRank'] },
-                { label: '代码总量', value: formatCodeSize(gs.totalCodeSize), rankKeys: ['code_size_rank', 'codeSizeRank'] },
-                { label: '30日活跃度', value: gs.activeDays != null ? String(gs.activeDays) : '—', rankKeys: ['active_days_rank', 'activeDaysRank'] },
-                { label: '粉丝数量', value: gs.followers != null ? String(gs.followers) : '—', rankKeys: ['followers_rank', 'followersRank'] },
-                { label: '技术广度', value: String(langBreadth), rankKeys: ['lang_breadth_rank', 'langBreadthRank'] },
-                { label: '赛博磕头', value: data.ketao_count != null ? Number(data.ketao_count).toLocaleString() : '—', rankKeys: ['ketao_rank', 'ketaoRank', 'please'] },
-                { label: '上岗天数', value: data.work_days != null ? String(data.work_days) : '—', rankKeys: ['work_days_rank', 'work_days', 'workDaysRank', 'day'] }
+                { label: '仓库数', value: gs.publicRepos != null ? String(gs.publicRepos) : '—', rankKeys: ['public_repos_rank', 'publicReposRank'], source: 'GitHub' },
+                { label: '星标总数', value: data.github_stars != null ? Number(data.github_stars).toLocaleString() : '—', rankKeys: ['stars_rank', 'starsRank'], source: 'GitHub' },
+                { label: 'Fork 数量', value: gs.totalForks != null ? String(gs.totalForks) : '—', rankKeys: ['forks_rank', 'forksRank'], source: 'GitHub' },
+                { label: '代码总量', value: formatCodeSize(gs.totalCodeSize), rankKeys: ['code_size_rank', 'codeSizeRank'], source: 'GitHub' },
+                { label: '30日活跃度', value: gs.activeDays != null ? String(gs.activeDays) : '—', rankKeys: ['active_days_rank', 'activeDaysRank'], source: 'GitHub' },
+                { label: '粉丝数量', value: gs.followers != null ? String(gs.followers) : '—', rankKeys: ['followers_rank', 'followersRank'], source: 'GitHub' },
+                { label: '技术广度', value: String(langBreadth), rankKeys: ['lang_breadth_rank', 'langBreadthRank'], source: 'GitHub' },
+                { label: '赛博磕头', value: data.ketao_count != null ? Number(data.ketao_count).toLocaleString() : '—', rankKeys: ['ketao_rank', 'ketaoRank', 'please'], source: '对话统计' },
+                { label: '上岗天数', value: data.work_days != null ? String(data.work_days) : '—', rankKeys: ['work_days_rank', 'work_days', 'workDaysRank', 'day'], source: '对话统计' }
             ];
 
             let answerContent = '';
@@ -11843,15 +11843,21 @@
 
             let gridHtml = items.map(function (it) {
                 const rankDisplay = getRankDisplay(ranks, it.rankKeys || [it.rankKey]);
-                return '<div class="bg-zinc-900/50 border border-green-500/20 rounded p-3">' +
-                    '<div class="text-zinc-400 text-xs mb-1">' + esc(it.label) + '</div>' +
-                    '<div class="flex items-baseline justify-between gap-2 flex-wrap">' +
-                    '<span class="text-white font-mono text-sm">' + esc(it.value) + '</span>' +
-                    '<span class="font-mono text-xs" style="color:#00ff41">' + esc(rankDisplay) + '</span>' +
+                const isEmpty = it.value === '—';
+                let valueBlock = '<span class="text-white font-mono text-sm truncate block">' + esc(it.value) + '</span>';
+                if (isEmpty) valueBlock += '<span class="text-zinc-500 text-[10px] mt-0.5 block" title="' + esc(it.source || '') + ' 未同步">未同步</span>';
+                return '<div class="cyber-report-card bg-zinc-900/50 border border-green-500/20 rounded p-3 min-h-[4.5rem] flex flex-col">' +
+                    '<div class="text-zinc-400 text-xs mb-1.5 flex-shrink-0">' + esc(it.label) + '</div>' +
+                    '<div class="flex items-start justify-between gap-2 min-h-0 flex-1">' +
+                    '<div class="min-w-0 flex-1">' + valueBlock + '</div>' +
+                    '<span class="font-mono text-xs flex-shrink-0 text-right" style="color:#00ff41;min-width:2.25rem;">' + esc(rankDisplay) + '</span>' +
                     '</div></div>';
             }).join('');
 
-            gridHtml += '<div class="bg-zinc-900/50 border border-green-500/20 rounded p-3"><div class="text-zinc-400 text-xs mb-1">仓库更新日期</div><div class="flex items-baseline justify-between gap-2 flex-wrap"><span class="text-white font-mono text-sm">' + esc(repoUpdatedAt) + '</span><span class="font-mono text-xs" style="color:#00ff41">#--</span></div></div>';
+            const repoUpdatedEmpty = repoUpdatedAt === '—';
+            let repoUpdatedValueBlock = '<span class="text-white font-mono text-sm truncate block">' + esc(repoUpdatedAt) + '</span>';
+            if (repoUpdatedEmpty) repoUpdatedValueBlock += '<span class="text-zinc-500 text-[10px] mt-0.5 block" title="GitHub 未同步">未同步</span>';
+            gridHtml += '<div class="cyber-report-card bg-zinc-900/50 border border-green-500/20 rounded p-3 min-h-[4.5rem] flex flex-col"><div class="text-zinc-400 text-xs mb-1.5 flex-shrink-0">仓库更新日期</div><div class="flex items-start justify-between gap-2 min-h-0 flex-1"><div class="min-w-0 flex-1">' + repoUpdatedValueBlock + '</div><span class="font-mono text-xs flex-shrink-0 text-right" style="color:#00ff41;min-width:2.25rem;">#--</span></div></div>';
 
             const githubUrl = (data.user_name && /^[a-zA-Z0-9-]+$/.test(data.user_name)) ? ('https://github.com/' + encodeURIComponent(data.user_name)) : '';
             const toId = data.user_name || data.fingerprint || data.id || '';

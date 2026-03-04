@@ -513,15 +513,15 @@
         })() : '—';
 
         var items = [
-            { label: '仓库数', value: gs.publicRepos != null ? String(gs.publicRepos) : '—', rankKeys: ['public_repos_rank', 'publicReposRank'] },
-            { label: '星标总数', value: data.github_stars != null ? Number(data.github_stars).toLocaleString() : '—', rankKeys: ['stars_rank', 'starsRank'] },
-            { label: 'Fork 数量', value: gs.totalForks != null ? String(gs.totalForks) : '—', rankKeys: ['forks_rank', 'forksRank'] },
-            { label: '代码总量', value: formatCodeSize(gs.totalCodeSize), rankKeys: ['code_size_rank', 'codeSizeRank'] },
-            { label: '30日活跃度', value: gs.activeDays != null ? String(gs.activeDays) : '—', rankKeys: ['active_days_rank', 'activeDaysRank'] },
-            { label: '粉丝数量', value: gs.followers != null ? String(gs.followers) : '—', rankKeys: ['followers_rank', 'followersRank'] },
-            { label: '技术广度', value: String(langBreadth), rankKeys: ['lang_breadth_rank', 'langBreadthRank'] },
-            { label: '赛博磕头', value: data.ketao_count != null ? Number(data.ketao_count).toLocaleString() : '—', rankKeys: ['ketao_rank', 'ketaoRank', 'please'] },
-            { label: '上岗天数', value: data.work_days != null ? String(data.work_days) : '—', rankKeys: ['work_days_rank', 'work_days', 'workDaysRank', 'day'] }
+            { label: '仓库数', value: gs.publicRepos != null ? String(gs.publicRepos) : '—', rankKeys: ['public_repos_rank', 'publicReposRank'], source: 'GitHub' },
+            { label: '星标总数', value: data.github_stars != null ? Number(data.github_stars).toLocaleString() : '—', rankKeys: ['stars_rank', 'starsRank'], source: 'GitHub' },
+            { label: 'Fork 数量', value: gs.totalForks != null ? String(gs.totalForks) : '—', rankKeys: ['forks_rank', 'forksRank'], source: 'GitHub' },
+            { label: '代码总量', value: formatCodeSize(gs.totalCodeSize), rankKeys: ['code_size_rank', 'codeSizeRank'], source: 'GitHub' },
+            { label: '30日活跃度', value: gs.activeDays != null ? String(gs.activeDays) : '—', rankKeys: ['active_days_rank', 'activeDaysRank'], source: 'GitHub' },
+            { label: '粉丝数量', value: gs.followers != null ? String(gs.followers) : '—', rankKeys: ['followers_rank', 'followersRank'], source: 'GitHub' },
+            { label: '技术广度', value: String(langBreadth), rankKeys: ['lang_breadth_rank', 'langBreadthRank'], source: 'GitHub' },
+            { label: '赛博磕头', value: data.ketao_count != null ? Number(data.ketao_count).toLocaleString() : '—', rankKeys: ['ketao_rank', 'ketaoRank', 'please'], source: '对话统计' },
+            { label: '上岗天数', value: data.work_days != null ? String(data.work_days) : '—', rankKeys: ['work_days_rank', 'work_days', 'workDaysRank', 'day'], source: '对话统计' }
         ];
 
         var answerContent = '';
@@ -540,15 +540,21 @@
 
         var gridHtml = items.map(function(it) {
             var rankDisplay = getRankDisplay(ranks, it.rankKeys || [it.rankKey]);
-            return '<div class="bg-zinc-900/50 border border-green-500/20 rounded p-3">' +
-                '<div class="text-zinc-400 text-xs mb-1">' + escapeHtml(it.label) + '</div>' +
-                '<div class="flex items-baseline justify-between gap-2 flex-wrap">' +
-                '<span class="text-white font-mono text-sm">' + escapeHtml(it.value) + '</span>' +
-                '<span class="font-mono text-xs" style="color:#00ff41">' + escapeHtml(rankDisplay) + '</span>' +
+            var isEmpty = it.value === '—';
+            var valueBlock = '<span class="text-white font-mono text-sm truncate block">' + escapeHtml(it.value) + '</span>';
+            if (isEmpty) valueBlock += '<span class="text-zinc-500 text-[10px] mt-0.5 block" title="' + escapeHtml(it.source || '') + ' 未同步">未同步</span>';
+            return '<div class="cyber-report-card bg-zinc-900/50 border border-green-500/20 rounded p-3 min-h-[4.5rem] flex flex-col">' +
+                '<div class="text-zinc-400 text-xs mb-1.5 flex-shrink-0">' + escapeHtml(it.label) + '</div>' +
+                '<div class="flex items-start justify-between gap-2 min-h-0 flex-1">' +
+                '<div class="min-w-0 flex-1">' + valueBlock + '</div>' +
+                '<span class="font-mono text-xs flex-shrink-0 text-right" style="color:#00ff41;min-width:2.25rem;">' + escapeHtml(rankDisplay) + '</span>' +
                 '</div></div>';
         }).join('');
 
-        gridHtml += '<div class="bg-zinc-900/50 border border-green-500/20 rounded p-3"><div class="text-zinc-400 text-xs mb-1">仓库更新日期</div><div class="flex items-baseline justify-between gap-2 flex-wrap"><span class="text-white font-mono text-sm">' + escapeHtml(repoUpdatedAt) + '</span><span class="font-mono text-xs" style="color:#00ff41">#--</span></div></div>';
+        var repoUpdatedEmpty = repoUpdatedAt === '—';
+        var repoUpdatedValueBlock = '<span class="text-white font-mono text-sm truncate block">' + escapeHtml(repoUpdatedAt) + '</span>';
+        if (repoUpdatedEmpty) repoUpdatedValueBlock += '<span class="text-zinc-500 text-[10px] mt-0.5 block" title="GitHub 未同步">未同步</span>';
+        gridHtml += '<div class="cyber-report-card bg-zinc-900/50 border border-green-500/20 rounded p-3 min-h-[4.5rem] flex flex-col"><div class="text-zinc-400 text-xs mb-1.5 flex-shrink-0">仓库更新日期</div><div class="flex items-start justify-between gap-2 min-h-0 flex-1"><div class="min-w-0 flex-1">' + repoUpdatedValueBlock + '</div><span class="font-mono text-xs flex-shrink-0 text-right" style="color:#00ff41;min-width:2.25rem;">#--</span></div></div>';
 
         var githubUrl = (data.user_name && /^[a-zA-Z0-9-]+$/.test(data.user_name)) ? ('https://github.com/' + encodeURIComponent(data.user_name)) : '';
         var toId = data.user_name || data.fingerprint || data.id || '';
@@ -1330,7 +1336,6 @@
 
             const setValueOrNA = (el, rawValue) => {
                 if (!el) return;
-                // UI 降级：仅将“空/不可解析”视为缺失；0 应该显示为 0（否则会误判为 N/A）
                 if (
                     rawValue === null ||
                     rawValue === undefined ||
@@ -1346,7 +1351,12 @@
                     stopFlash(el);
                     return;
                 }
-                el.textContent = new Intl.NumberFormat('zh-CN').format(n);
+                el.classList.add('stat-value-transition');
+                el.style.opacity = '0';
+                requestAnimationFrame(function() {
+                    el.textContent = new Intl.NumberFormat('zh-CN').format(n);
+                    el.style.opacity = '1';
+                });
             };
 
             /** 国家视图下：有 countryTotals 即执行（含 ai=0 的首人国家）——移除 .animate-pulse，将数值替换为该国真实统计。严禁回退全球数据。 */
@@ -5463,6 +5473,17 @@
             'cityCount',
         ];
 
+        /** 【非破坏性更新】仅当本地无缓存且请求进行中时才显示骨架/占位；有 localStorage 或 __USER_DATA 时保留并显示旧值 */
+        function hasLocalDashboardData() {
+            try {
+                if (window.lastData && typeof window.lastData === 'object') return true;
+                if (typeof localStorage !== 'undefined' && localStorage.getItem('dashboard_data_cache')) return true;
+                if (typeof localStorage !== 'undefined' && localStorage.getItem(VIBE_STATS2_SWR_CACHE_KEY)) return true;
+                if (window.currentUser || window.currentUserData) return true;
+            } catch (e) { /* ignore */ }
+            return false;
+        }
+
         function setLoadingState(isLoading) {
             const scan = document.getElementById('scanLine');
             if (scan) scan.classList.toggle('active', !!isLoading);
@@ -5470,6 +5491,10 @@
             numericIds.forEach((id) => {
                 const el = document.getElementById(id);
                 if (!el) return;
+                if (isLoading && hasLocalDashboardData()) {
+                    el.classList.remove('skeleton');
+                    return;
+                }
                 el.classList.toggle('skeleton', !!isLoading);
                 if (isLoading) {
                     el.textContent = '000000';
@@ -6165,9 +6190,17 @@
             if (rightTitle) rightTitle.textContent = countryDisplayName;
 
             // ============================================
-            // 骨架屏：仅完整打开时显示，summary 回调仅刷新右侧不闪骨架
+            // 【锁定骨架屏】仅当 localStorage 为空且网络请求进行中时显示骨架；只要本地有数严禁显示骨架
             // ============================================
-            if (!summaryOnly) {
+            var hasLocalDrawerData = (function() {
+                try {
+                    if (window.currentUser || window.currentUserData) return true;
+                    if (window.allData && Array.isArray(window.allData) && window.allData.length > 0) return true;
+                    if (typeof localStorage !== 'undefined' && localStorage.getItem(VIBE_STATS2_SWR_CACHE_KEY)) return true;
+                } catch (e) { /* ignore */ }
+                return false;
+            })();
+            if (!summaryOnly && !hasLocalDrawerData) {
                 const skeletonHTML = `
                     <div class="drawer-skeleton-card">
                         <div class="drawer-skeleton-header"></div>
@@ -6187,23 +6220,18 @@
                     </div>
                 `;
                 if (leftBody) {
-                    // 【保护词云卡片】清空 leftBody 前先将词云卡片移到临时位置，清空后再移回来
                     const wordcloudCard = document.getElementById('left-drawer-wordcloud-wrap');
                     const tempHolder = document.createDocumentFragment();
                     if (wordcloudCard && wordcloudCard.parentNode) {
                         tempHolder.appendChild(wordcloudCard);
                     }
-                    
                     leftBody.innerHTML = skeletonHTML;
                     leftBody.classList.add('drawer-loading');
-                    
-                    // 将词云卡片移回 leftBody（保留所有事件监听器）
                     if (tempHolder.childNodes.length > 0) {
                         leftBody.appendChild(tempHolder);
                     }
                 }
                 if (rightBody) {
-                    // 【重构】使用新的全球视图内容容器
                     const contentContainer = document.getElementById('panel-global-content') || rightBody;
                     contentContainer.innerHTML = skeletonHTML + skeletonHTML;
                     contentContainer.classList.add('drawer-loading');
@@ -18009,12 +18037,28 @@
             }
         }
 
+        /** 【数据版本校验】新数据比本地缓存小或为 null 时拒绝用于更新 UI，防止数值被清空 */
+        function applyDataVersionCheck(cached, incoming) {
+            if (!incoming || typeof incoming !== 'object') return cached || null;
+            if (!cached || typeof cached !== 'object') return incoming;
+            var out = Object.assign({}, incoming);
+            var numericKeys = ['totalUsers', 'totalAnalysis', 'totalChars', 'avgPerUser', 'avgPerScan', 'systemDays', 'cityCount', 'total_messages', 'total_chars', 'work_days', 'ketao_count', 'jiafang_count'];
+            numericKeys.forEach(function(k) {
+                var c = cached[k], n = incoming[k];
+                if (n == null || n === '') return;
+                var cn = Number(c), nn = Number(n);
+                if (!Number.isFinite(nn)) return;
+                if (Number.isFinite(cn) && nn < cn) out[k] = c;
+            });
+            return out;
+        }
+
         /**
          * 渲染 Dashboard 数据
          * @param {Object} data - 要渲染的数据对象
          */
         async function renderDashboard(data) {
-            // 保存到全局变量，供语言切换时使用
+            data = applyDataVersionCheck(window.lastData, data) || data;
             window.lastData = data;
             
             // 保存到 localStorage 缓存
@@ -21073,9 +21117,8 @@
                 }
             } catch (e) { /* ignore */ }
 
-            // Tailwind 降级：延迟 100ms 再执行主流程，确保 CDN/扫描稳定，降低初始化 CPU 压力
-            setTimeout(function() {
-            (async function() {
+            // 【统一入口】仅通过 initApp 触发初始化与首次 fetch，避免多处重复 fetch
+            window.initApp = window.initApp || (async function initApp() {
             try {
             loadGitHubUsername();
             try { await loadLanguageConfig(); } catch { /* ignore */ }
@@ -21563,7 +21606,9 @@
                 isGlobalInitializing = false; // 向后兼容
                 window.__allowInitCall = false;
             }
-            })();
+            });
+            setTimeout(function() {
+                if (typeof window.initApp === 'function') window.initApp();
             }, 100);
          };
 
