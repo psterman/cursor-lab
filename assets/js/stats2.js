@@ -514,11 +514,11 @@
         var langBreadth = typeof langDist === 'object' && langDist !== null ? Object.keys(langDist).length : 0;
         var DEFAULT_AVATAR = (typeof window.DEFAULT_AVATAR !== 'undefined') ? window.DEFAULT_AVATAR : '';
 
-        var repoUpdatedAt = (gs.updated_at != null || gs.updatedAt != null) ? (function() {
-            var raw = gs.updated_at || gs.updatedAt;
-            if (typeof raw !== 'string' || raw.length < 10) return '—';
-            try { return new Date(raw).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }); } catch (_) { return raw; }
-        })() : '—';
+        var repoUpdatedAt = (function() {
+            var raw = gs.latest_repo_updated_at || gs.updated_at || gs.updatedAt;
+            if (raw == null || (typeof raw === 'string' && raw.length < 10)) return '—';
+            try { return new Date(raw).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }); } catch (_) { return typeof raw === 'string' ? raw : '—'; }
+        })();
 
         var items = [
             { label: '仓库数', value: gs.publicRepos != null ? String(gs.publicRepos) : '—', rankKeys: ['public_repos_rank', 'publicReposRank'], source: 'GitHub' },
