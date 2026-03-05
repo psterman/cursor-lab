@@ -9,6 +9,14 @@
     /** 本国词云原始数据缓存，与 __countryKeywordsByLevel 同步，便于控制台检查 */
     var __nationalCloudData = null;
     if (typeof window !== 'undefined') window.__nationalCloudData = null;
+    /** 数据就绪监听：__nationalCloudData 为空时入队，fetch 完成后自动触发 */
+    if (typeof window !== 'undefined') window.__nationalCloudReadyCallbacks = window.__nationalCloudReadyCallbacks || [];
+    function flushNationalCloudReadyCallbacks() {
+        var q = window.__nationalCloudReadyCallbacks;
+        if (!Array.isArray(q) || q.length === 0) return;
+        window.__nationalCloudReadyCallbacks = [];
+        q.forEach(function(fn) { try { if (typeof fn === 'function') fn(); } catch (e) { /* ignore */ } });
+    }
     /** 右抽屉本国词云 Tab 中文文案 → 英文 Key，与 API 段位一致（首字母大写） */
     var levelMap = { '小白': 'Novice', '脱发': 'Professional', '霸天': 'Architect' };
 
@@ -2014,6 +2022,7 @@
                                 var resp = payload || data;
                                 window.__countryTotalUsers = Number(resp?.countryTotals?.totalUsers ?? resp?.countryTotals?.total_users ?? resp?.totalUsers ?? resp?.total_users ?? 0) || 0;
                                 console.log('Keywords loaded:', window.__countryKeywordsByLevel);
+                                flushNationalCloudReadyCallbacks();
                             }
                         }
                         // 若 country-summary 未带 identityLevelCloud，再请求 keywords 接口兜底
@@ -2038,6 +2047,7 @@
                                             window.__nationalCloudData = window.__countryKeywordsByLevel;
                                             apiSuccess = true;
                                             console.log('Keywords loaded:', window.__countryKeywordsByLevel);
+                                            flushNationalCloudReadyCallbacks();
                                         }
                                     }
                                 }
@@ -22243,6 +22253,14 @@
                 canvas.setAttribute('style', 'display:block;width:100%;height:100%');
                 container.appendChild(canvas);
             }
+            // 【强制清理旧 Canvas】每次绘制前清空所有词云 canvas，防止多层叠加以致性能下降
+            ['canvas-novice', 'canvas-pro', 'canvas-arch', 'national-identity-cloud-canvas'].forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el && el.getContext) {
+                    var c = el.getContext('2d');
+                    if (c) c.clearRect(0, 0, el.width || 0, el.height || 0);
+                }
+            });
             ['canvas-novice', 'canvas-pro', 'canvas-arch'].forEach(function(id) {
                 var el = document.getElementById(id);
                 if (el) { el.style.display = id === canvasId ? 'block' : 'none'; el.setAttribute('aria-hidden', id === canvasId ? 'false' : 'true'); }
@@ -22250,13 +22268,13 @@
             var empty = document.getElementById('vibe-cloud50-empty');
             var meta = document.getElementById('vibe-cloud50-meta');
             
-            // 【调试】记录当前渲染的国家和等级，便于排查数据混乱问题
-            var currentCountry = window.__selectedCountry || localStorage.getItem('user_selected_country') || localStorage.getItem('user_manual_location') || 'UNKNOWN';
-            console.log('[NationalCloud] 渲染本国词云 - 国家:', currentCountry, '等级:', levelKey, '数据源:', window.__countryKeywordsByLevel ? 'KV缓存' : '空');
-            
             var data = (window.__countryKeywordsByLevel && window.__countryKeywordsByLevel[levelKey]) ? window.__countryKeywordsByLevel[levelKey] : [];
             if (!Array.isArray(data)) data = [];
+            var currentCountry = window.__selectedCountry || localStorage.getItem('user_selected_country') || localStorage.getItem('user_manual_location') || 'UNKNOWN';
+            console.log('[NationalCloud] 渲染本国词云 - 国家:', currentCountry, '等级:', levelKey, '数据源:', window.__countryKeywordsByLevel ? 'KV缓存' : '空');
             if (data.length === 0) {
+                window.__nationalCloudReadyCallbacks = window.__nationalCloudReadyCallbacks || [];
+                window.__nationalCloudReadyCallbacks.push(function() { _renderNationalIdentityCloud(level); });
                 // 【Professional 隔离】当 level 为 Professional 时，仅允许使用 __countryKeywordsByLevel.Professional；空则显示「正在潜伏」，严禁回退到用户 Index 词云或自动拉取
                 if (levelKey === 'Professional') {
                     if (canvas.getContext) {
@@ -22289,6 +22307,7 @@
                         if (hasData) {
                             window.__cloudRetryCount = 0;
                             _renderNationalIdentityCloud(level);
+                            flushNationalCloudReadyCallbacks();
                         } else if (window.__cloudRetryCount < 2) {
                             if (empty) {
                                 empty.textContent = '正在同步词库...';
@@ -22377,6 +22396,8 @@
                 return [x.phrase, size];
             }).filter(function(item) { return item[0].length > 0 && item[1] >= 0; });
             if (list.length === 0) return;
+            var isLeftDrawer = container.closest && container.closest('#left-drawer');
+            var doDraw = function() {
             var width = container.offsetWidth || 0;
             var height = container.offsetHeight || 0;
             if (width <= 0 || height <= 0) {
@@ -22454,6 +22475,8 @@
                     ctx.shadowOffsetY = 0;
                 }
             }
+            };
+            if (isLeftDrawer) setTimeout(doDraw, 300); else doDraw();
         }
 
         function _renderCloud50(region, list) {
@@ -22766,6 +22789,7 @@
             window.__countryKeywordsByLevel = cached.countryKeywordsByLevel;
             window.__nationalCloudData = cached.countryKeywordsByLevel;
             window.__latestTop10 = cached.top10Data;
+            flushNationalCloudReadyCallbacks();
             
             var currentLevel = window.__currentNationalIdentityLevel || 'Architect';
             var renderFn = window._renderNationalIdentityCloud || (typeof _renderNationalIdentityCloud !== 'undefined' ? _renderNationalIdentityCloud : null);
@@ -22785,6 +22809,15 @@
         }
 
         async function loadWordCloud() {
+            // 【强制清理旧 Canvas】每次 init 前清空词云容器内所有 canvas，防止多层叠加以致性能下降
+            var wcContainer = document.getElementById('vibe-cloud50-container');
+            if (wcContainer) {
+                var canvases = wcContainer.querySelectorAll('canvas');
+                canvases.forEach(function(c) {
+                    var ctx = c.getContext && c.getContext('2d');
+                    if (ctx) ctx.clearRect(0, 0, c.width || 0, c.height || 0);
+                });
+            }
             // 新版：语义爆发卡片（Top10 + Cloud50）
             try {
                 const cc = String(currentDrawerCountry?.code || '').trim().toUpperCase();
@@ -23067,6 +23100,7 @@
         const initWordCloud = loadWordCloud;
         window.initWordCloud = initWordCloud;
         window.loadWordCloud = loadWordCloud;
+        window.__wordCloudManagedByStats2 = true;
 
         // Debug switch init (Semantic Burst)
         try {

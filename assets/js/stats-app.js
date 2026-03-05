@@ -6823,13 +6823,7 @@ var _loc = window.location;
                 // ignore
             }
 
-            // 初始化词云：非核心图表使用 requestIdleCallback，避免滚动卡顿
-            try {
-                const ric = window.requestIdleCallback || ((cb) => setTimeout(() => cb({ timeRemaining: () => 0 }), 0));
-                ric(() => { try { loadWordCloud(); } catch (e) { /* ignore */ } }, { timeout: 1500 });
-            } catch (e) {
-                try { setTimeout(() => { loadWordCloud(); }, 50); } catch (e2) { /* ignore */ }
-            }
+            // 【唯一渲染入口】词云由 stats2.js 统一管理，此处不再自执行 loadWordCloud
 
             // 将“暂无数据”的占位渲染出来，避免空白
             const realtimeBox = q('#rtRealtimeList');
@@ -19640,6 +19634,11 @@ var _loc = window.location;
         };
 
         async function loadWordCloud() {
+            // 【委托 stats2】词云由 stats2.js 统一管理时，仅转发调用，不重复执行
+            if (window.__wordCloudManagedByStats2 && typeof window.loadWordCloud === 'function') {
+                try { return await window.loadWordCloud(); } catch (e) { /* ignore */ }
+                return;
+            }
             // 新版：语义爆发卡片（Top10 + Cloud50）
             try {
                 const cc = String(currentDrawerCountry?.code || '').trim().toUpperCase();
