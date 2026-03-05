@@ -416,6 +416,8 @@ async function persistToSupabase(
     github_stats: stats,
     github_login: githubLogin,
     github_synced_at: syncedAt,
+    github_stars: stats.totalRepoStars ?? 0,
+    github_forks: stats.totalForks ?? 0,
   };
   if (identifiers.id != null && identifiers.id !== '' && /^[0-9a-f-]{36}$/i.test(identifiers.id)) {
     data.id = identifiers.id;

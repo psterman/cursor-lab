@@ -13,6 +13,159 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
 .flex{display:flex}.grid{display:grid}.hidden{display:none}.block{display:block}
 #user-modal.hidden{display:none!important}
 #user-modal:not(.hidden){display:flex!important;align-items:center;justify-content:center;z-index:20000}
+
+/* 强制性全屏 gate 遮罩：赛博朋克风格，无关闭按钮，双重状态完成后由 JS 静默移除 */
+.stats2-gate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: #030304;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  overflow: hidden;
+}
+.stats2-gate-overlay::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 255, 65, 0.02) 2px,
+    rgba(0, 255, 65, 0.02) 4px
+  );
+  pointer-events: none;
+}
+.stats2-gate-overlay::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 80% 50% at 50% 50%, rgba(0, 255, 65, 0.06) 0%, transparent 60%);
+  pointer-events: none;
+}
+.stats2-gate-overlay.stats2-gate-removed { display: none !important; }
+.stats2-gate-overlay-inner {
+  position: relative;
+  z-index: 1;
+  width: 90%;
+  max-width: 520px;
+  max-height: 85vh;
+  background: linear-gradient(165deg, rgba(8, 12, 10, 0.98) 0%, rgba(2, 6, 4, 0.99) 100%);
+  border: 1px solid rgba(0, 255, 65, 0.5);
+  border-radius: 0;
+  padding: 24px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow:
+    0 0 20px rgba(0, 255, 65, 0.15),
+    0 0 40px rgba(0, 255, 65, 0.08),
+    inset 0 0 60px rgba(0, 255, 65, 0.03);
+}
+.stats2-gate-overlay-inner::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(0, 255, 65, 0.8), transparent);
+  opacity: 0.8;
+}
+.stats2-gate-title {
+  color: #00ff41;
+  font-family: var(--font-mono-stack), monospace;
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 16px 0;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  text-shadow: 0 0 10px rgba(0, 255, 65, 0.6);
+}
+.stats2-gate-search {
+  width: 100%;
+  padding: 10px 14px;
+  background: rgba(0, 8, 4, 0.8);
+  border: 1px solid rgba(0, 255, 65, 0.4);
+  color: #00ff41;
+  font-family: var(--font-mono-stack), monospace;
+  font-size: 12px;
+  margin-bottom: 12px;
+  outline: none;
+  box-shadow: 0 0 8px rgba(0, 255, 65, 0.1);
+}
+.stats2-gate-search::placeholder {
+  color: rgba(0, 255, 65, 0.45);
+}
+.stats2-gate-search:focus {
+  border-color: rgba(0, 255, 65, 0.7);
+  box-shadow: 0 0 12px rgba(0, 255, 65, 0.2);
+}
+.stats2-gate-list {
+  flex: 1;
+  overflow-y: auto;
+  max-height: calc(85vh - 180px);
+  min-height: 200px;
+  background: rgba(0, 4, 2, 0.5);
+  border: 1px solid rgba(0, 255, 65, 0.2);
+  padding: 4px 0;
+}
+.stats2-gate-list::-webkit-scrollbar { width: 6px; }
+.stats2-gate-list::-webkit-scrollbar-track { background: rgba(0, 255, 65, 0.08); }
+.stats2-gate-list::-webkit-scrollbar-thumb { background: rgba(0, 255, 65, 0.35); border-radius: 3px; }
+.stats2-gate-list .country-item {
+  padding: 8px 14px;
+  color: rgba(0, 255, 65, 0.85);
+  font-family: var(--font-mono-stack), monospace;
+  font-size: 12px;
+  border-left: 2px solid transparent;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.stats2-gate-list .country-item:hover {
+  background: rgba(0, 255, 65, 0.08);
+  color: #00ff41;
+}
+.stats2-gate-list .country-item.selected {
+  background: rgba(0, 255, 65, 0.12);
+  border-left-color: #00ff41;
+  color: #00ff41;
+  box-shadow: inset 0 0 20px rgba(0, 255, 65, 0.06);
+}
+.stats2-gate-github-btn {
+  width: 100%;
+  padding: 14px 18px;
+  background: rgba(0, 255, 65, 0.08);
+  border: 1px solid rgba(0, 255, 65, 0.55);
+  color: #00ff41;
+  font-family: var(--font-mono-stack), monospace;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  border-radius: 0;
+  margin-top: 18px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  transition: background 0.2s, box-shadow 0.2s, border-color 0.2s;
+  box-shadow: 0 0 12px rgba(0, 255, 65, 0.15);
+}
+.stats2-gate-github-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  border-color: rgba(0, 255, 65, 0.25);
+  box-shadow: none;
+}
+.stats2-gate-github-btn:not(:disabled):hover {
+  background: rgba(0, 255, 65, 0.18);
+  box-shadow: 0 0 20px rgba(0, 255, 65, 0.25);
+  border-color: rgba(0, 255, 65, 0.8);
+}
+.stats2-gate-github-btn:not(:disabled):active {
+  background: rgba(0, 255, 65, 0.25);
+}
 /* 战力报告弹窗滚动条：赛博风格，与左抽屉一致 */
 #user-modal-body::-webkit-scrollbar{width:8px}
 #user-modal-body::-webkit-scrollbar-track{background:rgba(0,0,0,0.4);border-radius:4px}

@@ -309,43 +309,101 @@
 
     // --- Script Block ---
 
-    // 【一体化选籍+登录拦截】渲染统计数据前检查：无 selected_country 或无 supabase_session 则强制显示国家选择弹窗
+    // 【强制性 gate】全屏遮罩无关闭按钮；国家存 localStorage，登录态用 Supabase Session；双重满足时静默销毁遮罩，不弹 alert/confirm
     (function() {
-        function closeCountryPickerModal() {
-            var modal = document.getElementById('country-selector-modal');
-            if (modal) modal.style.display = 'none';
+        function getStoredCountry() {
+            try {
+                var v = localStorage.getItem('selected_country') || localStorage.getItem('user_selected_country') || '';
+                return (v && String(v).trim().length >= 2) ? String(v).trim().toUpperCase() : null;
+            } catch (e) { return null; }
+        }
+        function hideGateOverlay() {
+            var el = document.getElementById('stats2-gate-overlay');
+            if (el) {
+                el.classList.add('stats2-gate-removed');
+                el.setAttribute('aria-hidden', 'true');
+            }
             try { document.body.style.overflow = ''; document.documentElement.style.overflow = ''; } catch (e) {}
+        }
+        function checkGatePassed(session) {
+            var country = getStoredCountry();
+            var hasSession = !!(session && session.user);
+            if (country && hasSession) {
+                try {
+                    window.currentCountryCode = country;
+                    localStorage.setItem('user_country_fixed', country);
+                    localStorage.setItem('selected_country', country);
+                    localStorage.setItem('user_selected_country', country);
+                } catch (e) {}
+                hideGateOverlay();
+                return true;
+            }
+            return false;
+        }
+        function runGateCheck() {
+            var overlay = document.getElementById('stats2-gate-overlay');
+            if (!overlay || overlay.classList.contains('stats2-gate-removed')) return;
+            var country = getStoredCountry();
+            if (!country) {
+                window.__countryPickerForced = true;
+                window.__countrySelectorSelectedCode = '';
+                overlay.classList.remove('stats2-gate-removed');
+                overlay.setAttribute('aria-hidden', 'false');
+                try { document.body.style.overflow = 'hidden'; document.documentElement.style.overflow = 'hidden'; } catch (e) {}
+                return;
+            }
+            var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+            if (!sb || typeof sb.auth !== 'object') return;
+            sb.auth.getSession().then(function(r) {
+                var session = (r && r.data && r.data.session) ? r.data.session : null;
+                if (checkGatePassed(session)) return;
+                overlay.classList.remove('stats2-gate-removed');
+                overlay.setAttribute('aria-hidden', 'false');
+                try { document.body.style.overflow = 'hidden'; document.documentElement.style.overflow = 'hidden'; } catch (e) {}
+            }).catch(function() {});
+        }
+        function run() {
+            var overlay = document.getElementById('stats2-gate-overlay');
+            if (!overlay) return;
+            var country = getStoredCountry();
+            if (country) {
+                try {
+                    window.currentCountryCode = country;
+                    localStorage.setItem('user_country_fixed', country);
+                } catch (e) {}
+            }
+            overlay.classList.remove('stats2-gate-removed');
+            overlay.setAttribute('aria-hidden', 'false');
+            try { document.body.style.overflow = 'hidden'; document.documentElement.style.overflow = 'hidden'; } catch (e) {}
+            window.__countryPickerForced = true;
+            window.__countrySelectorSelectedCode = '';
+            var poll = setInterval(function() {
+                var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+                if (sb && typeof sb.auth !== 'undefined') {
+                    clearInterval(poll);
+                    runGateCheck();
+                    sb.auth.onAuthStateChange(function(event, session) {
+                        if (session) runGateCheck();
+                    });
+                }
+            }, 200);
+            setTimeout(function() { clearInterval(poll); }, 15000);
         }
         document.addEventListener('click', function(e) {
             var btn = e.target && (e.target.id === 'country-selector-close' || (e.target.closest && e.target.closest('#country-selector-close')));
-            if (btn) { closeCountryPickerModal(); }
+            if (btn) {
+                var modal = document.getElementById('country-selector-modal');
+                if (modal) modal.style.display = 'none';
+                try { document.body.style.overflow = ''; document.documentElement.style.overflow = ''; } catch (e) {}
+            }
         });
-        function run() {
-            var selectedCountry = null;
-            try { selectedCountry = localStorage.getItem('selected_country'); } catch (e) {}
-            if (selectedCountry && String(selectedCountry).trim().length >= 2) {
-                try {
-                    window.currentCountryCode = String(selectedCountry).trim().toUpperCase();
-                    localStorage.setItem('user_country_fixed', window.currentCountryCode);
-                } catch (e) {}
-                return;
-            }
-            var modal = document.getElementById('country-selector-modal');
-            if (modal) {
-                window.__countryPickerForced = true;
-                window.__countrySelectorSelectedCode = '';
-                modal.style.display = 'block';
-                modal.style.position = 'fixed';
-                modal.style.top = '0'; modal.style.left = '0'; modal.style.right = '0'; modal.style.bottom = '0';
-                modal.style.zIndex = '200';
-                try { document.body.style.overflow = 'hidden'; document.documentElement.style.overflow = 'hidden'; } catch (e) {}
-            }
-        }
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', run);
         } else {
             run();
         }
+        window.runGateCheck = runGateCheck;
+        window.hideGateOverlay = hideGateOverlay;
     })();
     
 
@@ -526,7 +584,7 @@
 
         var items = [
             { label: '仓库数', value: gs.publicRepos != null ? String(gs.publicRepos) : '—', rankKeys: ['public_repos_rank', 'publicReposRank'], source: 'GitHub' },
-            { label: '星标总数', value: data.github_stars != null ? Number(data.github_stars).toLocaleString() : '—', rankKeys: ['stars_rank', 'starsRank'], source: 'GitHub' },
+            { label: '星标总数', value: gs.totalRepoStars != null ? Number(gs.totalRepoStars).toLocaleString() : (data.github_stars != null ? Number(data.github_stars).toLocaleString() : '—'), rankKeys: ['stars_rank', 'starsRank'], source: 'GitHub' },
             { label: 'Fork 数量', value: gs.totalForks != null ? String(gs.totalForks) : '—', rankKeys: ['forks_rank', 'forksRank'], source: 'GitHub' },
             { label: '代码总量', value: formatCodeSize(gs.totalCodeSize), rankKeys: ['code_size_rank', 'codeSizeRank'], source: 'GitHub' },
             { label: '30日活跃度', value: gs.activeDays != null ? String(gs.activeDays) : '—', rankKeys: ['active_days_rank', 'activeDaysRank'], source: 'GitHub' },
@@ -15998,17 +16056,12 @@
          */
         async function loginWithGitHub() {
             if (!supabaseClient) {
-                console.error('[Auth] ❌ Supabase 客户端未初始化');
-                alert('数据库连接未就绪，请稍候再试');
+                console.warn('[Auth] Supabase 客户端未就绪，请稍候');
                 return;
             }
-            
             try {
                 console.log('[Auth] 🚀 开始 GitHub OAuth 登录流程...');
-                // 重定向地址必须与 Supabase 控制台 → Authentication → URL Configuration → Redirect URLs 中配置一致
                 const redirectTo = _loc.origin + _loc.pathname;
-                console.log('[Auth] 重定向地址（请在 Supabase 中已添加）:', redirectTo);
-                
                 const { data, error } = await supabaseClient.auth.signInWithOAuth({
                     provider: 'github',
                     options: {
@@ -16016,21 +16069,15 @@
                         scopes: 'read:user user:email',
                     }
                 });
-                
                 if (error) {
-                    console.error('[Auth] ❌ GitHub OAuth 登录失败:', error);
-                    alert(`登录失败: ${error.message}`);
+                    console.warn('[Auth] GitHub OAuth 登录失败:', error.message);
                     return;
                 }
-                
                 if (data?.url) {
                     window.location.href = data.url;
-                } else {
-                    console.log('[Auth] ✅ 登录请求已发送，等待重定向...');
                 }
             } catch (error) {
-                console.error('[Auth] ❌ GitHub OAuth 登录异常:', error);
-                alert(`登录失败: ${error.message || '未知错误'}`);
+                console.warn('[Auth] GitHub OAuth 异常:', error && error.message ? error.message : '未知错误');
             }
         }
         window.loginWithGitHub = loginWithGitHub;
@@ -20323,7 +20370,7 @@
                             }
                         }
                         if (!token || !token.length) {
-                            alert('需要重新使用 GitHub 登录以授权战力同步');
+                            console.warn('[GitHub Sync] 无 accessToken，跳过战力同步');
                             return { success: false, error: 'accessToken 必填' };
                         }
                         return fetch(apiBase ? apiBase + '/api/github/sync' : '/api/github/sync', {
@@ -20349,7 +20396,7 @@
                                 } catch (e) {}
                                 var isUniqueViolation = errMsg.indexOf('UNIQUE_VIOLATION_FINGERPRINT') !== -1 || /duplicate key|unique constraint|violates unique constraint/i.test(errMsg);
                                 var tip = isUniqueViolation ? '正在合并游客数据，请稍后刷新。' : (errMsg.indexOf('401') !== -1 || errMsg.indexOf('Bad credentials') !== -1) ? 'GitHub 凭证无效（401），请退出后重新用 GitHub 登录一次以刷新授权。' : (errMsg.indexOf('RLS') !== -1 || errMsg.indexOf('permission') !== -1) ? '数据库权限受限（RLS 拦截），请检查服务端配置。' : (errMsg.indexOf('Token') !== -1 || errMsg.indexOf('accessToken') !== -1) ? 'Token 失效或未授权，请重新使用 GitHub 登录。' : errMsg;
-                                alert('战力同步失败：' + tip);
+                                console.warn('[GitHub Sync] 战力同步失败:', tip);
                                 return { success: false, status: 'error', error: text || ('HTTP ' + r.status) };
                             }
                             var parsed;
@@ -20362,7 +20409,7 @@
                                 var errStr = String(parsed.error || '');
                                 var isUniqueViolation = errStr.indexOf('UNIQUE_VIOLATION_FINGERPRINT') !== -1 || /duplicate key|unique constraint|violates unique constraint/i.test(errStr);
                                 var tip = isUniqueViolation ? '正在合并游客数据，请稍后刷新。' : (errStr.indexOf('RLS') !== -1 || errStr.indexOf('permission') !== -1 || errStr.indexOf('Database error') !== -1) ? '数据库权限受限（可能为 RLS 拦截），请检查服务端 SUPABASE_SERVICE_ROLE_KEY。' : (errStr.indexOf('401') !== -1 || errStr.indexOf('Bad credentials') !== -1) ? 'GitHub 凭证无效（401），请退出后重新使用 GitHub 登录一次以刷新授权。' : (errStr.indexOf('Token') !== -1 || errStr.indexOf('accessToken') !== -1) ? 'Token 失效或未授权，请重新使用 GitHub 登录。' : (parsed.error || '未知错误');
-                                alert('战力同步失败：' + tip);
+                                console.warn('[GitHub Sync] 战力同步失败:', tip);
                             }
                             return parsed;
                         });
@@ -24424,7 +24471,7 @@ document.addEventListener('click', function(e) {
 
     var supabase = (typeof supabaseClient !== 'undefined' && supabaseClient) ? supabaseClient : (window.supabase || null);
     if (!supabase || typeof supabase.auth !== 'object') {
-        alert('请先登录 GitHub');
+        console.warn('[Sync] 请先登录 GitHub');
         return;
     }
 
@@ -24435,7 +24482,7 @@ document.addEventListener('click', function(e) {
     supabase.auth.getSession().then(function(sess) {
         var session = sess && sess.data && sess.data.session;
         if (!session || !session.user) {
-            alert('请先登录 GitHub');
+            console.warn('[Sync] 请先登录 GitHub');
             btn.disabled = false;
             btn.textContent = originalText;
             return Promise.reject(new Error('Not logged in'));
@@ -24447,11 +24494,13 @@ document.addEventListener('click', function(e) {
             body: { userId: userId, providerToken: providerToken }
         }).then(function(res) {
             if (res && res.error) {
-                console.error('[SyncGitHub] Error:', res.error);
-                alert('同步失败: ' + (res.error.message || res.error));
+                console.warn('[SyncGitHub] 同步失败:', res.error.message || res.error);
+                btn.disabled = false;
+                btn.textContent = originalText;
             } else if (res && res.data && res.data.error) {
-                console.error('[SyncGitHub] Data error:', res.data.error);
-                alert('同步失败: ' + res.data.error);
+                console.warn('[SyncGitHub] 同步失败:', res.data.error);
+                btn.disabled = false;
+                btn.textContent = originalText;
             } else {
                 console.log('[SyncGitHub] Success:', res && res.data);
                 if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
