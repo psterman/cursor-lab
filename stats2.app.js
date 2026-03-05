@@ -11809,15 +11809,15 @@
             const langDist = gs.languageDistribution || (gs.languageDistribution !== undefined ? gs.languageDistribution : {});
             const langBreadth = typeof langDist === 'object' && langDist !== null ? Object.keys(langDist).length : 0;
 
-            const repoUpdatedAt = (gs.updated_at != null || gs.updatedAt != null) ? (function() {
-                const raw = gs.updated_at || gs.updatedAt;
+            const repoUpdatedAt = (gs.latest_repo_updated_at != null || gs.updated_at != null || gs.updatedAt != null) ? (function() {
+                const raw = gs.latest_repo_updated_at || gs.updated_at || gs.updatedAt;
                 if (typeof raw !== 'string' || raw.length < 10) return '—';
                 try { return new Date(raw).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }); } catch (_) { return raw; }
             })() : '—';
 
             const items = [
                 { label: '仓库数', value: gs.publicRepos != null ? String(gs.publicRepos) : '—', rankKeys: ['public_repos_rank', 'publicReposRank'], source: 'GitHub' },
-                { label: '星标总数', value: data.github_stars != null ? Number(data.github_stars).toLocaleString() : '—', rankKeys: ['stars_rank', 'starsRank'], source: 'GitHub' },
+                { label: '星标总数', value: gs.totalRepoStars != null ? Number(gs.totalRepoStars).toLocaleString() : (data.github_stars != null ? Number(data.github_stars).toLocaleString() : '—'), rankKeys: ['stars_rank', 'starsRank'], source: 'GitHub' },
                 { label: 'Fork 数量', value: gs.totalForks != null ? String(gs.totalForks) : '—', rankKeys: ['forks_rank', 'forksRank'], source: 'GitHub' },
                 { label: '代码总量', value: formatCodeSize(gs.totalCodeSize), rankKeys: ['code_size_rank', 'codeSizeRank'], source: 'GitHub' },
                 { label: '30日活跃度', value: gs.activeDays != null ? String(gs.activeDays) : '—', rankKeys: ['active_days_rank', 'activeDaysRank'], source: 'GitHub' },
@@ -13184,11 +13184,8 @@
                 });
 
                 card.appendChild(listContainer);
-                container.appendChild(card)
-                    </div>
-                `;
+                container.appendChild(card);
             });
-            container.innerHTML = html;
             console.log('[GreenLaddersToContainer] ✅ HTML 已渲染到容器');
         }
         if (typeof window !== 'undefined') {

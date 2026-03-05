@@ -44,7 +44,7 @@ export interface ProcessedGitHubStats {
   latest_repo_updated_at: string | null;
 }
 
-/** GraphQL 查询：仅 read:user + user:email，不请求任何 name/avatarUrl（否则需 read:org） */
+/** GraphQL 查询：仅 read:user + user:email，不请求 name/avatarUrl/organizations（否则需 read:org） */
 const GITHUB_VIEWER_QUERY = `
 query ViewerCombatStats {
   viewer {
@@ -75,6 +75,13 @@ query ViewerCombatStats {
         watchers { totalCount }
         isPrivate
         createdAt
+        primaryLanguage { name }
+        languages(first: 10, orderBy: { field: SIZE, direction: DESC }) {
+          edges {
+            size
+            node { name }
+          }
+        }
       }
     }
     latestPushedRepos: repositories(first: 1, orderBy: { field: PUSHED_AT, direction: DESC }, ownerAffiliations: [OWNER, COLLABORATOR, ORGANIZATION_MEMBER]) {

@@ -147,7 +147,62 @@ var _loc = window.location;
             modal.addEventListener('click', function(ev) { if (ev.target === modal) modal.classList.add('hidden'); });
         }
     });
-    
+
+    // GitHub 战力同步按钮：调用 Edge Function，需传入 session.provider_token
+    document.addEventListener('click', function(e) {
+        var btn = e.target.id === 'sync-github-btn' ? e.target : (e.target.closest && e.target.closest('#sync-github-btn'));
+        if (!btn) return;
+        e.preventDefault();
+        var supabase = (typeof supabaseClient !== 'undefined' && supabaseClient) ? supabaseClient : (window.supabase || null);
+        if (!supabase || typeof supabase.functions.invoke !== 'function') {
+            alert(typeof getI18nText === 'function' ? (getI18nText('github.need_login') || '请先登录') : '请先登录');
+            return;
+        }
+        var userId = (window.currentUser && window.currentUser.id) ? window.currentUser.id : (window.currentUserData && window.currentUserData.id ? window.currentUserData.id : null);
+        if (!userId) {
+            alert(typeof getI18nText === 'function' ? (getI18nText('github.need_login') || '请先登录') : '请先登录');
+            return;
+        }
+        btn.disabled = true;
+        btn.textContent = (typeof getI18nText === 'function' && getI18nText('github.syncing')) ? getI18nText('github.syncing') : '同步中...';
+        supabase.auth.getSession().then(function(sess) {
+            var providerToken = (sess.data && sess.data.session && sess.data.session.provider_token) ? sess.data.session.provider_token : '';
+            return supabase.functions.invoke('sync-github-stats', { body: { userId: userId, providerToken: providerToken } });
+        }).then(function(res) {
+            var err = res && res.error;
+            var data = res && res.data;
+            if (err) {
+                alert(err.message || (typeof getI18nText === 'function' ? (getI18nText('github.sync_fail') || '同步失败') : '同步失败'));
+            } else if (data && data.error) {
+                alert(data.error);
+            } else {
+                if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
+                var leftBody = document.getElementById('left-drawer-body');
+                var cu = window.currentUser || window.currentUserData;
+                if (supabase && typeof supabase.from === 'function' && userId && leftBody && typeof renderUserStatsCards === 'function') {
+                    supabase.from('user_analysis').select('github_stars,github_forks,github_watchers,github_followers,github_score,github_synced_at,github_login').eq('id', userId).single().then(function(r) {
+                        if (r.data && cu) {
+                            var merged = Object.assign({}, cu, r.data);
+                            try { window.currentUser = merged; window.currentUserData = merged; } catch (e) {}
+                            renderUserStatsCards(leftBody, getBestUserRecordForStats(merged));
+                        } else if (cu) {
+                            renderUserStatsCards(leftBody, getBestUserRecordForStats(cu));
+                        }
+                    }).catch(function() {
+                        if (cu) renderUserStatsCards(leftBody, getBestUserRecordForStats(cu));
+                    });
+                } else if (leftBody && cu) {
+                    renderUserStatsCards(leftBody, getBestUserRecordForStats(cu));
+                }
+            }
+            btn.disabled = false;
+            btn.textContent = (typeof getI18nText === 'function' && getI18nText('github.sync')) ? getI18nText('github.sync') : '刷新';
+        }).catch(function(e) {
+            alert(e && e.message ? e.message : (typeof getI18nText === 'function' ? (getI18nText('github.sync_fail') || '同步失败') : '同步失败'));
+            btn.disabled = false;
+            btn.textContent = (typeof getI18nText === 'function' && getI18nText('github.sync')) ? getI18nText('github.sync') : '刷新';
+        });
+    });
 
     // --- Script Block ---
 
@@ -1174,16 +1229,36 @@ var _loc = window.location;
                         : Object.assign({}, window.cachedSummary || {}, data);
                 } catch (e) { /* ignore */ }
 
-                // 国家视图：拉取 get_country_dimension_averages(target_code) 作为雷达图真实数据源
-                let countryDimensionAverages = null;
-                if (!effectiveIsGlobal && countryCode && typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function') {
-                    try {
-                        const dimRes = await supabaseClient.rpc('get_country_dimension_averages', { target_code: countryCode });
-                        if (dimRes && dimRes.data != null) countryDimensionAverages = dimRes.data;
-                    } catch (e) { console.warn('[updateCountryDashboard] get_country_dimension_averages RPC 失败:', e); }
+                // 国家视图：拉取 get_country_dimension_averages（唯一签名 target_country_code）；可选 RPC，任何报错用默认 50 不中断 GitHub 同步
+                const DEFAULT_DIMENSION_AVERAGES = { has_valid_data: false, avg_l: 50, avg_p: 50, avg_d: 50, avg_e: 50, avg_f: 50 };
+                let record;
+                try {
+                    let countryDimensionAverages = null;
+                    if (!effectiveIsGlobal && countryCode) {
+                        try {
+                            const proxyRes = await fetch('/api/supabase/rpc/get_country_dimension_averages', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ target_country_code: countryCode })
+                            });
+                            if (proxyRes.ok) {
+                                const json = await proxyRes.json();
+                                if (json && json.data != null) countryDimensionAverages = json.data;
+                            }
+                        } catch (e) { console.warn('[updateCountryDashboard] get_country_dimension_averages 代理请求失败:', e); }
+                        if (countryDimensionAverages == null && typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function') {
+                            try {
+                                const dimRes = await supabaseClient.rpc('get_country_dimension_averages', { target_country_code: countryCode });
+                                if (dimRes && dimRes.data != null) countryDimensionAverages = dimRes.data;
+                            } catch (e) { console.warn('[updateCountryDashboard] get_country_dimension_averages RPC 失败:', e); }
+                        }
+                        if (countryDimensionAverages == null) countryDimensionAverages = [DEFAULT_DIMENSION_AVERAGES];
+                    }
+                    record = (Array.isArray(countryDimensionAverages) ? countryDimensionAverages[0] : countryDimensionAverages) || DEFAULT_DIMENSION_AVERAGES;
+                } catch (e) {
+                    console.warn('[updateCountryDashboard] get_country_dimension_averages 整体异常，使用默认均值:', e);
+                    record = DEFAULT_DIMENSION_AVERAGES;
                 }
-                // 返回值可能是数组 [{ avg_e: "54.00", has_valid_data: true, ... }]，取首条
-                const record = (Array.isArray(countryDimensionAverages) ? countryDimensionAverages[0] : countryDimensionAverages) || null;
 
                 // =========================
                 // 语义爆发（黑话榜）数据源：国家视图词云仅来源于 get_country_keywords RPC，禁止使用 data.cloud50 或 detailedStats 性格标签
@@ -2453,6 +2528,12 @@ var _loc = window.location;
                 'tab.global': '全球',
                 'tab.country': '国家',
                 'tab.ranking': '排行榜',
+                'tab.leaderboard': '天梯榜',
+                'github.power': 'GitHub 战力',
+                'github.sync': '刷新',
+                'github.syncing': '同步中...',
+                'github.need_login': '请先登录',
+                'github.sync_fail': '同步失败',
                 
                 // Buttons / panel header / hotlist / PK
                 'btn.back_global': '[返回全网]',
@@ -2528,6 +2609,12 @@ var _loc = window.location;
                 'tab.ranking': '排行榜',
                 'tab.global': '全球',
                 'tab.country': '国家',
+                'tab.leaderboard': '天梯榜',
+                'github.power': 'GitHub 战力',
+                'github.sync': '刷新',
+                'github.syncing': '同步中...',
+                'github.need_login': '请先登录',
+                'github.sync_fail': '同步失败',
                 'btn.refresh': '刷新',
 
                 // Drawer / Panels
@@ -2717,6 +2804,12 @@ var _loc = window.location;
                 'tab.global': 'Global',
                 'tab.country': 'Country',
                 'tab.ranking': 'Ranking',
+                'tab.leaderboard': 'Leaderboard',
+                'github.power': 'GitHub Power',
+                'github.sync': 'Sync',
+                'github.syncing': 'Syncing...',
+                'github.need_login': 'Please sign in first',
+                'github.sync_fail': 'Sync failed',
                 
                 // Buttons / panel header / hotlist / PK
                 'btn.back_global': '[Back to Global]',
@@ -5917,208 +6010,57 @@ var _loc = window.location;
                         ? `<span class="inline-flex items-center ml-1 text-[#00ff41]/50" title="病情可控">🌱</span>`
                         : '';
                 
-                // 获取当前状态
                 const currentStatus = localStorage.getItem('user_status') || 'idle';
                 const statusConfig = USER_STATUSES[currentStatus] || USER_STATUSES.idle;
+                // 身份数据传入 GitHub Combat 卡片（私信、GitHub 登录、退出、链接、国家、状态、徽章、图标均移入该卡片）
+                const identityData = {
+                    avatarUrl: avatarUrl,
+                    displayName: displayName,
+                    displayLabel: displayLabel,
+                    badgeHtml: badgeHtml,
+                    githubUsername: githubUsername,
+                    isLoggedIn: !!(githubUsername && isValidGitHubUsername(githubUsername, userIdentity)),
+                    currentStatus: currentStatus,
+                    defaultAvatar: DEFAULT_AVATAR
+                };
+
+                // 预计算国家信息，供 GitHub 卡片渲染后填充 #user-country-flag
+                let drawerCountryCode = '';
+                let drawerCountryName = '';
+                let drawerCountryIsManual = false;
+                const selectedCountry = localStorage.getItem('user_selected_country');
+                if (selectedCountry) {
+                    drawerCountryCode = selectedCountry.toUpperCase();
+                    drawerCountryName = countryNameMap[drawerCountryCode] ? (currentLang === 'zh' ? countryNameMap[drawerCountryCode].zh : countryNameMap[drawerCountryCode].en) : drawerCountryCode;
+                    drawerCountryIsManual = true;
+                }
+                if (!drawerCountryCode && localStorage.getItem('loc_fixed') === 'true' && localStorage.getItem('loc_locked') === 'true') {
+                    drawerCountryCode = (localStorage.getItem('manual_location') || '').toUpperCase();
+                    if (drawerCountryCode) {
+                        drawerCountryName = countryNameMap[drawerCountryCode] ? (currentLang === 'zh' ? countryNameMap[drawerCountryCode].zh : countryNameMap[drawerCountryCode].en) : drawerCountryCode;
+                        drawerCountryIsManual = true;
+                    }
+                }
+                if (!drawerCountryCode && currentUser && currentUser.manual_location) {
+                    drawerCountryCode = (currentUser.manual_location || '').toUpperCase();
+                    if (drawerCountryCode) {
+                        drawerCountryName = countryNameMap[drawerCountryCode] ? (currentLang === 'zh' ? countryNameMap[drawerCountryCode].zh : countryNameMap[drawerCountryCode].en) : drawerCountryCode;
+                        drawerCountryIsManual = true;
+                    }
+                }
+                if (!drawerCountryCode && currentUser && (currentUser.country_code || currentUser.ip_location)) {
+                    drawerCountryCode = (currentUser.country_code || currentUser.ip_location || '').toUpperCase();
+                    if (drawerCountryCode) {
+                        drawerCountryName = countryNameMap[drawerCountryCode] ? (currentLang === 'zh' ? countryNameMap[drawerCountryCode].zh : countryNameMap[drawerCountryCode].en) : drawerCountryCode;
+                        drawerCountryIsManual = !!(currentUser.manual_location || currentUser.manual_lat != null);
+                    }
+                }
                 
-                // 创建 user_identity_config 卡片
-                const identityCard = document.createElement('div');
-                identityCard.className = 'drawer-item';
-                identityCard.innerHTML = `
-                    <div class="flex items-center justify-between mb-3">
-                        <span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">🕶️</span>
-                        <span class="text-[8px] leading-none text-[#00ff41] border border-[#00ff41]/40 px-1 py-0.5 tracking-widest uppercase bg-[#00ff41]/5">
-                            ${escapeHtml(getI18nText('badge.config') || 'CONFIG')}
-                        </span>
-                    </div>
-                    
-                    <div class="drawer-item-label mb-2">用户身份配置</div>
-                    
-                    <!-- 用户信息（GitHub 或指纹） -->
-                    <div class="mb-3 pb-3 border-b border-[#00ff41]/10">
-                        <div class="flex items-center gap-3">
-                            <div class="w-9 h-9 rounded-full overflow-hidden border border-[#00ff41]/30 flex-shrink-0">
-                                <img 
-                                    src="${avatarUrl}" 
-                                    alt="Avatar" 
-                                    class="w-full h-full object-cover"
-                                    onerror="this.onerror=null; this.src='${DEFAULT_AVATAR}';"
-                                />
-                            </div>
-                            <div class="flex-1 min-w-0">
-                                <div class="drawer-item-value text-sm truncate flex items-center">${displayName}${badgeHtml}</div>
-                                <div class="drawer-item-desc text-[8px]">${displayLabel}</div>
-                            </div>
-                            <button 
-                                onclick="typeof openInboxDrawer === 'function' && openInboxDrawer()"
-                                class="inbox-indicator w-9 h-9 flex items-center justify-center bg-transparent border-none text-[#00ff41] hover:text-[#00ff41]/80 transition-colors flex-shrink-0 cursor-pointer p-0 relative"
-                                title="${currentLang === 'zh' ? '收件箱' : 'Inbox'}"
-                            >✉</button>
-                            ${githubUsername && isValidGitHubUsername(githubUsername, userIdentity)
-                                ? `
-                                <button 
-                                    onclick="logout()"
-                                    class="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-[8px] text-zinc-300 hover:text-white transition-colors rounded"
-                                    title="退出登录"
-                                >
-                                    退出
-                                </button>
-                                `
-                                : ''
-                            }
-                        </div>
-                        <!-- 用户国家/地区：国旗 + 自动识别 / 用户校准 -->
-                        <div id="user-country-flag" class="flex items-center gap-2 mt-2 text-[10px]"></div>
-                        ${githubUsername && isValidGitHubUsername(githubUsername, userIdentity)
-                            ? `
-                            <a 
-                                href="https://github.com/${githubUsername}" 
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                class="mt-2 inline-block text-[9px] text-[#00ff41]/70 hover:text-[#00ff41] transition-colors font-mono"
-                            >
-                                github.com/${githubUsername}
-                            </a>
-                            `
-                            : ''
-                        }
-                    </div>
-                    
-                    <!-- 状态切换按钮（简约：仅用选中态表达当前状态） -->
-                    <div class="drawer-item-label mb-2">${currentLang === 'zh' ? '状态' : 'Status'}</div>
-                    <div class="flex gap-1.5">
-                        <button 
-                            title="${(USER_STATUSES.idle && (currentLang === 'zh' ? USER_STATUSES.idle.descZh : USER_STATUSES.idle.descEn)) || ''}"
-                            onclick="setUserStatus('idle'); if(currentDrawerCountry.code) showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);"
-                            class="flex-1 px-2 py-1.5 bg-zinc-900/50 border ${currentStatus === 'idle' ? 'border-[#00ff41]' : 'border-zinc-800'} text-[10px] font-bold uppercase tracking-wider hover:border-[#00ff41] transition-colors"
-                            style="color: ${currentStatus === 'idle' ? '#00ff41' : '#71717a'};"
-                        >
-                            🟢 ${currentLang === 'zh' ? '在线' : 'Online'}
-                        </button>
-                        <button 
-                            title="${(USER_STATUSES.busy && (currentLang === 'zh' ? USER_STATUSES.busy.descZh : USER_STATUSES.busy.descEn)) || ''}"
-                            onclick="setUserStatus('busy'); if(currentDrawerCountry.code) showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);"
-                            class="flex-1 px-2 py-1.5 bg-zinc-900/50 border ${currentStatus === 'busy' ? 'border-[#ff8c00]' : 'border-zinc-800'} text-[10px] font-bold uppercase tracking-wider hover:border-[#ff8c00] transition-colors"
-                            style="color: ${currentStatus === 'busy' ? '#ff8c00' : '#71717a'};"
-                        >
-                            🟠 ${currentLang === 'zh' ? '忙碌' : 'Busy'}
-                        </button>
-                        <button 
-                            title="${(USER_STATUSES.sprint && (currentLang === 'zh' ? USER_STATUSES.sprint.descZh : USER_STATUSES.sprint.descEn)) || ''}"
-                            onclick="setUserStatus('sprint'); if(currentDrawerCountry.code) showDrawersWithCountryData(currentDrawerCountry.code, currentDrawerCountry.name);"
-                            class="flex-1 px-2 py-1.5 bg-zinc-900/50 border ${currentStatus === 'sprint' ? 'border-[#71717a]' : 'border-zinc-800'} text-[10px] font-bold uppercase tracking-wider hover:border-[#71717a] transition-colors"
-                            style="color: ${currentStatus === 'sprint' ? '#71717a' : '#71717a'};"
-                        >
-                            ⚫ ${currentLang === 'zh' ? '离线' : 'Offline'}
-                        </button>
-                    </div>
-                    
-                    <!-- GitHub OAuth 登录区域 -->
-                    <div class="mt-3 pt-3 border-t border-[#00ff41]/10" id="auth-login-section">
-                        ${githubUsername && isValidGitHubUsername(githubUsername, userIdentity) 
-                            ? ''
-                            : `
-                            <!-- 未登录状态：显示 GitHub 登录按钮 -->
-                            <div class="drawer-item-label mb-2">GitHub 登录</div>
-                            <button 
-                                onclick="loginWithGitHub()"
-                                class="w-full px-4 py-3 bg-[#24292e] hover:bg-[#2f363d] border border-[#444d56] rounded-md text-white text-sm font-semibold flex items-center justify-center gap-2 transition-all duration-200 hover:scale-105 active:scale-95 shadow-lg hover:shadow-xl"
-                            >
-                                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                    <path fill-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clip-rule="evenodd"></path>
-                                </svg>
-                                <span>使用 GitHub 登录</span>
-                            </button>
-                            <div class="text-[8px] text-[#00ff41]/40 mt-2 text-center">
-                                安全、快速、一键登录
-                            </div>
-                            `
-                        }
-                    </div>
-                `;
-                
-                // 移除骨架屏并添加渐入动画
+                // 移除骨架屏
                 if (leftBody) {
                     leftBody.classList.remove('drawer-loading');
                     const skeletons = leftBody.querySelectorAll('.drawer-skeleton-card');
                     skeletons.forEach(s => s.remove());
-                }
-                
-                identityCard.classList.add('clinic-card');
-                identityCard.style.opacity = '0';
-                identityCard.style.transform = 'translateY(12px)';
-                leftBody.appendChild(identityCard);
-                
-                // 触发渐入动画
-                requestAnimationFrame(() => {
-                    identityCard.style.transition = 'opacity 0.35s ease-out, transform 0.35s ease-out';
-                    identityCard.style.opacity = '1';
-                    identityCard.style.transform = 'translateY(0)';
-                });
-
-                // 填充用户国家/地区：优先使用下拉菜单选择的国家
-                if (typeof updateUserCountryFlag === 'function') {
-                    let countryCode = '';
-                    let countryName = '';
-                    let isManual = false;
-
-                    // 优先级 1: 下拉菜单选择的国家（user_selected_country）
-                    const selectedCountry = localStorage.getItem('user_selected_country');
-                    if (selectedCountry) {
-                        countryCode = selectedCountry.toUpperCase();
-                        if (countryNameMap[countryCode]) {
-                            countryName = currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en;
-                        } else {
-                            countryName = countryCode;
-                        }
-                        isManual = true; // 用户手动选择的国家视为用户校准
-                    }
-
-                    // 优先级 2: localStorage 中的手动校准信息（旧逻辑，兼容性保留）
-                    if (!countryCode && localStorage.getItem('loc_fixed') === 'true' && localStorage.getItem('loc_locked') === 'true') {
-                        countryCode = localStorage.getItem('manual_location') || '';
-                        if (countryCode) {
-                            countryCode = countryCode.toUpperCase();
-                            if (countryNameMap[countryCode]) {
-                                countryName = currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en;
-                            } else {
-                                countryName = countryCode;
-                            }
-                            isManual = true;
-                        }
-                    }
-
-                    // 优先级 3: currentUser 中的手动校准信息
-                    if (!countryCode && currentUser) {
-                        countryCode = currentUser.manual_location || '';
-                        if (countryCode) {
-                            countryCode = countryCode.toUpperCase();
-                            if (countryNameMap[countryCode]) {
-                                countryName = currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en;
-                            } else {
-                                countryName = countryCode;
-                            }
-                            isManual = true;
-                        }
-                    }
-
-                    // 优先级 4: currentUser 中的国家代码（自动识别）
-                    if (!countryCode && currentUser) {
-                        countryCode = currentUser.country_code || currentUser.ip_location || '';
-                        if (countryCode) {
-                            countryCode = countryCode.toUpperCase();
-                            if (countryNameMap[countryCode]) {
-                                countryName = currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en;
-                            } else {
-                                countryName = countryCode;
-                            }
-                            isManual = !!(currentUser.manual_location || currentUser.manual_lat != null);
-                        }
-                    }
-
-                    if (countryCode) {
-                        updateUserCountryFlag(countryCode, countryName, isManual);
-                    }
                 }
 
                 // 添加实时诊断活动卡片（带渐入动画）
@@ -6881,13 +6823,7 @@ var _loc = window.location;
                 // ignore
             }
 
-            // 初始化词云：非核心图表使用 requestIdleCallback，避免滚动卡顿
-            try {
-                const ric = window.requestIdleCallback || ((cb) => setTimeout(() => cb({ timeRemaining: () => 0 }), 0));
-                ric(() => { try { loadWordCloud(); } catch (e) { /* ignore */ } }, { timeout: 1500 });
-            } catch (e) {
-                try { setTimeout(() => { loadWordCloud(); }, 50); } catch (e2) { /* ignore */ }
-            }
+            // 【唯一渲染入口】词云由 stats2.js 统一管理，此处不再自执行 loadWordCloud
 
             // 将“暂无数据”的占位渲染出来，避免空白
             const realtimeBox = q('#rtRealtimeList');
@@ -6938,7 +6874,8 @@ var _loc = window.location;
             const panels = {
                 global: document.getElementById('panel-global-view'),
                 country: document.getElementById('panel-country-view'),
-                ranking: document.getElementById('panel-ranking-view')
+                ranking: document.getElementById('panel-ranking-view'),
+                leaderboard: document.getElementById('panel-leaderboard-view')
             };
             const tabs = document.querySelectorAll('.drawer-tab');
             
@@ -7022,10 +6959,67 @@ var _loc = window.location;
                     console.log('[switchView] window.stats2AppLoaded:', window.stats2AppLoaded);
                     renderRankingView();
                     break;
+                case 'leaderboard':
+                    if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
+                    break;
             }
             
             console.log('[switchView] 已切换到:', view);
         }
+
+        /**
+         * 加载 GitHub 天梯榜（Top50）并渲染到 #leaderboard-list
+         */
+        async function loadGitHubLeaderboard() {
+            var listEl = document.getElementById('leaderboard-list');
+            if (!listEl) return;
+            listEl.innerHTML = '<div class="text-zinc-500 text-sm py-4 text-center">加载中...</div>';
+            var supabase = (typeof supabaseClient !== 'undefined' && supabaseClient) ? supabaseClient : (window.supabase || null);
+            if (!supabase || typeof supabase.rpc !== 'function') {
+                listEl.innerHTML = '<div class="text-zinc-500 text-sm py-4 text-center">未连接数据库</div>';
+                return;
+            }
+            try {
+                var res = await supabase.rpc('get_github_leaderboard', { limit_count: 50 });
+                var data = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
+                var err = res && res.error;
+                if (err) {
+                    listEl.innerHTML = '<div class="text-red-400 text-sm py-4 text-center">' + (err.message || '加载失败') + '</div>';
+                    return;
+                }
+                if (!Array.isArray(data) || data.length === 0) {
+                    console.warn('Leaderboard is empty in DB');
+                    listEl.innerHTML = '<div class="text-zinc-500 text-sm py-4 text-center">暂无排行数据，同步 GitHub 后即可上榜</div>';
+                    return;
+                }
+                var rankColor = function(i) {
+                    if (i === 0) return '#FFD700';
+                    if (i === 1) return '#C0C0C0';
+                    if (i === 2) return '#CD7F32';
+                    return 'rgba(255,255,255,0.7)';
+                };
+                var esc = function(s) {
+                    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                };
+                listEl.innerHTML = data.map(function(user, idx) {
+                    var rank = user.rank != null ? user.rank : (idx + 1);
+                    var name = user.user_name || user.github_login || ('@' + (user.github_login || ''));
+                    var bg = idx < 3 ? 'rgba(0,255,65,0.1)' : 'rgba(0,255,65,0.02)';
+                    return '<div class="leaderboard-item flex items-center gap-3 p-3 rounded-lg mb-2" style="background:' + bg + ';">' +
+                        '<div class="w-10 text-lg font-bold" style="color:' + rankColor(idx) + ';">#' + rank + '</div>' +
+                        '<img src="' + esc(user.avatar_url || ('https://github.com/' + (user.github_login || '') + '.png')) + '" alt="" class="w-10 h-10 rounded-full object-cover" onerror="this.src=\'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 40 40%22%3E%3Crect fill=%22%23333%22 width=%2240%22 height=%2240%22/%3E%3C/svg%3E\'">' +
+                        '<div class="flex-1 min-w-0">' +
+                        '<div class="text-[#00ff41] font-semibold truncate">' + esc(name) + '</div>' +
+                        '<div class="text-[10px] text-zinc-500">&#9733;' + (user.github_stars || 0) + ' &#9861;' + (user.github_forks || 0) + ' &#128065;' + (user.github_watchers || 0) + ' &#128101;' + (user.github_followers || 0) + '</div>' +
+                        '</div>' +
+                        '<div class="text-right"><div class="text-[#00ff41] text-lg font-bold">' + (user.github_score || 0) + '</div></div>' +
+                        '</div>';
+                }).join('');
+            } catch (e) {
+                listEl.innerHTML = '<div class="text-red-400 text-sm py-4 text-center">' + (e && e.message ? e.message : '加载失败') + '</div>';
+            }
+        }
+        if (typeof window !== 'undefined') window.loadGitHubLeaderboard = loadGitHubLeaderboard;
 
         /**
          * 【新增】渲染排行榜视图
@@ -17455,7 +17449,7 @@ var _loc = window.location;
                     ` : ''}
                 `;
                 
-                // 先移除旧的统计卡片（如果存在）
+                // 先移除旧的统计卡片与 GitHub 战力卡片（如果存在）
                 const existingStatsCards = leftBody.querySelectorAll('.drawer-item');
                 existingStatsCards.forEach(card => {
                     const label = card.querySelector('.drawer-item-label');
@@ -17463,18 +17457,14 @@ var _loc = window.location;
                         card.remove();
                     }
                 });
+                leftBody.querySelectorAll('.github-power-card').forEach(function(c) { c.remove(); });
                 
                 // 将统计卡片插入到身份配置卡片之后，添加渐进式动画
                 statsCard.classList.add('clinic-card');
                 statsCard.style.opacity = '0';
                 statsCard.style.transform = 'translateY(12px)';
                 
-                const identityCard = leftBody.querySelector('.drawer-item');
-                if (identityCard && identityCard.nextSibling) {
-                    leftBody.insertBefore(statsCard, identityCard.nextSibling);
-                } else {
-                    leftBody.appendChild(statsCard);
-                }
+                leftBody.insertBefore(statsCard, leftBody.firstChild);
                 
                 // 触发渐入动画
                 requestAnimationFrame(() => {
@@ -17482,6 +17472,83 @@ var _loc = window.location;
                     statsCard.style.opacity = '1';
                     statsCard.style.transform = 'translateY(0)';
                 });
+
+                // GitHub Combat 卡片（22 项数据 + 身份区：私信、GitHub 登录、退出、链接、国家、状态、徽章、图标）
+                leftBody.querySelectorAll('.github-power-card').forEach(function(c) { c.remove(); });
+                leftBody.querySelectorAll('.github-combat-card').forEach(function(c) { c.remove(); });
+                if (typeof window.renderGithubCard === 'function') {
+                    var apiBase = (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content) || '';
+                    apiBase = String(apiBase).trim().replace(/\/$/, '');
+                    var defaultAvatar = (window.STATS_CONSTANTS && window.STATS_CONSTANTS.DEFAULT_AVATAR) || '';
+                    var ghUser = (typeof localStorage !== 'undefined' && localStorage.getItem('github_username')) || '';
+                    var userIdentity = (currentUserData && currentUserData.user_identity) || null;
+                    var isFingerprintOnly = !ghUser || (typeof isValidGitHubUsername === 'function' && !isValidGitHubUsername(ghUser, userIdentity));
+                    var fp = (typeof localStorage !== 'undefined' && localStorage.getItem('user_fingerprint')) || '';
+                    var fpPrefix = fp ? fp.substring(0, 6).toUpperCase() : '';
+                    var dispName = isFingerprintOnly && fp ? ('匿名专家 ' + fpPrefix) : (ghUser || '未设置');
+                    var dispLabel = isFingerprintOnly && fp ? '设备指纹' : 'GitHub ID';
+                    var avUrl = isFingerprintOnly && fp ? ('https://api.dicebear.com/7.x/identicon/svg?seed=' + encodeURIComponent(fp)) : (ghUser && typeof getGitHubAvatarUrl === 'function' ? getGitHubAvatarUrl(ghUser) : defaultAvatar);
+                    var totalMsgs = Number(currentUserData && (currentUserData.total_messages != null ? currentUserData.total_messages : currentUserData.totalMessages)) || 0;
+                    var badge = totalMsgs >= 500 ? '<span class="inline-flex items-center ml-1 animate-pulse" style="filter: drop-shadow(0 0 5px rgba(255,0,0,0.6));" title="病入膏肓">🏆</span>' : (totalMsgs < 10 && totalMsgs > 0 ? '<span class="inline-flex items-center ml-1 text-[#00ff41]/50" title="病情可控">🌱</span>' : '');
+                    var curStatus = (typeof localStorage !== 'undefined' && localStorage.getItem('user_status')) || 'idle';
+                    var identityForCard = {
+                        avatarUrl: avUrl,
+                        displayName: dispName,
+                        displayLabel: dispLabel,
+                        badgeHtml: badge,
+                        githubUsername: ghUser,
+                        isLoggedIn: !!(ghUser && (typeof isValidGitHubUsername !== 'function' || isValidGitHubUsername(ghUser, userIdentity))),
+                        currentStatus: curStatus,
+                        defaultAvatar: defaultAvatar
+                    };
+                    var drawerCountryCode = '';
+                    var drawerCountryName = '';
+                    var drawerCountryIsManual = false;
+                    try {
+                        var sel = localStorage.getItem('user_selected_country');
+                        if (sel) {
+                            drawerCountryCode = sel.toUpperCase();
+                            drawerCountryName = (typeof countryNameMap !== 'undefined' && countryNameMap[drawerCountryCode]) ? (typeof currentLang !== 'undefined' && currentLang === 'en' ? countryNameMap[drawerCountryCode].en : countryNameMap[drawerCountryCode].zh) : drawerCountryCode;
+                            drawerCountryIsManual = true;
+                        }
+                        if (!drawerCountryCode && currentUserData && (currentUserData.manual_location || currentUserData.country_code || currentUserData.ip_location)) {
+                            drawerCountryCode = (currentUserData.manual_location || currentUserData.country_code || currentUserData.ip_location || '').toUpperCase();
+                            if (drawerCountryCode && typeof countryNameMap !== 'undefined' && countryNameMap[drawerCountryCode]) {
+                                drawerCountryName = typeof currentLang !== 'undefined' && currentLang === 'en' ? countryNameMap[drawerCountryCode].en : countryNameMap[drawerCountryCode].zh;
+                            } else if (drawerCountryCode) drawerCountryName = drawerCountryCode;
+                            drawerCountryIsManual = !!(currentUserData.manual_location || currentUserData.manual_lat != null);
+                        }
+                    } catch (e) {}
+                    var githubCardEl = window.renderGithubCard(currentUserData.github_stats || null, {
+                        container: leftBody,
+                        lang: typeof currentLang !== 'undefined' ? currentLang : 'en',
+                        insertFirst: true,
+                        identity: identityForCard,
+                        onRefresh: function() {
+                            return fetch(apiBase ? apiBase + '/api/github/sync' : '/api/github/sync', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    accessToken: (window.__githubAccessToken || '').trim(),
+                                    userId: (currentUserData.user_name || currentUserData.login || '').trim(),
+                                    fingerprint: currentUserData.fingerprint || '',
+                                    id: currentUserData.id || ''
+                                })
+                            }).then(async function(r) {
+                                var text = await r.text();
+                                try { return JSON.parse(text); } catch (e) {
+                                    console.warn('[GitHub Sync] 响应非 JSON:', text.slice(0, 300));
+                                    return { success: false, status: 'error', error: (text && text.length) ? ('响应格式异常: ' + text.slice(0, 100)) : '未知错误' };
+                                }
+                            });
+                        }
+                    });
+                }
+
+                // 填充用户国家/地区（#user-country-flag 在 GitHub Combat 卡片内）
+                if (typeof updateUserCountryFlag === 'function' && (drawerCountryCode || drawerCountryName)) {
+                    updateUserCountryFlag(drawerCountryCode, drawerCountryName, drawerCountryIsManual);
+                }
 
                 // 上岗天数：抽屉打开后也要“实时增长”（无需手动刷新）
                 try {
@@ -19567,6 +19634,11 @@ var _loc = window.location;
         };
 
         async function loadWordCloud() {
+            // 【委托 stats2】词云由 stats2.js 统一管理时，仅转发调用，不重复执行
+            if (window.__wordCloudManagedByStats2 && typeof window.loadWordCloud === 'function') {
+                try { return await window.loadWordCloud(); } catch (e) { /* ignore */ }
+                return;
+            }
             // 新版：语义爆发卡片（Top10 + Cloud50）
             try {
                 const cc = String(currentDrawerCountry?.code || '').trim().toUpperCase();

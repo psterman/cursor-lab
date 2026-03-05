@@ -354,6 +354,9 @@
      * @param {object} [optionalRecord] - 可选，含 .stats.identityLevelCloud 的后端记录（如 res.data[0]）
      * @returns {Promise<object>} - { Novice, Professional, Architect, globalNative }
      */
+    // 【P1 修复】模块级 AbortController，新请求取消旧请求
+    var _keywordsFetchController = null;
+
     function fetchCountryKeywords(optionalRecord) {
         var emptyResult = { Novice: [], Professional: [], Architect: [], globalNative: [] };
 
@@ -374,6 +377,13 @@
             }
         }
 
+        // 【P1 修复】取消上一次未完成的请求
+        if (_keywordsFetchController) {
+            try { _keywordsFetchController.abort(); } catch (e) {}
+        }
+        _keywordsFetchController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        var fetchSignal = _keywordsFetchController ? _keywordsFetchController.signal : undefined;
+
         window.__isCloudLoading = true;
         var base = getApiBase();
         var apiBase = (base && String(base).trim()) ? base : '/';
@@ -387,6 +397,8 @@
             try { selectedCountry = (localStorage.getItem('user_selected_country') || localStorage.getItem('user_manual_location') || '').trim().toUpperCase(); } catch (e) {}
         }
         var countryParam = selectedCountry && /^[A-Z]{2}$/.test(selectedCountry) ? selectedCountry : '';
+        // 【P1 修复】记录本次请求的国家，用于回调时校验一致性
+        var requestedCountry = countryParam;
         
         // 【调试】记录请求的国家，便于排查数据混乱问题
         console.log('[fetchCountryKeywords] 请求本国词云数据 - 国家:', countryParam || '未指定', '来源:', selectedCountry ? (__selectedCountry ? '__selectedCountry' : (window.currentDrawerCountry ? 'currentDrawerCountry' : 'localStorage')) : '无');
@@ -399,6 +411,13 @@
             return out;
         }
 
+        // 【P1 修复】国家码一致性校验：回调时若 __selectedCountry 已变，说明用户已切换国家，放弃写入
+        function isStaleRequest() {
+            var current = (window.__selectedCountry && String(window.__selectedCountry).trim()) ? String(window.__selectedCountry).toUpperCase() : '';
+            if (!requestedCountry || !current) return false; // 无法判断时不丢弃
+            return current !== requestedCountry;
+        }
+
         if (!summaryUrl) {
             window.__isCloudLoading = false;
             return Promise.resolve(setResult(emptyResult));
@@ -407,9 +426,15 @@
         function tryKeywordsApi() {
             if (!countryParam) return Promise.resolve(emptyResult);
             var keywordsUrl = apiBase + 'api/v2/stats/keywords?region=' + encodeURIComponent(countryParam) + '&_t=' + Date.now();
-            return fetch(keywordsUrl, { cache: 'no-store' }).then(function(r) {
+            // 【P1 修复】传入 signal
+            return fetch(keywordsUrl, { cache: 'no-store', signal: fetchSignal }).then(function(r) {
                 if (!r.ok) return emptyResult;
                 return r.json().then(function(payload) {
+                    // 【P1 修复】校验国家一致性
+                    if (isStaleRequest()) {
+                        console.log('[fetchCountryKeywords] 国家已切换 (' + requestedCountry + ' → ' + window.__selectedCountry + ')，丢弃 keywords API 响应');
+                        return emptyResult;
+                    }
                     var raw = (payload && payload.data) ? payload.data : payload;
                     var cloudData = (raw && raw.identityLevelCloud) ? raw.identityLevelCloud : raw;
                     if (cloudData && typeof cloudData === 'object') {
@@ -424,12 +449,30 @@
                     }
                     return emptyResult;
                 }).catch(function() { return emptyResult; });
-            }).catch(function() { return emptyResult; });
+            }).catch(function(e) {
+                // 【P1 修复】AbortError 直接传播，不 fallback
+                if (e && e.name === 'AbortError') throw e;
+                return emptyResult;
+            });
         }
 
-        return fetch(summaryUrl).then(function(resp) {
+        var timeout = setTimeout(function() {
+            if (window.__isCloudLoading) {
+                console.warn('[StatsDataService] fetchCountryKeywords 超时 (10s)');
+                window.__isCloudLoading = false;
+            }
+        }, 10000);
+
+        // 【P1 修复】传入 signal
+        return fetch(summaryUrl, { signal: fetchSignal }).then(function(resp) {
+            clearTimeout(timeout);
             if (!resp.ok) return tryKeywordsApi().then(function(out) { return setResult(out); });
             return resp.json().then(function(data) {
+                // 【P1 修复】校验国家一致性
+                if (isStaleRequest()) {
+                    console.log('[fetchCountryKeywords] 国家已切换 (' + requestedCountry + ' → ' + window.__selectedCountry + ')，丢弃 summary 响应');
+                    return emptyResult;
+                }
                 var ilc = (data && data.identityLevelCloud) ? data.identityLevelCloud : (data && data.vibe_lexicon) ? data.vibe_lexicon : null;
                 if (ilc && typeof ilc === 'object') {
                     var rep = (data && data.representativeWords) ? data.representativeWords : null;
@@ -441,9 +484,16 @@
                 return tryKeywordsApi().then(function(out) { return setResult(out); });
             }).catch(function() { return tryKeywordsApi().then(function(out) { return setResult(out); }); });
         }).catch(function(e) {
+            clearTimeout(timeout);
+            // 【P1 修复】AbortError 不降级
+            if (e && e.name === 'AbortError') {
+                console.log('[fetchCountryKeywords] 请求已被新国家请求取消 (AbortError)');
+                return emptyResult;
+            }
             console.warn('[StatsDataService] fetchCountryKeywords 后端 summary 失败:', e);
             return tryKeywordsApi().then(function(out) { return setResult(out); });
         }).finally(function() {
+            clearTimeout(timeout);
             try { window.__isCloudLoading = false; } catch (err) {}
         });
     }

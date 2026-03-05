@@ -19135,6 +19135,29 @@
                         .replace(/"/g, '&quot;')
                         .replace(/'/g, '&#39;');
 
+                // 辅助格式化函数（复用 github-card-renderer 逻辑）
+                const formatBytes = (n) => {
+                    n = Number(n) || 0;
+                    if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
+                    if (n >= 1024) return (n / 1024).toFixed(1) + ' KB';
+                    return n + ' B';
+                };
+                const formatSyncedAt = (isoStr, lang) => {
+                    if (!isoStr) return '--';
+                    try {
+                        const d = new Date(isoStr);
+                        if (isNaN(d.getTime())) return '--';
+                        const now = new Date();
+                        const diffMs = now.getTime() - d.getTime();
+                        if (diffMs < 60000) return lang === 'en' ? 'Just now' : '刚刚';
+                        if (diffMs < 3600000) return Math.floor(diffMs / 60000) + (lang === 'en' ? 'm ago' : ' 分钟前');
+                        if (diffMs < 86400000) return Math.floor(diffMs / 3600000) + (lang === 'en' ? 'h ago' : ' 小时前');
+                        return d.toLocaleDateString(lang === 'zh' || lang === 'zh-CN' ? 'zh-CN' : 'en-US');
+                    } catch (e) { return '--'; }
+                };
+
+                const githubStats = currentUserData.github_stats || null;
+
                 // 【Task 4】检查是否为新用户（维度/统计为空或为默认值）
                 // 修复：统一视图/隐私裁剪可能不返回 l_score..f_score，但仍可能返回其它统计字段（total_messages 等）
                 const quickScoreKeys = ['l_score','p_score','d_score','e_score','f_score','l','p','d','e','f','L','P','D','E','F'];
@@ -20155,6 +20178,24 @@
                             <span class="dashboard-metric-label text-[10px]">📏 ${getI18nText('metric.avg_len') || (currentLang === 'en' ? 'Avg Prompt Length' : '平均吹水长度')}</span>
                             <span class="drawer-item-value text-sm">${avgLength} ${getI18nText('metric.avg_len_unit') || (currentLang === 'en' ? 'chars/msg' : '字/条')}</span>
                         </div>
+                        
+                        <!-- GitHub 战力同步字段（代码量、星标、时间） -->
+                        ${(githubStats && githubStats.login) ? `
+                        <div class="pt-2 mt-2 border-t border-[var(--border-ui)]/30 space-y-2">
+                            <div class="flex items-center justify-between">
+                                <span class="dashboard-metric-label text-[10px]">📦 ${getI18nText('github.total_code_size') || (currentLang === 'en' ? 'Code Quantity' : '代码量')}</span>
+                                <span class="drawer-item-value text-sm">${formatBytes(githubStats.totalCodeSize || 0)}</span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="dashboard-metric-label text-[10px]">⭐ ${getI18nText('github.total_stars') || (currentLang === 'en' ? 'Total Stars' : '星标总数')}</span>
+                                <span class="drawer-item-value text-sm">${(githubStats.totalRepoStars || 0).toLocaleString()}</span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="dashboard-metric-label text-[10px]">🕒 ${getI18nText('github.last_repo_update') || (currentLang === 'en' ? 'Repo Updated' : '仓库更新')}</span>
+                                <span class="drawer-item-value text-[10px] text-zinc-400">${formatSyncedAt(githubStats.latest_repo_updated_at, currentLang)}</span>
+                            </div>
+                        </div>
+                        ` : ''}
                     </div>
                     
                     <!-- 人格称号（与 index 一致：优先由 vibe_index 从 personalityNames.json 解析） -->
@@ -20321,7 +20362,7 @@
                             return parsed;
                         });
                     };
-                    var githubStats = currentUserData.github_stats;
+                    // githubStats already defined at start of function
                     var hasValidStats = githubStats && typeof githubStats === 'object' && Object.keys(githubStats).length > 0 && githubStats.login;
                     var githubCardEl;
                     var cardOpts = { container: leftBody, onRefresh: handleGithubSync, lang: typeof currentLang !== 'undefined' ? currentLang : 'en', insertFirst: true, identity: identityForCardSt2 };

@@ -134,10 +134,14 @@
      * 切换 Tab 时先清空当前 Canvas 及其容器内对应 canvas 内容，再渲染。
      */
     function _renderNationalIdentityCloud(level) {
+        // 【P0 修复】每次调用递增渲染令牌，异步回调中检查令牌一致性，旧回调自动作废
+        var myToken = ++window.__cloudRenderToken;
+
         if (window.__isCloudLoading) {
             showCloudLoadingHint();
             return;
         }
+        var currentLang = (typeof window.currentLang !== 'undefined' ? window.currentLang : 'zh');
         var levelKey = LEVEL_TO_KEY[level] || (level === 'Professional' || level === 'Architect' ? level : 'Novice');
         var container = document.getElementById('vibe-cloud50-container');
         var canvasId = LEVEL_TO_CANVAS_ID[levelKey] || 'canvas-novice';
@@ -165,9 +169,11 @@
         if (ctx0) ctx0.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
         var empty = document.getElementById('vibe-cloud50-empty');
         var meta = document.getElementById('vibe-cloud50-meta');
-        var data = (window.__countryKeywordsByLevel && window.__countryKeywordsByLevel[levelKey]) ? window.__countryKeywordsByLevel[levelKey] : [];
+        var hasLevelProp = window.__countryKeywordsByLevel && Object.prototype.hasOwnProperty.call(window.__countryKeywordsByLevel, levelKey);
+        var data = hasLevelProp ? window.__countryKeywordsByLevel[levelKey] : [];
         if (!Array.isArray(data)) data = [];
-        if (data.length === 0) {
+        
+        if (!hasLevelProp || (data.length === 0 && (window[retryKey] || 0) < 3 && !window.__isCloudLoading)) {
             var svc = window.StatsDataService;
             if (svc && typeof svc.fetchCountryKeywords === 'function') {
                 showCloudLoadingHint();
@@ -175,7 +181,14 @@
                     empty.textContent = '正在扫描该国开发者指纹...';
                     empty.classList.remove('hidden');
                 }
+                var retryKey = '__nationalCloudRetryCount';
+                if (typeof window[retryKey] !== 'number') window[retryKey] = 0;
                 svc.fetchCountryKeywords().then(function(result) {
+                    // 【令牌检查】如果已有更新的渲染调用，放弃当前回调
+                    if (window.__cloudRenderToken !== myToken) {
+                        console.log('[WordCloud] 令牌过期，放弃旧 fetch 回调 (token=' + myToken + ', current=' + window.__cloudRenderToken + ')');
+                        return;
+                    }
                     hideCloudLoadingHint();
                     // 检查获取到的数据是否有效
                     var hasData = result && (
@@ -185,44 +198,64 @@
                         (result.globalNative && result.globalNative.length > 0)
                     );
                     if (hasData) {
+                        window[retryKey] = 0;
                         fillSoulWordsList(levelKey);
                         _renderNationalIdentityCloud(level);
                     } else {
-                        // 数据为空，可能是 Supabase 未准备好，延迟重试
+                        window[retryKey] = (window[retryKey] || 0) + 1;
                         if (empty) {
-                            empty.textContent = '正在初始化数据...';
-                            empty.classList.remove('hidden');
+                            if (window[retryKey] >= 3) {
+                                empty.textContent = (typeof getI18nText === 'function' ? getI18nText('lexicon.none') : null) || '暂无该地区词云数据';
+                                empty.classList.remove('hidden');
+                                if (meta) meta.textContent = '--';
+                            } else {
+                                empty.textContent = (currentLang === 'en' ? 'Scanning developer vibes... ' : '正在扫描该国开发者指纹... ') + '(' + window[retryKey] + '/3)';
+                                empty.classList.remove('hidden');
+                                setTimeout(function() {
+                                    // 【令牌检查】setTimeout 重试前也检查令牌
+                                    if (window.__cloudRenderToken !== myToken) return;
+                                    _renderNationalIdentityCloud(level);
+                                }, 3000);
+                            }
                         }
-                        // 3秒后重试
-                        setTimeout(function() {
-                            _renderNationalIdentityCloud(level);
-                        }, 3000);
                     }
                 }).catch(function(err) {
+                    // 【令牌检查】错误回调也检查令牌
+                    if (window.__cloudRenderToken !== myToken) return;
                     hideCloudLoadingHint();
                     console.warn('[StatsUIRenderer] 获取词云数据失败:', err);
+                    window[retryKey] = (window[retryKey] || 0) + 1;
                     if (empty) { 
-                        empty.textContent = '正在加载数据...'; 
+                        if (window[retryKey] >= 3) {
+                            empty.textContent = '数据加载失败，请稍后重试';
+                        } else {
+                            empty.textContent = '正在重新加载数据... (' + window[retryKey] + '/3)';
+                        }
                         empty.classList.remove('hidden'); 
                     }
                     if (meta) meta.textContent = '--';
-                    // 出错后5秒重试
-                    setTimeout(function() {
-                        _renderNationalIdentityCloud(level);
-                    }, 5000);
+                    if (window[retryKey] < 3) {
+                        setTimeout(function() {
+                            // 【令牌检查】错误重试也检查令牌
+                            if (window.__cloudRenderToken !== myToken) return;
+                            _renderNationalIdentityCloud(level);
+                        }, 5000);
+                    }
                 });
                 return;
             }
             if (!window.__isCloudLoading) {
-                var ctx = canvas.getContext('2d');
+                var ctx = canvas.getContext && canvas.getContext('2d');
                 if (ctx) ctx.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
                 if (meta) meta.textContent = '--';
                 if (empty) {
-                    empty.textContent = '正在初始化...';
+                    empty.textContent = '正在初始化数据服务...';
                     empty.classList.remove('hidden');
                 }
                 // 如果 StatsDataService 不可用，延迟重试
                 setTimeout(function() {
+                    // 【令牌检查】初始化重试也检查令牌
+                    if (window.__cloudRenderToken !== myToken) return;
                     _renderNationalIdentityCloud(level);
                 }, 2000);
             }

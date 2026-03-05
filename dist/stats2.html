@@ -160,6 +160,29 @@
             <div id="user-modal-body" style="min-height: 320px; overflow-y: auto; overflow-x: hidden;"><!-- 由 JS 填充 --></div>
         </div>
     </div>
+
+    <!-- 天梯榜全榜单 Modal：黑客风格，全屏半透明，中心长列表 -->
+    <div id="global-leaderboard-modal" class="global-leaderboard-modal hidden" aria-hidden="true">
+        <div class="global-leaderboard-modal-backdrop"></div>
+        <div class="global-leaderboard-modal-box">
+            <div class="global-leaderboard-modal-header">
+                <h3 class="global-leaderboard-modal-title" id="global-leaderboard-modal-title">全榜单</h3>
+                <button type="button" class="global-leaderboard-modal-close" id="global-leaderboard-modal-close" aria-label="关闭">✕</button>
+            </div>
+            <div class="global-leaderboard-modal-toolbar">
+                <input type="text" class="global-leaderboard-search" id="global-leaderboard-search" placeholder="输入 ID / 用户名 搜索" autocomplete="off" />
+                <button type="button" class="global-leaderboard-btn-goto-me" id="global-leaderboard-goto-me">定位到我</button>
+            </div>
+            <div class="global-leaderboard-list-wrap" id="global-leaderboard-list-wrap">
+                <table class="global-leaderboard-table" id="global-leaderboard-table">
+                    <thead><tr><th>#</th><th>用户</th><th>数值</th></tr></thead>
+                    <tbody id="global-leaderboard-tbody"></tbody>
+                </table>
+                <div class="global-leaderboard-loading" id="global-leaderboard-loading" style="display:none;">加载中...</div>
+                <div class="global-leaderboard-end" id="global-leaderboard-end" style="display:none;">— 已到底 —</div>
+            </div>
+        </div>
+    </div>
     
     
     <!-- 左右赛博朋克抽屉 -->
@@ -276,6 +299,10 @@
                     <span class="tab-icon">🏆</span>
                     <span class="tab-text" data-t="tab.ranking" data-i18n="tab.ranking">排行榜</span>
                 </button>
+                <button type="button" class="drawer-tab" data-tab="leaderboard" onclick="switchView('leaderboard')">
+                    <span class="tab-icon">⚔</span>
+                    <span class="tab-text" data-t="tab.leaderboard" data-i18n="tab.leaderboard">天梯榜</span>
+                </button>
                 <button type="button" class="drawer-tab" data-tab="global" onclick="switchView('global')">
                     <span class="tab-icon">🌍</span>
                     <span class="tab-text" data-t="tab.global" data-i18n="tab.global">全球</span>
@@ -300,6 +327,14 @@
                     <div id="countryTemplateMount" class="flex-1 min-h-0 px-4 py-4 pb-4" style="font-family: 'JetBrains Mono', monospace;"></div>
                 </div>
                 
+                <!-- 天梯榜：22 个细分榜单卡片，带昨日|全网 Tab -->
+                <div id="panel-leaderboard-view" class="right-drawer-panel hidden flex-col h-full overflow-y-auto">
+                    <div class="p-4 border-b border-[#00ff41]/20 flex-shrink-0">
+                        <h2 class="text-[#00ff41] text-lg m-0">🏆 天梯榜</h2>
+                        <p class="text-zinc-500 text-xs mt-1">22 维度 · 昨日最强 / 全网最强</p>
+                    </div>
+                    <div id="leaderboards-grid" class="flex-1 overflow-y-auto p-4 min-h-0" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; align-content: start;"></div>
+                </div>
                 <!-- 【新增】排行榜视图 - 六个全球排行榜卡片 + 高分图谱 -->
                 <div id="panel-ranking-view" class="right-drawer-panel hidden flex-col h-full overflow-y-auto">
                     <div id="panel-ranking-content" class="flex-1 flex flex-col gap-4 min-h-0 p-4">
@@ -318,6 +353,27 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 天梯榜「全部」二级抽屉：滑入式，right -450px → 0 -->
+    <div id="leaderboard-detail-drawer" class="secondary-drawer leaderboard-detail-drawer" aria-hidden="true">
+        <div class="secondary-drawer-inner">
+            <div class="secondary-drawer-header">
+                <h3 class="secondary-drawer-title" id="leaderboard-detail-drawer-title">全榜单</h3>
+                <button type="button" class="secondary-drawer-close" id="leaderboard-detail-drawer-close" aria-label="关闭">✕</button>
+            </div>
+            <div class="secondary-drawer-toolbar">
+                <button type="button" class="secondary-drawer-btn-goto-me" id="leaderboard-detail-goto-me">定位到我</button>
+            </div>
+            <div class="secondary-drawer-list-wrap" id="leaderboard-detail-list-wrap">
+                <table class="secondary-drawer-table" id="leaderboard-detail-table">
+                    <thead><tr><th>#</th><th>用户</th><th>数值</th></tr></thead>
+                    <tbody id="leaderboard-detail-tbody"></tbody>
+                </table>
+                <div class="secondary-drawer-loading" id="leaderboard-detail-loading" style="display:none;">加载中...</div>
+                <div class="secondary-drawer-end" id="leaderboard-detail-end" style="display:none;">— 已到底 —</div>
             </div>
         </div>
     </div>
@@ -690,6 +746,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/wordcloud2.js/1.2.2/wordcloud2.min.js" defer></script>
     <script src="assets/js/stats-data-service.js" defer></script>
     <script src="assets/js/stats-ui-renderer.js" defer></script>
+    <script src="assets/js/github-card-renderer.js" defer></script>
     <script src="assets/js/stats2.js" defer></script>
 </body>
 </html>

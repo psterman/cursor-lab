@@ -13,11 +13,20 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
 .flex{display:flex}.grid{display:grid}.hidden{display:none}.block{display:block}
 #user-modal.hidden{display:none!important}
 #user-modal:not(.hidden){display:flex!important;align-items:center;justify-content:center;z-index:20000}
+/* 战力报告弹窗滚动条：赛博风格，与左抽屉一致 */
 #user-modal-body::-webkit-scrollbar{width:8px}
 #user-modal-body::-webkit-scrollbar-track{background:rgba(0,0,0,0.4);border-radius:4px}
 #user-modal-body::-webkit-scrollbar-thumb{background:rgba(0,255,65,0.6);border-radius:4px}
 #user-modal-body::-webkit-scrollbar-thumb:hover{background:rgba(0,255,65,0.85)}
 #user-modal-body{scrollbar-width:thin;scrollbar-color:rgba(0,255,65,0.6) rgba(0,0,0,0.4)}
+#user-modal-body .cyber-report-card{min-height:4.5rem;display:flex;flex-direction:column}
+#user-modal-body .cyber-report-card .truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#user-modal-body .cyber-report-card .flex-shrink-0{flex-shrink:0}
+#user-modal-body .cyber-report-card .min-w-0{min-width:0}
+#user-modal-body .cyber-report-card .flex-1{flex:1 1 0%}
+#user-modal-body .cyber-report-card .min-h-0{min-height:0}
+#user-modal-body .cyber-report-card .text-\[10px\]{font-size:10px}
+#user-modal-body .cyber-report-card .mt-0\.5{margin-top:2px}
 .h-full{height:100%}.w-full{width:100%}.max-w-\[1600px\]{max-width:1600px}
 .flex-1{flex:1 1 0%}.flex-col{flex-direction:column}
 .items-center{align-items:center}.justify-center{justify-content:center}.justify-between{justify-content:space-between}
@@ -238,6 +247,352 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
             background: var(--accent-terminal);
             box-shadow: 0 0 8px var(--accent-terminal);
             border-radius: var(--radius-card) 0 0 0;
+        }
+
+        /* 天梯榜 22 卡片网格 */
+        #leaderboards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1rem;
+            align-content: start;
+            font-family: var(--font-mono-stack);
+        }
+        .leaderboard-card {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            border-radius: var(--radius-card);
+        }
+        .leaderboard-card .card-title-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+        .leaderboard-card .card-title {
+            color: var(--accent-terminal);
+            font-size: 13px;
+            font-weight: 600;
+            flex: 1;
+            min-width: 0;
+        }
+        .leaderboard-card-tabs {
+            display: flex;
+            gap: 2px;
+        }
+        .leaderboard-card-tabs button {
+            padding: 2px 8px;
+            font-size: 10px;
+            border: 1px solid rgba(0, 255, 65, 0.35);
+            background: transparent;
+            color: rgba(255, 255, 255, 0.6);
+            cursor: pointer;
+            border-radius: 2px;
+            font-family: var(--font-mono-stack);
+        }
+        .leaderboard-card-tabs button:hover {
+            color: var(--accent-terminal);
+            border-color: var(--accent-terminal);
+        }
+        .leaderboard-card-tabs button.active,
+        .leaderboard-card-actions .lb-tab.active {
+            background: rgba(0, 255, 65, 0.15);
+            color: var(--accent-terminal);
+            border-color: var(--accent-terminal);
+        }
+        .leaderboard-card-actions {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+        }
+        .leaderboard-card-actions .lb-tab { margin: 0; }
+        .lb-btn-more {
+            padding: 2px 6px;
+            font-size: 14px;
+            line-height: 1;
+            border: 1px solid rgba(0, 255, 65, 0.35);
+            background: transparent;
+            color: rgba(255, 255, 255, 0.6);
+            cursor: pointer;
+            border-radius: 2px;
+            font-family: var(--font-mono-stack);
+        }
+        .lb-btn-more:hover {
+            color: var(--accent-terminal);
+            border-color: var(--accent-terminal);
+        }
+        .metric-annotation {
+            font-size: 9px;
+            color: rgba(255, 255, 255, 0.92);
+            font-family: var(--font-mono-stack);
+            border-left: 1px solid rgba(0, 255, 65, 0.2);
+            padding-left: 6px;
+            margin-top: 8px;
+            margin-bottom: 4px;
+            line-height: 1.2;
+        }
+        .leaderboard-card-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+        .leaderboard-card-list li {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(0, 255, 65, 0.08);
+            font-size: 12px;
+        }
+        .leaderboard-card-list li:last-child { border-bottom: none; }
+        .leaderboard-card-list .rank-medal { font-size: 14px; flex-shrink: 0; width: 24px; text-align: center; }
+        .leaderboard-card-list .rank-num { width: 22px; color: rgba(255,255,255,0.5); font-size: 11px; flex-shrink: 0; }
+        .leaderboard-card-list .user-name {
+            flex: 1;
+            min-width: 0;
+            color: var(--accent-terminal);
+            cursor: pointer;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .leaderboard-card-list .user-name:hover { text-decoration: underline; }
+        .leaderboard-card-list .user-value { color: rgba(255,255,255,0.85); font-weight: 500; flex-shrink: 0; }
+        .leaderboard-card-updated {
+            margin-top: auto;
+            padding-top: 8px;
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+        .leaderboard-card-my-rank {
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px dashed rgba(0, 255, 65, 0.2);
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+        @keyframes fade-in-up {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .leaderboard-list-animate {
+            animation: fade-in-up 0.25s ease-out forwards;
+        }
+
+        /* 天梯榜全榜单 Modal：黑客风格 */
+        .global-leaderboard-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 21000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .global-leaderboard-modal.hidden { display: none !important; }
+        .global-leaderboard-modal-backdrop {
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.82);
+            backdrop-filter: blur(6px);
+        }
+        .global-leaderboard-modal-box {
+            position: relative;
+            width: 100%;
+            max-width: 640px;
+            max-height: 85vh;
+            background: rgba(8, 8, 8, 0.97);
+            border: 1px solid rgba(0, 255, 65, 0.4);
+            box-shadow: 0 0 24px rgba(0, 255, 65, 0.12);
+            display: flex;
+            flex-direction: column;
+            font-family: var(--font-mono-stack);
+        }
+        .global-leaderboard-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border-bottom: 1px solid rgba(0, 255, 65, 0.2);
+            flex-shrink: 0;
+        }
+        .global-leaderboard-modal-title {
+            margin: 0;
+            font-size: 14px;
+            color: var(--accent-terminal);
+        }
+        .global-leaderboard-modal-close {
+            background: none;
+            border: none;
+            color: var(--accent-terminal);
+            font-size: 18px;
+            cursor: pointer;
+            padding: 4px 8px;
+        }
+        .global-leaderboard-modal-toolbar {
+            display: flex;
+            gap: 8px;
+            padding: 10px 16px;
+            border-bottom: 1px solid rgba(0, 255, 65, 0.12);
+            flex-shrink: 0;
+        }
+        .global-leaderboard-search {
+            flex: 1;
+            min-width: 0;
+            padding: 6px 10px;
+            font-size: 12px;
+            font-family: inherit;
+            color: #fff;
+            background: rgba(0, 255, 65, 0.06);
+            border: 1px solid rgba(0, 255, 65, 0.3);
+        }
+        .global-leaderboard-search::placeholder { color: rgba(255,255,255,0.4); }
+        .global-leaderboard-btn-goto-me {
+            padding: 6px 12px;
+            font-size: 12px;
+            font-family: inherit;
+            color: var(--accent-terminal);
+            background: transparent;
+            border: 1px solid rgba(0, 255, 65, 0.4);
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .global-leaderboard-list-wrap {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            padding: 0 16px 16px;
+        }
+        .global-leaderboard-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        .global-leaderboard-table th,
+        .global-leaderboard-table td {
+            padding: 6px 10px;
+            text-align: left;
+            border-bottom: 1px solid rgba(0, 255, 65, 0.08);
+        }
+        .global-leaderboard-table th {
+            color: rgba(255,255,255,0.5);
+            font-weight: 600;
+        }
+        .global-leaderboard-table td { color: rgba(255,255,255,0.9); }
+        .global-leaderboard-table tbody tr:hover { background: rgba(0, 255, 65, 0.06); }
+        .global-leaderboard-table .col-rank { width: 56px; color: rgba(255,255,255,0.6); }
+        .global-leaderboard-table .col-user { cursor: pointer; color: var(--accent-terminal); }
+        .global-leaderboard-table .col-user:hover { text-decoration: underline; }
+        .global-leaderboard-table .col-value { text-align: right; }
+        .global-leaderboard-table tr.highlight-my-rank { background: rgba(0, 255, 65, 0.12); }
+        .global-leaderboard-loading,
+        .global-leaderboard-end {
+            text-align: center;
+            padding: 12px;
+            font-size: 11px;
+            color: rgba(255,255,255,0.5);
+        }
+        body.body-scroll-lock { overflow: hidden; }
+
+        /* 二级抽屉：滑入式 right -450px → 0，黑客风格边框 */
+        .secondary-drawer {
+            position: fixed;
+            top: 0;
+            right: -450px;
+            width: 450px;
+            max-width: 100vw;
+            height: 100vh;
+            z-index: 20500;
+            transition: right 0.28s ease-out;
+            font-family: var(--font-mono-stack);
+        }
+        .secondary-drawer.active {
+            right: 0;
+        }
+        .secondary-drawer-inner {
+            height: 100%;
+            background: rgba(8, 8, 8, 0.98);
+            border-left: 1px solid rgba(0, 255, 65, 0.45);
+            box-shadow: -4px 0 24px rgba(0, 255, 65, 0.08);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .secondary-drawer-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border-bottom: 1px solid rgba(0, 255, 65, 0.25);
+            flex-shrink: 0;
+        }
+        .secondary-drawer-title {
+            margin: 0;
+            font-size: 14px;
+            color: var(--accent-terminal);
+        }
+        .secondary-drawer-close {
+            background: none;
+            border: none;
+            color: var(--accent-terminal);
+            font-size: 18px;
+            cursor: pointer;
+            padding: 4px 8px;
+        }
+        .secondary-drawer-toolbar {
+            padding: 10px 16px;
+            border-bottom: 1px solid rgba(0, 255, 65, 0.12);
+            flex-shrink: 0;
+        }
+        .secondary-drawer-btn-goto-me {
+            padding: 6px 12px;
+            font-size: 12px;
+            font-family: inherit;
+            color: var(--accent-terminal);
+            background: transparent;
+            border: 1px solid rgba(0, 255, 65, 0.4);
+            cursor: pointer;
+        }
+        .secondary-drawer-btn-goto-me:hover {
+            background: rgba(0, 255, 65, 0.1);
+        }
+        .secondary-drawer-list-wrap {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            padding: 0 16px 16px;
+        }
+        .secondary-drawer-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        .secondary-drawer-table th,
+        .secondary-drawer-table td {
+            padding: 6px 10px;
+            text-align: left;
+            border-bottom: 1px solid rgba(0, 255, 65, 0.08);
+        }
+        .secondary-drawer-table th {
+            color: rgba(255,255,255,0.5);
+            font-weight: 600;
+        }
+        .secondary-drawer-table td { color: rgba(255,255,255,0.9); }
+        .secondary-drawer-table tbody tr:hover { background: rgba(0, 255, 65, 0.06); }
+        .secondary-drawer-table .col-rank { width: 56px; color: rgba(255,255,255,0.6); }
+        .secondary-drawer-table .col-user { cursor: pointer; color: var(--accent-terminal); }
+        .secondary-drawer-table .col-user:hover { text-decoration: underline; }
+        .secondary-drawer-table .col-value { text-align: right; }
+        .secondary-drawer-table tr.my-rank-highlight { background: rgba(0, 255, 65, 0.15); }
+        .secondary-drawer-loading,
+        .secondary-drawer-end {
+            text-align: center;
+            padding: 12px;
+            font-size: 11px;
+            color: rgba(255,255,255,0.5);
         }
 
         #map-container {
@@ -1605,6 +1960,11 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
         #systemDays.skeleton,
         #cityCount.skeleton {
             min-height: 1.6rem;
+        }
+
+        /* 数值变动 300ms 渐变，避免生硬替换 */
+        .stat-value-transition {
+            transition: opacity 0.3s ease;
         }
 
         @keyframes scan-sweep {
