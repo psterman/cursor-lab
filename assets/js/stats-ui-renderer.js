@@ -134,6 +134,9 @@
      * 切换 Tab 时先清空当前 Canvas 及其容器内对应 canvas 内容，再渲染。
      */
     function _renderNationalIdentityCloud(level) {
+        // 【P0 修复】每次调用递增渲染令牌，异步回调中检查令牌一致性，旧回调自动作废
+        var myToken = ++window.__cloudRenderToken;
+
         if (window.__isCloudLoading) {
             showCloudLoadingHint();
             return;
@@ -181,6 +184,11 @@
                 var retryKey = '__nationalCloudRetryCount';
                 if (typeof window[retryKey] !== 'number') window[retryKey] = 0;
                 svc.fetchCountryKeywords().then(function(result) {
+                    // 【令牌检查】如果已有更新的渲染调用，放弃当前回调
+                    if (window.__cloudRenderToken !== myToken) {
+                        console.log('[WordCloud] 令牌过期，放弃旧 fetch 回调 (token=' + myToken + ', current=' + window.__cloudRenderToken + ')');
+                        return;
+                    }
                     hideCloudLoadingHint();
                     // 检查获取到的数据是否有效
                     var hasData = result && (
@@ -204,12 +212,16 @@
                                 empty.textContent = (currentLang === 'en' ? 'Scanning developer vibes... ' : '正在扫描该国开发者指纹... ') + '(' + window[retryKey] + '/3)';
                                 empty.classList.remove('hidden');
                                 setTimeout(function() {
+                                    // 【令牌检查】setTimeout 重试前也检查令牌
+                                    if (window.__cloudRenderToken !== myToken) return;
                                     _renderNationalIdentityCloud(level);
                                 }, 3000);
                             }
                         }
                     }
                 }).catch(function(err) {
+                    // 【令牌检查】错误回调也检查令牌
+                    if (window.__cloudRenderToken !== myToken) return;
                     hideCloudLoadingHint();
                     console.warn('[StatsUIRenderer] 获取词云数据失败:', err);
                     window[retryKey] = (window[retryKey] || 0) + 1;
@@ -224,6 +236,8 @@
                     if (meta) meta.textContent = '--';
                     if (window[retryKey] < 3) {
                         setTimeout(function() {
+                            // 【令牌检查】错误重试也检查令牌
+                            if (window.__cloudRenderToken !== myToken) return;
                             _renderNationalIdentityCloud(level);
                         }, 5000);
                     }
@@ -240,6 +254,8 @@
                 }
                 // 如果 StatsDataService 不可用，延迟重试
                 setTimeout(function() {
+                    // 【令牌检查】初始化重试也检查令牌
+                    if (window.__cloudRenderToken !== myToken) return;
                     _renderNationalIdentityCloud(level);
                 }, 2000);
             }

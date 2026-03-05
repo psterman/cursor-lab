@@ -6110,6 +6110,7 @@
                 return;
             }
             // 防抖：同国家 500ms 内不重复全量刷新；若该国最近加载失败则允许立即重试
+            // 【P1 修复】提前 return 时仅打开抽屉，不清空 DOM，避免骨架屏闪烁
             if (!summaryOnly) {
                 const now = Date.now();
                 const isRetryAfterFail = window.__drawerLastFailCc === ccUpper && (now - (window.__drawerLastFailTs || 0)) < 30000;
@@ -6118,6 +6119,9 @@
                     const rightDrawer = document.getElementById('right-drawer');
                     if (leftDrawer) leftDrawer.classList.add('active');
                     if (rightDrawer) rightDrawer.classList.add('active');
+                    // 【P1 修复】保持 localStorage 状态同步
+                    try { localStorage.setItem('left_drawer_open', 'true'); localStorage.setItem('right_drawer_open', 'true'); } catch (e) { /* ignore */ }
+                    console.log('[Drawer] ⏭️ 500ms 防抖生效，仅打开抽屉，保留当前 DOM 内容');
                     return;
                 }
                 window.__lastDrawerOpenCc = ccUpper;
@@ -6151,8 +6155,8 @@
 
             if (!leftDrawer || !rightDrawer) return;
             if (typeof currentDrawerCountry !== 'object' || currentDrawerCountry == null) return;
-            // ✅ 关键：当用户正在看“国家透视”时，不允许 showDrawersWithCountryData 把右侧切回全网/实时流
-            // 否则会出现“点 US/CN -> 立刻又回到全国/全网”的错觉。
+            // ✅ 关键：当用户正在看"国家透视"时，不允许 showDrawersWithCountryData 把右侧切回全网/实时流
+            // 否则会出现"点 US/CN -> 立刻又回到全国/全网"的错觉。
             const ccUpperForPanel = String(countryCode || '').trim().toUpperCase();
             const preserveCountryPanel =
                 !!opts.preserveCountryPanel ||
@@ -6160,34 +6164,29 @@
                     currentViewState === 'COUNTRY' &&
                     /^[A-Z]{2}$/.test(ccUpperForPanel));
             const globalFlowPanelButtons = document.getElementById('globalFlowPanelButtons');
-            // 【重构】使用新的 switchView 函数切换视图，而不是直接操作 DOM
-            if (preserveCountryPanel) {
-                // 切换到国家透视视图
-                if (typeof switchView === 'function') {
-                    switchView('country');
-                }
-                if (globalFlowPanelButtons) globalFlowPanelButtons.style.display = 'none';
-            } else {
-                // 显示全球榜单视图
-                // 【修复】避免重复渲染：如果已经在 global 视图且正在渲染，则不调用 switchView
-                if (typeof switchView === 'function' && currentViewState !== 'GLOBAL') {
-                    switchView('global');
-                } else if (currentViewState === 'GLOBAL') {
-                    // 如果已经在 global 视图，只更新按钮显示，不重复调用 switchView
-                    if (globalFlowPanelButtons) {
-                        globalFlowPanelButtons.style.display = '';
-                        globalFlowPanelButtons.style.visibility = 'visible';
-                    }
-                } else {
-                    // 不在 global 视图时，正常切换
-                    if (typeof switchView === 'function') {
+            // 【P0 修复】使用重入标志防止 switchView ↔ showDrawersWithCountryData 递归闭环
+            // switchView 内部在检测到此标志时，仅切换面板 DOM，不触发数据拉取
+            if (typeof switchView === 'function' && !window.__inShowDrawers) {
+                window.__inShowDrawers = true;
+                try {
+                    if (preserveCountryPanel) {
+                        switchView('country');
+                        if (globalFlowPanelButtons) globalFlowPanelButtons.style.display = 'none';
+                    } else if (currentViewState !== 'GLOBAL') {
                         switchView('global');
+                        if (globalFlowPanelButtons) {
+                            globalFlowPanelButtons.style.display = '';
+                            globalFlowPanelButtons.style.visibility = 'visible';
+                        }
+                    } else {
+                        // 已经在 global 视图，只更新按钮显示
+                        if (globalFlowPanelButtons) {
+                            globalFlowPanelButtons.style.display = '';
+                            globalFlowPanelButtons.style.visibility = 'visible';
+                        }
                     }
-                    // 【关键修复】确保 global 视图按钮显示
-                    if (globalFlowPanelButtons) {
-                        globalFlowPanelButtons.style.display = '';
-                        globalFlowPanelButtons.style.visibility = 'visible';
-                    }
+                } finally {
+                    window.__inShowDrawers = false;
                 }
             }
 
@@ -7534,6 +7533,31 @@
          */
         function switchToCountryView(code, name, opts) {
             opts = opts && typeof opts === 'object' ? opts : {};
+
+            // 【P0 修复】先写入所有状态，确保后续 showDrawersWithCountryData 判断 preserveCountryPanel=true
+            currentViewState = 'COUNTRY';
+            state.currentViewState = 'COUNTRY';
+
+            var displayName = countryNameMap[String(code || '').toUpperCase()]
+                ? (currentLang === 'zh'
+                    ? countryNameMap[String(code || '').toUpperCase()].zh
+                    : countryNameMap[String(code || '').toUpperCase()].en)
+                : name;
+
+            selectedCountry = code === 'US' ? 'US' : code;
+            state.selectedCountry = code;
+            currentDrawerCountry.code = code;
+            currentDrawerCountry.name = displayName;
+            try {
+                window.currentUserCountry = String(code || '').trim().toUpperCase();
+                // 【核心】同步 __selectedCountry 供 fetchCountryKeywords 等国别数据接口使用（前移，确保 fetch 读到新国家）
+                window.__selectedCountry = code;
+            } catch (e) { /* ignore */ }
+
+            // 【P0 修复】递增词云渲染令牌，使旧国家的词云异步回调自动作废
+            window.__cloudRenderToken = (window.__cloudRenderToken || 0) + 1;
+            window.__nationalCloudRetryCount = 0; // 重置重试计数
+
             // 切换国旗时立即清空词云缓存与 Canvas，显示 Loading，防止旧国家数据残留
             try {
                 window.__countryKeywordsByLevel = null;
@@ -7547,8 +7571,9 @@
                 if (emptyEl) { emptyEl.textContent = '正在扫描该国开发者指纹...'; emptyEl.classList.remove('hidden'); }
                 if (wc) { wc.setAttribute('data-loading', 'true'); }
             } catch (e) { /* ignore */ }
+
+            // 状态就绪后再调用数据填充（此时 preserveCountryPanel 判断正确）
             showDrawersWithCountryData(code, name);
-            currentViewState = 'COUNTRY';
             const rightDrawer = document.getElementById('right-drawer');
             const globalFlowPanelButtons = document.getElementById('globalFlowPanelButtons');
             if (!rightDrawer) return;
@@ -7558,11 +7583,6 @@
 
             const leftTitle = document.getElementById('left-drawer-title');
             const rightTitle = document.getElementById('right-drawer-title');
-            const displayName = countryNameMap[String(code || '').toUpperCase()]
-                ? (currentLang === 'zh'
-                    ? countryNameMap[String(code || '').toUpperCase()].zh
-                    : countryNameMap[String(code || '').toUpperCase()].en)
-                : name;
             if (leftTitle) leftTitle.textContent = displayName;
             if (rightTitle) rightTitle.textContent = displayName;
 
@@ -7571,14 +7591,6 @@
             var dashboardOpts = opts.forceRefresh ? { force: true, silent: false } : { preferCache: true, silent: true };
             try { updateCountryDashboard(code, null, dashboardOpts); } catch (e) { /* ignore */ }
 
-            selectedCountry = code === 'US' ? 'US' : code;
-            currentDrawerCountry.code = code;
-            currentDrawerCountry.name = displayName;
-            try {
-                window.currentUserCountry = String(code || '').trim().toUpperCase();
-                // 【核心】同步 __selectedCountry 供 fetchCountryKeywords 等国别数据接口使用
-                window.__selectedCountry = code;
-            } catch (e) { /* ignore */ }
             // 【新增】更新顶部视图切换按钮
             updateHeaderViewToggleBtn();
             console.log('[Drawer] 国家透视已打开:', name);
@@ -7813,18 +7825,7 @@
             state.currentViewState = targetView;
             currentViewState = targetView; // 向后兼容
 
-            // 【优化】移除自动刷新定时器，避免后台资源浪费
-            // 用户需要数据时手动刷新页面或点击刷新按钮
-            if (countryPanelAutoRefreshTimer) {
-                clearInterval(countryPanelAutoRefreshTimer);
-                countryPanelAutoRefreshTimer = null;
-            }
-            
-            // 获取所有面板和 Tab 按钮
-            state.currentViewState = targetView;
-            currentViewState = targetView; // 向后兼容
-
-            // 国家透视下自动刷新右侧面板（不通过按钮）；离开国家视图时清除定时器
+            // 【P2 修复】合并去重：清除旧定时器 + 按需创建新定时器（原代码此处重复执行了两次）
             if (countryPanelAutoRefreshTimer) {
                 clearInterval(countryPanelAutoRefreshTimer);
                 countryPanelAutoRefreshTimer = null;
