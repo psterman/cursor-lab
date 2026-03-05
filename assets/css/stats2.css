@@ -14,7 +14,7 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
 #user-modal.hidden{display:none!important}
 #user-modal:not(.hidden){display:flex!important;align-items:center;justify-content:center;z-index:20000}
 
-/* 强制性全屏 gate 遮罩：赛博朋克风格，无关闭按钮，双重状态完成后由 JS 静默移除 */
+/* 强制性全屏 gate 遮罩：赛博朋克风格，无关闭按钮，双重状态完成后由 JS 静默移除；淡出动画用 stats2-gate-fade-out */
 .stats2-gate-overlay {
   position: fixed;
   inset: 0;
@@ -25,6 +25,11 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
   justify-content: center;
   pointer-events: auto;
   overflow: hidden;
+  transition: opacity 0.25s ease;
+}
+.stats2-gate-overlay.stats2-gate-fade-out {
+  opacity: 0;
+  pointer-events: none;
 }
 .stats2-gate-overlay::before {
   content: '';
@@ -46,7 +51,9 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
   background: radial-gradient(ellipse 80% 50% at 50% 50%, rgba(0, 255, 65, 0.06) 0%, transparent 60%);
   pointer-events: none;
 }
+#force-onboarding-overlay.stats2-gate-removed { display: none !important; }
 .stats2-gate-overlay.stats2-gate-removed { display: none !important; }
+.stats2-gate-github-section { margin-top: 18px; flex-shrink: 0; }
 .stats2-gate-overlay-inner {
   position: relative;
   z-index: 1;

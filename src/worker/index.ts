@@ -9918,25 +9918,36 @@ async function writeGlobalCountryStatsToKV(env: Env): Promise<{ success: boolean
 
 /**
  * 天梯榜快照刷新：调用 Supabase RPC refresh_leaderboard_snapshots()
- * 计算 22 维度 x daily/all_time 的 Top10 并写入 leaderboard_snapshots 表
+ * 计算 22 维度 x daily/all_time 的 Top10 并写入 leaderboard_snapshots 表；带有限重试以提升 Cron 稳健性
  */
 async function refreshLeaderboardSnapshots(env: Env): Promise<{ success: boolean; error?: string }> {
-  try {
-    if (!env.SUPABASE_URL || !env.SUPABASE_KEY) return { success: false, error: 'Supabase 未配置' };
-    const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/refresh_leaderboard_snapshots`;
-    const res = await fetchSupabaseJson<{ ok?: boolean; count?: number }>(env, rpcUrl, {
-      method: 'POST',
-      headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
-      body: JSON.stringify({}),
-    }, SUPABASE_FETCH_TIMEOUT_MS * 2);
-    if (res && (res as any).ok) {
-      console.log('[Worker] ✅ 天梯榜快照刷新完成');
-      return { success: true };
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) return { success: false, error: 'Supabase 未配置' };
+  const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/refresh_leaderboard_snapshots`;
+  const maxAttempts = 3;
+  const retryDelayMs = 3000;
+  const timeoutMs = SUPABASE_FETCH_TIMEOUT_MS * 2;
+  let lastError: string | undefined;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetchSupabaseJson<{ ok?: boolean; count?: number }>(env, rpcUrl, {
+        method: 'POST',
+        headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({}),
+      }, timeoutMs);
+      if (res && (res as any).ok) {
+        console.log('[Worker] ✅ 天梯榜快照刷新完成');
+        return { success: true };
+      }
+      lastError = 'RPC 返回异常';
+    } catch (e: any) {
+      lastError = e?.message || String(e);
+      if (attempt < maxAttempts) {
+        console.warn(`[Worker] ⚠️ 天梯榜快照第 ${attempt} 次失败，${retryDelayMs / 1000}s 后重试:`, lastError);
+        await new Promise((r) => setTimeout(r, retryDelayMs));
+      }
     }
-    return { success: false, error: 'RPC 返回异常' };
-  } catch (e: any) {
-    return { success: false, error: e?.message || String(e) };
   }
+  return { success: false, error: lastError };
 }
 
 /**
@@ -9961,8 +9972,12 @@ export async function scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionC
     return;
   }
   if (cron === '0 * * * *') {
-    const lbResult = await refreshLeaderboardSnapshots(env);
-    if (!lbResult.success) console.warn('[Worker] ⚠️ 天梯榜快照刷新失败:', lbResult.error);
+    try {
+      const lbResult = await refreshLeaderboardSnapshots(env);
+      if (!lbResult.success) console.warn('[Worker] ⚠️ 天梯榜快照刷新失败:', lbResult.error);
+    } catch (lbErr: any) {
+      console.warn('[Worker] ⚠️ 天梯榜快照刷新异常，继续执行后续聚合:', lbErr?.message || lbErr);
+    }
   }
   const result = await performAggregation(env);
   const v6Result = await performV6Aggregation(env);

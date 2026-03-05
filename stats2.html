@@ -53,13 +53,15 @@
     <link rel="stylesheet" href="assets/css/stats2.css">
 </head>
 <body class="p-4 md:p-8">
-    <!-- 强制性全屏遮罩：无关闭按钮，遮盖整个 stats2，双重状态（国家+登录）完成后由 JS 静默销毁 -->
-    <div id="stats2-gate-overlay" class="stats2-gate-overlay" aria-hidden="false">
+    <!-- 强制性全屏遮罩：id=force-onboarding-overlay，无关闭按钮，先选国家再显示 GitHub 按钮，双重状态完成后由 JS 静默销毁 -->
+    <div id="force-onboarding-overlay" class="stats2-gate-overlay" aria-hidden="false" style="display: flex;">
         <div class="stats2-gate-overlay-inner">
             <h3 class="stats2-gate-title">身份设置</h3>
             <input type="text" id="country-search-input" placeholder="搜索国家..." class="stats2-gate-search" />
             <div id="country-list-container" class="stats2-gate-list"></div>
-            <button type="button" id="country-selector-github-save-btn" disabled class="stats2-gate-github-btn">使用 GitHub 登录并保存</button>
+            <div id="force-onboarding-github-section" class="stats2-gate-github-section" style="display: none;">
+                <button type="button" id="country-selector-github-save-btn" disabled class="stats2-gate-github-btn">使用 GitHub 登录并保存</button>
+            </div>
         </div>
     </div>
     <!-- 顶部固定 Header -->

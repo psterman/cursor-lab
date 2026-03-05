@@ -309,21 +309,49 @@
 
     // --- Script Block ---
 
-    // 【强制性 gate】全屏遮罩无关闭按钮；国家存 localStorage，登录态用 Supabase Session；双重满足时静默销毁遮罩，不弹 alert/confirm
+    // 【强制性初始化拦截】id=force-onboarding-overlay；国家存 localStorage，登录态用 Supabase Session；先选国家再显示 GitHub 按钮；双重满足时静默销毁遮罩，无闪烁
     (function() {
+        var OVERLAY_ID = 'force-onboarding-overlay';
+        var GITHUB_SECTION_ID = 'force-onboarding-github-section';
         function getStoredCountry() {
             try {
                 var v = localStorage.getItem('selected_country') || localStorage.getItem('user_selected_country') || '';
                 return (v && String(v).trim().length >= 2) ? String(v).trim().toUpperCase() : null;
             } catch (e) { return null; }
         }
-        function hideGateOverlay() {
-            var el = document.getElementById('stats2-gate-overlay');
+        function showOverlay() {
+            var el = document.getElementById(OVERLAY_ID);
             if (el) {
-                el.classList.add('stats2-gate-removed');
-                el.setAttribute('aria-hidden', 'true');
+                el.classList.remove('stats2-gate-removed');
+                el.style.display = 'flex';
+                el.setAttribute('aria-hidden', 'false');
+                try { document.body.style.overflow = 'hidden'; document.documentElement.style.overflow = 'hidden'; } catch (e) {}
             }
+        }
+        function restoreBodyScroll() {
             try { document.body.style.overflow = ''; document.documentElement.style.overflow = ''; } catch (e) {}
+        }
+        function removeOverlayImmediately() {
+            var el = document.getElementById(OVERLAY_ID);
+            if (el && el.parentNode) el.parentNode.removeChild(el);
+            restoreBodyScroll();
+        }
+        function hideGateOverlay() {
+            var el = document.getElementById(OVERLAY_ID);
+            if (!el) { restoreBodyScroll(); return; }
+            restoreBodyScroll();
+            el.classList.add('stats2-gate-fade-out');
+            el.setAttribute('aria-hidden', 'true');
+            el.addEventListener('transitionend', function onEnd(ev) {
+                if (ev.target !== el || (ev.propertyName && ev.propertyName !== 'opacity')) return;
+                el.removeEventListener('transitionend', onEnd);
+                if (el.parentNode) el.parentNode.removeChild(el);
+            });
+        }
+        function showGitHubSectionIfCountrySelected() {
+            var code = (window.__countrySelectorSelectedCode || '').trim().toUpperCase();
+            var section = document.getElementById(GITHUB_SECTION_ID);
+            if (section && /^[A-Z]{2}$/.test(code)) section.style.display = '';
         }
         function checkGatePassed(session) {
             var country = getStoredCountry();
@@ -335,21 +363,19 @@
                     localStorage.setItem('selected_country', country);
                     localStorage.setItem('user_selected_country', country);
                 } catch (e) {}
-                hideGateOverlay();
+                removeOverlayImmediately();
                 return true;
             }
             return false;
         }
         function runGateCheck() {
-            var overlay = document.getElementById('stats2-gate-overlay');
+            var overlay = document.getElementById(OVERLAY_ID);
             if (!overlay || overlay.classList.contains('stats2-gate-removed')) return;
             var country = getStoredCountry();
             if (!country) {
                 window.__countryPickerForced = true;
                 window.__countrySelectorSelectedCode = '';
-                overlay.classList.remove('stats2-gate-removed');
-                overlay.setAttribute('aria-hidden', 'false');
-                try { document.body.style.overflow = 'hidden'; document.documentElement.style.overflow = 'hidden'; } catch (e) {}
+                showOverlay();
                 return;
             }
             var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
@@ -357,13 +383,11 @@
             sb.auth.getSession().then(function(r) {
                 var session = (r && r.data && r.data.session) ? r.data.session : null;
                 if (checkGatePassed(session)) return;
-                overlay.classList.remove('stats2-gate-removed');
-                overlay.setAttribute('aria-hidden', 'false');
-                try { document.body.style.overflow = 'hidden'; document.documentElement.style.overflow = 'hidden'; } catch (e) {}
+                showOverlay();
             }).catch(function() {});
         }
         function run() {
-            var overlay = document.getElementById('stats2-gate-overlay');
+            var overlay = document.getElementById(OVERLAY_ID);
             if (!overlay) return;
             var country = getStoredCountry();
             if (country) {
@@ -371,10 +395,8 @@
                     window.currentCountryCode = country;
                     localStorage.setItem('user_country_fixed', country);
                 } catch (e) {}
+                overlay.style.display = 'none';
             }
-            overlay.classList.remove('stats2-gate-removed');
-            overlay.setAttribute('aria-hidden', 'false');
-            try { document.body.style.overflow = 'hidden'; document.documentElement.style.overflow = 'hidden'; } catch (e) {}
             window.__countryPickerForced = true;
             window.__countrySelectorSelectedCode = '';
             var poll = setInterval(function() {
@@ -388,6 +410,7 @@
                 }
             }, 200);
             setTimeout(function() { clearInterval(poll); }, 15000);
+            if (!country) showOverlay();
         }
         document.addEventListener('click', function(e) {
             var btn = e.target && (e.target.id === 'country-selector-close' || (e.target.closest && e.target.closest('#country-selector-close')));
@@ -404,6 +427,7 @@
         }
         window.runGateCheck = runGateCheck;
         window.hideGateOverlay = hideGateOverlay;
+        window.showGitHubSectionIfCountrySelected = showGitHubSectionIfCountrySelected;
     })();
     
 
@@ -559,6 +583,17 @@
         return n + ' B';
     }
 
+    /** 星标取值优先级：totalStars -> totalRepoStars -> github_stars，取第一个有效正数；若无则返回 null（避免误显 0） */
+    function resolveDisplayStars(data) {
+        if (!data) return null;
+        var gs = (data.github_stats && typeof data.github_stats === 'object') ? data.github_stats : (typeof data.github_stats === 'string' ? (function() { try { return JSON.parse(data.github_stats); } catch (_) { return {}; } })() : {});
+        var a = gs.totalStars != null ? Number(gs.totalStars) : NaN;
+        var b = gs.totalRepoStars != null ? Number(gs.totalRepoStars) : NaN;
+        var c = data.github_stars != null ? Number(data.github_stars) : NaN;
+        var nums = [a, b, c].filter(function(n) { return !Number.isNaN(n) && n > 0; });
+        return nums.length ? Math.max.apply(null, nums) : null;
+    }
+
     function renderCyberPowerReportBody(data) {
         var body = document.getElementById('user-modal-body');
         var titleEl = document.querySelector('#user-modal .user-modal-content h3');
@@ -582,9 +617,10 @@
             try { return new Date(raw).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }); } catch (_) { return typeof raw === 'string' ? raw : '—'; }
         })();
 
+        var starsVal = resolveDisplayStars(data);
         var items = [
             { label: '仓库数', value: gs.publicRepos != null ? String(gs.publicRepos) : '—', rankKeys: ['public_repos_rank', 'publicReposRank'], source: 'GitHub' },
-            { label: '星标总数', value: gs.totalRepoStars != null ? Number(gs.totalRepoStars).toLocaleString() : (data.github_stars != null ? Number(data.github_stars).toLocaleString() : '—'), rankKeys: ['stars_rank', 'starsRank'], source: 'GitHub' },
+            { label: '星标总数', value: starsVal != null ? Number(starsVal).toLocaleString() : '—', rankKeys: ['stars_rank', 'starsRank'], source: 'GitHub' },
             { label: 'Fork 数量', value: gs.totalForks != null ? String(gs.totalForks) : '—', rankKeys: ['forks_rank', 'forksRank'], source: 'GitHub' },
             { label: '代码总量', value: formatCodeSize(gs.totalCodeSize), rankKeys: ['code_size_rank', 'codeSizeRank'], source: 'GitHub' },
             { label: '30日活跃度', value: gs.activeDays != null ? String(gs.activeDays) : '—', rankKeys: ['active_days_rank', 'activeDaysRank'], source: 'GitHub' },
@@ -729,7 +765,8 @@
         var name = opts.name || opts.login || login;
         var publicRepos = opts.public_repos != null ? opts.public_repos : (opts.publicRepos != null ? opts.publicRepos : '—');
         var updatedAt = opts.updated_at || opts.updatedAt || '—';
-        var stars = opts.stars != null ? opts.stars : (opts.totalStars != null ? opts.totalStars : '—');
+        var starsVal = resolveDisplayStars(opts);
+        var stars = starsVal != null ? starsVal : (opts.stars != null ? opts.stars : (opts.totalStars != null ? opts.totalStars : '—'));
         var toId = opts.toId || opts.fingerprint || login;
         var githubUrl = 'https://github.com/' + (login ? encodeURIComponent(login) : '');
         if (typeof updatedAt === 'string' && updatedAt !== '—' && updatedAt.length > 10) {
@@ -8173,29 +8210,58 @@
         /** 按 metric_key 分组的快照缓存：{ [metric_key]: { daily: { top_data, updated_at }, all_time: { top_data, updated_at } } } */
         var __leaderboardSnapshots = null;
 
+        /** 禁止前端调用 supabase.rpc('refresh_leaderboard_snapshots')：该 RPC 执行 50 次重算与 50 次 Upsert，仅由后端 Worker 按日执行。登录后首次同步也禁止调用，仅通过查询 user_analysis/视图 更新 UI。 */
+
+        var VIBE_LEADERBOARD_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
         /**
-         * 从 leaderboard_snapshots 表拉取 44 条记录，按 metric_key 分组，每个维度下存 daily / all_time 的 top_data
+         * SWR 本地缓存：若 key 存在且未过期则返回缓存数据不请求；否则执行 fetchFn 后写入缓存
+         * @param {string} key - localStorage key
+         * @param {number} ttlMs - 有效期毫秒
+         * @param {function(): Promise<*>} fetchFn - 返回 Promise 的请求函数
+         * @returns {Promise<*>}
+         */
+        function getCachedOrFetch(key, ttlMs, fetchFn) {
+            try {
+                var raw = typeof localStorage !== 'undefined' && localStorage.getItem(key);
+                if (raw) {
+                    var obj = JSON.parse(raw);
+                    if (obj && obj.ts != null && (Date.now() - obj.ts < ttlMs) && obj.data !== undefined) return Promise.resolve(obj.data);
+                }
+            } catch (e) {}
+            return fetchFn().then(function(data) {
+                try { if (typeof localStorage !== 'undefined') localStorage.setItem(key, JSON.stringify({ data: data, ts: Date.now() })); } catch (e) {}
+                return data;
+            });
+        }
+
+        /**
+         * 从 leaderboard_snapshots 表拉取 44 条记录，按 metric_key 分组；优先 24h 本地缓存，未命中再请求
          */
         async function fetchAllLeaderboardSnapshots() {
             var sb = (typeof supabaseClient !== 'undefined' && supabaseClient) ? supabaseClient : (window.supabase || null);
             if (!sb || typeof sb.from !== 'function') return null;
             try {
-                var res = await sb.from('leaderboard_snapshots').select('*');
-                var data = (res && res.data) ? res.data : [];
-                if (res && res.error) {
-                    console.warn('[Leaderboard] select error:', res.error);
-                    return null;
-                }
-                var grouped = {};
-                (data || []).forEach(function(row) {
-                    var key = row.metric_key;
-                    var type = row.ranking_type === 'daily' ? 'daily' : 'all_time';
-                    if (!key) return;
-                    if (!grouped[key]) grouped[key] = { daily: {}, all_time: {} };
-                    grouped[key][type] = {
-                        top_data: Array.isArray(row.top_data) ? row.top_data : [],
-                        updated_at: row.updated_at || ''
-                    };
+                var grouped = await getCachedOrFetch('vibe_leaderboard_snapshots', VIBE_LEADERBOARD_CACHE_TTL_MS, function() {
+                    return sb.from('leaderboard_snapshots').select('*').then(function(res) {
+                        var data = (res && res.data) ? res.data : [];
+                        if (res && res.error) {
+                            console.warn('[Leaderboard] select error:', res.error);
+                            return null;
+                        }
+                        var out = {};
+                        (data || []).forEach(function(row) {
+                            var key = row.metric_key;
+                            var type = row.ranking_type === 'daily' ? 'daily' : 'all_time';
+                            if (!key) return;
+                            if (!out[key]) out[key] = { daily: {}, all_time: {} };
+                            out[key][type] = {
+                                top_data: Array.isArray(row.top_data) ? row.top_data : [],
+                                updated_at: row.updated_at || ''
+                            };
+                        });
+                        return out;
+                    });
                 });
                 __leaderboardSnapshots = grouped;
                 return grouped;
@@ -8203,6 +8269,25 @@
                 console.error('[Leaderboard] fetchAllLeaderboardSnapshots:', e);
                 return null;
             }
+        }
+
+        /**
+         * 分页榜单：优先 24h 缓存，未命中再调用 get_leaderboard_page RPC
+         */
+        function getLeaderboardPageCached(sb, metric, rankingType, startIndex, limit) {
+            var key = 'vibe_lb_page_' + (metric || '') + '_' + (rankingType || '') + '_' + (startIndex || 0) + '_' + (limit || 50);
+            return getCachedOrFetch(key, VIBE_LEADERBOARD_CACHE_TTL_MS, function() {
+                return sb.rpc('get_leaderboard_page', {
+                    p_metric_name: metric,
+                    p_ranking_type: rankingType,
+                    p_start_index: startIndex,
+                    p_limit: limit
+                }).then(function(res) {
+                    var data = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
+                    if (res && res.error) return Promise.reject(res.error);
+                    return data;
+                });
+            });
         }
 
         function esc(s) {
@@ -8381,24 +8466,14 @@
                 if (loadingEl) loadingEl.style.display = 'none';
                 return;
             }
-            sb.rpc('get_leaderboard_page', {
-                p_metric_name: __globalLeaderboardMetric,
-                p_ranking_type: __globalLeaderboardRankingType,
-                p_start_index: startIndex,
-                p_limit: __globalLeaderboardPageSize
-            }).then(function(res) {
+            getLeaderboardPageCached(sb, __globalLeaderboardMetric, __globalLeaderboardRankingType, startIndex, __globalLeaderboardPageSize).then(function(list) {
                 __globalLeaderboardLoading = false;
                 if (loadingEl) loadingEl.style.display = 'none';
-                var data = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
-                if (res && res.error) {
-                    console.warn('[Leaderboard] get_leaderboard_page error:', res.error);
-                    return;
-                }
+                list = Array.isArray(list) ? list : [];
                 if (replace) {
                     __globalLeaderboardRows = [];
                     tbody.innerHTML = '';
                 }
-                var list = Array.isArray(data) ? data : [];
                 list.forEach(function(row) {
                     __globalLeaderboardRows.push(row);
                     var tr = document.createElement('tr');
@@ -8425,7 +8500,7 @@
             }).catch(function(e) {
                 __globalLeaderboardLoading = false;
                 if (loadingEl) loadingEl.style.display = 'none';
-                console.error('[Leaderboard] get_leaderboard_page:', e);
+                console.warn('[Leaderboard] get_leaderboard_page error:', e);
             });
         }
 
@@ -8489,13 +8564,8 @@
                 __globalLeaderboardHasMore = true;
                 var tbody = document.getElementById('global-leaderboard-tbody');
                 if (tbody) tbody.innerHTML = '';
-                sb.rpc('get_leaderboard_page', {
-                    p_metric_name: __globalLeaderboardMetric,
-                    p_ranking_type: __globalLeaderboardRankingType,
-                    p_start_index: startIndex,
-                    p_limit: __globalLeaderboardPageSize
-                }).then(function(pageRes) {
-                    var list = (pageRes && pageRes.data) ? pageRes.data : (Array.isArray(pageRes) ? pageRes : []);
+                getLeaderboardPageCached(sb, __globalLeaderboardMetric, __globalLeaderboardRankingType, startIndex, __globalLeaderboardPageSize).then(function(list) {
+                    list = Array.isArray(list) ? list : [];
                     __globalLeaderboardRows = list;
                     __globalLeaderboardStartIndex = startIndex + list.length;
                     if (!tbody) return;
@@ -8612,21 +8682,11 @@
                 return;
             }
             var currentUserId = getCurrentLeaderboardUserId();
-            sb.rpc('get_leaderboard_page', {
-                p_metric_name: __detailMetric,
-                p_ranking_type: __detailRankingType,
-                p_start_index: startIndex,
-                p_limit: __detailPageSize
-            }).then(function(res) {
+            getLeaderboardPageCached(sb, __detailMetric, __detailRankingType, startIndex, __detailPageSize).then(function(list) {
                 __detailLoading = false;
                 if (loadingEl) loadingEl.style.display = 'none';
-                var data = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
-                if (res && res.error) {
-                    console.warn('[Leaderboard] get_leaderboard_page error:', res.error);
-                    return;
-                }
+                list = Array.isArray(list) ? list : [];
                 if (replace) tbody.innerHTML = '';
-                var list = Array.isArray(data) ? data : [];
                 list.forEach(function(row) {
                     var isMe = currentUserId && (
                         (row.id && String(row.id) === String(currentUserId)) ||
@@ -8691,13 +8751,8 @@
                 __detailStartIndex = 0;
                 __detailHasMore = true;
                 if (tbody) tbody.innerHTML = '';
-                sb.rpc('get_leaderboard_page', {
-                    p_metric_name: __detailMetric,
-                    p_ranking_type: __detailRankingType,
-                    p_start_index: startIndex,
-                    p_limit: __detailPageSize
-                }).then(function(pageRes) {
-                    var list = (pageRes && pageRes.data) ? pageRes.data : (Array.isArray(pageRes) ? pageRes : []);
+                getLeaderboardPageCached(sb, __detailMetric, __detailRankingType, startIndex, __detailPageSize).then(function(list) {
+                    list = Array.isArray(list) ? list : [];
                     __detailStartIndex = startIndex + list.length;
                     var currentUserId2 = getCurrentLeaderboardUserId();
                     if (!tbody) return;
@@ -12469,6 +12524,7 @@
                 btn.disabled = !enabled;
                 btn.style.opacity = enabled ? '1' : '0.6';
                 btn.style.cursor = enabled ? 'pointer' : 'not-allowed';
+                if (enabled && typeof window.showGitHubSectionIfCountrySelected === 'function') window.showGitHubSectionIfCountrySelected();
             } catch (e) {}
         }
         
@@ -15611,7 +15667,7 @@
                         if (res.ok && (data.success !== false && data.status !== 'error')) {
                             overlay.remove();
                             if (typeof showNotification === 'function') showNotification('暗号已送达，1小时后自毁');
-                            else alert('暗号已送达，1小时后自毁');
+                            else if (typeof showNotification === 'function') showNotification('暗号已送达，1小时后自毁');
                             if (typeof window.refreshUserStats === 'function') window.refreshUserStats();
                         } else {
                             sendBtn.disabled = false;
@@ -16119,7 +16175,7 @@
                 renderRankCards(null);
                 
                 console.log('[Auth] ✅ 已退出登录');
-                alert('已退出登录');
+                if (typeof showNotification === 'function') showNotification('已退出登录'); else console.log('[Auth] 已退出登录');
                 
             } catch (error) {
                 console.error('[Auth] ❌ 退出登录异常:', error);
@@ -16535,7 +16591,7 @@
                                     console.log('[Auth] ℹ️ Step B: 已在本页执行过自动上报，跳过');
                                 }
                                 
-                                // 【迁移优先】清除匿名缓存后强制刷新，使“我的排名”等数据统一来自 v_unified_analysis_v2
+                                // 【迁移优先】清除匿名缓存后强制刷新，使“我的排名”等数据统一来自 v_unified_analysis_v2。登录后首次同步仅通过读取最新 user_analysis / v_unified_analysis_v2（及现有 API）更新 UI；严禁调用 supabase.rpc('refresh_leaderboard_snapshots')，该 RPC 仅由后端 Worker Cron 执行。
                                 console.log('[Auth] 🔄 Step C: 强制刷新视图数据（fetchData + refreshUserStats）...');
                                 try {
                                     if (typeof fetchData === 'function') {
@@ -17305,7 +17361,7 @@
                 // 如果输入为空，清除localStorage
                 localStorage.removeItem('github_username');
                 console.log('[GitHub] ✅ 已清除GitHub用户名');
-                alert('已清除GitHub用户名');
+                console.log('[Auth] 已清除 GitHub 用户名');
                 return;
             }
             
@@ -17724,14 +17780,7 @@
                     });
                 }
                 
-                // 6.9 显示成功提示（清理旧的指纹匹配报错）
-                console.log('[GitHub] 🎉 绑定流程全部完成！');
-                alert('✅ GitHub用户名已保存并绑定成功！\n\n' +
-                      '• 指纹已更新到数据库\n' +
-                      '• 地图脉冲已触发\n' +
-                      '• 统计卡片已刷新\n' +
-                      '• 用户名已更新');
-                
+                console.log('[GitHub] 绑定流程完成：指纹已更新，统计卡片已刷新');
             } catch (error) {
                 const errorMessage = error && typeof error === 'object' && 'message' in error 
                     ? error.message 
@@ -20183,6 +20232,7 @@
                 }
                 
                 // 创建用户统计卡片容器（赛博病理风格：border-white/10 bg-[#0a0a0a]/80 backdrop-blur）
+                var drawerStarsResolved = (typeof resolveDisplayStars === 'function' ? resolveDisplayStars(currentUserData) : null);
                 const statsCard = document.createElement('div');
                 statsCard.className = 'drawer-item dashboard-card backdrop-blur';
                 statsCard.innerHTML = `
@@ -20240,7 +20290,7 @@
                             </div>
                             <div class="flex items-center justify-between">
                                 <span class="dashboard-metric-label text-[10px]">⭐ ${getI18nText('github.total_stars') || (currentLang === 'en' ? 'Total Stars' : '星标总数')}</span>
-                                <span class="drawer-item-value text-sm">${(githubStats.totalRepoStars || 0).toLocaleString()}</span>
+                                <span class="drawer-item-value text-sm">${(drawerStarsResolved != null ? drawerStarsResolved : (githubStats.totalRepoStars || 0)).toLocaleString()}</span>
                             </div>
                             <div class="flex items-center justify-between">
                                 <span class="dashboard-metric-label text-[10px]">🕒 ${getI18nText('github.last_repo_update') || (currentLang === 'en' ? 'Repo Updated' : '仓库更新')}</span>
@@ -20437,11 +20487,12 @@
                                         if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard(); else if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
                                     }, 1500);
                                 } else {
+                                    var fallbackStars = (typeof resolveDisplayStars === 'function' ? resolveDisplayStars(currentUserData) : null);
                                     var fallback = {
                                         login: currentUserData.user_name || currentUserData.login || '--',
                                         avatarUrl: '',
                                         globalRanking: '--',
-                                        totalRepoStars: Number(currentUserData.github_stars) || 0,
+                                        totalRepoStars: (fallbackStars != null ? Number(fallbackStars) : 0) || Number(currentUserData.github_stars) || 0,
                                         mergedPRs: 0, commitVelocity: 0, prReviews: 0, activeDays: 0,
                                         publicRepos: 0, privateRepos: 0, languageDistribution: [],
                                         accountAge: 0, syncedAt: '', latest_repo_updated_at: '', organizations: []
@@ -20449,10 +20500,11 @@
                                     window.renderGithubCard(fallback, cardOpts);
                                 }
                             }).catch(function() {
+                                var fs = (typeof resolveDisplayStars === 'function' ? resolveDisplayStars(currentUserData) : null);
                                 var fallback = {
                                     login: currentUserData.user_name || currentUserData.login || '--',
                                     avatarUrl: '', globalRanking: '--',
-                                    totalRepoStars: Number(currentUserData.github_stars) || 0,
+                                    totalRepoStars: (fs != null ? Number(fs) : 0) || Number(currentUserData.github_stars) || 0,
                                     mergedPRs: 0, commitVelocity: 0, prReviews: 0, activeDays: 0,
                                     publicRepos: 0, privateRepos: 0, languageDistribution: [],
                                     accountAge: 0, syncedAt: '', latest_repo_updated_at: '', organizations: []
@@ -20460,10 +20512,11 @@
                                 window.renderGithubCard(fallback, cardOpts);
                             });
                         } else {
+                            var fs2 = (typeof resolveDisplayStars === 'function' ? resolveDisplayStars(currentUserData) : null);
                             var fallback = {
                                 login: currentUserData.user_name || currentUserData.login || '--',
                                 avatarUrl: '', globalRanking: '--',
-                                totalRepoStars: Number(currentUserData.github_stars) || 0,
+                                totalRepoStars: (fs2 != null ? Number(fs2) : 0) || Number(currentUserData.github_stars) || 0,
                                 mergedPRs: 0, commitVelocity: 0, prReviews: 0, activeDays: 0,
                                 publicRepos: 0, privateRepos: 0, languageDistribution: [],
                                 accountAge: 0, syncedAt: '', latest_repo_updated_at: '', organizations: []
@@ -23960,6 +24013,7 @@
         let isRefreshingUserStats = false;
         let refreshUserStatsAbortController = null;
         
+        /** 登录后首次同步仅通过读取最新 user_analysis / v_unified_analysis_v2（及现有 API）更新 UI；严禁调用 supabase.rpc('refresh_leaderboard_snapshots')，该 RPC 仅由后端 Worker Cron 执行。 */
         window.refreshUserStats = async function() {
             if (isGlobalInitializing && !window.__allowInitCall) return;
             
