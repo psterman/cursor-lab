@@ -428,7 +428,11 @@
                 { metric: 'public_repos', rankKey: 'public_repos_rank' },
                 { metric: 'stars', rankKey: 'stars_rank' },
                 { metric: 'followers', rankKey: 'followers_rank' },
-                { metric: 'languages', rankKey: 'lang_breadth_rank' }
+                { metric: 'languages', rankKey: 'lang_breadth_rank' },
+                { metric: 'forks', rankKey: 'forks_rank' },
+                { metric: 'total_code_size', rankKey: 'code_size_rank' },
+                { metric: 'active_days', rankKey: 'active_days_rank' },
+                { metric: 'latest_repo_updated_at', rankKey: 'repo_updated_rank' }
             ];
             var pending = leaderboardMetrics.length;
             if (pending === 0) { mergeLeaderboardAndDone(); return; }
@@ -562,7 +566,8 @@
         var repoUpdatedEmpty = repoUpdatedAt === '—';
         var repoUpdatedValueBlock = '<span class="text-white font-mono text-sm truncate block">' + escapeHtml(repoUpdatedAt) + '</span>';
         if (repoUpdatedEmpty) repoUpdatedValueBlock += '<span class="text-zinc-500 text-[10px] mt-0.5 block" title="GitHub 未同步">未同步</span>';
-        gridHtml += '<div class="cyber-report-card bg-zinc-900/50 border border-green-500/20 rounded p-3 min-h-[4.5rem] flex flex-col"><div class="text-zinc-400 text-xs mb-1.5 flex-shrink-0">仓库更新日期</div><div class="flex items-start justify-between gap-2 min-h-0 flex-1"><div class="min-w-0 flex-1">' + repoUpdatedValueBlock + '</div><span class="font-mono text-xs flex-shrink-0 text-right" style="color:#00ff41;min-width:2.25rem;">#--</span></div></div>';
+        var repoUpdatedRankDisplay = getRankDisplay(ranks, ['repo_updated_rank', 'repoUpdatedRank']);
+        gridHtml += '<div class="cyber-report-card bg-zinc-900/50 border border-green-500/20 rounded p-3 min-h-[4.5rem] flex flex-col"><div class="text-zinc-400 text-xs mb-1.5 flex-shrink-0">仓库更新日期</div><div class="flex items-start justify-between gap-2 min-h-0 flex-1"><div class="min-w-0 flex-1">' + repoUpdatedValueBlock + '</div><span class="font-mono text-xs flex-shrink-0 text-right" style="color:#00ff41;min-width:2.25rem;">' + escapeHtml(repoUpdatedRankDisplay) + '</span></div></div>';
 
         var githubUrl = (data.user_name && /^[a-zA-Z0-9-]+$/.test(data.user_name)) ? ('https://github.com/' + encodeURIComponent(data.user_name)) : '';
         var toId = data.user_name || data.fingerprint || data.id || '';

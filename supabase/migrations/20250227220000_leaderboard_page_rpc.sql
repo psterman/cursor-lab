@@ -30,6 +30,10 @@ RETURNS TEXT LANGUAGE sql IMMUTABLE AS $$
     WHEN 'followers' THEN 'COALESCE((u.github_stats->>''followers'')::numeric, u.github_followers, 0)'
     WHEN 'commit_velocity' THEN 'COALESCE((u.github_stats->>''commitVelocity'')::numeric, 0)'
     WHEN 'pr_reviews' THEN 'COALESCE((u.github_stats->>''prReviews'')::numeric, 0)'
+    WHEN 'forks' THEN 'COALESCE((u.github_stats->>''totalForks'')::numeric, 0)'
+    WHEN 'total_code_size' THEN 'COALESCE((u.github_stats->>''totalCodeSize'')::numeric, 0)'
+    WHEN 'active_days' THEN 'COALESCE((u.github_stats->>''activeDays'')::numeric, 0)'
+    WHEN 'latest_repo_updated_at' THEN 'COALESCE(CASE WHEN u.github_stats->>''latest_repo_updated_at'' IS NOT NULL AND (u.github_stats->>''latest_repo_updated_at'') <> '''' THEN EXTRACT(EPOCH FROM (u.github_stats->>''latest_repo_updated_at'')::timestamptz) ELSE 0 END, 0)'
     ELSE '0'
   END;
 $$;

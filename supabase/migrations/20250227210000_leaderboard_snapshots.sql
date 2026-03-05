@@ -109,7 +109,8 @@ DECLARE
   dim_keys TEXT[] := ARRAY[
     'stars', 'commits', 'prs', 'languages', 'vibe_index', 'l_score', 'p_score', 'd_score', 'e_score', 'f_score',
     'work_days', 'jiafang_count', 'ketao_count', 'chars_avg', 'total_messages', 'total_chars', 'github_score',
-    'closed_issues', 'public_repos', 'followers', 'commit_velocity', 'pr_reviews'
+    'closed_issues', 'public_repos', 'followers', 'commit_velocity', 'pr_reviews',
+    'forks', 'total_code_size', 'active_days', 'latest_repo_updated_at'
   ];
   ordering_expr TEXT;
   daily_filter TEXT;
@@ -143,6 +144,10 @@ BEGIN
         WHEN 'followers' THEN 'COALESCE((u.github_stats->>''followers'')::numeric, u.github_followers, 0)'
         WHEN 'commit_velocity' THEN 'COALESCE((u.github_stats->>''commitVelocity'')::numeric, 0)'
         WHEN 'pr_reviews' THEN 'COALESCE((u.github_stats->>''prReviews'')::numeric, 0)'
+        WHEN 'forks' THEN 'COALESCE((u.github_stats->>''totalForks'')::numeric, 0)'
+        WHEN 'total_code_size' THEN 'COALESCE((u.github_stats->>''totalCodeSize'')::numeric, 0)'
+        WHEN 'active_days' THEN 'COALESCE((u.github_stats->>''activeDays'')::numeric, 0)'
+        WHEN 'latest_repo_updated_at' THEN 'COALESCE(CASE WHEN u.github_stats->>''latest_repo_updated_at'' IS NOT NULL AND (u.github_stats->>''latest_repo_updated_at'') <> '''' THEN EXTRACT(EPOCH FROM (u.github_stats->>''latest_repo_updated_at'')::timestamptz) ELSE 0 END, 0)'
         ELSE '0'
       END;
 
