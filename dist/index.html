@@ -22,9 +22,9 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- Waline 留言板 V2 -->
-    <link rel="stylesheet" href="https://unpkg.com/@waline/client@v2/dist/waline.css" />
-    <script src="https://unpkg.com/@waline/client@v2/dist/waline.js"></script>
+    <!-- Waline 留言板 V2（使用 jsDelivr CDN，部署时 CSP 需允许 style-src cdn.jsdelivr.net） -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@waline/client@2/dist/waline.css" crossorigin="anonymous" />
+    <script src="https://cdn.jsdelivr.net/npm/@waline/client@2/dist/waline.js" crossorigin="anonymous"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
         body { font-family: 'JetBrains Mono', monospace; }
