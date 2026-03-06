@@ -3842,11 +3842,11 @@ export class VibeCodingerAnalyzer {
       if (result.status === 'success') {
         // 提取后端计算的精准结果
         const backendDimensions = result.dimensions || {};
-        const backendRoastText = result.roastText || '';
-        const backendPersonalityName = result.personalityName || '';
-        const backendVibeIndex = result.vibeIndex || '00000';
-        const backendPersonalityType = result.personalityType || 'UNKNOWN';
-        const backendLpdef = result.lpdef || '';
+        const backendRoastText = result.roastText || result.roast_text || '';
+        const backendPersonalityName = result.personalityName || result.personality_name || '';
+        const backendVibeIndex = result.vibeIndex || result.vibe_index || '00000';
+        const backendPersonalityType = result.personalityType || result.personality_type || 'UNKNOWN';
+        const backendLpdef = result.lpdef || result.lpdef_str || '';
         
         // 【关键】同步状态：用后端返回的精准维度分覆盖本地粗略计算的分数
         // 更新 this.analysisResult 实例状态，确保 UI 渲染（雷达图）与后端分析一致
@@ -3861,7 +3861,7 @@ export class VibeCodingerAnalyzer {
           this.analysisResult.vibeIndex = backendVibeIndex;
           this.analysisResult.personalityType = backendPersonalityType;
           this.analysisResult.lpdef = backendLpdef;
-          
+
           // 【v4.0 V6 Stats对接】完整解析stats对象
           if (result.stats || result.statistics) {
             const stats = result.stats || result.statistics || {};
@@ -3917,6 +3917,27 @@ export class VibeCodingerAnalyzer {
             this.analysisResult.globalAverage = result.globalAverage;
           }
           
+          // 【关键修复】合并后端返回的完整数据，包括 analysis 和 semanticFingerprint
+          // 如果后端返回了 analysis 对象，更新它
+          if (result.analysis) {
+            this.analysisResult.analysis = result.analysis;
+          }
+          
+          // 如果后端返回了 semanticFingerprint 对象，更新它
+          if (result.semanticFingerprint) {
+            this.analysisResult.semanticFingerprint = result.semanticFingerprint;
+          }
+          
+          // 如果后端返回了 stats 对象，更新它
+          if (result.stats) {
+            this.analysisResult.stats = result.stats;
+          }
+          
+          // 如果后端返回了 fingerprint 字符串，更新它
+          if (result.fingerprint) {
+            this.analysisResult.fingerprint = result.fingerprint;
+          }
+
           console.log('[VibeAnalyzer] ✅ 已同步后端精准数据到实例状态:', {
             dimensions: backendDimensions,
             roastText: backendRoastText.substring(0, 50) + '...',

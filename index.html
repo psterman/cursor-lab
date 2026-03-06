@@ -3686,6 +3686,47 @@
                 };
             }, [step]);
 
+            // 【人格预览 8 秒兜底】若仍显示「正在破译」，强制填入 fallback 并清除破译动画
+            useEffect(() => {
+                if (step !== 'preview') return;
+                const timeoutId = setTimeout(() => {
+                    setAnalysisData((prev) => {
+                        if (!prev || !prev.vibeResult) return prev;
+                        const rt = (prev.vibeResult.roastText || prev.vibeResult.roast_text || '').trim();
+                        const stillInvalid = !rt || /正在生成中|正在由后端生成|正在破译|Deciphering your personality|personality combination is so unique/i.test(rt) || (/索引\s*\d+\s*对应的吐槽文案/.test(rt) && /人格组合太独特/.test(rt));
+                        if (!stillInvalid) return prev;
+                        
+                        const appLang = typeof document !== 'undefined' ? (document.documentElement.lang || localStorage.getItem('appLanguage') || 'zh-CN') : 'zh-CN';
+                        const vr = window.shareModeVibeResult || prev.vibeResult;
+                        
+                        let fallbackText = '';
+                        // 优先从 vr 对象中找有效的 roastText
+                        if (vr.roastText && !/正在破译|Deciphering your personality/i.test(String(vr.roastText))) {
+                            fallbackText = String(vr.roastText);
+                        } else if (vr.roast_text && !/正在破译|Deciphering your personality/i.test(String(vr.roast_text))) {
+                            fallbackText = String(vr.roast_text);
+                        }
+                        
+                        // 如果依然没有，则根据 dimensions 计算 fallback
+                        if (!fallbackText || fallbackText.trim() === '') {
+                            if (window.analysisModule && typeof window.analysisModule.fallbackInterpretationFromDimensions === 'function') {
+                                fallbackText = window.analysisModule.fallbackInterpretationFromDimensions(vr.dimensions || prev.vibeResult.dimensions, appLang);
+                            } else {
+                                fallbackText = appLang === 'en' ? 'A developer with a unique and complex personality.' : '一位性格深邃且独特的开发者。';
+                            }
+                        }
+                        
+                        console.log('[PersonalityFallback] 8s timeout reached, using fallback:', fallbackText);
+                        return { ...prev, vibeResult: { ...prev.vibeResult, roastText: fallbackText } };
+                    });
+                    const decodingEl = document.querySelector('.decoding-text');
+                    if (decodingEl) decodingEl.style.display = 'none';
+                    const descEl = document.getElementById('personality-desc');
+                    if (descEl) descEl.style.display = 'block';
+                }, 8000);
+                return () => clearTimeout(timeoutId);
+            }, [step]);
+
             // 监听模块加载状态
             useEffect(() => {
                 if (modulesReady) return;
@@ -3830,132 +3871,116 @@
 
                         // 将数字索引转换回vibeIndex
                         const vibeIndexStr = numberToVibeIndex(previewData.v);
+                        const currentLang = localStorage.getItem('appLanguage') || 'zh-CN';
+                        const isEn = currentLang === 'en';
 
-                        // 从JSON获取人格名称和吐槽文本
-                        const loadPersonalityData = async (vibeIndex) => {
-                            try {
-                                const currentLang = localStorage.getItem('appLanguage') || 'zh-CN';
-                                const isEn = currentLang === 'en';
-                                
-                                const response = await fetch(`src/personalityNames.json`);
-                                if (!response.ok) throw new Error('加载人格数据失败');
-                                const namesData = await response.json();
+                        const pathBase = (window.BASE_PATH || window.location.pathname.replace(/\/[^/]*$/, '') || '').replace(/\/$/, '');
+                        const assetPaths = (path) => {
+                            const p = path.replace(/^\//, '');
+                            const candidates = [
+                                pathBase ? pathBase + '/' + p : null,
+                                path,
+                                './' + p,
+                                (pathBase ? (window.location.origin + (pathBase[0] === '/' ? pathBase : '/' + pathBase) + '/' + p) : (window.location.origin + '/' + p))
+                            ].filter(Boolean);
+                            return [...new Set(candidates)];
+                        };
 
-                                // 根据语言加载对应的吐槽库
-                                const roastLibraryFile = isEn ? 'src/roastLibrary2.json' : 'src/roastLibrary.json';
-                                const response2 = await fetch(roastLibraryFile);
-                                if (!response2.ok) throw new Error('加载吐槽数据失败');
-                                const roastData = await response2.json();
+                        const fetchJsonWithFallback = async (paths) => {
+                            let lastErr;
+                            for (const url of paths) {
+                                try {
+                                    const r = await fetch(url);
+                                    if (r.ok) return await r.json();
+                                } catch (e) { lastErr = e; }
+                            }
+                            throw lastErr || new Error('所有路径均失败');
+                        };
 
-                                const defaultRoastText = isEn ? 'No roast available' : '暂无吐槽';
-                                const defaultPersonalityName = isEn ? `Unknown Personality ${vibeIndex}` : `未知人格 ${vibeIndex}`;
-                                const fallbackPersonalityName = isEn ? 'Unknown Personality' : '未知人格';
-                                const fallbackRoastText = isEn ? 'Failed to load personality data' : '数据加载失败，无法显示人格详情';
-
-                                return {
-                                    personalityName: namesData[vibeIndex] || defaultPersonalityName,
-                                    vibeIndex: vibeIndex,
-                                    roastText: roastData[vibeIndex] || defaultRoastText,
-                                    dimensions: null,
-                                    personalityType: null,
-                                    lpdef: null,
-                                    analysis: {
-                                        name: namesData[vibeIndex] || defaultPersonalityName,
-                                        description: '',
-                                        traits: []
-                                    }
-                                };
-                            } catch (error) {
-                                console.error('[分享] 加载人格数据失败:', error);
-                                const currentLang = localStorage.getItem('appLanguage') || 'zh-CN';
-                                const isEn = currentLang === 'en';
-                                // 降级：返回默认数据
-                                return {
-                                    personalityName: isEn ? 'Unknown Personality' : '未知人格',
-                                    vibeIndex: vibeIndexStr,
-                                    roastText: isEn ? 'Failed to load personality data' : '数据加载失败，无法显示人格详情',
-                                    dimensions: null,
-                                    personalityType: null,
-                                    lpdef: null,
-                                    analysis: {
-                                        name: isEn ? 'Unknown Personality' : '未知人格',
-                                        description: '',
-                                        traits: []
-                                    }
-                                };
+                        const now = Date.now();
+                        const usageDays = previewData.d;
+                        const earliestFileTime = now - (usageDays * 24 * 60 * 60 * 1000);
+                        const stats = {
+                            qingCount: previewData.q,
+                            earliestFileTime: earliestFileTime,
+                            totalConversations: 0,
+                            userMessages: 0,
+                            aiMessages: 0,
+                            totalCodeChars: 0,
+                            buCount: 0,
+                            totalUserChars: 0,
+                            userBehaviorStats: {
+                                totalUserChars: 0,
+                                avgUserMessageLength: 0,
+                                questionMessageCount: 0,
+                                techStack: {}
                             }
                         };
 
-                        // 异步加载人格数据
-                        loadPersonalityData(vibeIndexStr).then(vibeResult => {
-                            console.log('[分享] 加载的人格数据:', vibeResult);
+                        const placeholderRoast = isEn ? 'Deciphering your personality...' : '正在破译你的人格密码...';
+                        const placeholderName = isEn ? 'Loading...' : '加载中...';
+                        const initialVibeResult = {
+                            personalityName: placeholderName,
+                            vibeIndex: vibeIndexStr,
+                            roastText: placeholderRoast,
+                            dimensions: null,
+                            personalityType: null,
+                            lpdef: null,
+                            analysis: { name: placeholderName, description: '', traits: [] }
+                        };
 
-                            // 构建简化的stats数据
-                            const now = Date.now();
-                            const usageDays = previewData.d;
-                            const earliestFileTime = now - (usageDays * 24 * 60 * 60 * 1000);
+                        setIsShareMode(true);
+                        window.shareModeStats = stats;
+                        setAnalysisData({ stats, vibeResult: initialVibeResult, chatData: [], rankings: null });
+                        setStep('preview');
 
-                            console.log('[分享] 构建stats数据:');
-                            console.log('[分享]   usageDays:', usageDays);
-                            console.log('[分享]   now:', now);
-                            console.log('[分享]   earliestFileTime:', earliestFileTime);
-                            console.log('[分享]   计算验证:', {
-                                差值毫秒: now - earliestFileTime,
-                                差值天数: (now - earliestFileTime) / (24 * 60 * 60 * 1000)
-                            });
-
-                             const stats = {
-                                qingCount: previewData.q,
-                                earliestFileTime: earliestFileTime,
-                                totalConversations: 0,
-                                userMessages: 0,
-                                aiMessages: 0,
-                                totalCodeChars: 0,
-                                buCount: 0,
-                                totalUserChars: 0,
-                                userBehaviorStats: {
-                                    totalUserChars: 0,
-                                    avgUserMessageLength: 0,
-                                    questionMessageCount: 0,
-                                    techStack: {}
+                        (async () => {
+                            try {
+                                const cacheKeyNames = '__personalityNamesCache';
+                                const cacheKeyRoast = '__roastLibraryCache_' + (isEn ? 'en' : 'zh');
+                                let namesData = window[cacheKeyNames];
+                                if (!namesData) {
+                                    namesData = await fetchJsonWithFallback(assetPaths('src/personalityNames.json'));
+                                    window[cacheKeyNames] = namesData;
                                 }
-                            };
-
-                            console.log('[分享] 构建的完整stats对象:', JSON.stringify(stats, null, 2));
-                            console.log('[分享]   stats.qingCount:', stats.qingCount);
-                            console.log('[分享]   stats.earliestFileTime:', stats.earliestFileTime);
-                            console.log('[分享]   验证计算:', {
-                                解码的usageDays: previewData.d,
-                                earliestFileTime: earliestFileTime,
-                                now: now,
-                                重新计算的天数: Math.floor((now - earliestFileTime) / (24 * 60 * 60 * 1000))
-                            });
-
-                            // 设置分享模式
-                            setIsShareMode(true);
-
-                            // 存储到全局变量
-                            window.shareModeVibeResult = vibeResult;
-                            window.shareModeStats = stats;
-
-                            // 构建预览数据
-                            const previewDataState = {
-                                stats: stats,
-                                vibeResult: vibeResult,
-                                chatData: [],
-                                rankings: null
-                            };
-
-                            setAnalysisData(previewDataState);
-
-                            // 进入预览页面
-                            setStep('preview');
-
-                            console.log('[分享] ✅ 短链接解析成功，进入预览模式');
-                        }).catch(error => {
-                            console.error('[分享] 加载人格数据失败:', error);
-                            alert('加载人格数据失败，请刷新页面重试');
-                        });
+                                let roastData = window[cacheKeyRoast];
+                                if (!roastData) {
+                                    const roastPath = isEn ? 'src/roastLibrary2.json' : 'src/roastLibrary.json';
+                                    roastData = await fetchJsonWithFallback(assetPaths(roastPath));
+                                    window[cacheKeyRoast] = roastData;
+                                }
+                                const defaultName = isEn ? `Unknown Personality ${vibeIndexStr}` : `未知人格 ${vibeIndexStr}`;
+                                const defaultRoast = isEn ? 'No roast available' : '暂无吐槽';
+                                const name = (namesData[vibeIndexStr] != null) ? namesData[vibeIndexStr] : defaultName;
+                                const roastText = (roastData[vibeIndexStr] != null && String(roastData[vibeIndexStr]).trim()) ? roastData[vibeIndexStr] : defaultRoast;
+                                const vibeResult = {
+                                    personalityName: name,
+                                    vibeIndex: vibeIndexStr,
+                                    roastText: roastText,
+                                    dimensions: null,
+                                    personalityType: null,
+                                    lpdef: null,
+                                    analysis: { name: name, description: '', traits: [] }
+                                };
+                                window.shareModeVibeResult = vibeResult;
+                                setAnalysisData(prev => prev ? { ...prev, vibeResult } : prev);
+                            } catch (error) {
+                                console.error('[分享] 加载人格数据失败:', error);
+                                const fallbackName = isEn ? 'Unknown Personality' : '未知人格';
+                                const fallbackRoast = isEn ? 'Failed to load personality data' : '数据加载失败，无法显示人格详情';
+                                const vibeResult = {
+                                    personalityName: fallbackName,
+                                    vibeIndex: vibeIndexStr,
+                                    roastText: fallbackRoast,
+                                    dimensions: null,
+                                    personalityType: null,
+                                    lpdef: null,
+                                    analysis: { name: fallbackName, description: '', traits: [] }
+                                };
+                                window.shareModeVibeResult = vibeResult;
+                                setAnalysisData(prev => prev ? { ...prev, vibeResult } : prev);
+                            }
+                        })();
 
                         return; // 短链接处理完成，不继续处理完整链接
                     } catch (error) {
@@ -6786,25 +6811,39 @@
                                     <div>
                                         <h2 className="text-zinc-500 text-sm uppercase tracking-widest mb-2 font-mono">{t('preview.personalityLabel')}</h2>
                                         <div className="text-4xl md:text-5xl font-black text-white font-mono mb-4" style={{ wordBreak: 'break-word' }}>
-                                            {analysisData.vibeResult?.personalityName || t('dashboard.unknownPersonality')}
+                                            {analysisData.vibeResult?.personalityName || analysisData.vibeResult?.personality_name || t('dashboard.unknownPersonality')}
                                         </div>
                                     </div>
-                                    <p 
-                                        className="text-zinc-400 preview-text" 
-                                        style={{
-                                            fontSize: lang === 'en' ? '14px' : '16px',
-                                            lineHeight: '1.6',
-                                            wordBreak: 'break-word',
-                                            whiteSpace: 'normal',
-                                            overflow: 'visible'
-                                        }}
-                                    >
-                                        {(() => {
-                                            const rt = analysisData.vibeResult?.roastText || '';
-                                            const invalid = !rt || !rt.trim() || /正在生成中|正在由后端生成|personality combination is so unique/i.test(rt) || (/索引\s*\d+\s*对应的吐槽文案/.test(rt) && /人格组合太独特/.test(rt));
-                                            return invalid ? (t('preview.deciphering') || '正在破译你的人格密码...') : rt;
-                                        })()}
-                                    </p>
+                                    {(() => {
+                                        const rt = analysisData.vibeResult?.roastText || analysisData.vibeResult?.roast_text || '';
+                                        const invalid = !rt || !rt.trim() || /正在生成中|正在由后端生成|正在破译|Deciphering your personality|personality combination is so unique/i.test(rt) || (/索引\s*\d+\s*对应的吐槽文案/.test(rt) && /人格组合太独特/.test(rt));
+                                        const decipheringLabel = t('preview.deciphering') || '正在破译你的人格密码...';
+                                        return (
+                                            <>
+                                                {invalid && (
+                                                    <div className="decoding-text text-zinc-400 font-mono text-sm flex items-center gap-2" style={{ fontSize: lang === 'en' ? '14px' : '16px', lineHeight: '1.6' }}>
+                                                        <span className="inline-block w-2 h-4 bg-green-500 animate-pulse" />
+                                                        {decipheringLabel}
+                                                    </div>
+                                                )}
+                                                {!invalid && (
+                                                    <p 
+                                                        id="personality-desc"
+                                                        className="text-zinc-400 preview-text"
+                                                        style={{
+                                                            fontSize: lang === 'en' ? '14px' : '16px',
+                                                            lineHeight: '1.6',
+                                                            wordBreak: 'break-word',
+                                                            whiteSpace: 'normal',
+                                                            overflow: 'visible'
+                                                        }}
+                                                    >
+                                                        {rt}
+                                                    </p>
+                                                )}
+                                            </>
+                                        );
+                                    })()}
                                 </div>
 
                                 {/* 右侧：统计数据 */}

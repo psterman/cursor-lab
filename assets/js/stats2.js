@@ -765,15 +765,68 @@
         ];
 
         var answerContent = '';
-        var roastText = (data.roast_text != null && data.roast_text !== '') ? String(data.roast_text) : '';
+        var roastText = (data.roast_text || data.roastText || '') ? String(data.roast_text || data.roastText) : '';
+        if (!roastText && data.stats && typeof data.stats === 'object') {
+            roastText = String(data.stats.roast_text || data.stats.roastText || '');
+        }
+        var personalityData = null;
+        var detailedStatsArray = null;
         try {
-            var pd = data.personality_data;
-            var personalityData = typeof pd === 'string' ? JSON.parse(pd) : pd;
-            var answerBook = personalityData && (personalityData.answer_book || personalityData.answerBook);
-            if (answerBook && typeof answerBook === 'object') {
-                answerContent = answerBook.content != null ? String(answerBook.content) : (answerBook.text != null ? String(answerBook.text) : '');
+            var pd = data.personality_data || data.personalityData;
+            if (pd != null) {
+                if (typeof pd === 'object') {
+                    personalityData = Array.isArray(pd) ? { detailedStats: pd } : pd;
+                } else if (typeof pd === 'string' && pd.length >= 2) {
+                    var pre = String(pd).replace(/\\"/g, '"');
+                    try { var parsed = JSON.parse(pre); personalityData = Array.isArray(parsed) ? { detailedStats: parsed } : parsed; } catch (e1) { try { var p2 = JSON.parse(pd); personalityData = Array.isArray(p2) ? { detailedStats: p2 } : p2; } catch (e2) {} }
+                }
             }
+            var pers = data.personality;
+            if (typeof pers === 'string' && pers.length >= 2) {
+                try { pers = JSON.parse(pers.replace(/\\"/g, '"')); } catch (_) { try { pers = JSON.parse(pers); } catch (_) { pers = null; } }
+            }
+            if (pers && typeof pers === 'object') {
+                if (!personalityData) personalityData = {};
+                var ab = pers.answer_book || pers.answerBook;
+                if (ab && typeof ab === 'object') {
+                    var fromAb = (ab.content != null ? String(ab.content) : (ab.text != null ? String(ab.text) : '')).trim();
+                    if (fromAb) answerContent = fromAb;
+                }
+                if (pers.detailedStats && Array.isArray(pers.detailedStats)) detailedStatsArray = pers.detailedStats;
+            }
+            if (personalityData) {
+                if (!answerContent) {
+                    var answerBook = personalityData.answer_book || personalityData.answerBook;
+                    if (answerBook && typeof answerBook === 'object') {
+                        answerContent = (answerBook.content != null ? String(answerBook.content) : (answerBook.text != null ? String(answerBook.text) : '')).trim();
+                    }
+                }
+                if (detailedStatsArray == null && personalityData.detailedStats && Array.isArray(personalityData.detailedStats)) detailedStatsArray = personalityData.detailedStats;
+                if (!answerContent && roastText) answerContent = roastText;
+            }
+            if (!answerContent && roastText) answerContent = roastText;
         } catch (_) {}
+        if (!answerContent && roastText) answerContent = roastText;
+        if (answerContent && roastText && String(answerContent).trim() === String(roastText).trim()) roastText = '';
+
+        // 【关键修复】如果答案之书和吐槽文案都为空，根据维度生成兜底评价，避免左侧空白
+        if (!answerContent && !roastText && data.dimensions) {
+            var dims = data.dimensions;
+            var labels = (currentLang === 'en')
+                ? { L: 'Logic', P: 'Patience', D: 'Detail', E: 'Exploration', F: 'Feedback' }
+                : { L: '逻辑', P: '耐性', D: '细节', E: '探索', F: '反馈' };
+            var sorted = Object.entries(dims).filter(function(e) { return labels[e[0]]; }).map(function(e) { return { k: e[0], v: Number(e[1]) || 0 }; });
+            sorted.sort(function(a, b) { return b.v - a.v; });
+            if (sorted.length >= 2) {
+                var top1 = labels[sorted[0].k];
+                var top2 = labels[sorted[1].k];
+                answerContent = (currentLang === 'en')
+                    ? 'A developer with strong ' + top1 + ' and ' + top2.toLowerCase() + '.'
+                    : '一位极具' + top1 + '且' + (sorted[1].v >= 70 ? '极度' : '较为') + top2 + '的代码架构师。';
+            } else {
+                answerContent = (currentLang === 'en') ? 'A developer with a unique vibe.' : '一位风格鲜明的开发者。';
+            }
+        }
 
         var displayName = data.user_name ? '@' + escapeHtml(data.user_name) : (data.fingerprint ? 'user_' + escapeHtml(String(data.fingerprint).slice(0, 8)) : '—');
         var avatarUrl = (data.user_name && /^[a-zA-Z0-9-]+$/.test(data.user_name)) ? ('https://github.com/' + encodeURIComponent(data.user_name) + '.png?size=64') : DEFAULT_AVATAR;
@@ -805,10 +858,22 @@
             (toId ? '<button type="button" class="cyber-report-dm-btn inline-block px-4 py-2 rounded border border-green-500/50 text-[#00ff41] text-xs font-mono hover:bg-green-500/10 transition-colors" data-to-id="' + escapeHtml(toId) + '">私信</button>' : '') +
             '</div>';
 
-        var evaluationHtml = (answerContent || roastText) ? ('<div class="italic border-l-4 border-green-500 bg-green-500/10 p-4 mt-4 rounded-r">' +
-            (answerContent ? '<div class="mb-2">' + escapeHtml(answerContent) + '</div>' : '') +
+        var evaluationHtml = (answerContent || roastText) ? ('<div class="mt-4"><div class="text-zinc-500 text-xs uppercase tracking-wider font-mono mb-2">人格说明</div><div class="italic border-l-4 border-green-500 bg-green-500/10 p-4 rounded-r">' +
+            (answerContent ? '<div class="mb-2 text-zinc-300">' + escapeHtml(answerContent) + '</div>' : '') +
             (roastText ? '<div class="text-zinc-400 text-sm">' + escapeHtml(roastText) + '</div>' : '') +
-            '</div>') : '';
+            '</div></div>') : '';
+
+        var dimRoastHtml = '';
+        var statsForDim = detailedStatsArray || (personalityData && personalityData.detailedStats && Array.isArray(personalityData.detailedStats) ? personalityData.detailedStats : null);
+        if (statsForDim && statsForDim.length) {
+            var dimKeys = ['L', 'P', 'D', 'E', 'F'];
+            dimKeys.forEach(function(k) {
+                var stat = statsForDim.find(function(s) { if (!s || !s.dimension) return false; var d = String(s.dimension).replace(/维度$/, '').trim(); return d === k; });
+                var roast = (stat && (stat.roast != null ? String(stat.roast) : (stat.interpretation != null ? String(stat.interpretation) : ''))) || '';
+                dimRoastHtml += '<div class="dim-roast dim-roast-' + k.toLowerCase() + ' text-zinc-400 text-xs mt-1">' + (roast ? escapeHtml(roast) : '—') + '</div>';
+            });
+        }
+        if (dimRoastHtml) evaluationHtml += '<div class="mt-2 grid grid-cols-1 gap-1">' + dimRoastHtml + '</div>';
 
         body.innerHTML =
             '<div class="flex items-center gap-3 mb-4">' +
@@ -3760,6 +3825,7 @@
                 'rank.total_people': '共 {n} 人',
                 'rank.global_rank_label': '全球排名',
                 'drawer.personality_title': '人格称号',
+                'preview.personalityLabel': '人格鉴定结果',
                 'drawer.real_evaluation': '真实评价',
 
                 // Country panel titles
@@ -3868,6 +3934,7 @@
                 'rank.total_people': 'Total {n}',
                 'rank.global_rank_label': 'Global rank',
                 'drawer.personality_title': 'Title',
+                'preview.personalityLabel': 'Personality Verdict',
                 'drawer.real_evaluation': 'Real Evaluation',
 
                 // Country panel titles
@@ -19995,26 +20062,32 @@
                         };
                         if (tryLocal()) return;
 
-                        const url = (currentLang === 'en') ? 'src/personalityNames_en.json' : 'src/personalityNames.json';
-                        fetch(url)
-                            .then(response => {
-                                if (response.ok) {
-                                    return response.json();
-                                }
-                                throw new Error('Failed to load personalityNames.json');
-                            })
-                            .then(namesData => {
-                                if (namesData && namesData[idx]) {
-                                    console.log('[UserStats] ✅ 从 personalityNames.json 获取人格称号:', namesData[idx]);
-                                    resolve(String(namesData[idx]));
-                                } else {
-                                    resolve(null);
-                                }
-                            })
-                            .catch(error => {
-                                console.warn('[UserStats] ⚠️ 加载 personalityNames.json 失败:', error);
+                        var urls = (currentLang === 'en')
+                            ? ['src/personalityNames_en.json', 'personalityNames_en.json', 'dist/src/personalityNames_en.json']
+                            : ['src/personalityNames.json', 'personalityNames.json', 'dist/src/personalityNames.json'];
+                        var tryFetch = function(i) {
+                            if (i >= urls.length) {
                                 resolve(null);
-                            });
+                                return;
+                            }
+                            fetch(urls[i])
+                                .then(function(response) {
+                                    if (response.ok) return response.json();
+                                    throw new Error('Failed');
+                                })
+                                .then(function(namesData) {
+                                    if (namesData && namesData[idx]) {
+                                        console.log('[UserStats] ✅ 从 personalityNames.json 获取人格称号:', namesData[idx]);
+                                        resolve(String(namesData[idx]));
+                                    } else {
+                                        tryFetch(i + 1);
+                                    }
+                                })
+                                .catch(function() {
+                                    tryFetch(i + 1);
+                                });
+                        };
+                        tryFetch(0);
                     });
                 };
                 
@@ -20037,6 +20110,43 @@
                         }
                     } catch (e) {
                         console.warn('[UserStats] ⚠️ 获取人格称号失败:', e);
+                    }
+                }
+                
+                // 【修复人格鉴定结果空白】若仍无人格称号，从 index 分析结果（cursor_clinical_history / last_analysis_data）补充
+                if (!personalityName || personalityName === '未知人格' || personalityName === '未知') {
+                    try {
+                        var histStr = localStorage.getItem('cursor_clinical_history') || '';
+                        var hist = histStr ? JSON.parse(histStr) : null;
+                        var vr = hist && hist.analysisData && hist.analysisData.vibeResult ? hist.analysisData.vibeResult : null;
+                        if (vr && (vr.personalityName || vr.personality_name)) {
+                            personalityName = vr.personalityName || vr.personality_name || vr.personalityNameZh || vr.personality_name_zh || null;
+                            if (personalityName) console.log('[UserStats] ✅ 从 cursor_clinical_history 补充人格称号:', personalityName);
+                        }
+                        if (!personalityName) {
+                            var lastStr = localStorage.getItem('last_analysis_data');
+                            if (lastStr) {
+                                var lastObj = JSON.parse(lastStr);
+                                personalityName = lastObj && (lastObj.personalityName || lastObj.personality_name) ? (lastObj.personalityName || lastObj.personality_name) : null;
+                                if (personalityName) console.log('[UserStats] ✅ 从 last_analysis_data 补充人格称号:', personalityName);
+                            }
+                        }
+                        if (!personalityName) {
+                            var vibeIdx = localStorage.getItem('user_vibe_index');
+                            if (vibeIdx && typeof vibeIdx === 'string' && vibeIdx.length === 5) {
+                                loadPersonalityName(vibeIdx).then(function(name) {
+                                    if (name) {
+                                        var el = document.querySelector('[data-stat="personality-name"]');
+                                        if (el) {
+                                            el.textContent = (typeof translatePersonalityName === 'function' ? translatePersonalityName(name, currentUserData) : name);
+                                            console.log('[UserStats] ✅ 已从 user_vibe_index 异步更新人格称号:', name);
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('[UserStats] ⚠️ 从 localStorage 补充人格称号失败:', e);
                     }
                 }
                 
@@ -20432,8 +20542,25 @@
                                     }
 
                                     // 最后兜底
-                                    if (!realEvalTitle) realEvalTitle = '';
-                                    if (!realEvalText) realEvalText = '暂无真实评价（中文文案缺失）';
+                                    if (!realEvalTitle) realEvalTitle = personalityName || (currentLang === 'en' ? 'Technologist' : '赛博架构师');
+                                    if (!realEvalText || realEvalText === '暂无真实评价（中文文案缺失）') {
+                                        // 维度兜底
+                                        const dims = (vr && vr.dimensions) || currentUserData.dimensions || (currentUserData.vibe_rank && currentUserData.vibe_rank.dimensions) || {};
+                                        const labels = (currentLang === 'en')
+                                            ? { L: 'Logic', P: 'Patience', D: 'Detail', E: 'Exploration', F: 'Feedback' }
+                                            : { L: '逻辑', P: '耐性', D: '细节', E: '探索', F: '反馈' };
+                                        const sorted = Object.entries(dims).filter(function(e) { return labels[e[0]]; }).map(function(e) { return { k: e[0], v: Number(e[1]) || 0 }; });
+                                        sorted.sort(function(a, b) { return b.v - a.v; });
+                                        if (sorted.length >= 2) {
+                                            const top1 = labels[sorted[0].k];
+                                            const top2 = labels[sorted[1].k];
+                                            realEvalText = (currentLang === 'en')
+                                                ? 'A developer with strong ' + top1 + ' and ' + top2.toLowerCase() + '.'
+                                                : '一位极具' + top1 + '且' + (sorted[1].v >= 70 ? '极度' : '较为') + top2 + '的代码架构师。';
+                                        } else {
+                                            realEvalText = (currentLang === 'en') ? 'A developer with a unique and complex coding style.' : '一位性格深邃且独特的赛博开发者。';
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -20541,9 +20668,9 @@
                         ` : ''}
                     </div>
                     
-                    <!-- 人格称号（与 index 一致：优先由 vibe_index 从 personalityNames.json 解析） -->
+                    <!-- 人格鉴定结果（与 index 一致：优先由 vibe_index 从 personalityNames.json 解析） -->
                     <div class="mb-3 pb-3 border-b border-[var(--border-ui)]">
-                        <div class="drawer-item-label mb-1">${getI18nText('drawer.personality_title') || (currentLang === 'en' ? 'Title' : '人格称号')}</div>
+                        <div class="drawer-item-label mb-1">${getI18nText('preview.personalityLabel') || getI18nText('drawer.personality_title') || (currentLang === 'en' ? 'Personality Verdict' : '人格鉴定结果')}</div>
                         <div class="drawer-item-value text-sm" data-stat="personality-name">${personalityName}</div>
                         <div class="drawer-item-desc text-[8px]">${personalityType === 'AUTO_REPORT' ? '' : (personalityType || '')}</div>
                     </div>

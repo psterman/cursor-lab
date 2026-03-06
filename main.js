@@ -1166,6 +1166,30 @@ class VibeCodingApp {
             result.fingerprint = liveRank.fingerprint;
             console.log('[VibeCodingApp] ✅ fingerprint 已注入:', liveRank.fingerprint);
           }
+
+          // ✅ 【关键修复】同步人格名称和吐槽文案 - 确保预览页面能看到最新的 AI 文案
+          if (liveRank.personalityName) {
+            result.personalityName = liveRank.personalityName;
+          }
+          if (liveRank.personalityNameEn) result.personalityNameEn = liveRank.personalityNameEn;
+          if (liveRank.personalityNameZh) result.personalityNameZh = liveRank.personalityNameZh;
+
+          // 优先从 answer_book 获取文案，避免由于后端生成延迟导致的「正在破译」
+          const backAb = liveRank.personality?.answer_book || liveRank.personality?.answerBook || liveRank.answer_book || liveRank.answerBook;
+          const abContent = backAb && (backAb.content != null ? String(backAb.content) : (backAb.text != null ? String(backAb.text) : '')).trim();
+          
+          if (abContent && !isInvalidPersonalityText(abContent)) {
+            result.roastText = abContent;
+            console.log('[VibeCodingApp] ✅ 已从 answer_book 填充 roastText');
+          } else if (liveRank.roastText || liveRank.roast_text) {
+            const rt = String(liveRank.roastText || liveRank.roast_text);
+            if (!isInvalidPersonalityText(rt)) {
+              result.roastText = rt;
+              console.log('[VibeCodingApp] ✅ 已从 liveRank.roastText 填充 roastText');
+            }
+          }
+          if (liveRank.roastTextEn || liveRank.roast_text_en) result.roastTextEn = String(liveRank.roastTextEn || liveRank.roast_text_en);
+          if (liveRank.roastTextZh || liveRank.roast_text_zh) result.roastTextZh = String(liveRank.roastTextZh || liveRank.roast_text_zh);
           
           // 【V6 架构修复】优先从 personality.detailedStats 读取数据
           // 数据流向：后端 scoring.ts → rank-content.ts → matchRankLevel → personality.detailedStats
@@ -1996,6 +2020,28 @@ export const reanalyzeWithLanguage = async (lang) => {
           if (liveRank.personality) {
             vibeResult.personality = liveRank.personality;
             console.log('[Main] ✅ personality 对象已注入:', liveRank.personality);
+            
+            // 【人格预览】优先用 answer_book.content 作为主文案，否则用后端 roast_text，避免卡在「正在破译」
+            const backAb = liveRank.personality?.answer_book || liveRank.personality?.answerBook || liveRank.answer_book || liveRank.answerBook;
+            const abContent = backAb && (backAb.content != null ? String(backAb.content) : (backAb.text != null ? String(backAb.text) : '')).trim();
+            
+            if (abContent && !isInvalidPersonalityText(abContent)) {
+              vibeResult.roastText = abContent;
+              console.log('[Main] ✅ 已从 answer_book 填充 roastText');
+            } else if (liveRank.roastText || liveRank.roast_text) {
+              const rt = String(liveRank.roastText || liveRank.roast_text);
+              if (!isInvalidPersonalityText(rt)) {
+                vibeResult.roastText = rt;
+                console.log('[Main] ✅ 已从 liveRank.roastText 填充 roastText');
+              }
+            }
+
+            // 【关键修复】同步人格名称 - 确保预览页面能看到翻译后的名称
+            if (liveRank.personalityName) vibeResult.personalityName = liveRank.personalityName;
+            if (liveRank.personalityNameEn) vibeResult.personalityNameEn = liveRank.personalityNameEn;
+            if (liveRank.personalityNameZh) vibeResult.personalityNameZh = liveRank.personalityNameZh;
+            if (liveRank.roastTextEn || liveRank.roast_text_en) vibeResult.roastTextEn = String(liveRank.roastTextEn || liveRank.roast_text_en);
+            if (liveRank.roastTextZh || liveRank.roast_text_zh) vibeResult.roastTextZh = String(liveRank.roastTextZh || liveRank.roast_text_zh);
             
             // 【V6 架构】直接从 personality.detailedStats 读取数据
             if (liveRank.personality.detailedStats && Array.isArray(liveRank.personality.detailedStats)) {
@@ -3329,9 +3375,24 @@ async function handleFileUpload(event, type, callbacks = {}) {
       }
     }
     
-    // 【人格预览】若吐槽文案为占位或「正在生成中」，严禁直接展示：先 roastLibrary 补全，仍无效则前端根据 dimensions 动态生成
+    // 【人格预览】多路径取值：优先 personality_data.answer_book.content，否则 roast_text；再补全 roastLibrary / dimensions 保底
     if (vibeResult) {
       var rt = vibeResult.roastText ? String(vibeResult.roastText) : '';
+      if (isInvalidPersonalityText(rt)) {
+        var pd = vibeResult.personality_data || vibeResult.personalityData;
+        var parsed = safeParsePersonalityData(pd);
+        var ab = null;
+        if (parsed) ab = parsed.answer_book || parsed.answerBook;
+        if (!ab && vibeResult.personality) ab = vibeResult.personality.answer_book || vibeResult.personality.answerBook;
+        if (ab && typeof ab === 'object') {
+          var fromAb = (ab.content != null ? String(ab.content) : (ab.text != null ? String(ab.text) : '')).trim();
+          if (fromAb && !isInvalidPersonalityText(fromAb)) {
+            vibeResult.roastText = fromAb;
+            rt = fromAb;
+          }
+        }
+      }
+      rt = vibeResult.roastText ? String(vibeResult.roastText) : '';
       var isPlaceholder = isInvalidPersonalityText(rt);
       if (isPlaceholder) {
         var idx = (vibeResult.vibeIndex || vibeResult.vibe_index || '').toString().slice(0, 5);
@@ -4445,11 +4506,32 @@ function debounce(func, wait) {
   };
 }
 
+/**
+ * 安全解析 personality_data（可能为 JSON 字符串，含转义双引号）
+ * @param {*} raw - 对象或字符串
+ * @returns {Object|null} 解析后的对象或 null
+ */
+function safeParsePersonalityData(raw) {
+  if (raw == null) return null;
+  if (typeof raw === 'object') return raw;
+  if (typeof raw !== 'string' || raw.length < 2) return null;
+  try {
+    var s = String(raw).replace(/\\"/g, '"');
+    return JSON.parse(s);
+  } catch (e1) {
+    try {
+      return JSON.parse(raw);
+    } catch (e2) {
+      return null;
+    }
+  }
+}
+
 /** 是否为不可直接展示的人格文案（严禁展示给用户） */
 function isInvalidPersonalityText(s) {
   if (s == null || String(s).trim() === '') return true;
   var t = String(s);
-  if (/正在生成中|正在由后端生成|personality combination is so unique that even our AI needs more time/i.test(t)) return true;
+  if (/正在生成中|正在由后端生成|正在破译|Deciphering your personality|personality combination is so unique that even our AI needs more time/i.test(t)) return true;
   if (/索引\s*\d+\s*对应的吐槽文案(正在由后端生成中|未找到)/.test(t) && /人格组合太独特/.test(t)) return true;
   return false;
 }
