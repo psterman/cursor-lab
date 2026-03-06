@@ -765,6 +765,20 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
             pointer-events: auto;
             background: transparent;
         }
+        /* Canvas 图表固定长宽比，初始化时即声明，减少重排 */
+        #rtRadar {
+            aspect-ratio: 1;
+            width: 100%;
+            min-height: 260px;
+        }
+        #rtGlobalRatioPie {
+            aspect-ratio: 1;
+            width: 200px;
+            height: 200px;
+        }
+        .left-drawer-wordcloud-canvas-wrap.stats2-wc-min-height {
+            aspect-ratio: 16/10;
+        }
 
         /* 地图光标工具（校准/拖拽提示） */
         #map-cursor-tools {
@@ -3925,12 +3939,60 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
             background: rgba(91, 33, 182, 0.2);
             color: #a78bfa;
         }
+        /* 词云/高分图谱固定 min-height，防止内容插入时撑开页面抖动 */
+        .vibe-index-leaderboard.stats2-lp-min-height,
+        .vibe-index-leaderboard {
+            min-height: 300px;
+            position: relative;
+        }
+        .stats2-wc-min-height.left-drawer-wordcloud-canvas-wrap,
         .left-drawer-wordcloud-canvas-wrap {
             position: relative;
             width: 100%;
-            min-height: 160px;
+            min-height: 300px;
             height: min(280px, 32vh);
             overflow: visible;
+        }
+        /* 赛博风格骨架屏：数据返回前占位，避免布局跳动 */
+        .stats2-cyber-skeleton {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: linear-gradient(135deg, rgba(3, 3, 4, 0.97) 0%, rgba(0, 255, 65, 0.03) 100%);
+            border: 1px solid rgba(0, 255, 65, 0.15);
+            pointer-events: none;
+        }
+        .stats2-cyber-skeleton.stats2-skeleton-hidden,
+        .vibe-index-leaderboard .stats2-cyber-skeleton[aria-hidden="true"]:empty {
+            display: none;
+        }
+        .stats2-skeleton-bars {
+            width: 90%;
+            height: 120px;
+            background: repeating-linear-gradient(
+                90deg,
+                transparent,
+                transparent 12px,
+                rgba(0, 255, 65, 0.08) 12px,
+                rgba(0, 255, 65, 0.08) 14px
+            );
+            margin-bottom: 12px;
+        }
+        .stats2-skeleton-line {
+            width: 70%;
+            height: 8px;
+            background: rgba(0, 255, 65, 0.06);
+            margin-top: 8px;
+        }
+        .stats2-skeleton-line.short { width: 45%; }
+        .stats2-wordcloud-skeleton {
+            z-index: 1;
+        }
+        .stats2-wordcloud-skeleton.stats2-skeleton-hidden {
+            display: none !important;
         }
         .left-drawer-wordcloud-canvas-wrap canvas {
             display: block;

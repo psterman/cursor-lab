@@ -3609,20 +3609,18 @@ const DEFAULT_COUNTRY_DIMENSION_AVERAGES = {
   avg_f: 50,
 };
 
+/** 国家维度 RPC 服务端缓存 TTL（1h），多用户同国家共享一次 Supabase 调用 */
+const COUNTRY_DIM_CACHE_MAX_AGE = 3600;
+
 /**
  * POST /api/supabase/rpc/get_country_dimension_averages
  * 代理 Supabase RPC，唯一签名 target_country_code text；服务端注入 apikey + Authorization，避免 No API key found。
- * 任何失败（未配置、RPC 报错、function is not unique 等）均返回默认全维度 50，不中断 GitHub 同步等流程。
+ * 使用 Cache API 按国家码缓存 1h，控制 Supabase 用量；任何失败返回默认全维度 50。
  */
 app.post('/api/supabase/rpc/get_country_dimension_averages', async (c) => {
   const defaultResponse = () => c.json({ data: [DEFAULT_COUNTRY_DIMENSION_AVERAGES] });
   try {
     const env = c.env;
-    const supabaseKey = (env.SUPABASE_KEY || env.SUPABASE_ANON_KEY || '').trim();
-    if (!env.SUPABASE_URL || !supabaseKey) {
-      console.warn('[Worker] get_country_dimension_averages: Supabase 未配置或 API Key 为空，返回默认均值');
-      return defaultResponse();
-    }
     let body: { target_code?: string; target_country_code?: string } = {};
     try {
       body = await c.req.json().catch(() => ({}));
@@ -3631,6 +3629,25 @@ app.post('/api/supabase/rpc/get_country_dimension_averages', async (c) => {
     }
     const targetCode = (body.target_country_code || body.target_code || '').trim().toUpperCase();
     if (!targetCode || !/^[A-Z]{2}$/.test(targetCode)) {
+      return defaultResponse();
+    }
+    const cacheKey = new Request('https://vibe-internal/country_dim/' + targetCode);
+    try {
+      const cached = await caches.default.match(cacheKey);
+      if (cached) {
+        const cachedBody = await cached.text();
+        return new Response(cachedBody, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'public, max-age=' + COUNTRY_DIM_CACHE_MAX_AGE,
+          },
+        });
+      }
+    } catch (_) {}
+    const supabaseKey = (env.SUPABASE_KEY || env.SUPABASE_ANON_KEY || '').trim();
+    if (!env.SUPABASE_URL || !supabaseKey) {
+      console.warn('[Worker] get_country_dimension_averages: Supabase 未配置或 API Key 为空，返回默认均值');
       return defaultResponse();
     }
     const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_country_dimension_averages`;
@@ -3647,7 +3664,18 @@ app.post('/api/supabase/rpc/get_country_dimension_averages', async (c) => {
     }
     const data = await res.json().catch(() => null);
     const list = Array.isArray(data) && data.length > 0 ? data : [DEFAULT_COUNTRY_DIMENSION_AVERAGES];
-    return c.json({ data: list });
+    const resBody = JSON.stringify({ data: list });
+    const response = new Response(resBody, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'public, max-age=' + COUNTRY_DIM_CACHE_MAX_AGE,
+      },
+    });
+    try {
+      await caches.default.put(cacheKey, response.clone());
+    } catch (_) {}
+    return response;
   } catch (e: any) {
     console.warn('[Worker] get_country_dimension_averages 异常:', e?.message);
     return defaultResponse();

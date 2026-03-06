@@ -273,7 +273,8 @@
                             <button type="button" class="national-identity-tab left-drawer-wordcloud-tab" data-level="Professional" data-t="lexicon.pro">脱发</button>
                             <button type="button" class="national-identity-tab left-drawer-wordcloud-tab" data-level="Architect" data-t="lexicon.arch">霸天</button>
                         </div>
-                        <div class="left-drawer-wordcloud-canvas-wrap" id="vibe-cloud50-container">
+                        <div class="left-drawer-wordcloud-canvas-wrap stats2-wc-min-height" id="vibe-cloud50-container">
+                            <div class="stats2-cyber-skeleton stats2-wordcloud-skeleton" id="stats2-wc-skeleton" aria-hidden="false"></div>
                             <canvas id="canvas-novice" data-level="Novice" aria-hidden="false"></canvas>
                             <canvas id="canvas-pro" data-level="Professional" style="display: none;" aria-hidden="true"></canvas>
                             <canvas id="canvas-arch" data-level="Architect" style="display: none;" aria-hidden="true"></canvas>
@@ -355,9 +356,13 @@
                                 <!-- 六个全球排行榜卡片 - renderGlobalLadders 会写入此处或其子节点 global-ranking-grids -->
                                 <div id="global-ranking-grids" class="industrial-ranking-grid flex flex-col gap-3"></div>
                             </div>
-                            <!-- 高分图谱容器 - drawHighScores 函数会在此渲染6个排行榜 -->
-                            <div class="vibe-index-leaderboard space-y-4">
-                                <!-- 卡片将由 JavaScript 动态渲染 -->
+                            <!-- 高分图谱容器 - drawHighScores 函数会在此渲染6个排行榜；固定 min-height + 骨架屏防抖 -->
+                            <div class="vibe-index-leaderboard space-y-4 stats2-lp-min-height">
+                                <div class="stats2-cyber-skeleton" id="stats2-lp-skeleton" aria-hidden="true">
+                                    <div class="stats2-skeleton-bars"></div>
+                                    <div class="stats2-skeleton-line"></div>
+                                    <div class="stats2-skeleton-line short"></div>
+                                </div>
                             </div>
                         </div>
                     </div>

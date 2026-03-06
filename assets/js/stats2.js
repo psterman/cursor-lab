@@ -439,6 +439,12 @@
     var USER_CACHE_TTL_MS = 5 * 60 * 1000;
     var REPORT_REQUEST_TIMEOUT_MS = 8000;
     var CYBER_REPORT_STORAGE_PREFIX = 'vibe_cyber_report_';
+    /** 战力报告 id 映射与报告内容缓存 TTL（30min），减少 user_analysis 重复查 */
+    var REPORT_ID_CACHE_TTL_MS = 30 * 60 * 1000;
+    var REPORT_ID_CACHE_PREFIX = 'vibe_report_id_';
+    var REPORT_USER_CACHE_PREFIX = 'vibe_report_user_';
+    var REPORT_RANKS_CACHE_TTL_MS = 15 * 60 * 1000;
+    var REPORT_RANKS_CACHE_PREFIX = 'vibe_report_ranks_';
 
     /** 从 localStorage 读取战力报告缓存（支持 id / fingerprint / user_name 任一 key） */
     function getReportFromLocalStorage(identifier) {
@@ -466,15 +472,32 @@
 
     function resolveUserIdForReport(identifier, cb) {
         if (!identifier) { cb(null); return; }
-        var supabase = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
-        if (!supabase || typeof supabase.from !== 'function') { cb(null); return; }
         var s = String(identifier).trim();
         if (!s) { cb(null); return; }
         if (/^[0-9a-fA-F-]{32,}$/.test(s) || /^\d+$/.test(s)) { cb(s); return; }
+        try {
+            var cacheKey = REPORT_ID_CACHE_PREFIX + String(s).replace(/\s/g, '_').slice(0, 120);
+            var raw = typeof localStorage !== 'undefined' && localStorage.getItem(cacheKey);
+            if (raw) {
+                var obj = JSON.parse(raw);
+                if (obj && obj.id != null && obj.ts != null && (Date.now() - obj.ts < REPORT_ID_CACHE_TTL_MS)) {
+                    cb(String(obj.id));
+                    return;
+                }
+            }
+        } catch (_) {}
+        var supabase = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+        if (!supabase || typeof supabase.from !== 'function') { cb(null); return; }
         supabase.from('user_analysis').select('id').eq('fingerprint', s).limit(1).maybeSingle().then(function(r) {
-            if (r && r.data && r.data.id) { cb(r.data.id); return; }
+            if (r && r.data && r.data.id) {
+                try { localStorage.setItem(cacheKey, JSON.stringify({ id: r.data.id, ts: Date.now() })); } catch (_) {}
+                cb(r.data.id);
+                return;
+            }
             supabase.from('user_analysis').select('id').eq('user_name', s).limit(1).maybeSingle().then(function(r2) {
-                cb(r2 && r2.data && r2.data.id ? r2.data.id : null);
+                var id = r2 && r2.data && r2.data.id ? r2.data.id : null;
+                if (id) try { localStorage.setItem(cacheKey, JSON.stringify({ id: id, ts: Date.now() })); } catch (_) {}
+                cb(id);
             });
         });
     }
@@ -482,17 +505,42 @@
     function fetchUserAnalysisForReport(userId, cb) {
         var cached = window.userCache[userId];
         if (cached && (Date.now() - cached.ts) < USER_CACHE_TTL_MS) { cb(cached.data); return; }
+        try {
+            var key = REPORT_USER_CACHE_PREFIX + String(userId);
+            var raw = typeof localStorage !== 'undefined' && localStorage.getItem(key);
+            if (raw) {
+                var obj = JSON.parse(raw);
+                if (obj && obj.data != null && obj.ts != null && (Date.now() - obj.ts < REPORT_ID_CACHE_TTL_MS)) {
+                    window.userCache[userId] = { data: obj.data, ts: obj.ts };
+                    cb(obj.data);
+                    return;
+                }
+            }
+        } catch (_) {}
         var supabase = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
         if (!supabase || typeof supabase.from !== 'function') { cb(null); return; }
         supabase.from('user_analysis').select('*').eq('id', userId).single().then(function(r) {
             if (r.error || !r.data) { cb(null); return; }
             window.userCache[userId] = { data: r.data, ts: Date.now() };
+            try { localStorage.setItem(REPORT_USER_CACHE_PREFIX + String(userId), JSON.stringify({ data: r.data, ts: Date.now() })); } catch (_) {}
             cb(r.data);
         });
     }
 
-    /** 通过 RPC get_user_ranks_6d + get_leaderboard_my_rank（天梯榜）拉取排名，合并到 data 供详情弹窗使用 */
+    /** 通过 RPC get_user_ranks_6d + get_leaderboard_my_rank（天梯榜）拉取排名，合并到 data 供详情弹窗使用；优先 15min 本地缓存 */
     function fetchAndMergeRanksForReport(userId, data, cb) {
+        try {
+            var ranksKey = REPORT_RANKS_CACHE_PREFIX + String(userId);
+            var raw = typeof localStorage !== 'undefined' && localStorage.getItem(ranksKey);
+            if (raw) {
+                var obj = JSON.parse(raw);
+                if (obj && obj.data != null && obj.ts != null && (Date.now() - obj.ts < REPORT_RANKS_CACHE_TTL_MS)) {
+                    data.cached_ranks = obj.data;
+                    cb(data);
+                    return;
+                }
+            }
+        } catch (_) {}
         var supabase = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
         if (!supabase || typeof supabase.rpc !== 'function') { cb(data); return; }
         var base = (data.cached_ranks != null) ? (typeof data.cached_ranks === 'string' ? (function() { try { return JSON.parse(data.cached_ranks); } catch (_) { return {}; } })() : data.cached_ranks) : {};
@@ -502,6 +550,7 @@
 
         function mergeLeaderboardAndDone() {
             data.cached_ranks = merged;
+            try { localStorage.setItem(REPORT_RANKS_CACHE_PREFIX + String(userId), JSON.stringify({ data: merged, ts: Date.now() })); } catch (_) {}
             cb(data);
         }
 
@@ -583,10 +632,20 @@
         return n + ' B';
     }
 
+    /** 预解析 JSON 缓存：避免切换侧边栏时重复执行昂贵的 JSON.parse（github_stats / identity_cloud） */
+    var __parseMemo = {};
+    function parseJsonMemo(name, raw) {
+        if (raw == null) return name === 'github_stats' || name === 'identity_cloud' ? (name === 'identity_cloud' ? {} : {}) : null;
+        if (typeof raw !== 'string') return raw;
+        var k = name + '_' + raw.length + '_' + (raw.substring(0, 80) || '');
+        if (__parseMemo[k] !== undefined) return __parseMemo[k];
+        try { var out = JSON.parse(raw); __parseMemo[k] = out; return out; } catch (_) { var empty = name === 'identity_cloud' ? {} : {}; __parseMemo[k] = empty; return empty; }
+    }
+
     /** 星标取值优先级：totalStars -> totalRepoStars -> github_stars，取第一个有效正数；若无则返回 null（避免误显 0） */
     function resolveDisplayStars(data) {
         if (!data) return null;
-        var gs = (data.github_stats && typeof data.github_stats === 'object') ? data.github_stats : (typeof data.github_stats === 'string' ? (function() { try { return JSON.parse(data.github_stats); } catch (_) { return {}; } })() : {});
+        var gs = (data.github_stats && typeof data.github_stats === 'object') ? data.github_stats : parseJsonMemo('github_stats', data.github_stats);
         var a = gs.totalStars != null ? Number(gs.totalStars) : NaN;
         var b = gs.totalRepoStars != null ? Number(gs.totalRepoStars) : NaN;
         var c = data.github_stars != null ? Number(data.github_stars) : NaN;
@@ -605,7 +664,7 @@
             d.textContent = s;
             return d.innerHTML;
         };
-        var gs = (data && data.github_stats) ? (typeof data.github_stats === 'string' ? (function() { try { return JSON.parse(data.github_stats); } catch (_) { return {}; } })() : data.github_stats) : {};
+        var gs = (data && data.github_stats) ? (typeof data.github_stats === 'string' ? parseJsonMemo('github_stats', data.github_stats) : data.github_stats) : {};
         var ranks = (data && data.cached_ranks) ? (typeof data.cached_ranks === 'string' ? (function() { try { return JSON.parse(data.cached_ranks); } catch (_) { return {}; } })() : data.cached_ranks) : {};
         var langDist = gs.languageDistribution || {};
         var langBreadth = typeof langDist === 'object' && langDist !== null ? Object.keys(langDist).length : 0;
@@ -766,7 +825,7 @@
         var publicRepos = opts.public_repos != null ? opts.public_repos : (opts.publicRepos != null ? opts.publicRepos : '—');
         var updatedAt = opts.updated_at || opts.updatedAt || '—';
         var starsVal = resolveDisplayStars(opts);
-        var stars = starsVal != null ? starsVal : (opts.stars != null ? opts.stars : (opts.totalStars != null ? opts.totalStars : '—'));
+        var stars = starsVal != null ? Number(starsVal).toLocaleString() : ((opts.stars > 0 || opts.totalStars > 0) ? String((opts.stars || opts.totalStars)).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : '—');
         var toId = opts.toId || opts.fingerprint || login;
         var githubUrl = 'https://github.com/' + (login ? encodeURIComponent(login) : '');
         if (typeof updatedAt === 'string' && updatedAt !== '—' && updatedAt.length > 10) {
@@ -1281,6 +1340,8 @@
             return {};
         };
         
+        /** 国家 RPC 防抖：快速切换国家时 400ms 内只执行最后一次，控制 Supabase 请求 */
+        var __countryDashboardDebounce = { timer: null, skipNext: false };
         // 辅助函数：更新国家仪表板UI
         async function updateCountryDashboard(countryNameOrCode, maybeData) {
             // 强制清理 Loading：即便出错也隐藏转圈，让用户看到「暂无数据」而非一直转圈
@@ -1367,6 +1428,20 @@
             })();
             // 准入检查：同一国家且非强制刷新则直接 return（lastFetchedCountry 与 lastRequestCountry 双轨）
             const forceRefresh = opts.force === true || opts.forceRefresh === true;
+            if (!effectiveIsGlobal && countryCode && !forceRefresh && !opts.__debounceRun) {
+                var d = __countryDashboardDebounce;
+                d.pending = [countryNameOrCode, maybeData, opts];
+                clearTimeout(d.timer);
+                d.timer = setTimeout(function() {
+                    var a = d.pending;
+                    d.pending = null;
+                    if (a && a.length >= 3) {
+                        var o = (a[2] && typeof a[2] === 'object') ? Object.assign({}, a[2], { __debounceRun: true }) : { __debounceRun: true };
+                        updateCountryDashboard(a[0], a[1], o);
+                    }
+                }, 400);
+                return;
+            }
             const sameCountry = !effectiveIsGlobal && countryCode && (
                 String(countryCode).toUpperCase() === String(state.lastFetchedCountry || '').toUpperCase() ||
                 String(countryCode).toUpperCase() === String(state.lastRequestCountry || '').toUpperCase()
@@ -1977,12 +2052,35 @@
                         : Object.assign({}, window.cachedSummary || {}, data);
                 } catch (e) { /* ignore */ }
 
-                // 国家视图：get_country_dimension_averages 使用相对路径 /api/...，自动指向当前环境（生产即生产 Worker 代理）
+                // 国家视图：get_country_dimension_averages 优先 12h 本地缓存，控制 Supabase 用量
                 const DEFAULT_DIMENSION_AVERAGES = { has_valid_data: false, avg_l: 50, avg_p: 50, avg_d: 50, avg_e: 50, avg_f: 50 };
                 let record;
                 try {
                     let countryDimensionAverages = null;
-                    if (!effectiveIsGlobal && countryCode) {
+                    if (!effectiveIsGlobal && countryCode && typeof getCachedOrFetch === 'function') {
+                        var dimCacheKey = 'vibe_country_dim_' + String(countryCode).toUpperCase();
+                        countryDimensionAverages = await getCachedOrFetch(dimCacheKey, VIBE_COUNTRY_RPC_CACHE_TTL_MS, async function() {
+                            var raw = null;
+                            try {
+                                var proxyRes = await fetch('/api/supabase/rpc/get_country_dimension_averages', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ target_country_code: countryCode })
+                                });
+                                if (proxyRes.ok) {
+                                    var json = await proxyRes.json();
+                                    if (json && json.data != null) raw = json.data;
+                                }
+                            } catch (e) { console.warn('[updateCountryDashboard] get_country_dimension_averages 代理请求失败:', e); }
+                            if (raw == null && typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function') {
+                                try {
+                                    var dimRes = await supabaseClient.rpc('get_country_dimension_averages', { target_country_code: countryCode });
+                                    if (dimRes && dimRes.data != null) raw = dimRes.data;
+                                } catch (e) { console.warn('[updateCountryDashboard] get_country_dimension_averages RPC 失败:', e); }
+                            }
+                            return raw != null ? raw : [DEFAULT_DIMENSION_AVERAGES];
+                        });
+                    } else if (!effectiveIsGlobal && countryCode) {
                         try {
                             const proxyRes = await fetch('/api/supabase/rpc/get_country_dimension_averages', {
                                 method: 'POST',
@@ -3158,14 +3256,22 @@
                 // NOTE: 已在上方“派生指标计算与渲染 / 语义爆发（真实动态化）”完成渲染，
                 // 这里不再重复覆盖 powerScore / semanticBurst，避免 UI 抖动与逻辑分叉。
 
-                // 人格分布：国家视图用 get_country_personality_distribution 拉取该国数据，全网用 latest_records 聚合
+                // 人格分布：国家视图用 get_country_personality_distribution，优先 12h 本地缓存
                 (async function renderPersonalityDistributionForDrawer() {
                     const box = document.getElementById('rtRealtimeList');
                     if (!box) return;
                     if (!effectiveIsGlobal && target_country && (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function')) {
                         try {
-                            const { data: distData, error } = await supabaseClient.rpc('get_country_personality_distribution', { target_country_code: target_country });
-                            if (!error && Array.isArray(distData) && distData.length > 0) {
+                            var distData = null;
+                            if (typeof getCachedOrFetch === 'function' && typeof VIBE_COUNTRY_RPC_CACHE_TTL_MS !== 'undefined') {
+                                distData = await getCachedOrFetch('vibe_country_personality_' + String(target_country).toUpperCase(), VIBE_COUNTRY_RPC_CACHE_TTL_MS, function() {
+                                    return supabaseClient.rpc('get_country_personality_distribution', { target_country_code: target_country }).then(function(r) { return r && !r.error ? r.data : null; });
+                                });
+                            } else {
+                                var distRes = await supabaseClient.rpc('get_country_personality_distribution', { target_country_code: target_country });
+                                distData = distRes && !distRes.error ? distRes.data : null;
+                            }
+                            if (Array.isArray(distData) && distData.length > 0) {
                                 const distribution = distData.map((row) => ({
                                     type: String(row.personality_type ?? row.type ?? row.personality_type_code ?? 'UNKNOWN').toUpperCase(),
                                     count: Number(row.count ?? row.cnt ?? row.total ?? 0) || 0
@@ -8213,6 +8319,8 @@
         /** 禁止前端调用 supabase.rpc('refresh_leaderboard_snapshots')：该 RPC 执行 50 次重算与 50 次 Upsert，仅由后端 Worker 按日执行。登录后首次同步也禁止调用，仅通过查询 user_analysis/视图 更新 UI。 */
 
         var VIBE_LEADERBOARD_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+        /** 国家相关 RPC 短期缓存 TTL（12h），控制 Supabase 用量且保证每日可更新 */
+        var VIBE_COUNTRY_RPC_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
         /**
          * SWR 本地缓存：若 key 存在且未过期则返回缓存数据不请求；否则执行 fetchFn 后写入缓存
@@ -8841,7 +8949,10 @@
             }
             console.log('[Leaderboard] ✅ 22 个榜单卡片渲染完成');
         }
-        if (typeof window !== 'undefined') window.loadGitHubLeaderboard = loadGitHubLeaderboard;
+        if (typeof window !== 'undefined') {
+            window.loadGitHubLeaderboard = loadGitHubLeaderboard;
+            window.__fetchAllLeaderboardSnapshots = fetchAllLeaderboardSnapshots;
+        }
 
         // ==========================================
         // 矩阵绿天梯榜相关函数和常量
@@ -8917,21 +9028,29 @@
             }
 
             try {
-                // PostgREST 参数名与 SQL 函数一致：country_code / top_n；全局传 null
-                const { data, error } = await supabaseClient.rpc('get_country_top_metrics_v1', {
-                    p_country_code: null,
-                    p_top_n: 10
-                });
-                let rpcData = data;
-                if (error && (!rpcData || !rpcData.length)) {
-                    const alt = await supabaseClient.rpc('get_country_top_metrics_v1', { country_code: null, top_n: 10 });
-                    if (!alt.error && alt.data && alt.data.length) rpcData = alt.data;
+                var rpcData = null;
+                var topMetricsCacheKey = 'vibe_country_top_metrics_global_10';
+                if (typeof getCachedOrFetch === 'function' && typeof VIBE_COUNTRY_RPC_CACHE_TTL_MS !== 'undefined') {
+                    rpcData = await getCachedOrFetch(topMetricsCacheKey, VIBE_COUNTRY_RPC_CACHE_TTL_MS, async function() {
+                        var res = await supabaseClient.rpc('get_country_top_metrics_v1', { p_country_code: null, p_top_n: 10 });
+                        var data = res && res.data;
+                        if ((!data || !data.length) && res && res.error) {
+                            var alt = await supabaseClient.rpc('get_country_top_metrics_v1', { country_code: null, top_n: 10 });
+                            if (alt && !alt.error && alt.data && alt.data.length) data = alt.data;
+                        }
+                        return Array.isArray(data) ? data : [];
+                    });
                 }
-                if (error && (!rpcData || !rpcData.length)) {
-                    console.error('[MatrixLadders] ❌ RPC 调用失败:', error);
-                    isRankingLoading = false;
-                    await renderMatrixLaddersFromDirectQuery(contentTarget);
-                    return;
+                if (!rpcData || !rpcData.length) {
+                    const { data, error } = await supabaseClient.rpc('get_country_top_metrics_v1', {
+                        p_country_code: null,
+                        p_top_n: 10
+                    });
+                    rpcData = data;
+                    if (error && (!rpcData || !rpcData.length)) {
+                        const alt = await supabaseClient.rpc('get_country_top_metrics_v1', { country_code: null, top_n: 10 });
+                        if (!alt.error && alt.data && alt.data.length) rpcData = alt.data;
+                    }
                 }
                 if (!rpcData || !Array.isArray(rpcData) || rpcData.length === 0) {
                     console.warn('[MatrixLadders] ⚠️ RPC 返回空数据，使用直接查询');
@@ -20290,7 +20409,7 @@
                             </div>
                             <div class="flex items-center justify-between">
                                 <span class="dashboard-metric-label text-[10px]">⭐ ${getI18nText('github.total_stars') || (currentLang === 'en' ? 'Total Stars' : '星标总数')}</span>
-                                <span class="drawer-item-value text-sm">${(drawerStarsResolved != null ? drawerStarsResolved : (githubStats.totalRepoStars || 0)).toLocaleString()}</span>
+                                <span class="drawer-item-value text-sm">${drawerStarsResolved != null ? drawerStarsResolved.toLocaleString() : (githubStats.totalRepoStars > 0 ? githubStats.totalRepoStars.toLocaleString() : '—')}</span>
                             </div>
                             <div class="flex items-center justify-between">
                                 <span class="dashboard-metric-label text-[10px]">🕒 ${getI18nText('github.last_repo_update') || (currentLang === 'en' ? 'Repo Updated' : '仓库更新')}</span>
@@ -21316,14 +21435,21 @@
             // 加载维度排名数据资源
             await loadRankResources();
             
-            // 先执行初始数据加载（增强错误处理）
+            // 【并行加载】同时发起用户信息查询与全局榜单快照查询，减少首屏等待
             let apiFailed = false;
             try {
-                await fetchData();
-            } catch (fetchError) {
+                var preloadLb = (typeof window.__fetchAllLeaderboardSnapshots === 'function') ? window.__fetchAllLeaderboardSnapshots() : Promise.resolve(null);
+                await Promise.all([
+                    fetchData().catch(function(fetchError) {
+                        apiFailed = true;
+                        console.error('[Window.onload] ❌ fetchData 失败:', fetchError);
+                        return undefined;
+                    }),
+                    preloadLb.catch(function() { return null; })
+                ]);
+            } catch (e) {
                 apiFailed = true;
-                console.error('[Window.onload] ❌ fetchData 失败:', fetchError);
-                // 即使数据加载失败，也继续执行后续初始化
+                console.error('[Window.onload] ❌ 并行数据加载异常:', e);
             }
             
             // 检测 API 状态并提示用户
@@ -22393,6 +22519,7 @@
             var canvas = document.getElementById(canvasId);
             if (!canvas) canvas = document.getElementById('national-identity-cloud-canvas');
             if (!container) return;
+            var wcSkeleton = document.getElementById('stats2-wc-skeleton');
             if (!canvas) {
                 canvas = document.createElement('canvas');
                 canvas.id = canvasId;
@@ -22400,6 +22527,7 @@
                 canvas.setAttribute('style', 'display:block;width:100%;height:100%');
                 container.appendChild(canvas);
             }
+            if (wcSkeleton) { wcSkeleton.classList.add('stats2-skeleton-hidden'); wcSkeleton.setAttribute('aria-hidden', 'true'); }
             // 【强制清理旧 Canvas】每次绘制前清空所有词云 canvas，防止多层叠加以致性能下降
             ['canvas-novice', 'canvas-pro', 'canvas-arch', 'national-identity-cloud-canvas'].forEach(function(id) {
                 var el = document.getElementById(id);
@@ -22668,6 +22796,8 @@
 
             let words = applyLogFontSize(raw, (w) => w?.value ?? 0);
             // 【性能优化】复用 ECharts 实例，避免反复销毁重建
+            var wcSkel = document.getElementById('stats2-wc-skeleton');
+            if (wcSkel) { wcSkel.classList.add('stats2-skeleton-hidden'); wcSkel.setAttribute('aria-hidden', 'true'); }
             if (!vibeCloudChart || vibeCloudChart.isDisposed()) {
                 try { container.innerHTML = ''; } catch { /* ignore */ }
                 vibeCloudChart = echarts.init(container, null, { renderer: 'canvas' });
@@ -22834,7 +22964,11 @@
             ).then(r => r.ok ? r.json() : null).catch(() => null);
             
             const fetchTop10 = (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function')
-                ? supabaseClient.rpc('get_country_keywords', { target_code: region }).then(res => res?.data).catch(() => null)
+                ? (typeof getCachedOrFetch === 'function' && typeof VIBE_COUNTRY_RPC_CACHE_TTL_MS !== 'undefined'
+                    ? getCachedOrFetch('vibe_country_keywords_' + region, VIBE_COUNTRY_RPC_CACHE_TTL_MS, function() {
+                        return supabaseClient.rpc('get_country_keywords', { target_code: region }).then(function(res) { return res && res.data != null ? res.data : null; }).catch(function() { return null; });
+                    })
+                    : supabaseClient.rpc('get_country_keywords', { target_code: region }).then(res => res?.data).catch(() => null))
                 : fetch(
                     API_ENDPOINT + 'api/global-average?country_code=' + encodeURIComponent(region) + '&_t=' + Date.now(),
                     { cache: 'no-store', signal: vibeCloudAbort ? vibeCloudAbort.signal : undefined }
