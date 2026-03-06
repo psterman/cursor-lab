@@ -68,7 +68,58 @@
       }
       // 不清理 Hash，让 Supabase SDK 自动解析 #access_token 等并设置 session
     })();
-    
+
+    /**
+     * 【脏数据自动清理】页面加载第一时间检查：旧格式 GitHub Token（如误存的 JWT）或 URL 指纹与本地不一致时，清除关键项并强制刷新，避免 401/冲突。
+     */
+    (function dirtyDataCleanup() {
+      try {
+        var gt = typeof localStorage !== 'undefined' && localStorage.getItem('github_token');
+        var vgt = typeof localStorage !== 'undefined' && localStorage.getItem('vibe_github_access_token');
+        var fpLocal = typeof localStorage !== 'undefined' && localStorage.getItem('user_fingerprint');
+        var href = (typeof _loc !== 'undefined' && _loc && _loc.href) ? _loc.href : (typeof window !== 'undefined' && window.location && window.location.href) ? window.location.href : '';
+        var isOldFormatToken = function(val) {
+          if (!val || typeof val !== 'string') return false;
+          var parts = val.trim().split('.');
+          if (parts.length !== 3) return false;
+          return parts.every(function(p) { return /^[A-Za-z0-9_-]+$/.test(p); });
+        };
+        var urlFp = '';
+        if (href && href.indexOf('?') !== -1) {
+          var q = href.slice(href.indexOf('?') + 1).split('&');
+          for (var i = 0; i < q.length; i++) {
+            var kv = q[i].split('=');
+            if ((kv[0] === 'fingerprint' || kv[0] === 'fp') && kv[1]) {
+              urlFp = decodeURIComponent(kv[1]).trim();
+              break;
+            }
+          }
+        }
+        var needClear = false;
+        if (gt && isOldFormatToken(gt)) {
+          needClear = true;
+        }
+        if (vgt && isOldFormatToken(vgt)) {
+          needClear = true;
+        }
+        if (urlFp && fpLocal && String(fpLocal).trim() !== urlFp) {
+          needClear = true;
+        }
+        if (!needClear) return;
+        var keysToRemove = ['github_token', 'vibe_github_access_token', 'vibe_stats2_swr_cache'];
+        for (var k = 0; k < keysToRemove.length; k++) {
+          try { localStorage.removeItem(keysToRemove[k]); } catch (e) {}
+        }
+        if (typeof window !== 'undefined') {
+          try { window.__githubAccessToken = ''; } catch (e) {}
+        }
+        if (typeof location !== 'undefined' && location.reload) {
+          location.reload(true);
+        }
+      } catch (e) {
+        if (typeof console !== 'undefined' && console.warn) console.warn('[dirtyDataCleanup]', e);
+      }
+    })();
 
     // --- Script Block ---
     // 【已迁移】全局错误处理与 eval5 屏蔽 → stats-libs.min.js
@@ -384,7 +435,14 @@
                 var session = (r && r.data && r.data.session) ? r.data.session : null;
                 if (checkGatePassed(session)) return;
                 showOverlay();
-            }).catch(function() {});
+            }).catch(function() {
+                showOverlay();
+            }).finally(function() {
+                var ov = document.getElementById(OVERLAY_ID);
+                if (ov && ov.parentNode && window.getComputedStyle(ov).display === 'flex') {
+                    try { restoreBodyScroll(); } catch (e) {}
+                }
+            });
         }
         function run() {
             var overlay = document.getElementById(OVERLAY_ID);
@@ -401,16 +459,21 @@
             window.__countrySelectorSelectedCode = '';
             var poll = setInterval(function() {
                 var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
-                if (sb && typeof sb.auth !== 'undefined') {
-                    clearInterval(poll);
-                    runGateCheck();
-                    sb.auth.onAuthStateChange(function(event, session) {
-                        if (session) runGateCheck();
-                    });
-                }
+                if (!sb || typeof sb.auth !== 'object') return;
+                clearInterval(poll);
+                runGateCheck();
+                sb.auth.onAuthStateChange(function(event, session) {
+                    if (session) runGateCheck();
+                });
             }, 200);
             setTimeout(function() { clearInterval(poll); }, 15000);
             if (!country) showOverlay();
+            setTimeout(function() {
+                var el = document.getElementById(OVERLAY_ID);
+                if (el && el.parentNode) {
+                    try { removeOverlayImmediately(); } catch (e) {}
+                }
+            }, 15000);
         }
         document.addEventListener('click', function(e) {
             var btn = e.target && (e.target.id === 'country-selector-close' || (e.target.closest && e.target.closest('#country-selector-close')));
@@ -429,7 +492,19 @@
         window.hideGateOverlay = hideGateOverlay;
         window.showGitHubSectionIfCountrySelected = showGitHubSectionIfCountrySelected;
     })();
-    
+
+    /** GitHub 401 时清除本地 token 并将同步按钮恢复为「未连接」 */
+    window.__clearGitHubTokenAndResetSyncUI = function() {
+        try {
+            if (typeof localStorage !== 'undefined') {
+                localStorage.removeItem('github_token');
+                localStorage.removeItem('vibe_github_access_token');
+            }
+            if (typeof window !== 'undefined' && window.__githubAccessToken !== undefined) window.__githubAccessToken = '';
+            var sb = document.getElementById('sync-github-btn');
+            if (sb) { sb.textContent = '未连接'; sb.disabled = false; }
+        } catch (e) { if (typeof console !== 'undefined' && console.warn) console.warn('[clearGitHubToken]', e); }
+    };
 
     // --- Script Block ---
 
@@ -2052,9 +2127,23 @@
                         : Object.assign({}, window.cachedSummary || {}, data);
                 } catch (e) { /* ignore */ }
 
-                // 国家视图：get_country_dimension_averages 优先 12h 本地缓存，控制 Supabase 用量
+                // 国家视图：get_country_dimension_averages 优先 12h 本地缓存；连续失败 3 次则标记暂时不可用并隐藏右侧雷达图
+                if (typeof window.__countryDimFailCount === 'undefined') window.__countryDimFailCount = 0;
+                if (typeof window.__countryDimensionAveragesDisabled === 'undefined') window.__countryDimensionAveragesDisabled = false;
+                var hideRadarCardIfDisabled = function() {
+                    if (!window.__countryDimensionAveragesDisabled) return;
+                    var radarEl = document.getElementById('rtRadar');
+                    if (radarEl) {
+                        var card = radarEl.closest ? radarEl.closest('.clinic-card') : radarEl.parentElement;
+                        if (card) card.style.display = 'none';
+                    }
+                };
                 const DEFAULT_DIMENSION_AVERAGES = { has_valid_data: false, avg_l: 50, avg_p: 50, avg_d: 50, avg_e: 50, avg_f: 50 };
                 let record;
+                if (window.__countryDimensionAveragesDisabled) {
+                    record = DEFAULT_DIMENSION_AVERAGES;
+                    hideRadarCardIfDisabled();
+                } else {
                 try {
                     let countryDimensionAverages = null;
                     if (!effectiveIsGlobal && countryCode && typeof getCachedOrFetch === 'function') {
@@ -2069,13 +2158,32 @@
                                 });
                                 if (proxyRes.ok) {
                                     var json = await proxyRes.json();
-                                    if (json && json.data != null) raw = json.data;
+                                    if (json && json.data != null) {
+                                        raw = json.data;
+                                        window.__countryDimFailCount = 0;
+                                    }
+                                } else {
+                                    window.__countryDimFailCount = (window.__countryDimFailCount || 0) + 1;
+                                    if (window.__countryDimFailCount >= 3) {
+                                        window.__countryDimensionAveragesDisabled = true;
+                                        hideRadarCardIfDisabled();
+                                    }
                                 }
-                            } catch (e) { console.warn('[updateCountryDashboard] get_country_dimension_averages 代理请求失败:', e); }
+                            } catch (e) {
+                                window.__countryDimFailCount = (window.__countryDimFailCount || 0) + 1;
+                                if (window.__countryDimFailCount >= 3) {
+                                    window.__countryDimensionAveragesDisabled = true;
+                                    hideRadarCardIfDisabled();
+                                }
+                                console.warn('[updateCountryDashboard] get_country_dimension_averages 代理请求失败:', e);
+                            }
                             if (raw == null && typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function') {
                                 try {
                                     var dimRes = await supabaseClient.rpc('get_country_dimension_averages', { target_country_code: countryCode });
-                                    if (dimRes && dimRes.data != null) raw = dimRes.data;
+                                    if (dimRes && dimRes.data != null) {
+                                        raw = dimRes.data;
+                                        window.__countryDimFailCount = 0;
+                                    }
                                 } catch (e) { console.warn('[updateCountryDashboard] get_country_dimension_averages RPC 失败:', e); }
                             }
                             return raw != null ? raw : [DEFAULT_DIMENSION_AVERAGES];
@@ -2089,13 +2197,32 @@
                             });
                             if (proxyRes.ok) {
                                 const json = await proxyRes.json();
-                                if (json && json.data != null) countryDimensionAverages = json.data;
+                                if (json && json.data != null) {
+                                    countryDimensionAverages = json.data;
+                                    window.__countryDimFailCount = 0;
+                                }
+                            } else {
+                                window.__countryDimFailCount = (window.__countryDimFailCount || 0) + 1;
+                                if (window.__countryDimFailCount >= 3) {
+                                    window.__countryDimensionAveragesDisabled = true;
+                                    hideRadarCardIfDisabled();
+                                }
                             }
-                        } catch (e) { console.warn('[updateCountryDashboard] get_country_dimension_averages 代理请求失败:', e); }
+                        } catch (e) {
+                            window.__countryDimFailCount = (window.__countryDimFailCount || 0) + 1;
+                            if (window.__countryDimFailCount >= 3) {
+                                window.__countryDimensionAveragesDisabled = true;
+                                hideRadarCardIfDisabled();
+                            }
+                            console.warn('[updateCountryDashboard] get_country_dimension_averages 代理请求失败:', e);
+                        }
                         if (countryDimensionAverages == null && typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function') {
                             try {
                                 const dimRes = await supabaseClient.rpc('get_country_dimension_averages', { target_country_code: countryCode });
-                                if (dimRes && dimRes.data != null) countryDimensionAverages = dimRes.data;
+                                if (dimRes && dimRes.data != null) {
+                                    countryDimensionAverages = dimRes.data;
+                                    window.__countryDimFailCount = 0;
+                                }
                             } catch (e) { console.warn('[updateCountryDashboard] get_country_dimension_averages RPC 失败:', e); }
                         }
                         if (countryDimensionAverages == null) countryDimensionAverages = [DEFAULT_DIMENSION_AVERAGES];
@@ -2104,6 +2231,7 @@
                 } catch (e) {
                     console.warn('[updateCountryDashboard] get_country_dimension_averages 整体异常，使用默认均值:', e);
                     record = DEFAULT_DIMENSION_AVERAGES;
+                }
                 }
 
                 // =========================
@@ -16258,49 +16386,43 @@
         window.loginWithGitHub = loginWithGitHub;
         
         /**
-         * 退出登录
-         * 清理会话和本地数据
+         * 退出登录（同步、不依赖任何异步 API）
+         * 清除所有 Vibe 专属缓存后 replace('/')，防止后退回到已退出的报表页
          */
-        async function logout() {
-            if (!supabaseClient) {
-                console.error('[Auth] ❌ Supabase 客户端未初始化');
-                return;
-            }
-            
+        function logout() {
             try {
-                console.log('[Auth] 🚪 开始退出登录...');
-                
-                // 清理 localStorage
-                localStorage.removeItem('github_username');
-                // 保留 fingerprint，以便静默登录
-                
-                // 调用 Supabase Auth 退出
-                const { error } = await supabaseClient.auth.signOut();
-                
-                if (error) {
-                    console.error('[Auth] ❌ 退出登录失败:', error);
-                    alert(`退出失败: ${error.message}`);
+                if (typeof localStorage === 'undefined') {
+                    if (typeof window !== 'undefined' && window.location) window.location.replace('/');
                     return;
                 }
-                
-                // 清理全局变量
-                window.currentUser = null;
-                window.currentUserMatchedByFingerprint = false;
-                
-                // 刷新 UI
-                updateAuthUI(null);
-                
-                // 刷新排名卡片（显示全球最强模式）
-                renderRankCards(null);
-                
-                console.log('[Auth] ✅ 已退出登录');
-                if (typeof showNotification === 'function') showNotification('已退出登录'); else console.log('[Auth] 已退出登录');
-                
-            } catch (error) {
-                console.error('[Auth] ❌ 退出登录异常:', error);
-                alert(`退出失败: ${error.message || '未知错误'}`);
+                var keysToRemove = ['github_token', 'vibe_github_access_token', 'fingerprint', 'user_fingerprint', 'vibe_stats2_swr_cache'];
+                for (var i = 0; i < keysToRemove.length; i++) {
+                    try { localStorage.removeItem(keysToRemove[i]); } catch (e) {}
+                }
+                try {
+                    var keys = [];
+                    for (var idx = 0; idx < localStorage.length; idx++) {
+                        var k = localStorage.key(idx);
+                        if (k && k.indexOf('vibe_country_') === 0) keys.push(k);
+                    }
+                    for (var j = 0; j < keys.length; j++) {
+                        try { localStorage.removeItem(keys[j]); } catch (e2) {}
+                    }
+                } catch (e) {}
+                try {
+                    localStorage.clear();
+                } catch (e) {}
+                if (typeof window !== 'undefined' && window.__githubAccessToken !== undefined) window.__githubAccessToken = '';
+                if (typeof window !== 'undefined' && window.location && window.location.replace) {
+                    window.location.replace('/');
+                }
+            } catch (e) {
+                if (typeof window !== 'undefined' && window.location && window.location.replace) {
+                    window.location.replace('/');
+                }
             }
         }
+        if (typeof window !== 'undefined') window.logout = logout;
         
         /**
          * 显示同步遮罩
@@ -20554,6 +20676,9 @@
                         }).then(async function(r) {
                             var text = await r.text();
                             if (!r.ok) {
+                                if (r.status === 401 && typeof window.__clearGitHubTokenAndResetSyncUI === 'function') {
+                                    window.__clearGitHubTokenAndResetSyncUI();
+                                }
                                 console.error('[GitHub Sync] 后端返回错误:', r.status, text);
                                 if (r.status === 500) {
                                     console.error('[GitHub Sync] 500 原始报错:', text);
@@ -20574,8 +20699,11 @@
                                 return { success: false, status: 'error', error: (text && text.length) ? ('响应格式异常: ' + text.slice(0, 100)) : '未知错误' };
                             }
                             if (parsed && (parsed.success === false || parsed.status === 'error')) {
-                                console.error('[GitHub Sync] 同步失败:', parsed.error);
                                 var errStr = String(parsed.error || '');
+                                if (errStr.indexOf('401') !== -1 || errStr.indexOf('Bad credentials') !== -1) {
+                                    if (typeof window.__clearGitHubTokenAndResetSyncUI === 'function') window.__clearGitHubTokenAndResetSyncUI();
+                                }
+                                console.error('[GitHub Sync] 同步失败:', parsed.error);
                                 var isUniqueViolation = errStr.indexOf('UNIQUE_VIOLATION_FINGERPRINT') !== -1 || /duplicate key|unique constraint|violates unique constraint/i.test(errStr);
                                 var tip = isUniqueViolation ? '正在合并游客数据，请稍后刷新。' : (errStr.indexOf('RLS') !== -1 || errStr.indexOf('permission') !== -1 || errStr.indexOf('Database error') !== -1) ? '数据库权限受限（可能为 RLS 拦截），请检查服务端 SUPABASE_SERVICE_ROLE_KEY。' : (errStr.indexOf('401') !== -1 || errStr.indexOf('Bad credentials') !== -1) ? 'GitHub 凭证无效（401），请退出后重新使用 GitHub 登录一次以刷新授权。' : (errStr.indexOf('Token') !== -1 || errStr.indexOf('accessToken') !== -1) ? 'Token 失效或未授权，请重新使用 GitHub 登录。' : (parsed.error || '未知错误');
                                 console.warn('[GitHub Sync] 战力同步失败:', tip);
@@ -24740,6 +24868,9 @@ document.addEventListener('click', function(e) {
                                         id: cu.id || ''
                                     })
                                 }).then(async function(res) {
+                                    if (!res.ok && res.status === 401 && typeof window.__clearGitHubTokenAndResetSyncUI === 'function') {
+                                        window.__clearGitHubTokenAndResetSyncUI();
+                                    }
                                     var text = await res.text();
                                     try { return JSON.parse(text); } catch (e) {
                                         console.warn('[GitHub Sync] 响应非 JSON:', text.slice(0, 300));

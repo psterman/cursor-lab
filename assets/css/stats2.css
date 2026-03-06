@@ -2069,6 +2069,12 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
             position: relative !important;
         }
 
+        /* 退出按钮始终可点，高于 loading-overlay(z-index:50) 与 clinic-card，防止点击穿透 */
+        #logout-btn {
+            position: relative;
+            z-index: 99999;
+        }
+
         .loading-overlay {
             position: absolute;
             inset: 0;

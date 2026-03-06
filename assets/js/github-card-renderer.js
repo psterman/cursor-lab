@@ -129,7 +129,7 @@
         var currentStatus = identity.currentStatus || 'idle';
         var defaultAvatar = identity.defaultAvatar || '';
         if (!defaultAvatar && typeof window.STATS_CONSTANTS !== 'undefined' && window.STATS_CONSTANTS.DEFAULT_AVATAR) defaultAvatar = window.STATS_CONSTANTS.DEFAULT_AVATAR;
-        var logoutBtn = isLoggedIn ? '<button onclick="typeof logout === \'function\' && logout()" class="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-[8px] text-zinc-300 hover:text-white transition-colors rounded" title="' + esc(t(lang, 'logout')) + '">' + esc(t(lang, 'logout')) + '</button>' : '';
+        var logoutBtn = isLoggedIn ? '<button id="logout-btn" onclick="typeof logout === \'function\' && logout()" class="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-[8px] text-zinc-300 hover:text-white transition-colors rounded" title="' + esc(t(lang, 'logout')) + '">' + esc(t(lang, 'logout')) + '</button>' : '';
         var linkHtml = isLoggedIn && githubUsername ? '<a href="https://github.com/' + esc(githubUsername) + '" target="_blank" rel="noopener noreferrer" class="mt-2 inline-block text-[9px] text-[#00ff41]/70 hover:text-[#00ff41] transition-colors font-mono">github.com/' + esc(githubUsername) + '</a>' : '';
         var statusIdle = currentStatus === 'idle';
         var statusBusy = currentStatus === 'busy';
