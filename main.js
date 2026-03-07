@@ -6242,29 +6242,36 @@ function hexToRgba(hex, alpha) {
 }
 
 /**
- * 【三身份级别词云】渲染指定层级的词云（本地数据，无 Network）
- * - 非线性字号：FontSize = BaseSize + (Math.pow(count/maxCount, 0.8) * (MaxSize - BaseSize))
- * - Top 5 加成、长词保护、颜色饱和度随频率联动、gridSize 4 繁星密度
+ * 【三身份级别词云】渲染指定层级的词云（本地数据优先，可选全国灵魂词平滑切换）
+ * - optionalNationalData: 来自 /api/v2/country-hot-list 的该层级数组 [{ word, weight, count }]，有则用其重绘
  */
-function renderIdentityLevelCloud(level) {
-  const vr = window.vibeResults;
-  let data = (vr && vr[level]) || [];
-  const native = (vr && vr.native) || [];
-
+function renderIdentityLevelCloud(level, optionalNationalData) {
   var merged = [];
-  if (Array.isArray(data)) {
-    merged = data.map(function (x) {
-      return typeof x === 'object' && x !== null
-        ? { word: x.word || x[0], count: x.count != null ? x.count : x[1], source: x.source, maxInLevel: x.maxInLevel }
-        : { word: String(x[0]), count: x[1] || 1, source: level.toLowerCase(), maxInLevel: null };
-    });
-  } else if (Array.isArray(data) === false && data && typeof data === 'object') {
-    merged = Object.entries(data).filter(function (e) { return e[1] > 0; }).map(function (e) { return { word: e[0], count: e[1], source: level.toLowerCase(), maxInLevel: null }; });
+  if (optionalNationalData && Array.isArray(optionalNationalData) && optionalNationalData.length > 0) {
+    merged = optionalNationalData.map(function (x) {
+      var word = String(x.word || x.phrase || '').trim();
+      var count = Number(x.count || x.weight || 0) || 0;
+      return { word: word, count: count, source: level.toLowerCase(), maxInLevel: null };
+    }).filter(function (x) { return x.word.length > 0; });
   }
-  if (Array.isArray(native) && native.length > 0) {
-    native.forEach(function (x) {
-      merged.push({ word: x.word || x[0], count: x.count != null ? x.count : x[1] || 1, source: 'native', maxInLevel: null });
-    });
+  if (merged.length === 0) {
+    const vr = window.vibeResults;
+    var data = (vr && vr[level]) || [];
+    const native = (vr && vr.native) || [];
+    if (Array.isArray(data)) {
+      merged = data.map(function (x) {
+        return typeof x === 'object' && x !== null
+          ? { word: x.word || x[0], count: x.count != null ? x.count : x[1], source: x.source, maxInLevel: x.maxInLevel }
+          : { word: String(x[0]), count: x[1] || 1, source: level.toLowerCase(), maxInLevel: null };
+      });
+    } else if (Array.isArray(data) === false && data && typeof data === 'object') {
+      merged = Object.entries(data).filter(function (e) { return e[1] > 0; }).map(function (e) { return { word: e[0], count: e[1], source: level.toLowerCase(), maxInLevel: null }; });
+    }
+    if (Array.isArray(native) && native.length > 0) {
+      native.forEach(function (x) {
+        merged.push({ word: x.word || x[0], count: x.count != null ? x.count : x[1] || 1, source: 'native', maxInLevel: null });
+      });
+    }
   }
   var totalCount = merged.reduce(function (a, x) { return a + (x.count || 0); }, 0);
   if (totalCount <= 0) totalCount = 1;
@@ -6361,6 +6368,24 @@ function renderIdentityLevelCloud(level) {
     });
   } catch (err) {
     console.warn('[Main] 词云渲染失败:', err);
+  }
+  if (!optionalNationalData && merged.length > 0) {
+    var country = (typeof window.currentCountryCode === 'string' ? window.currentCountryCode : '') || (typeof localStorage !== 'undefined' && localStorage.getItem('user_selected_country')) || (typeof localStorage !== 'undefined' && localStorage.getItem('selected_country')) || '';
+    country = (country && String(country).trim().toUpperCase()) || '';
+    if (/^[A-Z]{2}$/.test(country)) {
+      var base = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : '') || (typeof document !== 'undefined' && document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content) || '';
+      if (base && !base.endsWith('/')) base += '/';
+      var hotUrl = base + 'api/v2/country-hot-list?country=' + encodeURIComponent(country);
+      fetch(hotUrl, { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (payload) {
+        if (!payload || typeof payload !== 'object') return;
+        var nationalForLevel = payload[level] || payload.Novice || payload.Professional || payload.Architect || (level === 'Novice' ? payload.slang : level === 'Professional' ? payload.merit : []);
+        if (Array.isArray(nationalForLevel) && nationalForLevel.length > 0) {
+          (window.requestAnimationFrame || window.setTimeout)(function () {
+            renderIdentityLevelCloud(level, nationalForLevel);
+          }, 0);
+        }
+      }).catch(function () {});
+    }
   }
 }
 

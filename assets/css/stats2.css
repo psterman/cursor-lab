@@ -4000,6 +4000,16 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
         .stats2-wordcloud-skeleton.stats2-skeleton-hidden {
             display: none !important;
         }
+        /* 词云加载中：紫色脉冲骨架 */
+        @keyframes vibe-cloud-skeleton-pulse {
+            0%, 100% { opacity: 0.4; box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.35); }
+            50% { opacity: 0.85; box-shadow: 0 0 20px 4px rgba(168, 85, 247, 0.2); }
+        }
+        .left-drawer-wordcloud-canvas-wrap.vibe-cloud-skeleton-pulse .stats2-cyber-skeleton.stats2-wordcloud-skeleton {
+            background: linear-gradient(135deg, rgba(3, 3, 4, 0.97) 0%, rgba(168, 85, 247, 0.08) 100%);
+            border-color: rgba(168, 85, 247, 0.25);
+            animation: vibe-cloud-skeleton-pulse 1.4s ease-in-out infinite;
+        }
         .left-drawer-wordcloud-canvas-wrap canvas {
             display: block;
             width: 100% !important;

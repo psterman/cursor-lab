@@ -257,7 +257,9 @@ const KV_KEY_GLOBAL_STATS_CACHE = 'GLOBAL_STATS_CACHE'; // 完整统计数据缓
 const KV_KEY_GLOBAL_STATS_V6 = 'GLOBAL_STATS_V6'; // V6 协议全局统计（用于动态排名）
 const KV_KEY_GLOBAL_DASHBOARD_DATA = 'GLOBAL_DASHBOARD_DATA'; // 右侧抽屉：大盘数据缓存（v_global_stats_v6）
 const KV_KEY_GLOBAL_COUNTRY_STATS = 'GLOBAL_COUNTRY_STATS'; // 国家维度累积排行（冷数据，仅定时任务写入，接口只读 KV）
+const KV_KEY_COUNTRY_HOT_LIST_PREFIX = 'country-hot-list'; // 国家级灵魂词云缓存，key: country-hot-list:${CC}，TTL 600s
 const KV_CACHE_TTL = 3600; // 缓存有效期：1小时（秒）
+const COUNTRY_HOT_LIST_TTL = 600; // 国家大盘热词缓存 10 分钟
 
 // 右侧抽屉大盘缓存 TTL（秒）
 const KV_GLOBAL_STATS_V6_VIEW_TTL = 300;
@@ -3878,10 +3880,15 @@ app.get('/api/rank-resources', async (c) => {
 
 /**
  * GET /api/national-lexicon?country=CN&type=merit_board
- * 按国家聚合 personality.vibe_lexicon[type]，返回 Top 词条 { phrase, hit_count }
+ * 优先从 country_vibe_stats 读取灵魂词（Lift>1.2），无数据时回退到 user_analysis 聚合
  * type: merit_board | slang_list | mantra_top
  */
 const LEXICON_TYPES = new Set(['merit_board', 'slang_list', 'mantra_top']);
+const LEXICON_TO_COL: Record<string, 'merit_jsonb' | 'slang_jsonb' | 'native_jsonb'> = {
+  merit_board: 'merit_jsonb',
+  slang_list: 'slang_jsonb',
+  mantra_top: 'native_jsonb',
+};
 app.get('/api/national-lexicon', async (c) => {
   try {
     const country = (c.req.query('country') || '').trim().toUpperCase();
@@ -3896,7 +3903,73 @@ app.get('/api/national-lexicon', async (c) => {
     if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
       return c.json({ data: [] }, 200);
     }
-    // 中国区统计：只要判定为该国（country_code / ip_location / manual_location / current_location 任一为该国），贡献即进入该国
+    const col = LEXICON_TO_COL[type] || 'merit_jsonb';
+    const LIFT_MIN = 1.2;
+
+    // 1) 优先从 country_vibe_stats 读取（灵魂词 Lift 算法）
+    try {
+      const rowUrl = `${env.SUPABASE_URL}/rest/v1/country_vibe_stats?country_code=eq.${country}&select=${col}`;
+      const rows = await fetchSupabaseJson<any[]>(env, rowUrl, { headers: buildSupabaseHeaders(env) });
+      const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+      const countryObj = (row?.[col] && typeof row[col] === 'object') ? (row[col] as Record<string, number>) : null;
+      if (countryObj && Object.keys(countryObj).length > 0) {
+        const globalRpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_country_vibe_stats_global_sum`;
+        const globalRows = await fetchSupabaseJson<Array<{ word: string; total: number; countries: number }>>(env, globalRpcUrl, {
+          method: 'POST',
+          headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+          body: JSON.stringify({}),
+        });
+        const globalMap = new Map<string, { total: number; countries: number }>();
+        for (const r of Array.isArray(globalRows) ? globalRows : []) {
+          if (r?.word) globalMap.set(r.word, { total: Number(r.total) || 0, countries: Math.max(1, Number(r.countries) || 1) });
+        }
+        const out: Array<{ phrase: string; hit_count: number }> = [];
+        for (const [word, count] of Object.entries(countryObj)) {
+          if (!word || count <= 0) continue;
+          const g = globalMap.get(word);
+          const avgGlobal = g ? (g.total / Math.max(1, g.countries)) : 0;
+          const lift = avgGlobal > 0 ? count / avgGlobal : (count > 0 ? 999 : 0);
+          if (lift >= LIFT_MIN) {
+            out.push({ phrase: word, hit_count: count });
+          }
+        }
+        out.sort((a, b) => b.hit_count - a.hit_count);
+        const data = out.slice(0, 20);
+        if (data.length > 0) {
+          return c.json({ data }, 200, { 'Cache-Control': 'public, max-age=120' });
+        }
+      }
+    } catch (e: any) {
+      console.warn('[Worker] /api/national-lexicon country_vibe_stats 读取失败:', e?.message);
+    }
+
+    // 2) 回退：从 slang_trends_pool 读取（report-vibe 已写入的热词）
+    try {
+      const poolCategories: Record<string, string[]> = {
+        merit_board: ['merit'],
+        slang_list: ['slang', 'sv_slang'],
+        mantra_top: ['phrase'],
+      };
+      const cats = poolCategories[type] || ['merit'];
+      const poolUrl = new URL(`${env.SUPABASE_URL}/rest/v1/slang_trends_pool`);
+      poolUrl.searchParams.set('select', 'phrase,hit_count,category');
+      poolUrl.searchParams.set('region', `eq.${country}`);
+      poolUrl.searchParams.set('order', 'hit_count.desc');
+      poolUrl.searchParams.set('limit', '100');
+      const poolRows = await fetchSupabaseJson<any[]>(env, poolUrl.toString(), { headers: buildSupabaseHeaders(env) });
+      const filtered = (Array.isArray(poolRows) ? poolRows : [])
+        .filter((r: any) => cats.includes(String(r?.category || '').trim()))
+        .slice(0, 20)
+        .map((r: any) => ({ phrase: String(r?.phrase || '').trim(), hit_count: Number(r?.hit_count) || 0 }))
+        .filter((x) => x.phrase && x.hit_count > 0);
+      if (filtered.length > 0) {
+        return c.json({ data: filtered }, 200, { 'Cache-Control': 'public, max-age=120' });
+      }
+    } catch (e: any) {
+      console.warn('[Worker] /api/national-lexicon slang_trends_pool 读取失败:', e?.message);
+    }
+
+    // 3) 回退：从 user_analysis.personality.vibe_lexicon 聚合
     const url = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
     url.searchParams.set('select', 'personality');
     url.searchParams.set('or', `(country_code.eq.${country},ip_location.eq.${country},manual_location.eq.${country},current_location.eq.${country})`);
@@ -3907,11 +3980,30 @@ app.get('/api/national-lexicon', async (c) => {
     const list = Array.isArray(rows) ? rows : [];
     const agg = new Map<string, number>();
     for (const row of list) {
-      const lex = row?.personality?.vibe_lexicon?.[type];
+      const p = row?.personality?.vibe_lexicon;
+      if (!p) continue;
+      
+      let lex = p[type];
+      if (!lex) {
+        if (type === 'merit_board') {
+          lex = p.Professional || p.merit || p.merit_board;
+        } else if (type === 'slang_list') {
+          lex = p.Novice || p.slang || p.slang_list;
+        } else if (type === 'mantra_top') {
+          lex = p.Architect || p.phrase || p.mantra || p.mantra_top || p.native;
+        }
+      }
+
       if (!Array.isArray(lex)) continue;
       for (const it of lex) {
-        const w = it?.w != null ? String(it.w).trim() : '';
-        const v = Number(it?.v) || 0;
+        let w = '';
+        if (it?.phrase != null) w = String(it.phrase).trim();
+        else if (it?.word != null) w = String(it.word).trim();
+        else if (it?.w != null) w = String(it.w).trim();
+        else if (Array.isArray(it) && it[0] != null) w = String(it[0]).trim();
+        
+        const v = Number(it?.count ?? it?.weight ?? it?.v ?? (Array.isArray(it) ? it[1] : 1)) || 0;
+
         if (!w) continue;
         agg.set(w, (agg.get(w) || 0) + v);
       }
@@ -6097,6 +6189,21 @@ function toSafePoolDelta(weight: any): number {
   return Math.max(1, Math.min(5, v));
 }
 
+/** 国家级词云：写入前过滤技术/通用词，保证统计纯净度 */
+const TECHNICAL_STOPWORDS = new Set([
+  'null', 'undefined', 'function', 'string', 'number', 'object',
+  'array', 'boolean', 'true', 'false', 'return', 'const', 'let',
+  'var', 'import', 'export', 'async', 'await', 'class', 'extends',
+  'AI', '代码', '报错', 'error', 'undefined', 'null', 'type', 'interface',
+]);
+
+function filterStopwords(word: string): boolean {
+  const w = String(word || '').trim().toLowerCase();
+  if (!w || w.length < 2) return false;
+  if (TECHNICAL_STOPWORDS.has(w)) return false;
+  return true;
+}
+
 app.post('/api/report-slang', async (c) => {
   const env = c.env;
   if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
@@ -6521,6 +6628,170 @@ app.post('/api/v2/report-vibe', async (c) => {
   })());
 
   return c.json({ status: 'success', queued: true });
+});
+
+/**
+ * POST /api/v2/verify-location
+ * 用户确认国籍后上报 identityLevelCloud，计入 country_vibe_stats。
+ * 置信度：cf-ipcountry 与 country_code 一致则 weight=1.0，否则 0.2（VPN 降权）。
+ */
+app.post('/api/v2/verify-location', async (c) => {
+  const env = c.env;
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+    return c.json({ status: 'error', error: 'Supabase 未配置' }, 500);
+  }
+  let body: any = null;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ status: 'error', error: 'Invalid JSON' }, 400);
+  }
+  const countryCodeRaw = String(body?.country_code ?? body?.countryCode ?? '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(countryCodeRaw)) {
+    return c.json({ status: 'error', error: 'country_code 必填且为 ISO2' }, 400);
+  }
+  let cfCountry = '';
+  try {
+    const rawReq: any = c.req?.raw;
+    cfCountry = String(rawReq?.cf?.country || c.req.header('cf-ipcountry') || '').trim().toUpperCase();
+  } catch {
+    // ignore
+  }
+  const weight = cfCountry === countryCodeRaw ? 1.0 : 0.2;
+
+  const ilc = body?.identityLevelCloud;
+  if (!ilc || typeof ilc !== 'object') {
+    return c.json({ status: 'success', weight, message: '无 identityLevelCloud，跳过写入' });
+  }
+
+  function toJsonb(arr: any[]): Record<string, number> {
+    const out: Record<string, number> = {};
+    if (!Array.isArray(arr)) return out;
+    for (const it of arr) {
+      const word = (it?.word ?? it?.[0] ?? '').trim();
+      if (!filterStopwords(word)) continue;
+      const count = Math.max(0, Math.min(5000, Math.floor(Number(it?.count ?? it?.[1] ?? 1) || 1)));
+      if (word.length < 2 || word.length > 120) continue;
+      out[word] = (out[word] || 0) + count;
+    }
+    return out;
+  }
+
+  const meritArr = [...(Array.isArray(ilc.Professional) ? ilc.Professional : []), ...(Array.isArray(ilc.Architect) ? ilc.Architect : [])];
+  const slangArr = Array.isArray(ilc.Novice) ? ilc.Novice : [];
+  const nativeArr = Array.isArray(ilc.native) ? ilc.native : [];
+  const p_merit = toJsonb(meritArr);
+  const p_slang = toJsonb(slangArr);
+  const p_native = toJsonb(nativeArr);
+  const hasAny = Object.keys(p_merit).length > 0 || Object.keys(p_slang).length > 0 || Object.keys(p_native).length > 0;
+  if (!hasAny) {
+    return c.json({ status: 'success', weight, message: '无有效词频，跳过写入' });
+  }
+
+  const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/increment_country_vibe_stats`;
+  try {
+    await fetchSupabaseJson(env, rpcUrl, {
+      method: 'POST',
+      headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        p_country_code: countryCodeRaw,
+        p_merit: p_merit,
+        p_slang: p_slang,
+        p_native: p_native,
+        p_weight: weight,
+      }),
+    });
+  } catch (err: any) {
+    console.warn('[Worker] /api/v2/verify-location increment_country_vibe_stats 失败:', err?.message);
+    return c.json({ status: 'error', error: err?.message || 'RPC 失败' }, 500);
+  }
+  return c.json({ status: 'success', weight, country_code: countryCodeRaw });
+});
+
+/**
+ * GET /api/v2/country-hot-list?country=CN
+ * 国家大盘灵魂词（Lift > 1.2），KV 缓存 10 分钟。
+ */
+app.get('/api/v2/country-hot-list', async (c) => {
+  const env = c.env;
+  const countryRaw = (c.req.query('country') || '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(countryRaw)) {
+    return c.json({ status: 'error', error: 'country 必填且为 ISO2' }, 400);
+  }
+  const kvKey = `${KV_KEY_COUNTRY_HOT_LIST_PREFIX}:${countryRaw}`;
+  if (env.STATS_STORE) {
+    try {
+      const cached = await env.STATS_STORE.get(kvKey, 'json');
+      if (cached && typeof cached === 'object') {
+        return c.json(cached);
+      }
+    } catch {
+      // ignore
+    }
+  }
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+    return c.json({ merit: [], slang: [], native: [], Novice: [], Professional: [], Architect: [], globalNative: [] });
+  }
+  const LIFT_MIN = 1.2;
+  type WordItem = { word: string; weight: number; count: number };
+  function applyLift(
+    countryObj: Record<string, number>,
+    globalMap: Map<string, { total: number; countries: number }>
+  ): WordItem[] {
+    const out: WordItem[] = [];
+    for (const [word, count] of Object.entries(countryObj)) {
+      if (!word || count <= 0) continue;
+      const g = globalMap.get(word);
+      const avgGlobal = g ? (g.total / Math.max(1, g.countries)) : 0;
+      const lift = avgGlobal > 0 ? count / avgGlobal : (count > 0 ? 999 : 0);
+      if (lift >= LIFT_MIN) {
+        out.push({ word, weight: Math.round(lift * 100) / 100, count });
+      }
+    }
+    out.sort((a, b) => (b.weight - a.weight) || (b.count - a.count));
+    return out;
+  }
+  try {
+    const rowUrl = `${env.SUPABASE_URL}/rest/v1/country_vibe_stats?country_code=eq.${countryRaw}&select=merit_jsonb,slang_jsonb,native_jsonb`;
+    const rows = await fetchSupabaseJson<any[]>(env, rowUrl, { headers: buildSupabaseHeaders(env) });
+    const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+    const globalRpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_country_vibe_stats_global_sum`;
+    const globalRows = await fetchSupabaseJson<Array<{ word: string; total: number; countries: number }>>(env, globalRpcUrl, {
+      method: 'POST',
+      headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({}),
+    });
+    const globalMap = new Map<string, { total: number; countries: number }>();
+    for (const r of Array.isArray(globalRows) ? globalRows : []) {
+      if (r?.word) globalMap.set(r.word, { total: Number(r.total) || 0, countries: Math.max(1, Number(r.countries) || 1) });
+    }
+    const merit = row?.merit_jsonb && typeof row.merit_jsonb === 'object' ? row.merit_jsonb as Record<string, number> : {};
+    const slang = row?.slang_jsonb && typeof row.slang_jsonb === 'object' ? row.slang_jsonb as Record<string, number> : {};
+    const native = row?.native_jsonb && typeof row.native_jsonb === 'object' ? row.native_jsonb as Record<string, number> : {};
+    const meritList = applyLift(merit, globalMap);
+    const slangList = applyLift(slang, globalMap);
+    const nativeList = applyLift(native, globalMap);
+    const payload = {
+      merit: meritList,
+      slang: slangList,
+      native: nativeList,
+      Novice: slangList,
+      Professional: meritList,
+      Architect: [] as WordItem[],
+      globalNative: nativeList,
+    };
+    if (env.STATS_STORE) {
+      try {
+        await env.STATS_STORE.put(kvKey, JSON.stringify(payload), { expirationTtl: COUNTRY_HOT_LIST_TTL });
+      } catch {
+        // ignore
+      }
+    }
+    return c.json(payload);
+  } catch (err: any) {
+    console.warn('[Worker] /api/v2/country-hot-list 失败:', err?.message);
+    return c.json({ merit: [], slang: [], native: [], Novice: [], Professional: [], Architect: [], globalNative: [] });
+  }
 });
 
 /**

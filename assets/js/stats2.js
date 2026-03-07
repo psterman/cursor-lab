@@ -415,6 +415,35 @@
                     localStorage.setItem('user_selected_country', country);
                 } catch (e) {}
                 removeOverlayImmediately();
+                // 确认国籍：将本地 identityLevelCloud 上报至 country_vibe_stats（静默，不阻塞）
+                (function() {
+                    var ilc = null;
+                    try {
+                        if (window.StatsDataService && typeof window.StatsDataService.getLastAnalysisData === 'function') {
+                            var last = window.StatsDataService.getLastAnalysisData();
+                            ilc = (last && last.identityLevelCloud) ? last.identityLevelCloud : null;
+                        }
+                        if (!ilc) {
+                            var raw = localStorage.getItem('last_analysis_data') || '';
+                            if (raw) {
+                                var data = JSON.parse(raw);
+                                var root = (data && data.analysis != null) ? data.analysis : data;
+                                if (root && root.stats && root.stats.identityLevelCloud) ilc = root.stats.identityLevelCloud;
+                                else if (root && root.identityLevelCloud) ilc = root.identityLevelCloud;
+                            }
+                        }
+                    } catch (e) {}
+                    if (ilc && typeof ilc === 'object' && /^[A-Z]{2}$/.test(country)) {
+                        var base = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : '') || '';
+                        if (base && !base.endsWith('/')) base += '/';
+                        var url = base + 'api/v2/verify-location';
+                        fetch(url, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ country_code: country, identityLevelCloud: ilc })
+                        }).catch(function() {});
+                    }
+                })();
                 return true;
             }
             return false;
@@ -2416,11 +2445,32 @@
                                 flushNationalCloudReadyCallbacks();
                             }
                         }
-                        // 若 country-summary 未带 identityLevelCloud，再请求 keywords 接口兜底
+                        // 若 country-summary 未带 identityLevelCloud，优先 country-hot-list，再 keywords 兜底
                         if (!apiSuccess) {
                             var kwApiBase = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content)) || API_ENDPOINT || '';
                             kwApiBase = (kwApiBase && kwApiBase.trim()) ? (kwApiBase.trim().endsWith('/') ? kwApiBase.trim() : kwApiBase.trim() + '/') : '/';
                             try {
+                                var hotResp = await fetch(kwApiBase + 'api/v2/country-hot-list?country=' + encodeURIComponent(countryCode) + '&_t=' + Date.now(), { cache: 'no-store' });
+                                if (hotResp.ok) {
+                                    var hotPayload = await hotResp.json();
+                                    if (hotPayload && typeof hotPayload === 'object') {
+                                        var hotNovice = (hotPayload.Novice || hotPayload.slang || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
+                                        var hotPro = (hotPayload.Professional || hotPayload.merit || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
+                                        var hotArch = (hotPayload.Architect || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
+                                        var hotNative = (hotPayload.globalNative || hotPayload.native || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
+                                        var hotHasAny = hotNovice.length + hotPro.length + hotArch.length + hotNative.length > 0;
+                                        if (hotHasAny) {
+                                            window.__countryKeywordsByLevel = { Novice: hotNovice, Professional: hotPro, Architect: hotArch, globalNative: hotNative };
+                                            window.__nationalCloudData = window.__countryKeywordsByLevel;
+                                            apiSuccess = true;
+                                            try { window.__countryCloudFromHotList = true; } catch (e) {}
+                                            console.log('Keywords loaded from country-hot-list:', window.__countryKeywordsByLevel);
+                                            flushNationalCloudReadyCallbacks();
+                                        }
+                                    }
+                                }
+                            } catch (hotErr) { console.warn('[updateCountryDashboard] country-hot-list 失败:', hotErr); }
+                            if (!apiSuccess) try {
                                 var kwResp = await fetch(kwApiBase + 'api/v2/stats/keywords?region=' + encodeURIComponent(countryCode) + '&_t=' + Date.now(), { cache: 'no-store' });
                                 if (kwResp.ok) {
                                     var rawPayload = await kwResp.json();
@@ -9638,7 +9688,15 @@
                     }
                 });
 
-                const results = await Promise.all(promises);
+                // 超时 15 秒，避免 Supabase 查询挂起导致一直显示「正在同步全球数据流」
+                var FETCH_GLOBAL_RANKINGS_TIMEOUT_MS = 15000;
+                var timeoutPromise = new Promise(function(_, reject) {
+                    setTimeout(function() { reject(new Error('FETCH_GLOBAL_RANKINGS_TIMEOUT')); }, FETCH_GLOBAL_RANKINGS_TIMEOUT_MS);
+                });
+                var results = await Promise.race([
+                    Promise.all(promises),
+                    timeoutPromise
+                ]);
                 results.forEach(result => {
                     rankings[result.key] = result;
                 });
@@ -9659,7 +9717,11 @@
                 }
                 return rankings;
             } catch (error) {
-                console.error('[GlobalRankings] ❌ 获取全局排行榜失败:', error);
+                if (error && error.message === 'FETCH_GLOBAL_RANKINGS_TIMEOUT') {
+                    console.warn('[GlobalRankings] ⚠️ 请求超时（15s），请检查网络或稍后重试');
+                } else {
+                    console.error('[GlobalRankings] ❌ 获取全局排行榜失败:', error);
+                }
                 // 返回空排行榜结构，而不是 null，确保 UI 能正常渲染
                 return {
                     ketao_count: { key: 'ketao_count', data: [], label: '磕头榜', desc: '顶级礼貌大户' },
