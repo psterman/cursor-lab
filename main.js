@@ -3031,6 +3031,13 @@ async function handleFileUpload(event, type, callbacks = {}) {
     console.log(`  [${i + 1}] ${f.name} (${formatFileSize(f.size)})`);
   });
 
+  // 分析模式：快速体检 500 条 / 全量体检
+  const limit = (callbacks && callbacks.analysisMode === 'full') ? undefined : 500;
+  if (callbacks && callbacks.onStatus) {
+    const msg = getCurrentLang() === 'en' ? 'Loading…' : '正在加载…';
+    callbacks.onStatus(msg, 0);
+  }
+
   // 显示加载状态（仅在非模块模式下）
   if (!callbacks || !callbacks.onLog) {
     showLoading();
@@ -3145,8 +3152,17 @@ async function handleFileUpload(event, type, callbacks = {}) {
         // 加载数据库
         await parser.loadDatabase(arrayBuffer);
 
-        // 扫描数据库
-        const chatData = await parser.scanDatabase();
+        // 扫描数据库（注入 limit 与进度回调）
+        const scanStatusText = getCurrentLang() === 'en' ? 'Scanning database…' : '正在深度扫描指纹…';
+        const chatData = await parser.scanDatabase({
+          limit,
+          onProgress: (current, total) => {
+            if (total && callbacks && callbacks.onStatus) {
+              const pct = Math.round((current / total) * 40);
+              callbacks.onStatus(scanStatusText, pct);
+            }
+          }
+        });
 
         // 合并到全局数据
         allChatData = allChatData.concat(chatData);
@@ -3211,6 +3227,10 @@ async function handleFileUpload(event, type, callbacks = {}) {
 
     // 进行 Vibe Codinger 人格分析（使用 VibeCodingApp 类）
     if (allChatData.length > 0) {
+      if (callbacks && callbacks.onStatus) {
+        const buildMsg = getCurrentLang() === 'en' ? 'Building personality model…' : '正在构建人格模型…';
+        callbacks.onStatus(buildMsg, 45);
+      }
       console.log('[Main] 开始 Vibe Codinger 人格分析（使用 VibeCodingApp）...');
       if (onLog) {
         const currentLang = getCurrentLang();
@@ -3243,12 +3263,14 @@ async function handleFileUpload(event, type, callbacks = {}) {
           usageDays: usageDays
         } : null;
         
-        // 创建进度回调函数
+        // 创建进度回调函数（同步更新 overlay 进度 50–95%）
         const onProgress = (message) => {
           if (onLog) {
             onLog(`> ${message}`);
           }
-          // 显示 UI Loading 状态
+          if (callbacks && callbacks.onStatus) {
+            callbacks.onStatus(message, 70);
+          }
           if (!callbacks || !callbacks.onLog) {
             showLoading(message);
           }
@@ -3430,7 +3452,8 @@ async function handleFileUpload(event, type, callbacks = {}) {
         vibeResult: vibeResult
       });
     } else {
-      // 如果没有回调，使用原来的逻辑
+      // 如果没有回调，使用原来的逻辑：500ms 淡出后再显示结果，减少闪烁
+      await new Promise(r => setTimeout(r, 500));
       showDashboard();
       displayStats();
       if (vibeResult) {

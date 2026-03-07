@@ -3588,6 +3588,9 @@
             const [error, setError] = useState(null);
             const [isInitialized, setIsInitialized] = useState(false);
             const [isSubmitting, setIsSubmitting] = useState(false); // 防止重复触发分析/重复写库
+            const [analysisMode, setAnalysisMode] = useState('quick'); // 'quick' | 'full' 快速体检(500条) / 全量体检
+            const [analysisStatusText, setAnalysisStatusText] = useState('');
+            const [analysisProgress, setAnalysisProgress] = useState(0);
             const [totalTestUsers, setTotalTestUsers] = useState(0); // 从 API 获取，不使用硬编码
             // 实时统计数据（全部从 Cloudflare API 获取）
             const [totalUsers, setTotalUsers] = useState(0); // 受虐人数
@@ -4698,6 +4701,8 @@
                 setError(null);
                 setIsSubmitting(true);
                 setStep('analyzing');
+                setAnalysisProgress(0);
+                setAnalysisStatusText(lang === 'en' ? 'Loading database…' : '正在加载数据库…');
                 setLogs([`> ${t('upload.logs.startParsing')}`]);
 
                 try {
@@ -4744,9 +4749,14 @@
                         setIsInitialized(true);
                     }
 
-                    // 调用 main.js 的处理函数
-                    console.log('调用 processFiles...');
+                    // 调用 main.js 的处理函数（注入分析模式与进度回调）
+                    console.log('调用 processFiles...', { analysisMode });
                     await window.analysisModule.processFiles(files, type, {
+                        analysisMode,
+                        onStatus: (text, percent) => {
+                            if (text != null) setAnalysisStatusText(text);
+                            if (percent != null) setAnalysisProgress(percent);
+                        },
                         onLog: (log) => {
                             console.log('onLog:', log);
                             setLogs(prev => [...prev, log]);
@@ -4764,6 +4774,9 @@
                                 if (total > 0) setTotalUsers(total);
                             }
                             setLogs(prev => [...prev, `> ${t('upload.logs.analysisComplete')}`]);
+                            setAnalysisStatusText(lang === 'en' ? 'Done' : '完成');
+                            setAnalysisProgress(100);
+                            // 500ms 淡出后再进入结果页，减少闪烁
                             setTimeout(() => {
                                 setStep('preview');
                                 setIsSubmitting(false);
@@ -6627,6 +6640,35 @@
                                             选择state.vscdb
                                         </button> */}
                                     </div>
+                                    {/* 分析模式选择：快速体检 / 全量体检 */}
+                                    <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
+                                        <span className="text-xs text-zinc-500 uppercase tracking-wider font-mono">{lang === 'en' ? 'Analysis mode' : '分析模式'}</span>
+                                        <div className="inline-flex p-1 rounded-sm bg-zinc-900 border border-zinc-700" role="group" aria-label={lang === 'en' ? 'Analysis mode' : '分析模式'}>
+                                            <button
+                                                type="button"
+                                                onClick={() => setAnalysisMode('quick')}
+                                                disabled={isSubmitting || step === 'analyzing'}
+                                                className={`px-4 py-2 rounded-sm text-sm font-mono uppercase tracking-wider transition-all ${analysisMode === 'quick'
+                                                    ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-black font-semibold shadow-[0_0_12px_rgba(0,255,65,0.3)]'
+                                                    : 'text-zinc-400 hover:text-white hover:bg-zinc-800'}`}
+                                            >
+                                                {lang === 'en' ? 'Quick (recommended)' : '快速体检 (推荐)'}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setAnalysisMode('full')}
+                                                disabled={isSubmitting || step === 'analyzing'}
+                                                className={`px-4 py-2 rounded-sm text-sm font-mono uppercase tracking-wider transition-all ${analysisMode === 'full'
+                                                    ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-black font-semibold shadow-[0_0_12px_rgba(0,255,65,0.3)]'
+                                                    : 'text-zinc-400 hover:text-white hover:bg-zinc-800'}`}
+                                            >
+                                                {lang === 'en' ? 'Full scan' : '全量体检'}
+                                            </button>
+                                        </div>
+                                        <span className="text-xs text-zinc-500 font-mono">
+                                            {analysisMode === 'quick' ? (lang === 'en' ? 'Last 500 messages, fast' : '仅最近 500 条，秒级出结果') : (lang === 'en' ? 'All history, deep profile' : '全部历史，深度画像')}
+                                        </span>
+                                    </div>
                                     {/* 救赎路径复制器 */}
                                     <div style={{ 
                                         marginTop: '24px', 
@@ -6752,22 +6794,45 @@
                         </div>
                     )}
 
-                    {/* 分析阶段 */}
+                    {/* 分析阶段：全局 Loading 层 + 终端日志 */}
                     {step === 'analyzing' && (
-                        <div className="w-full max-w-lg bg-zinc-950 border border-zinc-800 rounded-sm p-6 shadow-2xl overflow-hidden">
-                            <div className="flex items-center gap-2 mb-4 border-b border-zinc-900 pb-3">
-                                <Icon name="terminal" size={16} className="text-green-500" />
-                                <span className="text-xs text-zinc-500 uppercase tracking-widest">{t('dashboard.systemAnalysis')}</span>
-                            </div>
-                            <div className="space-y-2 h-64 overflow-y-auto custom-scrollbar">
-                                {logs.map((log, i) => (
-                                    <div key={i} className="text-sm text-zinc-400 font-mono">
-                                        {log}
+                        <>
+                            {/* 全屏 Loading 层 - Vibe 绿色调渐变进度条与动态状态文案 */}
+                            <div
+                                id="analysis-overlay"
+                                className="fixed inset-0 z-[2000] flex flex-col items-center justify-center bg-black/90 backdrop-blur-sm"
+                            >
+                                <div className="w-full max-w-md px-6 space-y-6">
+                                    <div className="flex justify-center">
+                                        <div className="w-12 h-12 rounded-full border-2 border-green-500/50 border-t-green-400 animate-spin" />
                                     </div>
-                                ))}
-                                <div className="w-2 h-5 bg-green-500 animate-pulse inline-block" />
+                                    <div id="status-text" className="text-center font-mono text-sm text-zinc-300 animate-pulse min-h-[1.5rem]">
+                                        {analysisStatusText || (lang === 'en' ? 'Scanning…' : '正在深度扫描指纹…')}
+                                    </div>
+                                    <div className="h-2 w-full rounded-full bg-zinc-800 overflow-hidden">
+                                        <div
+                                            id="progress-bar"
+                                            className="h-full rounded-full bg-gradient-to-r from-green-600 via-emerald-500 to-green-400 transition-all duration-300 ease-out"
+                                            style={{ width: `${Math.min(100, Math.max(0, analysisProgress))}%` }}
+                                        />
+                                    </div>
+                                </div>
                             </div>
-                        </div>
+                            <div className="w-full max-w-lg bg-zinc-950 border border-zinc-800 rounded-sm p-6 shadow-2xl overflow-hidden">
+                                <div className="flex items-center gap-2 mb-4 border-b border-zinc-900 pb-3">
+                                    <Icon name="terminal" size={16} className="text-green-500" />
+                                    <span className="text-xs text-zinc-500 uppercase tracking-widest">{t('dashboard.systemAnalysis')}</span>
+                                </div>
+                                <div className="space-y-2 h-64 overflow-y-auto custom-scrollbar">
+                                    {logs.map((log, i) => (
+                                        <div key={i} className="text-sm text-zinc-400 font-mono">
+                                            {log}
+                                        </div>
+                                    ))}
+                                    <div className="w-2 h-5 bg-green-500 animate-pulse inline-block" />
+                                </div>
+                            </div>
+                        </>
                     )}
 
                     {/* 预览结果阶段 */}

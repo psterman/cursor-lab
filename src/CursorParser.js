@@ -40,6 +40,8 @@ export class CursorParser {
     this.db = null;
     this.SQL = null;
     this.chatData = [];
+    /** 进度回调 (current, total)，由 scanDatabase 在遍历时调用 */
+    this.onProgress = () => {};
     this.stats = {
       totalConversations: 0,
       modelUsage: {},
@@ -107,62 +109,76 @@ export class CursorParser {
   }
 
   /**
-    * 
-    */
-   async scanDatabase() {
-     if (!this.db) {
-       throw new Error('');
-     }
+   * 扫描数据库并提取聊天数据
+   * @param {Object} [options]
+   * @param {number} [options.limit] 快速模式：仅保留最近 N 条聊天记录（按当前顺序取最后 limit 条）
+   * @param {function(number, number)} [options.onProgress] 进度回调 (current, total)
+   * @returns {Promise<Array>} chatData
+   */
+  async scanDatabase(options = {}) {
+    if (!this.db) {
+      throw new Error('');
+    }
 
-     this.chatData = [];
-     this.resetStats();
+    const { limit: limitMessages = null, onProgress } = options;
+    this.onProgress = typeof onProgress === 'function' ? onProgress : () => {};
 
-     try {
-       console.log('[CursorParser] ...');
-       console.log('[CursorParser] :', this.db.exec("SELECT name FROM sqlite_master WHERE type='table'").length);
+    this.chatData = [];
+    this.resetStats();
 
-       //  chatdata
-       const chatdataQuery = `
-         SELECT value FROM itemTable
-         WHERE [key] = 'workbench.panel.aichat.view.aichat.chatdata'
-       `;
-       console.log('[CursorParser]  chatdata ...');
-       this.extractFromQuery(chatdataQuery, 'json');
+    try {
+      console.log('[CursorParser] ...', limitMessages != null ? `(快速模式: 最近 ${limitMessages} 条)` : '(全量)');
+      console.log('[CursorParser] :', this.db.exec("SELECT name FROM sqlite_master WHERE type='table'").length);
 
-       //  composerState
-       const composerQuery = `
-         SELECT value FROM itemTable
-         WHERE [key] = 'composer.composerState'
-       `;
-       console.log('[CursorParser]  composerState ...');
-       this.extractFromQuery(composerQuery, 'json');
+      // 先统计各查询的行数，用于进度
+      const chatdataQuery = `SELECT value FROM itemTable WHERE [key] = 'workbench.panel.aichat.view.aichat.chatdata'`;
+      const composerQuery = `SELECT value FROM itemTable WHERE [key] = 'composer.composerState'`;
+      const textQuery = `SELECT value FROM itemTable WHERE value LIKE '%"text":%'`;
+      const count = (q) => {
+        const r = this.db.exec(q);
+        return (r[0] && r[0].values) ? r[0].values.length : 0;
+      };
+      const totalRows = count(chatdataQuery) + count(composerQuery) + count(textQuery);
+      this._progressTotal = Math.max(1, totalRows);
+      this._progressCurrent = 0;
 
-       //  text 
-       const textQuery = `
-         SELECT value FROM itemTable
-         WHERE value LIKE '%"text":%'
-       `;
-       console.log('[CursorParser]  text ...');
-       this.extractFromQuery(textQuery, 'regex');
+      //  chatdata
+      console.log('[CursorParser]  chatdata ...');
+      this.extractFromQuery(chatdataQuery, 'json');
 
-       console.log('[CursorParser] ', this.chatData.length, '');
+      //  composerState
+      console.log('[CursorParser]  composerState ...');
+      this.extractFromQuery(composerQuery, 'json');
 
-       // 
-       console.log('[CursorParser] ===========  =========');
+      //  text
+      console.log('[CursorParser]  text ...');
+      this.extractFromQuery(textQuery, 'regex');
+
+      // 快速模式：只保留最近 limit 条，并依此重新计算统计
+      if (limitMessages != null && limitMessages > 0 && this.chatData.length > limitMessages) {
+        console.log('[CursorParser] 快速模式: 从', this.chatData.length, '条截取最近', limitMessages, '条');
+        this.chatData = this.chatData.slice(-limitMessages);
+        this.resetStats();
+        this.chatData.forEach((item) => this.updateStats(item));
+      }
+
+      console.log('[CursorParser] ', this.chatData.length, '');
+
+      console.log('[CursorParser] ===========  =========');
       console.log('[CursorParser] 总对话次数:', this.stats.totalConversations);
       console.log('[CursorParser] 用户消息:', this.stats.userMessages);
       console.log('[CursorParser] AI消息:', this.stats.aiMessages);
       console.log('[CursorParser] 模型使用:', this.stats.modelUsage);
-       console.log('[CursorParser] :', this.stats.hourlyActivity.filter(v => v > 0));
-       console.log('[CursorParser] :', Object.keys(this.stats.topPrompts).length);
-       console.log('[CursorParser] ======================================');
+      console.log('[CursorParser] :', this.stats.hourlyActivity.filter(v => v > 0));
+      console.log('[CursorParser] :', Object.keys(this.stats.topPrompts).length);
+      console.log('[CursorParser] ======================================');
 
-       return this.chatData;
-     } catch (error) {
-       console.error('[CursorParser] :', error);
-       throw error;
-     }
-   }
+      return this.chatData;
+    } catch (error) {
+      console.error('[CursorParser] :', error);
+      throw error;
+    }
+  }
 
    /**
     * 
@@ -216,7 +232,6 @@ export class CursorParser {
         texts.forEach((item) => {
           if (!item || item.text.length < 5) return;
 
-          // 
           const textKey = item.text;
           if (extractedTextSet.has(textKey)) {
             return;
@@ -233,9 +248,13 @@ export class CursorParser {
             model: item.model || 'unknown',
           });
 
-          // 
           this.updateStats(item);
         });
+
+        this._progressCurrent = (this._progressCurrent || 0) + 1;
+        if (this.onProgress && this._progressTotal) {
+          this.onProgress(this._progressCurrent, this._progressTotal);
+        }
       } catch (error) {
         console.warn(`[CursorParser]  ${index + 1} :`, error.message);
       }
