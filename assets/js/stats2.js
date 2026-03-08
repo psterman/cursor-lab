@@ -2309,10 +2309,20 @@
                 } catch (e) { /* ignore */ }
                 // 写入 lastData，供天梯榜 Tab 等读取 topByMetrics
                 try {
+                    // 【修复】确保topByMetrics被正确保存到window.lastData
+                    if (data.topByMetrics && Array.isArray(data.topByMetrics) && data.topByMetrics.length > 0) {
+                        console.log('[updateCountryDashboard] ✅ 保存topByMetrics到lastData:', data.topByMetrics.length, '个维度');
+                    }
                     window.lastData = typeof mergeDeep === 'function'
                         ? mergeDeep(window.lastData || {}, data)
                         : Object.assign({}, window.lastData || {}, data);
-                } catch (e) { /* ignore */ }
+                    // 【修复】确保topByMetrics被正确保存
+                    if (window.lastData && !window.lastData.topByMetrics && data.topByMetrics) {
+                        window.lastData.topByMetrics = data.topByMetrics;
+                    }
+                } catch (e) { 
+                    console.warn('[updateCountryDashboard] ⚠️ 保存lastData失败:', e);
+                }
 
                 // 国家视图：get_country_dimension_averages 优先 12h 本地缓存；连续失败 3 次则标记暂时不可用并隐藏右侧雷达图
                 if (typeof window.__countryDimFailCount === 'undefined') window.__countryDimFailCount = 0;
@@ -2541,6 +2551,36 @@
                                 window.__countryTotalUsers = Number(resp?.countryTotals?.totalUsers ?? resp?.countryTotals?.total_users ?? resp?.totalUsers ?? resp?.total_users ?? 0) || 0;
                                 console.log('Keywords loaded:', window.__countryKeywordsByLevel);
                                 flushNationalCloudReadyCallbacks();
+                                
+                                // 【新增】确保三个tab的数据都已预加载
+                                if (window.__countryKeywordsByLevel && typeof _renderTop10List === 'function') {
+                                    var currentType = window.__currentLexiconType || 'merit_board';
+                                    var allTypes = ['merit_board', 'slang_list', 'mantra_top'];
+                                    allTypes.forEach(function(type) {
+                                        if (!window.__lexiconByType) window.__lexiconByType = {};
+                                        if (!window.__lexiconByType[type] || window.__lexiconByType[type].length === 0) {
+                                            var kwData = null;
+                                            if (type === 'merit_board') {
+                                                kwData = window.__countryKeywordsByLevel.Professional || [];
+                                            } else if (type === 'slang_list') {
+                                                kwData = window.__countryKeywordsByLevel.Novice || [];
+                                            } else if (type === 'mantra_top') {
+                                                kwData = (window.__countryKeywordsByLevel.Architect && window.__countryKeywordsByLevel.Architect.length > 0)
+                                                    ? window.__countryKeywordsByLevel.Architect
+                                                    : (window.__countryKeywordsByLevel.globalNative || []);
+                                            }
+                                            if (Array.isArray(kwData) && kwData.length > 0) {
+                                                window.__lexiconByType[type] = kwData.map(function(x) { 
+                                                    return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; 
+                                                }).filter(function(x) { return x.phrase; });
+                                            }
+                                        }
+                                    });
+                                    // 如果当前tab有数据，立即渲染
+                                    if (window.__lexiconByType[currentType] && window.__lexiconByType[currentType].length > 0) {
+                                        _renderTop10List(window.__lexiconByType[currentType], true);
+                                    }
+                                }
                             }
                         }
                         // 若 country-summary 未带 identityLevelCloud，优先 static-hotlist（纯 KV），再 country-hot-list，再 keywords 兜底
@@ -2686,15 +2726,114 @@
                         if (cloudLoadingHint) cloudLoadingHint.classList.add('hidden');
                         if (wordCloudContainer) wordCloudContainer.removeAttribute('data-loading');
                         // 排行榜：调用 get_national_lexicon(countryCode, type)，默认 merit_board
+                        // 【修复】自动预加载三个tab的数据
                         window.__currentCountryCode = countryCode;
                         (function loadLexiconList() {
                             var lexType = (window.__currentLexiconType || 'merit_board');
                             var url = API_ENDPOINT + 'api/national-lexicon?country=' + encodeURIComponent(countryCode) + '&type=' + encodeURIComponent(lexType);
                             fetch(url).then(function(r) { return r.json(); }).then(function(res) {
                                 var list = (res && res.data && Array.isArray(res.data)) ? res.data : [];
+                                // 【修复】如果API返回空，尝试从 __countryKeywordsByLevel 获取fallback数据
+                                if (list.length === 0 && window.__countryKeywordsByLevel) {
+                                    var fallbackData = null;
+                                    if (lexType === 'merit_board') {
+                                        fallbackData = window.__countryKeywordsByLevel.Professional || [];
+                                    } else if (lexType === 'slang_list') {
+                                        fallbackData = window.__countryKeywordsByLevel.Novice || [];
+                                    } else if (lexType === 'mantra_top') {
+                                        fallbackData = (window.__countryKeywordsByLevel.Architect && window.__countryKeywordsByLevel.Architect.length > 0)
+                                            ? window.__countryKeywordsByLevel.Architect
+                                            : (window.__countryKeywordsByLevel.globalNative || []);
+                                    }
+                                    if (Array.isArray(fallbackData) && fallbackData.length > 0) {
+                                        list = fallbackData.map(function(x) { 
+                                            return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; 
+                                        }).filter(function(x) { return x.phrase; });
+                                    }
+                                }
+                                if (!window.__lexiconByType) window.__lexiconByType = {};
+                                window.__lexiconByType[lexType] = list;
                                 if (typeof _renderTop10List === 'function') _renderTop10List(list, true);
+                                
+                                // 【新增】自动预加载其他两个tab的数据
+                                var otherTypes = ['merit_board', 'slang_list', 'mantra_top'].filter(function(t) { return t !== lexType; });
+                                otherTypes.forEach(function(otherType) {
+                                    // 如果已经有缓存数据，跳过
+                                    if (window.__lexiconByType && window.__lexiconByType[otherType] && window.__lexiconByType[otherType].length > 0) {
+                                        return;
+                                    }
+                                    // 尝试从 __countryKeywordsByLevel 获取
+                                    var kwData = null;
+                                    if (otherType === 'merit_board') {
+                                        kwData = window.__countryKeywordsByLevel && window.__countryKeywordsByLevel.Professional || [];
+                                    } else if (otherType === 'slang_list') {
+                                        kwData = window.__countryKeywordsByLevel && window.__countryKeywordsByLevel.Novice || [];
+                                    } else if (otherType === 'mantra_top') {
+                                        kwData = (window.__countryKeywordsByLevel && window.__countryKeywordsByLevel.Architect && window.__countryKeywordsByLevel.Architect.length > 0)
+                                            ? window.__countryKeywordsByLevel.Architect
+                                            : (window.__countryKeywordsByLevel && window.__countryKeywordsByLevel.globalNative || []);
+                                    }
+                                    if (Array.isArray(kwData) && kwData.length > 0) {
+                                        var preloadList = kwData.map(function(x) { 
+                                            return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; 
+                                        }).filter(function(x) { return x.phrase; });
+                                        if (!window.__lexiconByType) window.__lexiconByType = {};
+                                        window.__lexiconByType[otherType] = preloadList;
+                                    } else {
+                                        // 如果 __countryKeywordsByLevel 没有数据，调用API预加载
+                                        var preloadUrl = API_ENDPOINT + 'api/national-lexicon?country=' + encodeURIComponent(countryCode) + '&type=' + encodeURIComponent(otherType);
+                                        fetch(preloadUrl).then(function(r) { return r.json(); }).then(function(res) {
+                                            var preloadList = (res && res.data && Array.isArray(res.data)) ? res.data : [];
+                                            if (preloadList.length === 0 && window.__countryKeywordsByLevel) {
+                                                // 再次尝试fallback
+                                                var fallbackKw = null;
+                                                if (otherType === 'merit_board') {
+                                                    fallbackKw = window.__countryKeywordsByLevel.Professional || [];
+                                                } else if (otherType === 'slang_list') {
+                                                    fallbackKw = window.__countryKeywordsByLevel.Novice || [];
+                                                } else if (otherType === 'mantra_top') {
+                                                    fallbackKw = (window.__countryKeywordsByLevel.Architect && window.__countryKeywordsByLevel.Architect.length > 0)
+                                                        ? window.__countryKeywordsByLevel.Architect
+                                                        : (window.__countryKeywordsByLevel.globalNative || []);
+                                                }
+                                                if (Array.isArray(fallbackKw) && fallbackKw.length > 0) {
+                                                    preloadList = fallbackKw.map(function(x) { 
+                                                        return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; 
+                                                    }).filter(function(x) { return x.phrase; });
+                                                }
+                                            }
+                                            if (!window.__lexiconByType) window.__lexiconByType = {};
+                                            window.__lexiconByType[otherType] = preloadList;
+                                        }).catch(function() {
+                                            // 忽略错误，使用空数组
+                                            if (!window.__lexiconByType) window.__lexiconByType = {};
+                                            window.__lexiconByType[otherType] = [];
+                                        });
+                                    }
+                                });
                             }).catch(function() {
-                                if (typeof _renderTop10List === 'function') _renderTop10List([], true);
+                                // 【修复】错误时也尝试从 __countryKeywordsByLevel 获取fallback数据
+                                var fallbackList = [];
+                                if (window.__countryKeywordsByLevel) {
+                                    var fallbackKw = null;
+                                    if (lexType === 'merit_board') {
+                                        fallbackKw = window.__countryKeywordsByLevel.Professional || [];
+                                    } else if (lexType === 'slang_list') {
+                                        fallbackKw = window.__countryKeywordsByLevel.Novice || [];
+                                    } else if (lexType === 'mantra_top') {
+                                        fallbackKw = (window.__countryKeywordsByLevel.Architect && window.__countryKeywordsByLevel.Architect.length > 0)
+                                            ? window.__countryKeywordsByLevel.Architect
+                                            : (window.__countryKeywordsByLevel.globalNative || []);
+                                    }
+                                    if (Array.isArray(fallbackKw) && fallbackKw.length > 0) {
+                                        fallbackList = fallbackKw.map(function(x) { 
+                                            return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; 
+                                        }).filter(function(x) { return x.phrase; });
+                                    }
+                                }
+                                if (!window.__lexiconByType) window.__lexiconByType = {};
+                                window.__lexiconByType[lexType] = fallbackList;
+                                if (typeof _renderTop10List === 'function') _renderTop10List(fallbackList, true);
                             });
                         })();
                     } else {
@@ -3156,7 +3295,16 @@
                         // 关键：高分图谱的数据源来自 country-summary，而不是 global-average
                         try {
                             data.topByMetrics = payload2.topByMetrics || payload2.data?.topByMetrics || [];
-                        } catch { /* ignore */ }
+                            // 【修复】确保topByMetrics被正确设置
+                            if (data.topByMetrics && Array.isArray(data.topByMetrics) && data.topByMetrics.length > 0) {
+                                console.log('[updateCountryDashboard] ✅ topByMetrics已加载:', data.topByMetrics.length, '个维度');
+                            } else {
+                                console.warn('[updateCountryDashboard] ⚠️ topByMetrics为空或格式不正确');
+                            }
+                        } catch (e) { 
+                            console.warn('[updateCountryDashboard] ⚠️ 获取topByMetrics失败:', e);
+                            data.topByMetrics = [];
+                        }
 
                         const totalCountriesCount = totalCountriesFromData;
                         const MEDALS = { 1: '🥇', 2: '🥈', 3: '🥉' };
@@ -3483,13 +3631,31 @@
                 // 高分图谱：由 drawHighScores 统一渲染到 .vibe-index-leaderboard（data.topByMetrics -> it.leaders，字段 vibe_index_num）
                 // =========================
                 let topBy = Array.isArray(data.topByMetrics) ? data.topByMetrics : [];
+                // 【修复】确保从payload2中获取topByMetrics数据
+                if ((!topBy || topBy.length === 0) && payload2) {
+                    try {
+                        topBy = Array.isArray(payload2.topByMetrics) ? payload2.topByMetrics : 
+                                (Array.isArray(payload2.data?.topByMetrics) ? payload2.data.topByMetrics : []);
+                        if (topBy && topBy.length > 0) {
+                            data.topByMetrics = topBy;
+                            console.log('[updateCountryDashboard] ✅ 从payload2获取topByMetrics:', topBy.length, '个维度');
+                        }
+                    } catch (e) {
+                        console.warn('[updateCountryDashboard] ⚠️ 获取topByMetrics失败:', e);
+                    }
+                }
                 const metricOrder = [
                     'total_messages', 'total_chars', 'avg_message_length',
                     'jiafang_count', 'ketao_count', 'work_days'
                 ];
                 topBy = topBy.slice().sort((a, b) => metricOrder.indexOf(String(a?.key || '')) - metricOrder.indexOf(String(b?.key || '')));
                 window.__resolveUserMeta = _resolveUserMeta;
-                if (typeof drawHighScores === 'function') drawHighScores(topBy);
+                if (typeof drawHighScores === 'function') {
+                    console.log('[updateCountryDashboard] 🎯 调用drawHighScores，数据量:', topBy.length);
+                    drawHighScores(topBy);
+                } else {
+                    console.warn('[updateCountryDashboard] ⚠️ drawHighScores函数不可用');
+                }
 
                 // 语义爆发词云卡片：仅保留词云形态（ECharts wordCloud），不再渲染 slang/merit/sv_slang 文本区
                 // 词云数据由 loadWordCloud() 通过 /api/v2/wordcloud-data 动态拉取
@@ -23017,13 +23183,30 @@
                 var base = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content)) || '';
                 base = (base && base.trim()) ? (base.trim().endsWith('/') ? base.trim() : base.trim() + '/') : '';
                 var listToRender = null;
-                var archKw = (type === 'mantra_top' && window.__countryKeywordsByLevel) ? (window.__countryKeywordsByLevel.Architect || window.__countryKeywordsByLevel.globalNative) : null;
-                var archArr = Array.isArray(archKw) && archKw.length > 0 ? archKw.map(function(x) { return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; }).filter(function(x) { return x.phrase; }) : [];
+                // 【修复】优先从缓存中获取数据
                 var lexCached = window.__lexiconByType && window.__lexiconByType[type] && window.__lexiconByType[type].length > 0;
-                if (type === 'mantra_top' && archArr.length > 0) {
-                    listToRender = archArr;
-                } else if (lexCached) {
+                if (lexCached) {
                     listToRender = window.__lexiconByType[type];
+                } else if (window.__countryKeywordsByLevel) {
+                    // 【修复】如果缓存中没有，尝试从 __countryKeywordsByLevel 获取
+                    var kwData = null;
+                    if (type === 'merit_board') {
+                        kwData = window.__countryKeywordsByLevel.Professional || [];
+                    } else if (type === 'slang_list') {
+                        kwData = window.__countryKeywordsByLevel.Novice || [];
+                    } else if (type === 'mantra_top') {
+                        kwData = (window.__countryKeywordsByLevel.Architect && window.__countryKeywordsByLevel.Architect.length > 0) 
+                            ? window.__countryKeywordsByLevel.Architect 
+                            : (window.__countryKeywordsByLevel.globalNative || []);
+                    }
+                    if (Array.isArray(kwData) && kwData.length > 0) {
+                        listToRender = kwData.map(function(x) { 
+                            return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; 
+                        }).filter(function(x) { return x.phrase; });
+                        // 同步到缓存
+                        if (!window.__lexiconByType) window.__lexiconByType = {};
+                        window.__lexiconByType[type] = listToRender;
+                    }
                 }
                 if (listToRender && listToRender.length > 0) {
                     if (typeof _renderTop10List === 'function') _renderTop10List(listToRender, true);
