@@ -113,8 +113,9 @@
         if (typeof window !== 'undefined') {
           try { window.__githubAccessToken = ''; } catch (e) {}
         }
-        if (typeof location !== 'undefined' && location.reload) {
-          location.reload(true);
+        // 不再 location.reload，仅重置 UI 状态，避免整页刷新
+        if (typeof window !== 'undefined' && typeof window.refreshUserStats === 'function') {
+          try { window.refreshUserStats().catch(function() {}); } catch (e) {}
         }
       } catch (e) {
         if (typeof console !== 'undefined' && console.warn) console.warn('[dirtyDataCleanup]', e);
@@ -459,6 +460,10 @@
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ country_code: country, identityLevelCloud: ilc })
+                        }).then(function(r) {
+                            if (r.ok && typeof showNotification === 'function') {
+                                try { showNotification(typeof currentLang !== 'undefined' && currentLang === 'en' ? 'Submitted' : '已提交'); } catch (e) {}
+                            }
                         }).catch(function() {});
                     }
                 })();
@@ -13545,11 +13550,10 @@
                         }
                     }
                     
-                    // 刷新用户统计
-                    if (typeof window.refreshUserStats === 'function') {
-                        setTimeout(() => window.refreshUserStats(), 300);
+                    // 【数据流隔离】写入后仅成功提示，不触发重新拉取
+                    if (typeof showNotification === 'function') {
+                        try { showNotification(currentLang === 'en' ? 'Location saved' : '位置已保存'); } catch (e) {}
                     }
-                    
                     console.log('[SaveLocation] ✅ 已保存手动位置:', { countryCode, lng: formattedLng, lat: formattedLat });
                 } else {
                     console.warn('[SaveLocation] ⚠️ 保存失败:', res.status);
@@ -13735,18 +13739,9 @@
                     }
                     updateUserCountryFlag(countryCode, countryName, true);
                     if (typeof renderRankCards === 'function' && window.currentUser) renderRankCards(window.currentUser);
-                    if (typeof window.refreshUserStats === 'function') {
-                        setTimeout(() => window.refreshUserStats(), 300);
-                    }
-                    // 校准确认后立即重载黑话榜（右侧抽屉）
-                    try { window.refreshVibeCard && window.refreshVibeCard(String(countryCode).toUpperCase()); } catch { /* ignore */ }
-                    if (countryCode && typeof fetchCountrySummaryV3 === 'function') {
-                        fetchCountrySummaryV3(countryCode).then((summary) => {
-                            // 仅刷新右侧抽屉数据，不重设骨架、不重建左侧，避免反复叠加与错乱
-                            if (summary) showDrawersWithCountryData(countryCode, countryName || countryCode, summary, { summaryOnly: true });
-                        }).catch(() => {});
-                    } else if (countryCode) {
-                        showDrawersWithCountryData(countryCode, countryName || countryCode);
+                    // 【数据流隔离】写入后仅成功提示，不触发重新拉取大盘/词云
+                    if (typeof showNotification === 'function') {
+                        try { showNotification(currentLang === 'en' ? 'Location saved' : '位置已保存'); } catch (e) {}
                     }
                     console.log('[Calibration] ✅ 校准已确认并持久化（已锁定）:', { countryCode, countryName, lng, lat });
                 }
@@ -15618,40 +15613,30 @@
                 }
             }
 
-            // 通过IP API获取位置信息（使用ip-api.com，免费且稳定）
+            // 通过自有 Worker /api/v2/my-ip 获取国家码（CF 边缘，0 外网依赖）
             try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 3000); // 3秒超时
-                
-                const response = await fetch('https://ip-api.com/json/?fields=status,message,countryCode,lat,lon', {
-                    signal: controller.signal,
-                    method: 'GET'
-                });
-                
+                var apiBase = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content) || '') || '';
+                if (apiBase && apiBase.endsWith('/')) apiBase = apiBase.slice(0, -1);
+                var myIpUrl = apiBase ? (apiBase + '/api/v2/my-ip') : '/api/v2/my-ip';
+                var controller = new AbortController();
+                var timeoutId = setTimeout(function() { controller.abort(); }, 3000);
+                var response = await fetch(myIpUrl, { signal: controller.signal, method: 'GET' });
                 clearTimeout(timeoutId);
-                
                 if (response.ok) {
-                    const data = await response.json();
-                    if (data.status === 'success' && data.countryCode) {
-                        const countryCode = String(data.countryCode).trim().toUpperCase();
-                        if (/^[A-Z]{2}$/.test(countryCode)) {
-                            console.log('[getUserLocation] ✅ 通过IP API获取到国家代码:', countryCode);
-                            // 保存到localStorage以便后续使用
-                            try {
-                                localStorage.setItem('user_country_fixed', countryCode);
-                                localStorage.setItem('selected_country', countryCode);
-                            } catch (e) {}
-                            return {
-                                lat: data.lat ? parseFloat(data.lat) : null,
-                                lng: data.lon ? parseFloat(data.lon) : null,
-                                countryCode: countryCode
-                            };
-                        }
+                    var data = await response.json().catch(function() { return null; });
+                    var countryCode = data && data.country ? String(data.country).trim().toUpperCase() : '';
+                    if (countryCode && /^[A-Z]{2}$/.test(countryCode) && countryCode !== 'XX') {
+                        console.log('[getUserLocation] ✅ 通过 my-ip 获取到国家代码:', countryCode);
+                        try {
+                            localStorage.setItem('user_country_fixed', countryCode);
+                            localStorage.setItem('selected_country', countryCode);
+                        } catch (e) {}
+                        return { lat: null, lng: null, countryCode: countryCode };
                     }
                 }
             } catch (error) {
-                if (error.name !== 'AbortError') {
-                    console.warn('[getUserLocation] ⚠️ IP API请求失败:', error);
+                if (error && error.name !== 'AbortError') {
+                    console.warn('[getUserLocation] ⚠️ my-ip 请求失败:', error);
                 }
             }
 
@@ -19496,10 +19481,7 @@
                     }
                 } catch { /* ignore */ }
 
-                // 【SWR】缓存超过 30 分钟或缺少 github_stats.login 时异步 revalidate，失败仅打日志不抛错
-                revalidateSWRCache().catch(function(err) {
-                    if (typeof console !== 'undefined' && console.warn) console.warn('[SWR] revalidateSWRCache 异步失败:', err);
-                });
+                // 【状态锁定】不再自动 revalidate 刷新抽屉，仅用户手动点击地图或刷新时更新词云/排行榜
 
             } catch (err) {
                 console.error('[ERROR] Dashboard 渲染崩溃:', err);
@@ -21298,10 +21280,7 @@
                             handleGithubSync().then(function(result) {
                                 if (result && result.success && result.data) {
                                     window.renderGithubCard(result.data, cardOpts);
-                                    setTimeout(function() {
-                                        if (typeof window.refreshUserStats === 'function') window.refreshUserStats().catch(function(err) { console.warn('[GitHub Sync] refreshUserStats:', err); });
-                                        if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard(); else if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
-                                    }, 1500);
+                                    if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard(); else if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
                                 } else {
                                     var fallbackStars = (typeof resolveDisplayStars === 'function' ? resolveDisplayStars(currentUserData) : null);
                                     var fallback = {
@@ -21349,30 +21328,18 @@
                     if (dc || dn) updateUserCountryFlag(dc, dn, dm);
                 }
 
-                // 上岗天数：抽屉打开后也要“实时增长”（无需手动刷新）
+                // 上岗天数：仅首次计算，不再定时刷新（UI 锁定）
                 try {
                     const el = statsCard.querySelector('[data-stat="days-on-duty"]');
                     if (el) {
                         const tsRaw = (el.getAttribute('data-earliest-ts') || '').trim();
                         const ts = tsRaw ? Number(tsRaw) : NaN;
                         if (Number.isFinite(ts) && ts > 0) {
-                            window.__daysOnDutyEarliestTs = ts;
                             const unit = getI18nText('metric.cursor_days_unit') || (currentLang === 'en' ? 'days' : '天');
-                            const tick = () => {
-                                try {
-                                    const t0 = window.__daysOnDutyEarliestTs;
-                                    if (!Number.isFinite(t0) || t0 <= 0) return;
-                                    const diff = Math.floor((Date.now() - t0) / (1000 * 60 * 60 * 24));
-                                    const days = Math.max(1, diff);
-                                    const nf2 = new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN');
-                                    el.textContent = `${nf2.format(days)} ${unit}`;
-                                } catch { /* ignore */ }
-                            };
-                            tick();
-                            if (!window.__daysOnDutyTimer) {
-                                // 每分钟刷新一次足够“实时”
-                                window.__daysOnDutyTimer = setInterval(tick, 60 * 1000);
-                            }
+                            const diff = Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24));
+                            const days = Math.max(1, diff);
+                            const nf2 = new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN');
+                            el.textContent = `${nf2.format(days)} ${unit}`;
                         }
                     }
                 } catch { /* ignore */ }
@@ -22132,18 +22099,35 @@
             // 加载维度排名数据资源
             await loadRankResources();
             
-            // 【并行加载】同时发起用户信息查询与全局榜单快照查询，减少首屏等待
+            // 【并行加载】用户数据 + 榜单 + 静默定位(my-ip) + 静态词云快照，减少首屏等待
+            var myIpCountry = '';
+            var staticHotlistJson = null;
+            var apiBaseForInit = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content) || '') || '';
+            if (apiBaseForInit && apiBaseForInit.endsWith('/')) apiBaseForInit = apiBaseForInit.slice(0, -1);
+            var myIpUrlForInit = apiBaseForInit ? (apiBaseForInit + '/api/v2/my-ip') : '/api/v2/my-ip';
+            var staticHotlistUrl = apiBaseForInit ? (apiBaseForInit + '/api/v2/static-hotlist') : '/api/v2/static-hotlist';
             let apiFailed = false;
             try {
                 var preloadLb = (typeof window.__fetchAllLeaderboardSnapshots === 'function') ? window.__fetchAllLeaderboardSnapshots() : Promise.resolve(null);
-                await Promise.all([
+                var myIpPromise = fetch(myIpUrlForInit).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+                var staticHotlistPromise = fetch(staticHotlistUrl).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+                var results = await Promise.all([
                     fetchData().catch(function(fetchError) {
                         apiFailed = true;
                         console.error('[Window.onload] ❌ fetchData 失败:', fetchError);
                         return undefined;
                     }),
-                    preloadLb.catch(function() { return null; })
+                    preloadLb.catch(function() { return null; }),
+                    myIpPromise,
+                    staticHotlistPromise
                 ]);
+                var myIpPayload = results[2];
+                if (myIpPayload && myIpPayload.country && /^[A-Z]{2}$/.test(String(myIpPayload.country).trim())) {
+                    myIpCountry = String(myIpPayload.country).trim().toUpperCase();
+                    if (myIpCountry === 'XX') myIpCountry = '';
+                }
+                staticHotlistJson = results[3] && typeof results[3] === 'object' ? results[3] : null;
+                if (staticHotlistJson) window.__staticVibeSnapshot = staticHotlistJson;
             } catch (e) {
                 apiFailed = true;
                 console.error('[Window.onload] ❌ 并行数据加载异常:', e);
@@ -22154,12 +22138,16 @@
                 showApiStatusWarning();
             }
             
-            // 【自动定位】基础数据加载完成后，自动识别国家并加载本国词云和大盘数据
-            // 优先级：1) localStorage（gate 选籍） 2) GitHub 用户 country_code/ip_location 3) API 返回的 IP 国家（cf-ipcountry） 4) IP API获取
+            // 【自动定位】静默初始化：localStorage → my-ip → lastData → currentUser → getUserLocation
             window.__allowInitCall = true;
             try {
                 var savedCC = (localStorage.getItem('user_country_fixed') || localStorage.getItem('user_selected_country') || localStorage.getItem('selected_country') || '').trim().toUpperCase();
                 
+                if (!savedCC && myIpCountry) {
+                    savedCC = myIpCountry;
+                    try { localStorage.setItem('user_country_fixed', savedCC); localStorage.setItem('selected_country', savedCC); } catch (e) {}
+                    console.log('[Stats2] 自动定位: 使用 my-ip', savedCC);
+                }
                 // 如果还没有国家代码，尝试从window.lastData获取
                 if (!savedCC && window.lastData && (window.lastData.ip_country || window.lastData.ipCountry)) {
                     var ipCc = String(window.lastData.ip_country || window.lastData.ipCountry || '').trim().toUpperCase();
@@ -22202,18 +22190,19 @@
                 // 如果有有效的国家代码，自动加载国家数据并打开右侧抽屉
                 if (savedCC && /^[A-Z]{2}$/.test(savedCC)) {
                     console.log('[Stats2] 🚀 自动加载国家数据:', savedCC);
-                    
-                    // 获取国家显示名称
+                    try { window.__selectedCountry = savedCC; } catch (e) {}
                     const countryName = (countryNameMap && countryNameMap[savedCC])
                         ? (currentLang === 'zh' ? countryNameMap[savedCC].zh : countryNameMap[savedCC].en)
                         : savedCC;
-                    
-                    // 设置当前抽屉国家
                     if (currentDrawerCountry) {
                         currentDrawerCountry.code = savedCC;
                         currentDrawerCountry.name = countryName;
                     }
-                    
+                    // 首屏立即调用 fetchCountryKeywords 渲染右侧抽屉
+                    var svc = window.StatsDataService;
+                    if (svc && typeof svc.fetchCountryKeywords === 'function') {
+                        svc.fetchCountryKeywords().catch(function() {});
+                    }
                     // 切换到国家视图并打开右侧抽屉
                     switchView('country', savedCC);
                     
@@ -25612,10 +25601,7 @@ document.addEventListener('click', function(e) {
                             } else {
                                 renderUserStatsCards(leftBody, merged);
                             }
-                            setTimeout(function() {
-                                if (typeof window.refreshUserStats === 'function') window.refreshUserStats().catch(function(err) { console.warn('[GitHub Sync] refreshUserStats:', err); });
-                                if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard(); else if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
-                            }, 1500);
+                            if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard(); else if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
                             // 若查出的 github_login 为空且本地有 token，自动触发 Worker 同步以初始化 github_login
                             var accessTokenForSync = (window.__githubAccessToken && window.__githubAccessToken.trim()) || (typeof localStorage !== 'undefined' && localStorage.getItem('github_token')) || '';
                             accessTokenForSync = accessTokenForSync.trim();
@@ -25662,10 +25648,7 @@ document.addEventListener('click', function(e) {
                                                 renderUserStatsCards(leftBody, typeof getBestUserRecordForStats === 'function' ? getBestUserRecordForStats(m2) : m2);
                                             }
                                         });
-                                        setTimeout(function() {
-                                            if (typeof window.refreshUserStats === 'function') window.refreshUserStats().catch(function(err) { console.warn('[GitHub Sync] refreshUserStats:', err); });
-                                            if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard(); else if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
-                                        }, 1500);
+                                        if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard(); else if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
                                     }
                                 }).catch(function(err) { console.warn('[GitHub Sync] inner sync:', err); });
                                 }

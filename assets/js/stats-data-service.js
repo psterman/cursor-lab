@@ -435,7 +435,24 @@
                 globalNative: adaptCloudData(payload.globalNative || payload.native || [])
             };
         }
-        /** 优先请求静态快照（纯 KV，0 次 DB），失败或空再请求 country-hot-list */
+        /** 优先从首屏拉取的全量快照内存缓存取（0 请求） */
+        function tryFromLocalSnapshot() {
+            if (!countryParam) return Promise.resolve(emptyResult);
+            try {
+                var snapshot = window.__staticVibeSnapshot;
+                if (snapshot && typeof snapshot === 'object' && snapshot[countryParam]) {
+                    var payload = snapshot[countryParam];
+                    var out = parseHotlistPayload(payload);
+                    if (hasAnyCloud(out)) {
+                        setResult(out);
+                        try { window.__countryCloudFromHotList = true; } catch (e) {}
+                        return out;
+                    }
+                }
+            } catch (e) { /* ignore */ }
+            return emptyResult;
+        }
+        /** 请求静态快照（单国家或全量 KV），失败或空再请求 country-hot-list */
         function tryStaticHotlist() {
             if (!countryParam) return Promise.resolve(emptyResult);
             var staticUrl = apiBase + 'api/v2/static-hotlist?country=' + encodeURIComponent(countryParam) + '&_t=' + Date.now();
@@ -518,7 +535,13 @@
             return (out.Novice && out.Novice.length) || (out.Professional && out.Professional.length) || (out.Architect && out.Architect.length) || (out.globalNative && out.globalNative.length);
         }
 
-        // 优先 static-hotlist（纯 KV，0 次 DB），无数据再 country-hot-list，最后 summary + keywords 兜底
+        // 优先内存全量快照（0 请求）→ static-hotlist（纯 KV）→ country-hot-list → summary + keywords 兜底
+        var localOut = tryFromLocalSnapshot();
+        if (hasAnyCloud(localOut)) {
+            clearTimeout(timeout);
+            try { window.__isCloudLoading = false; } catch (err) {}
+            return Promise.resolve(localOut);
+        }
         return tryStaticHotlist().then(function(staticOut) {
             if (hasAnyCloud(staticOut)) {
                 clearTimeout(timeout);

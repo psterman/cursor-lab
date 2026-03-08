@@ -258,6 +258,8 @@ const KV_KEY_GLOBAL_STATS_V6 = 'GLOBAL_STATS_V6'; // V6 协议全局统计（用
 const KV_KEY_GLOBAL_DASHBOARD_DATA = 'GLOBAL_DASHBOARD_DATA'; // 右侧抽屉：大盘数据缓存（v_global_stats_v6）
 const KV_KEY_GLOBAL_COUNTRY_STATS = 'GLOBAL_COUNTRY_STATS'; // 国家维度累积排行（冷数据，仅定时任务写入，接口只读 KV）
 const KV_KEY_COUNTRY_HOT_LIST_PREFIX = 'country-hot-list'; // 国家级灵魂词云缓存，key: country-hot-list:${CC}，TTL 600s
+const KV_KEY_STATIC_VIBE_SNAPSHOT = 'STATIC_VIBE_SNAPSHOT'; // 全量国家词云快照（Cron 写入，读路径 0 DB）
+const KV_KEY_VIBE_HOTLIST_CACHE = 'VIBE_HOTLIST_CACHE'; // static-hotlist 专用，严禁 Supabase，仅读此键
 const KV_CACHE_TTL = 3600; // 缓存有效期：1小时（秒）
 const COUNTRY_HOT_LIST_TTL = 600; // 国家大盘热词缓存 10 分钟
 
@@ -277,7 +279,7 @@ type CountryWordCloudResult = {
 };
 
 /**
- * 本国词云：KV 优先，命中则 0 次 Supabase；未命中则聚合并写入 KV（10 分钟复用）
+ * 本国词云：仅读 KV（Cron 快照写入），未命中返回空，不做任何 DB 聚合。
  */
 async function getCountryWordCloudCached(
   env: Env,
@@ -309,74 +311,29 @@ async function getCountryWordCloudCached(
           hasData: meritList.length > 0 || slangList.length > 0 || nativeList.length > 0,
         };
       }
+      const snapshotRaw = await env.STATS_STORE.get(KV_KEY_STATIC_VIBE_SNAPSHOT, 'json');
+      if (snapshotRaw && typeof snapshotRaw === 'object' && snapshotRaw[cc]) {
+        const cached = snapshotRaw[cc] as any;
+        const toPhraseHit = (arr: any[]): Array<{ phrase: string; hit_count: number }> =>
+          (Array.isArray(arr) ? arr : [])
+            .map((x: any) => ({ phrase: String(x?.word ?? x?.phrase ?? '').trim(), hit_count: Number(x?.count ?? x?.hit_count ?? 0) || 0 }))
+            .filter((x) => x.phrase && x.hit_count > 0);
+        const meritList = toPhraseHit(cached.merit ?? cached.Professional ?? []);
+        const slangList = toPhraseHit(cached.slang ?? cached.Novice ?? []);
+        const nativeList = toPhraseHit(cached.native ?? cached.globalNative ?? []);
+        const allItems = [...meritList, ...slangList, ...nativeList].sort((a, b) => b.hit_count - a.hit_count);
+        return {
+          top10: allItems.slice(0, 10),
+          cloud50: allItems.slice(0, 50),
+          monthlyVibes: { slang: slangList, merit: meritList, sv_slang: [], phrase: nativeList },
+          hasData: meritList.length > 0 || slangList.length > 0 || nativeList.length > 0,
+        };
+      }
     } catch {
       // ignore
     }
   }
-  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) return empty;
-  try {
-    const rowUrl = `${env.SUPABASE_URL}/rest/v1/country_vibe_stats?country_code=eq.${cc}&select=merit_jsonb,slang_jsonb,native_jsonb`;
-    const globalRpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_country_vibe_stats_global_sum`;
-    const [rows, globalRows] = await Promise.all([
-      fetchSupabaseJson<any[]>(env, rowUrl, { headers: buildSupabaseHeaders(env) }),
-      fetchSupabaseJson<Array<{ word: string; total: number; countries: number }>>(env, globalRpcUrl, {
-        method: 'POST',
-        headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
-        body: JSON.stringify({}),
-      }),
-    ]);
-    const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
-    const globalMap = new Map<string, { total: number; countries: number }>();
-    for (const r of Array.isArray(globalRows) ? globalRows : []) {
-      if (r?.word) globalMap.set(r.word, { total: Number(r.total) || 0, countries: Math.max(1, Number(r.countries) || 1) });
-    }
-    const LIFT_MIN = 1.2;
-    const applyLift = (obj: Record<string, number>): Array<{ phrase: string; hit_count: number }> => {
-      const out: Array<{ phrase: string; hit_count: number }> = [];
-      for (const [word, count] of Object.entries(obj)) {
-        if (!word || count <= 0) continue;
-        const g = globalMap.get(word);
-        const avgGlobal = g ? g.total / Math.max(1, g.countries) : 0;
-        const lift = avgGlobal > 0 ? count / avgGlobal : (count > 0 ? 999 : 0);
-        if (lift >= LIFT_MIN) out.push({ phrase: word, hit_count: count });
-      }
-      out.sort((a, b) => b.hit_count - a.hit_count);
-      return out;
-    };
-    const meritObj = (row?.merit_jsonb && typeof row.merit_jsonb === 'object') ? (row.merit_jsonb as Record<string, number>) : {};
-    const slangObj = (row?.slang_jsonb && typeof row.slang_jsonb === 'object') ? (row.slang_jsonb as Record<string, number>) : {};
-    const nativeObj = (row?.native_jsonb && typeof row.native_jsonb === 'object') ? (row.native_jsonb as Record<string, number>) : {};
-    const meritList = applyLift(meritObj);
-    const slangList = applyLift(slangObj);
-    const nativeList = applyLift(nativeObj);
-    const hasAny = meritList.length > 0 || slangList.length > 0 || nativeList.length > 0;
-    const allItems = [...meritList, ...slangList, ...nativeList].sort((a, b) => b.hit_count - a.hit_count);
-    const result: CountryWordCloudResult = {
-      top10: allItems.slice(0, 10),
-      cloud50: allItems.slice(0, 50),
-      monthlyVibes: { slang: slangList, merit: meritList, sv_slang: [], phrase: nativeList },
-      hasData: hasAny,
-    };
-    if (hasAny && env.STATS_STORE) {
-      const payload = {
-        merit: meritList.map((x) => ({ word: x.phrase, weight: 0, count: x.hit_count })),
-        slang: slangList.map((x) => ({ word: x.phrase, weight: 0, count: x.hit_count })),
-        native: nativeList.map((x) => ({ word: x.phrase, weight: 0, count: x.hit_count })),
-        Novice: slangList.map((x) => ({ word: x.phrase, weight: 0, count: x.hit_count })),
-        Professional: meritList.map((x) => ({ word: x.phrase, weight: 0, count: x.hit_count })),
-        globalNative: nativeList.map((x) => ({ word: x.phrase, weight: 0, count: x.hit_count })),
-      };
-      try {
-        await env.STATS_STORE.put(kvKey, JSON.stringify(payload), { expirationTtl: COUNTRY_WORDCLOUD_KV_TTL });
-      } catch {
-        // ignore
-      }
-    }
-    return result;
-  } catch (e: any) {
-    console.warn('[Worker] getCountryWordCloudCached 失败:', e?.message);
-    return empty;
-  }
+  return empty;
 }
 
 /**
@@ -3995,14 +3952,14 @@ app.get('/api/rank-resources', async (c) => {
 
 /**
  * GET /api/national-lexicon?country=CN&type=merit_board
- * 优先从 country_vibe_stats 读取灵魂词（Lift>1.2），无数据时回退到 user_analysis 聚合
+ * 优先从 KV STATIC_VIBE_SNAPSHOT 解析，无数据时回退 slang_trends_pool / user_analysis
  * type: merit_board | slang_list | mantra_top
  */
 const LEXICON_TYPES = new Set(['merit_board', 'slang_list', 'mantra_top']);
-const LEXICON_TO_COL: Record<string, 'merit_jsonb' | 'slang_jsonb' | 'native_jsonb'> = {
-  merit_board: 'merit_jsonb',
-  slang_list: 'slang_jsonb',
-  mantra_top: 'native_jsonb',
+const LEXICON_TO_HOTLIST_KEYS: Record<string, string[]> = {
+  merit_board: ['Professional', 'merit'],
+  slang_list: ['Novice', 'slang'],
+  mantra_top: ['Architect', 'globalNative', 'native'],
 };
 app.get('/api/national-lexicon', async (c) => {
   try {
@@ -4018,44 +3975,32 @@ app.get('/api/national-lexicon', async (c) => {
     if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
       return c.json({ data: [] }, 200);
     }
-    const col = LEXICON_TO_COL[type] || 'merit_jsonb';
-    const LIFT_MIN = 1.2;
 
-    // 1) 优先从 country_vibe_stats 读取（灵魂词 Lift 算法）
-    try {
-      const rowUrl = `${env.SUPABASE_URL}/rest/v1/country_vibe_stats?country_code=eq.${country}&select=${col}`;
-      const rows = await fetchSupabaseJson<any[]>(env, rowUrl, { headers: buildSupabaseHeaders(env) });
-      const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
-      const countryObj = (row?.[col] && typeof row[col] === 'object') ? (row[col] as Record<string, number>) : null;
-      if (countryObj && Object.keys(countryObj).length > 0) {
-        const globalRpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_country_vibe_stats_global_sum`;
-        const globalRows = await fetchSupabaseJson<Array<{ word: string; total: number; countries: number }>>(env, globalRpcUrl, {
-          method: 'POST',
-          headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
-          body: JSON.stringify({}),
-        });
-        const globalMap = new Map<string, { total: number; countries: number }>();
-        for (const r of Array.isArray(globalRows) ? globalRows : []) {
-          if (r?.word) globalMap.set(r.word, { total: Number(r.total) || 0, countries: Math.max(1, Number(r.countries) || 1) });
-        }
-        const out: Array<{ phrase: string; hit_count: number }> = [];
-        for (const [word, count] of Object.entries(countryObj)) {
-          if (!word || count <= 0) continue;
-          const g = globalMap.get(word);
-          const avgGlobal = g ? (g.total / Math.max(1, g.countries)) : 0;
-          const lift = avgGlobal > 0 ? count / avgGlobal : (count > 0 ? 999 : 0);
-          if (lift >= LIFT_MIN) {
-            out.push({ phrase: word, hit_count: count });
+    // 1) 优先从 KV STATIC_VIBE_SNAPSHOT 解析（0 DB）
+    if (env.STATS_STORE) {
+      try {
+        const raw = await env.STATS_STORE.get(KV_KEY_STATIC_VIBE_SNAPSHOT, 'json');
+        const snapshot = raw && typeof raw === 'object' ? (raw as Record<string, any>) : null;
+        const countryPayload = snapshot?.[country];
+        if (countryPayload && typeof countryPayload === 'object') {
+          const keys = LEXICON_TO_HOTLIST_KEYS[type] || ['Professional', 'merit'];
+          let arr: any[] = [];
+          for (const k of keys) {
+            const a = countryPayload[k];
+            if (Array.isArray(a) && a.length) arr = arr.concat(a);
+          }
+          const data = arr
+            .map((x: any) => ({ phrase: String(x?.word ?? x?.phrase ?? '').trim(), hit_count: Number(x?.count ?? x?.hit_count ?? 0) || 0 }))
+            .filter((x) => x.phrase && x.hit_count > 0)
+            .sort((a, b) => b.hit_count - a.hit_count)
+            .slice(0, 20);
+          if (data.length > 0) {
+            return c.json({ data }, 200, { 'Cache-Control': 'public, max-age=120' });
           }
         }
-        out.sort((a, b) => b.hit_count - a.hit_count);
-        const data = out.slice(0, 20);
-        if (data.length > 0) {
-          return c.json({ data }, 200, { 'Cache-Control': 'public, max-age=120' });
-        }
+      } catch (e: any) {
+        console.warn('[Worker] /api/national-lexicon STATIC_VIBE_SNAPSHOT 读取失败:', e?.message);
       }
-    } catch (e: any) {
-      console.warn('[Worker] /api/national-lexicon country_vibe_stats 读取失败:', e?.message);
     }
 
     // 2) 回退：从 slang_trends_pool 读取（report-vibe 已写入的热词；pool 仅有 merit/slang/sv_slang，无 phrase）
@@ -6819,28 +6764,42 @@ app.post('/api/v2/verify-location', async (c) => {
   }
 
   const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/increment_country_vibe_stats`;
-  try {
-    await fetchSupabaseJson(env, rpcUrl, {
-      method: 'POST',
-      headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
-      body: JSON.stringify({
-        p_country_code: countryCodeRaw,
-        p_merit: p_merit,
-        p_slang: p_slang,
-        p_native: p_native,
-        p_weight: weight,
-      }),
-    });
-  } catch (err: any) {
-    console.warn('[Worker] /api/v2/verify-location increment_country_vibe_stats 失败:', err?.message);
-    return c.json({ status: 'error', error: err?.message || 'RPC 失败' }, 500);
+  const body = {
+    p_country_code: countryCodeRaw,
+    p_merit: p_merit,
+    p_slang: p_slang,
+    p_native: p_native,
+    p_weight: weight,
+  };
+  const ctx = c.executionCtx;
+  if (ctx && typeof ctx.waitUntil === 'function') {
+    ctx.waitUntil(
+      fetchSupabaseJson(env, rpcUrl, {
+        method: 'POST',
+        headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify(body),
+      }).catch((err: any) => {
+        console.warn('[Worker] /api/v2/verify-location increment_country_vibe_stats 失败:', err?.message);
+      })
+    );
+  } else {
+    try {
+      await fetchSupabaseJson(env, rpcUrl, {
+        method: 'POST',
+        headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify(body),
+      });
+    } catch (err: any) {
+      console.warn('[Worker] /api/v2/verify-location increment_country_vibe_stats 失败:', err?.message);
+      return c.json({ status: 'error', error: err?.message || 'RPC 失败' }, 500);
+    }
   }
   return c.json({ status: 'success', weight, country_code: countryCodeRaw });
 });
 
 /**
  * GET /api/v2/country-hot-list?country=CN
- * 国家大盘灵魂词（Lift > 1.2），复用 getCountryWordCloudCached KV 缓存（10 分钟）。
+ * 仅读 KV（per-country 或 STATIC_VIBE_SNAPSHOT），无数据返回空结构。
  */
 app.get('/api/v2/country-hot-list', async (c) => {
   const env = c.env;
@@ -6854,6 +6813,10 @@ app.get('/api/v2/country-hot-list', async (c) => {
       const cached = await env.STATS_STORE.get(kvKey, 'json');
       if (cached && typeof cached === 'object') {
         return c.json(cached);
+      }
+      const snapshotRaw = await env.STATS_STORE.get(KV_KEY_STATIC_VIBE_SNAPSHOT, 'json');
+      if (snapshotRaw && typeof snapshotRaw === 'object' && snapshotRaw[countryRaw]) {
+        return c.json(snapshotRaw[countryRaw]);
       }
     } catch {
       // ignore
@@ -6876,9 +6839,8 @@ app.get('/api/v2/country-hot-list', async (c) => {
 });
 
 /**
- * GET /api/v2/static-hotlist?country=CN
- * 静态快照：仅从 KV 读取，不查询数据库。用于降低 Supabase 负载、提升前端加载速度。
- * 无 country 或 KV 无数据时返回空结构。
+ * GET /api/v2/static-hotlist?country=CN 或 无参数
+ * 严禁直接查询 Supabase。仅从 env.STATS_STORE.get('VIBE_HOTLIST_CACHE') 读取。
  */
 const EMPTY_HOTLIST_PAYLOAD = {
   Novice: [],
@@ -6892,23 +6854,41 @@ const EMPTY_HOTLIST_PAYLOAD = {
 app.get('/api/v2/static-hotlist', async (c) => {
   const env = c.env;
   const countryRaw = (c.req.query('country') || '').trim().toUpperCase();
-  c.header('Cache-Control', 'public, max-age=300');
-  if (!/^[A-Z]{2}$/.test(countryRaw)) {
-    return c.json(EMPTY_HOTLIST_PAYLOAD);
-  }
-  const kvKey = `${KV_KEY_COUNTRY_HOT_LIST_PREFIX}:${countryRaw}`;
-  if (!env.STATS_STORE) {
-    return c.json(EMPTY_HOTLIST_PAYLOAD);
+  c.header('Cache-Control', 'public, max-age=3600');
+  const kv = env.STATS_STORE;
+  if (!kv) {
+    if (/^[A-Z]{2}$/.test(countryRaw)) return c.json(EMPTY_HOTLIST_PAYLOAD);
+    return c.json({});
   }
   try {
-    const cached = await env.STATS_STORE.get(kvKey, 'json');
-    if (cached && typeof cached === 'object') {
-      return c.json(cached);
+    const raw = await kv.get(KV_KEY_VIBE_HOTLIST_CACHE, 'text');
+    if (!raw) {
+      if (/^[A-Z]{2}$/.test(countryRaw)) return c.json(EMPTY_HOTLIST_PAYLOAD);
+      return c.json({});
     }
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    if (!/^[A-Z]{2}$/.test(countryRaw)) {
+      return c.json(data);
+    }
+    const countryPayload = data[countryRaw];
+    if (countryPayload && typeof countryPayload === 'object') {
+      return c.json(countryPayload);
+    }
+    return c.json(EMPTY_HOTLIST_PAYLOAD);
   } catch {
-    // ignore
+    if (/^[A-Z]{2}$/.test(countryRaw)) return c.json(EMPTY_HOTLIST_PAYLOAD);
+    return c.json({});
   }
-  return c.json(EMPTY_HOTLIST_PAYLOAD);
+});
+
+/**
+ * GET /api/v2/my-ip
+ * 返回 CF 国家码，用于首屏静默定位。
+ */
+app.get('/api/v2/my-ip', (c) => {
+  const raw = c.req.raw as any;
+  const country = String(raw?.cf?.country || c.req.header('cf-ipcountry') || 'XX').trim().toUpperCase();
+  return c.json({ country: country || 'XX' }, 200, { 'Cache-Control': 'public, max-age=60' });
 });
 
 /**
@@ -10414,6 +10394,7 @@ async function generateCountryHotlistSnapshot(env: Env): Promise<{ success: bool
     const toWordItem = (arr: Array<{ phrase: string; hit_count: number }>) =>
       arr.map((x) => ({ word: x.phrase, weight: 0, count: x.hit_count }));
     const countryList = Array.isArray(rows) ? rows : [];
+    const fullSnapshot: Record<string, unknown> = {};
     let written = 0;
     for (const row of countryList) {
       const cc = String(row?.country_code ?? '').trim().toUpperCase();
@@ -10436,6 +10417,7 @@ async function generateCountryHotlistSnapshot(env: Env): Promise<{ success: bool
         Architect: phraseItems,
         globalNative: phraseItems,
       };
+      fullSnapshot[cc] = payload;
       const kvKey = `${KV_KEY_COUNTRY_HOT_LIST_PREFIX}:${cc}`;
       try {
         await env.STATS_STORE.put(kvKey, JSON.stringify(payload), { expirationTtl: COUNTRY_HOTLIST_SNAPSHOT_KV_TTL });
@@ -10443,6 +10425,13 @@ async function generateCountryHotlistSnapshot(env: Env): Promise<{ success: bool
       } catch {
         // skip single country on KV error
       }
+    }
+    try {
+      const snapshotStr = JSON.stringify(fullSnapshot);
+      await env.STATS_STORE.put(KV_KEY_STATIC_VIBE_SNAPSHOT, snapshotStr, { expirationTtl: COUNTRY_HOTLIST_SNAPSHOT_KV_TTL });
+      await env.STATS_STORE.put(KV_KEY_VIBE_HOTLIST_CACHE, snapshotStr, { expirationTtl: COUNTRY_HOTLIST_SNAPSHOT_KV_TTL });
+    } catch (e: any) {
+      console.warn('[Worker] 词云快照 KV 写入失败:', e?.message);
     }
     console.log('[Worker] ✅ 国家词云快照写入 KV 完成，国家数:', written);
     return { success: true, countriesWritten: written };
