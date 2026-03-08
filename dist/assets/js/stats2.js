@@ -68,7 +68,58 @@
       }
       // 不清理 Hash，让 Supabase SDK 自动解析 #access_token 等并设置 session
     })();
-    
+
+    /**
+     * 【脏数据自动清理】页面加载第一时间检查：旧格式 GitHub Token（如误存的 JWT）或 URL 指纹与本地不一致时，清除关键项并强制刷新，避免 401/冲突。
+     */
+    (function dirtyDataCleanup() {
+      try {
+        var gt = typeof localStorage !== 'undefined' && localStorage.getItem('github_token');
+        var vgt = typeof localStorage !== 'undefined' && localStorage.getItem('vibe_github_access_token');
+        var fpLocal = typeof localStorage !== 'undefined' && localStorage.getItem('user_fingerprint');
+        var href = (typeof _loc !== 'undefined' && _loc && _loc.href) ? _loc.href : (typeof window !== 'undefined' && window.location && window.location.href) ? window.location.href : '';
+        var isOldFormatToken = function(val) {
+          if (!val || typeof val !== 'string') return false;
+          var parts = val.trim().split('.');
+          if (parts.length !== 3) return false;
+          return parts.every(function(p) { return /^[A-Za-z0-9_-]+$/.test(p); });
+        };
+        var urlFp = '';
+        if (href && href.indexOf('?') !== -1) {
+          var q = href.slice(href.indexOf('?') + 1).split('&');
+          for (var i = 0; i < q.length; i++) {
+            var kv = q[i].split('=');
+            if ((kv[0] === 'fingerprint' || kv[0] === 'fp') && kv[1]) {
+              urlFp = decodeURIComponent(kv[1]).trim();
+              break;
+            }
+          }
+        }
+        var needClear = false;
+        if (gt && isOldFormatToken(gt)) {
+          needClear = true;
+        }
+        if (vgt && isOldFormatToken(vgt)) {
+          needClear = true;
+        }
+        if (urlFp && fpLocal && String(fpLocal).trim() !== urlFp) {
+          needClear = true;
+        }
+        if (!needClear) return;
+        var keysToRemove = ['github_token', 'vibe_github_access_token', 'vibe_stats2_swr_cache'];
+        for (var k = 0; k < keysToRemove.length; k++) {
+          try { localStorage.removeItem(keysToRemove[k]); } catch (e) {}
+        }
+        if (typeof window !== 'undefined') {
+          try { window.__githubAccessToken = ''; } catch (e) {}
+        }
+        if (typeof location !== 'undefined' && location.reload) {
+          location.reload(true);
+        }
+      } catch (e) {
+        if (typeof console !== 'undefined' && console.warn) console.warn('[dirtyDataCleanup]', e);
+      }
+    })();
 
     // --- Script Block ---
     // 【已迁移】全局错误处理与 eval5 屏蔽 → stats-libs.min.js
@@ -309,45 +360,180 @@
 
     // --- Script Block ---
 
-    // 【一体化选籍+登录拦截】渲染统计数据前检查：无 selected_country 或无 supabase_session 则强制显示国家选择弹窗
+    // 【强制性初始化拦截】id=force-onboarding-overlay；国家存 localStorage，登录态用 Supabase Session；先选国家再显示 GitHub 按钮；双重满足时静默销毁遮罩，无闪烁
     (function() {
-        function closeCountryPickerModal() {
-            var modal = document.getElementById('country-selector-modal');
-            if (modal) modal.style.display = 'none';
-            try { document.body.style.overflow = ''; document.documentElement.style.overflow = ''; } catch (e) {}
+        var OVERLAY_ID = 'force-onboarding-overlay';
+        var GITHUB_SECTION_ID = 'force-onboarding-github-section';
+        function getStoredCountry() {
+            try {
+                var v = localStorage.getItem('selected_country') || localStorage.getItem('user_selected_country') || '';
+                return (v && String(v).trim().length >= 2) ? String(v).trim().toUpperCase() : null;
+            } catch (e) { return null; }
         }
-        document.addEventListener('click', function(e) {
-            var btn = e.target && (e.target.id === 'country-selector-close' || (e.target.closest && e.target.closest('#country-selector-close')));
-            if (btn) { closeCountryPickerModal(); }
-        });
-        function run() {
-            var selectedCountry = null;
-            try { selectedCountry = localStorage.getItem('selected_country'); } catch (e) {}
-            if (selectedCountry && String(selectedCountry).trim().length >= 2) {
-                try {
-                    window.currentCountryCode = String(selectedCountry).trim().toUpperCase();
-                    localStorage.setItem('user_country_fixed', window.currentCountryCode);
-                } catch (e) {}
-                return;
-            }
-            var modal = document.getElementById('country-selector-modal');
-            if (modal) {
-                window.__countryPickerForced = true;
-                window.__countrySelectorSelectedCode = '';
-                modal.style.display = 'block';
-                modal.style.position = 'fixed';
-                modal.style.top = '0'; modal.style.left = '0'; modal.style.right = '0'; modal.style.bottom = '0';
-                modal.style.zIndex = '200';
+        function showOverlay() {
+            var el = document.getElementById(OVERLAY_ID);
+            if (el) {
+                el.classList.remove('stats2-gate-removed');
+                el.style.display = 'flex';
+                el.setAttribute('aria-hidden', 'false');
                 try { document.body.style.overflow = 'hidden'; document.documentElement.style.overflow = 'hidden'; } catch (e) {}
             }
         }
+        function restoreBodyScroll() {
+            try { document.body.style.overflow = ''; document.documentElement.style.overflow = ''; } catch (e) {}
+        }
+        function removeOverlayImmediately() {
+            var el = document.getElementById(OVERLAY_ID);
+            if (el && el.parentNode) el.parentNode.removeChild(el);
+            restoreBodyScroll();
+        }
+        function hideGateOverlay() {
+            var el = document.getElementById(OVERLAY_ID);
+            if (!el) { restoreBodyScroll(); return; }
+            restoreBodyScroll();
+            el.classList.add('stats2-gate-fade-out');
+            el.setAttribute('aria-hidden', 'true');
+            el.addEventListener('transitionend', function onEnd(ev) {
+                if (ev.target !== el || (ev.propertyName && ev.propertyName !== 'opacity')) return;
+                el.removeEventListener('transitionend', onEnd);
+                if (el.parentNode) el.parentNode.removeChild(el);
+            });
+        }
+        function showGitHubSectionIfCountrySelected() {
+            var code = (window.__countrySelectorSelectedCode || '').trim().toUpperCase();
+            var section = document.getElementById(GITHUB_SECTION_ID);
+            if (section && /^[A-Z]{2}$/.test(code)) section.style.display = '';
+        }
+        function checkGatePassed(session) {
+            var country = getStoredCountry();
+            var hasSession = !!(session && session.user);
+            if (country && hasSession) {
+                try {
+                    window.currentCountryCode = country;
+                    localStorage.setItem('user_country_fixed', country);
+                    localStorage.setItem('selected_country', country);
+                    localStorage.setItem('user_selected_country', country);
+                } catch (e) {}
+                removeOverlayImmediately();
+                // 确认国籍：将本地 identityLevelCloud 上报至 country_vibe_stats（静默，不阻塞）
+                (function() {
+                    var ilc = null;
+                    try {
+                        if (window.StatsDataService && typeof window.StatsDataService.getLastAnalysisData === 'function') {
+                            var last = window.StatsDataService.getLastAnalysisData();
+                            ilc = (last && last.identityLevelCloud) ? last.identityLevelCloud : null;
+                        }
+                        if (!ilc) {
+                            var raw = localStorage.getItem('last_analysis_data') || '';
+                            if (raw) {
+                                var data = JSON.parse(raw);
+                                var root = (data && data.analysis != null) ? data.analysis : data;
+                                if (root && root.stats && root.stats.identityLevelCloud) ilc = root.stats.identityLevelCloud;
+                                else if (root && root.identityLevelCloud) ilc = root.identityLevelCloud;
+                            }
+                        }
+                    } catch (e) {}
+                    if (ilc && typeof ilc === 'object' && /^[A-Z]{2}$/.test(country)) {
+                        var base = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : '') || '';
+                        if (base && !base.endsWith('/')) base += '/';
+                        var url = base + 'api/v2/verify-location';
+                        fetch(url, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ country_code: country, identityLevelCloud: ilc })
+                        }).catch(function() {});
+                    }
+                })();
+                return true;
+            }
+            return false;
+        }
+        function runGateCheck() {
+            var overlay = document.getElementById(OVERLAY_ID);
+            if (!overlay || overlay.classList.contains('stats2-gate-removed')) return;
+            var country = getStoredCountry();
+            if (!country) {
+                window.__countryPickerForced = true;
+                window.__countrySelectorSelectedCode = '';
+                showOverlay();
+                return;
+            }
+            var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+            if (!sb || typeof sb.auth !== 'object') return;
+            sb.auth.getSession().then(function(r) {
+                var session = (r && r.data && r.data.session) ? r.data.session : null;
+                if (checkGatePassed(session)) return;
+                showOverlay();
+            }).catch(function() {
+                showOverlay();
+            }).finally(function() {
+                var ov = document.getElementById(OVERLAY_ID);
+                if (ov && ov.parentNode && window.getComputedStyle(ov).display === 'flex') {
+                    try { restoreBodyScroll(); } catch (e) {}
+                }
+            });
+        }
+        function run() {
+            var overlay = document.getElementById(OVERLAY_ID);
+            if (!overlay) return;
+            var country = getStoredCountry();
+            if (country) {
+                try {
+                    window.currentCountryCode = country;
+                    localStorage.setItem('user_country_fixed', country);
+                } catch (e) {}
+                overlay.style.display = 'none';
+            }
+            window.__countryPickerForced = true;
+            window.__countrySelectorSelectedCode = '';
+            var poll = setInterval(function() {
+                var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+                if (!sb || typeof sb.auth !== 'object') return;
+                clearInterval(poll);
+                runGateCheck();
+                sb.auth.onAuthStateChange(function(event, session) {
+                    if (session) runGateCheck();
+                });
+            }, 200);
+            setTimeout(function() { clearInterval(poll); }, 15000);
+            if (!country) showOverlay();
+            setTimeout(function() {
+                var el = document.getElementById(OVERLAY_ID);
+                if (el && el.parentNode) {
+                    try { removeOverlayImmediately(); } catch (e) {}
+                }
+            }, 15000);
+        }
+        document.addEventListener('click', function(e) {
+            var btn = e.target && (e.target.id === 'country-selector-close' || (e.target.closest && e.target.closest('#country-selector-close')));
+            if (btn) {
+                var modal = document.getElementById('country-selector-modal');
+                if (modal) modal.style.display = 'none';
+                try { document.body.style.overflow = ''; document.documentElement.style.overflow = ''; } catch (e) {}
+            }
+        });
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', run);
         } else {
             run();
         }
+        window.runGateCheck = runGateCheck;
+        window.hideGateOverlay = hideGateOverlay;
+        window.showGitHubSectionIfCountrySelected = showGitHubSectionIfCountrySelected;
     })();
-    
+
+    /** GitHub 401 时清除本地 token 并将同步按钮恢复为「未连接」 */
+    window.__clearGitHubTokenAndResetSyncUI = function() {
+        try {
+            if (typeof localStorage !== 'undefined') {
+                localStorage.removeItem('github_token');
+                localStorage.removeItem('vibe_github_access_token');
+            }
+            if (typeof window !== 'undefined' && window.__githubAccessToken !== undefined) window.__githubAccessToken = '';
+            var sb = document.getElementById('sync-github-btn');
+            if (sb) { sb.textContent = '未连接'; sb.disabled = false; }
+        } catch (e) { if (typeof console !== 'undefined' && console.warn) console.warn('[clearGitHubToken]', e); }
+    };
 
     // --- Script Block ---
 
@@ -357,6 +543,12 @@
     var USER_CACHE_TTL_MS = 5 * 60 * 1000;
     var REPORT_REQUEST_TIMEOUT_MS = 8000;
     var CYBER_REPORT_STORAGE_PREFIX = 'vibe_cyber_report_';
+    /** 战力报告 id 映射与报告内容缓存 TTL（30min），减少 user_analysis 重复查 */
+    var REPORT_ID_CACHE_TTL_MS = 30 * 60 * 1000;
+    var REPORT_ID_CACHE_PREFIX = 'vibe_report_id_';
+    var REPORT_USER_CACHE_PREFIX = 'vibe_report_user_';
+    var REPORT_RANKS_CACHE_TTL_MS = 15 * 60 * 1000;
+    var REPORT_RANKS_CACHE_PREFIX = 'vibe_report_ranks_';
 
     /** 从 localStorage 读取战力报告缓存（支持 id / fingerprint / user_name 任一 key） */
     function getReportFromLocalStorage(identifier) {
@@ -384,15 +576,32 @@
 
     function resolveUserIdForReport(identifier, cb) {
         if (!identifier) { cb(null); return; }
-        var supabase = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
-        if (!supabase || typeof supabase.from !== 'function') { cb(null); return; }
         var s = String(identifier).trim();
         if (!s) { cb(null); return; }
         if (/^[0-9a-fA-F-]{32,}$/.test(s) || /^\d+$/.test(s)) { cb(s); return; }
+        try {
+            var cacheKey = REPORT_ID_CACHE_PREFIX + String(s).replace(/\s/g, '_').slice(0, 120);
+            var raw = typeof localStorage !== 'undefined' && localStorage.getItem(cacheKey);
+            if (raw) {
+                var obj = JSON.parse(raw);
+                if (obj && obj.id != null && obj.ts != null && (Date.now() - obj.ts < REPORT_ID_CACHE_TTL_MS)) {
+                    cb(String(obj.id));
+                    return;
+                }
+            }
+        } catch (_) {}
+        var supabase = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+        if (!supabase || typeof supabase.from !== 'function') { cb(null); return; }
         supabase.from('user_analysis').select('id').eq('fingerprint', s).limit(1).maybeSingle().then(function(r) {
-            if (r && r.data && r.data.id) { cb(r.data.id); return; }
+            if (r && r.data && r.data.id) {
+                try { localStorage.setItem(cacheKey, JSON.stringify({ id: r.data.id, ts: Date.now() })); } catch (_) {}
+                cb(r.data.id);
+                return;
+            }
             supabase.from('user_analysis').select('id').eq('user_name', s).limit(1).maybeSingle().then(function(r2) {
-                cb(r2 && r2.data && r2.data.id ? r2.data.id : null);
+                var id = r2 && r2.data && r2.data.id ? r2.data.id : null;
+                if (id) try { localStorage.setItem(cacheKey, JSON.stringify({ id: id, ts: Date.now() })); } catch (_) {}
+                cb(id);
             });
         });
     }
@@ -400,17 +609,42 @@
     function fetchUserAnalysisForReport(userId, cb) {
         var cached = window.userCache[userId];
         if (cached && (Date.now() - cached.ts) < USER_CACHE_TTL_MS) { cb(cached.data); return; }
+        try {
+            var key = REPORT_USER_CACHE_PREFIX + String(userId);
+            var raw = typeof localStorage !== 'undefined' && localStorage.getItem(key);
+            if (raw) {
+                var obj = JSON.parse(raw);
+                if (obj && obj.data != null && obj.ts != null && (Date.now() - obj.ts < REPORT_ID_CACHE_TTL_MS)) {
+                    window.userCache[userId] = { data: obj.data, ts: obj.ts };
+                    cb(obj.data);
+                    return;
+                }
+            }
+        } catch (_) {}
         var supabase = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
         if (!supabase || typeof supabase.from !== 'function') { cb(null); return; }
         supabase.from('user_analysis').select('*').eq('id', userId).single().then(function(r) {
             if (r.error || !r.data) { cb(null); return; }
             window.userCache[userId] = { data: r.data, ts: Date.now() };
+            try { localStorage.setItem(REPORT_USER_CACHE_PREFIX + String(userId), JSON.stringify({ data: r.data, ts: Date.now() })); } catch (_) {}
             cb(r.data);
         });
     }
 
-    /** 通过 RPC get_user_ranks_6d + get_leaderboard_my_rank（天梯榜）拉取排名，合并到 data 供详情弹窗使用 */
+    /** 通过 RPC get_user_ranks_6d + get_leaderboard_my_rank（天梯榜）拉取排名，合并到 data 供详情弹窗使用；优先 15min 本地缓存 */
     function fetchAndMergeRanksForReport(userId, data, cb) {
+        try {
+            var ranksKey = REPORT_RANKS_CACHE_PREFIX + String(userId);
+            var raw = typeof localStorage !== 'undefined' && localStorage.getItem(ranksKey);
+            if (raw) {
+                var obj = JSON.parse(raw);
+                if (obj && obj.data != null && obj.ts != null && (Date.now() - obj.ts < REPORT_RANKS_CACHE_TTL_MS)) {
+                    data.cached_ranks = obj.data;
+                    cb(data);
+                    return;
+                }
+            }
+        } catch (_) {}
         var supabase = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
         if (!supabase || typeof supabase.rpc !== 'function') { cb(data); return; }
         var base = (data.cached_ranks != null) ? (typeof data.cached_ranks === 'string' ? (function() { try { return JSON.parse(data.cached_ranks); } catch (_) { return {}; } })() : data.cached_ranks) : {};
@@ -420,6 +654,7 @@
 
         function mergeLeaderboardAndDone() {
             data.cached_ranks = merged;
+            try { localStorage.setItem(REPORT_RANKS_CACHE_PREFIX + String(userId), JSON.stringify({ data: merged, ts: Date.now() })); } catch (_) {}
             cb(data);
         }
 
@@ -428,7 +663,11 @@
                 { metric: 'public_repos', rankKey: 'public_repos_rank' },
                 { metric: 'stars', rankKey: 'stars_rank' },
                 { metric: 'followers', rankKey: 'followers_rank' },
-                { metric: 'languages', rankKey: 'lang_breadth_rank' }
+                { metric: 'languages', rankKey: 'lang_breadth_rank' },
+                { metric: 'forks', rankKey: 'forks_rank' },
+                { metric: 'total_code_size', rankKey: 'code_size_rank' },
+                { metric: 'active_days', rankKey: 'active_days_rank' },
+                { metric: 'latest_repo_updated_at', rankKey: 'repo_updated_rank' }
             ];
             var pending = leaderboardMetrics.length;
             if (pending === 0) { mergeLeaderboardAndDone(); return; }
@@ -497,6 +736,27 @@
         return n + ' B';
     }
 
+    /** 预解析 JSON 缓存：避免切换侧边栏时重复执行昂贵的 JSON.parse（github_stats / identity_cloud） */
+    var __parseMemo = {};
+    function parseJsonMemo(name, raw) {
+        if (raw == null) return name === 'github_stats' || name === 'identity_cloud' ? (name === 'identity_cloud' ? {} : {}) : null;
+        if (typeof raw !== 'string') return raw;
+        var k = name + '_' + raw.length + '_' + (raw.substring(0, 80) || '');
+        if (__parseMemo[k] !== undefined) return __parseMemo[k];
+        try { var out = JSON.parse(raw); __parseMemo[k] = out; return out; } catch (_) { var empty = name === 'identity_cloud' ? {} : {}; __parseMemo[k] = empty; return empty; }
+    }
+
+    /** 星标取值优先级：totalStars -> totalRepoStars -> github_stars，取第一个有效正数；若无则返回 null（避免误显 0） */
+    function resolveDisplayStars(data) {
+        if (!data) return null;
+        var gs = (data.github_stats && typeof data.github_stats === 'object') ? data.github_stats : parseJsonMemo('github_stats', data.github_stats);
+        var a = gs.totalStars != null ? Number(gs.totalStars) : NaN;
+        var b = gs.totalRepoStars != null ? Number(gs.totalRepoStars) : NaN;
+        var c = data.github_stars != null ? Number(data.github_stars) : NaN;
+        var nums = [a, b, c].filter(function(n) { return !Number.isNaN(n) && n > 0; });
+        return nums.length ? Math.max.apply(null, nums) : null;
+    }
+
     function renderCyberPowerReportBody(data) {
         var body = document.getElementById('user-modal-body');
         var titleEl = document.querySelector('#user-modal .user-modal-content h3');
@@ -508,21 +768,22 @@
             d.textContent = s;
             return d.innerHTML;
         };
-        var gs = (data && data.github_stats) ? (typeof data.github_stats === 'string' ? (function() { try { return JSON.parse(data.github_stats); } catch (_) { return {}; } })() : data.github_stats) : {};
+        var gs = (data && data.github_stats) ? (typeof data.github_stats === 'string' ? parseJsonMemo('github_stats', data.github_stats) : data.github_stats) : {};
         var ranks = (data && data.cached_ranks) ? (typeof data.cached_ranks === 'string' ? (function() { try { return JSON.parse(data.cached_ranks); } catch (_) { return {}; } })() : data.cached_ranks) : {};
         var langDist = gs.languageDistribution || {};
         var langBreadth = typeof langDist === 'object' && langDist !== null ? Object.keys(langDist).length : 0;
         var DEFAULT_AVATAR = (typeof window.DEFAULT_AVATAR !== 'undefined') ? window.DEFAULT_AVATAR : '';
 
-        var repoUpdatedAt = (gs.updated_at != null || gs.updatedAt != null) ? (function() {
-            var raw = gs.updated_at || gs.updatedAt;
-            if (typeof raw !== 'string' || raw.length < 10) return '—';
-            try { return new Date(raw).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }); } catch (_) { return raw; }
-        })() : '—';
+        var repoUpdatedAt = (function() {
+            var raw = gs.latest_repo_updated_at || gs.updated_at || gs.updatedAt;
+            if (raw == null || (typeof raw === 'string' && raw.length < 10)) return '—';
+            try { return new Date(raw).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }); } catch (_) { return typeof raw === 'string' ? raw : '—'; }
+        })();
 
+        var starsVal = resolveDisplayStars(data);
         var items = [
             { label: '仓库数', value: gs.publicRepos != null ? String(gs.publicRepos) : '—', rankKeys: ['public_repos_rank', 'publicReposRank'], source: 'GitHub' },
-            { label: '星标总数', value: data.github_stars != null ? Number(data.github_stars).toLocaleString() : '—', rankKeys: ['stars_rank', 'starsRank'], source: 'GitHub' },
+            { label: '星标总数', value: starsVal != null ? Number(starsVal).toLocaleString() : '—', rankKeys: ['stars_rank', 'starsRank'], source: 'GitHub' },
             { label: 'Fork 数量', value: gs.totalForks != null ? String(gs.totalForks) : '—', rankKeys: ['forks_rank', 'forksRank'], source: 'GitHub' },
             { label: '代码总量', value: formatCodeSize(gs.totalCodeSize), rankKeys: ['code_size_rank', 'codeSizeRank'], source: 'GitHub' },
             { label: '30日活跃度', value: gs.activeDays != null ? String(gs.activeDays) : '—', rankKeys: ['active_days_rank', 'activeDaysRank'], source: 'GitHub' },
@@ -533,15 +794,68 @@
         ];
 
         var answerContent = '';
-        var roastText = (data.roast_text != null && data.roast_text !== '') ? String(data.roast_text) : '';
+        var roastText = (data.roast_text || data.roastText || '') ? String(data.roast_text || data.roastText) : '';
+        if (!roastText && data.stats && typeof data.stats === 'object') {
+            roastText = String(data.stats.roast_text || data.stats.roastText || '');
+        }
+        var personalityData = null;
+        var detailedStatsArray = null;
         try {
-            var pd = data.personality_data;
-            var personalityData = typeof pd === 'string' ? JSON.parse(pd) : pd;
-            var answerBook = personalityData && (personalityData.answer_book || personalityData.answerBook);
-            if (answerBook && typeof answerBook === 'object') {
-                answerContent = answerBook.content != null ? String(answerBook.content) : (answerBook.text != null ? String(answerBook.text) : '');
+            var pd = data.personality_data || data.personalityData;
+            if (pd != null) {
+                if (typeof pd === 'object') {
+                    personalityData = Array.isArray(pd) ? { detailedStats: pd } : pd;
+                } else if (typeof pd === 'string' && pd.length >= 2) {
+                    var pre = String(pd).replace(/\\"/g, '"');
+                    try { var parsed = JSON.parse(pre); personalityData = Array.isArray(parsed) ? { detailedStats: parsed } : parsed; } catch (e1) { try { var p2 = JSON.parse(pd); personalityData = Array.isArray(p2) ? { detailedStats: p2 } : p2; } catch (e2) {} }
+                }
             }
+            var pers = data.personality;
+            if (typeof pers === 'string' && pers.length >= 2) {
+                try { pers = JSON.parse(pers.replace(/\\"/g, '"')); } catch (_) { try { pers = JSON.parse(pers); } catch (_) { pers = null; } }
+            }
+            if (pers && typeof pers === 'object') {
+                if (!personalityData) personalityData = {};
+                var ab = pers.answer_book || pers.answerBook;
+                if (ab && typeof ab === 'object') {
+                    var fromAb = (ab.content != null ? String(ab.content) : (ab.text != null ? String(ab.text) : '')).trim();
+                    if (fromAb) answerContent = fromAb;
+                }
+                if (pers.detailedStats && Array.isArray(pers.detailedStats)) detailedStatsArray = pers.detailedStats;
+            }
+            if (personalityData) {
+                if (!answerContent) {
+                    var answerBook = personalityData.answer_book || personalityData.answerBook;
+                    if (answerBook && typeof answerBook === 'object') {
+                        answerContent = (answerBook.content != null ? String(answerBook.content) : (answerBook.text != null ? String(answerBook.text) : '')).trim();
+                    }
+                }
+                if (detailedStatsArray == null && personalityData.detailedStats && Array.isArray(personalityData.detailedStats)) detailedStatsArray = personalityData.detailedStats;
+                if (!answerContent && roastText) answerContent = roastText;
+            }
+            if (!answerContent && roastText) answerContent = roastText;
         } catch (_) {}
+        if (!answerContent && roastText) answerContent = roastText;
+        if (answerContent && roastText && String(answerContent).trim() === String(roastText).trim()) roastText = '';
+
+        // 【关键修复】如果答案之书和吐槽文案都为空，根据维度生成兜底评价，避免左侧空白
+        if (!answerContent && !roastText && data.dimensions) {
+            var dims = data.dimensions;
+            var labels = (currentLang === 'en')
+                ? { L: 'Logic', P: 'Patience', D: 'Detail', E: 'Exploration', F: 'Feedback' }
+                : { L: '逻辑', P: '耐性', D: '细节', E: '探索', F: '反馈' };
+            var sorted = Object.entries(dims).filter(function(e) { return labels[e[0]]; }).map(function(e) { return { k: e[0], v: Number(e[1]) || 0 }; });
+            sorted.sort(function(a, b) { return b.v - a.v; });
+            if (sorted.length >= 2) {
+                var top1 = labels[sorted[0].k];
+                var top2 = labels[sorted[1].k];
+                answerContent = (currentLang === 'en')
+                    ? 'A developer with strong ' + top1 + ' and ' + top2.toLowerCase() + '.'
+                    : '一位极具' + top1 + '且' + (sorted[1].v >= 70 ? '极度' : '较为') + top2 + '的代码架构师。';
+            } else {
+                answerContent = (currentLang === 'en') ? 'A developer with a unique vibe.' : '一位风格鲜明的开发者。';
+            }
+        }
 
         var displayName = data.user_name ? '@' + escapeHtml(data.user_name) : (data.fingerprint ? 'user_' + escapeHtml(String(data.fingerprint).slice(0, 8)) : '—');
         var avatarUrl = (data.user_name && /^[a-zA-Z0-9-]+$/.test(data.user_name)) ? ('https://github.com/' + encodeURIComponent(data.user_name) + '.png?size=64') : DEFAULT_AVATAR;
@@ -562,7 +876,8 @@
         var repoUpdatedEmpty = repoUpdatedAt === '—';
         var repoUpdatedValueBlock = '<span class="text-white font-mono text-sm truncate block">' + escapeHtml(repoUpdatedAt) + '</span>';
         if (repoUpdatedEmpty) repoUpdatedValueBlock += '<span class="text-zinc-500 text-[10px] mt-0.5 block" title="GitHub 未同步">未同步</span>';
-        gridHtml += '<div class="cyber-report-card bg-zinc-900/50 border border-green-500/20 rounded p-3 min-h-[4.5rem] flex flex-col"><div class="text-zinc-400 text-xs mb-1.5 flex-shrink-0">仓库更新日期</div><div class="flex items-start justify-between gap-2 min-h-0 flex-1"><div class="min-w-0 flex-1">' + repoUpdatedValueBlock + '</div><span class="font-mono text-xs flex-shrink-0 text-right" style="color:#00ff41;min-width:2.25rem;">#--</span></div></div>';
+        var repoUpdatedRankDisplay = getRankDisplay(ranks, ['repo_updated_rank', 'repoUpdatedRank']);
+        gridHtml += '<div class="cyber-report-card bg-zinc-900/50 border border-green-500/20 rounded p-3 min-h-[4.5rem] flex flex-col"><div class="text-zinc-400 text-xs mb-1.5 flex-shrink-0">仓库更新日期</div><div class="flex items-start justify-between gap-2 min-h-0 flex-1"><div class="min-w-0 flex-1">' + repoUpdatedValueBlock + '</div><span class="font-mono text-xs flex-shrink-0 text-right" style="color:#00ff41;min-width:2.25rem;">' + escapeHtml(repoUpdatedRankDisplay) + '</span></div></div>';
 
         var githubUrl = (data.user_name && /^[a-zA-Z0-9-]+$/.test(data.user_name)) ? ('https://github.com/' + encodeURIComponent(data.user_name)) : '';
         var toId = data.user_name || data.fingerprint || data.id || '';
@@ -572,10 +887,22 @@
             (toId ? '<button type="button" class="cyber-report-dm-btn inline-block px-4 py-2 rounded border border-green-500/50 text-[#00ff41] text-xs font-mono hover:bg-green-500/10 transition-colors" data-to-id="' + escapeHtml(toId) + '">私信</button>' : '') +
             '</div>';
 
-        var evaluationHtml = (answerContent || roastText) ? ('<div class="italic border-l-4 border-green-500 bg-green-500/10 p-4 mt-4 rounded-r">' +
-            (answerContent ? '<div class="mb-2">' + escapeHtml(answerContent) + '</div>' : '') +
+        var evaluationHtml = (answerContent || roastText) ? ('<div class="mt-4"><div class="text-zinc-500 text-xs uppercase tracking-wider font-mono mb-2">人格说明</div><div class="italic border-l-4 border-green-500 bg-green-500/10 p-4 rounded-r">' +
+            (answerContent ? '<div class="mb-2 text-zinc-300">' + escapeHtml(answerContent) + '</div>' : '') +
             (roastText ? '<div class="text-zinc-400 text-sm">' + escapeHtml(roastText) + '</div>' : '') +
-            '</div>') : '';
+            '</div></div>') : '';
+
+        var dimRoastHtml = '';
+        var statsForDim = detailedStatsArray || (personalityData && personalityData.detailedStats && Array.isArray(personalityData.detailedStats) ? personalityData.detailedStats : null);
+        if (statsForDim && statsForDim.length) {
+            var dimKeys = ['L', 'P', 'D', 'E', 'F'];
+            dimKeys.forEach(function(k) {
+                var stat = statsForDim.find(function(s) { if (!s || !s.dimension) return false; var d = String(s.dimension).replace(/维度$/, '').trim(); return d === k; });
+                var roast = (stat && (stat.roast != null ? String(stat.roast) : (stat.interpretation != null ? String(stat.interpretation) : ''))) || '';
+                dimRoastHtml += '<div class="dim-roast dim-roast-' + k.toLowerCase() + ' text-zinc-400 text-xs mt-1">' + (roast ? escapeHtml(roast) : '—') + '</div>';
+            });
+        }
+        if (dimRoastHtml) evaluationHtml += '<div class="mt-2 grid grid-cols-1 gap-1">' + dimRoastHtml + '</div>';
 
         body.innerHTML =
             '<div class="flex items-center gap-3 mb-4">' +
@@ -666,7 +993,8 @@
         var name = opts.name || opts.login || login;
         var publicRepos = opts.public_repos != null ? opts.public_repos : (opts.publicRepos != null ? opts.publicRepos : '—');
         var updatedAt = opts.updated_at || opts.updatedAt || '—';
-        var stars = opts.stars != null ? opts.stars : (opts.totalStars != null ? opts.totalStars : '—');
+        var starsVal = resolveDisplayStars(opts);
+        var stars = starsVal != null ? Number(starsVal).toLocaleString() : ((opts.stars > 0 || opts.totalStars > 0) ? String((opts.stars || opts.totalStars)).replace(/\B(?=(\d{3})+(?!\d))/g, ',') : '—');
         var toId = opts.toId || opts.fingerprint || login;
         var githubUrl = 'https://github.com/' + (login ? encodeURIComponent(login) : '');
         if (typeof updatedAt === 'string' && updatedAt !== '—' && updatedAt.length > 10) {
@@ -1181,6 +1509,8 @@
             return {};
         };
         
+        /** 国家 RPC 防抖：快速切换国家时 400ms 内只执行最后一次，控制 Supabase 请求 */
+        var __countryDashboardDebounce = { timer: null, skipNext: false };
         // 辅助函数：更新国家仪表板UI
         async function updateCountryDashboard(countryNameOrCode, maybeData) {
             // 强制清理 Loading：即便出错也隐藏转圈，让用户看到「暂无数据」而非一直转圈
@@ -1267,6 +1597,20 @@
             })();
             // 准入检查：同一国家且非强制刷新则直接 return（lastFetchedCountry 与 lastRequestCountry 双轨）
             const forceRefresh = opts.force === true || opts.forceRefresh === true;
+            if (!effectiveIsGlobal && countryCode && !forceRefresh && !opts.__debounceRun) {
+                var d = __countryDashboardDebounce;
+                d.pending = [countryNameOrCode, maybeData, opts];
+                clearTimeout(d.timer);
+                d.timer = setTimeout(function() {
+                    var a = d.pending;
+                    d.pending = null;
+                    if (a && a.length >= 3) {
+                        var o = (a[2] && typeof a[2] === 'object') ? Object.assign({}, a[2], { __debounceRun: true }) : { __debounceRun: true };
+                        updateCountryDashboard(a[0], a[1], o);
+                    }
+                }, 400);
+                return;
+            }
             const sameCountry = !effectiveIsGlobal && countryCode && (
                 String(countryCode).toUpperCase() === String(state.lastFetchedCountry || '').toUpperCase() ||
                 String(countryCode).toUpperCase() === String(state.lastRequestCountry || '').toUpperCase()
@@ -1877,12 +2221,68 @@
                         : Object.assign({}, window.cachedSummary || {}, data);
                 } catch (e) { /* ignore */ }
 
-                // 国家视图：get_country_dimension_averages 使用相对路径 /api/...，自动指向当前环境（生产即生产 Worker 代理）
+                // 国家视图：get_country_dimension_averages 优先 12h 本地缓存；连续失败 3 次则标记暂时不可用并隐藏右侧雷达图
+                if (typeof window.__countryDimFailCount === 'undefined') window.__countryDimFailCount = 0;
+                if (typeof window.__countryDimensionAveragesDisabled === 'undefined') window.__countryDimensionAveragesDisabled = false;
+                var hideRadarCardIfDisabled = function() {
+                    if (!window.__countryDimensionAveragesDisabled) return;
+                    var radarEl = document.getElementById('rtRadar');
+                    if (radarEl) {
+                        var card = radarEl.closest ? radarEl.closest('.clinic-card') : radarEl.parentElement;
+                        if (card) card.style.display = 'none';
+                    }
+                };
                 const DEFAULT_DIMENSION_AVERAGES = { has_valid_data: false, avg_l: 50, avg_p: 50, avg_d: 50, avg_e: 50, avg_f: 50 };
                 let record;
+                if (window.__countryDimensionAveragesDisabled) {
+                    record = DEFAULT_DIMENSION_AVERAGES;
+                    hideRadarCardIfDisabled();
+                } else {
                 try {
                     let countryDimensionAverages = null;
-                    if (!effectiveIsGlobal && countryCode) {
+                    if (!effectiveIsGlobal && countryCode && typeof getCachedOrFetch === 'function') {
+                        var dimCacheKey = 'vibe_country_dim_' + String(countryCode).toUpperCase();
+                        countryDimensionAverages = await getCachedOrFetch(dimCacheKey, VIBE_COUNTRY_RPC_CACHE_TTL_MS, async function() {
+                            var raw = null;
+                            try {
+                                var proxyRes = await fetch('/api/supabase/rpc/get_country_dimension_averages', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ target_country_code: countryCode })
+                                });
+                                if (proxyRes.ok) {
+                                    var json = await proxyRes.json();
+                                    if (json && json.data != null) {
+                                        raw = json.data;
+                                        window.__countryDimFailCount = 0;
+                                    }
+                                } else {
+                                    window.__countryDimFailCount = (window.__countryDimFailCount || 0) + 1;
+                                    if (window.__countryDimFailCount >= 3) {
+                                        window.__countryDimensionAveragesDisabled = true;
+                                        hideRadarCardIfDisabled();
+                                    }
+                                }
+                            } catch (e) {
+                                window.__countryDimFailCount = (window.__countryDimFailCount || 0) + 1;
+                                if (window.__countryDimFailCount >= 3) {
+                                    window.__countryDimensionAveragesDisabled = true;
+                                    hideRadarCardIfDisabled();
+                                }
+                                console.warn('[updateCountryDashboard] get_country_dimension_averages 代理请求失败:', e);
+                            }
+                            if (raw == null && typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function') {
+                                try {
+                                    var dimRes = await supabaseClient.rpc('get_country_dimension_averages', { target_country_code: countryCode });
+                                    if (dimRes && dimRes.data != null) {
+                                        raw = dimRes.data;
+                                        window.__countryDimFailCount = 0;
+                                    }
+                                } catch (e) { console.warn('[updateCountryDashboard] get_country_dimension_averages RPC 失败:', e); }
+                            }
+                            return raw != null ? raw : [DEFAULT_DIMENSION_AVERAGES];
+                        });
+                    } else if (!effectiveIsGlobal && countryCode) {
                         try {
                             const proxyRes = await fetch('/api/supabase/rpc/get_country_dimension_averages', {
                                 method: 'POST',
@@ -1891,13 +2291,32 @@
                             });
                             if (proxyRes.ok) {
                                 const json = await proxyRes.json();
-                                if (json && json.data != null) countryDimensionAverages = json.data;
+                                if (json && json.data != null) {
+                                    countryDimensionAverages = json.data;
+                                    window.__countryDimFailCount = 0;
+                                }
+                            } else {
+                                window.__countryDimFailCount = (window.__countryDimFailCount || 0) + 1;
+                                if (window.__countryDimFailCount >= 3) {
+                                    window.__countryDimensionAveragesDisabled = true;
+                                    hideRadarCardIfDisabled();
+                                }
                             }
-                        } catch (e) { console.warn('[updateCountryDashboard] get_country_dimension_averages 代理请求失败:', e); }
+                        } catch (e) {
+                            window.__countryDimFailCount = (window.__countryDimFailCount || 0) + 1;
+                            if (window.__countryDimFailCount >= 3) {
+                                window.__countryDimensionAveragesDisabled = true;
+                                hideRadarCardIfDisabled();
+                            }
+                            console.warn('[updateCountryDashboard] get_country_dimension_averages 代理请求失败:', e);
+                        }
                         if (countryDimensionAverages == null && typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function') {
                             try {
                                 const dimRes = await supabaseClient.rpc('get_country_dimension_averages', { target_country_code: countryCode });
-                                if (dimRes && dimRes.data != null) countryDimensionAverages = dimRes.data;
+                                if (dimRes && dimRes.data != null) {
+                                    countryDimensionAverages = dimRes.data;
+                                    window.__countryDimFailCount = 0;
+                                }
                             } catch (e) { console.warn('[updateCountryDashboard] get_country_dimension_averages RPC 失败:', e); }
                         }
                         if (countryDimensionAverages == null) countryDimensionAverages = [DEFAULT_DIMENSION_AVERAGES];
@@ -1906,6 +2325,7 @@
                 } catch (e) {
                     console.warn('[updateCountryDashboard] get_country_dimension_averages 整体异常，使用默认均值:', e);
                     record = DEFAULT_DIMENSION_AVERAGES;
+                }
                 }
 
                 // =========================
@@ -2025,11 +2445,32 @@
                                 flushNationalCloudReadyCallbacks();
                             }
                         }
-                        // 若 country-summary 未带 identityLevelCloud，再请求 keywords 接口兜底
+                        // 若 country-summary 未带 identityLevelCloud，优先 country-hot-list，再 keywords 兜底
                         if (!apiSuccess) {
                             var kwApiBase = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content)) || API_ENDPOINT || '';
                             kwApiBase = (kwApiBase && kwApiBase.trim()) ? (kwApiBase.trim().endsWith('/') ? kwApiBase.trim() : kwApiBase.trim() + '/') : '/';
                             try {
+                                var hotResp = await fetch(kwApiBase + 'api/v2/country-hot-list?country=' + encodeURIComponent(countryCode) + '&_t=' + Date.now(), { cache: 'no-store' });
+                                if (hotResp.ok) {
+                                    var hotPayload = await hotResp.json();
+                                    if (hotPayload && typeof hotPayload === 'object') {
+                                        var hotNovice = (hotPayload.Novice || hotPayload.slang || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
+                                        var hotPro = (hotPayload.Professional || hotPayload.merit || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
+                                        var hotArch = (hotPayload.Architect || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
+                                        var hotNative = (hotPayload.globalNative || hotPayload.native || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
+                                        var hotHasAny = hotNovice.length + hotPro.length + hotArch.length + hotNative.length > 0;
+                                        if (hotHasAny) {
+                                            window.__countryKeywordsByLevel = { Novice: hotNovice, Professional: hotPro, Architect: hotArch, globalNative: hotNative };
+                                            window.__nationalCloudData = window.__countryKeywordsByLevel;
+                                            apiSuccess = true;
+                                            try { window.__countryCloudFromHotList = true; } catch (e) {}
+                                            console.log('Keywords loaded from country-hot-list:', window.__countryKeywordsByLevel);
+                                            flushNationalCloudReadyCallbacks();
+                                        }
+                                    }
+                                }
+                            } catch (hotErr) { console.warn('[updateCountryDashboard] country-hot-list 失败:', hotErr); }
+                            if (!apiSuccess) try {
                                 var kwResp = await fetch(kwApiBase + 'api/v2/stats/keywords?region=' + encodeURIComponent(countryCode) + '&_t=' + Date.now(), { cache: 'no-store' });
                                 if (kwResp.ok) {
                                     var rawPayload = await kwResp.json();
@@ -2160,18 +2601,51 @@
                         })();
                     } else {
                         window.__latestTop10 = Array.isArray(data.top10) ? data.top10 : null;
-                        window.__latestCloud50 = effectiveIsGlobal ? (Array.isArray(data.cloud50) ? data.cloud50 : null) : null;
+                        window.__latestCloud50 = Array.isArray(data.cloud50) ? data.cloud50 : null;
+                        window.__latestMonthlyVibes = data.monthly_vibes || data.monthlyVibes || null;
+                        window.__latestTopSentences = Array.isArray(data.top_sentences) ? data.top_sentences : null;
                         if (effectiveIsGlobal) {
                             try { window.renderVibeCardFromData && window.renderVibeCardFromData(countryNameOrCode, data); } catch (e2) { /* ignore */ }
                         } else {
-                            window.__latestCloud50 = null;
-                            var emptyEl = document.getElementById('vibe-cloud50-empty');
-                            var emptyTopElse = document.getElementById('vibe-top10-empty');
-                            if (emptyEl) { emptyEl.textContent = '正在收集数据...'; emptyEl.classList.remove('hidden'); }
-                            if (emptyTopElse) { emptyTopElse.textContent = '正在收集数据...'; emptyTopElse.classList.remove('hidden'); }
-                            try { if (typeof _renderCloud50 === 'function') _renderCloud50(countryCode, []); } catch (_) {}
-                            try { if (typeof _renderTop10List === 'function') _renderTop10List([]); } catch (_) {}
-                            try { window.renderVibeCardFromData && window.renderVibeCardFromData(countryNameOrCode, { top10: [], cloud50: [] }); } catch (e2) { /* ignore */ }
+                            window.__currentCountryCode = String(countryCode || '').trim().toUpperCase();
+                            var hasHotData = (Array.isArray(data.top10) && data.top10.length > 0) || (Array.isArray(data.cloud50) && data.cloud50.length > 0);
+                            if (hasHotData) {
+                                var mv = data.monthly_vibes || data.monthlyVibes || {};
+                                var fallbackTop10 = Array.isArray(data.top10) ? data.top10 : [];
+                                var fallbackCloud50 = Array.isArray(data.cloud50) ? data.cloud50 : [];
+                                window.__lexiconByType = {
+                                    merit_board: (Array.isArray(mv.merit) && mv.merit.length > 0) ? mv.merit : fallbackTop10,
+                                    slang_list: [].concat(Array.isArray(mv.slang) ? mv.slang : [], Array.isArray(mv.sv_slang) ? mv.sv_slang : []),
+                                    mantra_top: (Array.isArray(mv.phrase) && mv.phrase.length > 0) ? mv.phrase : (fallbackCloud50.length > 0 ? fallbackCloud50.slice(0, 20) : fallbackTop10)
+                                };
+                                try { window.renderVibeCardFromData && window.renderVibeCardFromData(countryNameOrCode, data); } catch (e2) { /* ignore */ }
+                                (function loadLexiconList() {
+                                    var lexType = (window.__currentLexiconType || 'merit_board');
+                                    var cached = window.__lexiconByType && window.__lexiconByType[lexType] && window.__lexiconByType[lexType].length > 0;
+                                    if (cached) {
+                                        if (typeof _renderTop10List === 'function') _renderTop10List(window.__lexiconByType[lexType], true);
+                                        return;
+                                    }
+                                    var url = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : '') || '';
+                                    url = (url && url.trim()) ? (url.trim().endsWith('/') ? url.trim() : url.trim() + '/') : '/';
+                                    url = url + 'api/national-lexicon?country=' + encodeURIComponent(countryCode) + '&type=' + encodeURIComponent(lexType);
+                                    fetch(url).then(function(r) { return r.json(); }).then(function(res) {
+                                        var list = (res && res.data && Array.isArray(res.data)) ? res.data : [];
+                                        if (window.__lexiconByType) window.__lexiconByType[lexType] = list;
+                                        if (typeof _renderTop10List === 'function') _renderTop10List(list, true);
+                                    }).catch(function() {
+                                        if (typeof _renderTop10List === 'function') _renderTop10List([], true);
+                                    });
+                                })();
+                            } else {
+                                var emptyEl = document.getElementById('vibe-cloud50-empty');
+                                var emptyTopElse = document.getElementById('vibe-top10-empty');
+                                if (emptyEl) { emptyEl.textContent = '正在收集数据...'; emptyEl.classList.remove('hidden'); }
+                                if (emptyTopElse) { emptyTopElse.textContent = '正在收集数据...'; emptyTopElse.classList.remove('hidden'); }
+                                try { if (typeof _renderCloud50 === 'function') _renderCloud50(countryCode, []); } catch (_) {}
+                                try { if (typeof _renderTop10List === 'function') _renderTop10List([]); } catch (_) {}
+                                try { window.renderVibeCardFromData && window.renderVibeCardFromData(countryNameOrCode, { top10: [], cloud50: [] }); } catch (e2) { /* ignore */ }
+                            }
                         }
                     }
                 } catch (e1) { /* ignore */ }
@@ -3058,14 +3532,22 @@
                 // NOTE: 已在上方“派生指标计算与渲染 / 语义爆发（真实动态化）”完成渲染，
                 // 这里不再重复覆盖 powerScore / semanticBurst，避免 UI 抖动与逻辑分叉。
 
-                // 人格分布：国家视图用 get_country_personality_distribution 拉取该国数据，全网用 latest_records 聚合
+                // 人格分布：国家视图用 get_country_personality_distribution，优先 12h 本地缓存
                 (async function renderPersonalityDistributionForDrawer() {
                     const box = document.getElementById('rtRealtimeList');
                     if (!box) return;
                     if (!effectiveIsGlobal && target_country && (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function')) {
                         try {
-                            const { data: distData, error } = await supabaseClient.rpc('get_country_personality_distribution', { target_country_code: target_country });
-                            if (!error && Array.isArray(distData) && distData.length > 0) {
+                            var distData = null;
+                            if (typeof getCachedOrFetch === 'function' && typeof VIBE_COUNTRY_RPC_CACHE_TTL_MS !== 'undefined') {
+                                distData = await getCachedOrFetch('vibe_country_personality_' + String(target_country).toUpperCase(), VIBE_COUNTRY_RPC_CACHE_TTL_MS, function() {
+                                    return supabaseClient.rpc('get_country_personality_distribution', { target_country_code: target_country }).then(function(r) { return r && !r.error ? r.data : null; });
+                                });
+                            } else {
+                                var distRes = await supabaseClient.rpc('get_country_personality_distribution', { target_country_code: target_country });
+                                distData = distRes && !distRes.error ? distRes.data : null;
+                            }
+                            if (Array.isArray(distData) && distData.length > 0) {
                                 const distribution = distData.map((row) => ({
                                     type: String(row.personality_type ?? row.type ?? row.personality_type_code ?? 'UNKNOWN').toUpperCase(),
                                     count: Number(row.count ?? row.cnt ?? row.total ?? 0) || 0
@@ -3426,6 +3908,7 @@
                 'rank.total_people': '共 {n} 人',
                 'rank.global_rank_label': '全球排名',
                 'drawer.personality_title': '人格称号',
+                'preview.personalityLabel': '人格鉴定结果',
                 'drawer.real_evaluation': '真实评价',
 
                 // Country panel titles
@@ -3534,6 +4017,7 @@
                 'rank.total_people': 'Total {n}',
                 'rank.global_rank_label': 'Global rank',
                 'drawer.personality_title': 'Title',
+                'preview.personalityLabel': 'Personality Verdict',
                 'drawer.real_evaluation': 'Real Evaluation',
 
                 // Country panel titles
@@ -7550,6 +8034,7 @@
             currentDrawerCountry.name = displayName;
             try {
                 window.currentUserCountry = String(code || '').trim().toUpperCase();
+                window.__currentCountryCode = String(code || '').trim().toUpperCase();
                 // 【核心】同步 __selectedCountry 供 fetchCountryKeywords 等国别数据接口使用（前移，确保 fetch 读到新国家）
                 window.__selectedCountry = code;
             } catch (e) { /* ignore */ }
@@ -7616,6 +8101,7 @@
             if (!mount || !tpl) return;
 
             mount.innerHTML = '';
+            mount.dataset.country = String(code || '').trim().toUpperCase();
             const node = tpl.content.cloneNode(true);
             mount.appendChild(node);
 
@@ -8110,29 +8596,60 @@
         /** 按 metric_key 分组的快照缓存：{ [metric_key]: { daily: { top_data, updated_at }, all_time: { top_data, updated_at } } } */
         var __leaderboardSnapshots = null;
 
+        /** 禁止前端调用 supabase.rpc('refresh_leaderboard_snapshots')：该 RPC 执行 50 次重算与 50 次 Upsert，仅由后端 Worker 按日执行。登录后首次同步也禁止调用，仅通过查询 user_analysis/视图 更新 UI。 */
+
+        var VIBE_LEADERBOARD_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+        /** 国家相关 RPC 短期缓存 TTL（12h），控制 Supabase 用量且保证每日可更新 */
+        var VIBE_COUNTRY_RPC_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+
         /**
-         * 从 leaderboard_snapshots 表拉取 44 条记录，按 metric_key 分组，每个维度下存 daily / all_time 的 top_data
+         * SWR 本地缓存：若 key 存在且未过期则返回缓存数据不请求；否则执行 fetchFn 后写入缓存
+         * @param {string} key - localStorage key
+         * @param {number} ttlMs - 有效期毫秒
+         * @param {function(): Promise<*>} fetchFn - 返回 Promise 的请求函数
+         * @returns {Promise<*>}
+         */
+        function getCachedOrFetch(key, ttlMs, fetchFn) {
+            try {
+                var raw = typeof localStorage !== 'undefined' && localStorage.getItem(key);
+                if (raw) {
+                    var obj = JSON.parse(raw);
+                    if (obj && obj.ts != null && (Date.now() - obj.ts < ttlMs) && obj.data !== undefined) return Promise.resolve(obj.data);
+                }
+            } catch (e) {}
+            return fetchFn().then(function(data) {
+                try { if (typeof localStorage !== 'undefined') localStorage.setItem(key, JSON.stringify({ data: data, ts: Date.now() })); } catch (e) {}
+                return data;
+            });
+        }
+
+        /**
+         * 从 leaderboard_snapshots 表拉取 44 条记录，按 metric_key 分组；优先 24h 本地缓存，未命中再请求
          */
         async function fetchAllLeaderboardSnapshots() {
             var sb = (typeof supabaseClient !== 'undefined' && supabaseClient) ? supabaseClient : (window.supabase || null);
             if (!sb || typeof sb.from !== 'function') return null;
             try {
-                var res = await sb.from('leaderboard_snapshots').select('*');
-                var data = (res && res.data) ? res.data : [];
-                if (res && res.error) {
-                    console.warn('[Leaderboard] select error:', res.error);
-                    return null;
-                }
-                var grouped = {};
-                (data || []).forEach(function(row) {
-                    var key = row.metric_key;
-                    var type = row.ranking_type === 'daily' ? 'daily' : 'all_time';
-                    if (!key) return;
-                    if (!grouped[key]) grouped[key] = { daily: {}, all_time: {} };
-                    grouped[key][type] = {
-                        top_data: Array.isArray(row.top_data) ? row.top_data : [],
-                        updated_at: row.updated_at || ''
-                    };
+                var grouped = await getCachedOrFetch('vibe_leaderboard_snapshots', VIBE_LEADERBOARD_CACHE_TTL_MS, function() {
+                    return sb.from('leaderboard_snapshots').select('*').then(function(res) {
+                        var data = (res && res.data) ? res.data : [];
+                        if (res && res.error) {
+                            console.warn('[Leaderboard] select error:', res.error);
+                            return null;
+                        }
+                        var out = {};
+                        (data || []).forEach(function(row) {
+                            var key = row.metric_key;
+                            var type = row.ranking_type === 'daily' ? 'daily' : 'all_time';
+                            if (!key) return;
+                            if (!out[key]) out[key] = { daily: {}, all_time: {} };
+                            out[key][type] = {
+                                top_data: Array.isArray(row.top_data) ? row.top_data : [],
+                                updated_at: row.updated_at || ''
+                            };
+                        });
+                        return out;
+                    });
                 });
                 __leaderboardSnapshots = grouped;
                 return grouped;
@@ -8140,6 +8657,25 @@
                 console.error('[Leaderboard] fetchAllLeaderboardSnapshots:', e);
                 return null;
             }
+        }
+
+        /**
+         * 分页榜单：优先 24h 缓存，未命中再调用 get_leaderboard_page RPC
+         */
+        function getLeaderboardPageCached(sb, metric, rankingType, startIndex, limit) {
+            var key = 'vibe_lb_page_' + (metric || '') + '_' + (rankingType || '') + '_' + (startIndex || 0) + '_' + (limit || 50);
+            return getCachedOrFetch(key, VIBE_LEADERBOARD_CACHE_TTL_MS, function() {
+                return sb.rpc('get_leaderboard_page', {
+                    p_metric_name: metric,
+                    p_ranking_type: rankingType,
+                    p_start_index: startIndex,
+                    p_limit: limit
+                }).then(function(res) {
+                    var data = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
+                    if (res && res.error) return Promise.reject(res.error);
+                    return data;
+                });
+            });
         }
 
         function esc(s) {
@@ -8318,24 +8854,14 @@
                 if (loadingEl) loadingEl.style.display = 'none';
                 return;
             }
-            sb.rpc('get_leaderboard_page', {
-                p_metric_name: __globalLeaderboardMetric,
-                p_ranking_type: __globalLeaderboardRankingType,
-                p_start_index: startIndex,
-                p_limit: __globalLeaderboardPageSize
-            }).then(function(res) {
+            getLeaderboardPageCached(sb, __globalLeaderboardMetric, __globalLeaderboardRankingType, startIndex, __globalLeaderboardPageSize).then(function(list) {
                 __globalLeaderboardLoading = false;
                 if (loadingEl) loadingEl.style.display = 'none';
-                var data = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
-                if (res && res.error) {
-                    console.warn('[Leaderboard] get_leaderboard_page error:', res.error);
-                    return;
-                }
+                list = Array.isArray(list) ? list : [];
                 if (replace) {
                     __globalLeaderboardRows = [];
                     tbody.innerHTML = '';
                 }
-                var list = Array.isArray(data) ? data : [];
                 list.forEach(function(row) {
                     __globalLeaderboardRows.push(row);
                     var tr = document.createElement('tr');
@@ -8362,7 +8888,7 @@
             }).catch(function(e) {
                 __globalLeaderboardLoading = false;
                 if (loadingEl) loadingEl.style.display = 'none';
-                console.error('[Leaderboard] get_leaderboard_page:', e);
+                console.warn('[Leaderboard] get_leaderboard_page error:', e);
             });
         }
 
@@ -8426,13 +8952,8 @@
                 __globalLeaderboardHasMore = true;
                 var tbody = document.getElementById('global-leaderboard-tbody');
                 if (tbody) tbody.innerHTML = '';
-                sb.rpc('get_leaderboard_page', {
-                    p_metric_name: __globalLeaderboardMetric,
-                    p_ranking_type: __globalLeaderboardRankingType,
-                    p_start_index: startIndex,
-                    p_limit: __globalLeaderboardPageSize
-                }).then(function(pageRes) {
-                    var list = (pageRes && pageRes.data) ? pageRes.data : (Array.isArray(pageRes) ? pageRes : []);
+                getLeaderboardPageCached(sb, __globalLeaderboardMetric, __globalLeaderboardRankingType, startIndex, __globalLeaderboardPageSize).then(function(list) {
+                    list = Array.isArray(list) ? list : [];
                     __globalLeaderboardRows = list;
                     __globalLeaderboardStartIndex = startIndex + list.length;
                     if (!tbody) return;
@@ -8549,21 +9070,11 @@
                 return;
             }
             var currentUserId = getCurrentLeaderboardUserId();
-            sb.rpc('get_leaderboard_page', {
-                p_metric_name: __detailMetric,
-                p_ranking_type: __detailRankingType,
-                p_start_index: startIndex,
-                p_limit: __detailPageSize
-            }).then(function(res) {
+            getLeaderboardPageCached(sb, __detailMetric, __detailRankingType, startIndex, __detailPageSize).then(function(list) {
                 __detailLoading = false;
                 if (loadingEl) loadingEl.style.display = 'none';
-                var data = (res && res.data) ? res.data : (Array.isArray(res) ? res : []);
-                if (res && res.error) {
-                    console.warn('[Leaderboard] get_leaderboard_page error:', res.error);
-                    return;
-                }
+                list = Array.isArray(list) ? list : [];
                 if (replace) tbody.innerHTML = '';
-                var list = Array.isArray(data) ? data : [];
                 list.forEach(function(row) {
                     var isMe = currentUserId && (
                         (row.id && String(row.id) === String(currentUserId)) ||
@@ -8628,13 +9139,8 @@
                 __detailStartIndex = 0;
                 __detailHasMore = true;
                 if (tbody) tbody.innerHTML = '';
-                sb.rpc('get_leaderboard_page', {
-                    p_metric_name: __detailMetric,
-                    p_ranking_type: __detailRankingType,
-                    p_start_index: startIndex,
-                    p_limit: __detailPageSize
-                }).then(function(pageRes) {
-                    var list = (pageRes && pageRes.data) ? pageRes.data : (Array.isArray(pageRes) ? pageRes : []);
+                getLeaderboardPageCached(sb, __detailMetric, __detailRankingType, startIndex, __detailPageSize).then(function(list) {
+                    list = Array.isArray(list) ? list : [];
                     __detailStartIndex = startIndex + list.length;
                     var currentUserId2 = getCurrentLeaderboardUserId();
                     if (!tbody) return;
@@ -8723,7 +9229,10 @@
             }
             console.log('[Leaderboard] ✅ 22 个榜单卡片渲染完成');
         }
-        if (typeof window !== 'undefined') window.loadGitHubLeaderboard = loadGitHubLeaderboard;
+        if (typeof window !== 'undefined') {
+            window.loadGitHubLeaderboard = loadGitHubLeaderboard;
+            window.__fetchAllLeaderboardSnapshots = fetchAllLeaderboardSnapshots;
+        }
 
         // ==========================================
         // 矩阵绿天梯榜相关函数和常量
@@ -8799,21 +9308,29 @@
             }
 
             try {
-                // PostgREST 参数名与 SQL 函数一致：country_code / top_n；全局传 null
-                const { data, error } = await supabaseClient.rpc('get_country_top_metrics_v1', {
-                    p_country_code: null,
-                    p_top_n: 10
-                });
-                let rpcData = data;
-                if (error && (!rpcData || !rpcData.length)) {
-                    const alt = await supabaseClient.rpc('get_country_top_metrics_v1', { country_code: null, top_n: 10 });
-                    if (!alt.error && alt.data && alt.data.length) rpcData = alt.data;
+                var rpcData = null;
+                var topMetricsCacheKey = 'vibe_country_top_metrics_global_10';
+                if (typeof getCachedOrFetch === 'function' && typeof VIBE_COUNTRY_RPC_CACHE_TTL_MS !== 'undefined') {
+                    rpcData = await getCachedOrFetch(topMetricsCacheKey, VIBE_COUNTRY_RPC_CACHE_TTL_MS, async function() {
+                        var res = await supabaseClient.rpc('get_country_top_metrics_v1', { p_country_code: null, p_top_n: 10 });
+                        var data = res && res.data;
+                        if ((!data || !data.length) && res && res.error) {
+                            var alt = await supabaseClient.rpc('get_country_top_metrics_v1', { country_code: null, top_n: 10 });
+                            if (alt && !alt.error && alt.data && alt.data.length) data = alt.data;
+                        }
+                        return Array.isArray(data) ? data : [];
+                    });
                 }
-                if (error && (!rpcData || !rpcData.length)) {
-                    console.error('[MatrixLadders] ❌ RPC 调用失败:', error);
-                    isRankingLoading = false;
-                    await renderMatrixLaddersFromDirectQuery(contentTarget);
-                    return;
+                if (!rpcData || !rpcData.length) {
+                    const { data, error } = await supabaseClient.rpc('get_country_top_metrics_v1', {
+                        p_country_code: null,
+                        p_top_n: 10
+                    });
+                    rpcData = data;
+                    if (error && (!rpcData || !rpcData.length)) {
+                        const alt = await supabaseClient.rpc('get_country_top_metrics_v1', { country_code: null, top_n: 10 });
+                        if (!alt.error && alt.data && alt.data.length) rpcData = alt.data;
+                    }
                 }
                 if (!rpcData || !Array.isArray(rpcData) || rpcData.length === 0) {
                     console.warn('[MatrixLadders] ⚠️ RPC 返回空数据，使用直接查询');
@@ -9206,7 +9723,15 @@
                     }
                 });
 
-                const results = await Promise.all(promises);
+                // 超时 15 秒，避免 Supabase 查询挂起导致一直显示「正在同步全球数据流」
+                var FETCH_GLOBAL_RANKINGS_TIMEOUT_MS = 15000;
+                var timeoutPromise = new Promise(function(_, reject) {
+                    setTimeout(function() { reject(new Error('FETCH_GLOBAL_RANKINGS_TIMEOUT')); }, FETCH_GLOBAL_RANKINGS_TIMEOUT_MS);
+                });
+                var results = await Promise.race([
+                    Promise.all(promises),
+                    timeoutPromise
+                ]);
                 results.forEach(result => {
                     rankings[result.key] = result;
                 });
@@ -9227,7 +9752,11 @@
                 }
                 return rankings;
             } catch (error) {
-                console.error('[GlobalRankings] ❌ 获取全局排行榜失败:', error);
+                if (error && error.message === 'FETCH_GLOBAL_RANKINGS_TIMEOUT') {
+                    console.warn('[GlobalRankings] ⚠️ 请求超时（15s），请检查网络或稍后重试');
+                } else {
+                    console.error('[GlobalRankings] ❌ 获取全局排行榜失败:', error);
+                }
                 // 返回空排行榜结构，而不是 null，确保 UI 能正常渲染
                 return {
                     ketao_count: { key: 'ketao_count', data: [], label: '磕头榜', desc: '顶级礼貌大户' },
@@ -12406,6 +12935,7 @@
                 btn.disabled = !enabled;
                 btn.style.opacity = enabled ? '1' : '0.6';
                 btn.style.cursor = enabled ? 'pointer' : 'not-allowed';
+                if (enabled && typeof window.showGitHubSectionIfCountrySelected === 'function') window.showGitHubSectionIfCountrySelected();
             } catch (e) {}
         }
         
@@ -15548,7 +16078,7 @@
                         if (res.ok && (data.success !== false && data.status !== 'error')) {
                             overlay.remove();
                             if (typeof showNotification === 'function') showNotification('暗号已送达，1小时后自毁');
-                            else alert('暗号已送达，1小时后自毁');
+                            else if (typeof showNotification === 'function') showNotification('暗号已送达，1小时后自毁');
                             if (typeof window.refreshUserStats === 'function') window.refreshUserStats();
                         } else {
                             sendBtn.disabled = false;
@@ -15993,17 +16523,12 @@
          */
         async function loginWithGitHub() {
             if (!supabaseClient) {
-                console.error('[Auth] ❌ Supabase 客户端未初始化');
-                alert('数据库连接未就绪，请稍候再试');
+                console.warn('[Auth] Supabase 客户端未就绪，请稍候');
                 return;
             }
-            
             try {
                 console.log('[Auth] 🚀 开始 GitHub OAuth 登录流程...');
-                // 重定向地址必须与 Supabase 控制台 → Authentication → URL Configuration → Redirect URLs 中配置一致
                 const redirectTo = _loc.origin + _loc.pathname;
-                console.log('[Auth] 重定向地址（请在 Supabase 中已添加）:', redirectTo);
-                
                 const { data, error } = await supabaseClient.auth.signInWithOAuth({
                     provider: 'github',
                     options: {
@@ -16011,69 +16536,57 @@
                         scopes: 'read:user user:email',
                     }
                 });
-                
                 if (error) {
-                    console.error('[Auth] ❌ GitHub OAuth 登录失败:', error);
-                    alert(`登录失败: ${error.message}`);
+                    console.warn('[Auth] GitHub OAuth 登录失败:', error.message);
                     return;
                 }
-                
                 if (data?.url) {
                     window.location.href = data.url;
-                } else {
-                    console.log('[Auth] ✅ 登录请求已发送，等待重定向...');
                 }
             } catch (error) {
-                console.error('[Auth] ❌ GitHub OAuth 登录异常:', error);
-                alert(`登录失败: ${error.message || '未知错误'}`);
+                console.warn('[Auth] GitHub OAuth 异常:', error && error.message ? error.message : '未知错误');
             }
         }
         window.loginWithGitHub = loginWithGitHub;
         
         /**
-         * 退出登录
-         * 清理会话和本地数据
+         * 退出登录（同步、不依赖任何异步 API）
+         * 清除所有 Vibe 专属缓存后 replace('/')，防止后退回到已退出的报表页
          */
-        async function logout() {
-            if (!supabaseClient) {
-                console.error('[Auth] ❌ Supabase 客户端未初始化');
-                return;
-            }
-            
+        function logout() {
             try {
-                console.log('[Auth] 🚪 开始退出登录...');
-                
-                // 清理 localStorage
-                localStorage.removeItem('github_username');
-                // 保留 fingerprint，以便静默登录
-                
-                // 调用 Supabase Auth 退出
-                const { error } = await supabaseClient.auth.signOut();
-                
-                if (error) {
-                    console.error('[Auth] ❌ 退出登录失败:', error);
-                    alert(`退出失败: ${error.message}`);
+                if (typeof localStorage === 'undefined') {
+                    if (typeof window !== 'undefined' && window.location) window.location.replace('/');
                     return;
                 }
-                
-                // 清理全局变量
-                window.currentUser = null;
-                window.currentUserMatchedByFingerprint = false;
-                
-                // 刷新 UI
-                updateAuthUI(null);
-                
-                // 刷新排名卡片（显示全球最强模式）
-                renderRankCards(null);
-                
-                console.log('[Auth] ✅ 已退出登录');
-                alert('已退出登录');
-                
-            } catch (error) {
-                console.error('[Auth] ❌ 退出登录异常:', error);
-                alert(`退出失败: ${error.message || '未知错误'}`);
+                var keysToRemove = ['github_token', 'vibe_github_access_token', 'fingerprint', 'user_fingerprint', 'vibe_stats2_swr_cache'];
+                for (var i = 0; i < keysToRemove.length; i++) {
+                    try { localStorage.removeItem(keysToRemove[i]); } catch (e) {}
+                }
+                try {
+                    var keys = [];
+                    for (var idx = 0; idx < localStorage.length; idx++) {
+                        var k = localStorage.key(idx);
+                        if (k && k.indexOf('vibe_country_') === 0) keys.push(k);
+                    }
+                    for (var j = 0; j < keys.length; j++) {
+                        try { localStorage.removeItem(keys[j]); } catch (e2) {}
+                    }
+                } catch (e) {}
+                try {
+                    localStorage.clear();
+                } catch (e) {}
+                if (typeof window !== 'undefined' && window.__githubAccessToken !== undefined) window.__githubAccessToken = '';
+                if (typeof window !== 'undefined' && window.location && window.location.replace) {
+                    window.location.replace('/');
+                }
+            } catch (e) {
+                if (typeof window !== 'undefined' && window.location && window.location.replace) {
+                    window.location.replace('/');
+                }
             }
         }
+        if (typeof window !== 'undefined') window.logout = logout;
         
         /**
          * 显示同步遮罩
@@ -16483,7 +16996,7 @@
                                     console.log('[Auth] ℹ️ Step B: 已在本页执行过自动上报，跳过');
                                 }
                                 
-                                // 【迁移优先】清除匿名缓存后强制刷新，使“我的排名”等数据统一来自 v_unified_analysis_v2
+                                // 【迁移优先】清除匿名缓存后强制刷新，使“我的排名”等数据统一来自 v_unified_analysis_v2。登录后首次同步仅通过读取最新 user_analysis / v_unified_analysis_v2（及现有 API）更新 UI；严禁调用 supabase.rpc('refresh_leaderboard_snapshots')，该 RPC 仅由后端 Worker Cron 执行。
                                 console.log('[Auth] 🔄 Step C: 强制刷新视图数据（fetchData + refreshUserStats）...');
                                 try {
                                     if (typeof fetchData === 'function') {
@@ -17253,7 +17766,7 @@
                 // 如果输入为空，清除localStorage
                 localStorage.removeItem('github_username');
                 console.log('[GitHub] ✅ 已清除GitHub用户名');
-                alert('已清除GitHub用户名');
+                console.log('[Auth] 已清除 GitHub 用户名');
                 return;
             }
             
@@ -17672,14 +18185,7 @@
                     });
                 }
                 
-                // 6.9 显示成功提示（清理旧的指纹匹配报错）
-                console.log('[GitHub] 🎉 绑定流程全部完成！');
-                alert('✅ GitHub用户名已保存并绑定成功！\n\n' +
-                      '• 指纹已更新到数据库\n' +
-                      '• 地图脉冲已触发\n' +
-                      '• 统计卡片已刷新\n' +
-                      '• 用户名已更新');
-                
+                console.log('[GitHub] 绑定流程完成：指纹已更新，统计卡片已刷新');
             } catch (error) {
                 const errorMessage = error && typeof error === 'object' && 'message' in error 
                     ? error.message 
@@ -19653,26 +20159,32 @@
                         };
                         if (tryLocal()) return;
 
-                        const url = (currentLang === 'en') ? 'src/personalityNames_en.json' : 'src/personalityNames.json';
-                        fetch(url)
-                            .then(response => {
-                                if (response.ok) {
-                                    return response.json();
-                                }
-                                throw new Error('Failed to load personalityNames.json');
-                            })
-                            .then(namesData => {
-                                if (namesData && namesData[idx]) {
-                                    console.log('[UserStats] ✅ 从 personalityNames.json 获取人格称号:', namesData[idx]);
-                                    resolve(String(namesData[idx]));
-                                } else {
-                                    resolve(null);
-                                }
-                            })
-                            .catch(error => {
-                                console.warn('[UserStats] ⚠️ 加载 personalityNames.json 失败:', error);
+                        var urls = (currentLang === 'en')
+                            ? ['src/personalityNames_en.json', 'personalityNames_en.json', 'dist/src/personalityNames_en.json']
+                            : ['src/personalityNames.json', 'personalityNames.json', 'dist/src/personalityNames.json'];
+                        var tryFetch = function(i) {
+                            if (i >= urls.length) {
                                 resolve(null);
-                            });
+                                return;
+                            }
+                            fetch(urls[i])
+                                .then(function(response) {
+                                    if (response.ok) return response.json();
+                                    throw new Error('Failed');
+                                })
+                                .then(function(namesData) {
+                                    if (namesData && namesData[idx]) {
+                                        console.log('[UserStats] ✅ 从 personalityNames.json 获取人格称号:', namesData[idx]);
+                                        resolve(String(namesData[idx]));
+                                    } else {
+                                        tryFetch(i + 1);
+                                    }
+                                })
+                                .catch(function() {
+                                    tryFetch(i + 1);
+                                });
+                        };
+                        tryFetch(0);
                     });
                 };
                 
@@ -19695,6 +20207,43 @@
                         }
                     } catch (e) {
                         console.warn('[UserStats] ⚠️ 获取人格称号失败:', e);
+                    }
+                }
+                
+                // 【修复人格鉴定结果空白】若仍无人格称号，从 index 分析结果（cursor_clinical_history / last_analysis_data）补充
+                if (!personalityName || personalityName === '未知人格' || personalityName === '未知') {
+                    try {
+                        var histStr = localStorage.getItem('cursor_clinical_history') || '';
+                        var hist = histStr ? JSON.parse(histStr) : null;
+                        var vr = hist && hist.analysisData && hist.analysisData.vibeResult ? hist.analysisData.vibeResult : null;
+                        if (vr && (vr.personalityName || vr.personality_name)) {
+                            personalityName = vr.personalityName || vr.personality_name || vr.personalityNameZh || vr.personality_name_zh || null;
+                            if (personalityName) console.log('[UserStats] ✅ 从 cursor_clinical_history 补充人格称号:', personalityName);
+                        }
+                        if (!personalityName) {
+                            var lastStr = localStorage.getItem('last_analysis_data');
+                            if (lastStr) {
+                                var lastObj = JSON.parse(lastStr);
+                                personalityName = lastObj && (lastObj.personalityName || lastObj.personality_name) ? (lastObj.personalityName || lastObj.personality_name) : null;
+                                if (personalityName) console.log('[UserStats] ✅ 从 last_analysis_data 补充人格称号:', personalityName);
+                            }
+                        }
+                        if (!personalityName) {
+                            var vibeIdx = localStorage.getItem('user_vibe_index');
+                            if (vibeIdx && typeof vibeIdx === 'string' && vibeIdx.length === 5) {
+                                loadPersonalityName(vibeIdx).then(function(name) {
+                                    if (name) {
+                                        var el = document.querySelector('[data-stat="personality-name"]');
+                                        if (el) {
+                                            el.textContent = (typeof translatePersonalityName === 'function' ? translatePersonalityName(name, currentUserData) : name);
+                                            console.log('[UserStats] ✅ 已从 user_vibe_index 异步更新人格称号:', name);
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('[UserStats] ⚠️ 从 localStorage 补充人格称号失败:', e);
                     }
                 }
                 
@@ -20090,8 +20639,25 @@
                                     }
 
                                     // 最后兜底
-                                    if (!realEvalTitle) realEvalTitle = '';
-                                    if (!realEvalText) realEvalText = '暂无真实评价（中文文案缺失）';
+                                    if (!realEvalTitle) realEvalTitle = personalityName || (currentLang === 'en' ? 'Technologist' : '赛博架构师');
+                                    if (!realEvalText || realEvalText === '暂无真实评价（中文文案缺失）') {
+                                        // 维度兜底
+                                        const dims = (vr && vr.dimensions) || currentUserData.dimensions || (currentUserData.vibe_rank && currentUserData.vibe_rank.dimensions) || {};
+                                        const labels = (currentLang === 'en')
+                                            ? { L: 'Logic', P: 'Patience', D: 'Detail', E: 'Exploration', F: 'Feedback' }
+                                            : { L: '逻辑', P: '耐性', D: '细节', E: '探索', F: '反馈' };
+                                        const sorted = Object.entries(dims).filter(function(e) { return labels[e[0]]; }).map(function(e) { return { k: e[0], v: Number(e[1]) || 0 }; });
+                                        sorted.sort(function(a, b) { return b.v - a.v; });
+                                        if (sorted.length >= 2) {
+                                            const top1 = labels[sorted[0].k];
+                                            const top2 = labels[sorted[1].k];
+                                            realEvalText = (currentLang === 'en')
+                                                ? 'A developer with strong ' + top1 + ' and ' + top2.toLowerCase() + '.'
+                                                : '一位极具' + top1 + '且' + (sorted[1].v >= 70 ? '极度' : '较为') + top2 + '的代码架构师。';
+                                        } else {
+                                            realEvalText = (currentLang === 'en') ? 'A developer with a unique and complex coding style.' : '一位性格深邃且独特的赛博开发者。';
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -20131,6 +20697,7 @@
                 }
                 
                 // 创建用户统计卡片容器（赛博病理风格：border-white/10 bg-[#0a0a0a]/80 backdrop-blur）
+                var drawerStarsResolved = (typeof resolveDisplayStars === 'function' ? resolveDisplayStars(currentUserData) : null);
                 const statsCard = document.createElement('div');
                 statsCard.className = 'drawer-item dashboard-card backdrop-blur';
                 statsCard.innerHTML = `
@@ -20188,7 +20755,7 @@
                             </div>
                             <div class="flex items-center justify-between">
                                 <span class="dashboard-metric-label text-[10px]">⭐ ${getI18nText('github.total_stars') || (currentLang === 'en' ? 'Total Stars' : '星标总数')}</span>
-                                <span class="drawer-item-value text-sm">${(githubStats.totalRepoStars || 0).toLocaleString()}</span>
+                                <span class="drawer-item-value text-sm">${drawerStarsResolved != null ? drawerStarsResolved.toLocaleString() : (githubStats.totalRepoStars > 0 ? githubStats.totalRepoStars.toLocaleString() : '—')}</span>
                             </div>
                             <div class="flex items-center justify-between">
                                 <span class="dashboard-metric-label text-[10px]">🕒 ${getI18nText('github.last_repo_update') || (currentLang === 'en' ? 'Repo Updated' : '仓库更新')}</span>
@@ -20198,9 +20765,9 @@
                         ` : ''}
                     </div>
                     
-                    <!-- 人格称号（与 index 一致：优先由 vibe_index 从 personalityNames.json 解析） -->
+                    <!-- 人格鉴定结果（与 index 一致：优先由 vibe_index 从 personalityNames.json 解析） -->
                     <div class="mb-3 pb-3 border-b border-[var(--border-ui)]">
-                        <div class="drawer-item-label mb-1">${getI18nText('drawer.personality_title') || (currentLang === 'en' ? 'Title' : '人格称号')}</div>
+                        <div class="drawer-item-label mb-1">${getI18nText('preview.personalityLabel') || getI18nText('drawer.personality_title') || (currentLang === 'en' ? 'Personality Verdict' : '人格鉴定结果')}</div>
                         <div class="drawer-item-value text-sm" data-stat="personality-name">${personalityName}</div>
                         <div class="drawer-item-desc text-[8px]">${personalityType === 'AUTO_REPORT' ? '' : (personalityType || '')}</div>
                     </div>
@@ -20318,7 +20885,7 @@
                             }
                         }
                         if (!token || !token.length) {
-                            alert('需要重新使用 GitHub 登录以授权战力同步');
+                            console.warn('[GitHub Sync] 无 accessToken，跳过战力同步');
                             return { success: false, error: 'accessToken 必填' };
                         }
                         return fetch(apiBase ? apiBase + '/api/github/sync' : '/api/github/sync', {
@@ -20333,6 +20900,9 @@
                         }).then(async function(r) {
                             var text = await r.text();
                             if (!r.ok) {
+                                if (r.status === 401 && typeof window.__clearGitHubTokenAndResetSyncUI === 'function') {
+                                    window.__clearGitHubTokenAndResetSyncUI();
+                                }
                                 console.error('[GitHub Sync] 后端返回错误:', r.status, text);
                                 if (r.status === 500) {
                                     console.error('[GitHub Sync] 500 原始报错:', text);
@@ -20344,7 +20914,7 @@
                                 } catch (e) {}
                                 var isUniqueViolation = errMsg.indexOf('UNIQUE_VIOLATION_FINGERPRINT') !== -1 || /duplicate key|unique constraint|violates unique constraint/i.test(errMsg);
                                 var tip = isUniqueViolation ? '正在合并游客数据，请稍后刷新。' : (errMsg.indexOf('401') !== -1 || errMsg.indexOf('Bad credentials') !== -1) ? 'GitHub 凭证无效（401），请退出后重新用 GitHub 登录一次以刷新授权。' : (errMsg.indexOf('RLS') !== -1 || errMsg.indexOf('permission') !== -1) ? '数据库权限受限（RLS 拦截），请检查服务端配置。' : (errMsg.indexOf('Token') !== -1 || errMsg.indexOf('accessToken') !== -1) ? 'Token 失效或未授权，请重新使用 GitHub 登录。' : errMsg;
-                                alert('战力同步失败：' + tip);
+                                console.warn('[GitHub Sync] 战力同步失败:', tip);
                                 return { success: false, status: 'error', error: text || ('HTTP ' + r.status) };
                             }
                             var parsed;
@@ -20353,11 +20923,14 @@
                                 return { success: false, status: 'error', error: (text && text.length) ? ('响应格式异常: ' + text.slice(0, 100)) : '未知错误' };
                             }
                             if (parsed && (parsed.success === false || parsed.status === 'error')) {
-                                console.error('[GitHub Sync] 同步失败:', parsed.error);
                                 var errStr = String(parsed.error || '');
+                                if (errStr.indexOf('401') !== -1 || errStr.indexOf('Bad credentials') !== -1) {
+                                    if (typeof window.__clearGitHubTokenAndResetSyncUI === 'function') window.__clearGitHubTokenAndResetSyncUI();
+                                }
+                                console.error('[GitHub Sync] 同步失败:', parsed.error);
                                 var isUniqueViolation = errStr.indexOf('UNIQUE_VIOLATION_FINGERPRINT') !== -1 || /duplicate key|unique constraint|violates unique constraint/i.test(errStr);
                                 var tip = isUniqueViolation ? '正在合并游客数据，请稍后刷新。' : (errStr.indexOf('RLS') !== -1 || errStr.indexOf('permission') !== -1 || errStr.indexOf('Database error') !== -1) ? '数据库权限受限（可能为 RLS 拦截），请检查服务端 SUPABASE_SERVICE_ROLE_KEY。' : (errStr.indexOf('401') !== -1 || errStr.indexOf('Bad credentials') !== -1) ? 'GitHub 凭证无效（401），请退出后重新使用 GitHub 登录一次以刷新授权。' : (errStr.indexOf('Token') !== -1 || errStr.indexOf('accessToken') !== -1) ? 'Token 失效或未授权，请重新使用 GitHub 登录。' : (parsed.error || '未知错误');
-                                alert('战力同步失败：' + tip);
+                                console.warn('[GitHub Sync] 战力同步失败:', tip);
                             }
                             return parsed;
                         });
@@ -20385,11 +20958,12 @@
                                         if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard(); else if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
                                     }, 1500);
                                 } else {
+                                    var fallbackStars = (typeof resolveDisplayStars === 'function' ? resolveDisplayStars(currentUserData) : null);
                                     var fallback = {
                                         login: currentUserData.user_name || currentUserData.login || '--',
                                         avatarUrl: '',
                                         globalRanking: '--',
-                                        totalRepoStars: Number(currentUserData.github_stars) || 0,
+                                        totalRepoStars: (fallbackStars != null ? Number(fallbackStars) : 0) || Number(currentUserData.github_stars) || 0,
                                         mergedPRs: 0, commitVelocity: 0, prReviews: 0, activeDays: 0,
                                         publicRepos: 0, privateRepos: 0, languageDistribution: [],
                                         accountAge: 0, syncedAt: '', latest_repo_updated_at: '', organizations: []
@@ -20397,10 +20971,11 @@
                                     window.renderGithubCard(fallback, cardOpts);
                                 }
                             }).catch(function() {
+                                var fs = (typeof resolveDisplayStars === 'function' ? resolveDisplayStars(currentUserData) : null);
                                 var fallback = {
                                     login: currentUserData.user_name || currentUserData.login || '--',
                                     avatarUrl: '', globalRanking: '--',
-                                    totalRepoStars: Number(currentUserData.github_stars) || 0,
+                                    totalRepoStars: (fs != null ? Number(fs) : 0) || Number(currentUserData.github_stars) || 0,
                                     mergedPRs: 0, commitVelocity: 0, prReviews: 0, activeDays: 0,
                                     publicRepos: 0, privateRepos: 0, languageDistribution: [],
                                     accountAge: 0, syncedAt: '', latest_repo_updated_at: '', organizations: []
@@ -20408,10 +20983,11 @@
                                 window.renderGithubCard(fallback, cardOpts);
                             });
                         } else {
+                            var fs2 = (typeof resolveDisplayStars === 'function' ? resolveDisplayStars(currentUserData) : null);
                             var fallback = {
                                 login: currentUserData.user_name || currentUserData.login || '--',
                                 avatarUrl: '', globalRanking: '--',
-                                totalRepoStars: Number(currentUserData.github_stars) || 0,
+                                totalRepoStars: (fs2 != null ? Number(fs2) : 0) || Number(currentUserData.github_stars) || 0,
                                 mergedPRs: 0, commitVelocity: 0, prReviews: 0, activeDays: 0,
                                 publicRepos: 0, privateRepos: 0, languageDistribution: [],
                                 accountAge: 0, syncedAt: '', latest_repo_updated_at: '', organizations: []
@@ -21211,14 +21787,21 @@
             // 加载维度排名数据资源
             await loadRankResources();
             
-            // 先执行初始数据加载（增强错误处理）
+            // 【并行加载】同时发起用户信息查询与全局榜单快照查询，减少首屏等待
             let apiFailed = false;
             try {
-                await fetchData();
-            } catch (fetchError) {
+                var preloadLb = (typeof window.__fetchAllLeaderboardSnapshots === 'function') ? window.__fetchAllLeaderboardSnapshots() : Promise.resolve(null);
+                await Promise.all([
+                    fetchData().catch(function(fetchError) {
+                        apiFailed = true;
+                        console.error('[Window.onload] ❌ fetchData 失败:', fetchError);
+                        return undefined;
+                    }),
+                    preloadLb.catch(function() { return null; })
+                ]);
+            } catch (e) {
                 apiFailed = true;
-                console.error('[Window.onload] ❌ fetchData 失败:', fetchError);
-                // 即使数据加载失败，也继续执行后续初始化
+                console.error('[Window.onload] ❌ 并行数据加载异常:', e);
             }
             
             // 检测 API 状态并提示用户
@@ -22060,8 +22643,8 @@
             // 兼容多种数据源：lexicon { w, v } / 黑话榜 { phrase, hit_count } / 开发者榜 { user_name, total_messages }
             let items = (Array.isArray(list) ? list : [])
                 .map((x) => {
-                    var phrase = String(x?.phrase ?? x?.w ?? x?.user_name ?? '').trim();
-                    var hit = Number(x?.hit_count ?? x?.hitCount ?? x?.v ?? x?.total_messages ?? 0) || 0;
+                    var phrase = String(x?.phrase ?? x?.w ?? x?.word ?? x?.user_name ?? '').trim();
+                    var hit = Number(x?.hit_count ?? x?.hitCount ?? x?.v ?? x?.count ?? x?.total_messages ?? 0) || 0;
                     return { phrase: phrase, hit: hit };
                 })
                 .filter((x) => x.phrase && x.hit > 0);
@@ -22107,14 +22690,14 @@
         }
 
         (function bindLexiconTabs() {
-            var tabsEl = document.getElementById('vibe-lexicon-tabs');
-            if (!tabsEl) return;
-            if (tabsEl.dataset.bound) return;
-            tabsEl.dataset.bound = '1';
+            if (document.body.dataset.lexiconTabsBound) return;
+            document.body.dataset.lexiconTabsBound = '1';
             window.__currentLexiconType = window.__currentLexiconType || 'merit_board';
-            tabsEl.addEventListener('click', function(e) {
+            document.body.addEventListener('click', function(e) {
                 var btn = e.target && e.target.closest && e.target.closest('.vibe-lexicon-tab');
                 if (!btn || !btn.dataset.type) return;
+                var tabsEl = btn.closest && btn.closest('#vibe-lexicon-tabs');
+                if (!tabsEl) return;
                 var type = btn.dataset.type;
                 window.__currentLexiconType = type;
                 var all = tabsEl.querySelectorAll('.vibe-lexicon-tab');
@@ -22125,15 +22708,53 @@
                 btn.classList.add('bg-[var(--accent-terminal)]/20', 'text-[var(--accent-terminal)]', 'font-medium', 'border-white/20');
                 btn.classList.remove('bg-transparent', 'text-zinc-400', 'border-white/10');
                 var country = (typeof window.__currentCountryCode === 'string' && window.__currentCountryCode) ? window.__currentCountryCode : '';
-                if (!country) return;
+                if (!country && typeof currentDrawerCountry === 'object' && currentDrawerCountry && currentDrawerCountry.code) country = String(currentDrawerCountry.code).trim().toUpperCase();
+                if (!country) country = (window.__selectedCountry && String(window.__selectedCountry).trim()) ? String(window.__selectedCountry).trim().toUpperCase() : '';
+                if (!country) {
+                    var mountEl = document.getElementById('countryTemplateMount');
+                    if (mountEl && mountEl.dataset && mountEl.dataset.country && /^[A-Z]{2}$/.test(mountEl.dataset.country)) country = mountEl.dataset.country;
+                }
+                var lexTypeToLevel = { merit_board: 'Professional', slang_list: 'Novice', mantra_top: 'Architect' };
+                var level = lexTypeToLevel[type] || 'Professional';
+                if (!country || !/^[A-Z]{2}$/.test(country)) {
+                    var kw = window.__countryKeywordsByLevel && window.__countryKeywordsByLevel[level];
+                    var listNoCountry = Array.isArray(kw) ? kw : (window.__lexiconByType && window.__lexiconByType[type]) || [];
+                    if (typeof _renderTop10List === 'function') _renderTop10List(listNoCountry, true);
+                    return;
+                }
                 var base = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content)) || '';
                 base = (base && base.trim()) ? (base.trim().endsWith('/') ? base.trim() : base.trim() + '/') : '';
+                var cached = window.__lexiconByType && window.__lexiconByType[type] && window.__lexiconByType[type].length > 0;
+                if (cached) {
+                    if (typeof _renderTop10List === 'function') _renderTop10List(window.__lexiconByType[type], true);
+                    return;
+                }
                 var url = base + 'api/national-lexicon?country=' + encodeURIComponent(country) + '&type=' + encodeURIComponent(type);
                 fetch(url).then(function(r) { return r.json(); }).then(function(res) {
                     var list = (res && res.data && Array.isArray(res.data)) ? res.data : [];
+                    if (list.length === 0 && (type === 'merit_board' || type === 'mantra_top')) {
+                        var kwFallback = window.__countryKeywordsByLevel && window.__countryKeywordsByLevel[level];
+                        if (Array.isArray(kwFallback) && kwFallback.length > 0) {
+                            list = kwFallback.map(function(x) { return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; });
+                        }
+                        if (list.length === 0) {
+                            var fallback = Array.isArray(window.__latestTop10) ? window.__latestTop10 : (Array.isArray(window.__latestCloud50) ? window.__latestCloud50.slice(0, 20) : []);
+                            if (fallback.length > 0) list = fallback;
+                        }
+                    }
+                    if (!window.__lexiconByType) window.__lexiconByType = {};
+                    window.__lexiconByType[type] = list;
                     if (typeof _renderTop10List === 'function') _renderTop10List(list, true);
                 }).catch(function() {
-                    if (typeof _renderTop10List === 'function') _renderTop10List([], true);
+                    var fallback = (window.__lexiconByType && window.__lexiconByType[type] && window.__lexiconByType[type].length > 0)
+                        ? window.__lexiconByType[type] : [];
+                    if (fallback.length === 0 && (type === 'merit_board' || type === 'mantra_top')) {
+                        var kwErr = window.__countryKeywordsByLevel && window.__countryKeywordsByLevel[level];
+                        if (Array.isArray(kwErr) && kwErr.length > 0) {
+                            fallback = kwErr.map(function(x) { return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; });
+                        }
+                    }
+                    if (typeof _renderTop10List === 'function') _renderTop10List(fallback.length > 0 ? fallback : [], true);
                 });
             });
         })();
@@ -22234,6 +22855,7 @@
                             updateLeftDrawerCountryHint(window.__selectedCountry);
                         }
                     }).catch(function(err) {
+                        if (err && err.name === 'AbortError') return;
                         console.warn('[autoPreloadNationalCloud] 预加载词云数据失败:', err);
                         empty = document.getElementById('vibe-cloud50-empty');
                         if (empty) {
@@ -22288,6 +22910,7 @@
             var canvas = document.getElementById(canvasId);
             if (!canvas) canvas = document.getElementById('national-identity-cloud-canvas');
             if (!container) return;
+            var wcSkeleton = document.getElementById('stats2-wc-skeleton');
             if (!canvas) {
                 canvas = document.createElement('canvas');
                 canvas.id = canvasId;
@@ -22295,6 +22918,7 @@
                 canvas.setAttribute('style', 'display:block;width:100%;height:100%');
                 container.appendChild(canvas);
             }
+            if (wcSkeleton) { wcSkeleton.classList.add('stats2-skeleton-hidden'); wcSkeleton.setAttribute('aria-hidden', 'true'); }
             // 【强制清理旧 Canvas】每次绘制前清空所有词云 canvas，防止多层叠加以致性能下降
             ['canvas-novice', 'canvas-pro', 'canvas-arch', 'national-identity-cloud-canvas'].forEach(function(id) {
                 var el = document.getElementById(id);
@@ -22563,6 +23187,8 @@
 
             let words = applyLogFontSize(raw, (w) => w?.value ?? 0);
             // 【性能优化】复用 ECharts 实例，避免反复销毁重建
+            var wcSkel = document.getElementById('stats2-wc-skeleton');
+            if (wcSkel) { wcSkel.classList.add('stats2-skeleton-hidden'); wcSkel.setAttribute('aria-hidden', 'true'); }
             if (!vibeCloudChart || vibeCloudChart.isDisposed()) {
                 try { container.innerHTML = ''; } catch { /* ignore */ }
                 vibeCloudChart = echarts.init(container, null, { renderer: 'canvas' });
@@ -22664,7 +23290,10 @@
 
                 const top10 = Array.isArray(data?.top10) ? data.top10 : (Array.isArray(window.__latestTop10) ? window.__latestTop10 : []);
                 var isCountryRegion = (region && String(region).length === 2);
-                _renderTop10List(top10);
+                var lexType = window.__currentLexiconType || 'merit_board';
+                var listToRender = (window.__lexiconByType && window.__lexiconByType[lexType] && window.__lexiconByType[lexType].length > 0)
+                    ? window.__lexiconByType[lexType] : top10;
+                _renderTop10List(listToRender, true);
                 if (isCountryRegion && window.__countryKeywordsByLevel && typeof _renderNationalIdentityCloud === 'function') {
                     _renderNationalIdentityCloud(window.__currentNationalIdentityLevel || 'Architect');
                 } else {
@@ -22699,9 +23328,26 @@
                 return;
             }
             
-            // 【性能优化】检查缓存，避免重复请求
+            // 【性能优化】检查 updateCountryDashboard 缓存（country-summary 已含 top10/cloud50），30 秒内复用
             if (!opts.forceRefresh) {
-                const cached = _getVibeCloudCache(region);
+                var CACHE_MAX_AGE_MS = 30000;
+                try {
+                    var dashCache = window.__countryDashboardCache;
+                    var hit = dashCache && typeof dashCache.get === 'function' ? dashCache.get(region) : null;
+                    var cachedData = hit && typeof hit === 'object' ? (hit.data || hit) : null;
+                    var ts = hit && typeof hit === 'object' ? (hit.ts || 0) : 0;
+                    if (cachedData && typeof cachedData === 'object' && (Date.now() - ts) < CACHE_MAX_AGE_MS) {
+                        var hasHot = (Array.isArray(cachedData.top10) && cachedData.top10.length > 0) || (Array.isArray(cachedData.cloud50) && cachedData.cloud50.length > 0);
+                        if (hasHot) {
+                            window.__latestTop10 = Array.isArray(cachedData.top10) ? cachedData.top10 : null;
+                            window.__latestCloud50 = Array.isArray(cachedData.cloud50) ? cachedData.cloud50 : null;
+                            window.__latestMonthlyVibes = cachedData.monthly_vibes || cachedData.monthlyVibes || null;
+                            try { window.renderVibeCardFromData && window.renderVibeCardFromData(region, cachedData); } catch (_) {}
+                            return;
+                        }
+                    }
+                } catch (_) {}
+                var cached = _getVibeCloudCache(region);
                 if (cached) {
                     console.log('[refreshVibeCard] 命中缓存:', region);
                     _applyVibeCloudData(region, cached, empty);
@@ -22729,7 +23375,11 @@
             ).then(r => r.ok ? r.json() : null).catch(() => null);
             
             const fetchTop10 = (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function')
-                ? supabaseClient.rpc('get_country_keywords', { target_code: region }).then(res => res?.data).catch(() => null)
+                ? (typeof getCachedOrFetch === 'function' && typeof VIBE_COUNTRY_RPC_CACHE_TTL_MS !== 'undefined'
+                    ? getCachedOrFetch('vibe_country_keywords_' + region, VIBE_COUNTRY_RPC_CACHE_TTL_MS, function() {
+                        return supabaseClient.rpc('get_country_keywords', { target_code: region }).then(function(res) { return res && res.data != null ? res.data : null; }).catch(function() { return null; });
+                    })
+                    : supabaseClient.rpc('get_country_keywords', { target_code: region }).then(res => res?.data).catch(() => null))
                 : fetch(
                     API_ENDPOINT + 'api/global-average?country_code=' + encodeURIComponent(region) + '&_t=' + Date.now(),
                     { cache: 'no-store', signal: vibeCloudAbort ? vibeCloudAbort.signal : undefined }
@@ -23908,6 +24558,7 @@
         let isRefreshingUserStats = false;
         let refreshUserStatsAbortController = null;
         
+        /** 登录后首次同步仅通过读取最新 user_analysis / v_unified_analysis_v2（及现有 API）更新 UI；严禁调用 supabase.rpc('refresh_leaderboard_snapshots')，该 RPC 仅由后端 Worker Cron 执行。 */
         window.refreshUserStats = async function() {
             if (isGlobalInitializing && !window.__allowInitCall) return;
             
@@ -24419,7 +25070,7 @@ document.addEventListener('click', function(e) {
 
     var supabase = (typeof supabaseClient !== 'undefined' && supabaseClient) ? supabaseClient : (window.supabase || null);
     if (!supabase || typeof supabase.auth !== 'object') {
-        alert('请先登录 GitHub');
+        console.warn('[Sync] 请先登录 GitHub');
         return;
     }
 
@@ -24430,7 +25081,7 @@ document.addEventListener('click', function(e) {
     supabase.auth.getSession().then(function(sess) {
         var session = sess && sess.data && sess.data.session;
         if (!session || !session.user) {
-            alert('请先登录 GitHub');
+            console.warn('[Sync] 请先登录 GitHub');
             btn.disabled = false;
             btn.textContent = originalText;
             return Promise.reject(new Error('Not logged in'));
@@ -24442,11 +25093,13 @@ document.addEventListener('click', function(e) {
             body: { userId: userId, providerToken: providerToken }
         }).then(function(res) {
             if (res && res.error) {
-                console.error('[SyncGitHub] Error:', res.error);
-                alert('同步失败: ' + (res.error.message || res.error));
+                console.warn('[SyncGitHub] 同步失败:', res.error.message || res.error);
+                btn.disabled = false;
+                btn.textContent = originalText;
             } else if (res && res.data && res.data.error) {
-                console.error('[SyncGitHub] Data error:', res.data.error);
-                alert('同步失败: ' + res.data.error);
+                console.warn('[SyncGitHub] 同步失败:', res.data.error);
+                btn.disabled = false;
+                btn.textContent = originalText;
             } else {
                 console.log('[SyncGitHub] Success:', res && res.data);
                 if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
@@ -24498,6 +25151,9 @@ document.addEventListener('click', function(e) {
                                         id: cu.id || ''
                                     })
                                 }).then(async function(res) {
+                                    if (!res.ok && res.status === 401 && typeof window.__clearGitHubTokenAndResetSyncUI === 'function') {
+                                        window.__clearGitHubTokenAndResetSyncUI();
+                                    }
                                     var text = await res.text();
                                     try { return JSON.parse(text); } catch (e) {
                                         console.warn('[GitHub Sync] 响应非 JSON:', text.slice(0, 300));

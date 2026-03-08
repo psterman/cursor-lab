@@ -563,12 +563,14 @@
                 } catch { /* ignore */ }
                 
                 // =========================
-                // 语义爆发（黑话榜）数据源：top10 + cloud50（按国家过滤）
+                // 语义爆发（黑话榜）数据源：top10 + cloud50 + monthly_vibes（按国家过滤，单一请求归拢）
                 // =========================
                 try {
                     if (isStaleRequest()) return;
                     window.__latestTop10 = Array.isArray(data.top10) ? data.top10 : null;
                     window.__latestCloud50 = Array.isArray(data.cloud50) ? data.cloud50 : null;
+                    window.__latestMonthlyVibes = data.monthly_vibes || data.monthlyVibes || null;
+                    window.__latestTopSentences = Array.isArray(data.top_sentences) ? data.top_sentences : null;
                     // 直接用本次响应渲染（避免重复请求）
                     try { window.renderVibeCardFromData && window.renderVibeCardFromData(countryNameOrCode, data); } catch (e2) { /* ignore */ }
                 } catch (e1) { /* ignore */ }
@@ -14314,9 +14316,27 @@
             try { vibeCloudAbort && vibeCloudAbort.abort && vibeCloudAbort.abort(); } catch { /* ignore */ }
             vibeCloudAbort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
 
+            // 缓存优先：updateCountryDashboard 已注入的数据，30 秒内复用，减少 Supabase 并发
+            const CACHE_MAX_AGE_MS = 30000;
             try {
+                const cache = window.__countryDashboardCache;
+                const hit = cache && typeof cache.get === 'function' ? cache.get(region) : null;
+                const cached = hit && typeof hit === 'object' ? (hit.data || hit) : null;
+                const ts = hit && typeof hit === 'object' ? (hit.ts || 0) : 0;
+                if (cached && typeof cached === 'object' && (Date.now() - ts) < CACHE_MAX_AGE_MS) {
+                    window.__latestTop10 = Array.isArray(cached.top10) ? cached.top10 : null;
+                    window.__latestCloud50 = Array.isArray(cached.cloud50) ? cached.cloud50 : null;
+                    window.__latestMonthlyVibes = cached.monthly_vibes || cached.monthlyVibes || null;
+                    window.__latestTopSentences = Array.isArray(cached.top_sentences) ? cached.top_sentences : null;
+                    window.renderVibeCardFromData(region, cached);
+                    return;
+                }
+            } catch { /* ignore */ }
+
+            try {
+                try { vibeCloudAbort && vibeCloudAbort.abort && vibeCloudAbort.abort(); } catch { /* ignore */ }
+                vibeCloudAbort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
                 const API_ENDPOINT = _getApiEndpoint();
-                // cache-busting：避免浏览器/中间层对 GET 做意外缓存
                 const url = `${API_ENDPOINT}api/global-average?country_code=${encodeURIComponent(region)}&_t=${Date.now()}`;
                 const resp = await fetch(url, { cache: 'no-store', signal: vibeCloudAbort ? vibeCloudAbort.signal : undefined });
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -14325,6 +14345,8 @@
 
                 window.__latestTop10 = Array.isArray(data.top10) ? data.top10 : null;
                 window.__latestCloud50 = Array.isArray(data.cloud50) ? data.cloud50 : null;
+                window.__latestMonthlyVibes = data.monthly_vibes || data.monthlyVibes || null;
+                window.__latestTopSentences = Array.isArray(data.top_sentences) ? data.top_sentences : null;
                 window.renderVibeCardFromData(region, data);
             } catch (e) {
                 try { _renderTop10List([]); } catch { /* ignore */ }

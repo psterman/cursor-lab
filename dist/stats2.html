@@ -53,6 +53,17 @@
   <link rel="stylesheet" crossorigin href="assets/css/stats2.css">
 </head>
 <body class="p-4 md:p-8">
+    <!-- 强制性全屏遮罩：id=force-onboarding-overlay，无关闭按钮，先选国家再显示 GitHub 按钮，双重状态完成后由 JS 静默销毁 -->
+    <div id="force-onboarding-overlay" class="stats2-gate-overlay" aria-hidden="false" style="display: flex;">
+        <div class="stats2-gate-overlay-inner">
+            <h3 class="stats2-gate-title">身份设置</h3>
+            <input type="text" id="country-search-input" placeholder="搜索国家..." class="stats2-gate-search" />
+            <div id="country-list-container" class="stats2-gate-list"></div>
+            <div id="force-onboarding-github-section" class="stats2-gate-github-section" style="display: none;">
+                <button type="button" id="country-selector-github-save-btn" disabled class="stats2-gate-github-btn">使用 GitHub 登录并保存</button>
+            </div>
+        </div>
+    </div>
     <!-- 顶部固定 Header -->
     <div class="top-header">
         <div class="top-header-left">
@@ -132,19 +143,17 @@
         </div>
     </div>
     
-    <!-- 国家选择器浮窗 -->
+    <!-- 国家选择器浮窗（仅用于非 gate 场景的「身份设置」入口，gate 使用 #stats2-gate-overlay） -->
     <div id="country-selector-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 200; background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(4px); pointer-events: auto;">
         <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 500px; max-height: 80vh; background: rgba(5, 5, 5, 0.95); border: 1px solid rgba(0, 255, 65, 0.45); border-radius: 4px; padding: 20px; overflow: hidden; display: flex; flex-direction: column;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                 <h3 style="color: #00ff41; font-family: 'JetBrains Mono', monospace; font-size: 14px; margin: 0;">身份设置</h3>
                 <button id="country-selector-close" style="background: none; border: none; color: #00ff41; font-size: 20px; cursor: pointer; padding: 0; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;" title="关闭">✕</button>
             </div>
-            <input type="text" id="country-search-input" placeholder="搜索国家..." style="width: 100%; padding: 8px 12px; background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(0, 255, 65, 0.3); color: #00ff41; font-family: 'JetBrains Mono', monospace; font-size: 12px; margin-bottom: 12px; outline: none;">
-            <div id="country-list-container" style="flex: 1; overflow-y: auto; max-height: calc(80vh - 120px);">
-                <!-- 国家列表将通过 JavaScript 动态填充 -->
-            </div>
+            <input type="text" id="country-search-input-modal" placeholder="搜索国家..." style="width: 100%; padding: 8px 12px; background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(0, 255, 65, 0.3); color: #00ff41; font-family: 'JetBrains Mono', monospace; font-size: 12px; margin-bottom: 12px; outline: none;">
+            <div id="country-list-container-modal" style="flex: 1; overflow-y: auto; max-height: calc(80vh - 120px);"></div>
             <div style="flex-shrink: 0; margin-top: 16px; padding-top: 12px; border-top: 1px solid rgba(0, 255, 65, 0.25);">
-                <button type="button" id="country-selector-github-save-btn" disabled style="width: 100%; padding: 12px 16px; background: rgba(0, 255, 65, 0.15); border: 1px solid rgba(0, 255, 65, 0.45); color: #00ff41; font-family: 'JetBrains Mono', monospace; font-size: 13px; cursor: pointer; border-radius: 4px; opacity: 0.6;">使用 GitHub 登录并保存</button>
+                <button type="button" id="country-selector-github-save-btn-modal" disabled style="width: 100%; padding: 12px 16px; background: rgba(0, 255, 65, 0.15); border: 1px solid rgba(0, 255, 65, 0.45); color: #00ff41; font-family: 'JetBrains Mono', monospace; font-size: 13px; cursor: pointer; border-radius: 4px; opacity: 0.6;">使用 GitHub 登录并保存</button>
             </div>
         </div>
     </div>
@@ -258,13 +267,15 @@
                         <div class="left-drawer-wordcloud-meta-row">
                             <span class="left-drawer-wordcloud-label" data-i18n="panel.national_cloud_50">本国词云 50</span>
                             <span class="left-drawer-wordcloud-meta font-mono" id="vibe-cloud50-meta">--</span>
+                            <span id="vibe-cloud50-source-label" class="left-drawer-wordcloud-source hidden text-[10px] text-purple-400/90 ml-2" aria-hidden="true"></span>
                         </div>
                         <div id="national-identity-tabs" class="left-drawer-wordcloud-tabs">
                             <button type="button" class="national-identity-tab left-drawer-wordcloud-tab" data-level="Novice" data-t="lexicon.novice">小白</button>
                             <button type="button" class="national-identity-tab left-drawer-wordcloud-tab" data-level="Professional" data-t="lexicon.pro">脱发</button>
                             <button type="button" class="national-identity-tab left-drawer-wordcloud-tab" data-level="Architect" data-t="lexicon.arch">霸天</button>
                         </div>
-                        <div class="left-drawer-wordcloud-canvas-wrap" id="vibe-cloud50-container">
+                        <div class="left-drawer-wordcloud-canvas-wrap stats2-wc-min-height" id="vibe-cloud50-container">
+                            <div class="stats2-cyber-skeleton stats2-wordcloud-skeleton" id="stats2-wc-skeleton" aria-hidden="false"></div>
                             <canvas id="canvas-novice" data-level="Novice" aria-hidden="false"></canvas>
                             <canvas id="canvas-pro" data-level="Professional" style="display: none;" aria-hidden="true"></canvas>
                             <canvas id="canvas-arch" data-level="Architect" style="display: none;" aria-hidden="true"></canvas>
@@ -346,9 +357,13 @@
                                 <!-- 六个全球排行榜卡片 - renderGlobalLadders 会写入此处或其子节点 global-ranking-grids -->
                                 <div id="global-ranking-grids" class="industrial-ranking-grid flex flex-col gap-3"></div>
                             </div>
-                            <!-- 高分图谱容器 - drawHighScores 函数会在此渲染6个排行榜 -->
-                            <div class="vibe-index-leaderboard space-y-4">
-                                <!-- 卡片将由 JavaScript 动态渲染 -->
+                            <!-- 高分图谱容器 - drawHighScores 函数会在此渲染6个排行榜；固定 min-height + 骨架屏防抖 -->
+                            <div class="vibe-index-leaderboard space-y-4 stats2-lp-min-height">
+                                <div class="stats2-cyber-skeleton" id="stats2-lp-skeleton" aria-hidden="true">
+                                    <div class="stats2-skeleton-bars"></div>
+                                    <div class="stats2-skeleton-line"></div>
+                                    <div class="stats2-skeleton-line short"></div>
+                                </div>
                             </div>
                         </div>
                     </div>

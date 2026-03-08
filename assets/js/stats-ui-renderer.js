@@ -220,7 +220,7 @@
                         }
                     }
                 }).catch(function(err) {
-                    // 【令牌检查】错误回调也检查令牌
+                    if (err && err.name === 'AbortError') return;
                     if (window.__cloudRenderToken !== myToken) return;
                     hideCloudLoadingHint();
                     console.warn('[StatsUIRenderer] 获取词云数据失败:', err);

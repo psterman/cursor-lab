@@ -264,6 +264,119 @@ const COUNTRY_HOT_LIST_TTL = 600; // 国家大盘热词缓存 10 分钟
 // 右侧抽屉大盘缓存 TTL（秒）
 const KV_GLOBAL_STATS_V6_VIEW_TTL = 300;
 
+/** 本国词云 KV 缓存 TTL（秒），与 country-hot-list 一致 */
+const COUNTRY_WORDCLOUD_KV_TTL = 600;
+
+type CountryWordCloudResult = {
+  top10: Array<{ phrase: string; hit_count: number }>;
+  cloud50: Array<{ phrase: string; hit_count: number }>;
+  monthlyVibes: { slang: any[]; merit: any[]; sv_slang: any[]; phrase: any[] };
+  hasData: boolean;
+};
+
+/**
+ * 本国词云：KV 优先，命中则 0 次 Supabase；未命中则聚合并写入 KV（10 分钟复用）
+ */
+async function getCountryWordCloudCached(
+  env: Env,
+  cc: string
+): Promise<CountryWordCloudResult> {
+  const empty: CountryWordCloudResult = {
+    top10: [],
+    cloud50: [],
+    monthlyVibes: { slang: [], merit: [], sv_slang: [], phrase: [] },
+    hasData: false,
+  };
+  const kvKey = `${KV_KEY_COUNTRY_HOT_LIST_PREFIX}:${cc}`;
+  if (env.STATS_STORE) {
+    try {
+      const cached = await env.STATS_STORE.get(kvKey, 'json');
+      if (cached && typeof cached === 'object') {
+        const toPhraseHit = (arr: any[]): Array<{ phrase: string; hit_count: number }> =>
+          (Array.isArray(arr) ? arr : [])
+            .map((x: any) => ({ phrase: String(x?.word ?? x?.phrase ?? '').trim(), hit_count: Number(x?.count ?? x?.hit_count ?? 0) || 0 }))
+            .filter((x) => x.phrase && x.hit_count > 0);
+        const meritList = toPhraseHit(cached.merit ?? cached.Professional ?? []);
+        const slangList = toPhraseHit(cached.slang ?? cached.Novice ?? []);
+        const nativeList = toPhraseHit(cached.native ?? cached.globalNative ?? []);
+        const allItems = [...meritList, ...slangList, ...nativeList].sort((a, b) => b.hit_count - a.hit_count);
+        return {
+          top10: allItems.slice(0, 10),
+          cloud50: allItems.slice(0, 50),
+          monthlyVibes: { slang: slangList, merit: meritList, sv_slang: [], phrase: nativeList },
+          hasData: meritList.length > 0 || slangList.length > 0 || nativeList.length > 0,
+        };
+      }
+    } catch {
+      // ignore
+    }
+  }
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) return empty;
+  try {
+    const rowUrl = `${env.SUPABASE_URL}/rest/v1/country_vibe_stats?country_code=eq.${cc}&select=merit_jsonb,slang_jsonb,native_jsonb`;
+    const globalRpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_country_vibe_stats_global_sum`;
+    const [rows, globalRows] = await Promise.all([
+      fetchSupabaseJson<any[]>(env, rowUrl, { headers: buildSupabaseHeaders(env) }),
+      fetchSupabaseJson<Array<{ word: string; total: number; countries: number }>>(env, globalRpcUrl, {
+        method: 'POST',
+        headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({}),
+      }),
+    ]);
+    const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+    const globalMap = new Map<string, { total: number; countries: number }>();
+    for (const r of Array.isArray(globalRows) ? globalRows : []) {
+      if (r?.word) globalMap.set(r.word, { total: Number(r.total) || 0, countries: Math.max(1, Number(r.countries) || 1) });
+    }
+    const LIFT_MIN = 1.2;
+    const applyLift = (obj: Record<string, number>): Array<{ phrase: string; hit_count: number }> => {
+      const out: Array<{ phrase: string; hit_count: number }> = [];
+      for (const [word, count] of Object.entries(obj)) {
+        if (!word || count <= 0) continue;
+        const g = globalMap.get(word);
+        const avgGlobal = g ? g.total / Math.max(1, g.countries) : 0;
+        const lift = avgGlobal > 0 ? count / avgGlobal : (count > 0 ? 999 : 0);
+        if (lift >= LIFT_MIN) out.push({ phrase: word, hit_count: count });
+      }
+      out.sort((a, b) => b.hit_count - a.hit_count);
+      return out;
+    };
+    const meritObj = (row?.merit_jsonb && typeof row.merit_jsonb === 'object') ? (row.merit_jsonb as Record<string, number>) : {};
+    const slangObj = (row?.slang_jsonb && typeof row.slang_jsonb === 'object') ? (row.slang_jsonb as Record<string, number>) : {};
+    const nativeObj = (row?.native_jsonb && typeof row.native_jsonb === 'object') ? (row.native_jsonb as Record<string, number>) : {};
+    const meritList = applyLift(meritObj);
+    const slangList = applyLift(slangObj);
+    const nativeList = applyLift(nativeObj);
+    const hasAny = meritList.length > 0 || slangList.length > 0 || nativeList.length > 0;
+    const allItems = [...meritList, ...slangList, ...nativeList].sort((a, b) => b.hit_count - a.hit_count);
+    const result: CountryWordCloudResult = {
+      top10: allItems.slice(0, 10),
+      cloud50: allItems.slice(0, 50),
+      monthlyVibes: { slang: slangList, merit: meritList, sv_slang: [], phrase: nativeList },
+      hasData: hasAny,
+    };
+    if (hasAny && env.STATS_STORE) {
+      const payload = {
+        merit: meritList.map((x) => ({ word: x.phrase, weight: 0, count: x.hit_count })),
+        slang: slangList.map((x) => ({ word: x.phrase, weight: 0, count: x.hit_count })),
+        native: nativeList.map((x) => ({ word: x.phrase, weight: 0, count: x.hit_count })),
+        Novice: slangList.map((x) => ({ word: x.phrase, weight: 0, count: x.hit_count })),
+        Professional: meritList.map((x) => ({ word: x.phrase, weight: 0, count: x.hit_count })),
+        globalNative: nativeList.map((x) => ({ word: x.phrase, weight: 0, count: x.hit_count })),
+      };
+      try {
+        await env.STATS_STORE.put(kvKey, JSON.stringify(payload), { expirationTtl: COUNTRY_WORDCLOUD_KV_TTL });
+      } catch {
+        // ignore
+      }
+    }
+    return result;
+  } catch (e: any) {
+    console.warn('[Worker] getCountryWordCloudCached 失败:', e?.message);
+    return empty;
+  }
+}
+
 /**
  * 【止血】脏检查保护：仅当值发生变化时才执行 KV 写入，减少免费额度消耗
  */
@@ -3943,7 +4056,7 @@ app.get('/api/national-lexicon', async (c) => {
       console.warn('[Worker] /api/national-lexicon country_vibe_stats 读取失败:', e?.message);
     }
 
-    // 2) 回退：从 slang_trends_pool 读取（report-vibe 已写入的热词）
+    // 2) 回退：从 slang_trends_pool 读取（report-vibe 已写入的热词；pool 仅有 merit/slang/sv_slang，无 phrase）
     try {
       const poolCategories: Record<string, string[]> = {
         merit_board: ['merit'],
@@ -3971,7 +4084,7 @@ app.get('/api/national-lexicon', async (c) => {
 
     // 3) 回退：从 user_analysis.personality.vibe_lexicon 聚合
     const url = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
-    url.searchParams.set('select', 'personality');
+    url.searchParams.set('select', 'personality,personality_data');
     url.searchParams.set('or', `(country_code.eq.${country},ip_location.eq.${country},manual_location.eq.${country},current_location.eq.${country})`);
     url.searchParams.set('limit', '500');
     const rows = await fetchSupabaseJson<any[]>(env, url.toString(), {
@@ -3980,7 +4093,14 @@ app.get('/api/national-lexicon', async (c) => {
     const list = Array.isArray(rows) ? rows : [];
     const agg = new Map<string, number>();
     for (const row of list) {
-      const p = row?.personality?.vibe_lexicon;
+      let p = row?.personality?.vibe_lexicon;
+      if (!p && row?.personality_data) {
+        if (typeof row.personality_data === 'string') {
+          try { p = JSON.parse(row.personality_data).vibe_lexicon; } catch {}
+        } else {
+          p = row.personality_data.vibe_lexicon;
+        }
+      }
       if (!p) continue;
       
       let lex = p[type];
@@ -5491,56 +5611,101 @@ app.get('/api/global-average', async (c) => {
   // 5) 地理过滤：US 平替（保留兼容）；其他国家由 RPC 直接返回该国口径
   const finalRow = wantsUS ? applyUsStatsToGlobalRow(baseRow) : baseRow;
 
-  // 6) monthly_vibes：返回该国 Top 词云（slang / merit / sv_slang）
-  // 重构：数据源改为 slang_trends_pool（不分月桶），按 hit_count desc 取前 20
-  try {
-    const region = normalizeRegion(countryCode);
+  // 6) monthly_vibes + top10/cloud50：优先 country_vibe_stats（Lift 过滤），回退 slang_trends_pool
+  // 解决国籍识别词云汇聚断层、减少 Supabase 并发、过滤平庸词汇
+  const isCountryRegion = /^[A-Z]{2}$/.test(String(region || '').toUpperCase()) && String(region).toUpperCase() !== 'GLOBAL';
+  const LIFT_MIN = 1.2;
 
-    const fetchTop = async (category: 'slang' | 'merit' | 'sv_slang' | 'phrase') => {
-      const url = new URL(`${env.SUPABASE_URL}/rest/v1/slang_trends_pool`);
-      url.searchParams.set('select', 'phrase,hit_count');
-      url.searchParams.set('region', `eq.${region}`);
-      url.searchParams.set('category', `eq.${category}`);
-      url.searchParams.set('order', 'hit_count.desc');
-      url.searchParams.set('limit', '20');
-      const rows = await fetchSupabaseJson<any[]>(env, url.toString(), {
-        headers: buildSupabaseHeaders(env),
-      });
-      return (Array.isArray(rows) ? rows : [])
-        .map((r: any) => ({ phrase: String(r?.phrase || ''), hit_count: Number(r?.hit_count) || 0 }))
-        .filter((x) => x.phrase);
-    };
+  let usedCountryVibeStats = false;
+  if (isCountryRegion) {
+    const hot = await getCountryWordCloudCached(env, String(region).toUpperCase());
+    if (hot.hasData) {
+      usedCountryVibeStats = true;
+      (finalRow as any).monthlyVibes = hot.monthlyVibes;
+      (finalRow as any).monthly_vibes = { region, time_bucket: null, ...hot.monthlyVibes };
+      (finalRow as any).monthly_slang = hot.monthlyVibes.slang.map((x) => x.phrase);
+      (finalRow as any).top10 = hot.top10;
+      (finalRow as any).cloud50 = hot.cloud50;
+    }
+  }
 
-    const [slang, merit, svSlang, phrases] = await Promise.all([
-      fetchTop('slang').catch(() => []),
-      fetchTop('merit').catch(() => []),
-      fetchTop('sv_slang').catch(() => []),
-      fetchTop('phrase').catch(() => []),
-    ]);
+  if (!usedCountryVibeStats) {
+    try {
+      const fetchTop = async (category: 'slang' | 'merit' | 'sv_slang' | 'phrase') => {
+        const url = new URL(`${env.SUPABASE_URL}/rest/v1/slang_trends_pool`);
+        url.searchParams.set('select', 'phrase,hit_count');
+        url.searchParams.set('region', `eq.${region}`);
+        url.searchParams.set('category', `eq.${category}`);
+        url.searchParams.set('order', 'hit_count.desc');
+        url.searchParams.set('limit', '20');
+        const rows = await fetchSupabaseJson<any[]>(env, url.toString(), {
+          headers: buildSupabaseHeaders(env),
+        });
+        return (Array.isArray(rows) ? rows : [])
+          .map((r: any) => ({ phrase: String(r?.phrase || ''), hit_count: Number(r?.hit_count) || 0 }))
+          .filter((x) => x.phrase);
+      };
 
-    // ✅ 契约字段：monthlyVibes（camelCase），并确保三类都存在且为数组
-    (finalRow as any).monthlyVibes = {
-      slang: Array.isArray(slang) ? slang : [],
-      merit: Array.isArray(merit) ? merit : [],
-      sv_slang: Array.isArray(svSlang) ? svSlang : [],
-      phrase: Array.isArray(phrases) ? phrases : [],
-    };
+      const [slang, merit, svSlang, phrases] = await Promise.all([
+        fetchTop('slang').catch(() => []),
+        fetchTop('merit').catch(() => []),
+        fetchTop('sv_slang').catch(() => []),
+        fetchTop('phrase').catch(() => []),
+      ]);
 
-    // 兼容旧字段：monthly_vibes（snake_case）
-    (finalRow as any).monthly_vibes = {
-      region,
-      // pool 口径不带 time_bucket：保留字段但置为 null，避免前端依赖字段不存在
-      time_bucket: null,
-      slang,
-      merit,
-      sv_slang: svSlang,
-      phrase: phrases,
-    };
+      (finalRow as any).monthlyVibes = {
+        slang: Array.isArray(slang) ? slang : [],
+        merit: Array.isArray(merit) ? merit : [],
+        sv_slang: Array.isArray(svSlang) ? svSlang : [],
+        phrase: Array.isArray(phrases) ? phrases : [],
+      };
+      (finalRow as any).monthly_vibes = {
+        region,
+        time_bucket: null,
+        slang,
+        merit,
+        sv_slang: svSlang,
+        phrase: phrases,
+      };
+      (finalRow as any).monthly_slang = slang.map((x: any) => x.phrase);
+    } catch (e) {
+      (finalRow as any).monthlyVibes = { slang: [], merit: [], sv_slang: [], phrase: [] };
+      (finalRow as any).monthly_vibes = { region, time_bucket: null, slang: [], merit: [], sv_slang: [], phrase: [] };
+      (finalRow as any).monthly_slang = [];
+    }
 
-    // 兼容旧字段：monthly_slang 仅保留 slang 的 phrase 列表
-    (finalRow as any).monthly_slang = slang.map((x: any) => x.phrase);
+    try {
+      const nowMs = Date.now();
+      const HALF_LIFE_DAYS = 14;
+      const poolUrl = new URL(`${env.SUPABASE_URL}/rest/v1/slang_trends_pool`);
+      poolUrl.searchParams.set('select', 'phrase,hit_count,updated_at,created_at');
+      poolUrl.searchParams.set('region', `eq.${region}`);
+      poolUrl.searchParams.set('order', 'hit_count.desc');
+      poolUrl.searchParams.set('limit', '500');
+      const rows = await fetchSupabaseJson<any[]>(env, poolUrl.toString(), { headers: buildSupabaseHeaders(env) });
+      const items = (Array.isArray(rows) ? rows : [])
+        .map((r: any) => {
+          const phrase = String(r?.phrase ?? '').trim();
+          const hitCount = Number(r?.hit_count ?? 0) || 0;
+          const tsStr = String(r?.updated_at || r?.created_at || '');
+          const ts = Date.parse(tsStr);
+          const ageDays = Number.isFinite(ts) ? Math.max(0, (nowMs - ts) / 86400000) : 0;
+          const decay = Math.pow(0.5, ageDays / HALF_LIFE_DAYS);
+          const activity = hitCount * decay;
+          return { phrase, hit_count: hitCount, activity };
+        })
+        .filter((x) => x.phrase && x.phrase.length >= 2 && x.phrase.length <= 120 && x.hit_count > 0);
+      const top10 = items.slice().sort((a, b) => (b.hit_count - a.hit_count) || (b.activity - a.activity) || (a.phrase > b.phrase ? 1 : -1)).slice(0, 10).map(({ phrase, hit_count }) => ({ phrase, hit_count }));
+      const cloud50 = items.slice().sort((a, b) => (b.activity - a.activity) || (b.hit_count - a.hit_count) || (a.phrase > b.phrase ? 1 : -1)).slice(0, 50).map(({ phrase, hit_count }) => ({ phrase, hit_count }));
+      (finalRow as any).top10 = top10;
+      (finalRow as any).cloud50 = cloud50;
+    } catch {
+      if (!(finalRow as any).top10) (finalRow as any).top10 = [];
+      if (!(finalRow as any).cloud50) (finalRow as any).cloud50 = [];
+    }
+  }
 
-    // 【V6.3 约束】top_sentences 必须来自用户真实句子池 sentence_pool
+  // 【V6.3 约束】top_sentences 必须来自用户真实句子池 sentence_pool
     // 且必须是“雷同”（hit_count >= 2）。句子归一化在数据库层完成（normalized_sentence）。
     // 不允许回退到关键词/短语。
     try {
@@ -5578,34 +5743,24 @@ app.get('/api/global-average', async (c) => {
     try {
       const debug = String(c.req.query('debug') || c.req.query('debugSemanticBurst') || '').trim();
       if (debug === '1' || debug.toLowerCase() === 'true') {
-    (finalRow as any)._debugSemanticBurst = {
+        const mv = (finalRow as any).monthly_vibes || {};
+        (finalRow as any)._debugSemanticBurst = {
           countryCodeRaw: String(countryCode || ''),
           regionComputed: region,
-          sourceTable: 'slang_trends_pool',
+          sourceTable: usedCountryVibeStats ? 'country_vibe_stats' : 'slang_trends_pool',
+          liftMin: usedCountryVibeStats ? LIFT_MIN : null,
           topLimit: 20,
           counts: {
-            slang: Array.isArray(slang) ? slang.length : 0,
-            merit: Array.isArray(merit) ? merit.length : 0,
-            sv_slang: Array.isArray(svSlang) ? svSlang.length : 0,
-        phrase: Array.isArray(phrases) ? phrases.length : 0,
+            slang: Array.isArray(mv.slang) ? mv.slang.length : 0,
+            merit: Array.isArray(mv.merit) ? mv.merit.length : 0,
+            sv_slang: Array.isArray(mv.sv_slang) ? mv.sv_slang.length : 0,
+            phrase: Array.isArray(mv.phrase) ? mv.phrase.length : 0,
           },
         };
       }
     } catch {
       // ignore
     }
-  } catch (e) {
-    (finalRow as any).monthly_slang = [];
-    // ✅ 契约字段：失败也要返回空数组，不返回 null/undefined
-    (finalRow as any).monthlyVibes = { slang: [], merit: [], sv_slang: [] };
-    (finalRow as any).monthly_vibes = {
-      region: normalizeRegion(countryCode),
-      time_bucket: getMonthBucketUtc(new Date()),
-      slang: [],
-      merit: [],
-      sv_slang: [],
-    };
-  }
 
   // 6.5) Global 大盘补全：缺失时从聚合与 extended_stats_view 补 totalAnalysis/totalChars/locationRank/personalityDistribution
   if (region === 'Global' && env.SUPABASE_URL && env.SUPABASE_KEY) {
@@ -5674,57 +5829,6 @@ app.get('/api/global-average', async (c) => {
     }
   }
 
-  // 7) 黑话榜聚合（按需）：slang_trends_pool + 时间衰减
-  // - country_code: 从 slang_trends_pool 过滤 region
-  // - top10: hit_count desc 前 10
-  // - cloud50: hit_count * 时间衰减因子 desc 前 50
-  try {
-    const region = normalizeRegion(countryCode);
-    const nowMs = Date.now();
-    const HALF_LIFE_DAYS = 14; // 可按产品需要调整：越小越“追新”
-
-    const poolUrl = new URL(`${env.SUPABASE_URL}/rest/v1/slang_trends_pool`);
-    poolUrl.searchParams.set('select', 'phrase,hit_count,updated_at,created_at');
-    poolUrl.searchParams.set('region', `eq.${region}`);
-    poolUrl.searchParams.set('order', 'hit_count.desc');
-    // 为了更准确挑出“近期爆发但 hit_count 不高”的词：取更大的候选集再做衰减排序
-    poolUrl.searchParams.set('limit', '500');
-
-    const rows = await fetchSupabaseJson<any[]>(env, poolUrl.toString(), {
-      headers: buildSupabaseHeaders(env),
-    });
-
-    const items = (Array.isArray(rows) ? rows : [])
-      .map((r: any) => {
-        const phrase = String(r?.phrase ?? '').trim();
-        const hitCount = Number(r?.hit_count ?? 0) || 0;
-        const tsStr = String(r?.updated_at || r?.created_at || '');
-        const ts = Date.parse(tsStr);
-        const ageDays = Number.isFinite(ts) ? Math.max(0, (nowMs - ts) / 86400000) : 0;
-        const decay = Math.pow(0.5, ageDays / HALF_LIFE_DAYS);
-        const activity = hitCount * decay;
-        return { phrase, hit_count: hitCount, activity };
-      })
-      .filter((x) => x.phrase && x.phrase.length >= 2 && x.phrase.length <= 120 && x.hit_count > 0);
-
-    const top10 = items
-      .slice()
-      .sort((a, b) => (b.hit_count - a.hit_count) || (b.activity - a.activity) || (a.phrase > b.phrase ? 1 : -1))
-      .slice(0, 10)
-      .map(({ phrase, hit_count }) => ({ phrase, hit_count }));
-
-    const cloud50 = items
-      .slice()
-      .sort((a, b) => (b.activity - a.activity) || (b.hit_count - a.hit_count) || (a.phrase > b.phrase ? 1 : -1))
-      .slice(0, 50)
-      .map(({ phrase, hit_count }) => ({ phrase, hit_count }));
-
-    (finalRow as any).top10 = top10;
-    (finalRow as any).cloud50 = cloud50;
-  } catch {
-    (finalRow as any).top10 = [];
-    (finalRow as any).cloud50 = [];
-  }
   c.header('Cache-Control', 'public, max-age=600');
   return c.json(finalRow);
 });
@@ -6677,9 +6781,24 @@ app.post('/api/v2/verify-location', async (c) => {
     return out;
   }
 
-  const meritArr = [...(Array.isArray(ilc.Professional) ? ilc.Professional : []), ...(Array.isArray(ilc.Architect) ? ilc.Architect : [])];
-  const slangArr = Array.isArray(ilc.Novice) ? ilc.Novice : [];
-  const nativeArr = Array.isArray(ilc.native) ? ilc.native : [];
+  // 三 tab 映射：功德簿=Professional，行业黑话=Novice，全民口头禅=Architect；兼容 vibe_lexicon 键名
+  const meritArr = [
+    ...(Array.isArray(ilc.Professional) ? ilc.Professional : []),
+    ...(Array.isArray(ilc.merit_board) ? ilc.merit_board : []),
+    ...(Array.isArray(ilc.merit) ? ilc.merit : []),
+  ];
+  const slangArr = [
+    ...(Array.isArray(ilc.Novice) ? ilc.Novice : []),
+    ...(Array.isArray(ilc.slang_list) ? ilc.slang_list : []),
+    ...(Array.isArray(ilc.slang) ? ilc.slang : []),
+  ];
+  const nativeArr = [
+    ...(Array.isArray(ilc.Architect) ? ilc.Architect : []),
+    ...(Array.isArray(ilc.mantra_top) ? ilc.mantra_top : []),
+    ...(Array.isArray(ilc.mantra) ? ilc.mantra : []),
+    ...(Array.isArray(ilc.phrase) ? ilc.phrase : []),
+    ...(Array.isArray(ilc.native) ? ilc.native : []),
+  ];
   const p_merit = toJsonb(meritArr);
   const p_slang = toJsonb(slangArr);
   const p_native = toJsonb(nativeArr);
@@ -6710,7 +6829,7 @@ app.post('/api/v2/verify-location', async (c) => {
 
 /**
  * GET /api/v2/country-hot-list?country=CN
- * 国家大盘灵魂词（Lift > 1.2），KV 缓存 10 分钟。
+ * 国家大盘灵魂词（Lift > 1.2），复用 getCountryWordCloudCached KV 缓存（10 分钟）。
  */
 app.get('/api/v2/country-hot-list', async (c) => {
   const env = c.env;
@@ -6729,69 +6848,19 @@ app.get('/api/v2/country-hot-list', async (c) => {
       // ignore
     }
   }
-  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
-    return c.json({ merit: [], slang: [], native: [], Novice: [], Professional: [], Architect: [], globalNative: [] });
-  }
-  const LIFT_MIN = 1.2;
-  type WordItem = { word: string; weight: number; count: number };
-  function applyLift(
-    countryObj: Record<string, number>,
-    globalMap: Map<string, { total: number; countries: number }>
-  ): WordItem[] {
-    const out: WordItem[] = [];
-    for (const [word, count] of Object.entries(countryObj)) {
-      if (!word || count <= 0) continue;
-      const g = globalMap.get(word);
-      const avgGlobal = g ? (g.total / Math.max(1, g.countries)) : 0;
-      const lift = avgGlobal > 0 ? count / avgGlobal : (count > 0 ? 999 : 0);
-      if (lift >= LIFT_MIN) {
-        out.push({ word, weight: Math.round(lift * 100) / 100, count });
-      }
-    }
-    out.sort((a, b) => (b.weight - a.weight) || (b.count - a.count));
-    return out;
-  }
-  try {
-    const rowUrl = `${env.SUPABASE_URL}/rest/v1/country_vibe_stats?country_code=eq.${countryRaw}&select=merit_jsonb,slang_jsonb,native_jsonb`;
-    const rows = await fetchSupabaseJson<any[]>(env, rowUrl, { headers: buildSupabaseHeaders(env) });
-    const row = Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
-    const globalRpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_country_vibe_stats_global_sum`;
-    const globalRows = await fetchSupabaseJson<Array<{ word: string; total: number; countries: number }>>(env, globalRpcUrl, {
-      method: 'POST',
-      headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
-      body: JSON.stringify({}),
-    });
-    const globalMap = new Map<string, { total: number; countries: number }>();
-    for (const r of Array.isArray(globalRows) ? globalRows : []) {
-      if (r?.word) globalMap.set(r.word, { total: Number(r.total) || 0, countries: Math.max(1, Number(r.countries) || 1) });
-    }
-    const merit = row?.merit_jsonb && typeof row.merit_jsonb === 'object' ? row.merit_jsonb as Record<string, number> : {};
-    const slang = row?.slang_jsonb && typeof row.slang_jsonb === 'object' ? row.slang_jsonb as Record<string, number> : {};
-    const native = row?.native_jsonb && typeof row.native_jsonb === 'object' ? row.native_jsonb as Record<string, number> : {};
-    const meritList = applyLift(merit, globalMap);
-    const slangList = applyLift(slang, globalMap);
-    const nativeList = applyLift(native, globalMap);
-    const payload = {
-      merit: meritList,
-      slang: slangList,
-      native: nativeList,
-      Novice: slangList,
-      Professional: meritList,
-      Architect: [] as WordItem[],
-      globalNative: nativeList,
-    };
-    if (env.STATS_STORE) {
-      try {
-        await env.STATS_STORE.put(kvKey, JSON.stringify(payload), { expirationTtl: COUNTRY_HOT_LIST_TTL });
-      } catch {
-        // ignore
-      }
-    }
-    return c.json(payload);
-  } catch (err: any) {
-    console.warn('[Worker] /api/v2/country-hot-list 失败:', err?.message);
-    return c.json({ merit: [], slang: [], native: [], Novice: [], Professional: [], Architect: [], globalNative: [] });
-  }
+  const hot = await getCountryWordCloudCached(env, countryRaw);
+  const toWordItem = (arr: Array<{ phrase: string; hit_count: number }>) =>
+    arr.map((x) => ({ word: x.phrase, weight: 0, count: x.hit_count }));
+  const payload = {
+    merit: toWordItem(hot.monthlyVibes.merit),
+    slang: toWordItem(hot.monthlyVibes.slang),
+    native: toWordItem(hot.monthlyVibes.phrase),
+    Novice: toWordItem(hot.monthlyVibes.slang),
+    Professional: toWordItem(hot.monthlyVibes.merit),
+    Architect: [] as Array<{ word: string; weight: number; count: number }>,
+    globalNative: toWordItem(hot.monthlyVibes.phrase),
+  };
+  return c.json(payload);
 });
 
 /**
@@ -8537,6 +8606,19 @@ app.get('/api/country-summary', async (c) => {
       }
     } catch (_) { /* 保留单国兜底 */ }
 
+    // 【本国词云归拢】KV 优先，10 分钟内 0 次 Supabase；与 global-average 共用缓存
+    let hotTop10: Array<{ phrase: string; hit_count: number }> = [];
+    let hotCloud50: Array<{ phrase: string; hit_count: number }> = [];
+    let hotMonthlyVibes: { slang: any[]; merit: any[]; sv_slang: any[]; phrase: any[] } = { slang: [], merit: [], sv_slang: [], phrase: [] };
+    if (/^[A-Z]{2}$/.test(cc)) {
+      const hot = await getCountryWordCloudCached(env, cc);
+      if (hot.hasData) {
+        hotTop10 = hot.top10;
+        hotCloud50 = hot.cloud50;
+        hotMonthlyVibes = hot.monthlyVibes;
+      }
+    }
+
     const out: any = {
       success: true,
       msg_count,
@@ -8622,6 +8704,10 @@ app.get('/api/country-summary', async (c) => {
         },
       } : undefined),
       total_countries: (kvCountry as any)?._meta?.total_countries ?? totalCountries ?? 195,
+      top10: hotTop10,
+      cloud50: hotCloud50,
+      monthly_vibes: hotMonthlyVibes,
+      monthlyVibes: hotMonthlyVibes,
     };
 
     if (includeDebug) {

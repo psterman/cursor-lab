@@ -220,7 +220,7 @@
                         }
                     }
                 }).catch(function(err) {
-                    // 【令牌检查】错误回调也检查令牌
+                    if (err && err.name === 'AbortError') return;
                     if (window.__cloudRenderToken !== myToken) return;
                     hideCloudLoadingHint();
                     console.warn('[StatsUIRenderer] 获取词云数据失败:', err);
@@ -264,6 +264,18 @@
         fillSoulWordsList(levelKey);
         if (empty) empty.classList.add('hidden');
         if (meta) meta.textContent = 'N=' + data.length;
+        var sourceLabel = document.getElementById('vibe-cloud50-source-label');
+        if (sourceLabel) {
+            if (window.__countryCloudFromHotList) {
+                sourceLabel.textContent = '全国灵魂词';
+                sourceLabel.classList.remove('hidden');
+                sourceLabel.setAttribute('aria-hidden', 'false');
+            } else {
+                sourceLabel.textContent = '';
+                sourceLabel.classList.add('hidden');
+                sourceLabel.setAttribute('aria-hidden', 'true');
+            }
+        }
         var colorByLevel = { Novice: '#10b981', Professional: '#3b82f6', Architect: '#5b21b6', globalNative: '#8b5cf6', native: '#8b5cf6' };
         var baseHex = colorByLevel[levelKey] || '#5b21b6';
         // 【核心匹配】获取当前用户 fingerprint，用于高亮其贡献的词
@@ -297,6 +309,8 @@
             return [phrase, weight];
         }).filter(function(item) { return item[0].length > 0 && item[1] >= 0; });
         if (list.length === 0) return;
+        var sk = document.getElementById('stats2-wc-skeleton');
+        if (sk) sk.classList.add('stats2-skeleton-hidden');
         var width = container.offsetWidth || 0;
         var height = container.offsetHeight || 0;
         if (width <= 0 || height <= 0) {
@@ -321,11 +335,19 @@
     function showCloudLoadingHint() {
         var el = document.getElementById('cloud-loading-hint');
         if (el) el.classList.remove('hidden');
+        var container = document.getElementById('vibe-cloud50-container');
+        if (container) container.classList.add('vibe-cloud-skeleton-pulse');
+        var skeleton = document.getElementById('stats2-wc-skeleton');
+        if (skeleton) skeleton.classList.remove('stats2-skeleton-hidden');
     }
 
     function hideCloudLoadingHint() {
         var el = document.getElementById('cloud-loading-hint');
         if (el) el.classList.add('hidden');
+        var container = document.getElementById('vibe-cloud50-container');
+        if (container) container.classList.remove('vibe-cloud-skeleton-pulse');
+        var skeleton = document.getElementById('stats2-wc-skeleton');
+        if (skeleton) skeleton.classList.add('stats2-skeleton-hidden');
     }
 
     /**

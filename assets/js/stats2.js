@@ -2601,18 +2601,51 @@
                         })();
                     } else {
                         window.__latestTop10 = Array.isArray(data.top10) ? data.top10 : null;
-                        window.__latestCloud50 = effectiveIsGlobal ? (Array.isArray(data.cloud50) ? data.cloud50 : null) : null;
+                        window.__latestCloud50 = Array.isArray(data.cloud50) ? data.cloud50 : null;
+                        window.__latestMonthlyVibes = data.monthly_vibes || data.monthlyVibes || null;
+                        window.__latestTopSentences = Array.isArray(data.top_sentences) ? data.top_sentences : null;
                         if (effectiveIsGlobal) {
                             try { window.renderVibeCardFromData && window.renderVibeCardFromData(countryNameOrCode, data); } catch (e2) { /* ignore */ }
                         } else {
-                            window.__latestCloud50 = null;
-                            var emptyEl = document.getElementById('vibe-cloud50-empty');
-                            var emptyTopElse = document.getElementById('vibe-top10-empty');
-                            if (emptyEl) { emptyEl.textContent = '正在收集数据...'; emptyEl.classList.remove('hidden'); }
-                            if (emptyTopElse) { emptyTopElse.textContent = '正在收集数据...'; emptyTopElse.classList.remove('hidden'); }
-                            try { if (typeof _renderCloud50 === 'function') _renderCloud50(countryCode, []); } catch (_) {}
-                            try { if (typeof _renderTop10List === 'function') _renderTop10List([]); } catch (_) {}
-                            try { window.renderVibeCardFromData && window.renderVibeCardFromData(countryNameOrCode, { top10: [], cloud50: [] }); } catch (e2) { /* ignore */ }
+                            window.__currentCountryCode = String(countryCode || '').trim().toUpperCase();
+                            var hasHotData = (Array.isArray(data.top10) && data.top10.length > 0) || (Array.isArray(data.cloud50) && data.cloud50.length > 0);
+                            if (hasHotData) {
+                                var mv = data.monthly_vibes || data.monthlyVibes || {};
+                                var fallbackTop10 = Array.isArray(data.top10) ? data.top10 : [];
+                                var fallbackCloud50 = Array.isArray(data.cloud50) ? data.cloud50 : [];
+                                window.__lexiconByType = {
+                                    merit_board: (Array.isArray(mv.merit) && mv.merit.length > 0) ? mv.merit : fallbackTop10,
+                                    slang_list: [].concat(Array.isArray(mv.slang) ? mv.slang : [], Array.isArray(mv.sv_slang) ? mv.sv_slang : []),
+                                    mantra_top: (Array.isArray(mv.phrase) && mv.phrase.length > 0) ? mv.phrase : (fallbackCloud50.length > 0 ? fallbackCloud50.slice(0, 20) : fallbackTop10)
+                                };
+                                try { window.renderVibeCardFromData && window.renderVibeCardFromData(countryNameOrCode, data); } catch (e2) { /* ignore */ }
+                                (function loadLexiconList() {
+                                    var lexType = (window.__currentLexiconType || 'merit_board');
+                                    var cached = window.__lexiconByType && window.__lexiconByType[lexType] && window.__lexiconByType[lexType].length > 0;
+                                    if (cached) {
+                                        if (typeof _renderTop10List === 'function') _renderTop10List(window.__lexiconByType[lexType], true);
+                                        return;
+                                    }
+                                    var url = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : '') || '';
+                                    url = (url && url.trim()) ? (url.trim().endsWith('/') ? url.trim() : url.trim() + '/') : '/';
+                                    url = url + 'api/national-lexicon?country=' + encodeURIComponent(countryCode) + '&type=' + encodeURIComponent(lexType);
+                                    fetch(url).then(function(r) { return r.json(); }).then(function(res) {
+                                        var list = (res && res.data && Array.isArray(res.data)) ? res.data : [];
+                                        if (window.__lexiconByType) window.__lexiconByType[lexType] = list;
+                                        if (typeof _renderTop10List === 'function') _renderTop10List(list, true);
+                                    }).catch(function() {
+                                        if (typeof _renderTop10List === 'function') _renderTop10List([], true);
+                                    });
+                                })();
+                            } else {
+                                var emptyEl = document.getElementById('vibe-cloud50-empty');
+                                var emptyTopElse = document.getElementById('vibe-top10-empty');
+                                if (emptyEl) { emptyEl.textContent = '正在收集数据...'; emptyEl.classList.remove('hidden'); }
+                                if (emptyTopElse) { emptyTopElse.textContent = '正在收集数据...'; emptyTopElse.classList.remove('hidden'); }
+                                try { if (typeof _renderCloud50 === 'function') _renderCloud50(countryCode, []); } catch (_) {}
+                                try { if (typeof _renderTop10List === 'function') _renderTop10List([]); } catch (_) {}
+                                try { window.renderVibeCardFromData && window.renderVibeCardFromData(countryNameOrCode, { top10: [], cloud50: [] }); } catch (e2) { /* ignore */ }
+                            }
                         }
                     }
                 } catch (e1) { /* ignore */ }
@@ -8001,6 +8034,7 @@
             currentDrawerCountry.name = displayName;
             try {
                 window.currentUserCountry = String(code || '').trim().toUpperCase();
+                window.__currentCountryCode = String(code || '').trim().toUpperCase();
                 // 【核心】同步 __selectedCountry 供 fetchCountryKeywords 等国别数据接口使用（前移，确保 fetch 读到新国家）
                 window.__selectedCountry = code;
             } catch (e) { /* ignore */ }
@@ -8067,6 +8101,7 @@
             if (!mount || !tpl) return;
 
             mount.innerHTML = '';
+            mount.dataset.country = String(code || '').trim().toUpperCase();
             const node = tpl.content.cloneNode(true);
             mount.appendChild(node);
 
@@ -22608,8 +22643,8 @@
             // 兼容多种数据源：lexicon { w, v } / 黑话榜 { phrase, hit_count } / 开发者榜 { user_name, total_messages }
             let items = (Array.isArray(list) ? list : [])
                 .map((x) => {
-                    var phrase = String(x?.phrase ?? x?.w ?? x?.user_name ?? '').trim();
-                    var hit = Number(x?.hit_count ?? x?.hitCount ?? x?.v ?? x?.total_messages ?? 0) || 0;
+                    var phrase = String(x?.phrase ?? x?.w ?? x?.word ?? x?.user_name ?? '').trim();
+                    var hit = Number(x?.hit_count ?? x?.hitCount ?? x?.v ?? x?.count ?? x?.total_messages ?? 0) || 0;
                     return { phrase: phrase, hit: hit };
                 })
                 .filter((x) => x.phrase && x.hit > 0);
@@ -22655,14 +22690,14 @@
         }
 
         (function bindLexiconTabs() {
-            var tabsEl = document.getElementById('vibe-lexicon-tabs');
-            if (!tabsEl) return;
-            if (tabsEl.dataset.bound) return;
-            tabsEl.dataset.bound = '1';
+            if (document.body.dataset.lexiconTabsBound) return;
+            document.body.dataset.lexiconTabsBound = '1';
             window.__currentLexiconType = window.__currentLexiconType || 'merit_board';
-            tabsEl.addEventListener('click', function(e) {
+            document.body.addEventListener('click', function(e) {
                 var btn = e.target && e.target.closest && e.target.closest('.vibe-lexicon-tab');
                 if (!btn || !btn.dataset.type) return;
+                var tabsEl = btn.closest && btn.closest('#vibe-lexicon-tabs');
+                if (!tabsEl) return;
                 var type = btn.dataset.type;
                 window.__currentLexiconType = type;
                 var all = tabsEl.querySelectorAll('.vibe-lexicon-tab');
@@ -22673,15 +22708,53 @@
                 btn.classList.add('bg-[var(--accent-terminal)]/20', 'text-[var(--accent-terminal)]', 'font-medium', 'border-white/20');
                 btn.classList.remove('bg-transparent', 'text-zinc-400', 'border-white/10');
                 var country = (typeof window.__currentCountryCode === 'string' && window.__currentCountryCode) ? window.__currentCountryCode : '';
-                if (!country) return;
+                if (!country && typeof currentDrawerCountry === 'object' && currentDrawerCountry && currentDrawerCountry.code) country = String(currentDrawerCountry.code).trim().toUpperCase();
+                if (!country) country = (window.__selectedCountry && String(window.__selectedCountry).trim()) ? String(window.__selectedCountry).trim().toUpperCase() : '';
+                if (!country) {
+                    var mountEl = document.getElementById('countryTemplateMount');
+                    if (mountEl && mountEl.dataset && mountEl.dataset.country && /^[A-Z]{2}$/.test(mountEl.dataset.country)) country = mountEl.dataset.country;
+                }
+                var lexTypeToLevel = { merit_board: 'Professional', slang_list: 'Novice', mantra_top: 'Architect' };
+                var level = lexTypeToLevel[type] || 'Professional';
+                if (!country || !/^[A-Z]{2}$/.test(country)) {
+                    var kw = window.__countryKeywordsByLevel && window.__countryKeywordsByLevel[level];
+                    var listNoCountry = Array.isArray(kw) ? kw : (window.__lexiconByType && window.__lexiconByType[type]) || [];
+                    if (typeof _renderTop10List === 'function') _renderTop10List(listNoCountry, true);
+                    return;
+                }
                 var base = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content)) || '';
                 base = (base && base.trim()) ? (base.trim().endsWith('/') ? base.trim() : base.trim() + '/') : '';
+                var cached = window.__lexiconByType && window.__lexiconByType[type] && window.__lexiconByType[type].length > 0;
+                if (cached) {
+                    if (typeof _renderTop10List === 'function') _renderTop10List(window.__lexiconByType[type], true);
+                    return;
+                }
                 var url = base + 'api/national-lexicon?country=' + encodeURIComponent(country) + '&type=' + encodeURIComponent(type);
                 fetch(url).then(function(r) { return r.json(); }).then(function(res) {
                     var list = (res && res.data && Array.isArray(res.data)) ? res.data : [];
+                    if (list.length === 0 && (type === 'merit_board' || type === 'mantra_top')) {
+                        var kwFallback = window.__countryKeywordsByLevel && window.__countryKeywordsByLevel[level];
+                        if (Array.isArray(kwFallback) && kwFallback.length > 0) {
+                            list = kwFallback.map(function(x) { return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; });
+                        }
+                        if (list.length === 0) {
+                            var fallback = Array.isArray(window.__latestTop10) ? window.__latestTop10 : (Array.isArray(window.__latestCloud50) ? window.__latestCloud50.slice(0, 20) : []);
+                            if (fallback.length > 0) list = fallback;
+                        }
+                    }
+                    if (!window.__lexiconByType) window.__lexiconByType = {};
+                    window.__lexiconByType[type] = list;
                     if (typeof _renderTop10List === 'function') _renderTop10List(list, true);
                 }).catch(function() {
-                    if (typeof _renderTop10List === 'function') _renderTop10List([], true);
+                    var fallback = (window.__lexiconByType && window.__lexiconByType[type] && window.__lexiconByType[type].length > 0)
+                        ? window.__lexiconByType[type] : [];
+                    if (fallback.length === 0 && (type === 'merit_board' || type === 'mantra_top')) {
+                        var kwErr = window.__countryKeywordsByLevel && window.__countryKeywordsByLevel[level];
+                        if (Array.isArray(kwErr) && kwErr.length > 0) {
+                            fallback = kwErr.map(function(x) { return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; });
+                        }
+                    }
+                    if (typeof _renderTop10List === 'function') _renderTop10List(fallback.length > 0 ? fallback : [], true);
                 });
             });
         })();
@@ -22782,6 +22855,7 @@
                             updateLeftDrawerCountryHint(window.__selectedCountry);
                         }
                     }).catch(function(err) {
+                        if (err && err.name === 'AbortError') return;
                         console.warn('[autoPreloadNationalCloud] 预加载词云数据失败:', err);
                         empty = document.getElementById('vibe-cloud50-empty');
                         if (empty) {
@@ -23216,7 +23290,10 @@
 
                 const top10 = Array.isArray(data?.top10) ? data.top10 : (Array.isArray(window.__latestTop10) ? window.__latestTop10 : []);
                 var isCountryRegion = (region && String(region).length === 2);
-                _renderTop10List(top10);
+                var lexType = window.__currentLexiconType || 'merit_board';
+                var listToRender = (window.__lexiconByType && window.__lexiconByType[lexType] && window.__lexiconByType[lexType].length > 0)
+                    ? window.__lexiconByType[lexType] : top10;
+                _renderTop10List(listToRender, true);
                 if (isCountryRegion && window.__countryKeywordsByLevel && typeof _renderNationalIdentityCloud === 'function') {
                     _renderNationalIdentityCloud(window.__currentNationalIdentityLevel || 'Architect');
                 } else {
@@ -23251,9 +23328,26 @@
                 return;
             }
             
-            // 【性能优化】检查缓存，避免重复请求
+            // 【性能优化】检查 updateCountryDashboard 缓存（country-summary 已含 top10/cloud50），30 秒内复用
             if (!opts.forceRefresh) {
-                const cached = _getVibeCloudCache(region);
+                var CACHE_MAX_AGE_MS = 30000;
+                try {
+                    var dashCache = window.__countryDashboardCache;
+                    var hit = dashCache && typeof dashCache.get === 'function' ? dashCache.get(region) : null;
+                    var cachedData = hit && typeof hit === 'object' ? (hit.data || hit) : null;
+                    var ts = hit && typeof hit === 'object' ? (hit.ts || 0) : 0;
+                    if (cachedData && typeof cachedData === 'object' && (Date.now() - ts) < CACHE_MAX_AGE_MS) {
+                        var hasHot = (Array.isArray(cachedData.top10) && cachedData.top10.length > 0) || (Array.isArray(cachedData.cloud50) && cachedData.cloud50.length > 0);
+                        if (hasHot) {
+                            window.__latestTop10 = Array.isArray(cachedData.top10) ? cachedData.top10 : null;
+                            window.__latestCloud50 = Array.isArray(cachedData.cloud50) ? cachedData.cloud50 : null;
+                            window.__latestMonthlyVibes = cachedData.monthly_vibes || cachedData.monthlyVibes || null;
+                            try { window.renderVibeCardFromData && window.renderVibeCardFromData(region, cachedData); } catch (_) {}
+                            return;
+                        }
+                    }
+                } catch (_) {}
+                var cached = _getVibeCloudCache(region);
                 if (cached) {
                     console.log('[refreshVibeCard] 命中缓存:', region);
                     _applyVibeCloudData(region, cached, empty);

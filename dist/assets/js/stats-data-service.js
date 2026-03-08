@@ -423,6 +423,33 @@
             return Promise.resolve(setResult(emptyResult));
         }
 
+        /** 优先请求国家大盘灵魂词（Lift 算法结果），兼容 Novice/Professional/Architect/globalNative */
+        function tryCountryHotList() {
+            if (!countryParam) return Promise.resolve(emptyResult);
+            var hotUrl = apiBase + 'api/v2/country-hot-list?country=' + encodeURIComponent(countryParam) + '&_t=' + Date.now();
+            return fetch(hotUrl, { cache: 'no-store', signal: fetchSignal }).then(function(r) {
+                if (!r.ok) return emptyResult;
+                return r.json().then(function(payload) {
+                    if (isStaleRequest()) return emptyResult;
+                    if (!payload || typeof payload !== 'object') return emptyResult;
+                    var hasData = (payload.Novice && payload.Novice.length) || (payload.Professional && payload.Professional.length) || (payload.Architect && payload.Architect.length) || (payload.globalNative && payload.globalNative.length) || (payload.merit && payload.merit.length) || (payload.slang && payload.slang.length) || (payload.native && payload.native.length);
+                    if (!hasData) return emptyResult;
+                    var out = {
+                        Novice: adaptCloudData(payload.Novice || payload.slang || []),
+                        Professional: adaptCloudData(payload.Professional || payload.merit || []),
+                        Architect: adaptCloudData(payload.Architect || []),
+                        globalNative: adaptCloudData(payload.globalNative || payload.native || [])
+                    };
+                    setResult(out);
+                    try { window.__countryCloudFromHotList = true; } catch (e) {}
+                    return out;
+                }).catch(function() { return emptyResult; });
+            }).catch(function(e) {
+                if (e && e.name === 'AbortError') throw e;
+                return emptyResult;
+            });
+        }
+
         function tryKeywordsApi() {
             if (!countryParam) return Promise.resolve(emptyResult);
             var keywordsUrl = apiBase + 'api/v2/stats/keywords?region=' + encodeURIComponent(countryParam) + '&_t=' + Date.now();
@@ -430,11 +457,11 @@
             return fetch(keywordsUrl, { cache: 'no-store', signal: fetchSignal }).then(function(r) {
                 if (!r.ok) return emptyResult;
                 return r.json().then(function(payload) {
-                    // 【P1 修复】校验国家一致性
                     if (isStaleRequest()) {
                         console.log('[fetchCountryKeywords] 国家已切换 (' + requestedCountry + ' → ' + window.__selectedCountry + ')，丢弃 keywords API 响应');
                         return emptyResult;
                     }
+                    try { window.__countryCloudFromHotList = false; } catch (e) {}
                     var raw = (payload && payload.data) ? payload.data : payload;
                     var cloudData = (raw && raw.identityLevelCloud) ? raw.identityLevelCloud : raw;
                     if (cloudData && typeof cloudData === 'object') {
@@ -463,35 +490,48 @@
             }
         }, 10000);
 
-        // 【P1 修复】传入 signal
-        return fetch(summaryUrl, { signal: fetchSignal }).then(function(resp) {
-            clearTimeout(timeout);
-            if (!resp.ok) return tryKeywordsApi().then(function(out) { return setResult(out); });
-            return resp.json().then(function(data) {
-                // 【P1 修复】校验国家一致性
-                if (isStaleRequest()) {
-                    console.log('[fetchCountryKeywords] 国家已切换 (' + requestedCountry + ' → ' + window.__selectedCountry + ')，丢弃 summary 响应');
+        function hasAnyCloud(out) {
+            return (out.Novice && out.Novice.length) || (out.Professional && out.Professional.length) || (out.Architect && out.Architect.length) || (out.globalNative && out.globalNative.length);
+        }
+
+        // 优先 country-hot-list（国家大盘灵魂词），有数据则直接返回；否则走 summary + keywords 兜底
+        return tryCountryHotList().then(function(hotOut) {
+            if (hasAnyCloud(hotOut)) {
+                clearTimeout(timeout);
+                try { window.__isCloudLoading = false; } catch (err) {}
+                return hotOut;
+            }
+            return fetch(summaryUrl, { signal: fetchSignal }).then(function(resp) {
+                clearTimeout(timeout);
+                if (!resp.ok) return tryKeywordsApi().then(function(out) { return setResult(out); });
+                return resp.json().then(function(data) {
+                    if (isStaleRequest()) {
+                        console.log('[fetchCountryKeywords] 国家已切换 (' + requestedCountry + ' → ' + window.__selectedCountry + ')，丢弃 summary 响应');
+                        return emptyResult;
+                    }
+                    var ilc = (data && data.identityLevelCloud) ? data.identityLevelCloud : (data && data.vibe_lexicon) ? data.vibe_lexicon : null;
+                    if (ilc && typeof ilc === 'object') {
+                        var rep = (data && data.representativeWords) ? data.representativeWords : null;
+                        try { window.__countryCloudFromHotList = false; } catch (e) {}
+                        var out = setResult(fromBackendIlc(ilc, rep, null));
+                        if (data && data.success !== false) { try { window.__isCloudLoading = false; } catch (err) {} }
+                        return out;
+                    }
+                    if (data && data.success !== false) { try { window.__isCloudLoading = false; } catch (err) {} }
+                    return tryKeywordsApi().then(function(out) {
+                        try { window.__countryCloudFromHotList = false; } catch (e) {}
+                        return setResult(out);
+                    });
+                }).catch(function() { return tryKeywordsApi().then(function(out) { return setResult(out); }); });
+            }).catch(function(e) {
+                clearTimeout(timeout);
+                if (e && e.name === 'AbortError') {
+                    console.log('[fetchCountryKeywords] 请求已被新国家请求取消 (AbortError)');
                     return emptyResult;
                 }
-                var ilc = (data && data.identityLevelCloud) ? data.identityLevelCloud : (data && data.vibe_lexicon) ? data.vibe_lexicon : null;
-                if (ilc && typeof ilc === 'object') {
-                    var rep = (data && data.representativeWords) ? data.representativeWords : null;
-                    var out = setResult(fromBackendIlc(ilc, rep, null));
-                    if (data && data.success !== false) { try { window.__isCloudLoading = false; } catch (err) {} }
-                    return out;
-                }
-                if (data && data.success !== false) { try { window.__isCloudLoading = false; } catch (err) {} }
+                console.warn('[StatsDataService] fetchCountryKeywords 后端 summary 失败:', e);
                 return tryKeywordsApi().then(function(out) { return setResult(out); });
-            }).catch(function() { return tryKeywordsApi().then(function(out) { return setResult(out); }); });
-        }).catch(function(e) {
-            clearTimeout(timeout);
-            // 【P1 修复】AbortError 不降级
-            if (e && e.name === 'AbortError') {
-                console.log('[fetchCountryKeywords] 请求已被新国家请求取消 (AbortError)');
-                return emptyResult;
-            }
-            console.warn('[StatsDataService] fetchCountryKeywords 后端 summary 失败:', e);
-            return tryKeywordsApi().then(function(out) { return setResult(out); });
+            });
         }).finally(function() {
             clearTimeout(timeout);
             try { window.__isCloudLoading = false; } catch (err) {}
