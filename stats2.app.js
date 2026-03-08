@@ -4169,10 +4169,9 @@
                 // ignore
             }
 
-            // 初始化词云：非核心图表使用 requestIdleCallback，避免滚动卡顿
+            // 初始化词云：立即加载，确保本国词云与行业黑话 Tab 一样快速展示（优先命中缓存）
             try {
-                const ric = window.requestIdleCallback || ((cb) => setTimeout(() => cb({ timeRemaining: () => 0 }), 0));
-                ric(() => { try { loadWordCloud(); } catch (e) { /* ignore */ } }, { timeout: 1500 });
+                loadWordCloud();
             } catch (e) {
                 try { setTimeout(() => { loadWordCloud(); }, 50); } catch (e2) { /* ignore */ }
             }

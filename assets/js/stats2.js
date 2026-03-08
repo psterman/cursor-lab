@@ -8468,10 +8468,9 @@
                 // ignore
             }
 
-            // 初始化词云：非核心图表使用 requestIdleCallback，避免滚动卡顿
+            // 初始化词云：立即加载，确保本国词云与行业黑话 Tab 一样快速展示（优先命中缓存）
             try {
-                const ric = window.requestIdleCallback || ((cb) => setTimeout(() => cb({ timeRemaining: () => 0 }), 0));
-                ric(() => { try { loadWordCloud(); } catch (e) { /* ignore */ } }, { timeout: 1500 });
+                loadWordCloud();
             } catch (e) {
                 try { setTimeout(() => { loadWordCloud(); }, 50); } catch (e2) { /* ignore */ }
             }
@@ -23297,10 +23296,10 @@
             
             function tryPreload() {
                 syncSelectedCountryForCloud();
-                var svc = window.StatsDataService;
+                var region = (window.__selectedCountry && String(window.__selectedCountry).trim()) ? String(window.__selectedCountry).trim().toUpperCase() : '';
                 var defaultLevel = window.__currentNationalIdentityLevel || 'Architect';
                 
-                // 检查是否已经有数据
+                // 检查是否已经有数据（含缓存命中）
                 if (window.__countryKeywordsByLevel && 
                     (window.__countryKeywordsByLevel[defaultLevel] || []).length > 0) {
                     var render = window._renderNationalIdentityCloud || 
@@ -23312,6 +23311,16 @@
                     return;
                 }
                 
+                // 【快速加载】优先调用 refreshVibeCard，复用 60s 缓存，与右抽屉/行业黑话一致
+                if (region && region.length === 2 && typeof window.refreshVibeCard === 'function') {
+                    window.refreshVibeCard(region).then(function() {
+                        updateLeftDrawerCountryHint(region);
+                    }).catch(function() { /* ignore */ });
+                    return;
+                }
+                
+                // 无国家时回退到 fetchCountryKeywords
+                var svc = window.StatsDataService;
                 if (svc && typeof svc.fetchCountryKeywords === 'function') {
                     var empty = document.getElementById('vibe-cloud50-empty');
                     if (empty) {
@@ -23408,8 +23417,17 @@
             
             var data = (window.__countryKeywordsByLevel && window.__countryKeywordsByLevel[levelKey]) ? window.__countryKeywordsByLevel[levelKey] : [];
             if (!Array.isArray(data)) data = [];
+            // 【修复】当前 level 为空时，用其他有数据的 level 兜底，避免切换 Tab 后数据消失
+            if (data.length === 0 && window.__countryKeywordsByLevel) {
+                var kw = window.__countryKeywordsByLevel;
+                var tryOrder = levelKey === 'Architect' ? ['globalNative', 'Novice', 'Professional', 'Architect'] : ['Novice', 'Architect', 'globalNative', 'Professional'];
+                for (var i = 0; i < tryOrder.length; i++) {
+                    var arr = kw[tryOrder[i]];
+                    if (Array.isArray(arr) && arr.length > 0) { data = arr; break; }
+                }
+            }
             var currentCountry = window.__selectedCountry || localStorage.getItem('user_selected_country') || localStorage.getItem('user_manual_location') || 'UNKNOWN';
-            console.log('[NationalCloud] 渲染本国词云 - 国家:', currentCountry, '等级:', levelKey, '数据源:', window.__countryKeywordsByLevel ? 'KV缓存' : '空');
+            console.log('[NationalCloud] 渲染本国词云 - 国家:', currentCountry, '等级:', levelKey, '数据源:', window.__countryKeywordsByLevel ? 'KV缓存' : '空', '条数:', data.length);
             if (data.length === 0) {
                 window.__nationalCloudReadyCallbacks = window.__nationalCloudReadyCallbacks || [];
                 window.__nationalCloudReadyCallbacks.push(function() { _renderNationalIdentityCloud(level); });
@@ -23426,7 +23444,32 @@
                     }
                     return;
                 }
-                // 非 Professional：数据为空时尝试自动获取（限制重试次数）
+                // 非 Professional：数据为空时尝试自动获取
+                // 【修复】先同步国家来源，再优先 refreshVibeCard（复用缓存），确保点击标签能触发加载
+                try {
+                    if (!window.__selectedCountry || !/^[A-Z]{2}$/.test(String(window.__selectedCountry))) {
+                        if (window.currentDrawerCountry && window.currentDrawerCountry.code)
+                            window.__selectedCountry = String(window.currentDrawerCountry.code).trim().toUpperCase();
+                        if (!window.__selectedCountry)
+                            window.__selectedCountry = (localStorage.getItem('user_selected_country') || localStorage.getItem('user_manual_location') || '').trim().toUpperCase();
+                    }
+                } catch (e) {}
+                var region = (window.__selectedCountry && String(window.__selectedCountry).trim()) ? String(window.__selectedCountry).trim().toUpperCase() : '';
+                if (region && region.length === 2 && typeof window.refreshVibeCard === 'function') {
+                    if (empty) {
+                        empty.textContent = '正在扫描该国开发者指纹...';
+                        empty.classList.remove('hidden');
+                    }
+                    window.refreshVibeCard(region, { forceRefresh: false }).then(function() {
+                        flushNationalCloudReadyCallbacks();
+                    }).catch(function() {
+                        if (empty) {
+                            empty.textContent = '暂无灵魂词，快去分析吧';
+                            empty.classList.remove('hidden');
+                        }
+                    });
+                    return;
+                }
                 window.__cloudRetryCount = (window.__cloudRetryCount || 0);
                 var svc = window.StatsDataService;
                 if (svc && typeof svc.fetchCountryKeywords === 'function' && !window.__isCloudLoading && window.__cloudRetryCount < 2) {
