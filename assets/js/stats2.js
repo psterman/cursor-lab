@@ -505,7 +505,7 @@
                     window.currentCountryCode = country;
                     localStorage.setItem('user_country_fixed', country);
                 } catch (e) {}
-                overlay.style.display = 'none';
+                // 不再因已选国家就隐藏遮罩：用户必须点击 GitHub 登录并完成登录后才能进入
             }
             window.__countryPickerForced = true;
             window.__countrySelectorSelectedCode = '';
@@ -519,13 +519,8 @@
                 });
             }, 200);
             setTimeout(function() { clearInterval(poll); }, 15000);
-            if (!country) showOverlay();
-            setTimeout(function() {
-                var el = document.getElementById(OVERLAY_ID);
-                if (el && el.parentNode) {
-                    try { removeOverlayImmediately(); } catch (e) {}
-                }
-            }, 15000);
+            // 首次加载必须显示身份设置，由 runGateCheck 根据「国家 + 已登录」决定是否关闭
+            showOverlay();
         }
         document.addEventListener('click', function(e) {
             var btn = e.target && (e.target.id === 'country-selector-close' || (e.target.closest && e.target.closest('#country-selector-close')));
@@ -533,6 +528,26 @@
                 var modal = document.getElementById('country-selector-modal');
                 if (modal) modal.style.display = 'none';
                 try { document.body.style.overflow = ''; document.documentElement.style.overflow = ''; } catch (e) {}
+            }
+            if (e.target && (e.target.id === 'gate-reject-btn' || (e.target.closest && e.target.closest('#gate-reject-btn')))) {
+                try {
+                    localStorage.removeItem('selected_country');
+                    localStorage.removeItem('user_selected_country');
+                    localStorage.removeItem('user_country_fixed');
+                    localStorage.removeItem('user_manual_location');
+                    localStorage.setItem('stats2_user_rejected_terms', '1');
+                } catch (err) {}
+                try {
+                    window.close();
+                } catch (e1) {}
+                try {
+                    if (!window.closed) {
+                        document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0a0a0a;color:rgba(0,255,65,0.8);font-family:monospace;font-size:14px;padding:24px;text-align:center;">您已拒绝隐私与服务条款，请关闭此标签页。</div>';
+                        document.body.style.overflow = 'hidden';
+                    }
+                } catch (e2) {
+                    try { location.replace('about:blank'); } catch (e3) {}
+                }
             }
         });
         if (document.readyState === 'loading') {
@@ -13198,7 +13213,9 @@
                 const btn = document.getElementById('country-selector-github-save-btn');
                 if (!btn) return;
                 const code = (window.__countrySelectorSelectedCode || '').trim().toUpperCase();
-                const enabled = window.__countryPickerForced && /^[A-Z]{2}$/.test(code);
+                const privacyCheck = document.getElementById('gate-privacy-accept');
+                const privacyAccepted = !privacyCheck || privacyCheck.checked;
+                const enabled = window.__countryPickerForced && /^[A-Z]{2}$/.test(code) && privacyAccepted;
                 btn.disabled = !enabled;
                 btn.style.opacity = enabled ? '1' : '0.6';
                 btn.style.cursor = enabled ? 'pointer' : 'not-allowed';
@@ -13230,7 +13247,13 @@
                     }
                 });
                 
-                // 「使用 GitHub 登录并保存」按钮：仅在选择国家且为强制选籍模式时可用
+                var privacyCheck = document.getElementById('gate-privacy-accept');
+                if (privacyCheck) {
+                    privacyCheck.addEventListener('change', function() {
+                        if (typeof updateCountrySelectorGitHubButtonState === 'function') updateCountrySelectorGitHubButtonState();
+                    });
+                }
+                // 「使用 GitHub 登录并保存」按钮：仅在选择国家、同意隐私条款且为强制选籍模式时可用
                 if (githubSaveBtn) {
                     githubSaveBtn.addEventListener('click', function() {
                         const code = (window.__countrySelectorSelectedCode || '').trim().toUpperCase();
@@ -13272,6 +13295,66 @@
         } else {
             initCountrySelector();
         }
+        
+        (function initDeleteAccountButton() {
+            function clearLocalAccountData() {
+                try {
+                    var keys = ['selected_country', 'user_selected_country', 'user_country_fixed', 'user_manual_location', 'github_token', 'vibe_github_access_token', 'last_analysis_data', 'vibe_fp', 'user_fingerprint', 'anchored_country', 'loc_locked', 'loc_fixed', 'drawer_expanded', 'left_drawer_open', 'right_drawer_open'];
+                    keys.forEach(function(k) { try { localStorage.removeItem(k); } catch (e) {} });
+                    var toRemove = [];
+                    for (var i = 0; i < localStorage.length; i++) {
+                        var key = localStorage.key(i);
+                        if (key && (key.indexOf('vibe_') === 0 || key.indexOf('vibe_report') === 0 || key.indexOf('vibe_cyber_report_') === 0)) toRemove.push(key);
+                    }
+                    toRemove.forEach(function(k) { try { localStorage.removeItem(k); } catch (e) {} });
+                    if (window.__githubAccessToken !== undefined) window.__githubAccessToken = '';
+                } catch (e) {}
+            }
+            function doSignOutAndReload(clearLocal) {
+                if (clearLocal) clearLocalAccountData();
+                var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+                if (sb && typeof sb.auth !== 'object') { sb = null; }
+                if (sb && typeof sb.auth.signOut === 'function') {
+                    sb.auth.signOut().catch(function() {}).finally(function() {
+                        if (clearLocal) clearLocalAccountData();
+                        if (typeof window.runGateCheck === 'function') window.runGateCheck();
+                        try { location.reload(); } catch (e) {}
+                    });
+                } else {
+                    if (clearLocal) clearLocalAccountData();
+                    try { location.reload(); } catch (e) {}
+                }
+            }
+            function onReady() {
+                var root = document.getElementById('left-drawer') || document.body;
+                root.addEventListener('click', function(e) {
+                    var target = e.target && (e.target.id === 'left-drawer-exit-btn' || e.target.closest && e.target.closest('#left-drawer-exit-btn'));
+                    if (target) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        var msg = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Exit and sign out?' : '确定退出登录吗？';
+                        if (!confirm(msg)) return;
+                        doSignOutAndReload(true);
+                        return;
+                    }
+                    target = e.target && (e.target.id === 'left-drawer-delete-account-btn' || e.target.closest && e.target.closest('#left-drawer-delete-account-btn'));
+                    if (target) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        var msgDel = (typeof currentLang !== 'undefined' && currentLang === 'en')
+                            ? 'Delete your account and all associated data? This cannot be undone.'
+                            : '确定要删除账号及所有关联数据吗？此操作不可恢复。';
+                        if (!confirm(msgDel)) return;
+                        doSignOutAndReload(true);
+                    }
+                });
+            }
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', onReady);
+            } else {
+                onReady();
+            }
+        })();
         
         /**
          * 渲染国家列表

@@ -54,6 +54,16 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
 #force-onboarding-overlay.stats2-gate-removed { display: none !important; }
 .stats2-gate-overlay.stats2-gate-removed { display: none !important; }
 .stats2-gate-github-section { margin-top: 18px; flex-shrink: 0; }
+.stats2-gate-privacy-block { margin-bottom: 14px; }
+.stats2-gate-privacy-intro { font-size: 11px; color: rgba(0, 255, 65, 0.85); line-height: 1.5; margin: 0 0 8px 0; font-family: var(--font-mono-stack), monospace; }
+.stats2-gate-privacy-list { font-size: 11px; color: rgba(0, 255, 65, 0.75); line-height: 1.55; margin: 0 0 12px 0; padding-left: 18px; font-family: var(--font-mono-stack), monospace; }
+.stats2-gate-privacy-list li { margin-bottom: 4px; }
+.stats2-gate-privacy-check { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; cursor: pointer; font-size: 12px; color: rgba(0, 255, 65, 0.9); font-family: var(--font-mono-stack), monospace; }
+.stats2-gate-privacy-check input[type="checkbox"] { width: 16px; height: 16px; accent-color: #00ff41; cursor: pointer; }
+.stats2-gate-buttons-row { display: flex; gap: 12px; align-items: center; margin-top: 4px; }
+.stats2-gate-buttons-row .stats2-gate-github-btn { flex: 1; margin-top: 0; }
+.stats2-gate-reject-btn { flex-shrink: 0; padding: 14px 20px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.5); color: #ef4444; font-family: var(--font-mono-stack), monospace; font-size: 12px; font-weight: 600; cursor: pointer; border-radius: 0; transition: background 0.2s, border-color 0.2s; }
+.stats2-gate-reject-btn:hover { background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.8); }
 .stats2-gate-overlay-inner {
   position: relative;
   z-index: 1;
@@ -1186,6 +1196,64 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
         .drawer-close-btn:hover {
             background: rgba(0, 255, 65, 0.12);
             border-color: var(--accent-terminal);
+        }
+
+        .left-drawer-footer        .left-drawer-exit-row {
+            flex-shrink: 0;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border-ui, rgba(0, 255, 65, 0.2));
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 10px;
+        }
+        .left-drawer-exit-btn {
+            height: 36px;
+            min-width: 36px;
+            padding: 0 12px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--border-ui, rgba(0, 255, 65, 0.3));
+            border-radius: 18px;
+            color: rgba(0, 255, 65, 0.9);
+            font-size: 12px;
+            font-family: var(--font-mono-stack), monospace;
+            cursor: pointer;
+            background: transparent;
+            transition: background 0.2s, border-color 0.2s;
+        }
+        .left-drawer-exit-btn:hover {
+            background: rgba(0, 255, 65, 0.12);
+            border-color: var(--accent-terminal);
+        }
+        .left-drawer-delete-account-btn {
+            height: 36px;
+            min-width: 36px;
+            padding: 0 12px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(239, 68, 68, 0.5);
+            border-radius: 18px;
+            color: #ef4444;
+            font-size: 12px;
+            font-family: var(--font-mono-stack), monospace;
+            cursor: pointer;
+            background: rgba(239, 68, 68, 0.1);
+            transition: background 0.2s, border-color 0.2s;
+        }
+        .left-drawer-delete-account-btn:hover {
+            background: rgba(239, 68, 68, 0.2);
+            border-color: rgba(239, 68, 68, 0.8);
+        }
+        .github-combat-identity .left-drawer-exit-btn,
+        .github-combat-identity .left-drawer-delete-account-btn {
+            height: auto;
+            min-width: auto;
+            padding: 4px 10px;
+            font-size: 10px;
         }
 
         /* 抽屉内容区域 */

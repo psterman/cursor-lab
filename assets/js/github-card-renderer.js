@@ -51,6 +51,7 @@
             identityConfig: '用户身份配置',
             inbox: '收件箱',
             logout: '退出',
+            deleteAccount: '删除',
             status: '状态',
             online: '在线',
             busy: '忙碌',
@@ -99,6 +100,7 @@
             identityConfig: 'Identity',
             inbox: 'Inbox',
             logout: 'Logout',
+            deleteAccount: 'Delete',
             status: 'Status',
             online: 'Online',
             busy: 'Busy',
@@ -129,7 +131,7 @@
         var currentStatus = identity.currentStatus || 'idle';
         var defaultAvatar = identity.defaultAvatar || '';
         if (!defaultAvatar && typeof window.STATS_CONSTANTS !== 'undefined' && window.STATS_CONSTANTS.DEFAULT_AVATAR) defaultAvatar = window.STATS_CONSTANTS.DEFAULT_AVATAR;
-        var logoutBtn = isLoggedIn ? '<button id="logout-btn" onclick="typeof logout === \'function\' && logout()" class="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-[8px] text-zinc-300 hover:text-white transition-colors rounded" title="' + esc(t(lang, 'logout')) + '">' + esc(t(lang, 'logout')) + '</button>' : '';
+        var exitDeleteBtns = isLoggedIn ? '<button type="button" id="left-drawer-exit-btn" class="left-drawer-exit-btn identity-row-btn px-2 py-1 text-[10px] rounded border border-[#00ff41]/40 text-[#00ff41]/90 hover:bg-[#00ff41]/10 transition-colors font-mono" title="' + esc(t(lang, 'logout')) + '">' + esc(t(lang, 'logout')) + '</button><button type="button" id="left-drawer-delete-account-btn" class="left-drawer-delete-account-btn identity-row-btn px-2 py-1 text-[10px] rounded border border-red-500/50 text-red-400 hover:bg-red-500/10 transition-colors font-mono" title="' + esc(t(lang, 'deleteAccount')) + '">' + esc(t(lang, 'deleteAccount')) + '</button>' : '';
         var linkHtml = isLoggedIn && githubUsername ? '<a href="https://github.com/' + esc(githubUsername) + '" target="_blank" rel="noopener noreferrer" class="mt-2 inline-block text-[9px] text-[#00ff41]/70 hover:text-[#00ff41] transition-colors font-mono">github.com/' + esc(githubUsername) + '</a>' : '';
         var statusIdle = currentStatus === 'idle';
         var statusBusy = currentStatus === 'busy';
@@ -147,7 +149,7 @@
             '<div class="w-9 h-9 rounded-full overflow-hidden border border-[#00ff41]/30 flex-shrink-0"><img src="' + esc(avatarUrl) + '" alt="Avatar" class="w-full h-full object-cover" onerror="this.onerror=null;this.src=\'' + esc(defaultAvatar) + '\';" /></div>',
             '<div class="flex-1 min-w-0"><div class="drawer-item-value text-sm truncate flex items-center">' + esc(displayName) + (badgeHtml || '') + '</div><div class="drawer-item-desc text-[8px]">' + esc(displayLabel) + '</div></div>',
             '<button onclick="typeof openInboxDrawer === \'function\' && openInboxDrawer()" class="inbox-indicator w-9 h-9 flex items-center justify-center bg-transparent border-none text-[#00ff41] hover:text-[#00ff41]/80 transition-colors flex-shrink-0 cursor-pointer p-0 relative" title="' + esc(t(lang, 'inbox')) + '">✉</button>',
-            logoutBtn,
+            exitDeleteBtns,
             '</div>',
             '<div id="user-country-flag" class="flex items-center gap-2 mt-2 text-[10px]"></div>',
             linkHtml,

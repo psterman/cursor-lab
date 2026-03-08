@@ -53,14 +53,28 @@
     <link rel="stylesheet" href="assets/css/stats2.css">
 </head>
 <body class="p-4 md:p-8">
-    <!-- 强制性全屏遮罩：id=force-onboarding-overlay，无关闭按钮，先选国家再显示 GitHub 按钮，双重状态完成后由 JS 静默销毁 -->
+    <!-- 强制性全屏遮罩：身份设置弹窗，选国家 + 隐私申明 + 同意/拒绝按钮均在弹窗内 -->
     <div id="force-onboarding-overlay" class="stats2-gate-overlay" aria-hidden="false" style="display: flex;">
         <div class="stats2-gate-overlay-inner">
             <h3 class="stats2-gate-title">身份设置</h3>
             <input type="text" id="country-search-input" placeholder="搜索国家..." class="stats2-gate-search" />
             <div id="country-list-container" class="stats2-gate-list"></div>
-            <div id="force-onboarding-github-section" class="stats2-gate-github-section" style="display: none;">
-                <button type="button" id="country-selector-github-save-btn" disabled class="stats2-gate-github-btn">使用 GitHub 登录并保存</button>
+            <div id="force-onboarding-github-section" class="stats2-gate-github-section">
+                <div class="stats2-gate-privacy-block">
+                    <p class="stats2-gate-privacy-intro">使用服务即表示您知悉并同意以下数据采集说明：</p>
+                    <ul class="stats2-gate-privacy-list">
+                        <li><strong>设备指纹</strong>：用于防作弊与身份识别，仅限本服务使用。</li>
+                        <li><strong>地理位置 / 国家</strong>：用于生成国家维度词云与统计展示。</li>
+                    </ul>
+                    <label class="stats2-gate-privacy-check">
+                        <input type="checkbox" id="gate-privacy-accept" name="gate-privacy-accept" autocomplete="off" />
+                        <span id="gate-privacy-accept-label">我已阅读并同意上述 <strong>隐私与服务条款</strong></span>
+                    </label>
+                </div>
+                <div class="stats2-gate-buttons-row">
+                    <button type="button" id="country-selector-github-save-btn" disabled class="stats2-gate-github-btn">同意并使用 GitHub 登录</button>
+                    <button type="button" id="gate-reject-btn" class="stats2-gate-reject-btn">拒绝并退出</button>
+                </div>
             </div>
         </div>
     </div>
