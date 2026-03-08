@@ -2656,15 +2656,7 @@
                             window.__nationalCloudData = window.__countryKeywordsByLevel;
                         })();
                         
-                        // 若词云 KV 数据超过 1 小时，后台静默触发一次 refresh 以轮换 Dynamic 池
-                        var summaryResponse = payload || data;
-                        if (!effectiveIsGlobal && summaryResponse && summaryResponse._meta && summaryResponse._meta.lexicon_updated_at) {
-                            var lexTs = Date.parse(summaryResponse._meta.lexicon_updated_at);
-                            if (!isNaN(lexTs) && (Date.now() - lexTs) > 3600000) {
-                                var refreshUrl = (url.indexOf('refresh=true') !== -1 ? url : url + (url.indexOf('?') >= 0 ? '&' : '?') + 'refresh=true');
-                                fetch(refreshUrl, { method: 'GET' }).catch(function() {});
-                            }
-                        }
+                        // 【废弃轮换】不再后台静默触发 refresh 轮换 Dynamic 池，确保用户看到的分析结果稳定
                         
                         // 数据准备好后，必须显式调用 _renderNationalIdentityCloud() 进行重绘（与 Tab 点击同源，优先用 window 挂载）
                         var currentLevel = (window.__currentNationalIdentityLevel || 'Architect');
@@ -8417,18 +8409,10 @@
             state.currentViewState = targetView;
             currentViewState = targetView; // 向后兼容
 
-            // 【P2 修复】合并去重：清除旧定时器 + 按需创建新定时器（原代码此处重复执行了两次）
+            // 【废弃定时刷新】清除旧定时器，不再创建新定时器；分析结果仅在手动操作时更新
             if (countryPanelAutoRefreshTimer) {
                 clearInterval(countryPanelAutoRefreshTimer);
                 countryPanelAutoRefreshTimer = null;
-            }
-            if (targetView === 'COUNTRY' && currentDrawerCountry && currentDrawerCountry.code) {
-                countryPanelAutoRefreshTimer = setInterval(function() {
-                    if (currentViewState !== 'COUNTRY' || !currentDrawerCountry || !currentDrawerCountry.code) return;
-                    var rightDrawer = document.getElementById('right-drawer');
-                    if (!rightDrawer || !rightDrawer.classList.contains('active')) return;
-                    try { refreshCountryRightPanel(); } catch (e) { /* ignore */ }
-                }, typeof COUNTRY_PANEL_AUTO_REFRESH_INTERVAL_MS !== 'undefined' ? COUNTRY_PANEL_AUTO_REFRESH_INTERVAL_MS : 60000);
             }
             
             // 获取所有面板和 Tab 按钮
@@ -8522,10 +8506,17 @@
                             currentDrawerCountry.name = (countryNameMap && countryNameMap[defaultCountryCode]) ? (currentLang === 'zh' ? countryNameMap[defaultCountryCode].zh : countryNameMap[defaultCountryCode].en) : defaultCountryCode;
                         }
                     }
-                    // 单一请求源：通过 switchToCountryView 触发 updateCountryDashboard
+                    // 【自动加载】进入国家视图时统一通过 switchToCountryView 打开抽屉并加载该国数据（含本国词云、大盘）
                     const countryMount = document.getElementById('countryTemplateMount');
                     if (currentDrawerCountry.code && currentDrawerCountry.name) {
-                        if (countryMount && !countryMount.innerHTML.trim() && !window.__renderingCountryView) {
+                        // 首次进入页面：始终用 switchToCountryView 打开抽屉并加载数据，确保右侧自动展示本国数据
+                        if (window.__allowInitCall && typeof switchToCountryView === 'function') {
+                            if (!window.__renderingCountryView) {
+                                window.__renderingCountryView = true;
+                                switchToCountryView(currentDrawerCountry.code, currentDrawerCountry.name);
+                                setTimeout(() => { window.__renderingCountryView = false; }, 100);
+                            }
+                        } else if (countryMount && !countryMount.innerHTML.trim() && !window.__renderingCountryView) {
                             window.__renderingCountryView = true;
                             switchToCountryView(currentDrawerCountry.code, currentDrawerCountry.name);
                             setTimeout(() => { window.__renderingCountryView = false; }, 100);
@@ -15421,9 +15412,86 @@
          * 获取用户地理位置（由后端 CF 接管，前端不再请求 ipapi.co/ip-api.com，避免 429）。
          * 返回默认结构，实际国家由后端 /api/v2/analyze 根据 CF 或 manual_location 写入。
          */
-        function getUserLocation() {
-            var defaultResult = { lat: null, lng: null, countryCode: 'US' };
-            return Promise.resolve(defaultResult);
+        /**
+         * 获取用户地理位置信息（通过IP API）
+         * @returns {Promise<{lat: number|null, lng: number|null, countryCode: string}>}
+         */
+        async function getUserLocation() {
+            // 优先从localStorage获取已保存的位置信息
+            try {
+                const savedCountry = localStorage.getItem('user_selected_country') || 
+                                    localStorage.getItem('user_country_fixed') || 
+                                    localStorage.getItem('selected_country');
+                if (savedCountry && /^[A-Z]{2}$/i.test(savedCountry)) {
+                    const savedLat = localStorage.getItem('manual_lat');
+                    const savedLng = localStorage.getItem('manual_lng');
+                    return {
+                        lat: savedLat ? parseFloat(savedLat) : null,
+                        lng: savedLng ? parseFloat(savedLng) : null,
+                        countryCode: savedCountry.toUpperCase()
+                    };
+                }
+            } catch (e) {
+                console.warn('[getUserLocation] 读取localStorage失败:', e);
+            }
+
+            // 尝试从window.lastData获取IP国家信息
+            if (window.lastData && (window.lastData.ip_country || window.lastData.ipCountry)) {
+                const ipCountry = String(window.lastData.ip_country || window.lastData.ipCountry || '').trim().toUpperCase();
+                if (/^[A-Z]{2}$/.test(ipCountry)) {
+                    return { lat: null, lng: null, countryCode: ipCountry };
+                }
+            }
+
+            // 尝试从window.currentUser获取国家信息
+            if (window.currentUser || window.currentUserData) {
+                const user = window.currentUser || window.currentUserData;
+                const userCountry = (user.country_code || user.ip_location || user.manual_location || user.current_location || '').trim().toUpperCase();
+                if (userCountry && /^[A-Z]{2}$/.test(userCountry)) {
+                    return { lat: null, lng: null, countryCode: userCountry };
+                }
+            }
+
+            // 通过IP API获取位置信息（使用ip-api.com，免费且稳定）
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 3000); // 3秒超时
+                
+                const response = await fetch('https://ip-api.com/json/?fields=status,message,countryCode,lat,lon', {
+                    signal: controller.signal,
+                    method: 'GET'
+                });
+                
+                clearTimeout(timeoutId);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.status === 'success' && data.countryCode) {
+                        const countryCode = String(data.countryCode).trim().toUpperCase();
+                        if (/^[A-Z]{2}$/.test(countryCode)) {
+                            console.log('[getUserLocation] ✅ 通过IP API获取到国家代码:', countryCode);
+                            // 保存到localStorage以便后续使用
+                            try {
+                                localStorage.setItem('user_country_fixed', countryCode);
+                                localStorage.setItem('selected_country', countryCode);
+                            } catch (e) {}
+                            return {
+                                lat: data.lat ? parseFloat(data.lat) : null,
+                                lng: data.lon ? parseFloat(data.lon) : null,
+                                countryCode: countryCode
+                            };
+                        }
+                    }
+                }
+            } catch (error) {
+                if (error.name !== 'AbortError') {
+                    console.warn('[getUserLocation] ⚠️ IP API请求失败:', error);
+                }
+            }
+
+            // 默认返回US（向后兼容）
+            console.log('[getUserLocation] ℹ️ 使用默认国家代码: US');
+            return { lat: null, lng: null, countryCode: 'US' };
         }
         /**
          * 强制同步自身状态（trackSelf）
@@ -21920,16 +21988,105 @@
                 showApiStatusWarning();
             }
             
-            // 瀑布式初始化：基础数据加载完成后，唯一一次主动调用 switchView('country', savedCC)
+            // 【自动定位】基础数据加载完成后，自动识别国家并加载本国词云和大盘数据
+            // 优先级：1) localStorage（gate 选籍） 2) GitHub 用户 country_code/ip_location 3) API 返回的 IP 国家（cf-ipcountry） 4) IP API获取
             window.__allowInitCall = true;
             try {
-                var savedCC = (localStorage.getItem('user_country_fixed') || localStorage.getItem('user_selected_country') || '').trim().toUpperCase();
+                var savedCC = (localStorage.getItem('user_country_fixed') || localStorage.getItem('user_selected_country') || localStorage.getItem('selected_country') || '').trim().toUpperCase();
+                
+                // 如果还没有国家代码，尝试从window.lastData获取
+                if (!savedCC && window.lastData && (window.lastData.ip_country || window.lastData.ipCountry)) {
+                    var ipCc = String(window.lastData.ip_country || window.lastData.ipCountry || '').trim().toUpperCase();
+                    if (ipCc && /^[A-Z]{2}$/.test(ipCc)) {
+                        savedCC = ipCc;
+                        try { localStorage.setItem('user_country_fixed', savedCC); localStorage.setItem('selected_country', savedCC); } catch (e) {}
+                        console.log('[Stats2] 自动定位: 使用 IP 国家', savedCC);
+                    }
+                }
+                
+                // 如果还没有国家代码，尝试从window.currentUser获取
+                if (!savedCC && (window.currentUser || window.currentUserData)) {
+                    var u = window.currentUser || window.currentUserData;
+                    var uCc = (u.country_code || u.ip_location || u.manual_location || u.current_location || '').trim().toUpperCase();
+                    if (uCc && /^[A-Z]{2}$/.test(uCc)) {
+                        savedCC = uCc;
+                        console.log('[Stats2] 自动定位: 使用 GitHub 用户国家', savedCC);
+                    }
+                }
+                
+                // 如果还没有国家代码，通过getUserLocation()获取
+                if (!savedCC || !/^[A-Z]{2}$/.test(savedCC)) {
+                    try {
+                        console.log('[Stats2] 🔍 通过getUserLocation()获取用户位置...');
+                        const location = await getUserLocation();
+                        if (location && location.countryCode && /^[A-Z]{2}$/.test(location.countryCode)) {
+                            savedCC = location.countryCode.toUpperCase();
+                            console.log('[Stats2] ✅ 通过getUserLocation()获取到国家代码:', savedCC);
+                            // 保存到localStorage
+                            try {
+                                localStorage.setItem('user_country_fixed', savedCC);
+                                localStorage.setItem('selected_country', savedCC);
+                            } catch (e) {}
+                        }
+                    } catch (e) {
+                        console.warn('[Stats2] ⚠️ getUserLocation()获取位置失败:', e);
+                    }
+                }
+                
+                // 如果有有效的国家代码，自动加载国家数据并打开右侧抽屉
                 if (savedCC && /^[A-Z]{2}$/.test(savedCC)) {
+                    console.log('[Stats2] 🚀 自动加载国家数据:', savedCC);
+                    
+                    // 获取国家显示名称
+                    const countryName = (countryNameMap && countryNameMap[savedCC])
+                        ? (currentLang === 'zh' ? countryNameMap[savedCC].zh : countryNameMap[savedCC].en)
+                        : savedCC;
+                    
+                    // 设置当前抽屉国家
+                    if (currentDrawerCountry) {
+                        currentDrawerCountry.code = savedCC;
+                        currentDrawerCountry.name = countryName;
+                    }
+                    
+                    // 切换到国家视图并打开右侧抽屉
                     switchView('country', savedCC);
+                    
+                    // 确保右侧抽屉打开
+                    setTimeout(() => {
+                        const rightDrawer = document.getElementById('right-drawer');
+                        if (rightDrawer && !rightDrawer.classList.contains('active')) {
+                            rightDrawer.classList.add('active');
+                            localStorage.setItem('right_drawer_open', 'true');
+                            console.log('[Stats2] ✅ 右侧抽屉已自动打开');
+                        }
+                        
+                        // 触发国家切换事件，确保数据加载
+                        if (typeof onCountrySwitch === 'function') {
+                            onCountrySwitch(savedCC, { 
+                                source: 'auto-init', 
+                                name: countryName,
+                                force: true 
+                            });
+                        }
+                        
+                        // 调用switchToCountryView确保数据完整加载
+                        if (typeof switchToCountryView === 'function') {
+                            switchToCountryView(savedCC, countryName, { forceRefresh: false });
+                        }
+                    }, 500);
                 } else {
+                    console.log('[Stats2] ℹ️ 未获取到有效的国家代码，切换到全球视图');
                     switchView('global');
                 }
-            } catch (e) { console.warn('[onload] switchView 初始化失败:', e); }
+            } catch (e) { 
+                console.warn('[onload] switchView 初始化失败:', e);
+                // 失败时默认切换到全球视图
+                try {
+                    switchView('global');
+                } catch (e2) {
+                    console.error('[onload] 切换到全球视图也失败:', e2);
+                }
+            }
             window.__allowInitCall = false;
             state.isInitialLayoutPending = false;
             isInitialLayoutPending = false; // 向后兼容

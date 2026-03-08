@@ -5831,6 +5831,15 @@ app.get('/api/global-average', async (c) => {
     }
   }
 
+  // 【stats2 自动定位】注入 IP 国家码，供前端无 localStorage 时自动加载本国词云
+  const cfCountry = (c.req.raw as any)?.cf?.country || c.req.header('cf-ipcountry') || '';
+  const ipCountry = (cfCountry && cfCountry.trim() && cfCountry !== 'XX')
+    ? String(cfCountry).trim().toUpperCase()
+    : null;
+  if (ipCountry && /^[A-Z]{2}$/.test(ipCountry)) {
+    (finalRow as any).ip_country = ipCountry;
+  }
+
   c.header('Cache-Control', 'public, max-age=600');
   return c.json(finalRow);
 });

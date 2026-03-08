@@ -2575,15 +2575,7 @@
                             window.__nationalCloudData = window.__countryKeywordsByLevel;
                         })();
                         
-                        // 若词云 KV 数据超过 1 小时，后台静默触发一次 refresh 以轮换 Dynamic 池
-                        var summaryResponse = payload || data;
-                        if (!effectiveIsGlobal && summaryResponse && summaryResponse._meta && summaryResponse._meta.lexicon_updated_at) {
-                            var lexTs = Date.parse(summaryResponse._meta.lexicon_updated_at);
-                            if (!isNaN(lexTs) && (Date.now() - lexTs) > 3600000) {
-                                var refreshUrl = (url.indexOf('refresh=true') !== -1 ? url : url + (url.indexOf('?') >= 0 ? '&' : '?') + 'refresh=true');
-                                fetch(refreshUrl, { method: 'GET' }).catch(function() {});
-                            }
-                        }
+                        // 【废弃轮换】不再后台静默触发 refresh 轮换 Dynamic 池，确保用户看到的分析结果稳定
                         
                         // 数据准备好后，必须显式调用 _renderNationalIdentityCloud() 进行重绘（与 Tab 点击同源，优先用 window 挂载）
                         var currentLevel = (window.__currentNationalIdentityLevel || 'Architect');
@@ -8336,18 +8328,10 @@
             state.currentViewState = targetView;
             currentViewState = targetView; // 向后兼容
 
-            // 【P2 修复】合并去重：清除旧定时器 + 按需创建新定时器（原代码此处重复执行了两次）
+            // 【废弃定时刷新】清除旧定时器，不再创建新定时器；分析结果仅在手动操作时更新
             if (countryPanelAutoRefreshTimer) {
                 clearInterval(countryPanelAutoRefreshTimer);
                 countryPanelAutoRefreshTimer = null;
-            }
-            if (targetView === 'COUNTRY' && currentDrawerCountry && currentDrawerCountry.code) {
-                countryPanelAutoRefreshTimer = setInterval(function() {
-                    if (currentViewState !== 'COUNTRY' || !currentDrawerCountry || !currentDrawerCountry.code) return;
-                    var rightDrawer = document.getElementById('right-drawer');
-                    if (!rightDrawer || !rightDrawer.classList.contains('active')) return;
-                    try { refreshCountryRightPanel(); } catch (e) { /* ignore */ }
-                }, typeof COUNTRY_PANEL_AUTO_REFRESH_INTERVAL_MS !== 'undefined' ? COUNTRY_PANEL_AUTO_REFRESH_INTERVAL_MS : 60000);
             }
             
             // 获取所有面板和 Tab 按钮
@@ -8441,10 +8425,17 @@
                             currentDrawerCountry.name = (countryNameMap && countryNameMap[defaultCountryCode]) ? (currentLang === 'zh' ? countryNameMap[defaultCountryCode].zh : countryNameMap[defaultCountryCode].en) : defaultCountryCode;
                         }
                     }
-                    // 单一请求源：通过 switchToCountryView 触发 updateCountryDashboard
+                    // 【自动加载】进入国家视图时统一通过 switchToCountryView 打开抽屉并加载该国数据（含本国词云、大盘）
                     const countryMount = document.getElementById('countryTemplateMount');
                     if (currentDrawerCountry.code && currentDrawerCountry.name) {
-                        if (countryMount && !countryMount.innerHTML.trim() && !window.__renderingCountryView) {
+                        // 首次进入页面：始终用 switchToCountryView 打开抽屉并加载数据，确保右侧自动展示本国数据
+                        if (window.__allowInitCall && typeof switchToCountryView === 'function') {
+                            if (!window.__renderingCountryView) {
+                                window.__renderingCountryView = true;
+                                switchToCountryView(currentDrawerCountry.code, currentDrawerCountry.name);
+                                setTimeout(() => { window.__renderingCountryView = false; }, 100);
+                            }
+                        } else if (countryMount && !countryMount.innerHTML.trim() && !window.__renderingCountryView) {
                             window.__renderingCountryView = true;
                             switchToCountryView(currentDrawerCountry.code, currentDrawerCountry.name);
                             setTimeout(() => { window.__renderingCountryView = false; }, 100);
@@ -21839,10 +21830,27 @@
                 showApiStatusWarning();
             }
             
-            // 瀑布式初始化：基础数据加载完成后，唯一一次主动调用 switchView('country', savedCC)
+            // 【自动定位】基础数据加载完成后，自动识别国家并加载本国词云和大盘数据
+            // 优先级：1) localStorage（gate 选籍） 2) GitHub 用户 country_code/ip_location 3) API 返回的 IP 国家（cf-ipcountry）
             window.__allowInitCall = true;
             try {
-                var savedCC = (localStorage.getItem('user_country_fixed') || localStorage.getItem('user_selected_country') || '').trim().toUpperCase();
+                var savedCC = (localStorage.getItem('user_country_fixed') || localStorage.getItem('user_selected_country') || localStorage.getItem('selected_country') || '').trim().toUpperCase();
+                if (!savedCC && window.lastData && (window.lastData.ip_country || window.lastData.ipCountry)) {
+                    var ipCc = String(window.lastData.ip_country || window.lastData.ipCountry || '').trim().toUpperCase();
+                    if (ipCc && /^[A-Z]{2}$/.test(ipCc)) {
+                        savedCC = ipCc;
+                        try { localStorage.setItem('user_country_fixed', savedCC); localStorage.setItem('selected_country', savedCC); } catch (e) {}
+                        console.log('[Stats2] 自动定位: 使用 IP 国家', savedCC);
+                    }
+                }
+                if (!savedCC && (window.currentUser || window.currentUserData)) {
+                    var u = window.currentUser || window.currentUserData;
+                    var uCc = (u.country_code || u.ip_location || u.manual_location || u.current_location || '').trim().toUpperCase();
+                    if (uCc && /^[A-Z]{2}$/.test(uCc)) {
+                        savedCC = uCc;
+                        console.log('[Stats2] 自动定位: 使用 GitHub 用户国家', savedCC);
+                    }
+                }
                 if (savedCC && /^[A-Z]{2}$/.test(savedCC)) {
                     switchView('country', savedCC);
                 } else {
