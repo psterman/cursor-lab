@@ -6772,9 +6772,9 @@ app.post('/api/v2/verify-location', async (c) => {
     const out: Record<string, number> = {};
     if (!Array.isArray(arr)) return out;
     for (const it of arr) {
-      const word = (it?.word ?? it?.[0] ?? '').trim();
+      const word = (it?.word ?? it?.phrase ?? it?.w ?? it?.[0] ?? '').trim();
       if (!filterStopwords(word)) continue;
-      const count = Math.max(0, Math.min(5000, Math.floor(Number(it?.count ?? it?.[1] ?? 1) || 1)));
+      const count = Math.max(0, Math.min(5000, Math.floor(Number(it?.count ?? it?.weight ?? it?.v ?? it?.[1] ?? 1) || 1)));
       if (word.length < 2 || word.length > 120) continue;
       out[word] = (out[word] || 0) + count;
     }
@@ -6851,14 +6851,15 @@ app.get('/api/v2/country-hot-list', async (c) => {
   const hot = await getCountryWordCloudCached(env, countryRaw);
   const toWordItem = (arr: Array<{ phrase: string; hit_count: number }>) =>
     arr.map((x) => ({ word: x.phrase, weight: 0, count: x.hit_count }));
+  const phraseItems = toWordItem(hot.monthlyVibes.phrase);
   const payload = {
     merit: toWordItem(hot.monthlyVibes.merit),
     slang: toWordItem(hot.monthlyVibes.slang),
-    native: toWordItem(hot.monthlyVibes.phrase),
+    native: phraseItems,
     Novice: toWordItem(hot.monthlyVibes.slang),
     Professional: toWordItem(hot.monthlyVibes.merit),
-    Architect: [] as Array<{ word: string; weight: number; count: number }>,
-    globalNative: toWordItem(hot.monthlyVibes.phrase),
+    Architect: phraseItems,
+    globalNative: phraseItems,
   };
   return c.json(payload);
 });

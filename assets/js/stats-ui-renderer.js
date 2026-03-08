@@ -22,43 +22,28 @@
      * @param {string} level - Novice | Professional | Architect
      */
     function fillSoulWordsList(level) {
-        var ol = document.getElementById('vibe-top10-list');
+        var canvas = document.getElementById('vibe-lexicon-wordcloud-canvas');
         var emptyEl = document.getElementById('vibe-top10-empty');
         var metaEl = document.getElementById('vibe-country-top10-meta');
-        if (!ol) return;
         var list = (window.__countryKeywordsByLevel && window.__countryKeywordsByLevel[level]) ? window.__countryKeywordsByLevel[level] : [];
         if (!Array.isArray(list)) list = [];
-        var items = list.slice(0, 10).map(function(x) {
+        var items = list.map(function(x) {
             var phrase = String(x.phrase || x.word || '').trim();
             var weight = Number(x.weight || x.count || 0) || 0;
-            return { phrase: phrase, hit: weight };
+            return { phrase: phrase, hit_count: weight };
         }).filter(function(x) { return x.phrase.length > 0; });
-        ol.innerHTML = '';
+        if (typeof window._renderTop10List === 'function') {
+            window._renderTop10List(items, true);
+            return;
+        }
+        if (!canvas) return;
         if (items.length === 0) {
-            if (emptyEl) {
-                emptyEl.textContent = '暂无数据（正在收录中...）';
-                emptyEl.classList.remove('hidden');
-            }
+            if (emptyEl) { emptyEl.textContent = '暂无数据（正在收录中...）'; emptyEl.classList.remove('hidden'); }
             if (metaEl) metaEl.textContent = '--';
             return;
         }
         if (emptyEl) emptyEl.classList.add('hidden');
         if (metaEl) metaEl.textContent = 'N=' + items.length;
-        var escapeHtml = function(s) {
-            var div = document.createElement('div');
-            div.textContent = s;
-            return div.innerHTML;
-        };
-        ol.innerHTML = items.map(function(it, idx) {
-            var rank = idx + 1;
-            var name = escapeHtml(it.phrase);
-            var count = it.hit;
-            var countColor = count >= 30 ? '#00ff41' : count >= 10 ? 'rgba(0,255,65,0.7)' : '#9ca3af';
-            return '<li class="flex items-center gap-3 p-2 border-b border-white/5 hover:bg-white/5 transition-colors">' +
-                '<div class="flex-shrink-0 w-6 h-6 rounded-full bg-gradient-to-br from-[var(--accent-terminal)]/20 to-[var(--accent-terminal)]/10 flex items-center justify-center text-[10px] font-bold text-white/70">' + rank + '</div>' +
-                '<div class="flex-1 min-w-0"><div class="text-[12px] text-zinc-200 font-mono truncate" title="词汇">' + name + '</div></div>' +
-                '<div class="flex-shrink-0 flex items-center gap-1"><span class="text-[10px] text-zinc-500">频次</span><span class="text-[12px] font-bold tabular-nums" style="color:' + countColor + '">' + count + '</span></div></li>';
-        }).join('');
     }
 
     /**

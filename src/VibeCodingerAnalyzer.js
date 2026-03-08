@@ -315,6 +315,8 @@ const CATEGORY_SEEDS = {
   slang: new Set(['颗粒度', '闭环', '方法论', '架构解耦', '底层逻辑', '降维打击', '赛道赋能', '头部效应', '护城河', '对齐', '抓手', '落地', '复盘', '链路', '兜底']),
   merit: new Set(['功德', '福报', '积德', '善业', '救火', '背锅', '加班', '熬夜']),
   sv_slang: new Set(['硅谷', '护城河', '增长', '融资', '赛道', '估值', '现金流', '天使轮', 'A轮']),
+  /** 全民口头禅：用户高频口癖、请求句式，供 native 维度归拢 */
+  phrase: new Set(['请帮我', '能不能', '可以吗', '谢谢', '请', '帮我', '麻烦', '谢谢啦', '辛苦了', '感谢', 'please', 'thanks', 'help me', 'could you', 'can you']),
 };
 
 // 用于“国家级词云/语义爆发”的停用词（只用于提词，不影响维度分析）
@@ -335,6 +337,7 @@ function categorizeWordcloudPhrase(phrase) {
   const p = String(phrase || '').trim();
   if (!p) return 'slang';
   if (CATEGORY_SEEDS.merit.has(p)) return 'merit';
+  if (CATEGORY_SEEDS.phrase.has(p)) return 'phrase';
   if (CATEGORY_SEEDS.sv_slang.has(p) || /^[a-zA-Z]+$/.test(p)) return 'sv_slang';
   if (CATEGORY_SEEDS.slang.has(p)) return 'slang';
   // 默认：当作“程序员黑话/技术词组”归到 slang
@@ -382,7 +385,7 @@ function extractCountryWordcloudItemsFromText(text, { maxItems = 12 } = {}) {
   const entries = Array.from(freq.entries())
     .filter(([phrase, count]) => {
       if (!phrase) return false;
-      const isSeed = CATEGORY_SEEDS.slang.has(phrase) || CATEGORY_SEEDS.merit.has(phrase) || CATEGORY_SEEDS.sv_slang.has(phrase);
+      const isSeed = CATEGORY_SEEDS.slang.has(phrase) || CATEGORY_SEEDS.merit.has(phrase) || CATEGORY_SEEDS.sv_slang.has(phrase) || CATEGORY_SEEDS.phrase.has(phrase);
       return count >= 2 || isSeed;
     })
     .sort((a, b) => (b[1] - a[1]) || (a[0] > b[0] ? 1 : -1))
@@ -425,6 +428,7 @@ export function extractNationalVibes(text, region) {
     const p = String(phrase);
     let category = 'slang';
     if (CATEGORY_SEEDS.merit.has(p)) category = 'merit';
+    else if (CATEGORY_SEEDS.phrase.has(p)) category = 'phrase';
     else if (CATEGORY_SEEDS.sv_slang.has(p)) category = 'sv_slang';
     else if (CATEGORY_SEEDS.slang.has(p)) category = 'slang';
     // 权重：频次上限 5（防止单条刷爆）
@@ -2585,6 +2589,10 @@ export class VibeCodingerAnalyzer {
           identityLevelCloud[level].sort((a, b) => b.count - a.count);
         }
       }
+      const toItem = (c) => ({ word: c.name, count: c.value });
+      const phraseItems = cloud50.filter((c) => c.category === 'phrase').map(toItem);
+      const supplement = cloud50.filter((c) => c.category !== 'phrase').slice(0, 10).map(toItem);
+      identityLevelCloud.native = phraseItems.concat(supplement).slice(0, 20);
     } catch (_) { /* ignore */ }
 
     // 不再在 analyzeSync 内部自动上传排名，由外部调用 uploadToSupabase 统一处理
@@ -3731,6 +3739,7 @@ export class VibeCodingerAnalyzer {
           merit_board: cloud50.filter((c) => c.category === 'merit').map(toItem),
           slang_list: cloud50.filter((c) => c.category === 'slang' || c.category === 'sv_slang').map(toItem),
           mantra_top: cloud50.slice(0, 20).map(toItem),
+          native: cloud50.filter((c) => c.category === 'phrase').map(toItem).concat(cloud50.filter((c) => c.category !== 'phrase').slice(0, 10).map(toItem)).slice(0, 20),
         },
       };
 

@@ -418,10 +418,12 @@
                 // 确认国籍：将本地 identityLevelCloud 上报至 country_vibe_stats（静默，不阻塞）
                 (function() {
                     var ilc = null;
+                    var persona = null;
                     try {
                         if (window.StatsDataService && typeof window.StatsDataService.getLastAnalysisData === 'function') {
                             var last = window.StatsDataService.getLastAnalysisData();
                             ilc = (last && last.identityLevelCloud) ? last.identityLevelCloud : null;
+                            persona = (last && last.personality) ? last.personality : null;
                         }
                         if (!ilc) {
                             var raw = localStorage.getItem('last_analysis_data') || '';
@@ -430,10 +432,26 @@
                                 var root = (data && data.analysis != null) ? data.analysis : data;
                                 if (root && root.stats && root.stats.identityLevelCloud) ilc = root.stats.identityLevelCloud;
                                 else if (root && root.identityLevelCloud) ilc = root.identityLevelCloud;
+                                if (!persona && data && data.personality) persona = data.personality;
+                                if (!persona && root && root.personality) persona = root.personality;
                             }
                         }
                     } catch (e) {}
                     if (ilc && typeof ilc === 'object' && /^[A-Z]{2}$/.test(country)) {
+                        var wvToWordCount = function(x) { return { word: String(x?.w ?? x?.word ?? x?.phrase ?? '').trim(), count: Number(x?.v ?? x?.count ?? x?.weight ?? 0) || 0 }; };
+                        var nativeFromVibe = [];
+                        if (persona && persona.vibe_lexicon && typeof persona.vibe_lexicon === 'object') {
+                            var vl = persona.vibe_lexicon;
+                            if (Array.isArray(vl.native) && vl.native.length > 0) nativeFromVibe = vl.native.map(wvToWordCount).filter(function(x) { return x.word.length >= 2; });
+                            else if (Array.isArray(vl.mantra_top) && vl.mantra_top.length > 0) nativeFromVibe = vl.mantra_top.map(wvToWordCount).filter(function(x) { return x.word.length >= 2; });
+                        }
+                        if (nativeFromVibe.length > 0) {
+                            ilc.native = (Array.isArray(ilc.native) ? ilc.native : []).concat(nativeFromVibe).slice(0, 20);
+                        }
+                        if (!ilc.native || ilc.native.length === 0) {
+                            var arch = Array.isArray(ilc.Architect) ? ilc.Architect : [];
+                            ilc.native = arch.map(function(x) { return { word: String(x?.word ?? x?.phrase ?? x?.w ?? '').trim(), count: Number(x?.count ?? x?.weight ?? x?.v ?? 0) || 0 }; }).filter(function(x) { return x.word.length >= 2; }).slice(0, 20);
+                        }
                         var base = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : '') || '';
                         if (base && !base.endsWith('/')) base += '/';
                         var url = base + 'api/v2/verify-location';
@@ -2350,7 +2368,8 @@
                         window.__nationalCloudData = null;
                         var wordCloudContainer = document.getElementById('vibe-cloud50-container');
                         var emptyCloudEl = document.getElementById('vibe-cloud50-empty');
-                        var topRankContainer = document.getElementById('vibe-top10-list');
+                        var lexiconEmpty = document.getElementById('vibe-top10-empty');
+                        var lexiconCanvas = document.getElementById('vibe-lexicon-wordcloud-canvas');
                         if (emptyCloudEl) {
                             emptyCloudEl.textContent = '正在扫描该国开发者指纹...';
                             emptyCloudEl.classList.remove('hidden');
@@ -2363,10 +2382,13 @@
                                 if (ctx) { ctx.clearRect(0, 0, canvas.width || 0, canvas.height || 0); }
                             }
                         }
-                        if (topRankContainer) {
-                            topRankContainer.innerHTML = '<li class="list-none text-zinc-500 text-sm py-4 text-center">加载中...</li>';
-                            var emptyEl = document.getElementById('vibe-top10-empty');
-                            if (emptyEl) emptyEl.classList.add('hidden');
+                        if (lexiconEmpty) {
+                            lexiconEmpty.textContent = '加载中...';
+                            lexiconEmpty.classList.remove('hidden');
+                        }
+                        if (lexiconCanvas && lexiconCanvas.getContext) {
+                            var lctx = lexiconCanvas.getContext('2d');
+                            if (lctx) lctx.clearRect(0, 0, lexiconCanvas.width || 0, lexiconCanvas.height || 0);
                         }
                         
                         // 当前用户指纹，用于词云「灵魂带走」高亮（词来自该用户则金色 + 1.5~2x 字号）
@@ -2438,6 +2460,7 @@
                                     globalNative: adaptCloudData(ilc.globalNative || ilc.globalnative || [])
                                 };
                                 window.__nationalCloudData = window.__countryKeywordsByLevel;
+                                _syncLexiconFromKeywords();
                                 apiSuccess = true;
                                 var resp = payload || data;
                                 window.__countryTotalUsers = Number(resp?.countryTotals?.totalUsers ?? resp?.countryTotals?.total_users ?? resp?.totalUsers ?? resp?.total_users ?? 0) || 0;
@@ -2462,6 +2485,7 @@
                                         if (hotHasAny) {
                                             window.__countryKeywordsByLevel = { Novice: hotNovice, Professional: hotPro, Architect: hotArch, globalNative: hotNative };
                                             window.__nationalCloudData = window.__countryKeywordsByLevel;
+                                            _syncLexiconFromKeywords();
                                             apiSuccess = true;
                                             try { window.__countryCloudFromHotList = true; } catch (e) {}
                                             console.log('Keywords loaded from country-hot-list:', window.__countryKeywordsByLevel);
@@ -2486,6 +2510,7 @@
                                         if (hasAny) {
                                             window.__countryKeywordsByLevel = { Novice: novice, Professional: professional, Architect: architect, globalNative: globalNative };
                                             window.__nationalCloudData = window.__countryKeywordsByLevel;
+                                            _syncLexiconFromKeywords();
                                             apiSuccess = true;
                                             console.log('Keywords loaded:', window.__countryKeywordsByLevel);
                                             flushNationalCloudReadyCallbacks();
@@ -22635,12 +22660,12 @@
         }
 
         function _renderTop10List(list, isLexicon) {
-            const ol = document.getElementById('vibe-top10-list');
+            const canvas = document.getElementById('vibe-lexicon-wordcloud-canvas');
+            const container = document.getElementById('vibe-lexicon-display');
             const empty = document.getElementById('vibe-top10-empty');
             const meta = document.getElementById('vibe-country-top10-meta');
-            if (!ol) return;
+            if (!canvas || !container) return;
 
-            // 兼容多种数据源：lexicon { w, v } / 黑话榜 { phrase, hit_count } / 开发者榜 { user_name, total_messages }
             let items = (Array.isArray(list) ? list : [])
                 .map((x) => {
                     var phrase = String(x?.phrase ?? x?.w ?? x?.word ?? x?.user_name ?? '').trim();
@@ -22648,45 +22673,65 @@
                     return { phrase: phrase, hit: hit };
                 })
                 .filter((x) => x.phrase && x.hit > 0);
-            
-            // 应用可读性过滤器
             items = filterReadableWords(items.map(x => ({ name: x.phrase, value: x.hit })))
                 .map(x => ({ phrase: x.name, hit: x.value }));
-            
-            items = items.slice(0, 10);
+            items = items.slice(0, 30);
 
             if (items.length === 0) {
-                ol.innerHTML = '';
-                if (empty) {
-                    empty.textContent = '暂无灵魂词，快去分析吧';
-                    empty.classList.remove('hidden');
-                }
+                var ctx = canvas.getContext('2d');
+                if (ctx) ctx.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
+                if (empty) { empty.textContent = '暂无灵魂词，快去分析吧'; empty.classList.remove('hidden'); }
                 if (meta) meta.textContent = '--';
                 return;
             }
             if (empty) empty.classList.add('hidden');
-            if (meta) meta.textContent = `N=${items.length}`;
+            if (meta) meta.textContent = 'N=' + items.length;
 
-            ol.innerHTML = items.map((it, idx) => {
-                const rank = idx + 1;
-                const name = _escapeHtml(it.phrase);
-                const count = it.hit;
-                const countColor = count >= 30 ? '#00ff41' : count >= 10 ? 'rgba(0,255,65,0.7)' : '#9ca3af';
-                return `
-                    <li class="flex items-center gap-3 p-2 border-b border-white/5 hover:bg-white/5 transition-colors">
-                        <div class="flex-shrink-0 w-6 h-6 rounded-full bg-gradient-to-br from-[var(--accent-terminal)]/20 to-[var(--accent-terminal)]/10 flex items-center justify-center text-[10px] font-bold text-white/70">
-                            ${rank}
-                        </div>
-                        <div class="flex-1 min-w-0">
-                            <div class="text-[12px] text-zinc-200 font-mono truncate" title="${isLexicon ? '词汇' : ''}">${name}</div>
-                        </div>
-                        <div class="flex-shrink-0 flex items-center gap-1">
-                            <span class="text-[10px] text-zinc-500">${isLexicon ? '频次' : '×'}</span>
-                            <span class="text-[12px] font-bold tabular-nums" style="color: ${countColor}">${count}</span>
-                        </div>
-                    </li>
-                `;
-            }).join('');
+            var wordList = items.map(function(x) { return [x.phrase, x.hit]; });
+            var w = container.offsetWidth || 400;
+            var h = 160;
+            canvas.width = w;
+            canvas.height = h;
+            if (typeof WordCloud !== 'undefined') {
+                try {
+                    var ctx = canvas.getContext('2d');
+                    if (ctx) ctx.clearRect(0, 0, w, h);
+                    var maxW = Math.max.apply(null, wordList.map(function(x) { return Number(x[1]) || 0; })) || 1;
+                    WordCloud(canvas, {
+                        list: wordList,
+                        clearCanvas: true,
+                        gridSize: 4,
+                        weightFactor: function(weight) { return Math.max(10, Math.min(48, 8 + Math.log2((weight || 0) + 1) * 10)); },
+                        fontFamily: '"Microsoft YaHei", "微软雅黑", SimHei, sans-serif',
+                        color: function(word, weight) {
+                            var ratio = (Number(weight) || 0) / maxW;
+                            var alpha = 0.5 + 0.5 * Math.pow(ratio, 0.7);
+                            return 'rgba(0, 255, 65, ' + alpha + ')';
+                        },
+                        rotateRatio: 0.5,
+                        backgroundColor: 'transparent',
+                        minSize: 10,
+                        shrinkToFit: true
+                    });
+                } catch (err) { console.warn('[LexiconWordCloud] 渲染失败:', err); }
+            }
+        }
+        try { window._renderTop10List = _renderTop10List; } catch (e) {}
+
+        function _syncLexiconFromKeywords() {
+            if (!window.__countryKeywordsByLevel) return;
+            var toItem = function(x) { return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; };
+            if (!window.__lexiconByType) window.__lexiconByType = {};
+            var pro = (window.__countryKeywordsByLevel.Professional || []).map(toItem).filter(function(x) { return x.phrase; });
+            var nov = (window.__countryKeywordsByLevel.Novice || []).map(toItem).filter(function(x) { return x.phrase; });
+            var arch = (window.__countryKeywordsByLevel.Architect || []).map(toItem).filter(function(x) { return x.phrase; });
+            var nat = (window.__countryKeywordsByLevel.globalNative || []).map(toItem).filter(function(x) { return x.phrase; });
+            if (pro.length > 0) window.__lexiconByType.merit_board = pro;
+            if (nov.length > 0) window.__lexiconByType.slang_list = nov;
+            if (arch.length > 0 || nat.length > 0) window.__lexiconByType.mantra_top = arch.length > 0 ? arch : nat;
+            var lexType = window.__currentLexiconType || 'merit_board';
+            var list = (window.__lexiconByType[lexType] || []).length > 0 ? window.__lexiconByType[lexType] : (lexType === 'mantra_top' ? (arch.length > 0 ? arch : nat) : []);
+            if (list.length > 0 && typeof _renderTop10List === 'function') _renderTop10List(list, true);
         }
 
         (function bindLexiconTabs() {
@@ -22716,24 +22761,36 @@
                 }
                 var lexTypeToLevel = { merit_board: 'Professional', slang_list: 'Novice', mantra_top: 'Architect' };
                 var level = lexTypeToLevel[type] || 'Professional';
+                var getKwForLevel = function(lvl) {
+                    var kw = window.__countryKeywordsByLevel && window.__countryKeywordsByLevel[lvl];
+                    return Array.isArray(kw) && kw.length > 0 ? kw : null;
+                };
                 if (!country || !/^[A-Z]{2}$/.test(country)) {
-                    var kw = window.__countryKeywordsByLevel && window.__countryKeywordsByLevel[level];
-                    var listNoCountry = Array.isArray(kw) ? kw : (window.__lexiconByType && window.__lexiconByType[type]) || [];
+                    var kw = getKwForLevel(level) || (type === 'mantra_top' ? getKwForLevel('globalNative') : null);
+                    var listNoCountry = kw || (window.__lexiconByType && window.__lexiconByType[type]) || [];
                     if (typeof _renderTop10List === 'function') _renderTop10List(listNoCountry, true);
                     return;
                 }
                 var base = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content)) || '';
                 base = (base && base.trim()) ? (base.trim().endsWith('/') ? base.trim() : base.trim() + '/') : '';
-                var cached = window.__lexiconByType && window.__lexiconByType[type] && window.__lexiconByType[type].length > 0;
-                if (cached) {
-                    if (typeof _renderTop10List === 'function') _renderTop10List(window.__lexiconByType[type], true);
+                var listToRender = null;
+                var archKw = (type === 'mantra_top' && window.__countryKeywordsByLevel) ? (window.__countryKeywordsByLevel.Architect || window.__countryKeywordsByLevel.globalNative) : null;
+                var archArr = Array.isArray(archKw) && archKw.length > 0 ? archKw.map(function(x) { return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; }).filter(function(x) { return x.phrase; }) : [];
+                var lexCached = window.__lexiconByType && window.__lexiconByType[type] && window.__lexiconByType[type].length > 0;
+                if (type === 'mantra_top' && archArr.length > 0) {
+                    listToRender = archArr;
+                } else if (lexCached) {
+                    listToRender = window.__lexiconByType[type];
+                }
+                if (listToRender && listToRender.length > 0) {
+                    if (typeof _renderTop10List === 'function') _renderTop10List(listToRender, true);
                     return;
                 }
                 var url = base + 'api/national-lexicon?country=' + encodeURIComponent(country) + '&type=' + encodeURIComponent(type);
                 fetch(url).then(function(r) { return r.json(); }).then(function(res) {
                     var list = (res && res.data && Array.isArray(res.data)) ? res.data : [];
                     if (list.length === 0 && (type === 'merit_board' || type === 'mantra_top')) {
-                        var kwFallback = window.__countryKeywordsByLevel && window.__countryKeywordsByLevel[level];
+                        var kwFallback = (window.__countryKeywordsByLevel && window.__countryKeywordsByLevel[level]) || (type === 'mantra_top' && window.__countryKeywordsByLevel && window.__countryKeywordsByLevel.globalNative);
                         if (Array.isArray(kwFallback) && kwFallback.length > 0) {
                             list = kwFallback.map(function(x) { return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; });
                         }
@@ -22749,7 +22806,7 @@
                     var fallback = (window.__lexiconByType && window.__lexiconByType[type] && window.__lexiconByType[type].length > 0)
                         ? window.__lexiconByType[type] : [];
                     if (fallback.length === 0 && (type === 'merit_board' || type === 'mantra_top')) {
-                        var kwErr = window.__countryKeywordsByLevel && window.__countryKeywordsByLevel[level];
+                        var kwErr = (window.__countryKeywordsByLevel && window.__countryKeywordsByLevel[level]) || (type === 'mantra_top' && window.__countryKeywordsByLevel && window.__countryKeywordsByLevel.globalNative);
                         if (Array.isArray(kwErr) && kwErr.length > 0) {
                             fallback = kwErr.map(function(x) { return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; });
                         }
@@ -23403,6 +23460,7 @@
                     globalNative: adapt(cloudData.globalNative || cloudData.native || [])
                 };
                 window.__nationalCloudData = window.__countryKeywordsByLevel;
+                if (typeof _syncLexiconFromKeywords === 'function') _syncLexiconFromKeywords();
             } else {
                 window.__countryKeywordsByLevel = null;
                 window.__nationalCloudData = null;
@@ -23422,6 +23480,7 @@
                                     globalNative: dataAdapter(ilc.globalNative || ilc.native || []) 
                                 };
                                 window.__nationalCloudData = window.__countryKeywordsByLevel;
+                                if (typeof _syncLexiconFromKeywords === 'function') _syncLexiconFromKeywords();
                             }
                         }
                     } catch (e2) { console.warn('[refreshVibeCard] 本国词云 localStorage 兜底失败:', e2); }
@@ -23481,6 +23540,7 @@
             window.__countryKeywordsByLevel = cached.countryKeywordsByLevel;
             window.__nationalCloudData = cached.countryKeywordsByLevel;
             window.__latestTop10 = cached.top10Data;
+            if (cached.countryKeywordsByLevel && typeof _syncLexiconFromKeywords === 'function') _syncLexiconFromKeywords();
             flushNationalCloudReadyCallbacks();
             
             var currentLevel = window.__currentNationalIdentityLevel || 'Architect';
@@ -23497,7 +23557,7 @@
             if (empty && total > 0) empty.classList.add('hidden');
             if (total === 0 && empty) { empty.textContent = '暂无灵魂词，快去分析吧'; empty.classList.remove('hidden'); }
             
-            if (typeof _renderTop10List === 'function') _renderTop10List(cached.top10Data || []);
+            if (!cached.countryKeywordsByLevel && typeof _renderTop10List === 'function') _renderTop10List(cached.top10Data || []);
         }
 
         async function loadWordCloud() {

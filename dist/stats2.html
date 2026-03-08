@@ -573,7 +573,9 @@
                                     <button type="button" class="vibe-lexicon-tab px-2 py-1 text-[10px] rounded border border-white/10 bg-transparent text-zinc-400 hover:bg-white/5" data-type="slang_list" data-t="lexicon.slang">行业黑话</button>
                                     <button type="button" class="vibe-lexicon-tab px-2 py-1 text-[10px] rounded border border-white/10 bg-transparent text-zinc-400 hover:bg-white/5" data-type="mantra_top" data-t="lexicon.mantra">全民口头禅</button>
                                 </div>
-                                <ol id="vibe-top10-list" class="space-y-1"></ol>
+                                <div id="vibe-lexicon-display" class="relative min-h-[160px] w-full" style="height:160px">
+                                    <canvas id="vibe-lexicon-wordcloud-canvas" width="400" height="160" style="width:100%;height:160px;display:block"></canvas>
+                                </div>
                                 <div id="vibe-top10-empty" class="hidden text-zinc-500 text-sm p-3 italic" data-t="hotlist.collecting">
                                     暂无数据（正在收录中...）
                                 </div>
