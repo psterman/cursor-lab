@@ -18809,11 +18809,16 @@
 
             // 【修复】渲染高分图谱（六个排行榜卡片）
             try {
-                if (typeof drawHighScores === 'function' && data.topByMetrics && Array.isArray(data.topByMetrics) && data.topByMetrics.length > 0) {
-                    drawHighScores(data.topByMetrics);
-                    console.log('[Dashboard] ✅ 高分图谱渲染完成:', data.topByMetrics.length, '个维度');
+                if (typeof drawHighScores === 'function') {
+                    var topBy = Array.isArray(data.topByMetrics) ? data.topByMetrics : [];
+                    drawHighScores(topBy);
+                    if (topBy.length > 0) {
+                        console.log('[Dashboard] ✅ 高分图谱渲染完成:', topBy.length, '个维度');
+                    } else {
+                        console.log('[Dashboard] 高分图谱无数据，已渲染占位 UI');
+                    }
                 } else {
-                    console.log('[Dashboard] ⚠️ 高分图谱数据不可用:', { hasFunction: typeof drawHighScores === 'function', topByMetrics: data.topByMetrics });
+                    console.log('[Dashboard] ⚠️ drawHighScores 不可用');
                 }
             } catch (e) {
                 console.warn('[Dashboard] ⚠️ 渲染高分图谱失败:', e);

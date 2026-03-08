@@ -3155,7 +3155,49 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
             min-width: 72px; /* 右侧定宽：一行清晰显示“名次/用户/分数” */
         }
 
-        /* 新布局：6 张纵向卡片 */
+        /* 新布局：Tab 切换 + 每 Tab 一国一维排行榜 */
+        .lpdef-tabs-wrap {
+            padding: 6px 0 2px 0;
+        }
+        .lpdef-tab-bar {
+            display: flex;
+            flex-wrap: nowrap;
+            gap: 4px;
+            margin-bottom: 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.10);
+            overflow-x: auto;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch;
+        }
+        .lpdef-tab {
+            flex: 0 0 auto;
+            min-width: 0;
+            padding: 6px 8px;
+            font-size: 10px;
+            font-weight: 700;
+            white-space: nowrap;
+            color: rgba(255,255,255,0.5);
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            transition: color 0.15s, border-color 0.15s;
+        }
+        .lpdef-tab:hover { color: rgba(255,255,255,0.8); }
+        .lpdef-tab.active {
+            color: #00ff41;
+            border-bottom-color: #00ff41;
+        }
+        .lpdef-tab-panels {
+            position: relative;
+            min-height: 120px;
+        }
+        .lpdef-tab-panel {
+            display: none;
+        }
+        .lpdef-tab-panel.active {
+            display: block;
+        }
         .lpdef-metric-cards {
             display: flex;
             flex-direction: column;

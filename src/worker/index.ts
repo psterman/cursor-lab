@@ -8236,9 +8236,17 @@ app.get('/api/country-summary', async (c) => {
     }
 
     // ----------------------------
-    // 该国六项指标排行榜（用于 stats2 “高分图谱”卡片）
-    // - 兼容旧字段：topByMetrics 仍存在，但每项会带 leaders[]（TopN）
+    // 该国五项指标排行榜（用于 stats2 “高分图谱”卡片）：废话输出、调戏AI次数、甲方上身、磕头、上岗天数
+    // - 仅返回 5 维，顺序固定；RPC 无 work_days 时 Worker 单独查一次兜底
     // ----------------------------
+    const TOP_BY_METRICS_5_ORDER = ['total_user_chars', 'total_messages', 'jiafang_count', 'ketao_count', 'work_days'] as const;
+    const metrics5: Array<{ key: string; col: string; labelZh: string; labelEn: string; format?: 'int' | 'float' }> = [
+      { key: 'total_user_chars', col: 'total_chars', labelZh: '废话输出', labelEn: 'User Chars', format: 'int' },
+      { key: 'total_messages', col: 'total_messages', labelZh: '调戏AI次数', labelEn: 'Messages', format: 'int' },
+      { key: 'jiafang_count', col: 'jiafang_count', labelZh: '甲方上身', labelEn: 'Jiafang', format: 'int' },
+      { key: 'ketao_count', col: 'ketao_count', labelZh: '磕头', labelEn: 'Ketao', format: 'int' },
+      { key: 'work_days', col: 'work_days', labelZh: '上岗天数', labelEn: 'Work Days', format: 'int' },
+    ];
     let topByMetrics: any[] = [];
     try {
       const topNRaw = String(c.req.query('topN') || '').trim();
@@ -8247,32 +8255,19 @@ app.get('/api/country-summary', async (c) => {
         if (Number.isFinite(n) && n > 0) return Math.max(3, Math.min(20, n));
         return 10;
       })();
-      const metrics: Array<{ key: string; col: string; labelZh: string; labelEn: string; format?: 'int' | 'float' }> = [
-          { key: 'total_messages', col: 'total_messages', labelZh: '调戏AI次数', labelEn: 'Messages', format: 'int' },
-          { key: 'total_chars', col: 'total_chars', labelZh: '对话字符数', labelEn: 'Total Chars', format: 'int' },
-          { key: 'avg_user_message_length', col: 'avg_user_message_length', labelZh: '平均长度', labelEn: 'Avg Len', format: 'float' },
-          { key: 'jiafang_count', col: 'jiafang_count', labelZh: '甲方上身', labelEn: 'Jiafang', format: 'int' },
-          { key: 'ketao_count', col: 'ketao_count', labelZh: '磕头', labelEn: 'Ketao', format: 'int' },
-          { key: 'work_days', col: 'work_days', labelZh: '上岗天数', labelEn: 'Work Days', format: 'int' },
-      ];
-
-      // 无论是否有数据，都返回 6 个条目，前端才能稳定显示 6 个排行榜 + 指示器
       const emptyEntry = (m: { key: string; col: string; labelZh: string; labelEn: string; format?: 'int' | 'float' }) => ({
         key: m.key,
         col: m.col,
         labelZh: m.labelZh,
         labelEn: m.labelEn,
         format: m.format || 'int',
-        // 兼容旧使用：保留 top1 字段，但允许为空
         score: null,
         user: null,
-        leaders: [],
+        leaders: [] as any[],
         topN,
       });
 
       if (/^[A-Z]{2}$/.test(cc)) {
-        // ✅ 方案 B：优先使用 Supabase RPC 一次拿到 6 榜单（更省连接/更低延迟，适合免费档）
-        // 如果 RPC 尚未部署或执行失败，则自动回退到旧方案（每指标单独查询）
         try {
           const rpcTopUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_country_top_metrics_v1`;
           const rpcTop = await fetchSupabaseJson<any>(
@@ -8286,27 +8281,63 @@ app.get('/api/country-summary', async (c) => {
             SUPABASE_FETCH_TIMEOUT_MS
           ).catch(() => null);
           if (Array.isArray(rpcTop) && rpcTop.length > 0) {
-            // 兼容：保证顺序与前端 metricOrder 一致
-            const order = new Map<string, number>(metrics.map((m, i) => [m.key, i]));
+            const order5 = new Map<string, number>(TOP_BY_METRICS_5_ORDER.map((k, i) => [k, i]));
+            const allowed = new Set(TOP_BY_METRICS_5_ORDER);
             topByMetrics = rpcTop
-              .slice()
-              .sort((a: any, b: any) => (order.get(String(a?.key || '')) ?? 999) - (order.get(String(b?.key || '')) ?? 999));
-            // 补齐：如果 RPC 返回不足 6 项，也要补齐空项，避免前端指示器/轮播断裂
-            if (topByMetrics.length < metrics.length) {
-              const existing = new Set(topByMetrics.map((x: any) => String(x?.key || '')));
-              for (const m of metrics) {
-                if (!existing.has(m.key)) topByMetrics.push(emptyEntry(m));
-              }
-              topByMetrics = topByMetrics
-                .slice()
-                .sort((a: any, b: any) => (order.get(String(a?.key || '')) ?? 999) - (order.get(String(b?.key || '')) ?? 999));
+              .filter((x: any) => allowed.has(String(x?.key || '')))
+              .sort((a: any, b: any) => (order5.get(String(a?.key || '')) ?? 999) - (order5.get(String(b?.key || '')) ?? 999));
+            const hasWorkDays = topByMetrics.some((x: any) => String(x?.key) === 'work_days');
+            if (!hasWorkDays) {
+              const wdUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
+              wdUrl.searchParams.set('select', 'id,user_name,github_username,fingerprint,user_identity,work_days');
+              wdUrl.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc},manual_location.eq.${cc},current_location.eq.${cc})`);
+              wdUrl.searchParams.set('work_days', 'gt.0');
+              wdUrl.searchParams.set('order', 'work_days.desc');
+              wdUrl.searchParams.set('limit', String(topN));
+              const wdRows = await fetchSupabaseJson<any[]>(env, wdUrl.toString(), { headers: buildSupabaseHeaders(env) }).catch(() => []);
+              const wdList = Array.isArray(wdRows) ? wdRows : [];
+              const wdLeaders = wdList
+                .map((row: any, idx: number) => {
+                  const score = Number(row?.work_days);
+                  if (!Number.isFinite(score) || score <= 0) return null;
+                  return {
+                    rank: idx + 1,
+                    score,
+                    user: {
+                      id: row?.id ?? null,
+                      user_name: row?.user_name ?? '',
+                      github_username: row?.github_username ?? '',
+                      fingerprint: row?.fingerprint ?? null,
+                      user_identity: row?.user_identity ?? null,
+                      lpdef: row?.lpdef ?? null,
+                    },
+                  };
+                })
+                .filter(Boolean);
+              const m = metrics5.find((x) => x.key === 'work_days')!;
+              topByMetrics.push({
+                ...emptyEntry(m),
+                score: wdLeaders.length ? (wdLeaders[0] as any).score : null,
+                user: wdLeaders.length ? (wdLeaders[0] as any).user : null,
+                leaders: wdLeaders,
+              });
+              topByMetrics = topByMetrics.sort((a: any, b: any) => (order5.get(String(a?.key || '')) ?? 999) - (order5.get(String(b?.key || '')) ?? 999));
             }
+            const existing = new Set(topByMetrics.map((x: any) => String(x?.key || '')));
+            for (const m of metrics5) {
+              if (!existing.has(m.key)) {
+                topByMetrics.push(emptyEntry(m));
+                existing.add(m.key);
+              }
+            }
+            topByMetrics = topByMetrics
+              .slice()
+              .sort((a: any, b: any) => (order5.get(String(a?.key || '')) ?? 999) - (order5.get(String(b?.key || '')) ?? 999));
           }
         } catch {
           // ignore -> fallback
         }
 
-        // RPC 成功则不再进行 6 次查询
         if (Array.isArray(topByMetrics) && topByMetrics.length > 0) {
           // ok
         } else {
@@ -8319,15 +8350,12 @@ app.get('/api/country-summary', async (c) => {
           'country_code',
           'total_messages',
           'total_chars',
-          'avg_user_message_length',
           'jiafang_count',
           'ketao_count',
           'work_days',
           ].join(',');
-          // 注意：部分环境的视图可能尚未包含 lpdef 列。这里先尝试带 lpdef，失败则回退到不带 lpdef，
-          // 避免整项榜单因 select 列不存在而变成空数据。
           const selectColsWithLpdef = `${selectColsBase},lpdef`;
-          const results = await Promise.all(metrics.map(async (m) => {
+          const results = await Promise.all(metrics5.map(async (m) => {
             try {
               const buildUrl = (selectCols: string) => {
                 const url = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
@@ -8400,11 +8428,9 @@ app.get('/api/country-summary', async (c) => {
           topByMetrics = results;
         }
       } else {
-        // country 参数异常时也返回 6 个空条目，避免前端 UI 断裂
-        topByMetrics = metrics.map((m) => emptyEntry(m));
+        topByMetrics = metrics5.map((m) => emptyEntry(m));
       }
     } catch {
-      // 兜底：返回空数组（保持兼容），前端会显示“暂无数据”
       topByMetrics = [];
     }
 

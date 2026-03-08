@@ -1146,7 +1146,8 @@
                 var globalContainer = document.querySelector('#panel-global-view .vibe-index-leaderboard') || 
                                      document.querySelector('#panel-global-content .vibe-index-leaderboard');
                 var countryContainer = document.querySelector('#panel-country-view .vibe-index-leaderboard') || 
-                                      document.querySelector('#countryTemplateMount .vibe-index-leaderboard');
+                                      document.querySelector('#countryTemplateMount .vibe-index-leaderboard') ||
+                                      document.getElementById('rtTopTalentsList');
                 
                 // 兼容旧容器（panel-global-view 与 panel-global-content 已在上方查找）
                 var oldGlobalContainer = document.querySelector('#panel-global-view .vibe-index-leaderboard');
@@ -1179,9 +1180,10 @@
                     container = countryContainer;
                     console.log('[drawHighScores] ✅ 使用 Country 国家视图容器');
                 } else {
-                    // 降级选择：优先使用新容器，然后是旧容器
+                    // 降级选择：优先使用新容器，然后是旧容器，国家 Tab 高分图谱卡片 #rtTopTalentsList 兜底
+                    var rtTopTalentsList = document.getElementById('rtTopTalentsList');
                     container = rankingContainer || globalContainer || countryContainer || 
-                               oldGlobalContainer || oldCountryContainer || 
+                               oldGlobalContainer || oldCountryContainer || rtTopTalentsList ||
                                document.querySelector('.vibe-index-leaderboard');
                     console.log('[drawHighScores] ⚠️ 降级容器:', container ? (container.id || container.className) : 'null');
                 }
@@ -1196,10 +1198,51 @@
                 return;
             }
             console.log('[drawHighScores] ✅ 找到容器:', container);
-            var metricOrder = ['total_messages', 'total_chars', 'avg_message_length', 'jiafang_count', 'ketao_count', 'work_days'];
-            var sorted = (Array.isArray(topBy) ? topBy.slice() : []).sort(function (a, b) { return metricOrder.indexOf(String((a && a.key) || '')) - metricOrder.indexOf(String((b && b.key) || '')); });
+            var metricOrder = ['total_user_chars', 'total_messages', 'jiafang_count', 'ketao_count', 'work_days'];
+            var metricLabels = [
+                { key: 'total_user_chars', labelZh: '废话输出', labelEn: 'User Chars' },
+                { key: 'total_messages', labelZh: '调戏AI次数', labelEn: 'Messages' },
+                { key: 'jiafang_count', labelZh: '甲方上身', labelEn: 'Jiafang' },
+                { key: 'ketao_count', labelZh: '磕头', labelEn: 'Ketao' },
+                { key: 'work_days', labelZh: '上岗天数', labelEn: 'Work Days' }
+            ];
+            var allowed5 = { total_user_chars: 1, total_messages: 1, jiafang_count: 1, ketao_count: 1, work_days: 1 };
+            var raw = Array.isArray(topBy) ? topBy : [];
+            var filtered = raw.filter(function (it) {
+                var k = String((it && it.key) || '');
+                if (k === 'total_chars') return true;
+                return allowed5[k];
+            }).map(function (it) {
+                var k = String((it && it.key) || '');
+                if (k === 'total_chars') return Object.assign({}, it, { key: 'total_user_chars' });
+                return it;
+            });
+            var sorted = filtered.slice().sort(function (a, b) { return metricOrder.indexOf(String((a && a.key) || '')) - metricOrder.indexOf(String((b && b.key) || '')); });
+            var existingKeys = {};
+            sorted.forEach(function (it) { existingKeys[String((it && it.key) || '')] = true; });
+            metricOrder.forEach(function (key) {
+                if (!existingKeys[key]) {
+                    var ml = metricLabels.filter(function (m) { return m.key === key; })[0];
+                    sorted.push({ key: key, leaders: [], labelZh: ml ? ml.labelZh : key, labelEn: ml ? ml.labelEn : key });
+                }
+            });
+            sorted.sort(function (a, b) { return metricOrder.indexOf(String((a && a.key) || '')) - metricOrder.indexOf(String((b && b.key) || '')); });
+            var esc0 = typeof escapeHtml === 'function' ? escapeHtml : function (s) { return String(s == null ? '' : s); };
+            var isEn = typeof currentLang !== 'undefined' && currentLang === 'en';
             if (!sorted.length) {
-                container.innerHTML = '<div class="text-zinc-500 text-xs text-center">' + (typeof escapeHtml === 'function' ? escapeHtml(typeof getI18nText === 'function' ? getI18nText('lpdef.none') || '暂无高分图谱数据' : '暂无高分图谱数据') : '暂无高分图谱数据') + '</div>';
+                var noDataMsg = typeof getI18nText === 'function' ? (getI18nText('lpdef.none') || '暂无高分图谱数据') : '暂无高分图谱数据';
+                var noDataRow = '<div class="text-zinc-500 text-xs text-center py-3">' + esc0(noDataMsg) + '</div>';
+                var tabLabels = metricLabels.map(function (m) { return isEn ? m.labelEn : m.labelZh; });
+                var tabBarHtml = '<div class="lpdef-tab-bar" role="tablist">' + tabLabels.map(function (label, idx) {
+                    return '<button type="button" class="lpdef-tab' + (idx === 0 ? ' active' : '') + '" role="tab" data-tab-index="' + idx + '">' + esc0(label) + '</button>';
+                }).join('') + '</div>';
+                var panelsHtml = metricLabels.map(function (m, idx) {
+                    var label = isEn ? m.labelEn : m.labelZh;
+                    return '<div class="lpdef-tab-panel' + (idx === 0 ? ' active' : '') + '" data-tab-index="' + idx + '" role="tabpanel">' +
+                        '<div class="lpdef-metric-card"><div class="lpdef-metric-title">' + esc0(label) + '</div><div class="lpdef-rank-list">' + noDataRow + '</div></div></div>';
+                }).join('');
+                container.innerHTML = '<div class="lpdef-tabs-wrap">' + tabBarHtml + '<div class="lpdef-tab-panels">' + panelsHtml + '</div></div>';
+                bindLpdefTabs(container);
                 ensureLeaderboardParentVisible(container);
                 return;
             }
@@ -1211,7 +1254,7 @@
                     if (Math.abs(n) >= 1000) return (n / 1000).toFixed(1) + 'k';
                     return new Intl.NumberFormat(typeof currentLang !== 'undefined' && currentLang === 'en' ? 'en-US' : 'zh-CN').format(Math.round(n));
                 }
-                if (k === 'avg_message_length') return n.toFixed(1);
+                if (k === 'avg_message_length' || k === 'avg_user_message_length') return n.toFixed(1);
                 return new Intl.NumberFormat(typeof currentLang !== 'undefined' && currentLang === 'en' ? 'en-US' : 'zh-CN').format(Math.round(n));
             };
             var labelForMetric = function (it) {
@@ -1246,7 +1289,11 @@
             var cardsHtml = sorted.map(function (it, idx) {
                 var label = (labelForMetric(it) || '').trim() || ('M' + (idx + 1));
                 var leaders = Array.isArray(it && it.leaders) ? it.leaders : (it && it.user ? [{ rank: 1, score: it.score, user: it.user }] : []);
-                if (!leaders.length) return '';
+                var noData = getText('common.no_data') || '暂无数据';
+                if (!leaders.length) {
+                    var panelClass = 'lpdef-tab-panel' + (idx === 0 ? ' active' : '');
+                    return '<div class="' + panelClass + '" data-tab-index="' + idx + '" role="tabpanel"><div class="lpdef-metric-card"><div class="lpdef-metric-title">' + esc(label) + '</div><div class="lpdef-rank-list"><div class="text-zinc-500 text-xs text-center py-3">' + esc(noData) + '</div></div></div></div>';
+                }
                 leaders = leaders.slice().map(function (row) {
                     var pData = {};
                     if (typeof row.personality === 'string') {
@@ -1308,13 +1355,35 @@
                     var defAvatar = typeof DEFAULT_AVATAR !== 'undefined' ? DEFAULT_AVATAR : '';
                     return '<div class="lpdef-rank-row"><div class="lpdef-rank-left"><span class="lpdef-rank-rn">' + esc(rankText) + '</span><img class="lpdef-rank-avatar" src="' + esc(meta.avatar) + '" alt="" onerror="this.onerror=null; this.src=\'' + esc(defAvatar) + '\';" /><div class="lpdef-name-wrap">' + nameHtml + (displayTag ? '<span class="lpdef-persona-tag" title="' + esc(badgeTitle) + '">' + esc(displayTag) + '</span>' : '') + '</div></div><div class="lpdef-rank-right"><div class="lpdef-rank-score">' + esc(String(scoreText)) + '</div>' + _renderDelta(delta) + '</div></div>';
                 }).join('');
-                var noData = getText('common.no_data') || 'No data';
-                return '<div class="lpdef-metric-card" data-metric-index="' + idx + '"><div class="lpdef-metric-title">' + esc(label) + '</div><div class="lpdef-rank-list">' + _headerRow() + (rows || '<div class="text-zinc-500 text-xs text-center">' + esc(noData) + '</div>') + '</div></div>';
+                var noDataRow = getText('common.no_data') || '暂无数据';
+                var panelClass = 'lpdef-tab-panel' + (idx === 0 ? ' active' : '');
+                return '<div class="' + panelClass + '" data-tab-index="' + idx + '" role="tabpanel"><div class="lpdef-metric-card"><div class="lpdef-metric-title">' + esc(label) + '</div><div class="lpdef-rank-list">' + _headerRow() + (rows || '<div class="text-zinc-500 text-xs text-center">' + esc(noDataRow) + '</div>') + '</div></div></div>';
             }).join('');
-            var html = '<div class="lpdef-metric-cards">' + cardsHtml + '</div>';
+            var tabLabels = sorted.map(function (it) { return (labelForMetric(it) || '').trim() || '—'; });
+            var tabBarHtml = '<div class="lpdef-tab-bar" role="tablist">' + tabLabels.map(function (label, idx) {
+                return '<button type="button" class="lpdef-tab' + (idx === 0 ? ' active' : '') + '" role="tab" data-tab-index="' + idx + '">' + esc(tabLabels[idx]) + '</button>';
+            }).join('') + '</div>';
+            var html = '<div class="lpdef-tabs-wrap">' + tabBarHtml + '<div class="lpdef-tab-panels">' + cardsHtml + '</div></div>';
             console.log('✅ 准备渲染榜单，数据样本:', topBy[0] && topBy[0].leaders && topBy[0].leaders[0]);
             container.innerHTML = html;
+            bindLpdefTabs(container);
             ensureLeaderboardParentVisible(container);
+        }
+
+        function bindLpdefTabs(container) {
+            if (!container) return;
+            var bar = container.querySelector('.lpdef-tab-bar');
+            var panels = container.querySelectorAll('.lpdef-tab-panel');
+            if (!bar || !panels.length) return;
+            bar.addEventListener('click', function (e) {
+                var btn = e.target && e.target.closest && e.target.closest('.lpdef-tab');
+                if (!btn || btn.getAttribute('data-tab-index') == null) return;
+                var idx = parseInt(btn.getAttribute('data-tab-index'), 10);
+                if (!Number.isFinite(idx) || idx < 0) return;
+                var tabs = bar.querySelectorAll('.lpdef-tab');
+                tabs.forEach(function (t, i) { t.classList.toggle('active', i === idx); });
+                panels.forEach(function (p, i) { p.classList.toggle('active', i === idx); });
+            });
         }
 
         // ==========================================
@@ -2237,6 +2306,12 @@
                     window.cachedSummary = typeof mergeDeep === 'function'
                         ? mergeDeep(window.cachedSummary || {}, data)
                         : Object.assign({}, window.cachedSummary || {}, data);
+                } catch (e) { /* ignore */ }
+                // 写入 lastData，供天梯榜 Tab 等读取 topByMetrics
+                try {
+                    window.lastData = typeof mergeDeep === 'function'
+                        ? mergeDeep(window.lastData || {}, data)
+                        : Object.assign({}, window.lastData || {}, data);
                 } catch (e) { /* ignore */ }
 
                 // 国家视图：get_country_dimension_averages 优先 12h 本地缓存；连续失败 3 次则标记暂时不可用并隐藏右侧雷达图
@@ -18813,13 +18888,18 @@
             // 注意：LPDEF 专家卡片将在 window.onload 的身份检查后渲染
             // 这里不调用 renderLPDEFExperts，避免覆盖身份检查的结果
 
-            // 【修复】渲染高分图谱（六个排行榜卡片）
+            // 【修复】渲染高分图谱：无数据时也调用 drawHighScores([])，避免内容区完全空白（与 updateCountryDashboard 行为一致）
             try {
-                if (typeof drawHighScores === 'function' && data.topByMetrics && Array.isArray(data.topByMetrics) && data.topByMetrics.length > 0) {
-                    drawHighScores(data.topByMetrics);
-                    console.log('[Dashboard] ✅ 高分图谱渲染完成:', data.topByMetrics.length, '个维度');
+                if (typeof drawHighScores === 'function') {
+                    var topBy = Array.isArray(data.topByMetrics) ? data.topByMetrics : [];
+                    drawHighScores(topBy);
+                    if (topBy.length > 0) {
+                        console.log('[Dashboard] ✅ 高分图谱渲染完成:', topBy.length, '个维度');
+                    } else {
+                        console.log('[Dashboard] 高分图谱无数据，已渲染占位 UI');
+                    }
                 } else {
-                    console.log('[Dashboard] ⚠️ 高分图谱数据不可用:', { hasFunction: typeof drawHighScores === 'function', topByMetrics: data.topByMetrics });
+                    console.log('[Dashboard] ⚠️ drawHighScores 不可用');
                 }
             } catch (e) {
                 console.warn('[Dashboard] ⚠️ 渲染高分图谱失败:', e);
