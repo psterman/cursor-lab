@@ -266,6 +266,8 @@ const KV_GLOBAL_STATS_V6_VIEW_TTL = 300;
 
 /** 本国词云 KV 缓存 TTL（秒），与 country-hot-list 一致 */
 const COUNTRY_WORDCLOUD_KV_TTL = 600;
+/** 定时快照写入的 KV TTL（秒），2 小时，覆盖两次 cron 间隔 */
+const COUNTRY_HOTLIST_SNAPSHOT_KV_TTL = 7200;
 
 type CountryWordCloudResult = {
   top10: Array<{ phrase: string; hit_count: number }>;
@@ -6865,6 +6867,42 @@ app.get('/api/v2/country-hot-list', async (c) => {
 });
 
 /**
+ * GET /api/v2/static-hotlist?country=CN
+ * 静态快照：仅从 KV 读取，不查询数据库。用于降低 Supabase 负载、提升前端加载速度。
+ * 无 country 或 KV 无数据时返回空结构。
+ */
+const EMPTY_HOTLIST_PAYLOAD = {
+  Novice: [],
+  Professional: [],
+  Architect: [],
+  globalNative: [],
+  merit: [],
+  slang: [],
+  native: [],
+};
+app.get('/api/v2/static-hotlist', async (c) => {
+  const env = c.env;
+  const countryRaw = (c.req.query('country') || '').trim().toUpperCase();
+  c.header('Cache-Control', 'public, max-age=300');
+  if (!/^[A-Z]{2}$/.test(countryRaw)) {
+    return c.json(EMPTY_HOTLIST_PAYLOAD);
+  }
+  const kvKey = `${KV_KEY_COUNTRY_HOT_LIST_PREFIX}:${countryRaw}`;
+  if (!env.STATS_STORE) {
+    return c.json(EMPTY_HOTLIST_PAYLOAD);
+  }
+  try {
+    const cached = await env.STATS_STORE.get(kvKey, 'json');
+    if (cached && typeof cached === 'object') {
+      return c.json(cached);
+    }
+  } catch {
+    // ignore
+  }
+  return c.json(EMPTY_HOTLIST_PAYLOAD);
+});
+
+/**
  * OPTIONS /api/v2/log-vibe-soul
  * 显式响应预检，确保 localhost 等跨域 preflight 收到 CORS 头（部分环境 cors 中间件对 OPTIONS 不生效时兜底）
  */
@@ -10302,6 +10340,83 @@ async function writeGlobalCountryStatsToKV(env: Env): Promise<{ success: boolean
   }
 }
 
+const LIFT_MIN_HOTLIST = 1.2;
+
+/**
+ * 国家级词云快照生成：从 country_vibe_stats 全表读出已聚合结果，计算 Lift，批量写入 KV。
+ * 供每小时 Cron 调用，使 /api/v2/static-hotlist 可纯读 KV、0 次 Supabase。
+ */
+async function generateCountryHotlistSnapshot(env: Env): Promise<{ success: boolean; error?: string; countriesWritten?: number }> {
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) return { success: false, error: 'Supabase 未配置' };
+  if (!env.STATS_STORE) return { success: false, error: 'STATS_STORE 未绑定' };
+  try {
+    const rowUrl = `${env.SUPABASE_URL}/rest/v1/country_vibe_stats?select=country_code,merit_jsonb,slang_jsonb,native_jsonb`;
+    const globalRpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_country_vibe_stats_global_sum`;
+    const [rows, globalRows] = await Promise.all([
+      fetchSupabaseJson<any[]>(env, rowUrl, { headers: buildSupabaseHeaders(env) }),
+      fetchSupabaseJson<Array<{ word: string; total: number; countries: number }>>(env, globalRpcUrl, {
+        method: 'POST',
+        headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({}),
+      }),
+    ]);
+    const globalMap = new Map<string, { total: number; countries: number }>();
+    for (const r of Array.isArray(globalRows) ? globalRows : []) {
+      if (r?.word) globalMap.set(r.word, { total: Number(r.total) || 0, countries: Math.max(1, Number(r.countries) || 1) });
+    }
+    const applyLift = (obj: Record<string, number>): Array<{ phrase: string; hit_count: number }> => {
+      const out: Array<{ phrase: string; hit_count: number }> = [];
+      for (const [word, count] of Object.entries(obj)) {
+        if (!word || count <= 0) continue;
+        const g = globalMap.get(word);
+        const avgGlobal = g ? g.total / Math.max(1, g.countries) : 0;
+        const lift = avgGlobal > 0 ? count / avgGlobal : (count > 0 ? 999 : 0);
+        if (lift >= LIFT_MIN_HOTLIST) out.push({ phrase: word, hit_count: count });
+      }
+      out.sort((a, b) => b.hit_count - a.hit_count);
+      return out;
+    };
+    const toWordItem = (arr: Array<{ phrase: string; hit_count: number }>) =>
+      arr.map((x) => ({ word: x.phrase, weight: 0, count: x.hit_count }));
+    const countryList = Array.isArray(rows) ? rows : [];
+    let written = 0;
+    for (const row of countryList) {
+      const cc = String(row?.country_code ?? '').trim().toUpperCase();
+      if (!/^[A-Z]{2}$/.test(cc)) continue;
+      const meritObj = (row?.merit_jsonb && typeof row.merit_jsonb === 'object') ? (row.merit_jsonb as Record<string, number>) : {};
+      const slangObj = (row?.slang_jsonb && typeof row.slang_jsonb === 'object') ? (row.slang_jsonb as Record<string, number>) : {};
+      const nativeObj = (row?.native_jsonb && typeof row.native_jsonb === 'object') ? (row.native_jsonb as Record<string, number>) : {};
+      const meritList = applyLift(meritObj);
+      const slangList = applyLift(slangObj);
+      const nativeList = applyLift(nativeObj);
+      const hasAny = meritList.length > 0 || slangList.length > 0 || nativeList.length > 0;
+      if (!hasAny) continue;
+      const phraseItems = toWordItem(nativeList);
+      const payload = {
+        merit: toWordItem(meritList),
+        slang: toWordItem(slangList),
+        native: phraseItems,
+        Novice: toWordItem(slangList),
+        Professional: toWordItem(meritList),
+        Architect: phraseItems,
+        globalNative: phraseItems,
+      };
+      const kvKey = `${KV_KEY_COUNTRY_HOT_LIST_PREFIX}:${cc}`;
+      try {
+        await env.STATS_STORE.put(kvKey, JSON.stringify(payload), { expirationTtl: COUNTRY_HOTLIST_SNAPSHOT_KV_TTL });
+        written++;
+      } catch {
+        // skip single country on KV error
+      }
+    }
+    console.log('[Worker] ✅ 国家词云快照写入 KV 完成，国家数:', written);
+    return { success: true, countriesWritten: written };
+  } catch (e: any) {
+    console.warn('[Worker] generateCountryHotlistSnapshot 失败:', e?.message);
+    return { success: false, error: e?.message || String(e) };
+  }
+}
+
 /**
  * 天梯榜快照刷新：调用 Supabase RPC refresh_leaderboard_snapshots()
  * 计算 22 维度 x daily/all_time 的 Top10 并写入 leaderboard_snapshots 表；带有限重试以提升 Cron 稳健性
@@ -10364,6 +10479,8 @@ export async function scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionC
     } catch (lbErr: any) {
       console.warn('[Worker] ⚠️ 天梯榜快照刷新异常，继续执行后续聚合:', lbErr?.message || lbErr);
     }
+    const hotlistResult = await generateCountryHotlistSnapshot(env);
+    if (!hotlistResult.success) console.warn('[Worker] ⚠️ 国家词云快照写入失败:', hotlistResult.error);
   }
   const result = await performAggregation(env);
   const v6Result = await performV6Aggregation(env);

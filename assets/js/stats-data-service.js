@@ -423,7 +423,38 @@
             return Promise.resolve(setResult(emptyResult));
         }
 
-        /** 优先请求国家大盘灵魂词（Lift 算法结果），兼容 Novice/Professional/Architect/globalNative */
+        /** 解析 hotlist 类 payload 为统一结构（static-hotlist / country-hot-list 共用） */
+        function parseHotlistPayload(payload) {
+            if (!payload || typeof payload !== 'object') return emptyResult;
+            var hasData = (payload.Novice && payload.Novice.length) || (payload.Professional && payload.Professional.length) || (payload.Architect && payload.Architect.length) || (payload.globalNative && payload.globalNative.length) || (payload.merit && payload.merit.length) || (payload.slang && payload.slang.length) || (payload.native && payload.native.length);
+            if (!hasData) return emptyResult;
+            return {
+                Novice: adaptCloudData(payload.Novice || payload.slang || []),
+                Professional: adaptCloudData(payload.Professional || payload.merit || []),
+                Architect: adaptCloudData(payload.Architect || []),
+                globalNative: adaptCloudData(payload.globalNative || payload.native || [])
+            };
+        }
+        /** 优先请求静态快照（纯 KV，0 次 DB），失败或空再请求 country-hot-list */
+        function tryStaticHotlist() {
+            if (!countryParam) return Promise.resolve(emptyResult);
+            var staticUrl = apiBase + 'api/v2/static-hotlist?country=' + encodeURIComponent(countryParam) + '&_t=' + Date.now();
+            return fetch(staticUrl, { cache: 'no-store', signal: fetchSignal }).then(function(r) {
+                if (!r.ok) return emptyResult;
+                return r.json().then(function(payload) {
+                    if (isStaleRequest()) return emptyResult;
+                    var out = parseHotlistPayload(payload);
+                    if (!hasAnyCloud(out)) return emptyResult;
+                    setResult(out);
+                    try { window.__countryCloudFromHotList = true; } catch (e) {}
+                    return out;
+                }).catch(function() { return emptyResult; });
+            }).catch(function(e) {
+                if (e && e.name === 'AbortError') throw e;
+                return emptyResult;
+            });
+        }
+        /** 国家大盘灵魂词（Lift 算法），static-hotlist 无数据时的兜底，可能触发 DB */
         function tryCountryHotList() {
             if (!countryParam) return Promise.resolve(emptyResult);
             var hotUrl = apiBase + 'api/v2/country-hot-list?country=' + encodeURIComponent(countryParam) + '&_t=' + Date.now();
@@ -431,15 +462,8 @@
                 if (!r.ok) return emptyResult;
                 return r.json().then(function(payload) {
                     if (isStaleRequest()) return emptyResult;
-                    if (!payload || typeof payload !== 'object') return emptyResult;
-                    var hasData = (payload.Novice && payload.Novice.length) || (payload.Professional && payload.Professional.length) || (payload.Architect && payload.Architect.length) || (payload.globalNative && payload.globalNative.length) || (payload.merit && payload.merit.length) || (payload.slang && payload.slang.length) || (payload.native && payload.native.length);
-                    if (!hasData) return emptyResult;
-                    var out = {
-                        Novice: adaptCloudData(payload.Novice || payload.slang || []),
-                        Professional: adaptCloudData(payload.Professional || payload.merit || []),
-                        Architect: adaptCloudData(payload.Architect || []),
-                        globalNative: adaptCloudData(payload.globalNative || payload.native || [])
-                    };
+                    var out = parseHotlistPayload(payload);
+                    if (!hasAnyCloud(out)) return emptyResult;
                     setResult(out);
                     try { window.__countryCloudFromHotList = true; } catch (e) {}
                     return out;
@@ -494,14 +518,20 @@
             return (out.Novice && out.Novice.length) || (out.Professional && out.Professional.length) || (out.Architect && out.Architect.length) || (out.globalNative && out.globalNative.length);
         }
 
-        // 优先 country-hot-list（国家大盘灵魂词），有数据则直接返回；否则走 summary + keywords 兜底
-        return tryCountryHotList().then(function(hotOut) {
-            if (hasAnyCloud(hotOut)) {
+        // 优先 static-hotlist（纯 KV，0 次 DB），无数据再 country-hot-list，最后 summary + keywords 兜底
+        return tryStaticHotlist().then(function(staticOut) {
+            if (hasAnyCloud(staticOut)) {
                 clearTimeout(timeout);
                 try { window.__isCloudLoading = false; } catch (err) {}
-                return hotOut;
+                return staticOut;
             }
-            return fetch(summaryUrl, { signal: fetchSignal }).then(function(resp) {
+            return tryCountryHotList().then(function(hotOut) {
+                if (hasAnyCloud(hotOut)) {
+                    clearTimeout(timeout);
+                    try { window.__isCloudLoading = false; } catch (err) {}
+                    return hotOut;
+                }
+                return fetch(summaryUrl, { signal: fetchSignal }).then(function(resp) {
                 clearTimeout(timeout);
                 if (!resp.ok) return tryKeywordsApi().then(function(out) { return setResult(out); });
                 return resp.json().then(function(data) {
@@ -531,6 +561,7 @@
                 }
                 console.warn('[StatsDataService] fetchCountryKeywords 后端 summary 失败:', e);
                 return tryKeywordsApi().then(function(out) { return setResult(out); });
+            });
             });
         }).finally(function() {
             clearTimeout(timeout);

@@ -2468,30 +2468,36 @@
                                 flushNationalCloudReadyCallbacks();
                             }
                         }
-                        // 若 country-summary 未带 identityLevelCloud，优先 country-hot-list，再 keywords 兜底
+                        // 若 country-summary 未带 identityLevelCloud，优先 static-hotlist（纯 KV），再 country-hot-list，再 keywords 兜底
                         if (!apiSuccess) {
                             var kwApiBase = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content)) || API_ENDPOINT || '';
                             kwApiBase = (kwApiBase && kwApiBase.trim()) ? (kwApiBase.trim().endsWith('/') ? kwApiBase.trim() : kwApiBase.trim() + '/') : '/';
+                            function applyHotlistPayload(hotPayload) {
+                                if (!hotPayload || typeof hotPayload !== 'object') return false;
+                                var hotNovice = (hotPayload.Novice || hotPayload.slang || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
+                                var hotPro = (hotPayload.Professional || hotPayload.merit || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
+                                var hotArch = (hotPayload.Architect || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
+                                var hotNative = (hotPayload.globalNative || hotPayload.native || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
+                                var hotHasAny = hotNovice.length + hotPro.length + hotArch.length + hotNative.length > 0;
+                                if (!hotHasAny) return false;
+                                window.__countryKeywordsByLevel = { Novice: hotNovice, Professional: hotPro, Architect: hotArch, globalNative: hotNative };
+                                window.__nationalCloudData = window.__countryKeywordsByLevel;
+                                _syncLexiconFromKeywords();
+                                apiSuccess = true;
+                                try { window.__countryCloudFromHotList = true; } catch (e) {}
+                                flushNationalCloudReadyCallbacks();
+                                return true;
+                            }
                             try {
+                                var staticResp = await fetch(kwApiBase + 'api/v2/static-hotlist?country=' + encodeURIComponent(countryCode) + '&_t=' + Date.now(), { cache: 'no-store' });
+                                if (staticResp.ok && applyHotlistPayload(await staticResp.json())) {
+                                    console.log('Keywords loaded from static-hotlist:', window.__countryKeywordsByLevel);
+                                }
+                            } catch (staticErr) { /* ignore */ }
+                            if (!apiSuccess) try {
                                 var hotResp = await fetch(kwApiBase + 'api/v2/country-hot-list?country=' + encodeURIComponent(countryCode) + '&_t=' + Date.now(), { cache: 'no-store' });
-                                if (hotResp.ok) {
-                                    var hotPayload = await hotResp.json();
-                                    if (hotPayload && typeof hotPayload === 'object') {
-                                        var hotNovice = (hotPayload.Novice || hotPayload.slang || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
-                                        var hotPro = (hotPayload.Professional || hotPayload.merit || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
-                                        var hotArch = (hotPayload.Architect || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
-                                        var hotNative = (hotPayload.globalNative || hotPayload.native || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
-                                        var hotHasAny = hotNovice.length + hotPro.length + hotArch.length + hotNative.length > 0;
-                                        if (hotHasAny) {
-                                            window.__countryKeywordsByLevel = { Novice: hotNovice, Professional: hotPro, Architect: hotArch, globalNative: hotNative };
-                                            window.__nationalCloudData = window.__countryKeywordsByLevel;
-                                            _syncLexiconFromKeywords();
-                                            apiSuccess = true;
-                                            try { window.__countryCloudFromHotList = true; } catch (e) {}
-                                            console.log('Keywords loaded from country-hot-list:', window.__countryKeywordsByLevel);
-                                            flushNationalCloudReadyCallbacks();
-                                        }
-                                    }
+                                if (hotResp.ok && applyHotlistPayload(await hotResp.json())) {
+                                    console.log('Keywords loaded from country-hot-list:', window.__countryKeywordsByLevel);
                                 }
                             } catch (hotErr) { console.warn('[updateCountryDashboard] country-hot-list 失败:', hotErr); }
                             if (!apiSuccess) try {
@@ -23421,15 +23427,23 @@
                 empty.classList.remove('hidden');
             }
             
-            // 【性能优化】并行请求 keywords 和 top10 数据
+            // 【性能优化】并行请求 keywords 和 top10 数据；词云优先 static-hotlist（纯 KV），再 stats/keywords
             var API_ENDPOINT = _getApiEndpoint();
             try { vibeCloudAbort && vibeCloudAbort.abort && vibeCloudAbort.abort(); } catch { /* ignore */ }
             vibeCloudAbort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
             
-            const fetchKeywords = fetch(
-                API_ENDPOINT + 'api/v2/stats/keywords?region=' + encodeURIComponent(region) + '&_t=' + Date.now(), 
-                { cache: 'no-store', signal: vibeCloudAbort ? vibeCloudAbort.signal : undefined }
-            ).then(r => r.ok ? r.json() : null).catch(() => null);
+            const fetchKeywords = (async function() {
+                try {
+                    var staticRes = await fetch(API_ENDPOINT + 'api/v2/static-hotlist?country=' + encodeURIComponent(region) + '&_t=' + Date.now(), { cache: 'no-store', signal: vibeCloudAbort ? vibeCloudAbort.signal : undefined });
+                    if (staticRes.ok) {
+                        var payload = await staticRes.json();
+                        var hasAny = payload && ((payload.Novice && payload.Novice.length) || (payload.Professional && payload.Professional.length) || (payload.Architect && payload.Architect.length) || (payload.globalNative && payload.globalNative.length) || (payload.merit && payload.merit.length) || (payload.slang && payload.slang.length) || (payload.native && payload.native.length));
+                        if (hasAny) return payload;
+                    }
+                } catch (e) {}
+                var r = await fetch(API_ENDPOINT + 'api/v2/stats/keywords?region=' + encodeURIComponent(region) + '&_t=' + Date.now(), { cache: 'no-store', signal: vibeCloudAbort ? vibeCloudAbort.signal : undefined });
+                return r.ok ? r.json() : null;
+            })();
             
             const fetchTop10 = (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function')
                 ? (typeof getCachedOrFetch === 'function' && typeof VIBE_COUNTRY_RPC_CACHE_TTL_MS !== 'undefined'
