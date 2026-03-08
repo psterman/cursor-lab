@@ -287,6 +287,18 @@
             text-transform: uppercase;
             color: #00ff41;
         }
+        .top-header-nav-link {
+            display: inline-block;
+            font-size: 12px;
+            font-weight: 600;
+            color: #00ff41;
+            text-decoration: none;
+            letter-spacing: 0.05em;
+            transition: color 0.2s, opacity 0.2s;
+        }
+        .top-header-nav-link:hover {
+            color: rgba(0, 255, 65, 0.9);
+        }
 
         .lang-flag-btn {
             padding: 0;
@@ -7088,6 +7100,11 @@
                                             {lang === 'en' ? 'THREAT LEVEL' : '风险评级'}
                                         </div>
                                         <div className="top-header-card-value text-red-500">LEVEL_CRITICAL</div>
+                                    </div>
+                                    <div className="top-header-card">
+                                        <a href="stats2.html" className="top-header-nav-link" title={lang === 'en' ? 'PK Map' : 'PK地图'}>
+                                            {lang === 'en' ? 'PK Map' : 'PK地图'}
+                                        </a>
                                     </div>
                                     <div className="flex gap-2 items-center">
                                         <button

@@ -1026,6 +1026,20 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
             align-items: center;
             gap: 6px;
         }
+        .top-header-nav-link {
+            display: inline-block;
+            font-family: var(--font-mono-stack), monospace;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--accent-terminal, #00ff41);
+            text-decoration: none;
+            letter-spacing: 0.05em;
+            transition: color 0.2s, opacity 0.2s;
+        }
+        .top-header-nav-link:hover {
+            color: rgba(0, 255, 65, 0.9);
+            opacity: 1;
+        }
 
         /* 为 body 添加顶部 padding，避免内容被 header 遮挡 */
         body.p-4 {
