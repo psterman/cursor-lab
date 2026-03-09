@@ -955,8 +955,8 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
             z-index: 90;
             background: var(--bg-card);
             backdrop-filter: blur(20px);
-            border-bottom: 1px solid var(--border-ui);
-            padding: 12px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            padding: 10px 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -999,15 +999,14 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
 
         .top-header-right {
             display: flex;
-            align-items: center;
-            gap: 12px;
+            align-items: stretch;
+            gap: 8px;
             flex-wrap: wrap;
         }
 
         .top-header-cards {
             display: flex;
-            gap: 12px;
-            align-items: center;
+            align-items: stretch;
             flex-wrap: wrap;
         }
 
@@ -1054,12 +1053,17 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
             }
         }
 
-        /* hrdkm: 控制条/卡片 - fill #0A0A0A, stroke #2f2f2f, JetBrains Mono 9px 600 */
+        /* 顶部栏卡片：无粗线框，仅右侧细分隔线，统一高度与对齐 */
         .top-header-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border-ui);
-            padding: 8px 12px;
-            backdrop-filter: blur(10px);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-height: 44px;
+            padding: 6px 12px;
+            background: rgba(255, 255, 255, 0.03);
+            border: none;
+            border-radius: 4px;
+            backdrop-filter: none;
         }
 
         .top-header-card-label {
@@ -1070,23 +1074,42 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-bottom: 4px;
+            line-height: 1.2;
         }
 
         .top-header-card-value {
             font-family: 'Space Grotesk', system-ui, sans-serif;
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 700;
             color: var(--text-main);
             letter-spacing: -0.5px;
             display: flex;
             align-items: center;
             gap: 6px;
+            min-height: 20px;
+            line-height: 1.2;
+        }
+
+        /* 国家选择与导航链接与 value 同高、对齐 */
+        .top-header-card .country-select-dropdown {
+            min-height: 20px;
+            margin-top: 0;
+        }
+        .top-header-card > .top-header-nav-link {
+            display: inline-flex;
+            align-items: center;
+            min-height: 20px;
+            margin-top: 0;
+            font-size: 13px;
+            border: none;
+            box-shadow: none;
         }
 
         .top-header-nav-link {
-            display: inline-block;
+            display: inline-flex;
+            align-items: center;
             font-family: var(--font-mono-stack), monospace;
-            font-size: 12px;
+            font-size: 13px;
             font-weight: 600;
             color: var(--accent-terminal, #00ff41);
             text-decoration: none;
@@ -3791,37 +3814,35 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
             pointer-events: none;
         }
 
-        /* 国家选择下拉菜单样式 - 赛博朋克风格 */
+        /* 国家选择下拉菜单样式 - 与 top-header 统一，弱化线框 */
         .country-select-dropdown {
             appearance: none;
             -webkit-appearance: none;
             -moz-appearance: none;
-            background: rgba(0, 0, 0, 0.6);
-            border: 1px solid rgba(0, 255, 65, 0.4);
-            border-radius: 2px;
-            color: #00ff41;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            color: var(--text-main, #e4e4e7);
             font-family: 'JetBrains Mono', monospace;
-            font-size: 11px;
-            font-weight: 700;
+            font-size: 12px;
+            font-weight: 600;
             cursor: pointer;
             outline: none;
-            padding: 6px 24px 6px 8px;
-            transition: all 0.2s;
+            padding: 4px 22px 4px 8px;
+            transition: border-color 0.2s, background 0.2s;
             position: relative;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%2300ff41' d='M5 7L1 3h8z'/%3E%3C/svg%3E");
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%239ca3af' d='M5 7L1 3h8z'/%3E%3C/svg%3E");
             background-repeat: no-repeat;
-            background-position: right 8px center;
-            box-shadow: 0 0 8px rgba(0, 255, 65, 0.2);
+            background-position: right 6px center;
+            box-shadow: none;
         }
         .country-select-dropdown:hover {
-            border-color: rgba(0, 255, 65, 0.7);
-            box-shadow: 0 0 12px rgba(0, 255, 65, 0.4);
-            background-color: rgba(0, 255, 65, 0.05);
+            border-color: rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.08);
         }
         .country-select-dropdown:focus {
-            border-color: #00ff41;
-            box-shadow: 0 0 16px rgba(0, 255, 65, 0.6);
-            background-color: rgba(0, 255, 65, 0.1);
+            border-color: rgba(0, 255, 65, 0.35);
+            background: rgba(255, 255, 255, 0.08);
         }
         .country-select-dropdown option {
             background: #050505 !important;

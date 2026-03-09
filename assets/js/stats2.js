@@ -475,20 +475,30 @@
             var overlay = document.getElementById(OVERLAY_ID);
             if (!overlay || overlay.classList.contains('stats2-gate-removed')) return;
             var country = getStoredCountry();
-            if (!country) {
-                window.__countryPickerForced = true;
-                window.__countrySelectorSelectedCode = '';
-                showOverlay();
-                return;
-            }
             var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
             if (!sb || typeof sb.auth !== 'object') return;
             sb.auth.getSession().then(function(r) {
                 var session = (r && r.data && r.data.session) ? r.data.session : null;
+                // 已登录 GitHub：不弹出登录/选国家窗口；若已有国家则走确认逻辑，否则直接移除遮罩
+                if (session && session.user) {
+                    if (checkGatePassed(session)) return;
+                    hideGateOverlay();
+                    return;
+                }
+                if (!country) {
+                    window.__countryPickerForced = true;
+                    window.__countrySelectorSelectedCode = '';
+                    showOverlay();
+                    return;
+                }
                 if (checkGatePassed(session)) return;
                 showOverlay();
             }).catch(function() {
-                showOverlay();
+                if (!country) {
+                    window.__countryPickerForced = true;
+                    window.__countrySelectorSelectedCode = '';
+                    showOverlay();
+                }
             }).finally(function() {
                 var ov = document.getElementById(OVERLAY_ID);
                 if (ov && ov.parentNode && window.getComputedStyle(ov).display === 'flex') {
@@ -505,7 +515,6 @@
                     window.currentCountryCode = country;
                     localStorage.setItem('user_country_fixed', country);
                 } catch (e) {}
-                // 不再因已选国家就隐藏遮罩：用户必须点击 GitHub 登录并完成登录后才能进入
             }
             window.__countryPickerForced = true;
             window.__countrySelectorSelectedCode = '';
@@ -513,14 +522,24 @@
                 var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
                 if (!sb || typeof sb.auth !== 'object') return;
                 clearInterval(poll);
-                runGateCheck();
-                sb.auth.onAuthStateChange(function(event, session) {
-                    if (session) runGateCheck();
+                sb.auth.getSession().then(function(r) {
+                    var session = (r && r.data && r.data.session) ? r.data.session : null;
+                    if (session && session.user) {
+                        runGateCheck();
+                        sb.auth.onAuthStateChange(function(event, s) { if (s) runGateCheck(); });
+                        return;
+                    }
+                    runGateCheck();
+                    sb.auth.onAuthStateChange(function(event, session) {
+                        if (session) runGateCheck();
+                    });
+                    showOverlay();
+                }).catch(function() {
+                    runGateCheck();
+                    showOverlay();
                 });
             }, 200);
             setTimeout(function() { clearInterval(poll); }, 15000);
-            // 首次加载必须显示身份设置，由 runGateCheck 根据「国家 + 已登录」决定是否关闭
-            showOverlay();
         }
         document.addEventListener('click', function(e) {
             var btn = e.target && (e.target.id === 'country-selector-close' || (e.target.closest && e.target.closest('#country-selector-close')));
