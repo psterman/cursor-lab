@@ -356,8 +356,15 @@
      */
     // 【P1 修复】模块级 AbortController，新请求取消旧请求
     var _keywordsFetchController = null;
+    // 【缓存】按国家缓存词云，优先使用远程 KV 镜像（static-hotlist）解析结果，避免抽屉每次打开都拉取
+    var _countryKeywordsCache = {};
+    var _COUNTRY_KEYWORDS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 分钟（远程快照通常按小时刷新）
 
-    function fetchCountryKeywords(optionalRecord) {
+    function fetchCountryKeywords(optionalRecord, opts) {
+        opts = opts && typeof opts === 'object' ? opts : {};
+        var forceRefresh = !!opts.forceRefresh;
+        var requestedLevel = (typeof opts.level === 'string' ? String(opts.level).trim() : '');
+        if (!/^(Novice|Professional|Architect)$/.test(requestedLevel)) requestedLevel = '';
         var emptyResult = { Novice: [], Professional: [], Architect: [], globalNative: [] };
 
         function setResult(out) {
@@ -366,14 +373,25 @@
             return out;
         }
 
+        // 允许直接传入国家码，避免依赖全局 __selectedCountry / currentDrawerCountry
+        var forcedCountry = '';
+        if (typeof optionalRecord === 'string') {
+            var cc = String(optionalRecord || '').trim().toUpperCase();
+            if (/^[A-Z]{2}$/.test(cc)) forcedCountry = cc;
+            optionalRecord = null;
+        }
+
         // 仅当调用方显式传入后端 record 时，用其 stats.identityLevelCloud 填充三维度
         if (optionalRecord && optionalRecord.stats && typeof optionalRecord.stats === 'object') {
             var ilc = optionalRecord.stats.identityLevelCloud;
             if (ilc && typeof ilc === 'object') {
                 var rep = optionalRecord.stats.representativeWords && typeof optionalRecord.stats.representativeWords === 'object' ? optionalRecord.stats.representativeWords : null;
                 var out = buildCountryKeywordsByLevel(ilc, rep, null);
-                window.__isCloudLoading = false;
-                return Promise.resolve(setResult(out));
+                // 若 record 内词云为空，不应短路；继续走静态镜像/keywords 兜底
+                if (out && ((out.Novice && out.Novice.length) || (out.Professional && out.Professional.length) || (out.Architect && out.Architect.length) || (out.globalNative && out.globalNative.length))) {
+                    window.__isCloudLoading = false;
+                    return Promise.resolve(setResult(out));
+                }
             }
         }
 
@@ -389,7 +407,7 @@
         var apiBase = (base && String(base).trim()) ? base : '/';
         if (apiBase && !apiBase.endsWith('/')) apiBase += '/';
         // 【核心】优先级：__selectedCountry > currentDrawerCountry.code > user_selected_country，确保切换国家后请求正确
-        var selectedCountry = (window.__selectedCountry && String(window.__selectedCountry).trim()) ? String(window.__selectedCountry).toUpperCase() : '';
+        var selectedCountry = forcedCountry || ((window.__selectedCountry && String(window.__selectedCountry).trim()) ? String(window.__selectedCountry).toUpperCase() : '');
         if (!selectedCountry && typeof window.currentDrawerCountry === 'object' && window.currentDrawerCountry && window.currentDrawerCountry.code) {
             selectedCountry = String(window.currentDrawerCountry.code).trim().toUpperCase();
         }
@@ -399,11 +417,32 @@
         var countryParam = selectedCountry && /^[A-Z]{2}$/.test(selectedCountry) ? selectedCountry : '';
         // 【P1 修复】记录本次请求的国家，用于回调时校验一致性
         var requestedCountry = countryParam;
+
+        // 【缓存优先】同一国家短期内重复打开抽屉时直接复用
+        if (!forceRefresh && requestedCountry) {
+            try {
+                var cached = _countryKeywordsCache[requestedCountry];
+                if (cached && cached.data && (Date.now() - (cached.ts || 0) < _COUNTRY_KEYWORDS_CACHE_TTL_MS)) {
+                    var cd = cached.data;
+                    var hasAny = (cd.Novice && cd.Novice.length) || (cd.Professional && cd.Professional.length) || (cd.Architect && cd.Architect.length) || (cd.globalNative && cd.globalNative.length);
+                    var levelOk = true;
+                    if (requestedLevel) {
+                        var lv = Array.isArray(cd[requestedLevel]) ? cd[requestedLevel] : [];
+                        levelOk = lv.length > 0;
+                    }
+                    if (hasAny && levelOk) {
+                        console.log('[fetchCountryKeywords] 命中本地缓存:', requestedCountry);
+                        window.__isCloudLoading = false;
+                        return Promise.resolve(setResult(cd));
+                    }
+                }
+            } catch (e) { /* ignore */ }
+        }
         
         // 【调试】记录请求的国家，便于排查数据混乱问题
         console.log('[fetchCountryKeywords] 请求本国词云数据 - 国家:', countryParam || '未指定', '来源:', selectedCountry ? (__selectedCountry ? '__selectedCountry' : (window.currentDrawerCountry ? 'currentDrawerCountry' : 'localStorage')) : '无');
         
-        var summaryUrl = countryParam ? (apiBase + 'api/country-summary?country=' + encodeURIComponent(countryParam) + '&_ts=' + Date.now()) : null;
+        var summaryUrl = countryParam ? (apiBase + 'api/country-summary?country=' + encodeURIComponent(countryParam)) : null;
 
         function fromBackendIlc(ilc, rep, globalNativeFallback) {
             if (!ilc || typeof ilc !== 'object') return emptyResult;
@@ -431,7 +470,7 @@
             return {
                 Novice: adaptCloudData(payload.Novice || payload.slang || []),
                 Professional: adaptCloudData(payload.Professional || payload.merit || []),
-                Architect: adaptCloudData(payload.Architect || []),
+                Architect: adaptCloudData(payload.Architect || payload.native || payload.globalNative || []),
                 globalNative: adaptCloudData(payload.globalNative || payload.native || [])
             };
         }
@@ -445,6 +484,7 @@
                     var out = parseHotlistPayload(payload);
                     if (hasAnyCloud(out)) {
                         setResult(out);
+                        console.log('[fetchCountryKeywords] 命中 __staticVibeSnapshot:', countryParam);
                         try { window.__countryCloudFromHotList = true; } catch (e) {}
                         return out;
                     }
@@ -455,38 +495,41 @@
         /** 请求静态快照（单国家或全量 KV），失败或空再请求 country-hot-list */
         function tryStaticHotlist() {
             if (!countryParam) return Promise.resolve(emptyResult);
-            var staticUrl = apiBase + 'api/v2/static-hotlist?country=' + encodeURIComponent(countryParam) + '&_t=' + Date.now();
-            return fetch(staticUrl, { cache: 'no-store', signal: fetchSignal }).then(function(r) {
+            var staticUrl = apiBase + 'api/v2/static-hotlist?country=' + encodeURIComponent(countryParam) + (forceRefresh ? ('&_t=' + Date.now()) : '');
+            return fetch(staticUrl, { cache: forceRefresh ? 'no-store' : 'force-cache', signal: fetchSignal }).then(function(r) {
                 if (!r.ok) return emptyResult;
                 return r.json().then(function(payload) {
                     if (isStaleRequest()) return emptyResult;
                     var out = parseHotlistPayload(payload);
                     if (!hasAnyCloud(out)) return emptyResult;
                     setResult(out);
+                    try { _countryKeywordsCache[requestedCountry] = { data: out, ts: Date.now() }; } catch (e) {}
                     try { window.__countryCloudFromHotList = true; } catch (e) {}
                     return out;
                 }).catch(function() { return emptyResult; });
             }).catch(function(e) {
-                if (e && e.name === 'AbortError') throw e;
+                // Abort 属于预期行为：新请求取消旧请求，直接返回空即可，避免未处理 Promise 拒绝
+                if (e && e.name === 'AbortError') return emptyResult;
                 return emptyResult;
             });
         }
         /** 国家大盘灵魂词（Lift 算法），static-hotlist 无数据时的兜底，可能触发 DB */
         function tryCountryHotList() {
             if (!countryParam) return Promise.resolve(emptyResult);
-            var hotUrl = apiBase + 'api/v2/country-hot-list?country=' + encodeURIComponent(countryParam) + '&_t=' + Date.now();
-            return fetch(hotUrl, { cache: 'no-store', signal: fetchSignal }).then(function(r) {
+            var hotUrl = apiBase + 'api/v2/country-hot-list?country=' + encodeURIComponent(countryParam) + (forceRefresh ? ('&_t=' + Date.now()) : '');
+            return fetch(hotUrl, { cache: forceRefresh ? 'no-store' : 'force-cache', signal: fetchSignal }).then(function(r) {
                 if (!r.ok) return emptyResult;
                 return r.json().then(function(payload) {
                     if (isStaleRequest()) return emptyResult;
                     var out = parseHotlistPayload(payload);
                     if (!hasAnyCloud(out)) return emptyResult;
                     setResult(out);
+                    try { _countryKeywordsCache[requestedCountry] = { data: out, ts: Date.now() }; } catch (e) {}
                     try { window.__countryCloudFromHotList = true; } catch (e) {}
                     return out;
                 }).catch(function() { return emptyResult; });
             }).catch(function(e) {
-                if (e && e.name === 'AbortError') throw e;
+                if (e && e.name === 'AbortError') return emptyResult;
                 return emptyResult;
             });
         }
@@ -506,20 +549,16 @@
                     var raw = (payload && payload.data) ? payload.data : payload;
                     var cloudData = (raw && raw.identityLevelCloud) ? raw.identityLevelCloud : raw;
                     if (cloudData && typeof cloudData === 'object') {
-                        var out = {
-                            Novice: adaptCloudData(cloudData.Novice || []),
-                            Professional: adaptCloudData(cloudData.Professional || []),
-                            Architect: adaptCloudData(cloudData.Architect || []),
-                            globalNative: adaptCloudData(cloudData.globalNative || cloudData.native || [])
-                        };
+                        var rep = (raw && raw.representativeWords && typeof raw.representativeWords === 'object') ? raw.representativeWords : ((payload && payload.representativeWords && typeof payload.representativeWords === 'object') ? payload.representativeWords : null);
+                        var out = buildCountryKeywordsByLevel(cloudData, rep, null);
                         setResult(out);
+                        try { if (requestedCountry) _countryKeywordsCache[requestedCountry] = { data: out, ts: Date.now() }; } catch (e) {}
                         return out;
                     }
                     return emptyResult;
                 }).catch(function() { return emptyResult; });
             }).catch(function(e) {
-                // 【P1 修复】AbortError 直接传播，不 fallback
-                if (e && e.name === 'AbortError') throw e;
+                if (e && e.name === 'AbortError') return emptyResult;
                 return emptyResult;
             });
         }
@@ -567,6 +606,14 @@
                         var rep = (data && data.representativeWords) ? data.representativeWords : null;
                         try { window.__countryCloudFromHotList = false; } catch (e) {}
                         var out = setResult(fromBackendIlc(ilc, rep, null));
+                        // 若 summary 返回了结构但内容为空（常见于 KV 未命中），不要短路；继续 keywords 兜底
+                        if (!hasAnyCloud(out)) {
+                            return tryKeywordsApi().then(function(fallbackOut) {
+                                try { window.__countryCloudFromHotList = false; } catch (e) {}
+                                return setResult(fallbackOut);
+                            });
+                        }
+                        try { if (requestedCountry) _countryKeywordsCache[requestedCountry] = { data: out, ts: Date.now() }; } catch (e) {}
                         if (data && data.success !== false) { try { window.__isCloudLoading = false; } catch (err) {} }
                         return out;
                     }

@@ -279,14 +279,14 @@
                 <!-- 最下方：本国词云卡片（左抽屉风格、自适应高度） -->
                 <div class="left-drawer-wordcloud-card" id="left-drawer-wordcloud-wrap">
                     <div class="left-drawer-wordcloud-header">
-                        <span class="left-drawer-wordcloud-title" data-t="panel.wordcloud">本人词云</span>
+                        <span class="left-drawer-wordcloud-title" data-t="panel.personal_wordcloud">本人词云</span>
                         <span class="left-drawer-wordcloud-hint" id="vibe-country-hint">国家：--</span>
                     </div>
                     <div class="left-drawer-wordcloud-inner">
                         <div class="left-drawer-wordcloud-meta-row">
-                            <span class="left-drawer-wordcloud-label" data-i18n="panel.national_cloud_50">本人词云 50</span>
+                            <span class="left-drawer-wordcloud-label" data-i18n="panel.personal_cloud_50">本人词云 50</span>
                             <span class="left-drawer-wordcloud-meta font-mono" id="personal-cloud-meta">--</span>
-                            <span id="vibe-cloud50-source-label" class="left-drawer-wordcloud-source hidden text-[10px] text-purple-400/90 ml-2" aria-hidden="true"></span>
+                            <span id="personal-cloud-source-label" class="left-drawer-wordcloud-source hidden text-[10px] text-purple-400/90 ml-2" aria-hidden="true"></span>
                         </div>
                         <div id="personal-identity-tabs" class="left-drawer-wordcloud-tabs">
                             <button type="button" class="personal-identity-tab left-drawer-wordcloud-tab" data-level="Novice" data-t="lexicon.novice">小白</button>
@@ -294,7 +294,7 @@
                             <button type="button" class="personal-identity-tab left-drawer-wordcloud-tab" data-level="Architect" data-t="lexicon.arch">霸天</button>
                         </div>
                         <div class="left-drawer-wordcloud-canvas-wrap stats2-wc-min-height" id="personal-cloud-container">
-                            <div class="stats2-cyber-skeleton stats2-wordcloud-skeleton" id="stats2-wc-skeleton" aria-hidden="false"></div>
+                            <div class="stats2-cyber-skeleton stats2-wordcloud-skeleton" id="stats2-personal-wc-skeleton" aria-hidden="false"></div>
                             <canvas id="personal-identity-cloud-canvas" aria-hidden="false"></canvas>
                             <div id="personal-cloud-loading-hint" class="left-drawer-cloud-loading hidden">加载中...</div>
                         </div>
@@ -576,7 +576,27 @@
                                 <div class="text-[11px] text-zinc-400 uppercase tracking-widest" data-t="hotlist.title">黑话榜</div>
                             </div>
 
-                            <!-- 本国词云已移至左侧抽屉 -->
+                            <!-- 本国词云（按国家聚合的三段位词云） -->
+                            <div class="border border-white/10 bg-zinc-950/30 p-2 mb-4" id="national-wordcloud-wrap">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="text-[10px] text-zinc-500 uppercase tracking-widest" data-i18n="panel.national_cloud_50">本国词云 50</div>
+                                    <div class="flex items-center gap-2">
+                                        <div class="text-[10px] text-zinc-600 font-mono" id="vibe-cloud50-meta">--</div>
+                                        <span id="vibe-cloud50-source-label" class="hidden text-[10px] text-purple-400/90" aria-hidden="true"></span>
+                                    </div>
+                            </div>
+                                <div id="national-identity-tabs" class="flex gap-1 mb-2">
+                                    <button type="button" class="national-identity-tab px-2 py-1 text-[10px] rounded border border-white/20 bg-[var(--accent-terminal)]/20 text-[var(--accent-terminal)] font-medium" data-level="Novice" data-t="lexicon.novice">新手</button>
+                                    <button type="button" class="national-identity-tab px-2 py-1 text-[10px] rounded border border-white/10 bg-transparent text-zinc-400 hover:bg-white/5" data-level="Professional" data-t="lexicon.pro">实战</button>
+                                    <button type="button" class="national-identity-tab px-2 py-1 text-[10px] rounded border border-white/10 bg-transparent text-zinc-400 hover:bg-white/5" data-level="Architect" data-t="lexicon.arch">老手</button>
+                                </div>
+                                <div class="left-drawer-wordcloud-canvas-wrap stats2-wc-min-height" id="vibe-cloud50-container">
+                                    <div class="stats2-cyber-skeleton stats2-wordcloud-skeleton" id="stats2-wc-skeleton" aria-hidden="false"></div>
+                                    <canvas id="national-identity-cloud-canvas" aria-hidden="false"></canvas>
+                                    <div id="cloud-loading-hint" class="left-drawer-cloud-loading hidden">加载中...</div>
+                                </div>
+                                <div id="vibe-cloud50-empty" class="left-drawer-wordcloud-empty hidden" data-t="hotlist.building">正在扫描该国开发者指纹...</div>
+                            </div>
 
                             <!-- 下方：文字榜单（分类词库 Top 10，Tab 切换功德簿/黑话/口头禅） -->
                             <div class="border border-white/10 bg-zinc-950/30 p-2">
@@ -585,9 +605,9 @@
                                     <div class="text-[10px] text-zinc-600 font-mono" id="vibe-country-top10-meta">--</div>
                                 </div>
                                 <div id="vibe-lexicon-tabs" class="flex gap-1 mb-2">
-                                    <button type="button" class="vibe-lexicon-tab px-2 py-1 text-[10px] rounded border border-white/20 bg-[var(--accent-terminal)]/20 text-[var(--accent-terminal)] font-medium" data-type="merit_board" data-t="lexicon.merit">功德簿</button>
-                                    <button type="button" class="vibe-lexicon-tab px-2 py-1 text-[10px] rounded border border-white/10 bg-transparent text-zinc-400 hover:bg-white/5" data-type="slang_list" data-t="lexicon.slang">行业黑话</button>
-                                    <button type="button" class="vibe-lexicon-tab px-2 py-1 text-[10px] rounded border border-white/10 bg-transparent text-zinc-400 hover:bg-white/5" data-type="mantra_top" data-t="lexicon.mantra">全民口头禅</button>
+                                    <button type="button" class="vibe-lexicon-tab px-2 py-1 text-[10px] rounded border border-white/20 bg-[var(--accent-terminal)]/20 text-[var(--accent-terminal)] font-medium" data-type="merit_board" data-t="lexicon.merit">经验清单</button>
+                                    <button type="button" class="vibe-lexicon-tab px-2 py-1 text-[10px] rounded border border-white/10 bg-transparent text-zinc-400 hover:bg-white/5" data-type="slang_list" data-t="lexicon.slang">圈内术语</button>
+                                    <button type="button" class="vibe-lexicon-tab px-2 py-1 text-[10px] rounded border border-white/10 bg-transparent text-zinc-400 hover:bg-white/5" data-type="mantra_top" data-t="lexicon.mantra">国民爱用</button>
                                 </div>
                                 <div id="vibe-lexicon-display" class="relative min-h-[160px] w-full" style="height:160px">
                                     <canvas id="vibe-lexicon-wordcloud-canvas" width="400" height="160" style="width:100%;height:160px;display:block"></canvas>

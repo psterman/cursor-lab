@@ -126,8 +126,17 @@
             showCloudLoadingHint();
             return;
         }
+        // 【P1 修复】retryKey 必须在读取前初始化；否则条件里 window[retryKey] 会变成 window[undefined]，导致重试上限失效（无限加载）
+        // 同时按国家隔离重试计数，避免切换国家后沿用旧计数导致“不再重试/误判已重试完”。
+        var _cc = '';
+        try {
+            _cc = (String(window.__selectedCountry || (window.currentDrawerCountry && window.currentDrawerCountry.code) || '')).trim().toUpperCase();
+        } catch (e) { /* ignore */ }
+        if (!/^[A-Z]{2}$/.test(_cc)) _cc = '';
+        var retryKey = '__nationalCloudRetryCount' + (_cc ? ('_' + _cc) : '');
         var currentLang = (typeof window.currentLang !== 'undefined' ? window.currentLang : 'zh');
         var levelKey = LEVEL_TO_KEY[level] || (level === 'Professional' || level === 'Architect' ? level : 'Novice');
+        var forceRefreshKey = '__nationalCloudForceRefreshTried' + (_cc ? ('_' + _cc) : '') + '_' + levelKey;
         var container = document.getElementById('vibe-cloud50-container');
         var canvasId = LEVEL_TO_CANVAS_ID[levelKey] || 'canvas-novice';
         var canvas = document.getElementById(canvasId);
@@ -166,26 +175,62 @@
                     empty.textContent = '正在扫描该国开发者指纹...';
                     empty.classList.remove('hidden');
                 }
-                var retryKey = '__nationalCloudRetryCount';
                 if (typeof window[retryKey] !== 'number') window[retryKey] = 0;
-                svc.fetchCountryKeywords().then(function(result) {
+                svc.fetchCountryKeywords(null, { level: levelKey }).then(function(result) {
                     // 【令牌检查】如果已有更新的渲染调用，放弃当前回调
                     if (window.__cloudRenderToken !== myToken) {
                         console.log('[WordCloud] 令牌过期，放弃旧 fetch 回调 (token=' + myToken + ', current=' + window.__cloudRenderToken + ')');
                         return;
                     }
                     hideCloudLoadingHint();
-                    // 检查获取到的数据是否有效
-                    var hasData = result && (
+                    // 关键修复：按当前 level 判定是否可继续渲染，避免“其他 level 有数据”触发本 level 无限递归
+                    var levelData = (result && result[levelKey] && Array.isArray(result[levelKey])) ? result[levelKey] : [];
+                    var hasLevelData = levelData.length > 0;
+                    var hasAnyData = result && (
                         (result.Novice && result.Novice.length > 0) ||
                         (result.Professional && result.Professional.length > 0) ||
                         (result.Architect && result.Architect.length > 0) ||
                         (result.globalNative && result.globalNative.length > 0)
                     );
-                    if (hasData) {
+                    if (hasLevelData) {
+                        window[forceRefreshKey] = 0;
                         window[retryKey] = 0;
                         fillSoulWordsList(levelKey);
                         _renderNationalIdentityCloud(level);
+                    } else if (hasAnyData) {
+                        // 当前标签无数据但其他标签有数据：先强制刷新一次（绕过本地缓存），再决定是否展示空态
+                        if (!window[forceRefreshKey]) {
+                            window[forceRefreshKey] = 1;
+                            if (empty) {
+                                empty.textContent = (currentLang === 'en' ? 'Refreshing cloud data...' : '正在刷新该标签词云数据...');
+                                empty.classList.remove('hidden');
+                            }
+                            svc.fetchCountryKeywords(null, { forceRefresh: true, level: levelKey }).then(function() {
+                                if (window.__cloudRenderToken !== myToken) return;
+                                _renderNationalIdentityCloud(level);
+                            }).catch(function(err2) {
+                                if (err2 && err2.name === 'AbortError') return;
+                                if (window.__cloudRenderToken !== myToken) return;
+                                window[retryKey] = 3;
+                                var ctx2 = canvas.getContext && canvas.getContext('2d');
+                                if (ctx2) ctx2.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
+                                if (meta) meta.textContent = '--';
+                                if (empty) {
+                                    empty.textContent = (typeof getI18nText === 'function' ? getI18nText('lexicon.none') : null) || '暂无该地区词云数据';
+                                    empty.classList.remove('hidden');
+                                }
+                            });
+                            return;
+                        }
+                        window[retryKey] = 3;
+                        fillSoulWordsList(levelKey);
+                        var ctx = canvas.getContext && canvas.getContext('2d');
+                        if (ctx) ctx.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
+                        if (meta) meta.textContent = '--';
+                        if (empty) {
+                            empty.textContent = (typeof getI18nText === 'function' ? getI18nText('lexicon.none') : null) || '暂无该地区词云数据';
+                            empty.classList.remove('hidden');
+                        }
                     } else {
                         window[retryKey] = (window[retryKey] || 0) + 1;
                         if (empty) {

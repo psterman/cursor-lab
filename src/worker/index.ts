@@ -2970,7 +2970,7 @@ app.post('/api/v2/analyze', async (c) => {
 
           // 【用户校准】若前端上报 manual_location（国家代码）、manual_lat/manual_lng 或 manual_coordinates，写入数据库
           if (body.manual_location != null && typeof body.manual_location === 'string' && body.manual_location.trim() !== '') {
-            payload.manual_location = body.manual_location.trim();
+            payload.manual_location = body.manual_location.trim().toUpperCase();
           }
           if (body.manual_lat != null && typeof body.manual_lat === 'number' && !isNaN(body.manual_lat)) {
             payload.manual_lat = body.manual_lat;
@@ -3029,33 +3029,52 @@ app.post('/api/v2/analyze', async (c) => {
           if (ipIso2 && !payload.manual_location) {
             payload.manual_location = ipIso2;
           }
+          const bodyCurrentLocation = (
+            body?.current_location ??
+            body?.currentLocation ??
+            body?.anchored_country ??
+            body?.anchoredCountry ??
+            ''
+          );
+          if (bodyCurrentLocation && /^[A-Za-z]{2}$/.test(String(bodyCurrentLocation).trim())) {
+            payload.current_location = String(bodyCurrentLocation).trim().toUpperCase();
+          }
+          if (!payload.current_location && payload.manual_location && /^[A-Za-z]{2}$/.test(String(payload.manual_location).trim())) {
+            payload.current_location = String(payload.manual_location).trim().toUpperCase();
+          }
 
-          // 【地理标识修复】自动从 Cloudflare 环境获取国家代码，修复存量数据 country_code 为 NULL 的问题
-          // 优先级：手动指定 > Cloudflare cf.country > ip_location > 默认值
+          // 【地理标识归一化】统一 country_code/current_location/manual_location，避免字段口径错位导致国家词云漏数
+          // 优先级：current_location > manual_location > body.country_code > cf.country/ip_location
           let countryCodeForDb: string | null = null;
           try {
-            // 1. 优先使用手动指定的 country_code
-            if (body?.country_code && /^[A-Za-z]{2}$/.test(String(body.country_code).trim())) {
+            if (payload.current_location && /^[A-Za-z]{2}$/.test(String(payload.current_location).trim())) {
+              countryCodeForDb = String(payload.current_location).trim().toUpperCase();
+            }
+            else if (payload.manual_location && /^[A-Za-z]{2}$/.test(String(payload.manual_location).trim())) {
+              countryCodeForDb = String(payload.manual_location).trim().toUpperCase();
+            }
+            else if (body?.country_code && /^[A-Za-z]{2}$/.test(String(body.country_code).trim())) {
               countryCodeForDb = String(body.country_code).trim().toUpperCase();
             }
-            // 2. 如果没有，尝试从 Cloudflare 环境获取
             else {
               const rawRequest = c.req.raw as any;
               if (rawRequest?.cf?.country && /^[A-Za-z]{2}$/.test(String(rawRequest.cf.country).trim())) {
                 countryCodeForDb = String(rawRequest.cf.country).trim().toUpperCase();
               }
-              // 3. 如果还没有，使用 ip_location（如果它是 ISO2 格式）
               else if (ipIso2) {
                 countryCodeForDb = ipIso2;
               }
             }
           } catch (e) {
-            // 忽略错误，继续使用 null
             console.warn('[Worker] 获取国家代码失败:', e);
           }
-          // 设置 country_code 字段（如果获取到了有效的国家代码）
+
           if (countryCodeForDb) {
             payload.country_code = countryCodeForDb;
+            if (!payload.current_location) payload.current_location = countryCodeForDb;
+            payload.manual_location = payload.manual_location && /^[A-Za-z]{2}$/.test(String(payload.manual_location).trim())
+              ? String(payload.manual_location).trim().toUpperCase()
+              : countryCodeForDb;
           }
 
           // 【身份词库】使用已提前计算好的 identityMatches（带 category），见上方 debug_info
@@ -6867,7 +6886,7 @@ app.get('/api/v2/country-hot-list', async (c) => {
 
 /**
  * GET /api/v2/static-hotlist?country=CN 或 无参数
- * 严禁直接查询 Supabase。仅从 env.STATS_STORE.get('VIBE_HOTLIST_CACHE') 读取。
+ * 优先从 env.STATS_STORE.get('VIBE_HOTLIST_CACHE') 读取；KV 缺失/未命中时，按需从 Supabase 的 country_vibe_stats 读取静态镜像数据兜底。
  */
 const EMPTY_HOTLIST_PAYLOAD = {
   Novice: [],
@@ -6881,31 +6900,73 @@ const EMPTY_HOTLIST_PAYLOAD = {
 app.get('/api/v2/static-hotlist', async (c) => {
   const env = c.env;
   const countryRaw = (c.req.query('country') || '').trim().toUpperCase();
+  const wantsCountry = /^[A-Z]{2}$/.test(countryRaw);
   c.header('Cache-Control', 'public, max-age=3600');
   const kv = env.STATS_STORE;
-  if (!kv) {
-    if (/^[A-Z]{2}$/.test(countryRaw)) return c.json(EMPTY_HOTLIST_PAYLOAD);
-    return c.json({});
+
+  // 1) KV 优先：全量快照（按国家切片）或直接返回全量
+  if (kv) {
+    try {
+      const raw = await kv.get(KV_KEY_VIBE_HOTLIST_CACHE, 'text');
+      if (raw) {
+        const data = JSON.parse(raw) as Record<string, unknown>;
+        if (!wantsCountry) return c.json(data);
+        const countryPayload = data[countryRaw];
+        if (countryPayload && typeof countryPayload === 'object') return c.json(countryPayload);
+        return c.json(EMPTY_HOTLIST_PAYLOAD);
+      }
+    } catch {
+      // ignore KV parse failures, fallback to Supabase below (for country mode)
+    }
+  } else {
+    if (!wantsCountry) return c.json({});
   }
-  try {
-    const raw = await kv.get(KV_KEY_VIBE_HOTLIST_CACHE, 'text');
-    if (!raw) {
-      if (/^[A-Z]{2}$/.test(countryRaw)) return c.json(EMPTY_HOTLIST_PAYLOAD);
-      return c.json({});
+
+  // 2) Supabase 静态镜像兜底：country_vibe_stats 已聚合（JSONB），避免前端抽屉无限 loading
+  if (wantsCountry && env.SUPABASE_URL && env.SUPABASE_KEY) {
+    try {
+      const url = new URL(`${env.SUPABASE_URL}/rest/v1/country_vibe_stats`);
+      url.searchParams.set('select', 'country_code,merit_jsonb,slang_jsonb,native_jsonb');
+      url.searchParams.set('country_code', `eq.${countryRaw}`);
+      url.searchParams.set('limit', '1');
+      const rows = await fetchSupabaseJson<any[]>(env, url.toString(), { headers: buildSupabaseHeaders(env) });
+      const row = (Array.isArray(rows) && rows.length > 0) ? rows[0] : null;
+
+      const toWordItems = (obj: unknown) => {
+        const rec = (obj && typeof obj === 'object') ? (obj as Record<string, unknown>) : {};
+        return Object.entries(rec)
+          .map(([word, count]) => ({ word: String(word || '').trim(), count: Number(count as any) || 0 }))
+          .filter((x) => x.word && x.count > 0)
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 50)
+          .map((x) => ({ word: x.word, weight: 0, count: x.count }));
+      };
+
+      const merit = toWordItems(row?.merit_jsonb);
+      const slang = toWordItems(row?.slang_jsonb);
+      const native = toWordItems(row?.native_jsonb);
+      const hasAny = merit.length > 0 || slang.length > 0 || native.length > 0;
+      if (hasAny) {
+        // Supabase 兜底的数据更新频率更高，缓存时间缩短，避免 stale
+        c.header('Cache-Control', 'public, max-age=600');
+        return c.json({
+          Novice: slang,
+          Professional: merit,
+          Architect: native,
+          globalNative: native,
+          merit,
+          slang,
+          native,
+        });
+      }
+    } catch (e: any) {
+      console.warn('[Worker] /api/v2/static-hotlist Supabase fallback 失败:', e?.message || String(e));
     }
-    const data = JSON.parse(raw) as Record<string, unknown>;
-    if (!/^[A-Z]{2}$/.test(countryRaw)) {
-      return c.json(data);
-    }
-    const countryPayload = data[countryRaw];
-    if (countryPayload && typeof countryPayload === 'object') {
-      return c.json(countryPayload);
-    }
-    return c.json(EMPTY_HOTLIST_PAYLOAD);
-  } catch {
-    if (/^[A-Z]{2}$/.test(countryRaw)) return c.json(EMPTY_HOTLIST_PAYLOAD);
-    return c.json({});
   }
+
+  if (!wantsCountry) return c.json({});
+  c.header('Cache-Control', 'no-store');
+  return c.json(EMPTY_HOTLIST_PAYLOAD);
 });
 
 /**
@@ -7385,7 +7446,8 @@ app.get('/api/v2/stats/keywords', async (c) => {
           .slice(0, 50);
       }
 
-      if (out.Novice.length > 0 || out.Professional.length > 0) {
+      // 仅当三档都已有数据时才直接返回；否则继续走 user_analysis 兜底补齐缺失档位
+      if (out.Novice.length > 0 && out.Professional.length > 0 && out.Architect.length > 0) {
         return c.json({ status: 'success', data: out });
       }
     }
@@ -7393,7 +7455,8 @@ app.get('/api/v2/stats/keywords', async (c) => {
     // 【第二步】兜底：从 user_analysis 表查询；词云优先读 identity_cloud 列，兼容 stats.identityLevelCloud
     const uaUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
     uaUrl.searchParams.set('select', 'stats,identity_cloud');
-    uaUrl.searchParams.set('country_code', `eq.${regionRaw}`);
+    // 地理口径容错：country_code 与 current/manual 可能暂时不一致，按四字段任一命中聚合
+    uaUrl.searchParams.set('or', `(current_location.eq.${regionRaw},manual_location.eq.${regionRaw},country_code.eq.${regionRaw},ip_location.eq.${regionRaw})`);
     uaUrl.searchParams.set('total_messages', 'gt.5');
     uaUrl.searchParams.set('order', 'updated_at.desc');
     uaUrl.searchParams.set('limit', '100');
@@ -7408,9 +7471,9 @@ app.get('/api/v2/stats/keywords', async (c) => {
         Professional: Map<string, number>;
         Architect: Map<string, number>;
       } = {
-        Novice: new Map(),
-        Professional: new Map(),
-        Architect: new Map(),
+        Novice: new Map(out.Novice.map((item) => [item.phrase, Number(item.weight) || 0])),
+        Professional: new Map(out.Professional.map((item) => [item.phrase, Number(item.weight) || 0])),
+        Architect: new Map(out.Architect.map((item) => [item.phrase, Number(item.weight) || 0])),
       };
 
       for (const row of uaRows) {

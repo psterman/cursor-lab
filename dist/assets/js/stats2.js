@@ -17,17 +17,17 @@
         window.__nationalCloudReadyCallbacks = [];
         q.forEach(function(fn) { try { if (typeof fn === 'function') fn(); } catch (e) { /* ignore */ } });
     }
-    /** 右抽屉本国词云 Tab 中文文案 → 英文 Key，与 API 段位一致（首字母大写） */
+    /** 左侧本人词云 Tab 中文文案 → 英文 Key */
     var levelMap = {
         '小白': 'Novice',
+        '新手': 'Novice',
         '脱发': 'Professional',
+        '实战': 'Professional',
         '霸天': 'Architect',
+        '老手': 'Architect',
         'Novice': 'Novice',
-        'novice': 'Novice',
         'Professional': 'Professional',
-        'professional': 'Professional',
-        'Architect': 'Architect',
-        'architect': 'Architect'
+        'Architect': 'Architect'
     };
 
     // 物理隔离环境：修复 eval5 冲突，在 IIFE 最顶层添加 _loc 变量
@@ -123,8 +123,9 @@
         if (typeof window !== 'undefined') {
           try { window.__githubAccessToken = ''; } catch (e) {}
         }
-        if (typeof location !== 'undefined' && location.reload) {
-          location.reload(true);
+        // 不再 location.reload，仅重置 UI 状态，避免整页刷新
+        if (typeof window !== 'undefined' && typeof window.refreshUserStats === 'function') {
+          try { window.refreshUserStats().catch(function() {}); } catch (e) {}
         }
       } catch (e) {
         if (typeof console !== 'undefined' && console.warn) console.warn('[dirtyDataCleanup]', e);
@@ -469,6 +470,10 @@
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ country_code: country, identityLevelCloud: ilc })
+                        }).then(function(r) {
+                            if (r.ok && typeof showNotification === 'function') {
+                                try { showNotification(typeof currentLang !== 'undefined' && currentLang === 'en' ? 'Submitted' : '已提交'); } catch (e) {}
+                            }
                         }).catch(function() {});
                     }
                 })();
@@ -480,20 +485,30 @@
             var overlay = document.getElementById(OVERLAY_ID);
             if (!overlay || overlay.classList.contains('stats2-gate-removed')) return;
             var country = getStoredCountry();
-            if (!country) {
-                window.__countryPickerForced = true;
-                window.__countrySelectorSelectedCode = '';
-                showOverlay();
-                return;
-            }
             var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
             if (!sb || typeof sb.auth !== 'object') return;
             sb.auth.getSession().then(function(r) {
                 var session = (r && r.data && r.data.session) ? r.data.session : null;
+                // 已登录 GitHub：不弹出登录/选国家窗口；若已有国家则走确认逻辑，否则直接移除遮罩
+                if (session && session.user) {
+                    if (checkGatePassed(session)) return;
+                    hideGateOverlay();
+                    return;
+                }
+                if (!country) {
+                    window.__countryPickerForced = true;
+                    window.__countrySelectorSelectedCode = '';
+                    showOverlay();
+                    return;
+                }
                 if (checkGatePassed(session)) return;
                 showOverlay();
             }).catch(function() {
-                showOverlay();
+                if (!country) {
+                    window.__countryPickerForced = true;
+                    window.__countrySelectorSelectedCode = '';
+                    showOverlay();
+                }
             }).finally(function() {
                 var ov = document.getElementById(OVERLAY_ID);
                 if (ov && ov.parentNode && window.getComputedStyle(ov).display === 'flex') {
@@ -510,7 +525,6 @@
                     window.currentCountryCode = country;
                     localStorage.setItem('user_country_fixed', country);
                 } catch (e) {}
-                overlay.style.display = 'none';
             }
             window.__countryPickerForced = true;
             window.__countrySelectorSelectedCode = '';
@@ -518,19 +532,24 @@
                 var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
                 if (!sb || typeof sb.auth !== 'object') return;
                 clearInterval(poll);
-                runGateCheck();
-                sb.auth.onAuthStateChange(function(event, session) {
-                    if (session) runGateCheck();
+                sb.auth.getSession().then(function(r) {
+                    var session = (r && r.data && r.data.session) ? r.data.session : null;
+                    if (session && session.user) {
+                        runGateCheck();
+                        sb.auth.onAuthStateChange(function(event, s) { if (s) runGateCheck(); });
+                        return;
+                    }
+                    runGateCheck();
+                    sb.auth.onAuthStateChange(function(event, session) {
+                        if (session) runGateCheck();
+                    });
+                    showOverlay();
+                }).catch(function() {
+                    runGateCheck();
+                    showOverlay();
                 });
             }, 200);
             setTimeout(function() { clearInterval(poll); }, 15000);
-            if (!country) showOverlay();
-            setTimeout(function() {
-                var el = document.getElementById(OVERLAY_ID);
-                if (el && el.parentNode) {
-                    try { removeOverlayImmediately(); } catch (e) {}
-                }
-            }, 15000);
         }
         document.addEventListener('click', function(e) {
             var btn = e.target && (e.target.id === 'country-selector-close' || (e.target.closest && e.target.closest('#country-selector-close')));
@@ -538,6 +557,26 @@
                 var modal = document.getElementById('country-selector-modal');
                 if (modal) modal.style.display = 'none';
                 try { document.body.style.overflow = ''; document.documentElement.style.overflow = ''; } catch (e) {}
+            }
+            if (e.target && (e.target.id === 'gate-reject-btn' || (e.target.closest && e.target.closest('#gate-reject-btn')))) {
+                try {
+                    localStorage.removeItem('selected_country');
+                    localStorage.removeItem('user_selected_country');
+                    localStorage.removeItem('user_country_fixed');
+                    localStorage.removeItem('user_manual_location');
+                    localStorage.setItem('stats2_user_rejected_terms', '1');
+                } catch (err) {}
+                try {
+                    window.close();
+                } catch (e1) {}
+                try {
+                    if (!window.closed) {
+                        document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0a0a0a;color:rgba(0,255,65,0.8);font-family:monospace;font-size:14px;padding:24px;text-align:center;">您已拒绝隐私与服务条款，请关闭此标签页。</div>';
+                        document.body.style.overflow = 'hidden';
+                    }
+                } catch (e2) {
+                    try { location.replace('about:blank'); } catch (e3) {}
+                }
             }
         });
         if (document.readyState === 'loading') {
@@ -1156,7 +1195,8 @@
                 var globalContainer = document.querySelector('#panel-global-view .vibe-index-leaderboard') || 
                                      document.querySelector('#panel-global-content .vibe-index-leaderboard');
                 var countryContainer = document.querySelector('#panel-country-view .vibe-index-leaderboard') || 
-                                      document.querySelector('#countryTemplateMount .vibe-index-leaderboard');
+                                      document.querySelector('#countryTemplateMount .vibe-index-leaderboard') ||
+                                      document.getElementById('rtTopTalentsList');
                 
                 // 兼容旧容器（panel-global-view 与 panel-global-content 已在上方查找）
                 var oldGlobalContainer = document.querySelector('#panel-global-view .vibe-index-leaderboard');
@@ -1189,9 +1229,10 @@
                     container = countryContainer;
                     console.log('[drawHighScores] ✅ 使用 Country 国家视图容器');
                 } else {
-                    // 降级选择：优先使用新容器，然后是旧容器
+                    // 降级选择：优先使用新容器，然后是旧容器，国家 Tab 高分图谱卡片 #rtTopTalentsList 兜底
+                    var rtTopTalentsList = document.getElementById('rtTopTalentsList');
                     container = rankingContainer || globalContainer || countryContainer || 
-                               oldGlobalContainer || oldCountryContainer || 
+                               oldGlobalContainer || oldCountryContainer || rtTopTalentsList ||
                                document.querySelector('.vibe-index-leaderboard');
                     console.log('[drawHighScores] ⚠️ 降级容器:', container ? (container.id || container.className) : 'null');
                 }
@@ -1206,10 +1247,51 @@
                 return;
             }
             console.log('[drawHighScores] ✅ 找到容器:', container);
-            var metricOrder = ['total_messages', 'total_chars', 'avg_message_length', 'jiafang_count', 'ketao_count', 'work_days'];
-            var sorted = (Array.isArray(topBy) ? topBy.slice() : []).sort(function (a, b) { return metricOrder.indexOf(String((a && a.key) || '')) - metricOrder.indexOf(String((b && b.key) || '')); });
+            var metricOrder = ['total_user_chars', 'total_messages', 'jiafang_count', 'ketao_count', 'work_days'];
+            var metricLabels = [
+                { key: 'total_user_chars', labelZh: '废话输出', labelEn: 'User Chars' },
+                { key: 'total_messages', labelZh: '调戏AI次数', labelEn: 'Messages' },
+                { key: 'jiafang_count', labelZh: '甲方上身', labelEn: 'Jiafang' },
+                { key: 'ketao_count', labelZh: '磕头', labelEn: 'Ketao' },
+                { key: 'work_days', labelZh: '上岗天数', labelEn: 'Work Days' }
+            ];
+            var allowed5 = { total_user_chars: 1, total_messages: 1, jiafang_count: 1, ketao_count: 1, work_days: 1 };
+            var raw = Array.isArray(topBy) ? topBy : [];
+            var filtered = raw.filter(function (it) {
+                var k = String((it && it.key) || '');
+                if (k === 'total_chars') return true;
+                return allowed5[k];
+            }).map(function (it) {
+                var k = String((it && it.key) || '');
+                if (k === 'total_chars') return Object.assign({}, it, { key: 'total_user_chars' });
+                return it;
+            });
+            var sorted = filtered.slice().sort(function (a, b) { return metricOrder.indexOf(String((a && a.key) || '')) - metricOrder.indexOf(String((b && b.key) || '')); });
+            var existingKeys = {};
+            sorted.forEach(function (it) { existingKeys[String((it && it.key) || '')] = true; });
+            metricOrder.forEach(function (key) {
+                if (!existingKeys[key]) {
+                    var ml = metricLabels.filter(function (m) { return m.key === key; })[0];
+                    sorted.push({ key: key, leaders: [], labelZh: ml ? ml.labelZh : key, labelEn: ml ? ml.labelEn : key });
+                }
+            });
+            sorted.sort(function (a, b) { return metricOrder.indexOf(String((a && a.key) || '')) - metricOrder.indexOf(String((b && b.key) || '')); });
+            var esc0 = typeof escapeHtml === 'function' ? escapeHtml : function (s) { return String(s == null ? '' : s); };
+            var isEn = typeof currentLang !== 'undefined' && currentLang === 'en';
             if (!sorted.length) {
-                container.innerHTML = '<div class="text-zinc-500 text-xs text-center">' + (typeof escapeHtml === 'function' ? escapeHtml(typeof getI18nText === 'function' ? getI18nText('lpdef.none') || '暂无高分图谱数据' : '暂无高分图谱数据') : '暂无高分图谱数据') + '</div>';
+                var noDataMsg = typeof getI18nText === 'function' ? (getI18nText('lpdef.none') || '暂无高分图谱数据') : '暂无高分图谱数据';
+                var noDataRow = '<div class="text-zinc-500 text-xs text-center py-3">' + esc0(noDataMsg) + '</div>';
+                var tabLabels = metricLabels.map(function (m) { return isEn ? m.labelEn : m.labelZh; });
+                var tabBarHtml = '<div class="lpdef-tab-bar" role="tablist">' + tabLabels.map(function (label, idx) {
+                    return '<button type="button" class="lpdef-tab' + (idx === 0 ? ' active' : '') + '" role="tab" data-tab-index="' + idx + '">' + esc0(label) + '</button>';
+                }).join('') + '</div>';
+                var panelsHtml = metricLabels.map(function (m, idx) {
+                    var label = isEn ? m.labelEn : m.labelZh;
+                    return '<div class="lpdef-tab-panel' + (idx === 0 ? ' active' : '') + '" data-tab-index="' + idx + '" role="tabpanel">' +
+                        '<div class="lpdef-metric-card"><div class="lpdef-metric-title">' + esc0(label) + '</div><div class="lpdef-rank-list">' + noDataRow + '</div></div></div>';
+                }).join('');
+                container.innerHTML = '<div class="lpdef-tabs-wrap">' + tabBarHtml + '<div class="lpdef-tab-panels">' + panelsHtml + '</div></div>';
+                bindLpdefTabs(container);
                 ensureLeaderboardParentVisible(container);
                 return;
             }
@@ -1221,7 +1303,7 @@
                     if (Math.abs(n) >= 1000) return (n / 1000).toFixed(1) + 'k';
                     return new Intl.NumberFormat(typeof currentLang !== 'undefined' && currentLang === 'en' ? 'en-US' : 'zh-CN').format(Math.round(n));
                 }
-                if (k === 'avg_message_length') return n.toFixed(1);
+                if (k === 'avg_message_length' || k === 'avg_user_message_length') return n.toFixed(1);
                 return new Intl.NumberFormat(typeof currentLang !== 'undefined' && currentLang === 'en' ? 'en-US' : 'zh-CN').format(Math.round(n));
             };
             var labelForMetric = function (it) {
@@ -1256,7 +1338,11 @@
             var cardsHtml = sorted.map(function (it, idx) {
                 var label = (labelForMetric(it) || '').trim() || ('M' + (idx + 1));
                 var leaders = Array.isArray(it && it.leaders) ? it.leaders : (it && it.user ? [{ rank: 1, score: it.score, user: it.user }] : []);
-                if (!leaders.length) return '';
+                var noData = getText('common.no_data') || '暂无数据';
+                if (!leaders.length) {
+                    var panelClass = 'lpdef-tab-panel' + (idx === 0 ? ' active' : '');
+                    return '<div class="' + panelClass + '" data-tab-index="' + idx + '" role="tabpanel"><div class="lpdef-metric-card"><div class="lpdef-metric-title">' + esc(label) + '</div><div class="lpdef-rank-list"><div class="text-zinc-500 text-xs text-center py-3">' + esc(noData) + '</div></div></div></div>';
+                }
                 leaders = leaders.slice().map(function (row) {
                     var pData = {};
                     if (typeof row.personality === 'string') {
@@ -1318,13 +1404,35 @@
                     var defAvatar = typeof DEFAULT_AVATAR !== 'undefined' ? DEFAULT_AVATAR : '';
                     return '<div class="lpdef-rank-row"><div class="lpdef-rank-left"><span class="lpdef-rank-rn">' + esc(rankText) + '</span><img class="lpdef-rank-avatar" src="' + esc(meta.avatar) + '" alt="" onerror="this.onerror=null; this.src=\'' + esc(defAvatar) + '\';" /><div class="lpdef-name-wrap">' + nameHtml + (displayTag ? '<span class="lpdef-persona-tag" title="' + esc(badgeTitle) + '">' + esc(displayTag) + '</span>' : '') + '</div></div><div class="lpdef-rank-right"><div class="lpdef-rank-score">' + esc(String(scoreText)) + '</div>' + _renderDelta(delta) + '</div></div>';
                 }).join('');
-                var noData = getText('common.no_data') || 'No data';
-                return '<div class="lpdef-metric-card" data-metric-index="' + idx + '"><div class="lpdef-metric-title">' + esc(label) + '</div><div class="lpdef-rank-list">' + _headerRow() + (rows || '<div class="text-zinc-500 text-xs text-center">' + esc(noData) + '</div>') + '</div></div>';
+                var noDataRow = getText('common.no_data') || '暂无数据';
+                var panelClass = 'lpdef-tab-panel' + (idx === 0 ? ' active' : '');
+                return '<div class="' + panelClass + '" data-tab-index="' + idx + '" role="tabpanel"><div class="lpdef-metric-card"><div class="lpdef-metric-title">' + esc(label) + '</div><div class="lpdef-rank-list">' + _headerRow() + (rows || '<div class="text-zinc-500 text-xs text-center">' + esc(noDataRow) + '</div>') + '</div></div></div>';
             }).join('');
-            var html = '<div class="lpdef-metric-cards">' + cardsHtml + '</div>';
+            var tabLabels = sorted.map(function (it) { return (labelForMetric(it) || '').trim() || '—'; });
+            var tabBarHtml = '<div class="lpdef-tab-bar" role="tablist">' + tabLabels.map(function (label, idx) {
+                return '<button type="button" class="lpdef-tab' + (idx === 0 ? ' active' : '') + '" role="tab" data-tab-index="' + idx + '">' + esc(tabLabels[idx]) + '</button>';
+            }).join('') + '</div>';
+            var html = '<div class="lpdef-tabs-wrap">' + tabBarHtml + '<div class="lpdef-tab-panels">' + cardsHtml + '</div></div>';
             console.log('✅ 准备渲染榜单，数据样本:', topBy[0] && topBy[0].leaders && topBy[0].leaders[0]);
             container.innerHTML = html;
+            bindLpdefTabs(container);
             ensureLeaderboardParentVisible(container);
+        }
+
+        function bindLpdefTabs(container) {
+            if (!container) return;
+            var bar = container.querySelector('.lpdef-tab-bar');
+            var panels = container.querySelectorAll('.lpdef-tab-panel');
+            if (!bar || !panels.length) return;
+            bar.addEventListener('click', function (e) {
+                var btn = e.target && e.target.closest && e.target.closest('.lpdef-tab');
+                if (!btn || btn.getAttribute('data-tab-index') == null) return;
+                var idx = parseInt(btn.getAttribute('data-tab-index'), 10);
+                if (!Number.isFinite(idx) || idx < 0) return;
+                var tabs = bar.querySelectorAll('.lpdef-tab');
+                tabs.forEach(function (t, i) { t.classList.toggle('active', i === idx); });
+                panels.forEach(function (p, i) { p.classList.toggle('active', i === idx); });
+            });
         }
 
         // ==========================================
@@ -1501,40 +1609,56 @@
             
             return [];
         };
-        var EMPTY_NATIONAL_CLOUD_TEXT = '初出茅庐，灵魂波段捕获中...';
-        function normalizeIdentityLevelKey(level) {
+        var EMPTY_PERSONAL_CLOUD_TEXT = '初出茅庐，灵魂波段捕获中...';
+        var PERSONAL_CLOUD_STORAGE_KEY = 'last_analysis_data';
+        function normalizeCloudLevel(level) {
             var key = String(level || '').trim();
-            if (key === 'Professional' || key === 'professional' || key === 'Pro' || key === 'pro' || key === '脱发') return 'Professional';
-            if (key === 'Architect' || key === 'architect' || key === '霸天') return 'Architect';
+            if (key === 'Professional' || key === 'professional' || key === '脱发' || key === '实战') return 'Professional';
+            if (key === 'Architect' || key === 'architect' || key === '霸天' || key === '老手') return 'Architect';
             return 'Novice';
         }
         function pickIdentityLevelCloud(raw) {
+            // 只读本地稳定源：localStorage.last_analysis_data（由 index/main.js 写入）
             if (!raw || typeof raw !== 'object') return null;
-            // 左侧本人词云：只读本地 last_analysis_data 写入的 stats.identityLevelCloud
-            if (raw.stats && raw.stats.identityLevelCloud) return raw.stats.identityLevelCloud;
-            if (raw.identityLevelCloud) return raw.identityLevelCloud;
-            if (raw.analysis && raw.analysis.stats && raw.analysis.stats.identityLevelCloud) return raw.analysis.stats.identityLevelCloud;
-            return null;
+            return (
+                (raw.stats && raw.stats.identityLevelCloud) ||
+                raw.identityLevelCloud ||
+                (raw.analysis && raw.analysis.stats && raw.analysis.stats.identityLevelCloud) ||
+                null
+            );
         }
-        function getLocalIdentityCloudByLevel(level) {
-            var levelKey = normalizeIdentityLevelKey(level);
-            var localCloud = null;
+        function readPersonalCloudFromLocalStorage() {
             try {
-                var lastRaw = localStorage.getItem('last_analysis_data');
-                if (lastRaw) localCloud = pickIdentityLevelCloud(JSON.parse(lastRaw));
-            } catch (_) {}
-            if (!localCloud || typeof localCloud !== 'object') return [];
-            var levelData = localCloud[levelKey];
-            if (levelData == null) levelData = localCloud[levelKey.toLowerCase()];
-            return dataAdapter(levelData || []);
-        }
-        function isLocalOnlyNationalCloudMode() {
-            try {
-                var container = document.getElementById('vibe-cloud50-container');
-                return !!(container && container.closest && container.closest('#left-drawer'));
+                var raw = localStorage.getItem(PERSONAL_CLOUD_STORAGE_KEY);
+                if (!raw) return null;
+                return JSON.parse(raw);
             } catch (_) {
-                return false;
+                return null;
             }
+        }
+        function getPersonalIdentityLevelCloudAll() {
+            // 单一权威来源，避免“多处猜测”带来的竞态与不一致
+            var cache = window.__personalIdentityLevelCloudCache;
+            if (cache && cache.v && typeof cache.v === 'object') return cache.v;
+
+            // 只读本地：localStorage.last_analysis_data
+            var parsed = readPersonalCloudFromLocalStorage();
+
+            var ilc = pickIdentityLevelCloud(parsed);
+            var out = { Novice: [], Professional: [], Architect: [] };
+            if (ilc && typeof ilc === 'object') {
+                out.Novice = dataAdapter(ilc.Novice || ilc.novice || []);
+                out.Professional = dataAdapter(ilc.Professional || ilc.professional || []);
+                out.Architect = dataAdapter(ilc.Architect || ilc.architect || []);
+            }
+            window.__personalIdentityLevelCloudCache = { v: out, ts: Date.now() };
+            return out;
+        }
+        function getPersonalIdentityCloudByLevel(level) {
+            var levelKey = normalizeCloudLevel(level);
+            var all = getPersonalIdentityLevelCloudAll();
+            var levelData = all && all[levelKey];
+            return Array.isArray(levelData) ? levelData : [];
         }
         
         // ==========================================
@@ -2283,6 +2407,22 @@
                         ? mergeDeep(window.cachedSummary || {}, data)
                         : Object.assign({}, window.cachedSummary || {}, data);
                 } catch (e) { /* ignore */ }
+                // 写入 lastData，供天梯榜 Tab 等读取 topByMetrics
+                try {
+                    // 【修复】确保topByMetrics被正确保存到window.lastData
+                    if (data.topByMetrics && Array.isArray(data.topByMetrics) && data.topByMetrics.length > 0) {
+                        console.log('[updateCountryDashboard] ✅ 保存topByMetrics到lastData:', data.topByMetrics.length, '个维度');
+                    }
+                    window.lastData = typeof mergeDeep === 'function'
+                        ? mergeDeep(window.lastData || {}, data)
+                        : Object.assign({}, window.lastData || {}, data);
+                    // 【修复】确保topByMetrics被正确保存
+                    if (window.lastData && !window.lastData.topByMetrics && data.topByMetrics) {
+                        window.lastData.topByMetrics = data.topByMetrics;
+                    }
+                } catch (e) { 
+                    console.warn('[updateCountryDashboard] ⚠️ 保存lastData失败:', e);
+                }
 
                 // 国家视图：get_country_dimension_averages 优先 12h 本地缓存；连续失败 3 次则标记暂时不可用并隐藏右侧雷达图
                 if (typeof window.__countryDimFailCount === 'undefined') window.__countryDimFailCount = 0;
@@ -2416,7 +2556,7 @@
                         var lexiconEmpty = document.getElementById('vibe-top10-empty');
                         var lexiconCanvas = document.getElementById('vibe-lexicon-wordcloud-canvas');
                         if (emptyCloudEl) {
-                            emptyCloudEl.textContent = isLocalOnlyNationalCloudMode() ? EMPTY_NATIONAL_CLOUD_TEXT : '正在扫描该国开发者指纹...';
+                            emptyCloudEl.textContent = EMPTY_PERSONAL_CLOUD_TEXT;
                             emptyCloudEl.classList.remove('hidden');
                         }
                         if (wordCloudContainer) {
@@ -2511,32 +2651,80 @@
                                 window.__countryTotalUsers = Number(resp?.countryTotals?.totalUsers ?? resp?.countryTotals?.total_users ?? resp?.totalUsers ?? resp?.total_users ?? 0) || 0;
                                 console.log('Keywords loaded:', window.__countryKeywordsByLevel);
                                 flushNationalCloudReadyCallbacks();
+                                
+                                // 【新增】确保三个tab的数据都已预加载
+                                if (window.__countryKeywordsByLevel && typeof _renderTop10List === 'function') {
+                                    var currentType = window.__currentLexiconType || 'merit_board';
+                                    var allTypes = ['merit_board', 'slang_list', 'mantra_top'];
+                                    allTypes.forEach(function(type) {
+                                        if (!window.__lexiconByType) window.__lexiconByType = {};
+                                        if (!window.__lexiconByType[type] || window.__lexiconByType[type].length === 0) {
+                                            var kwData = null;
+                                            if (type === 'merit_board') {
+                                                kwData = window.__countryKeywordsByLevel.Professional || [];
+                                            } else if (type === 'slang_list') {
+                                                kwData = window.__countryKeywordsByLevel.Novice || [];
+                                            } else if (type === 'mantra_top') {
+                                                kwData = (window.__countryKeywordsByLevel.Architect && window.__countryKeywordsByLevel.Architect.length > 0)
+                                                    ? window.__countryKeywordsByLevel.Architect
+                                                    : (window.__countryKeywordsByLevel.globalNative || []);
+                                            }
+                                            if (Array.isArray(kwData) && kwData.length > 0) {
+                                                window.__lexiconByType[type] = kwData.map(function(x) { 
+                                                    return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; 
+                                                }).filter(function(x) { return x.phrase; });
+                                            }
+                                        }
+                                    });
+                                    // 如果当前tab有数据，立即渲染
+                                    if (window.__lexiconByType[currentType] && window.__lexiconByType[currentType].length > 0) {
+                                        _renderTop10List(window.__lexiconByType[currentType], true);
+                                    }
+                                }
                             }
                         }
-                        // 若 country-summary 未带 identityLevelCloud，优先 country-hot-list，再 keywords 兜底
+                        // 若 country-summary 未带 identityLevelCloud，优先 static-hotlist（纯 KV），再 country-hot-list，再 keywords 兜底
                         if (!apiSuccess) {
                             var kwApiBase = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content)) || API_ENDPOINT || '';
                             kwApiBase = (kwApiBase && kwApiBase.trim()) ? (kwApiBase.trim().endsWith('/') ? kwApiBase.trim() : kwApiBase.trim() + '/') : '/';
+                            function applyHotlistPayload(hotPayload) {
+                                if (!hotPayload || typeof hotPayload !== 'object') return false;
+                                var hotNovice = (hotPayload.Novice || hotPayload.slang || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
+                                var hotPro = (hotPayload.Professional || hotPayload.merit || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
+                                var hotArch = (hotPayload.Architect || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
+                                var hotNative = (hotPayload.globalNative || hotPayload.native || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
+                                var hotHasAny = hotNovice.length + hotPro.length + hotArch.length + hotNative.length > 0;
+                                if (!hotHasAny) return false;
+                                window.__countryKeywordsByLevel = { Novice: hotNovice, Professional: hotPro, Architect: hotArch, globalNative: hotNative };
+                                window.__nationalCloudData = window.__countryKeywordsByLevel;
+                                _syncLexiconFromKeywords();
+                                apiSuccess = true;
+                                try { window.__countryCloudFromHotList = true; } catch (e) {}
+                                flushNationalCloudReadyCallbacks();
+                                return true;
+                            }
                             try {
-                                var hotResp = await fetch(kwApiBase + 'api/v2/country-hot-list?country=' + encodeURIComponent(countryCode) + '&_t=' + Date.now(), { cache: 'no-store' });
-                                if (hotResp.ok) {
-                                    var hotPayload = await hotResp.json();
-                                    if (hotPayload && typeof hotPayload === 'object') {
-                                        var hotNovice = (hotPayload.Novice || hotPayload.slang || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
-                                        var hotPro = (hotPayload.Professional || hotPayload.merit || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
-                                        var hotArch = (hotPayload.Architect || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
-                                        var hotNative = (hotPayload.globalNative || hotPayload.native || []).map(function(x) { return { phrase: x.word || x.phrase || '', weight: x.weight || x.count || 0 }; }).filter(function(x) { return x.phrase; });
-                                        var hotHasAny = hotNovice.length + hotPro.length + hotArch.length + hotNative.length > 0;
-                                        if (hotHasAny) {
-                                            window.__countryKeywordsByLevel = { Novice: hotNovice, Professional: hotPro, Architect: hotArch, globalNative: hotNative };
-                                            window.__nationalCloudData = window.__countryKeywordsByLevel;
-                                            _syncLexiconFromKeywords();
-                                            apiSuccess = true;
-                                            try { window.__countryCloudFromHotList = true; } catch (e) {}
-                                            console.log('Keywords loaded from country-hot-list:', window.__countryKeywordsByLevel);
-                                            flushNationalCloudReadyCallbacks();
+                                // 先用首屏预加载的远程 KV 镜像快照（0 请求）
+                                try {
+                                    if (window.__staticVibeSnapshot && typeof window.__staticVibeSnapshot === 'object' && window.__staticVibeSnapshot[countryCode]) {
+                                        if (applyHotlistPayload(window.__staticVibeSnapshot[countryCode])) {
+                                            console.log('Keywords loaded from __staticVibeSnapshot:', window.__countryKeywordsByLevel);
                                         }
                                     }
+                                } catch (e0) { /* ignore */ }
+                                if (apiSuccess) return;
+
+                                var staticUrl = kwApiBase + 'api/v2/static-hotlist?country=' + encodeURIComponent(countryCode) + (forceRefresh ? ('&_t=' + Date.now()) : '');
+                                var staticResp = await fetch(staticUrl, { cache: forceRefresh ? 'no-store' : 'force-cache' });
+                                if (staticResp.ok && applyHotlistPayload(await staticResp.json())) {
+                                    console.log('Keywords loaded from static-hotlist:', window.__countryKeywordsByLevel);
+                                }
+                            } catch (staticErr) { /* ignore */ }
+                            if (!apiSuccess) try {
+                                var hotUrl = kwApiBase + 'api/v2/country-hot-list?country=' + encodeURIComponent(countryCode) + (forceRefresh ? ('&_t=' + Date.now()) : '');
+                                var hotResp = await fetch(hotUrl, { cache: forceRefresh ? 'no-store' : 'force-cache' });
+                                if (hotResp.ok && applyHotlistPayload(await hotResp.json())) {
+                                    console.log('Keywords loaded from country-hot-list:', window.__countryKeywordsByLevel);
                                 }
                             } catch (hotErr) { console.warn('[updateCountryDashboard] country-hot-list 失败:', hotErr); }
                             if (!apiSuccess) try {
@@ -2634,13 +2822,13 @@
                                       (window.__countryKeywordsByLevel.Architect || []).length + 
                                       (window.__countryKeywordsByLevel.globalNative || []).length;
                             if (total === 0) {
-                                emptyCloudEl.textContent = EMPTY_NATIONAL_CLOUD_TEXT;
+                                emptyCloudEl.textContent = EMPTY_PERSONAL_CLOUD_TEXT;
                                 emptyCloudEl.classList.remove('hidden');
                             } else {
                                 emptyCloudEl.classList.add('hidden');
                             }
                         } else if (!apiSuccess && emptyCloudEl) {
-                            emptyCloudEl.textContent = EMPTY_NATIONAL_CLOUD_TEXT;
+                            emptyCloudEl.textContent = EMPTY_PERSONAL_CLOUD_TEXT;
                             emptyCloudEl.classList.remove('hidden');
                             var renderCloudEmpty = window._renderNationalIdentityCloud || (typeof _renderNationalIdentityCloud === 'function' ? _renderNationalIdentityCloud : null);
                             if (renderCloudEmpty) renderCloudEmpty('Novice');
@@ -2650,15 +2838,114 @@
                         if (cloudLoadingHint) cloudLoadingHint.classList.add('hidden');
                         if (wordCloudContainer) wordCloudContainer.removeAttribute('data-loading');
                         // 排行榜：调用 get_national_lexicon(countryCode, type)，默认 merit_board
+                        // 【修复】自动预加载三个tab的数据
                         window.__currentCountryCode = countryCode;
                         (function loadLexiconList() {
                             var lexType = (window.__currentLexiconType || 'merit_board');
                             var url = API_ENDPOINT + 'api/national-lexicon?country=' + encodeURIComponent(countryCode) + '&type=' + encodeURIComponent(lexType);
                             fetch(url).then(function(r) { return r.json(); }).then(function(res) {
                                 var list = (res && res.data && Array.isArray(res.data)) ? res.data : [];
+                                // 【修复】如果API返回空，尝试从 __countryKeywordsByLevel 获取fallback数据
+                                if (list.length === 0 && window.__countryKeywordsByLevel) {
+                                    var fallbackData = null;
+                                    if (lexType === 'merit_board') {
+                                        fallbackData = window.__countryKeywordsByLevel.Professional || [];
+                                    } else if (lexType === 'slang_list') {
+                                        fallbackData = window.__countryKeywordsByLevel.Novice || [];
+                                    } else if (lexType === 'mantra_top') {
+                                        fallbackData = (window.__countryKeywordsByLevel.Architect && window.__countryKeywordsByLevel.Architect.length > 0)
+                                            ? window.__countryKeywordsByLevel.Architect
+                                            : (window.__countryKeywordsByLevel.globalNative || []);
+                                    }
+                                    if (Array.isArray(fallbackData) && fallbackData.length > 0) {
+                                        list = fallbackData.map(function(x) { 
+                                            return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; 
+                                        }).filter(function(x) { return x.phrase; });
+                                    }
+                                }
+                                if (!window.__lexiconByType) window.__lexiconByType = {};
+                                window.__lexiconByType[lexType] = list;
                                 if (typeof _renderTop10List === 'function') _renderTop10List(list, true);
+                                
+                                // 【新增】自动预加载其他两个tab的数据
+                                var otherTypes = ['merit_board', 'slang_list', 'mantra_top'].filter(function(t) { return t !== lexType; });
+                                otherTypes.forEach(function(otherType) {
+                                    // 如果已经有缓存数据，跳过
+                                    if (window.__lexiconByType && window.__lexiconByType[otherType] && window.__lexiconByType[otherType].length > 0) {
+                                        return;
+                                    }
+                                    // 尝试从 __countryKeywordsByLevel 获取
+                                    var kwData = null;
+                                    if (otherType === 'merit_board') {
+                                        kwData = window.__countryKeywordsByLevel && window.__countryKeywordsByLevel.Professional || [];
+                                    } else if (otherType === 'slang_list') {
+                                        kwData = window.__countryKeywordsByLevel && window.__countryKeywordsByLevel.Novice || [];
+                                    } else if (otherType === 'mantra_top') {
+                                        kwData = (window.__countryKeywordsByLevel && window.__countryKeywordsByLevel.Architect && window.__countryKeywordsByLevel.Architect.length > 0)
+                                            ? window.__countryKeywordsByLevel.Architect
+                                            : (window.__countryKeywordsByLevel && window.__countryKeywordsByLevel.globalNative || []);
+                                    }
+                                    if (Array.isArray(kwData) && kwData.length > 0) {
+                                        var preloadList = kwData.map(function(x) { 
+                                            return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; 
+                                        }).filter(function(x) { return x.phrase; });
+                                        if (!window.__lexiconByType) window.__lexiconByType = {};
+                                        window.__lexiconByType[otherType] = preloadList;
+                                    } else {
+                                        // 如果 __countryKeywordsByLevel 没有数据，调用API预加载
+                                        var preloadUrl = API_ENDPOINT + 'api/national-lexicon?country=' + encodeURIComponent(countryCode) + '&type=' + encodeURIComponent(otherType);
+                                        fetch(preloadUrl).then(function(r) { return r.json(); }).then(function(res) {
+                                            var preloadList = (res && res.data && Array.isArray(res.data)) ? res.data : [];
+                                            if (preloadList.length === 0 && window.__countryKeywordsByLevel) {
+                                                // 再次尝试fallback
+                                                var fallbackKw = null;
+                                                if (otherType === 'merit_board') {
+                                                    fallbackKw = window.__countryKeywordsByLevel.Professional || [];
+                                                } else if (otherType === 'slang_list') {
+                                                    fallbackKw = window.__countryKeywordsByLevel.Novice || [];
+                                                } else if (otherType === 'mantra_top') {
+                                                    fallbackKw = (window.__countryKeywordsByLevel.Architect && window.__countryKeywordsByLevel.Architect.length > 0)
+                                                        ? window.__countryKeywordsByLevel.Architect
+                                                        : (window.__countryKeywordsByLevel.globalNative || []);
+                                                }
+                                                if (Array.isArray(fallbackKw) && fallbackKw.length > 0) {
+                                                    preloadList = fallbackKw.map(function(x) { 
+                                                        return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; 
+                                                    }).filter(function(x) { return x.phrase; });
+                                                }
+                                            }
+                                            if (!window.__lexiconByType) window.__lexiconByType = {};
+                                            window.__lexiconByType[otherType] = preloadList;
+                                        }).catch(function() {
+                                            // 忽略错误，使用空数组
+                                            if (!window.__lexiconByType) window.__lexiconByType = {};
+                                            window.__lexiconByType[otherType] = [];
+                                        });
+                                    }
+                                });
                             }).catch(function() {
-                                if (typeof _renderTop10List === 'function') _renderTop10List([], true);
+                                // 【修复】错误时也尝试从 __countryKeywordsByLevel 获取fallback数据
+                                var fallbackList = [];
+                                if (window.__countryKeywordsByLevel) {
+                                    var fallbackKw = null;
+                                    if (lexType === 'merit_board') {
+                                        fallbackKw = window.__countryKeywordsByLevel.Professional || [];
+                                    } else if (lexType === 'slang_list') {
+                                        fallbackKw = window.__countryKeywordsByLevel.Novice || [];
+                                    } else if (lexType === 'mantra_top') {
+                                        fallbackKw = (window.__countryKeywordsByLevel.Architect && window.__countryKeywordsByLevel.Architect.length > 0)
+                                            ? window.__countryKeywordsByLevel.Architect
+                                            : (window.__countryKeywordsByLevel.globalNative || []);
+                                    }
+                                    if (Array.isArray(fallbackKw) && fallbackKw.length > 0) {
+                                        fallbackList = fallbackKw.map(function(x) { 
+                                            return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; 
+                                        }).filter(function(x) { return x.phrase; });
+                                    }
+                                }
+                                if (!window.__lexiconByType) window.__lexiconByType = {};
+                                window.__lexiconByType[lexType] = fallbackList;
+                                if (typeof _renderTop10List === 'function') _renderTop10List(fallbackList, true);
                             });
                         })();
                     } else {
@@ -3120,7 +3407,16 @@
                         // 关键：高分图谱的数据源来自 country-summary，而不是 global-average
                         try {
                             data.topByMetrics = payload2.topByMetrics || payload2.data?.topByMetrics || [];
-                        } catch { /* ignore */ }
+                            // 【修复】确保topByMetrics被正确设置
+                            if (data.topByMetrics && Array.isArray(data.topByMetrics) && data.topByMetrics.length > 0) {
+                                console.log('[updateCountryDashboard] ✅ topByMetrics已加载:', data.topByMetrics.length, '个维度');
+                            } else {
+                                console.warn('[updateCountryDashboard] ⚠️ topByMetrics为空或格式不正确');
+                            }
+                        } catch (e) { 
+                            console.warn('[updateCountryDashboard] ⚠️ 获取topByMetrics失败:', e);
+                            data.topByMetrics = [];
+                        }
 
                         const totalCountriesCount = totalCountriesFromData;
                         const MEDALS = { 1: '🥇', 2: '🥈', 3: '🥉' };
@@ -3447,13 +3743,31 @@
                 // 高分图谱：由 drawHighScores 统一渲染到 .vibe-index-leaderboard（data.topByMetrics -> it.leaders，字段 vibe_index_num）
                 // =========================
                 let topBy = Array.isArray(data.topByMetrics) ? data.topByMetrics : [];
+                // 【修复】确保从payload2中获取topByMetrics数据
+                if ((!topBy || topBy.length === 0) && payload2) {
+                    try {
+                        topBy = Array.isArray(payload2.topByMetrics) ? payload2.topByMetrics : 
+                                (Array.isArray(payload2.data?.topByMetrics) ? payload2.data.topByMetrics : []);
+                        if (topBy && topBy.length > 0) {
+                            data.topByMetrics = topBy;
+                            console.log('[updateCountryDashboard] ✅ 从payload2获取topByMetrics:', topBy.length, '个维度');
+                        }
+                    } catch (e) {
+                        console.warn('[updateCountryDashboard] ⚠️ 获取topByMetrics失败:', e);
+                    }
+                }
                 const metricOrder = [
                     'total_messages', 'total_chars', 'avg_message_length',
                     'jiafang_count', 'ketao_count', 'work_days'
                 ];
                 topBy = topBy.slice().sort((a, b) => metricOrder.indexOf(String(a?.key || '')) - metricOrder.indexOf(String(b?.key || '')));
                 window.__resolveUserMeta = _resolveUserMeta;
-                if (typeof drawHighScores === 'function') drawHighScores(topBy);
+                if (typeof drawHighScores === 'function') {
+                    console.log('[updateCountryDashboard] 🎯 调用drawHighScores，数据量:', topBy.length);
+                    drawHighScores(topBy);
+                } else {
+                    console.warn('[updateCountryDashboard] ⚠️ drawHighScores函数不可用');
+                }
 
                 // 语义爆发词云卡片：仅保留词云形态（ECharts wordCloud），不再渲染 slang/merit/sv_slang 文本区
                 // 词云数据由 loadWordCloud() 通过 /api/v2/wordcloud-data 动态拉取
@@ -4007,6 +4321,8 @@
                 'panel.pk_tsundere': '傲娇',
                 'panel.pk_bootlick': '跪舔',
                 'panel.national_cloud_50': '本国词云 50',
+                'panel.personal_wordcloud': '本人词云',
+                'panel.personal_cloud_50': '本人词云 50',
                 'panel.country_top_10': '国家 Top10',
                 'panel.semantic_label': '语义',
                 'panel.most_used': '最常用',
@@ -4116,6 +4432,8 @@
                 'panel.pk_tsundere': 'Tsundere',
                 'panel.pk_bootlick': 'Bootlick',
                 'panel.national_cloud_50': 'NATIONAL CLOUD 50',
+                'panel.personal_wordcloud': 'My Word Cloud',
+                'panel.personal_cloud_50': 'MY CLOUD 50',
                 'panel.country_top_10': 'COUNTRY TOP 10',
                 'panel.semantic_label': 'SEMANTIC',
                 'panel.most_used': 'MOST_USED',
@@ -8115,7 +8433,7 @@
                     var ctx = canvas.getContext('2d');
                     if (ctx) ctx.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
                 }
-                if (emptyEl) { emptyEl.textContent = isLocalOnlyNationalCloudMode() ? EMPTY_NATIONAL_CLOUD_TEXT : '正在扫描该国开发者指纹...'; emptyEl.classList.remove('hidden'); }
+                if (emptyEl) { emptyEl.textContent = EMPTY_PERSONAL_CLOUD_TEXT; emptyEl.classList.remove('hidden'); }
                 if (wc) { wc.setAttribute('data-loading', 'true'); }
             } catch (e) { /* ignore */ }
 
@@ -8261,10 +8579,9 @@
                 // ignore
             }
 
-            // 初始化词云：非核心图表使用 requestIdleCallback，避免滚动卡顿
+            // 初始化词云：立即加载，确保本国词云与行业黑话 Tab 一样快速展示（优先命中缓存）
             try {
-                const ric = window.requestIdleCallback || ((cb) => setTimeout(() => cb({ timeRemaining: () => 0 }), 0));
-                ric(() => { try { loadWordCloud(); } catch (e) { /* ignore */ } }, { timeout: 1500 });
+                loadWordCloud();
             } catch (e) {
                 try { setTimeout(() => { loadWordCloud(); }, 50); } catch (e2) { /* ignore */ }
             }
@@ -12992,7 +13309,9 @@
                 const btn = document.getElementById('country-selector-github-save-btn');
                 if (!btn) return;
                 const code = (window.__countrySelectorSelectedCode || '').trim().toUpperCase();
-                const enabled = window.__countryPickerForced && /^[A-Z]{2}$/.test(code);
+                const privacyCheck = document.getElementById('gate-privacy-accept');
+                const privacyAccepted = !privacyCheck || privacyCheck.checked;
+                const enabled = window.__countryPickerForced && /^[A-Z]{2}$/.test(code) && privacyAccepted;
                 btn.disabled = !enabled;
                 btn.style.opacity = enabled ? '1' : '0.6';
                 btn.style.cursor = enabled ? 'pointer' : 'not-allowed';
@@ -13024,7 +13343,13 @@
                     }
                 });
                 
-                // 「使用 GitHub 登录并保存」按钮：仅在选择国家且为强制选籍模式时可用
+                var privacyCheck = document.getElementById('gate-privacy-accept');
+                if (privacyCheck) {
+                    privacyCheck.addEventListener('change', function() {
+                        if (typeof updateCountrySelectorGitHubButtonState === 'function') updateCountrySelectorGitHubButtonState();
+                    });
+                }
+                // 「使用 GitHub 登录并保存」按钮：仅在选择国家、同意隐私条款且为强制选籍模式时可用
                 if (githubSaveBtn) {
                     githubSaveBtn.addEventListener('click', function() {
                         const code = (window.__countrySelectorSelectedCode || '').trim().toUpperCase();
@@ -13066,6 +13391,66 @@
         } else {
             initCountrySelector();
         }
+        
+        (function initDeleteAccountButton() {
+            function clearLocalAccountData() {
+                try {
+                    var keys = ['selected_country', 'user_selected_country', 'user_country_fixed', 'user_manual_location', 'github_token', 'vibe_github_access_token', 'last_analysis_data', 'vibe_fp', 'user_fingerprint', 'anchored_country', 'loc_locked', 'loc_fixed', 'drawer_expanded', 'left_drawer_open', 'right_drawer_open'];
+                    keys.forEach(function(k) { try { localStorage.removeItem(k); } catch (e) {} });
+                    var toRemove = [];
+                    for (var i = 0; i < localStorage.length; i++) {
+                        var key = localStorage.key(i);
+                        if (key && (key.indexOf('vibe_') === 0 || key.indexOf('vibe_report') === 0 || key.indexOf('vibe_cyber_report_') === 0)) toRemove.push(key);
+                    }
+                    toRemove.forEach(function(k) { try { localStorage.removeItem(k); } catch (e) {} });
+                    if (window.__githubAccessToken !== undefined) window.__githubAccessToken = '';
+                } catch (e) {}
+            }
+            function doSignOutAndReload(clearLocal) {
+                if (clearLocal) clearLocalAccountData();
+                var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+                if (sb && typeof sb.auth !== 'object') { sb = null; }
+                if (sb && typeof sb.auth.signOut === 'function') {
+                    sb.auth.signOut().catch(function() {}).finally(function() {
+                        if (clearLocal) clearLocalAccountData();
+                        if (typeof window.runGateCheck === 'function') window.runGateCheck();
+                        try { location.reload(); } catch (e) {}
+                    });
+                } else {
+                    if (clearLocal) clearLocalAccountData();
+                    try { location.reload(); } catch (e) {}
+                }
+            }
+            function onReady() {
+                var root = document.getElementById('left-drawer') || document.body;
+                root.addEventListener('click', function(e) {
+                    var target = e.target && (e.target.id === 'left-drawer-exit-btn' || e.target.closest && e.target.closest('#left-drawer-exit-btn'));
+                    if (target) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        var msg = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Exit and sign out?' : '确定退出登录吗？';
+                        if (!confirm(msg)) return;
+                        doSignOutAndReload(true);
+                        return;
+                    }
+                    target = e.target && (e.target.id === 'left-drawer-delete-account-btn' || e.target.closest && e.target.closest('#left-drawer-delete-account-btn'));
+                    if (target) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        var msgDel = (typeof currentLang !== 'undefined' && currentLang === 'en')
+                            ? 'Delete your account and all associated data? This cannot be undone.'
+                            : '确定要删除账号及所有关联数据吗？此操作不可恢复。';
+                        if (!confirm(msgDel)) return;
+                        doSignOutAndReload(true);
+                    }
+                });
+            }
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', onReady);
+            } else {
+                onReady();
+            }
+        })();
         
         /**
          * 渲染国家列表
@@ -13343,11 +13728,10 @@
                         }
                     }
                     
-                    // 刷新用户统计
-                    if (typeof window.refreshUserStats === 'function') {
-                        setTimeout(() => window.refreshUserStats(), 300);
+                    // 【数据流隔离】写入后仅成功提示，不触发重新拉取
+                    if (typeof showNotification === 'function') {
+                        try { showNotification(currentLang === 'en' ? 'Location saved' : '位置已保存'); } catch (e) {}
                     }
-                    
                     console.log('[SaveLocation] ✅ 已保存手动位置:', { countryCode, lng: formattedLng, lat: formattedLat });
                 } else {
                     console.warn('[SaveLocation] ⚠️ 保存失败:', res.status);
@@ -13533,18 +13917,9 @@
                     }
                     updateUserCountryFlag(countryCode, countryName, true);
                     if (typeof renderRankCards === 'function' && window.currentUser) renderRankCards(window.currentUser);
-                    if (typeof window.refreshUserStats === 'function') {
-                        setTimeout(() => window.refreshUserStats(), 300);
-                    }
-                    // 校准确认后立即重载黑话榜（右侧抽屉）
-                    try { window.refreshVibeCard && window.refreshVibeCard(String(countryCode).toUpperCase()); } catch { /* ignore */ }
-                    if (countryCode && typeof fetchCountrySummaryV3 === 'function') {
-                        fetchCountrySummaryV3(countryCode).then((summary) => {
-                            // 仅刷新右侧抽屉数据，不重设骨架、不重建左侧，避免反复叠加与错乱
-                            if (summary) showDrawersWithCountryData(countryCode, countryName || countryCode, summary, { summaryOnly: true });
-                        }).catch(() => {});
-                    } else if (countryCode) {
-                        showDrawersWithCountryData(countryCode, countryName || countryCode);
+                    // 【数据流隔离】写入后仅成功提示，不触发重新拉取大盘/词云
+                    if (typeof showNotification === 'function') {
+                        try { showNotification(currentLang === 'en' ? 'Location saved' : '位置已保存'); } catch (e) {}
                     }
                     console.log('[Calibration] ✅ 校准已确认并持久化（已锁定）:', { countryCode, countryName, lng, lat });
                 }
@@ -15376,9 +15751,76 @@
          * 获取用户地理位置（由后端 CF 接管，前端不再请求 ipapi.co/ip-api.com，避免 429）。
          * 返回默认结构，实际国家由后端 /api/v2/analyze 根据 CF 或 manual_location 写入。
          */
-        function getUserLocation() {
-            var defaultResult = { lat: null, lng: null, countryCode: 'US' };
-            return Promise.resolve(defaultResult);
+        /**
+         * 获取用户地理位置信息（通过IP API）
+         * @returns {Promise<{lat: number|null, lng: number|null, countryCode: string}>}
+         */
+        async function getUserLocation() {
+            // 优先从localStorage获取已保存的位置信息
+            try {
+                const savedCountry = localStorage.getItem('user_selected_country') || 
+                                    localStorage.getItem('user_country_fixed') || 
+                                    localStorage.getItem('selected_country');
+                if (savedCountry && /^[A-Z]{2}$/i.test(savedCountry)) {
+                    const savedLat = localStorage.getItem('manual_lat');
+                    const savedLng = localStorage.getItem('manual_lng');
+                    return {
+                        lat: savedLat ? parseFloat(savedLat) : null,
+                        lng: savedLng ? parseFloat(savedLng) : null,
+                        countryCode: savedCountry.toUpperCase()
+                    };
+                }
+            } catch (e) {
+                console.warn('[getUserLocation] 读取localStorage失败:', e);
+            }
+
+            // 尝试从window.lastData获取IP国家信息
+            if (window.lastData && (window.lastData.ip_country || window.lastData.ipCountry)) {
+                const ipCountry = String(window.lastData.ip_country || window.lastData.ipCountry || '').trim().toUpperCase();
+                if (/^[A-Z]{2}$/.test(ipCountry)) {
+                    return { lat: null, lng: null, countryCode: ipCountry };
+                }
+            }
+
+            // 尝试从window.currentUser获取国家信息
+            if (window.currentUser || window.currentUserData) {
+                const user = window.currentUser || window.currentUserData;
+                const userCountry = (user.country_code || user.ip_location || user.manual_location || user.current_location || '').trim().toUpperCase();
+                if (userCountry && /^[A-Z]{2}$/.test(userCountry)) {
+                    return { lat: null, lng: null, countryCode: userCountry };
+                }
+            }
+
+            // 通过自有 Worker /api/v2/my-ip 获取国家码（CF 边缘，0 外网依赖）
+            try {
+                var apiBase = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content) || '') || '';
+                if (apiBase && apiBase.endsWith('/')) apiBase = apiBase.slice(0, -1);
+                var myIpUrl = apiBase ? (apiBase + '/api/v2/my-ip') : '/api/v2/my-ip';
+                var controller = new AbortController();
+                var timeoutId = setTimeout(function() { controller.abort(); }, 3000);
+                var response = await fetch(myIpUrl, { signal: controller.signal, method: 'GET' });
+                clearTimeout(timeoutId);
+                if (response.ok) {
+                    var data = await response.json().catch(function() { return null; });
+                    var countryCode = data && data.country ? String(data.country).trim().toUpperCase() : '';
+                    if (countryCode && /^[A-Z]{2}$/.test(countryCode) && countryCode !== 'XX') {
+                        console.log('[getUserLocation] ✅ 通过 my-ip 获取到国家代码:', countryCode);
+                        try {
+                            localStorage.setItem('user_country_fixed', countryCode);
+                            localStorage.setItem('selected_country', countryCode);
+                        } catch (e) {}
+                        return { lat: null, lng: null, countryCode: countryCode };
+                    }
+                }
+            } catch (error) {
+                if (error && error.name !== 'AbortError') {
+                    console.warn('[getUserLocation] ⚠️ my-ip 请求失败:', error);
+                }
+            }
+
+            // 默认返回US（向后兼容）
+            console.log('[getUserLocation] ℹ️ 使用默认国家代码: US');
+            return { lat: null, lng: null, countryCode: 'US' };
         }
         /**
          * 强制同步自身状态（trackSelf）
@@ -18843,7 +19285,7 @@
             // 注意：LPDEF 专家卡片将在 window.onload 的身份检查后渲染
             // 这里不调用 renderLPDEFExperts，避免覆盖身份检查的结果
 
-            // 【修复】渲染高分图谱（六个排行榜卡片）
+            // 【修复】渲染高分图谱：无数据时也调用 drawHighScores([])，避免内容区完全空白（与 updateCountryDashboard 行为一致）
             try {
                 if (typeof drawHighScores === 'function') {
                     var topBy = Array.isArray(data.topByMetrics) ? data.topByMetrics : [];
@@ -19217,10 +19659,7 @@
                     }
                 } catch { /* ignore */ }
 
-                // 【SWR】缓存超过 30 分钟或缺少 github_stats.login 时异步 revalidate，失败仅打日志不抛错
-                revalidateSWRCache().catch(function(err) {
-                    if (typeof console !== 'undefined' && console.warn) console.warn('[SWR] revalidateSWRCache 异步失败:', err);
-                });
+                // 【状态锁定】不再自动 revalidate 刷新抽屉，仅用户手动点击地图或刷新时更新词云/排行榜
 
             } catch (err) {
                 console.error('[ERROR] Dashboard 渲染崩溃:', err);
@@ -21019,10 +21458,7 @@
                             handleGithubSync().then(function(result) {
                                 if (result && result.success && result.data) {
                                     window.renderGithubCard(result.data, cardOpts);
-                                    setTimeout(function() {
-                                        if (typeof window.refreshUserStats === 'function') window.refreshUserStats().catch(function(err) { console.warn('[GitHub Sync] refreshUserStats:', err); });
-                                        if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard(); else if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
-                                    }, 1500);
+                                    if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard(); else if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
                                 } else {
                                     var fallbackStars = (typeof resolveDisplayStars === 'function' ? resolveDisplayStars(currentUserData) : null);
                                     var fallback = {
@@ -21070,30 +21506,18 @@
                     if (dc || dn) updateUserCountryFlag(dc, dn, dm);
                 }
 
-                // 上岗天数：抽屉打开后也要“实时增长”（无需手动刷新）
+                // 上岗天数：仅首次计算，不再定时刷新（UI 锁定）
                 try {
                     const el = statsCard.querySelector('[data-stat="days-on-duty"]');
                     if (el) {
                         const tsRaw = (el.getAttribute('data-earliest-ts') || '').trim();
                         const ts = tsRaw ? Number(tsRaw) : NaN;
                         if (Number.isFinite(ts) && ts > 0) {
-                            window.__daysOnDutyEarliestTs = ts;
                             const unit = getI18nText('metric.cursor_days_unit') || (currentLang === 'en' ? 'days' : '天');
-                            const tick = () => {
-                                try {
-                                    const t0 = window.__daysOnDutyEarliestTs;
-                                    if (!Number.isFinite(t0) || t0 <= 0) return;
-                                    const diff = Math.floor((Date.now() - t0) / (1000 * 60 * 60 * 24));
-                                    const days = Math.max(1, diff);
-                                    const nf2 = new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN');
-                                    el.textContent = `${nf2.format(days)} ${unit}`;
-                                } catch { /* ignore */ }
-                            };
-                            tick();
-                            if (!window.__daysOnDutyTimer) {
-                                // 每分钟刷新一次足够“实时”
-                                window.__daysOnDutyTimer = setInterval(tick, 60 * 1000);
-                            }
+                            const diff = Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24));
+                            const days = Math.max(1, diff);
+                            const nf2 = new Intl.NumberFormat(currentLang === 'en' ? 'en-US' : 'zh-CN');
+                            el.textContent = `${nf2.format(days)} ${unit}`;
                         }
                     }
                 } catch { /* ignore */ }
@@ -21853,18 +22277,35 @@
             // 加载维度排名数据资源
             await loadRankResources();
             
-            // 【并行加载】同时发起用户信息查询与全局榜单快照查询，减少首屏等待
+            // 【并行加载】用户数据 + 榜单 + 静默定位(my-ip) + 静态词云快照，减少首屏等待
+            var myIpCountry = '';
+            var staticHotlistJson = null;
+            var apiBaseForInit = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content) || '') || '';
+            if (apiBaseForInit && apiBaseForInit.endsWith('/')) apiBaseForInit = apiBaseForInit.slice(0, -1);
+            var myIpUrlForInit = apiBaseForInit ? (apiBaseForInit + '/api/v2/my-ip') : '/api/v2/my-ip';
+            var staticHotlistUrl = apiBaseForInit ? (apiBaseForInit + '/api/v2/static-hotlist') : '/api/v2/static-hotlist';
             let apiFailed = false;
             try {
                 var preloadLb = (typeof window.__fetchAllLeaderboardSnapshots === 'function') ? window.__fetchAllLeaderboardSnapshots() : Promise.resolve(null);
-                await Promise.all([
+                var myIpPromise = fetch(myIpUrlForInit).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+                var staticHotlistPromise = fetch(staticHotlistUrl).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+                var results = await Promise.all([
                     fetchData().catch(function(fetchError) {
                         apiFailed = true;
                         console.error('[Window.onload] ❌ fetchData 失败:', fetchError);
                         return undefined;
                     }),
-                    preloadLb.catch(function() { return null; })
+                    preloadLb.catch(function() { return null; }),
+                    myIpPromise,
+                    staticHotlistPromise
                 ]);
+                var myIpPayload = results[2];
+                if (myIpPayload && myIpPayload.country && /^[A-Z]{2}$/.test(String(myIpPayload.country).trim())) {
+                    myIpCountry = String(myIpPayload.country).trim().toUpperCase();
+                    if (myIpCountry === 'XX') myIpCountry = '';
+                }
+                staticHotlistJson = results[3] && typeof results[3] === 'object' ? results[3] : null;
+                if (staticHotlistJson) window.__staticVibeSnapshot = staticHotlistJson;
             } catch (e) {
                 apiFailed = true;
                 console.error('[Window.onload] ❌ 并行数据加载异常:', e);
@@ -21875,11 +22316,17 @@
                 showApiStatusWarning();
             }
             
-            // 【自动定位】基础数据加载完成后，自动识别国家并加载本国词云和大盘数据
-            // 优先级：1) localStorage（gate 选籍） 2) GitHub 用户 country_code/ip_location 3) API 返回的 IP 国家（cf-ipcountry）
+            // 【自动定位】静默初始化：localStorage → my-ip → lastData → currentUser → getUserLocation
             window.__allowInitCall = true;
             try {
                 var savedCC = (localStorage.getItem('user_country_fixed') || localStorage.getItem('user_selected_country') || localStorage.getItem('selected_country') || '').trim().toUpperCase();
+                
+                if (!savedCC && myIpCountry) {
+                    savedCC = myIpCountry;
+                    try { localStorage.setItem('user_country_fixed', savedCC); localStorage.setItem('selected_country', savedCC); } catch (e) {}
+                    console.log('[Stats2] 自动定位: 使用 my-ip', savedCC);
+                }
+                // 如果还没有国家代码，尝试从window.lastData获取
                 if (!savedCC && window.lastData && (window.lastData.ip_country || window.lastData.ipCountry)) {
                     var ipCc = String(window.lastData.ip_country || window.lastData.ipCountry || '').trim().toUpperCase();
                     if (ipCc && /^[A-Z]{2}$/.test(ipCc)) {
@@ -21888,6 +22335,8 @@
                         console.log('[Stats2] 自动定位: 使用 IP 国家', savedCC);
                     }
                 }
+                
+                // 如果还没有国家代码，尝试从window.currentUser获取
                 if (!savedCC && (window.currentUser || window.currentUserData)) {
                     var u = window.currentUser || window.currentUserData;
                     var uCc = (u.country_code || u.ip_location || u.manual_location || u.current_location || '').trim().toUpperCase();
@@ -21896,12 +22345,81 @@
                         console.log('[Stats2] 自动定位: 使用 GitHub 用户国家', savedCC);
                     }
                 }
+                
+                // 如果还没有国家代码，通过getUserLocation()获取
+                if (!savedCC || !/^[A-Z]{2}$/.test(savedCC)) {
+                    try {
+                        console.log('[Stats2] 🔍 通过getUserLocation()获取用户位置...');
+                        const location = await getUserLocation();
+                        if (location && location.countryCode && /^[A-Z]{2}$/.test(location.countryCode)) {
+                            savedCC = location.countryCode.toUpperCase();
+                            console.log('[Stats2] ✅ 通过getUserLocation()获取到国家代码:', savedCC);
+                            // 保存到localStorage
+                            try {
+                                localStorage.setItem('user_country_fixed', savedCC);
+                                localStorage.setItem('selected_country', savedCC);
+                            } catch (e) {}
+                        }
+                    } catch (e) {
+                        console.warn('[Stats2] ⚠️ getUserLocation()获取位置失败:', e);
+                    }
+                }
+                
+                // 如果有有效的国家代码，自动加载国家数据并打开右侧抽屉
                 if (savedCC && /^[A-Z]{2}$/.test(savedCC)) {
+                    console.log('[Stats2] 🚀 自动加载国家数据:', savedCC);
+                    try { window.__selectedCountry = savedCC; } catch (e) {}
+                    const countryName = (countryNameMap && countryNameMap[savedCC])
+                        ? (currentLang === 'zh' ? countryNameMap[savedCC].zh : countryNameMap[savedCC].en)
+                        : savedCC;
+                    if (currentDrawerCountry) {
+                        currentDrawerCountry.code = savedCC;
+                        currentDrawerCountry.name = countryName;
+                    }
+                    // 首屏立即调用 fetchCountryKeywords 渲染右侧抽屉
+                    var svc = window.StatsDataService;
+                    if (svc && typeof svc.fetchCountryKeywords === 'function') {
+                        svc.fetchCountryKeywords().catch(function() {});
+                    }
+                    // 切换到国家视图并打开右侧抽屉
                     switchView('country', savedCC);
+                    
+                    // 确保右侧抽屉打开
+                    setTimeout(() => {
+                        const rightDrawer = document.getElementById('right-drawer');
+                        if (rightDrawer && !rightDrawer.classList.contains('active')) {
+                            rightDrawer.classList.add('active');
+                            localStorage.setItem('right_drawer_open', 'true');
+                            console.log('[Stats2] ✅ 右侧抽屉已自动打开');
+                        }
+                        
+                        // 触发国家切换事件，确保数据加载
+                        if (typeof onCountrySwitch === 'function') {
+                            onCountrySwitch(savedCC, { 
+                                source: 'auto-init', 
+                                name: countryName,
+                                force: true 
+                            });
+                        }
+                        
+                        // 调用switchToCountryView确保数据完整加载
+                        if (typeof switchToCountryView === 'function') {
+                            switchToCountryView(savedCC, countryName, { forceRefresh: false });
+                        }
+                    }, 500);
                 } else {
+                    console.log('[Stats2] ℹ️ 未获取到有效的国家代码，切换到全球视图');
                     switchView('global');
                 }
-            } catch (e) { console.warn('[onload] switchView 初始化失败:', e); }
+            } catch (e) { 
+                console.warn('[onload] switchView 初始化失败:', e);
+                // 失败时默认切换到全球视图
+                try {
+                    switchView('global');
+                } catch (e2) {
+                    console.error('[onload] 切换到全球视图也失败:', e2);
+                }
+            }
             window.__allowInitCall = false;
             state.isInitialLayoutPending = false;
             isInitialLayoutPending = false; // 向后兼容
@@ -22738,7 +23256,7 @@
             if (items.length === 0) {
                 var ctx = canvas.getContext('2d');
                 if (ctx) ctx.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
-                if (empty) { empty.textContent = EMPTY_NATIONAL_CLOUD_TEXT; empty.classList.remove('hidden'); }
+                if (empty) { empty.textContent = EMPTY_PERSONAL_CLOUD_TEXT; empty.classList.remove('hidden'); }
                 if (meta) meta.textContent = '--';
                 return;
             }
@@ -22832,13 +23350,30 @@
                 var base = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content)) || '';
                 base = (base && base.trim()) ? (base.trim().endsWith('/') ? base.trim() : base.trim() + '/') : '';
                 var listToRender = null;
-                var archKw = (type === 'mantra_top' && window.__countryKeywordsByLevel) ? (window.__countryKeywordsByLevel.Architect || window.__countryKeywordsByLevel.globalNative) : null;
-                var archArr = Array.isArray(archKw) && archKw.length > 0 ? archKw.map(function(x) { return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; }).filter(function(x) { return x.phrase; }) : [];
+                // 【修复】优先从缓存中获取数据
                 var lexCached = window.__lexiconByType && window.__lexiconByType[type] && window.__lexiconByType[type].length > 0;
-                if (type === 'mantra_top' && archArr.length > 0) {
-                    listToRender = archArr;
-                } else if (lexCached) {
+                if (lexCached) {
                     listToRender = window.__lexiconByType[type];
+                } else if (window.__countryKeywordsByLevel) {
+                    // 【修复】如果缓存中没有，尝试从 __countryKeywordsByLevel 获取
+                    var kwData = null;
+                    if (type === 'merit_board') {
+                        kwData = window.__countryKeywordsByLevel.Professional || [];
+                    } else if (type === 'slang_list') {
+                        kwData = window.__countryKeywordsByLevel.Novice || [];
+                    } else if (type === 'mantra_top') {
+                        kwData = (window.__countryKeywordsByLevel.Architect && window.__countryKeywordsByLevel.Architect.length > 0) 
+                            ? window.__countryKeywordsByLevel.Architect 
+                            : (window.__countryKeywordsByLevel.globalNative || []);
+                    }
+                    if (Array.isArray(kwData) && kwData.length > 0) {
+                        listToRender = kwData.map(function(x) { 
+                            return { phrase: x.phrase || x.word || '', hit_count: Number(x.weight || x.count || 0) || 0 }; 
+                        }).filter(function(x) { return x.phrase; });
+                        // 同步到缓存
+                        if (!window.__lexiconByType) window.__lexiconByType = {};
+                        window.__lexiconByType[type] = listToRender;
+                    }
                 }
                 if (listToRender && listToRender.length > 0) {
                     if (typeof _renderTop10List === 'function') _renderTop10List(listToRender, true);
@@ -22874,38 +23409,59 @@
             });
         })();
 
+        // 本国词云：国家聚合三段位 Tab（右抽屉）
         (function bindNationalIdentityTabs() {
             if (document.body.dataset.nationalIdentityTabsBound) return;
             document.body.dataset.nationalIdentityTabsBound = '1';
-            window.__currentNationalIdentityLevel = window.__currentNationalIdentityLevel || 'Architect';
-            var colorByLevel = { Novice: '#10b981', Professional: '#3b82f6', Architect: '#5b21b6' };
+            // 默认与 UI 高亮一致：Novice
+            window.__currentNationalIdentityLevel = window.__currentNationalIdentityLevel || 'Novice';
+            // 用 capture 以绕过部分容器对 click 的 stopPropagation（否则右侧抽屉按钮会“无反应”）
             document.addEventListener('click', function(e) {
                 var btn = e.target && e.target.closest && e.target.closest('.national-identity-tab');
                 if (!btn) return;
-                var currentText = (btn.textContent || '').trim();
-                var level = (typeof levelMap !== 'undefined' && levelMap[currentText]) ? levelMap[currentText] : (btn.dataset.level || 'Architect');
+                var level = btn.dataset.level || 'Novice';
                 level = (level === 'Professional' || level === 'Architect') ? level : 'Novice';
                 window.__currentNationalIdentityLevel = level;
                 var tabsEl = btn.closest && btn.closest('#national-identity-tabs');
                 var all = tabsEl ? tabsEl.querySelectorAll('.national-identity-tab') : [btn];
                 all.forEach(function(b) {
-                    b.classList.remove('border-[var(--accent-terminal)]', 'bg-[var(--accent-terminal)]/20', 'text-[var(--accent-terminal)]');
+                    b.classList.remove('border-white/20', 'bg-[var(--accent-terminal)]/20', 'text-[var(--accent-terminal)]', 'font-medium');
                     b.classList.add('border-white/10', 'bg-transparent', 'text-zinc-400');
                 });
                 btn.classList.remove('border-white/10', 'bg-transparent', 'text-zinc-400');
-                btn.classList.add('border-white/20');
-                var hex = colorByLevel[level] || '#10b981';
-                btn.style.borderColor = hex;
-                btn.style.backgroundColor = hex + '26';
-                btn.style.color = hex;
-                var cloudLoadingHint = document.getElementById('cloud-loading-hint');
-                if (cloudLoadingHint) { cloudLoadingHint.classList.add('hidden'); cloudLoadingHint.textContent = ''; }
-                var render = window._renderNationalIdentityCloud || (typeof _renderNationalIdentityCloud === 'function' ? _renderNationalIdentityCloud : null);
+                btn.classList.add('border-white/20', 'bg-[var(--accent-terminal)]/20', 'text-[var(--accent-terminal)]', 'font-medium');
+                var render = window._renderNationalIdentityCloud ||
+                    (window.StatsUIRenderer && window.StatsUIRenderer._renderNationalIdentityCloud) ||
+                    (typeof _renderNationalIdentityCloud === 'function' ? _renderNationalIdentityCloud : null);
                 if (render) render(level);
-            });
+            }, true);
         })();
 
-        // 左侧「本人词云」：只读 localStorage.last_analysis_data，使用独立 DOM id，避免与国家词云互相覆盖
+        // 尽早预渲染本国词云（右抽屉国家视图）
+        (function autoPreloadNationalIdentityCloud() {
+            if (window.__nationalIdentityCloudPreloaded) return;
+            window.__nationalIdentityCloudPreloaded = true;
+            function tryRender() {
+                var wrap = document.getElementById('national-wordcloud-wrap') || document.getElementById('vibe-cloud50-container');
+                if (!wrap) return;
+                var activeBtn = document.querySelector('#national-identity-tabs .national-identity-tab.border-white\\/20') ||
+                    document.querySelector('#national-identity-tabs .national-identity-tab.bg-\\[var\\(--accent-terminal\\)\\]\\/20');
+                var level = (activeBtn && activeBtn.dataset && activeBtn.dataset.level) || window.__currentNationalIdentityLevel || 'Novice';
+                level = (level === 'Professional' || level === 'Architect') ? level : 'Novice';
+                window.__currentNationalIdentityLevel = level;
+                var render = window._renderNationalIdentityCloud ||
+                    (window.StatsUIRenderer && window.StatsUIRenderer._renderNationalIdentityCloud) ||
+                    (typeof _renderNationalIdentityCloud === 'function' ? _renderNationalIdentityCloud : null);
+                if (render) render(level);
+            }
+            if (document.readyState === 'complete' || document.readyState === 'interactive') {
+                setTimeout(tryRender, 200);
+            } else {
+                document.addEventListener('DOMContentLoaded', function() { setTimeout(tryRender, 200); });
+            }
+            window.addEventListener('countryviewshown', function() { setTimeout(tryRender, 120); });
+        })();
+
         (function bindPersonalIdentityTabs() {
             if (document.body.dataset.personalIdentityTabsBound) return;
             document.body.dataset.personalIdentityTabsBound = '1';
@@ -22940,23 +23496,11 @@
          * 【修复】自动预加载本国词云数据
          * 确保在页面加载、左抽屉打开或切换到国家视图时，自动同步国家并获取/渲染词云数据
          */
-        (function autoPreloadNationalCloud() {
+        (function autoPreloadPersonalCloud() {
             // 避免重复预加载
-            if (window.__nationalCloudPreloaded) return;
-            window.__nationalCloudPreloaded = true;
-            
-            // 默认使用 Architect（霸天）级别
-            window.__currentNationalIdentityLevel = window.__currentNationalIdentityLevel || 'Architect';
-            
-            function syncSelectedCountryForCloud() {
-                try {
-                    if (window.__selectedCountry && /^[A-Z]{2}$/.test(String(window.__selectedCountry))) return;
-                    if (window.currentDrawerCountry && window.currentDrawerCountry.code)
-                        window.__selectedCountry = String(window.currentDrawerCountry.code).trim().toUpperCase();
-                    if (!window.__selectedCountry)
-                        window.__selectedCountry = (localStorage.getItem('user_selected_country') || localStorage.getItem('user_manual_location') || '').trim().toUpperCase();
-                } catch (e) {}
-            }
+            if (window.__personalCloudPreloaded) return;
+            window.__personalCloudPreloaded = true;
+             
             function updateLeftDrawerCountryHint(region) {
                 var hint = document.getElementById('vibe-country-hint');
                 if (!hint || !region || !/^[A-Z]{2}$/.test(region)) return;
@@ -22968,62 +23512,18 @@
                     hint.textContent = (prefix || '国家') + ': ' + label;
                 } catch (e) { hint.textContent = '国家: ' + region; }
             }
-            
+             
             function tryPreload() {
-                syncSelectedCountryForCloud();
-                var svc = window.StatsDataService;
-                var defaultLevel = window.__currentNationalIdentityLevel || 'Architect';
-                var localNovice = getLocalIdentityCloudByLevel('Novice');
+                var defaultLevel = window.__currentPersonalIdentityLevel || 'Novice';
+                var localNovice = getPersonalIdentityCloudByLevel('Novice');
                 if (Array.isArray(localNovice) && localNovice.length > 0) {
-                    window.__currentNationalIdentityLevel = 'Novice';
-                    var preloadRender = window._renderNationalIdentityCloud ||
-                        (typeof _renderNationalIdentityCloud === 'function' ? _renderNationalIdentityCloud : null);
-                    if (preloadRender) preloadRender('Novice');
-                    return;
+                    defaultLevel = 'Novice';
+                    window.__currentPersonalIdentityLevel = 'Novice';
                 }
-                if (isLocalOnlyNationalCloudMode()) {
-                    var localOnlyRender = window._renderNationalIdentityCloud ||
-                        (typeof _renderNationalIdentityCloud === 'function' ? _renderNationalIdentityCloud : null);
-                    if (localOnlyRender) localOnlyRender(defaultLevel);
-                    return;
-                }
-                
-                // 检查是否已经有数据
-                if (window.__countryKeywordsByLevel && 
-                    (window.__countryKeywordsByLevel[defaultLevel] || []).length > 0) {
-                    var render = window._renderNationalIdentityCloud || 
-                        (typeof _renderNationalIdentityCloud === 'function' ? _renderNationalIdentityCloud : null);
-                    if (render) {
-                        render(defaultLevel);
-                        updateLeftDrawerCountryHint(window.__selectedCountry);
-                    }
-                    return;
-                }
-                
-                if (svc && typeof svc.fetchCountryKeywords === 'function') {
-                    var empty = document.getElementById('vibe-cloud50-empty');
-                    if (empty) {
-                        empty.textContent = isLocalOnlyNationalCloudMode() ? EMPTY_NATIONAL_CLOUD_TEXT : '正在扫描该国开发者指纹...';
-                        empty.classList.remove('hidden');
-                    }
-                    
-                    svc.fetchCountryKeywords().then(function() {
-                        var render = window._renderNationalIdentityCloud || 
-                            (typeof _renderNationalIdentityCloud === 'function' ? _renderNationalIdentityCloud : null);
-                        if (render) {
-                            render(defaultLevel);
-                            updateLeftDrawerCountryHint(window.__selectedCountry);
-                        }
-                    }).catch(function(err) {
-                        if (err && err.name === 'AbortError') return;
-                        console.warn('[autoPreloadNationalCloud] 预加载词云数据失败:', err);
-                        empty = document.getElementById('vibe-cloud50-empty');
-                        if (empty) {
-                            empty.textContent = EMPTY_NATIONAL_CLOUD_TEXT;
-                            empty.classList.remove('hidden');
-                        }
-                    });
-                }
+                var render = window._renderPersonalIdentityCloud ||
+                    (typeof _renderPersonalIdentityCloud === 'function' ? _renderPersonalIdentityCloud : null);
+                if (render) render(defaultLevel);
+                updateLeftDrawerCountryHint(window.__selectedCountry);
             }
             
             if (document.readyState === 'complete' || document.readyState === 'interactive') {
@@ -23050,38 +23550,7 @@
                 });
                 obs.observe(leftDrawerEl, { attributes: true });
             }
-            window.__tryPreloadNationalCloud = tryPreload;
-        })();
-
-        (function autoPreloadPersonalCloud() {
-            if (window.__personalCloudPreloaded) return;
-            window.__personalCloudPreloaded = true;
-            function tryPreload() {
-                var defaultLevel = window.__currentPersonalIdentityLevel || 'Novice';
-                var localNovice = getLocalIdentityCloudByLevel('Novice');
-                if (Array.isArray(localNovice) && localNovice.length > 0) {
-                    defaultLevel = 'Novice';
-                    window.__currentPersonalIdentityLevel = 'Novice';
-                }
-                var render = window._renderPersonalIdentityCloud || (typeof _renderPersonalIdentityCloud === 'function' ? _renderPersonalIdentityCloud : null);
-                if (render) render(defaultLevel);
-            }
-            if (document.readyState === 'complete' || document.readyState === 'interactive') {
-                setTimeout(tryPreload, 250);
-            } else {
-                document.addEventListener('DOMContentLoaded', function() { setTimeout(tryPreload, 250); });
-            }
-            var leftDrawerEl = document.getElementById('left-drawer');
-            if (leftDrawerEl) {
-                var obs = new MutationObserver(function(mutations) {
-                    mutations.forEach(function(m) {
-                        if (m.attributeName === 'class' && leftDrawerEl.classList.contains('active')) {
-                            setTimeout(tryPreload, 150);
-                        }
-                    });
-                });
-                obs.observe(leftDrawerEl, { attributes: true });
-            }
+            window.__tryPreloadPersonalCloud = tryPreload;
         })();
 
         function _hexToRgba(hex, alpha) {
@@ -23091,141 +23560,50 @@
         }
 
         var LEVEL_TO_KEY_WC = { Novice: 'Novice', Professional: 'Professional', Architect: 'Architect', Pro: 'Professional', novice: 'Novice', pro: 'Professional', architect: 'Architect' };
-        var LEVEL_TO_CANVAS_ID_WC = { Novice: 'canvas-novice', Professional: 'canvas-pro', Architect: 'canvas-arch' };
-        function _renderNationalIdentityCloud(level) {
+        // 本人词云使用单 canvas，避免标签切换时的 canvas 竞态
+        var PERSONAL_CLOUD_CANVAS_ID = 'personal-identity-cloud-canvas';
+        function _renderPersonalIdentityCloud(level) {
+            window.__personalCloudRenderSeq = (window.__personalCloudRenderSeq || 0) + 1;
+            var renderSeq = window.__personalCloudRenderSeq;
             var levelKey = LEVEL_TO_KEY_WC[level] || (level === 'Professional' || level === 'Architect' ? level : 'Novice');
-            var cloudLoadingHint = document.getElementById('cloud-loading-hint');
+            var cloudLoadingHint = document.getElementById('personal-cloud-loading-hint');
             if (cloudLoadingHint) { cloudLoadingHint.classList.add('hidden'); cloudLoadingHint.textContent = ''; }
-            var container = document.getElementById('vibe-cloud50-container');
-            var canvasId = LEVEL_TO_CANVAS_ID_WC[levelKey] || 'canvas-novice';
-            var canvas = document.getElementById(canvasId);
-            if (!canvas) canvas = document.getElementById('national-identity-cloud-canvas');
+            var container = document.getElementById('personal-cloud-container');
+            var canvas = document.getElementById(PERSONAL_CLOUD_CANVAS_ID);
             if (!container) return;
-            var wcSkeleton = document.getElementById('stats2-wc-skeleton');
+            var wcSkeleton = document.getElementById('stats2-personal-wc-skeleton');
             if (!canvas) {
                 canvas = document.createElement('canvas');
-                canvas.id = canvasId;
+                canvas.id = PERSONAL_CLOUD_CANVAS_ID;
                 canvas.setAttribute('data-level', levelKey);
                 canvas.setAttribute('style', 'display:block;width:100%;height:100%');
                 container.appendChild(canvas);
             }
+            try { canvas.style.display = 'block'; canvas.setAttribute('aria-hidden', 'false'); } catch (_) {}
             if (wcSkeleton) { wcSkeleton.classList.add('stats2-skeleton-hidden'); wcSkeleton.setAttribute('aria-hidden', 'true'); }
-            // 【强制清理旧 Canvas】每次绘制前清空所有词云 canvas，防止多层叠加以致性能下降
-            ['canvas-novice', 'canvas-pro', 'canvas-arch', 'national-identity-cloud-canvas'].forEach(function(id) {
-                var el = document.getElementById(id);
-                if (el && el.getContext) {
-                    var c = el.getContext('2d');
-                    if (c) c.clearRect(0, 0, el.width || 0, el.height || 0);
+            // 清理当前 canvas
+            try {
+                if (canvas.getContext) {
+                    var ctxClear = canvas.getContext('2d');
+                    if (ctxClear) ctxClear.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
                 }
-            });
-            ['canvas-novice', 'canvas-pro', 'canvas-arch'].forEach(function(id) {
-                var el = document.getElementById(id);
-                if (el) { el.style.display = id === canvasId ? 'block' : 'none'; el.setAttribute('aria-hidden', id === canvasId ? 'false' : 'true'); }
-            });
-            var empty = document.getElementById('vibe-cloud50-empty');
-            var meta = document.getElementById('vibe-cloud50-meta');
+            } catch (_) {}
+            var empty = document.getElementById('personal-cloud-empty');
+            var meta = document.getElementById('personal-cloud-meta');
             
-            var isLeftDrawerCloud = !!(container && container.closest && container.closest('#left-drawer'));
-            var nationalSnapshot = (window.__nationalCloudData && typeof window.__nationalCloudData === 'object')
-                ? window.__nationalCloudData
-                : window.__countryKeywordsByLevel;
-            var localData = getLocalIdentityCloudByLevel(levelKey);
-            var nationalData = (nationalSnapshot && nationalSnapshot[levelKey]) ? nationalSnapshot[levelKey] : [];
-            // 左侧本人词云：只使用本地数据，禁止回退国家数据源
-            // 右侧国家词云：优先国家数据源，可回退本地（仅用于极端情况下的占位）
-            var data = isLeftDrawerCloud ? localData : nationalData;
-            if (!isLeftDrawerCloud && (!Array.isArray(data) || data.length === 0)) data = localData;
+            var data = getPersonalIdentityCloudByLevel(levelKey);
             if (!Array.isArray(data)) data = [];
             var currentCountry = window.__selectedCountry || localStorage.getItem('user_selected_country') || localStorage.getItem('user_manual_location') || 'UNKNOWN';
-            console.log('[NationalCloud] 渲染本国词云 - 国家:', currentCountry, '等级:', levelKey, '场景:', isLeftDrawerCloud ? 'left-local-first' : 'right-national-first', '数据源:', Array.isArray(data) && data.length > 0 ? (isLeftDrawerCloud ? 'local' : 'national') : 'empty');
+            console.log('[PersonalCloud] 渲染本人词云 - 国家:', currentCountry, '等级:', levelKey, '数据源: index/local', '条数:', data.length);
             if (data.length === 0) {
-                if (isLeftDrawerCloud || isLocalOnlyNationalCloudMode()) {
-                    if (canvas.getContext) {
-                        var ctxLocalOnly = canvas.getContext('2d');
-                        if (ctxLocalOnly) ctxLocalOnly.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
-                    }
-                    if (meta) meta.textContent = '--';
-                    if (empty) {
-                        empty.textContent = EMPTY_NATIONAL_CLOUD_TEXT;
-                        empty.classList.remove('hidden');
-                    }
-                    return;
-                }
-                window.__nationalCloudReadyCallbacks = window.__nationalCloudReadyCallbacks || [];
-                window.__nationalCloudReadyCallbacks.push(function() { _renderNationalIdentityCloud(level); });
-                // 【Professional 隔离】当 level 为 Professional 时，仅允许使用 __countryKeywordsByLevel.Professional；空则显示「正在潜伏」，严禁回退到用户 Index 词云或自动拉取
-                if (levelKey === 'Professional') {
-                    if (canvas.getContext) {
-                        var ctxPro = canvas.getContext('2d');
-                        if (ctxPro) ctxPro.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
-                    }
-                    if (meta) meta.textContent = '--';
-                    if (empty) {
-                        empty.textContent = '正在潜伏';
-                        empty.classList.remove('hidden');
-                    }
-                    return;
-                }
-                // 非 Professional：数据为空时尝试自动获取（限制重试次数）
-                window.__cloudRetryCount = (window.__cloudRetryCount || 0);
-                var svc = window.StatsDataService;
-                if (svc && typeof svc.fetchCountryKeywords === 'function' && !window.__isCloudLoading && window.__cloudRetryCount < 2) {
-                    window.__cloudRetryCount++;
-                    if (empty) {
-                        empty.textContent = isLocalOnlyNationalCloudMode() ? EMPTY_NATIONAL_CLOUD_TEXT : '正在扫描该国开发者指纹...';
-                        empty.classList.remove('hidden');
-                    }
-                    svc.fetchCountryKeywords().then(function(result) {
-                        var hasData = result && (
-                            (result.Novice && result.Novice.length > 0) ||
-                            (result.Professional && result.Professional.length > 0) ||
-                            (result.Architect && result.Architect.length > 0) ||
-                            (result.globalNative && result.globalNative.length > 0)
-                        );
-                        if (hasData) {
-                            window.__cloudRetryCount = 0;
-                            _renderNationalIdentityCloud(level);
-                            flushNationalCloudReadyCallbacks();
-                        } else if (window.__cloudRetryCount < 2) {
-                            if (empty) {
-                                empty.textContent = '正在同步词库...';
-                                empty.classList.remove('hidden');
-                            }
-                            setTimeout(function() {
-                                _renderNationalIdentityCloud(level);
-                            }, 800);
-                        } else {
-                            if (empty) {
-                                empty.textContent = EMPTY_NATIONAL_CLOUD_TEXT;
-                                empty.classList.remove('hidden');
-                            }
-                        }
-                    }).catch(function(err) {
-                        console.warn('[_renderNationalIdentityCloud] 获取词云数据失败:', err);
-                        if (window.__cloudRetryCount < 2) {
-                            if (empty) {
-                                empty.textContent = '加载失败，重试中...';
-                                empty.classList.remove('hidden');
-                            }
-                            setTimeout(function() {
-                                _renderNationalIdentityCloud(level);
-                            }, 1500);
-                        } else {
-                            if (empty) {
-                                empty.textContent = EMPTY_NATIONAL_CLOUD_TEXT;
-                                empty.classList.remove('hidden');
-                            }
-                        }
-                    });
-                    return;
-                }
+                if (renderSeq !== window.__personalCloudRenderSeq) return;
                 if (canvas.getContext) {
                     var ctx = canvas.getContext('2d');
                     if (ctx) ctx.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
                 }
                 if (meta) meta.textContent = '--';
                 if (empty) {
-                    empty.textContent = EMPTY_NATIONAL_CLOUD_TEXT;
+                    empty.textContent = EMPTY_PERSONAL_CLOUD_TEXT;
                     empty.classList.remove('hidden');
                 }
                 return;
@@ -23275,12 +23653,20 @@
             }).filter(function(item) { return item[0].length > 0 && item[1] >= 0; });
             if (list.length === 0) return;
             var isLeftDrawer = container.closest && container.closest('#left-drawer');
-            var doDraw = function() {
+            var doDraw = function(retryCount) {
+            if (renderSeq !== window.__personalCloudRenderSeq) return;
             var width = container.offsetWidth || 0;
             var height = container.offsetHeight || 0;
             if (width <= 0 || height <= 0) {
+                if ((retryCount || 0) >= 4) {
+                    if (empty) {
+                        empty.textContent = EMPTY_PERSONAL_CLOUD_TEXT;
+                        empty.classList.remove('hidden');
+                    }
+                    return;
+                }
                 requestAnimationFrame(function() {
-                    if (typeof _renderNationalIdentityCloud === 'function') _renderNationalIdentityCloud(level);
+                    doDraw((retryCount || 0) + 1);
                 });
                 return;
             }
@@ -23290,12 +23676,13 @@
             if (ctx) ctx.clearRect(0, 0, width, height);
                 if (typeof WordCloud === 'undefined') {
                 if (empty) {
-                    empty.textContent = EMPTY_NATIONAL_CLOUD_TEXT;
+                    empty.textContent = EMPTY_PERSONAL_CLOUD_TEXT;
                     empty.classList.remove('hidden');
                 }
                 return;
             }
             try {
+                if (renderSeq !== window.__personalCloudRenderSeq) return;
                 var wordToRatio = {};
                 var wordToHighlight = {};
                 list.forEach(function(item, i) {
@@ -23343,7 +23730,7 @@
             } catch (err) {
                 console.warn('[WordCloud] 本国词云渲染失败:', err);
                 if (empty) {
-                    empty.textContent = EMPTY_NATIONAL_CLOUD_TEXT;
+                    empty.textContent = EMPTY_PERSONAL_CLOUD_TEXT;
                     empty.classList.remove('hidden');
                 }
                 if (ctx) {
@@ -23354,7 +23741,7 @@
                 }
             }
             };
-            if (isLeftDrawer) setTimeout(doDraw, 300); else doDraw();
+            if (isLeftDrawer) requestAnimationFrame(function() { doDraw(0); }); else doDraw(0);
         }
 
         function _renderCloud50(region, list) {
@@ -23365,7 +23752,7 @@
             if (typeof echarts === 'undefined') {
                 if (meta) meta.textContent = 'ECharts missing';
                 if (empty) {
-                    empty.textContent = EMPTY_NATIONAL_CLOUD_TEXT;
+                    empty.textContent = EMPTY_PERSONAL_CLOUD_TEXT;
                     empty.classList.remove('hidden');
                 }
                 return;
@@ -23572,19 +23959,30 @@
             var canvas = document.getElementById('national-identity-cloud-canvas');
             if (canvas && canvas.getContext) { try { canvas.getContext('2d').clearRect(0, 0, canvas.width || 0, canvas.height || 0); } catch (_) {} }
             if (empty) {
-                empty.textContent = isLocalOnlyNationalCloudMode() ? EMPTY_NATIONAL_CLOUD_TEXT : '正在扫描该国开发者指纹...';
+                empty.textContent = EMPTY_PERSONAL_CLOUD_TEXT;
                 empty.classList.remove('hidden');
             }
             
-            // 【性能优化】并行请求 keywords 和 top10 数据
+            // 【性能优化】并行请求 keywords 和 top10 数据；词云优先 static-hotlist（纯 KV），再 stats/keywords
             var API_ENDPOINT = _getApiEndpoint();
             try { vibeCloudAbort && vibeCloudAbort.abort && vibeCloudAbort.abort(); } catch { /* ignore */ }
             vibeCloudAbort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
             
-            const fetchKeywords = fetch(
-                API_ENDPOINT + 'api/v2/stats/keywords?region=' + encodeURIComponent(region) + '&_t=' + Date.now(), 
-                { cache: 'no-store', signal: vibeCloudAbort ? vibeCloudAbort.signal : undefined }
-            ).then(r => r.ok ? r.json() : null).catch(() => null);
+            const fetchKeywords = (async function() {
+                // 统一走 StatsDataService.fetchCountryKeywords：优先本地快照(window.__staticVibeSnapshot)→远程 KV 镜像(static-hotlist)→兜底
+                try {
+                    if (window.StatsDataService && typeof window.StatsDataService.fetchCountryKeywords === 'function') {
+                        return window.StatsDataService.fetchCountryKeywords(region, { forceRefresh: !!opts.forceRefresh });
+                    }
+                } catch (e) {}
+                try {
+                    var staticUrl = API_ENDPOINT + 'api/v2/static-hotlist?country=' + encodeURIComponent(region) + (opts.forceRefresh ? ('&_t=' + Date.now()) : '');
+                    var staticRes = await fetch(staticUrl, { cache: opts.forceRefresh ? 'no-store' : 'force-cache', signal: vibeCloudAbort ? vibeCloudAbort.signal : undefined });
+                    if (staticRes.ok) return await staticRes.json();
+                } catch (e2) {}
+                var r = await fetch(API_ENDPOINT + 'api/v2/stats/keywords?region=' + encodeURIComponent(region) + '&_t=' + Date.now(), { cache: 'no-store', signal: vibeCloudAbort ? vibeCloudAbort.signal : undefined });
+                return r.ok ? r.json() : null;
+            })();
             
             const fetchTop10 = (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function')
                 ? (typeof getCachedOrFetch === 'function' && typeof VIBE_COUNTRY_RPC_CACHE_TTL_MS !== 'undefined'
@@ -23604,16 +24002,13 @@
             
             // 处理词云数据
             var kwPayload = (kwResult && kwResult.data) ? kwResult.data : kwResult;
-            var adapt = (window.StatsDataService && window.StatsDataService.adaptCloudData) ? window.StatsDataService.adaptCloudData : function(arr) { return Array.isArray(arr) ? arr : []; };
-            
-            if (kwPayload && typeof kwPayload === 'object') {
-                var cloudData = kwPayload.identityLevelCloud || kwPayload;
-                window.__countryKeywordsByLevel = {
-                    Novice: adapt(cloudData.Novice || []),
-                    Professional: adapt(cloudData.Professional || []),
-                    Architect: adapt(cloudData.Architect || []),
-                    globalNative: adapt(cloudData.globalNative || cloudData.native || [])
-                };
+            // kwPayload 可能是 fetchCountryKeywords 的标准结构，也可能是原始接口 payload；此处只做最小兼容
+            if (kwPayload && typeof kwPayload === 'object' && (kwPayload.Novice || kwPayload.Professional || kwPayload.Architect || kwPayload.identityLevelCloud)) {
+                if (kwPayload.identityLevelCloud && window.StatsDataService && typeof window.StatsDataService.buildCountryKeywordsByLevel === 'function') {
+                    window.__countryKeywordsByLevel = window.StatsDataService.buildCountryKeywordsByLevel(kwPayload.identityLevelCloud, kwPayload.representativeWords || null, null);
+                } else {
+                    window.__countryKeywordsByLevel = kwPayload;
+                }
                 window.__nationalCloudData = window.__countryKeywordsByLevel;
                 if (typeof _syncLexiconFromKeywords === 'function') _syncLexiconFromKeywords();
             } else {
@@ -23674,7 +24069,7 @@
                         (window.__countryKeywordsByLevel.globalNative || []).length;
             }
             if (empty && total > 0) empty.classList.add('hidden');
-            if (total === 0 && empty) { empty.textContent = EMPTY_NATIONAL_CLOUD_TEXT; empty.classList.remove('hidden'); }
+            if (total === 0 && empty) { empty.textContent = EMPTY_PERSONAL_CLOUD_TEXT; empty.classList.remove('hidden'); }
             
             // 渲染 Top10
             if (typeof _renderTop10List === 'function') _renderTop10List(top10Data);
@@ -23710,7 +24105,7 @@
                         (window.__countryKeywordsByLevel.globalNative || []).length;
             }
             if (empty && total > 0) empty.classList.add('hidden');
-            if (total === 0 && empty) { empty.textContent = EMPTY_NATIONAL_CLOUD_TEXT; empty.classList.remove('hidden'); }
+            if (total === 0 && empty) { empty.textContent = EMPTY_PERSONAL_CLOUD_TEXT; empty.classList.remove('hidden'); }
             
             if (!cached.countryKeywordsByLevel && typeof _renderTop10List === 'function') _renderTop10List(cached.top10Data || []);
         }
@@ -25082,6 +25477,16 @@
         // 监听 storage 事件，当其他页面更新 localStorage 时自动刷新
         window.addEventListener('storage', (e) => {
             if (isInitialLayoutPending) return;
+            if (e.key === PERSONAL_CLOUD_STORAGE_KEY) {
+                try { window.__personalIdentityLevelCloudCache = null; } catch (_) {}
+                try {
+                    var left = document.getElementById('left-drawer');
+                    if (left && left.classList && left.classList.contains('active')) {
+                        var render = window._renderPersonalIdentityCloud || (typeof _renderPersonalIdentityCloud === 'function' ? _renderPersonalIdentityCloud : null);
+                        if (render) render(window.__currentPersonalIdentityLevel || 'Novice');
+                    }
+                } catch (_) {}
+            }
             if (e.key === 'user_fingerprint' || e.key === 'github_username') {
                 console.log('[Storage] 🔔 检测到 localStorage 变化，触发数据刷新');
                 setTimeout(() => {
@@ -25094,98 +25499,8 @@
         window.addEventListener('beforeunload', () => {
             stopRealtimeListener();
         });
-
-
-    // ============================
-    // 左侧本人词云（本地 only）
-    // ============================
-    function _renderPersonalIdentityCloud(level) {
-        window.__personalCloudRenderSeq = (window.__personalCloudRenderSeq || 0) + 1;
-        var renderSeq = window.__personalCloudRenderSeq;
-        var levelKey = (level === 'Professional' || level === 'Architect') ? level : 'Novice';
-
-        var container = document.getElementById('personal-cloud-container');
-        if (!container) return;
-        var canvas = document.getElementById('personal-identity-cloud-canvas');
-        if (!canvas) {
-            canvas = document.createElement('canvas');
-            canvas.id = 'personal-identity-cloud-canvas';
-            canvas.setAttribute('style', 'display:block;width:100%;height:100%');
-            container.appendChild(canvas);
-        }
-        var empty = document.getElementById('personal-cloud-empty');
-        var meta = document.getElementById('personal-cloud-meta');
-        var wcSkeleton = document.getElementById('stats2-wc-skeleton');
-        if (wcSkeleton) { wcSkeleton.classList.add('stats2-skeleton-hidden'); wcSkeleton.setAttribute('aria-hidden', 'true'); }
-
-        var data = getLocalIdentityCloudByLevel(levelKey);
-        if (!Array.isArray(data)) data = [];
-        if (data.length === 0) {
-            if (canvas.getContext) {
-                var ctx0 = canvas.getContext('2d');
-                if (ctx0) ctx0.clearRect(0, 0, canvas.width || 0, canvas.height || 0);
-            }
-            if (meta) meta.textContent = '--';
-            if (empty) { empty.textContent = EMPTY_NATIONAL_CLOUD_TEXT; empty.classList.remove('hidden'); }
-            return;
-        }
-        if (empty) empty.classList.add('hidden');
-        if (meta) meta.textContent = 'N=' + data.length;
-
-        var colorByLevel = { Novice: '#10b981', Professional: '#3b82f6', Architect: '#5b21b6' };
-        var baseHex = colorByLevel[levelKey] || '#10b981';
-        var normalized = data.map(function(x) {
-            var phrase = (x.phrase != null ? String(x.phrase) : (x.word != null ? String(x.word) : '')).trim();
-            var weight = Number(x.weight != null ? x.weight : (x.count != null ? x.count : 0)) || 0;
-            return { phrase: phrase, weight: weight, scaleWeight: 1 };
-        }).filter(function(x) { return x.phrase.length > 0; });
-        var maxW = Math.max.apply(null, normalized.map(function(x) { return x.weight; })) || 1;
-        var list = normalized.map(function(x) {
-            var baseSize = Math.max(12, Math.min(80, 10 + Math.log2(x.weight + 1) * 14));
-            var size = Math.round(baseSize * (x.scaleWeight || 1));
-            size = Math.max(12, Math.min(80, size));
-            return [x.phrase, size];
-        }).filter(function(item) { return item[0].length > 0 && item[1] >= 0; });
-        if (list.length === 0) return;
-
-        var doDraw = function(retryCount) {
-            if (renderSeq !== window.__personalCloudRenderSeq) return;
-            var width = container.offsetWidth || 0;
-            var height = container.offsetHeight || 0;
-            if (width <= 0 || height <= 0) {
-                if ((retryCount || 0) >= 4) return;
-                requestAnimationFrame(function() { doDraw((retryCount || 0) + 1); });
-                return;
-            }
-            canvas.width = width;
-            canvas.height = height;
-            var ctx = canvas.getContext('2d');
-            if (ctx) ctx.clearRect(0, 0, width, height);
-            if (typeof WordCloud === 'undefined') {
-                if (empty) { empty.textContent = EMPTY_NATIONAL_CLOUD_TEXT; empty.classList.remove('hidden'); }
-                return;
-            }
-            try {
-                WordCloud(canvas, {
-                    list: list,
-                    gridSize: 6,
-                    weightFactor: function(size) { return Math.max(12, Math.min(80, size)); },
-                    fontFamily: '\"Microsoft YaHei\", \"微软雅黑\", SimHei, sans-serif',
-                    color: function() { return baseHex; },
-                    rotateRatio: 0.6,
-                    backgroundColor: 'transparent',
-                    minSize: 12,
-                    drawOutOfBound: false,
-                    shrinkToFit: false,
-                    ellipticity: 0.8
-                });
-            } catch (_) {
-                if (empty) { empty.textContent = EMPTY_NATIONAL_CLOUD_TEXT; empty.classList.remove('hidden'); }
-            }
-        };
-        requestAnimationFrame(function() { doDraw(0); });
-    }
-
+    
+    
     // ============================================
     // 函数暴露优化：确保所有 onclick 调用的函数显式挂载（优先级最高）
     // ============================================
@@ -25202,6 +25517,9 @@
         };
         window._renderNationalIdentityCloud = window.StatsUIRenderer._renderNationalIdentityCloud;
         window.initWordCloud = window.StatsUIRenderer.initWordCloud;
+    }
+    if (typeof _renderPersonalIdentityCloud !== 'undefined') {
+        window._renderPersonalIdentityCloud = _renderPersonalIdentityCloud;
     }
     if (typeof updateCountryDashboard !== 'undefined') {
         window.updateCountryDashboard = updateCountryDashboard;
@@ -25223,9 +25541,6 @@
     }
     if (typeof _renderNationalIdentityCloud !== 'undefined' && !window.StatsUIRenderer) {
         window._renderNationalIdentityCloud = _renderNationalIdentityCloud;
-    }
-    if (typeof _renderPersonalIdentityCloud !== 'undefined') {
-        window._renderPersonalIdentityCloud = _renderPersonalIdentityCloud;
     }
     
     console.log('[IIFE] 全局函数暴露完成');
@@ -25426,10 +25741,7 @@ document.addEventListener('click', function(e) {
                             } else {
                                 renderUserStatsCards(leftBody, merged);
                             }
-                            setTimeout(function() {
-                                if (typeof window.refreshUserStats === 'function') window.refreshUserStats().catch(function(err) { console.warn('[GitHub Sync] refreshUserStats:', err); });
-                                if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard(); else if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
-                            }, 1500);
+                            if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard(); else if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
                             // 若查出的 github_login 为空且本地有 token，自动触发 Worker 同步以初始化 github_login
                             var accessTokenForSync = (window.__githubAccessToken && window.__githubAccessToken.trim()) || (typeof localStorage !== 'undefined' && localStorage.getItem('github_token')) || '';
                             accessTokenForSync = accessTokenForSync.trim();
@@ -25476,10 +25788,7 @@ document.addEventListener('click', function(e) {
                                                 renderUserStatsCards(leftBody, typeof getBestUserRecordForStats === 'function' ? getBestUserRecordForStats(m2) : m2);
                                             }
                                         });
-                                        setTimeout(function() {
-                                            if (typeof window.refreshUserStats === 'function') window.refreshUserStats().catch(function(err) { console.warn('[GitHub Sync] refreshUserStats:', err); });
-                                            if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard(); else if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
-                                        }, 1500);
+                                        if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard(); else if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
                                     }
                                 }).catch(function(err) { console.warn('[GitHub Sync] inner sync:', err); });
                                 }
