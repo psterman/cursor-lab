@@ -3896,6 +3896,33 @@ app.post('/api/v2/update_location', async (c) => {
   }
 });
 
+/** KV 键：国家排行榜静态快照，key: static_leaderboard_${CC}，由 Cron 写入 */
+const KV_KEY_STATIC_LEADERBOARD_PREFIX = 'static_leaderboard_';
+
+/**
+ * GET /api/v2/static-leaderboard?country=CC
+ * 静态快照接口：仅读 KV，配合静态化方案；未命中返回空 topByMetrics，前端显示「本国英雄榜点亮中...」
+ */
+app.get('/api/v2/static-leaderboard', async (c) => {
+  const countryRaw = (c.req.query('country') || c.req.query('cc') || '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(countryRaw)) {
+    return c.json({ success: false, error: 'country 必须为 2 位国家代码' }, 400);
+  }
+  const cc = countryRaw;
+  let topByMetrics: any[] = [];
+  if (c.env.STATS_STORE) {
+    try {
+      const raw = await c.env.STATS_STORE.get(KV_KEY_STATIC_LEADERBOARD_PREFIX + cc, 'json');
+      if (raw && typeof raw === 'object' && Array.isArray((raw as any).topByMetrics)) {
+        topByMetrics = (raw as any).topByMetrics;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return c.json({ success: true, topByMetrics });
+});
+
 /**
  * 路由：/api/random_prompt（答案之书）
  * 功能：从 D1 数据库随机获取一条答案之书记录
@@ -6764,7 +6791,7 @@ app.post('/api/v2/verify-location', async (c) => {
   }
 
   const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/increment_country_vibe_stats`;
-  const body = {
+  const rpcBody = {
     p_country_code: countryCodeRaw,
     p_merit: p_merit,
     p_slang: p_slang,
@@ -6777,7 +6804,7 @@ app.post('/api/v2/verify-location', async (c) => {
       fetchSupabaseJson(env, rpcUrl, {
         method: 'POST',
         headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
-        body: JSON.stringify(body),
+        body: JSON.stringify(rpcBody),
       }).catch((err: any) => {
         console.warn('[Worker] /api/v2/verify-location increment_country_vibe_stats 失败:', err?.message);
       })
@@ -6787,7 +6814,7 @@ app.post('/api/v2/verify-location', async (c) => {
       await fetchSupabaseJson(env, rpcUrl, {
         method: 'POST',
         headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
-        body: JSON.stringify(body),
+        body: JSON.stringify(rpcBody),
       });
     } catch (err: any) {
       console.warn('[Worker] /api/v2/verify-location increment_country_vibe_stats 失败:', err?.message);

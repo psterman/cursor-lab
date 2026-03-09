@@ -279,29 +279,26 @@
                 <!-- 最下方：本国词云卡片（左抽屉风格、自适应高度） -->
                 <div class="left-drawer-wordcloud-card" id="left-drawer-wordcloud-wrap">
                     <div class="left-drawer-wordcloud-header">
-                        <span class="left-drawer-wordcloud-title" data-t="panel.wordcloud">本国词云</span>
+                        <span class="left-drawer-wordcloud-title" data-t="panel.wordcloud">本人词云</span>
                         <span class="left-drawer-wordcloud-hint" id="vibe-country-hint">国家：--</span>
                     </div>
                     <div class="left-drawer-wordcloud-inner">
                         <div class="left-drawer-wordcloud-meta-row">
-                            <span class="left-drawer-wordcloud-label" data-i18n="panel.national_cloud_50">本国词云 50</span>
-                            <span class="left-drawer-wordcloud-meta font-mono" id="vibe-cloud50-meta">--</span>
+                            <span class="left-drawer-wordcloud-label" data-i18n="panel.national_cloud_50">本人词云 50</span>
+                            <span class="left-drawer-wordcloud-meta font-mono" id="personal-cloud-meta">--</span>
                             <span id="vibe-cloud50-source-label" class="left-drawer-wordcloud-source hidden text-[10px] text-purple-400/90 ml-2" aria-hidden="true"></span>
                         </div>
-                        <div id="national-identity-tabs" class="left-drawer-wordcloud-tabs">
-                            <button type="button" class="national-identity-tab left-drawer-wordcloud-tab" data-level="Novice" data-t="lexicon.novice">小白</button>
-                            <button type="button" class="national-identity-tab left-drawer-wordcloud-tab" data-level="Professional" data-t="lexicon.pro">脱发</button>
-                            <button type="button" class="national-identity-tab left-drawer-wordcloud-tab" data-level="Architect" data-t="lexicon.arch">霸天</button>
+                        <div id="personal-identity-tabs" class="left-drawer-wordcloud-tabs">
+                            <button type="button" class="personal-identity-tab left-drawer-wordcloud-tab" data-level="Novice" data-t="lexicon.novice">小白</button>
+                            <button type="button" class="personal-identity-tab left-drawer-wordcloud-tab" data-level="Professional" data-t="lexicon.pro">脱发</button>
+                            <button type="button" class="personal-identity-tab left-drawer-wordcloud-tab" data-level="Architect" data-t="lexicon.arch">霸天</button>
                         </div>
-                        <div class="left-drawer-wordcloud-canvas-wrap stats2-wc-min-height" id="vibe-cloud50-container">
+                        <div class="left-drawer-wordcloud-canvas-wrap stats2-wc-min-height" id="personal-cloud-container">
                             <div class="stats2-cyber-skeleton stats2-wordcloud-skeleton" id="stats2-wc-skeleton" aria-hidden="false"></div>
-                            <canvas id="canvas-novice" data-level="Novice" aria-hidden="false"></canvas>
-                            <canvas id="canvas-pro" data-level="Professional" style="display: none;" aria-hidden="true"></canvas>
-                            <canvas id="canvas-arch" data-level="Architect" style="display: none;" aria-hidden="true"></canvas>
-                            <canvas id="national-identity-cloud-canvas" style="display: none;" aria-hidden="true"></canvas>
-                            <div id="cloud-loading-hint" class="left-drawer-cloud-loading hidden">加载中...</div>
+                            <canvas id="personal-identity-cloud-canvas" aria-hidden="false"></canvas>
+                            <div id="personal-cloud-loading-hint" class="left-drawer-cloud-loading hidden">加载中...</div>
                         </div>
-                        <div id="vibe-cloud50-empty" class="left-drawer-wordcloud-empty hidden" data-t="hotlist.building">正在扫描该国开发者指纹...</div>
+                        <div id="personal-cloud-empty" class="left-drawer-wordcloud-empty hidden" data-t="hotlist.building">初出茅庐，灵魂波段捕获中...</div>
                     </div>
                 </div>
             </div>

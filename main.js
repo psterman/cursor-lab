@@ -1662,6 +1662,7 @@ class VibeCodingApp {
       const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
       const safeFp = (context && context.fingerprint) ? String(context.fingerprint) : (localStorage.getItem('user_fingerprint') || null);
       const st = result?.stats || result?.statistics || {};
+      const ilcSync = result && (result.identityLevelCloud || result.statistics?.identityLevelCloud || result.stats?.identityLevelCloud || st.identityLevelCloud);
       const usageDaysSync = st.work_days ?? st.usageDays ?? st.usage_days ?? st.days ?? null;
       const payloadForStats2 = {
         chatData: chatData,
@@ -1672,6 +1673,8 @@ class VibeCodingApp {
           ...(st),
           usageDays: usageDaysSync != null ? Math.max(1, Number(usageDaysSync)) : null,
           work_days: usageDaysSync != null ? Math.max(1, Number(usageDaysSync)) : (st.work_days ?? null),
+          // 供 stats2.html 左侧本人词云读取：按 Novice/Professional/Architect 分桶
+          identityLevelCloud: ilcSync || null,
         },
         meta: context || null,
         vibeIndex: result?.vibeIndex || result?.vibe_index || null,
@@ -1683,6 +1686,7 @@ class VibeCodingApp {
         const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
         const safeFp = (context && context.fingerprint) ? String(context.fingerprint) : (localStorage.getItem('user_fingerprint') || null);
         const fromResultLite2 = result?.stats || result?.statistics || {};
+        const ilcLite2 = result && (result.identityLevelCloud || result.statistics?.identityLevelCloud || result.stats?.identityLevelCloud || fromResultLite2.identityLevelCloud);
         let usageDaysLite2 = fromResultLite2.work_days ?? fromResultLite2.usageDays ?? fromResultLite2.usage_days ?? fromResultLite2.days ?? null;
         if (usageDaysLite2 != null) usageDaysLite2 = Math.max(1, Number(usageDaysLite2));
         const payloadLite = {
@@ -1694,6 +1698,7 @@ class VibeCodingApp {
             ...(fromResultLite2),
             usageDays: usageDaysLite2,
             work_days: usageDaysLite2 ?? fromResultLite2.work_days ?? null,
+            identityLevelCloud: ilcLite2 || null,
           },
           meta: context || null,
           vibeIndex: result?.vibeIndex || result?.vibe_index || null,

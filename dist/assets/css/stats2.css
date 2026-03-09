@@ -54,16 +54,72 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
 #force-onboarding-overlay.stats2-gate-removed { display: none !important; }
 .stats2-gate-overlay.stats2-gate-removed { display: none !important; }
 .stats2-gate-github-section { margin-top: 18px; flex-shrink: 0; }
-.stats2-gate-privacy-block { margin-bottom: 14px; }
-.stats2-gate-privacy-intro { font-size: 11px; color: rgba(0, 255, 65, 0.85); line-height: 1.5; margin: 0 0 8px 0; font-family: var(--font-mono-stack), monospace; }
-.stats2-gate-privacy-list { font-size: 11px; color: rgba(0, 255, 65, 0.75); line-height: 1.55; margin: 0 0 12px 0; padding-left: 18px; font-family: var(--font-mono-stack), monospace; }
+.stats2-gate-privacy-block {
+  margin-bottom: 14px;
+}
+.stats2-gate-privacy-intro {
+  font-size: 11px;
+  color: rgba(0, 255, 65, 0.85);
+  line-height: 1.5;
+  margin: 0 0 8px 0;
+  font-family: var(--font-mono-stack), monospace;
+}
+.stats2-gate-privacy-list {
+  font-size: 11px;
+  color: rgba(0, 255, 65, 0.75);
+  line-height: 1.55;
+  margin: 0 0 12px 0;
+  padding-left: 18px;
+  font-family: var(--font-mono-stack), monospace;
+}
 .stats2-gate-privacy-list li { margin-bottom: 4px; }
-.stats2-gate-privacy-check { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; cursor: pointer; font-size: 12px; color: rgba(0, 255, 65, 0.9); font-family: var(--font-mono-stack), monospace; }
-.stats2-gate-privacy-check input[type="checkbox"] { width: 16px; height: 16px; accent-color: #00ff41; cursor: pointer; }
-.stats2-gate-buttons-row { display: flex; gap: 12px; align-items: center; margin-top: 4px; }
+.stats2-gate-privacy-text {
+  font-size: 11px;
+  color: rgba(0, 255, 65, 0.75);
+  line-height: 1.5;
+  margin: 0 0 10px 0;
+  font-family: var(--font-mono-stack), monospace;
+}
+.stats2-gate-privacy-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  cursor: pointer;
+  font-size: 12px;
+  color: rgba(0, 255, 65, 0.9);
+  font-family: var(--font-mono-stack), monospace;
+}
+.stats2-gate-privacy-check input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #00ff41;
+  cursor: pointer;
+}
+.stats2-gate-buttons-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 4px;
+}
 .stats2-gate-buttons-row .stats2-gate-github-btn { flex: 1; margin-top: 0; }
-.stats2-gate-reject-btn { flex-shrink: 0; padding: 14px 20px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.5); color: #ef4444; font-family: var(--font-mono-stack), monospace; font-size: 12px; font-weight: 600; cursor: pointer; border-radius: 0; transition: background 0.2s, border-color 0.2s; }
-.stats2-gate-reject-btn:hover { background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.8); }
+.stats2-gate-reject-btn {
+  flex-shrink: 0;
+  padding: 14px 20px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  color: #ef4444;
+  font-family: var(--font-mono-stack), monospace;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 0;
+  transition: background 0.2s, border-color 0.2s;
+}
+.stats2-gate-reject-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.8);
+}
 .stats2-gate-overlay-inner {
   position: relative;
   z-index: 1;
@@ -899,8 +955,8 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
             z-index: 90;
             background: var(--bg-card);
             backdrop-filter: blur(20px);
-            border-bottom: 1px solid var(--border-ui);
-            padding: 12px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            padding: 10px 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -943,15 +999,14 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
 
         .top-header-right {
             display: flex;
-            align-items: center;
-            gap: 12px;
+            align-items: stretch;
+            gap: 8px;
             flex-wrap: wrap;
         }
 
         .top-header-cards {
             display: flex;
-            gap: 12px;
-            align-items: center;
+            align-items: stretch;
             flex-wrap: wrap;
         }
 
@@ -998,12 +1053,17 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
             }
         }
 
-        /* hrdkm: 控制条/卡片 - fill #0A0A0A, stroke #2f2f2f, JetBrains Mono 9px 600 */
+        /* 顶部栏卡片：无粗线框，仅右侧细分隔线，统一高度与对齐 */
         .top-header-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border-ui);
-            padding: 8px 12px;
-            backdrop-filter: blur(10px);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-height: 44px;
+            padding: 6px 12px;
+            background: rgba(255, 255, 255, 0.03);
+            border: none;
+            border-radius: 4px;
+            backdrop-filter: none;
         }
 
         .top-header-card-label {
@@ -1014,22 +1074,42 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-bottom: 4px;
+            line-height: 1.2;
         }
 
         .top-header-card-value {
             font-family: 'Space Grotesk', system-ui, sans-serif;
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 700;
             color: var(--text-main);
             letter-spacing: -0.5px;
             display: flex;
             align-items: center;
             gap: 6px;
+            min-height: 20px;
+            line-height: 1.2;
         }
+
+        /* 国家选择与导航链接与 value 同高、对齐 */
+        .top-header-card .country-select-dropdown {
+            min-height: 20px;
+            margin-top: 0;
+        }
+        .top-header-card > .top-header-nav-link {
+            display: inline-flex;
+            align-items: center;
+            min-height: 20px;
+            margin-top: 0;
+            font-size: 13px;
+            border: none;
+            box-shadow: none;
+        }
+
         .top-header-nav-link {
-            display: inline-block;
+            display: inline-flex;
+            align-items: center;
             font-family: var(--font-mono-stack), monospace;
-            font-size: 12px;
+            font-size: 13px;
             font-weight: 600;
             color: var(--accent-terminal, #00ff41);
             text-decoration: none;
@@ -1210,64 +1290,6 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
         .drawer-close-btn:hover {
             background: rgba(0, 255, 65, 0.12);
             border-color: var(--accent-terminal);
-        }
-
-        .left-drawer-footer        .left-drawer-exit-row {
-            flex-shrink: 0;
-            margin-top: 16px;
-            padding-top: 16px;
-            border-top: 1px solid var(--border-ui, rgba(0, 255, 65, 0.2));
-            display: flex;
-            justify-content: flex-end;
-            align-items: center;
-            gap: 10px;
-        }
-        .left-drawer-exit-btn {
-            height: 36px;
-            min-width: 36px;
-            padding: 0 12px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            border: 1px solid var(--border-ui, rgba(0, 255, 65, 0.3));
-            border-radius: 18px;
-            color: rgba(0, 255, 65, 0.9);
-            font-size: 12px;
-            font-family: var(--font-mono-stack), monospace;
-            cursor: pointer;
-            background: transparent;
-            transition: background 0.2s, border-color 0.2s;
-        }
-        .left-drawer-exit-btn:hover {
-            background: rgba(0, 255, 65, 0.12);
-            border-color: var(--accent-terminal);
-        }
-        .left-drawer-delete-account-btn {
-            height: 36px;
-            min-width: 36px;
-            padding: 0 12px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            border: 1px solid rgba(239, 68, 68, 0.5);
-            border-radius: 18px;
-            color: #ef4444;
-            font-size: 12px;
-            font-family: var(--font-mono-stack), monospace;
-            cursor: pointer;
-            background: rgba(239, 68, 68, 0.1);
-            transition: background 0.2s, border-color 0.2s;
-        }
-        .left-drawer-delete-account-btn:hover {
-            background: rgba(239, 68, 68, 0.2);
-            border-color: rgba(239, 68, 68, 0.8);
-        }
-        .github-combat-identity .left-drawer-exit-btn,
-        .github-combat-identity .left-drawer-delete-account-btn {
-            height: auto;
-            min-width: auto;
-            padding: 4px 10px;
-            font-size: 10px;
         }
 
         /* 抽屉内容区域 */
@@ -3792,37 +3814,35 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
             pointer-events: none;
         }
 
-        /* 国家选择下拉菜单样式 - 赛博朋克风格 */
+        /* 国家选择下拉菜单样式 - 与 top-header 统一，弱化线框 */
         .country-select-dropdown {
             appearance: none;
             -webkit-appearance: none;
             -moz-appearance: none;
-            background: rgba(0, 0, 0, 0.6);
-            border: 1px solid rgba(0, 255, 65, 0.4);
-            border-radius: 2px;
-            color: #00ff41;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            color: var(--text-main, #e4e4e7);
             font-family: 'JetBrains Mono', monospace;
-            font-size: 11px;
-            font-weight: 700;
+            font-size: 12px;
+            font-weight: 600;
             cursor: pointer;
             outline: none;
-            padding: 6px 24px 6px 8px;
-            transition: all 0.2s;
+            padding: 4px 22px 4px 8px;
+            transition: border-color 0.2s, background 0.2s;
             position: relative;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%2300ff41' d='M5 7L1 3h8z'/%3E%3C/svg%3E");
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%239ca3af' d='M5 7L1 3h8z'/%3E%3C/svg%3E");
             background-repeat: no-repeat;
-            background-position: right 8px center;
-            box-shadow: 0 0 8px rgba(0, 255, 65, 0.2);
+            background-position: right 6px center;
+            box-shadow: none;
         }
         .country-select-dropdown:hover {
-            border-color: rgba(0, 255, 65, 0.7);
-            box-shadow: 0 0 12px rgba(0, 255, 65, 0.4);
-            background-color: rgba(0, 255, 65, 0.05);
+            border-color: rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.08);
         }
         .country-select-dropdown:focus {
-            border-color: #00ff41;
-            box-shadow: 0 0 16px rgba(0, 255, 65, 0.6);
-            background-color: rgba(0, 255, 65, 0.1);
+            border-color: rgba(0, 255, 65, 0.35);
+            background: rgba(255, 255, 255, 0.08);
         }
         .country-select-dropdown option {
             background: #050505 !important;
@@ -4157,7 +4177,67 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
             color: rgba(0, 255, 65, 0.5);
             font-style: italic;
         }
-        #left-drawer-wordcloud-wrap #vibe-cloud50-container {
+        /* 左抽屉底部：退出按钮（与抽屉关闭按钮同尺寸，右对齐） */
+.left-drawer-footer.left-drawer-exit-row {
+  flex-shrink: 0;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-ui, rgba(0, 255, 65, 0.2));
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+}
+.left-drawer-exit-btn {
+  height: 36px;
+  min-width: 36px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-ui, rgba(0, 255, 65, 0.3));
+  border-radius: 18px;
+  color: rgba(0, 255, 65, 0.9);
+  font-size: 12px;
+  font-family: var(--font-mono-stack), monospace;
+  cursor: pointer;
+  background: transparent;
+  transition: background 0.2s, border-color 0.2s;
+}
+.left-drawer-exit-btn:hover {
+  background: rgba(0, 255, 65, 0.12);
+  border-color: var(--accent-terminal);
+}
+.left-drawer-delete-account-btn {
+  height: 36px;
+  min-width: 36px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  border-radius: 18px;
+  color: #ef4444;
+  font-size: 12px;
+  font-family: var(--font-mono-stack), monospace;
+  cursor: pointer;
+  background: rgba(239, 68, 68, 0.1);
+  transition: background 0.2s, border-color 0.2s;
+}
+.left-drawer-delete-account-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.8);
+}
+/* 身份区与私信并排的退出/删除：紧凑尺寸 */
+.github-combat-identity .left-drawer-exit-btn,
+.github-combat-identity .left-drawer-delete-account-btn {
+  height: auto;
+  min-width: auto;
+  padding: 4px 10px;
+  font-size: 10px;
+}
+
+#left-drawer-wordcloud-wrap #personal-cloud-container {
             overflow: visible;
         }
     
