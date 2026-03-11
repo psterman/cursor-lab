@@ -381,6 +381,60 @@
                 return (v && String(v).trim().length >= 2) ? String(v).trim().toUpperCase() : null;
             } catch (e) { return null; }
         }
+        function isGuestGatePassed() {
+            try { return localStorage.getItem('stats2_guest_mode') === '1'; } catch (e) { return false; }
+        }
+        function setGuestGatePassed(enabled) {
+            try {
+                if (enabled) localStorage.setItem('stats2_guest_mode', '1');
+                else localStorage.removeItem('stats2_guest_mode');
+            } catch (e) {}
+        }
+        function renderGuestModeDrawerCard() {
+            var leftBody = document.getElementById('left-drawer-body');
+            if (!leftBody) return;
+            try {
+                leftBody.querySelectorAll('.drawer-item').forEach(function(node) { node.remove(); });
+            } catch (e) {}
+            var guestCard = document.createElement('div');
+            guestCard.className = 'drawer-item clinic-card';
+            guestCard.setAttribute('data-card', 'guest-mode-info');
+            guestCard.innerHTML = [
+                '<div class="flex items-center justify-between mb-3">',
+                '<span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">◎</span>',
+                '<span class="text-[8px] leading-none text-[#00ff41] border border-[#00ff41]/40 px-1 py-0.5 tracking-widest uppercase bg-[#00ff41]/5">GUEST</span>',
+                '</div>',
+                '<div class="drawer-item-label mb-2">' + (typeof currentLang !== 'undefined' && currentLang === 'en' ? 'Guest Mode' : '游客模式') + '</div>',
+                '<div class="text-[11px] leading-5 text-[#00ff41]/75">' +
+                    (typeof currentLang !== 'undefined' && currentLang === 'en'
+                        ? 'Public country and ranking data is available. Personal identity, inbox, and synced GitHub stats stay hidden until you sign in.'
+                        : '当前仅展示公开的国家和榜单数据，个人身份、私信和 GitHub 同步信息会保持隐藏，登录后才会恢复。') +
+                '</div>'
+            ].join('');
+            leftBody.insertBefore(guestCard, leftBody.firstChild || null);
+        }
+        function resetGuestViewerState(options) {
+            options = options || {};
+            try {
+                [
+                    'github_username',
+                    'github_user_id',
+                    'supabase_user_id',
+                    'github_token',
+                    'vibe_github_access_token',
+                    'vibe_stats2_swr_cache'
+                ].forEach(function(key) {
+                    try { localStorage.removeItem(key); } catch (e) {}
+                });
+            } catch (e) {}
+            try { window.currentUser = null; } catch (e) {}
+            try { window.currentUserData = null; } catch (e) {}
+            try { window.supabaseAuthUser = null; } catch (e) {}
+            try { window.authenticatedUserId = ''; } catch (e) {}
+            try { window.__authUserId = ''; } catch (e) {}
+            try { window.__githubAccessToken = ''; } catch (e) {}
+            if (options.renderDrawer) renderGuestModeDrawerCard();
+        }
         function showOverlay() {
             var el = document.getElementById(OVERLAY_ID);
             if (el) {
@@ -418,7 +472,8 @@
         function checkGatePassed(session) {
             var country = getStoredCountry();
             var hasSession = !!(session && session.user);
-            if (country && hasSession) {
+            var hasGuestMode = isGuestGatePassed();
+            if (country && (hasSession || hasGuestMode)) {
                 try {
                     window.currentCountryCode = country;
                     localStorage.setItem('user_country_fixed', country);
@@ -491,6 +546,7 @@
                 var session = (r && r.data && r.data.session) ? r.data.session : null;
                 // 已登录 GitHub：不弹出登录/选国家窗口；若已有国家则走确认逻辑，否则直接移除遮罩
                 if (session && session.user) {
+                    setGuestGatePassed(false);
                     if (checkGatePassed(session)) return;
                     hideGateOverlay();
                     return;
@@ -558,12 +614,50 @@
                 if (modal) modal.style.display = 'none';
                 try { document.body.style.overflow = ''; document.documentElement.style.overflow = ''; } catch (e) {}
             }
+            if (e.target && (e.target.id === 'gate-guest-btn' || (e.target.closest && e.target.closest('#gate-guest-btn')))) {
+                var guestCode = (window.__countrySelectorSelectedCode || getStoredCountry() || '').trim().toUpperCase();
+                var guestPrivacyCheck = document.getElementById('gate-privacy-accept');
+                var guestPrivacyAccepted = !guestPrivacyCheck || guestPrivacyCheck.checked;
+                if (!/^[A-Z]{2}$/.test(guestCode) || !guestPrivacyAccepted) return;
+                try {
+                    localStorage.setItem('selected_country', guestCode);
+                    localStorage.setItem('user_country_fixed', guestCode);
+                    localStorage.setItem('user_manual_location', guestCode);
+                    localStorage.setItem('user_selected_country', guestCode);
+                    localStorage.removeItem('stats2_user_rejected_terms');
+                } catch (err) {}
+                setGuestGatePassed(true);
+                resetGuestViewerState({ renderDrawer: true });
+                try { window.currentCountryCode = guestCode; } catch (err) {}
+                hideGateOverlay();
+                if (typeof window.runGateCheck === 'function') {
+                    try { window.runGateCheck(); } catch (err) {}
+                }
+                try {
+                    var guestCountryName = (typeof countryNameMap !== 'undefined' && countryNameMap && countryNameMap[guestCode])
+                        ? ((typeof currentLang !== 'undefined' && currentLang === 'zh') ? countryNameMap[guestCode].zh : countryNameMap[guestCode].en)
+                        : guestCode;
+                    if (typeof switchView === 'function') switchView('country', guestCode);
+                    if (typeof onCountrySwitch === 'function') {
+                        onCountrySwitch(guestCode, {
+                            source: 'gate-guest',
+                            name: guestCountryName,
+                            force: true
+                        });
+                    } else if (typeof showDrawersWithCountryData === 'function') {
+                        showDrawersWithCountryData(guestCode, guestCountryName);
+                    }
+                } catch (err2) {
+                    if (typeof console !== 'undefined' && console.warn) console.warn('[GateGuest] switch failed:', err2);
+                }
+            }
             if (e.target && (e.target.id === 'gate-reject-btn' || (e.target.closest && e.target.closest('#gate-reject-btn')))) {
                 try {
                     localStorage.removeItem('selected_country');
                     localStorage.removeItem('user_selected_country');
                     localStorage.removeItem('user_country_fixed');
                     localStorage.removeItem('user_manual_location');
+                    localStorage.removeItem('stats2_guest_mode');
                     localStorage.setItem('stats2_user_rejected_terms', '1');
                 } catch (err) {}
                 try {
@@ -7890,7 +7984,10 @@
                 }
                 
                 // 如果检测到当前用户数据，自动加载用户统计卡片（优先使用 allData 中同人的完整记录，以显示提交聊天记录对应的数值）
-                if (currentUser) {
+                if (typeof isGuestGatePassed === 'function' && isGuestGatePassed()) {
+                    console.log('[Drawer] ℹ️ 游客模式，跳过当前用户解析与等待卡片');
+                    if (typeof resetGuestViewerState === 'function') resetGuestViewerState({ renderDrawer: true });
+                } else if (currentUser) {
                     const userForStats = getBestUserRecordForStats(currentUser);
                     console.log('[Drawer] 📊 开始渲染用户统计卡片，使用', userForStats !== currentUser ? 'allData 中的完整记录' : '当前用户记录');
                     renderUserStatsCards(leftBody, userForStats);
@@ -13307,14 +13404,18 @@
         function updateCountrySelectorGitHubButtonState() {
             try {
                 const btn = document.getElementById('country-selector-github-save-btn');
-                if (!btn) return;
+                const guestBtn = document.getElementById('gate-guest-btn');
+                if (!btn && !guestBtn) return;
                 const code = (window.__countrySelectorSelectedCode || '').trim().toUpperCase();
                 const privacyCheck = document.getElementById('gate-privacy-accept');
                 const privacyAccepted = !privacyCheck || privacyCheck.checked;
                 const enabled = window.__countryPickerForced && /^[A-Z]{2}$/.test(code) && privacyAccepted;
-                btn.disabled = !enabled;
-                btn.style.opacity = enabled ? '1' : '0.6';
-                btn.style.cursor = enabled ? 'pointer' : 'not-allowed';
+                [btn, guestBtn].forEach(function(targetBtn) {
+                    if (!targetBtn) return;
+                    targetBtn.disabled = !enabled;
+                    targetBtn.style.opacity = enabled ? '1' : '0.6';
+                    targetBtn.style.cursor = enabled ? 'pointer' : 'not-allowed';
+                });
                 if (enabled && typeof window.showGitHubSectionIfCountrySelected === 'function') window.showGitHubSectionIfCountrySelected();
             } catch (e) {}
         }
@@ -13326,6 +13427,7 @@
                 const searchInput = document.getElementById('country-search-input');
                 const listContainer = document.getElementById('country-list-container');
                 const githubSaveBtn = document.getElementById('country-selector-github-save-btn');
+                const guestBtn = document.getElementById('gate-guest-btn');
                 
                 if (!modal || !closeBtn || !searchInput || !listContainer) return;
                 
@@ -13349,6 +13451,11 @@
                         if (typeof updateCountrySelectorGitHubButtonState === 'function') updateCountrySelectorGitHubButtonState();
                     });
                 }
+                if (guestBtn) {
+                    guestBtn.addEventListener('click', function() {
+                        if (typeof updateCountrySelectorGitHubButtonState === 'function') updateCountrySelectorGitHubButtonState();
+                    });
+                }
                 // 「使用 GitHub 登录并保存」按钮：仅在选择国家、同意隐私条款且为强制选籍模式时可用
                 if (githubSaveBtn) {
                     githubSaveBtn.addEventListener('click', function() {
@@ -13359,6 +13466,7 @@
                             localStorage.setItem('user_country_fixed', code);
                             localStorage.setItem('user_manual_location', code);
                             localStorage.setItem('user_selected_country', code);
+                            localStorage.removeItem('stats2_guest_mode');
                         } catch (e) {}
                         if (typeof window.loginWithGitHub === 'function') {
                             window.loginWithGitHub();
@@ -13393,34 +13501,131 @@
         }
         
         (function initDeleteAccountButton() {
-            function clearLocalAccountData() {
+            function getStats2ActionText(kind) {
+                var isEn = typeof currentLang !== 'undefined' && currentLang === 'en';
+                if (kind === 'logoutConfirm') return isEn ? 'Exit and sign out?' : '确定退出登录吗？';
+                if (kind === 'logoutPending') return isEn ? 'Signing out...' : '退出中...';
+                if (kind === 'logoutLabel') return isEn ? 'Logout' : '退出';
+                if (kind === 'deleteUnsupported') return isEn
+                    ? 'Account deletion is not wired to the backend yet. No data has been deleted.'
+                    : '删除账号功能尚未接入后端，当前不会删除任何数据。';
+                return '';
+            }
+            function setActionPendingState(button, pending, pendingText, idleText) {
+                if (!button) return;
                 try {
-                    var keys = ['selected_country', 'user_selected_country', 'user_country_fixed', 'user_manual_location', 'github_token', 'vibe_github_access_token', 'last_analysis_data', 'vibe_fp', 'user_fingerprint', 'anchored_country', 'loc_locked', 'loc_fixed', 'drawer_expanded', 'left_drawer_open', 'right_drawer_open'];
+                    if (!button.dataset.originalText) button.dataset.originalText = button.textContent || idleText || '';
+                    button.disabled = !!pending;
+                    button.setAttribute('aria-busy', pending ? 'true' : 'false');
+                    button.textContent = pending ? pendingText : (idleText || button.dataset.originalText || '');
+                } catch (e) {}
+            }
+            function clearLocalAccountData() {
+                if (typeof localStorage === 'undefined') return;
+                try {
+                    var keys = [
+                        'selected_country',
+                        'user_selected_country',
+                        'user_country_fixed',
+                        'user_manual_location',
+                        'stats2_guest_mode',
+                        'github_token',
+                        'vibe_github_access_token',
+                        'github_username',
+                        'last_analysis_data',
+                        'vibe_fp',
+                        'fingerprint',
+                        'user_fingerprint',
+                        'anchored_country',
+                        'loc_locked',
+                        'loc_fixed',
+                        'drawer_expanded',
+                        'left_drawer_open',
+                        'right_drawer_open'
+                    ];
                     keys.forEach(function(k) { try { localStorage.removeItem(k); } catch (e) {} });
                     var toRemove = [];
                     for (var i = 0; i < localStorage.length; i++) {
                         var key = localStorage.key(i);
-                        if (key && (key.indexOf('vibe_') === 0 || key.indexOf('vibe_report') === 0 || key.indexOf('vibe_cyber_report_') === 0)) toRemove.push(key);
+                        if (!key) continue;
+                        if (
+                            key.indexOf('vibe_') === 0 ||
+                            key.indexOf('vibe_report') === 0 ||
+                            key.indexOf('vibe_cyber_report_') === 0 ||
+                            key.indexOf('vibe_country_') === 0
+                        ) {
+                            toRemove.push(key);
+                        }
                     }
                     toRemove.forEach(function(k) { try { localStorage.removeItem(k); } catch (e) {} });
+                    try { localStorage.setItem('left_drawer_open', 'false'); } catch (e) {}
+                    try { localStorage.setItem('right_drawer_open', 'false'); } catch (e) {}
                     if (window.__githubAccessToken !== undefined) window.__githubAccessToken = '';
                 } catch (e) {}
             }
-            function doSignOutAndReload(clearLocal) {
-                if (clearLocal) clearLocalAccountData();
-                var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
-                if (sb && typeof sb.auth !== 'object') { sb = null; }
-                if (sb && typeof sb.auth.signOut === 'function') {
-                    sb.auth.signOut().catch(function() {}).finally(function() {
-                        if (clearLocal) clearLocalAccountData();
-                        if (typeof window.runGateCheck === 'function') window.runGateCheck();
-                        try { location.reload(); } catch (e) {}
-                    });
-                } else {
-                    if (clearLocal) clearLocalAccountData();
-                    try { location.reload(); } catch (e) {}
+            function resetSignedOutUi() {
+                try { window.currentUser = null; } catch (e) {}
+                try { window.currentUserData = null; } catch (e) {}
+                try { window.currentUserMatchedByFingerprint = false; } catch (e) {}
+                try { window.__githubSyncInFlight = false; } catch (e) {}
+                try {
+                    var leftDrawer = document.getElementById('left-drawer');
+                    var rightDrawer = document.getElementById('right-drawer');
+                    if (leftDrawer) leftDrawer.classList.remove('active');
+                    if (rightDrawer) rightDrawer.classList.remove('active');
+                } catch (e) {}
+                try {
+                    if (typeof updateAuthUI === 'function') updateAuthUI(null);
+                } catch (e) {}
+            }
+            function resolvePostSignOutUrl() {
+                try {
+                    var currentUrl = new URL(window.location.href);
+                    currentUrl.hash = '';
+                    return currentUrl.pathname + (currentUrl.search || '');
+                } catch (e) {
+                    return 'stats2.html';
                 }
             }
+            function performStats2SignOut(options) {
+                options = options || {};
+                if (window.__stats2SignOutPromise) return window.__stats2SignOutPromise;
+                var pendingButton = options.button || null;
+                setActionPendingState(
+                    pendingButton,
+                    true,
+                    getStats2ActionText('logoutPending'),
+                    getStats2ActionText('logoutLabel')
+                );
+                window.__stats2SignOutPromise = Promise.resolve().then(function() {
+                    clearLocalAccountData();
+                    var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+                    if (sb && typeof sb.auth !== 'object') sb = null;
+                    if (sb && typeof sb.auth.signOut === 'function') {
+                        return sb.auth.signOut().catch(function(err) {
+                            if (typeof console !== 'undefined' && console.warn) console.warn('[Auth] signOut failed, continue with local cleanup:', err);
+                        });
+                    }
+                    return null;
+                }).finally(function() {
+                    clearLocalAccountData();
+                    resetSignedOutUi();
+                    if (typeof window.runGateCheck === 'function') {
+                        try { window.runGateCheck(); } catch (e) {}
+                    }
+                    var redirectUrl = resolvePostSignOutUrl();
+                    setActionPendingState(
+                        pendingButton,
+                        false,
+                        getStats2ActionText('logoutPending'),
+                        getStats2ActionText('logoutLabel')
+                    );
+                    window.__stats2SignOutPromise = null;
+                    try { window.location.replace(redirectUrl); } catch (e) { try { location.reload(); } catch (err) {} }
+                });
+                return window.__stats2SignOutPromise;
+            }
+            if (typeof window !== 'undefined') window.performStats2SignOut = performStats2SignOut;
             function onReady() {
                 var root = document.getElementById('left-drawer') || document.body;
                 root.addEventListener('click', function(e) {
@@ -13428,20 +13633,15 @@
                     if (target) {
                         e.preventDefault();
                         e.stopPropagation();
-                        var msg = (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Exit and sign out?' : '确定退出登录吗？';
-                        if (!confirm(msg)) return;
-                        doSignOutAndReload(true);
+                        if (!confirm(getStats2ActionText('logoutConfirm'))) return;
+                        performStats2SignOut({ button: target });
                         return;
                     }
                     target = e.target && (e.target.id === 'left-drawer-delete-account-btn' || e.target.closest && e.target.closest('#left-drawer-delete-account-btn'));
                     if (target) {
                         e.preventDefault();
                         e.stopPropagation();
-                        var msgDel = (typeof currentLang !== 'undefined' && currentLang === 'en')
-                            ? 'Delete your account and all associated data? This cannot be undone.'
-                            : '确定要删除账号及所有关联数据吗？此操作不可恢复。';
-                        if (!confirm(msgDel)) return;
-                        doSignOutAndReload(true);
+                        alert(getStats2ActionText('deleteUnsupported'));
                     }
                 });
             }
@@ -17058,34 +17258,15 @@
          */
         function logout() {
             try {
-                if (typeof localStorage === 'undefined') {
-                    if (typeof window !== 'undefined' && window.location) window.location.replace('/');
-                    return;
+                if (typeof window !== 'undefined' && typeof window.performStats2SignOut === 'function') {
+                    return window.performStats2SignOut();
                 }
-                var keysToRemove = ['github_token', 'vibe_github_access_token', 'fingerprint', 'user_fingerprint', 'vibe_stats2_swr_cache'];
-                for (var i = 0; i < keysToRemove.length; i++) {
-                    try { localStorage.removeItem(keysToRemove[i]); } catch (e) {}
-                }
-                try {
-                    var keys = [];
-                    for (var idx = 0; idx < localStorage.length; idx++) {
-                        var k = localStorage.key(idx);
-                        if (k && k.indexOf('vibe_country_') === 0) keys.push(k);
-                    }
-                    for (var j = 0; j < keys.length; j++) {
-                        try { localStorage.removeItem(keys[j]); } catch (e2) {}
-                    }
-                } catch (e) {}
-                try {
-                    localStorage.clear();
-                } catch (e) {}
-                if (typeof window !== 'undefined' && window.__githubAccessToken !== undefined) window.__githubAccessToken = '';
                 if (typeof window !== 'undefined' && window.location && window.location.replace) {
-                    window.location.replace('/');
+                    window.location.replace('stats2.html');
                 }
             } catch (e) {
                 if (typeof window !== 'undefined' && window.location && window.location.replace) {
-                    window.location.replace('/');
+                    window.location.replace('stats2.html');
                 }
             }
         }
@@ -20119,6 +20300,11 @@
                 console.warn('[UserStats] ⚠️ currentUserData 不存在，跳过渲染');
                 return;
             }
+            if (typeof isGuestGatePassed === 'function' && isGuestGatePassed()) {
+                console.log('[UserStats] ℹ️ 游客模式，跳过个人统计卡片渲染');
+                if (typeof resetGuestViewerState === 'function') resetGuestViewerState({ renderDrawer: true });
+                return;
+            }
             // 【侧边栏拦截】若存在刚完成的本地分析（last_local_stats），优先用本地数据覆盖，忽略服务器可能延迟或累加错误的旧数据
             var localStats = window.last_local_stats;
             if (localStats && localStats.payload && (Date.now() - (localStats.ts || 0)) < 300000) {
@@ -22314,6 +22500,9 @@
             // 检测 API 状态并提示用户
             if (apiFailed || !window.lastData) {
                 showApiStatusWarning();
+            }
+            if (typeof isGuestGatePassed === 'function' && isGuestGatePassed()) {
+                resetGuestViewerState({ renderDrawer: false });
             }
             
             // 【自动定位】静默初始化：localStorage → my-ip → lastData → currentUser → getUserLocation
