@@ -439,9 +439,11 @@
         if (!stats || typeof stats !== 'object') {
             var emptyCard = document.createElement('div');
             emptyCard.className = 'drawer-item github-combat-card hacker-border';
+            emptyCard.setAttribute('data-card', 'identity-config');
             emptyCard.setAttribute('data-github-combat', '1');
             emptyCard.style.cssText = 'background:' + CARD_BG + ';border-radius:8px;padding:14px;font-family:\'JetBrains Mono\',\'Fira Code\',monospace;';
-            emptyCard.innerHTML = identityHtml + '<div class="p-4 text-center text-zinc-500 text-sm">' + esc(t(lang, 'syncToUnlock')) + '</div>';
+            var identityOnly = !!(options && options.identity && !options.identity.isLoggedIn);
+            emptyCard.innerHTML = identityOnly ? identityHtml : (identityHtml + '<div class="p-4 text-center text-zinc-500 text-sm">' + esc(t(lang, 'syncToUnlock')) + '</div>');
             var existing = container.querySelector('.github-combat-card');
             if (existing) existing.remove();
             if (insertFirst && container.firstChild) container.insertBefore(emptyCard, container.firstChild); else container.appendChild(emptyCard);
@@ -480,8 +482,18 @@
 
         var card = document.createElement('div');
         card.className = 'drawer-item github-combat-card hacker-border';
+        card.setAttribute('data-card', 'identity-config');
         card.setAttribute('data-github-combat', '1');
         card.style.cssText = 'background:' + CARD_BG + ';border-radius:8px;padding:14px;font-family:\'JetBrains Mono\',\'Fira Code\',monospace;';
+
+        var identityOnlyMode = !!(options && options.identity && !options.identity.isLoggedIn);
+        if (identityOnlyMode) {
+            card.innerHTML = identityHtml;
+            var existingIdentityOnly = container.querySelector('.github-combat-card');
+            if (existingIdentityOnly) existingIdentityOnly.remove();
+            if (insertFirst && container.firstChild) container.insertBefore(card, container.firstChild); else container.appendChild(card);
+            return card;
+        }
 
         var orgsHtml = '';
         try {

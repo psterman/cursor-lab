@@ -254,6 +254,100 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
   color: #00ff41;
   box-shadow: inset 0 0 20px rgba(0, 255, 65, 0.06);
 }
+
+/* Guest mode: hide private/advanced left-drawer cards */
+body.stats2-guest-mode #left-drawer-body .drawer-item.dashboard-card,
+body.stats2-guest-mode #left-drawer-body .drawer-item.backdrop-blur,
+body.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
+body.stats2-guest-mode #left-drawer-body .drawer-item.github-combat-card:not([data-card="identity-config"]),
+body.stats2-guest-mode #left-drawer-body .drawer-item.hacker-border:not([data-card="identity-config"]),
+body.stats2-guest-mode #left-drawer-body .drawer-skeleton-card,
+body.stats2-guest-mode #left-drawer-body #syncing-overlay-card,
+body.stats2-guest-mode #left-drawer-body [data-github-combat="1"],
+body.stats2-guest-mode #left-drawer-body .left-drawer-wordcloud-card,
+body.stats2-guest-mode #left-drawer-body #left-drawer-wordcloud-wrap,
+html.stats2-guest-mode #left-drawer-body .drawer-item.dashboard-card,
+html.stats2-guest-mode #left-drawer-body .drawer-item.backdrop-blur,
+html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
+html.stats2-guest-mode #left-drawer-body .drawer-item.github-combat-card:not([data-card="identity-config"]),
+html.stats2-guest-mode #left-drawer-body .drawer-item.hacker-border:not([data-card="identity-config"]),
+html.stats2-guest-mode #left-drawer-body .drawer-skeleton-card,
+html.stats2-guest-mode #left-drawer-body #syncing-overlay-card,
+html.stats2-guest-mode #left-drawer-body [data-github-combat="1"],
+html.stats2-guest-mode #left-drawer-body .left-drawer-wordcloud-card,
+html.stats2-guest-mode #left-drawer-body #left-drawer-wordcloud-wrap,
+#left-drawer-body.stats2-guest-mode .drawer-item.dashboard-card,
+#left-drawer-body.stats2-guest-mode .drawer-item.backdrop-blur,
+#left-drawer-body.stats2-guest-mode .drawer-item.clinic-card,
+#left-drawer-body.stats2-guest-mode .drawer-item.github-combat-card:not([data-card="identity-config"]),
+#left-drawer-body.stats2-guest-mode .drawer-item.hacker-border:not([data-card="identity-config"]),
+#left-drawer-body.stats2-guest-mode .drawer-skeleton-card,
+#left-drawer-body.stats2-guest-mode #syncing-overlay-card,
+#left-drawer-body.stats2-guest-mode [data-github-combat="1"],
+#left-drawer-body.stats2-guest-mode .left-drawer-wordcloud-card,
+#left-drawer-body.stats2-guest-mode #left-drawer-wordcloud-wrap {
+  display: none !important;
+}
+
+body.stats2-private-hidden #left-drawer-body .drawer-item.dashboard-card,
+body.stats2-private-hidden #left-drawer-body .drawer-item.backdrop-blur,
+body.stats2-private-hidden #left-drawer-body .drawer-item.clinic-card,
+body.stats2-private-hidden #left-drawer-body .drawer-item.github-combat-card:not([data-card="identity-config"]),
+body.stats2-private-hidden #left-drawer-body .drawer-item.hacker-border:not([data-card="identity-config"]),
+body.stats2-private-hidden #left-drawer-body .drawer-skeleton-card,
+body.stats2-private-hidden #left-drawer-body #syncing-overlay-card,
+body.stats2-private-hidden #left-drawer-body [data-github-combat="1"],
+body.stats2-private-hidden #left-drawer-body .left-drawer-wordcloud-card,
+body.stats2-private-hidden #left-drawer-body #left-drawer-wordcloud-wrap,
+html.stats2-private-hidden #left-drawer-body .drawer-item.dashboard-card,
+html.stats2-private-hidden #left-drawer-body .drawer-item.backdrop-blur,
+html.stats2-private-hidden #left-drawer-body .drawer-item.clinic-card,
+html.stats2-private-hidden #left-drawer-body .drawer-item.github-combat-card:not([data-card="identity-config"]),
+html.stats2-private-hidden #left-drawer-body .drawer-item.hacker-border:not([data-card="identity-config"]),
+html.stats2-private-hidden #left-drawer-body .drawer-skeleton-card,
+html.stats2-private-hidden #left-drawer-body #syncing-overlay-card,
+html.stats2-private-hidden #left-drawer-body [data-github-combat="1"],
+html.stats2-private-hidden #left-drawer-body .left-drawer-wordcloud-card,
+html.stats2-private-hidden #left-drawer-body #left-drawer-wordcloud-wrap,
+#left-drawer-body.stats2-private-hidden .drawer-item.dashboard-card,
+#left-drawer-body.stats2-private-hidden .drawer-item.backdrop-blur,
+#left-drawer-body.stats2-private-hidden .drawer-item.clinic-card,
+#left-drawer-body.stats2-private-hidden .drawer-item.github-combat-card:not([data-card="identity-config"]),
+#left-drawer-body.stats2-private-hidden .drawer-item.hacker-border:not([data-card="identity-config"]),
+#left-drawer-body.stats2-private-hidden .drawer-skeleton-card,
+#left-drawer-body.stats2-private-hidden #syncing-overlay-card,
+#left-drawer-body.stats2-private-hidden [data-github-combat="1"],
+#left-drawer-body.stats2-private-hidden .left-drawer-wordcloud-card,
+#left-drawer-body.stats2-private-hidden #left-drawer-wordcloud-wrap {
+  display: none !important;
+}
+
+body.stats2-private-hidden #left-drawer-body .drawer-item:not([data-card="identity-config"]),
+html.stats2-private-hidden #left-drawer-body .drawer-item:not([data-card="identity-config"]),
+#left-drawer-body.stats2-private-hidden .drawer-item:not([data-card="identity-config"]) {
+  display: none !important;
+}
+
+body.stats2-private-hidden #left-drawer-wordcloud-wrap,
+html.stats2-private-hidden #left-drawer-wordcloud-wrap,
+#left-drawer-body.stats2-private-hidden #left-drawer-wordcloud-wrap,
+body.stats2-private-hidden #left-drawer-body .drawer-item.dashboard-card.backdrop-blur.clinic-card,
+html.stats2-private-hidden #left-drawer-body .drawer-item.dashboard-card.backdrop-blur.clinic-card,
+#left-drawer-body.stats2-private-hidden .drawer-item.dashboard-card.backdrop-blur.clinic-card,
+body.stats2-private-hidden #left-drawer-body .drawer-item.clinic-card,
+html.stats2-private-hidden #left-drawer-body .drawer-item.clinic-card,
+#left-drawer-body.stats2-private-hidden .drawer-item.clinic-card,
+body.stats2-guest-mode #left-drawer-wordcloud-wrap,
+html.stats2-guest-mode #left-drawer-wordcloud-wrap,
+#left-drawer-body.stats2-guest-mode #left-drawer-wordcloud-wrap,
+body.stats2-guest-mode #left-drawer-body .drawer-item.dashboard-card.backdrop-blur.clinic-card,
+html.stats2-guest-mode #left-drawer-body .drawer-item.dashboard-card.backdrop-blur.clinic-card,
+#left-drawer-body.stats2-guest-mode .drawer-item.dashboard-card.backdrop-blur.clinic-card,
+body.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
+html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
+#left-drawer-body.stats2-guest-mode .drawer-item.clinic-card {
+  display: none !important;
+}
 .stats2-gate-github-btn {
   width: 100%;
   padding: 14px 18px;
