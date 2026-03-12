@@ -961,6 +961,12 @@
             var overlay = document.getElementById(OVERLAY_ID);
             if (!overlay || overlay.classList.contains('stats2-gate-removed')) return;
             var country = getStoredCountry();
+            // 游客模式：允许不选国家直接进入（默认展示全球数据）
+            if (isGuestGatePassed()) {
+                try { window.__countryPickerForced = false; window.__countrySelectorSelectedCode = ''; } catch (e) {}
+                hideGateOverlay();
+                return;
+            }
             var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
             if (!sb || typeof sb.auth !== 'object') return;
             sb.auth.getSession().then(function(r) {
@@ -1020,10 +1026,18 @@
                     sb.auth.onAuthStateChange(function(event, session) {
                         if (session) runGateCheck();
                     });
-                    showOverlay();
+                    if (isGuestGatePassed()) {
+                        try { hideGateOverlay(); } catch (e0) {}
+                    } else {
+                        showOverlay();
+                    }
                 }).catch(function() {
                     runGateCheck();
-                    showOverlay();
+                    if (isGuestGatePassed()) {
+                        try { hideGateOverlay(); } catch (e0) {}
+                    } else {
+                        showOverlay();
+                    }
                 });
             }, 200);
             setTimeout(function() { clearInterval(poll); }, 15000);
@@ -1037,34 +1051,30 @@
             }
             if (e.target && (e.target.id === 'gate-guest-btn' || (e.target.closest && e.target.closest('#gate-guest-btn')))) {
                 var guestCode = (window.__countrySelectorSelectedCode || getStoredCountry() || '').trim().toUpperCase();
-                if (!/^[A-Z]{2}$/.test(guestCode)) return;
-                try {
-                    localStorage.setItem('selected_country', guestCode);
-                    localStorage.setItem('user_country_fixed', guestCode);
-                    localStorage.setItem('user_manual_location', guestCode);
-                    localStorage.setItem('user_selected_country', guestCode);
-                    localStorage.removeItem('stats2_user_rejected_terms');
-                } catch (err) {}
+                // 游客允许不选国家：不写入 selected_country，进入后展示 GLOBAL 数据
+                try { localStorage.removeItem('stats2_user_rejected_terms'); } catch (err) {}
                 setGuestGatePassed(true);
                 resetGuestViewerState({ renderDrawer: true });
-                try { window.currentCountryCode = guestCode; } catch (err) {}
+                try { window.__countryPickerForced = false; } catch (err) {}
                 hideGateOverlay();
                 if (typeof window.runGateCheck === 'function') {
                     try { window.runGateCheck(); } catch (err) {}
                 }
                 try {
-                    var guestCountryName = (typeof countryNameMap !== 'undefined' && countryNameMap && countryNameMap[guestCode])
-                        ? ((typeof currentLang !== 'undefined' && currentLang === 'zh') ? countryNameMap[guestCode].zh : countryNameMap[guestCode].en)
-                        : guestCode;
-                    if (typeof switchView === 'function') switchView('country', guestCode);
-                    if (typeof onCountrySwitch === 'function') {
-                        onCountrySwitch(guestCode, {
-                            source: 'gate-guest',
-                            name: guestCountryName,
-                            force: true
-                        });
-                    } else if (typeof showDrawersWithCountryData === 'function') {
-                        showDrawersWithCountryData(guestCode, guestCountryName);
+                    // 无国家时保持 GLOBAL；若已有国家（历史缓存），仍允许按国家视图展示
+                    if (/^[A-Z]{2}$/.test(guestCode)) {
+                        var guestCountryName = (typeof countryNameMap !== 'undefined' && countryNameMap && countryNameMap[guestCode])
+                            ? ((typeof currentLang !== 'undefined' && currentLang === 'zh') ? countryNameMap[guestCode].zh : countryNameMap[guestCode].en)
+                            : guestCode;
+                        try { window.currentCountryCode = guestCode; } catch (err) {}
+                        if (typeof switchView === 'function') switchView('country', guestCode);
+                        if (typeof onCountrySwitch === 'function') {
+                            onCountrySwitch(guestCode, { source: 'gate-guest', name: guestCountryName, force: true });
+                        } else if (typeof showDrawersWithCountryData === 'function') {
+                            showDrawersWithCountryData(guestCode, guestCountryName);
+                        }
+                    } else {
+                        try { if (typeof switchView === 'function') switchView('ranking'); } catch (e0) {}
                     }
                 } catch (err2) {
                     if (typeof console !== 'undefined' && console.warn) console.warn('[GateGuest] switch failed:', err2);
@@ -13907,14 +13917,19 @@
                 const guestBtn = document.getElementById('gate-guest-btn');
                 if (!btn && !guestBtn) return;
                 const code = (window.__countrySelectorSelectedCode || '').trim().toUpperCase();
-                const enabled = window.__countryPickerForced && /^[A-Z]{2}$/.test(code);
-                [btn, guestBtn].forEach(function(targetBtn) {
-                    if (!targetBtn) return;
-                    targetBtn.disabled = !enabled;
-                    targetBtn.style.opacity = enabled ? '1' : '0.6';
-                    targetBtn.style.cursor = enabled ? 'pointer' : 'not-allowed';
-                });
-                if (enabled && typeof window.showGitHubSectionIfCountrySelected === 'function') window.showGitHubSectionIfCountrySelected();
+                const githubEnabled = window.__countryPickerForced && /^[A-Z]{2}$/.test(code);
+                if (btn) {
+                    btn.disabled = !githubEnabled;
+                    btn.style.opacity = githubEnabled ? '1' : '0.6';
+                    btn.style.cursor = githubEnabled ? 'pointer' : 'not-allowed';
+                }
+                // 游客入口不依赖国家：允许直接进入 GLOBAL
+                if (guestBtn) {
+                    guestBtn.disabled = false;
+                    guestBtn.style.opacity = '1';
+                    guestBtn.style.cursor = 'pointer';
+                }
+                if (githubEnabled && typeof window.showGitHubSectionIfCountrySelected === 'function') window.showGitHubSectionIfCountrySelected();
             } catch (e) {}
         }
         function getGateLanguageDefaultCountry() {

@@ -123,6 +123,7 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
   margin-top: 4px;
 }
 .stats2-gate-buttons-row .stats2-gate-github-btn { flex: 1; margin-top: 0; min-height: 46px; }
+.stats2-gate-buttons-row .stats2-gate-guest-btn { flex: 1; margin-top: 0; min-height: 46px; }
 .stats2-gate-secondary-row {
   display: flex;
   gap: 12px;
