@@ -253,6 +253,9 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
   border: 1px solid rgba(0, 255, 65, 0.2);
   padding: 4px 0;
 }
+.stats2-gate-list[hidden] {
+  display: none !important;
+}
 .stats2-gate-list::-webkit-scrollbar { width: 6px; }
 .stats2-gate-list::-webkit-scrollbar-track { background: rgba(0, 255, 65, 0.08); }
 .stats2-gate-list::-webkit-scrollbar-thumb { background: rgba(0, 255, 65, 0.35); border-radius: 3px; }
@@ -289,6 +292,26 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
   color: #00ff41;
   border-color: rgba(0, 255, 65, 0.55);
   background: rgba(0, 255, 65, 0.08);
+}
+.stats2-gate-expand-btn {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px 14px;
+  border: 1px solid rgba(0, 255, 65, 0.35);
+  background: rgba(0, 255, 65, 0.08);
+  color: #00ff41;
+  font-family: var(--font-mono-stack), monospace;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+.stats2-gate-expand-btn:hover {
+  background: rgba(0, 255, 65, 0.14);
+  border-color: rgba(0, 255, 65, 0.6);
+  box-shadow: 0 0 12px rgba(0, 255, 65, 0.14);
+}
+.stats2-gate-expand-btn[hidden] {
+  display: none !important;
 }
 
 /* Guest mode: hide private/advanced left-drawer cards */
