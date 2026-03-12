@@ -322,9 +322,9 @@ html.stats2-private-hidden #left-drawer-body #left-drawer-wordcloud-wrap,
   display: none !important;
 }
 
-body.stats2-private-hidden #left-drawer-body .drawer-item:not([data-card="identity-config"]),
-html.stats2-private-hidden #left-drawer-body .drawer-item:not([data-card="identity-config"]),
-#left-drawer-body.stats2-private-hidden .drawer-item:not([data-card="identity-config"]) {
+body.stats2-private-hidden #left-drawer-body .drawer-item:not([data-card="identity-config"]):not([data-card="guest-mode-info"]),
+html.stats2-private-hidden #left-drawer-body .drawer-item:not([data-card="identity-config"]):not([data-card="guest-mode-info"]),
+#left-drawer-body.stats2-private-hidden .drawer-item:not([data-card="identity-config"]):not([data-card="guest-mode-info"]) {
   display: none !important;
 }
 
@@ -346,6 +346,12 @@ html.stats2-guest-mode #left-drawer-body .drawer-item.dashboard-card.backdrop-bl
 body.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
 html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
 #left-drawer-body.stats2-guest-mode .drawer-item.clinic-card {
+  display: none !important;
+}
+
+#left-drawer-body[data-guest-restricted="true"] > .drawer-item:not([data-card="identity-config"]),
+#left-drawer-body[data-guest-restricted="true"] .left-drawer-wordcloud-card,
+#left-drawer-body[data-guest-restricted="true"] #left-drawer-wordcloud-wrap {
   display: none !important;
 }
 .stats2-gate-github-btn {

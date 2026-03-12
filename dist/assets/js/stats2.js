@@ -404,7 +404,12 @@
                     document.querySelectorAll(selector).forEach(function(node) {
                         if (!node) return;
                         var cardType = (typeof node.getAttribute === 'function' ? node.getAttribute('data-card') : '') || '';
-                        if (cardType === 'identity-config') return;
+                        if (cardType === 'identity-config') {
+                            node.style.display = 'block';
+                            node.style.visibility = 'visible';
+                            node.setAttribute('aria-hidden', 'false');
+                            return;
+                        }
                         if (node.closest) {
                             var parentCard = node.closest('.drawer-item');
                             var parentType = parentCard && typeof parentCard.getAttribute === 'function' ? parentCard.getAttribute('data-card') : '';
@@ -422,7 +427,13 @@
                     leftBody.querySelectorAll('.drawer-item').forEach(function(node) {
                         if (!node || !node.querySelector) return;
                         var cardType = (typeof node.getAttribute === 'function' ? node.getAttribute('data-card') : '') || '';
-                        if (cardType === 'identity-config' || cardType === 'guest-mode-info') return;
+                        if (cardType === 'identity-config') {
+                            node.style.display = 'block';
+                            node.style.visibility = 'visible';
+                            node.setAttribute('aria-hidden', 'false');
+                            return;
+                        }
+                        if (cardType === 'guest-mode-info') return;
                         if (
                             node.id === 'syncing-overlay-card' ||
                             node.classList.contains('clinic-card') ||
@@ -455,6 +466,7 @@
                         else if (node.parentNode) node.parentNode.removeChild(node);
                     });
                 }
+                try { enforceGuestLoginCardPriority('pruneGuestDrawerBlocks'); } catch (e) {}
             } catch (e) {}
         }
         function syncGuestModeDomState(enabled) {
@@ -467,16 +479,29 @@
             try {
                 if (enabled) {
                     pruneGuestDrawerBlocks();
+                    applyLeftDrawerGuestModePermissions();
+                    enforceGuestLoginCardPriority('syncGuestModeDomState:enabled');
                     var leftBody = leftBodyRoot || document.getElementById('left-drawer-body');
                     if (leftBody && !window.__stats2GuestDrawerObserver) {
-                        window.__stats2GuestDrawerObserver = new MutationObserver(function() {
-                            if (typeof isGuestGatePassed === 'function' && isGuestGatePassed()) pruneGuestDrawerBlocks();
+                        window.__stats2GuestDrawerObserver = new MutationObserver(function(mutations) {
+                            if (window.__stats2GuestDrawerInjecting) return;
+                            if (!Array.isArray(mutations) || mutations.length === 0) return;
+                            var identityOnly = mutations.every(function(mutation) {
+                                var target = mutation && mutation.target;
+                                if (!target || !target.closest) return false;
+                                var card = target.closest('.drawer-item');
+                                var cardType = card && typeof card.getAttribute === 'function' ? (card.getAttribute('data-card') || '') : '';
+                                return cardType === 'identity-config';
+                            });
+                            if (identityOnly) return;
+                            applyLeftDrawerGuestModePermissions();
                         });
                         window.__stats2GuestDrawerObserver.observe(leftBody, { childList: true, subtree: true });
                     }
                 } else if (window.__stats2GuestDrawerObserver) {
                     window.__stats2GuestDrawerObserver.disconnect();
                     window.__stats2GuestDrawerObserver = null;
+                    applyLeftDrawerGuestModePermissions();
                 }
             } catch (e) {}
         }
@@ -490,6 +515,7 @@
         function renderGuestModeDrawerCard() {
             var leftBody = document.getElementById('left-drawer-body');
             if (!leftBody) return;
+            window.__stats2GuestDrawerInjecting = true;
             try {
                 leftBody.querySelectorAll('.drawer-item[data-card="guest-mode-info"]').forEach(function(node) { node.remove(); });
             } catch (e) {}
@@ -517,6 +543,84 @@
                 }
             } catch (e) {}
             try { applyLeftDrawerGuestModePermissions(); } catch (e) {}
+            setTimeout(function() {
+                window.__stats2GuestDrawerInjecting = false;
+            }, 0);
+        }
+        function renderGuestLoginCard() {
+            var leftBody = document.getElementById('left-drawer-body');
+            if (!leftBody) return null;
+            window.__stats2GuestDrawerInjecting = true;
+            var card = null;
+            try {
+                leftBody.querySelectorAll('.drawer-item[data-card="guest-mode-info"]').forEach(function(node) { node.remove(); });
+            } catch (e) {}
+            try {
+                card = document.createElement('div');
+                card.className = 'drawer-item guest-login-guide-card';
+                card.setAttribute('data-card', 'guest-mode-info');
+                card.style.cssText = 'position:relative;padding:16px 14px;border-radius:4px;border:1px solid rgba(0,255,65,0.45);background:linear-gradient(165deg,rgba(5,5,5,0.95),rgba(8,18,12,0.92));box-shadow:0 0 16px rgba(0,255,65,0.18), inset 0 0 12px rgba(0,255,65,0.08);text-align:center;color:#c7ffd6;overflow:hidden;';
+                card.innerHTML = ''
+                    + '<div style="display:inline-flex;align-items:center;justify-content:center;width:46px;height:46px;border-radius:9999px;background:rgba(0,255,65,0.12);border:1px solid rgba(0,255,65,0.5);color:#00ff41;box-shadow:0 0 14px rgba(0,255,65,0.25);margin-bottom:10px;" aria-hidden="true">'
+                    + '  <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" style="display:block;"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"></path></svg>'
+                    + '</div>'
+                    + '<div style="font-size:16px;font-weight:700;line-height:1.4;margin-bottom:8px;color:#00ff41;text-shadow:0 0 8px rgba(0,255,65,0.35);font-family:var(--font-mono-stack),monospace;">查看完整数据分析</div>'
+                    + '<div style="font-size:12px;line-height:1.7;color:rgba(192,255,210,0.88);margin-bottom:14px;font-family:var(--font-mono-stack),monospace;">登录 GitHub 即可解锁深度 Vibe Coding 行踪分析、专属技术画像及全站排名。</div>'
+                    + '<button type="button" data-action="github-login" style="cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:10px 14px;border-radius:3px;border:1px solid rgba(0,255,65,0.7);background:linear-gradient(180deg,rgba(0,255,65,0.16),rgba(0,255,65,0.06));color:#00ff41;font-size:13px;font-weight:700;box-shadow:0 0 12px rgba(0,255,65,0.22), inset 0 0 10px rgba(0,255,65,0.08);font-family:var(--font-mono-stack),monospace;letter-spacing:0.4px;text-transform:uppercase;">'
+                    + '  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="filter:drop-shadow(0 0 4px rgba(0,255,65,0.45));"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"></path></svg>'
+                    + '  <span>GitHub 登录</span>'
+                    + '</button>';
+                var loginBtn = card.querySelector('[data-action="github-login"]');
+                if (loginBtn) {
+                    loginBtn.addEventListener('click', function(e) {
+                        if (e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                        }
+                        if (typeof window.loginWithGitHub === 'function') window.loginWithGitHub();
+                        else if (typeof loginWithGitHub === 'function') loginWithGitHub();
+                    });
+                }
+                leftBody.insertBefore(card, leftBody.firstChild || null);
+                card.style.setProperty('display', 'block', 'important');
+                card.style.setProperty('visibility', 'visible', 'important');
+                card.setAttribute('aria-hidden', 'false');
+            } catch (e) {}
+            setTimeout(function() {
+                window.__stats2GuestDrawerInjecting = false;
+            }, 0);
+            return card;
+        }
+        function enforceGuestLoginCardPriority(reason) {
+            try {
+                var leftBody = document && document.getElementById ? document.getElementById('left-drawer-body') : null;
+                if (!leftBody) return;
+                var shouldShow = false;
+                try {
+                    shouldShow = !hasAuthenticatedDrawerAccess() || !window.currentUser || (typeof isGuestGatePassed === 'function' && isGuestGatePassed());
+                } catch (e) {
+                    shouldShow = true;
+                }
+                if (!shouldShow) return;
+                var card = leftBody.querySelector('.drawer-item[data-card="guest-mode-info"]');
+                if (!card) card = renderGuestLoginCard();
+                if (!card) return;
+                if (leftBody.firstElementChild !== card) {
+                    leftBody.insertBefore(card, leftBody.firstChild || null);
+                }
+                card.style.setProperty('display', 'block', 'important');
+                card.style.setProperty('visibility', 'visible', 'important');
+                card.setAttribute('aria-hidden', 'false');
+                setTimeout(function() {
+                    try {
+                        var card2 = leftBody.querySelector('.drawer-item[data-card="guest-mode-info"]');
+                        if (!card2) return;
+                        card2.style.setProperty('display', 'block', 'important');
+                        card2.style.setProperty('visibility', 'visible', 'important');
+                        card2.setAttribute('aria-hidden', 'false');
+                    } catch (e) {}
+                }, 0);
+            } catch (e) {}
         }
         function resetGuestViewerState(options) {
             options = options || {};
@@ -540,7 +644,11 @@
             try { window.__githubAccessToken = ''; } catch (e) {}
             try { window.__stats2HasAuthenticatedSession = false; } catch (e) {}
             syncGuestModeDomState(true);
-            if (options.renderDrawer) renderGuestModeDrawerCard();
+            if (options.renderDrawer) {
+                renderGuestModeDrawerCard();
+                renderGuestLoginCard();
+                enforceGuestLoginCardPriority('resetGuestViewerState');
+            }
         }
         function setAuthenticatedDrawerAccess(enabled, user) {
             try { window.__stats2HasAuthenticatedSession = !!enabled; } catch (e) {}
@@ -569,44 +677,118 @@
                 return false;
             }
         }
-        function enforceLeftDrawerAccessControl() {
+        function applyLeftDrawerGuestModePermissions() {
             try {
                 var leftBody = document && document.getElementById ? document.getElementById('left-drawer-body') : null;
                 if (!leftBody) return;
-                var hasAuth = hasAuthenticatedDrawerAccess();
+                var isGuestMode = !window.currentUser || (typeof isGuestGatePassed === 'function' && isGuestGatePassed());
+                if (isGuestMode) {
+                    try {
+                        var hasIdentityCard = !!leftBody.querySelector('.drawer-item[data-card="identity-config"]');
+                        if (!hasIdentityCard && !window.__stats2GuestCardRepairing) {
+                            window.__stats2GuestCardRepairing = true;
+                            setTimeout(function() {
+                                try {
+                                    var lb = document && document.getElementById ? document.getElementById('left-drawer-body') : null;
+                                    if (lb && !lb.querySelector('.drawer-item[data-card="identity-config"]')) {
+                                        renderGuestModeDrawerCard();
+                                    }
+                                } catch (e) {}
+                                window.__stats2GuestCardRepairing = false;
+                            }, 0);
+                        }
+                    } catch (e) {}
+                }
+                var shouldHideUserData = isGuestMode || !hasAuthenticatedDrawerAccess();
+                var hasAuth = !shouldHideUserData;
+                if (!hasAuth) {
+                    try { renderGuestLoginCard(); } catch (e) {}
+                    try { enforceGuestLoginCardPriority('applyLeftDrawerGuestModePermissions:no-auth'); } catch (e) {}
+                } else {
+                    try {
+                        leftBody.querySelectorAll('.drawer-item[data-card="guest-mode-info"]').forEach(function(node) { node.remove(); });
+                    } catch (e) {}
+                }
+                leftBody.setAttribute('data-guest-restricted', isGuestMode ? 'true' : 'false');
                 leftBody.querySelectorAll('.drawer-item').forEach(function(node) {
                     if (!node) return;
                     var cardType = typeof node.getAttribute === 'function' ? (node.getAttribute('data-card') || '') : '';
+                    if (isGuestMode) {
+                        if (cardType === 'guest-mode-info') {
+                            node.style.display = 'block';
+                            node.style.visibility = 'visible';
+                            node.setAttribute('aria-hidden', 'false');
+                            return;
+                        }
+                        if (cardType === 'identity-config') {
+                            node.style.display = 'block';
+                            node.style.visibility = 'visible';
+                            node.setAttribute('aria-hidden', 'false');
+                            Array.from(node.children || []).forEach(function(child) {
+                                if (!child || !child.style) return;
+                                var keep = !!(
+                                    (child.classList && (
+                                        child.classList.contains('github-combat-identity') ||
+                                        child.classList.contains('status-grid') ||
+                                        child.classList.contains('status-item')
+                                    )) ||
+                                    child.id === 'auth-login-section' ||
+                                    (child.querySelector && (
+                                        child.querySelector('#auth-login-section') ||
+                                        child.querySelector('.github-login-btn') ||
+                                        child.querySelector('[data-auth-container]') ||
+                                        child.querySelector('[data-account-status]') ||
+                                        child.querySelector('.status-grid') ||
+                                        child.querySelector('.status-item')
+                                    ))
+                                );
+                                child.style.display = keep ? '' : 'none';
+                                child.style.visibility = keep ? 'visible' : 'hidden';
+                                child.setAttribute('aria-hidden', keep ? 'false' : 'true');
+                            });
+                            return;
+                        }
+                        node.style.display = 'none';
+                        node.style.visibility = 'hidden';
+                        node.setAttribute('aria-hidden', 'true');
+                        return;
+                    }
                     if (cardType === 'guest-mode-info') {
                         node.style.display = hasAuth ? 'none' : '';
+                        node.style.visibility = hasAuth ? 'hidden' : 'visible';
                         node.setAttribute('aria-hidden', hasAuth ? 'true' : 'false');
                         return;
                     }
                     if (cardType === 'identity-config') {
                         node.style.display = '';
+                        node.style.visibility = 'visible';
                         node.setAttribute('aria-hidden', 'false');
                         if (!hasAuth) {
                             Array.from(node.children || []).forEach(function(child) {
                                 if (!child || !child.classList) return;
                                 var keep = child.classList.contains('github-combat-identity') || child.id === 'auth-login-section' || (child.querySelector && child.querySelector('#auth-login-section'));
                                 child.style.display = keep ? '' : 'none';
+                                child.style.visibility = keep ? 'visible' : 'hidden';
                                 child.setAttribute('aria-hidden', keep ? 'false' : 'true');
                             });
                         } else {
                             Array.from(node.children || []).forEach(function(child) {
                                 if (!child || !child.style) return;
                                 child.style.display = '';
+                                child.style.visibility = 'visible';
                                 child.setAttribute('aria-hidden', 'false');
                             });
                         }
                         return;
                     }
                     node.style.display = hasAuth ? '' : 'none';
+                    node.style.visibility = hasAuth ? 'visible' : 'hidden';
                     node.setAttribute('aria-hidden', hasAuth ? 'false' : 'true');
                 });
                 var wordcloud = document.getElementById('left-drawer-wordcloud-wrap');
                 if (wordcloud) {
                     wordcloud.style.display = hasAuth ? '' : 'none';
+                    wordcloud.style.visibility = hasAuth ? 'visible' : 'hidden';
                     wordcloud.setAttribute('aria-hidden', hasAuth ? 'false' : 'true');
                 }
                 leftBody.querySelectorAll('.drawer-item.dashboard-card.backdrop-blur.clinic-card, .drawer-item.clinic-card, .drawer-item.dashboard-card, .drawer-item.backdrop-blur').forEach(function(node) {
@@ -614,17 +796,66 @@
                     var isIdentityCard = (typeof node.getAttribute === 'function' ? (node.getAttribute('data-card') || '') : '') === 'identity-config';
                     if (isIdentityCard) return;
                     node.style.display = hasAuth ? '' : 'none';
+                    node.style.visibility = hasAuth ? 'visible' : 'hidden';
                     node.setAttribute('aria-hidden', hasAuth ? 'false' : 'true');
                 });
             } catch (e) {}
         }
+        function enforceLeftDrawerAccessControl() {
+            applyLeftDrawerGuestModePermissions();
+            try {
+                if (!hasAuthenticatedDrawerAccess()) {
+                    renderGuestLoginCard();
+                    enforceGuestLoginCardPriority('enforceLeftDrawerAccessControl');
+                }
+            } catch (e) {}
+        }
         function clearPrivateDrawerCards(options) {
             options = options || {};
+            var shouldRenderGuestCard = !!options.renderGuestCard;
+            if (!shouldRenderGuestCard) {
+                try {
+                    if (typeof isGuestGatePassed === 'function' && isGuestGatePassed()) {
+                        shouldRenderGuestCard = true;
+                    }
+                } catch (e) {}
+            }
             setAuthenticatedDrawerAccess(false, null);
             pruneGuestDrawerBlocks();
-            enforceLeftDrawerAccessControl();
-            if (options.renderGuestCard) renderGuestModeDrawerCard();
+            applyLeftDrawerGuestModePermissions();
+            if (shouldRenderGuestCard) {
+                renderGuestModeDrawerCard();
+                renderGuestLoginCard();
+                enforceGuestLoginCardPriority('clearPrivateDrawerCards');
+            }
         }
+        try { window.isGuestGatePassed = isGuestGatePassed; } catch (e) {}
+        try { window.setGuestGatePassed = setGuestGatePassed; } catch (e) {}
+        try { window.resetGuestViewerState = resetGuestViewerState; } catch (e) {}
+        try { window.setAuthenticatedDrawerAccess = setAuthenticatedDrawerAccess; } catch (e) {}
+        try { window.hasAuthenticatedDrawerAccess = hasAuthenticatedDrawerAccess; } catch (e) {}
+        try { window.clearPrivateDrawerCards = clearPrivateDrawerCards; } catch (e) {}
+        try { window.renderGuestLoginCard = renderGuestLoginCard; } catch (e) {}
+        try { window.enforceGuestLoginCardPriority = enforceGuestLoginCardPriority; } catch (e) {}
+        if (typeof window !== 'undefined') window.applyLeftDrawerGuestModePermissions = applyLeftDrawerGuestModePermissions;
+        var isGuestGatePassed = (typeof window !== 'undefined' && typeof window.isGuestGatePassed === 'function')
+            ? function() { return window.isGuestGatePassed.apply(window, arguments); }
+            : function() { return false; };
+        var setGuestGatePassed = (typeof window !== 'undefined' && typeof window.setGuestGatePassed === 'function')
+            ? function() { return window.setGuestGatePassed.apply(window, arguments); }
+            : function() {};
+        var resetGuestViewerState = (typeof window !== 'undefined' && typeof window.resetGuestViewerState === 'function')
+            ? function() { return window.resetGuestViewerState.apply(window, arguments); }
+            : function() {};
+        var setAuthenticatedDrawerAccess = (typeof window !== 'undefined' && typeof window.setAuthenticatedDrawerAccess === 'function')
+            ? function() { return window.setAuthenticatedDrawerAccess.apply(window, arguments); }
+            : function() {};
+        var hasAuthenticatedDrawerAccess = (typeof window !== 'undefined' && typeof window.hasAuthenticatedDrawerAccess === 'function')
+            ? function() { return window.hasAuthenticatedDrawerAccess.apply(window, arguments); }
+            : function() { return false; };
+        var clearPrivateDrawerCards = (typeof window !== 'undefined' && typeof window.clearPrivateDrawerCards === 'function')
+            ? function() { return window.clearPrivateDrawerCards.apply(window, arguments); }
+            : function() {};
         function showOverlay() {
             var el = document.getElementById(OVERLAY_ID);
             if (el) {
@@ -7377,15 +7608,23 @@
                     </div>
                 `;
                 if (leftBody) {
+                    const isGuestDrawerMode = (typeof isGuestGatePassed === 'function' && isGuestGatePassed());
                     const wordcloudCard = document.getElementById('left-drawer-wordcloud-wrap');
+                    const identityCard = isGuestDrawerMode ? leftBody.querySelector('.drawer-item[data-card="identity-config"]') : null;
                     const tempHolder = document.createDocumentFragment();
+                    if (identityCard && identityCard.parentNode) {
+                        tempHolder.appendChild(identityCard);
+                    }
                     if (wordcloudCard && wordcloudCard.parentNode) {
                         tempHolder.appendChild(wordcloudCard);
                     }
-                    leftBody.innerHTML = skeletonHTML;
-                    leftBody.classList.add('drawer-loading');
+                    leftBody.innerHTML = isGuestDrawerMode ? '' : skeletonHTML;
+                    leftBody.classList.toggle('drawer-loading', !isGuestDrawerMode);
                     if (tempHolder.childNodes.length > 0) {
                         leftBody.appendChild(tempHolder);
+                    }
+                    if (isGuestDrawerMode && !leftBody.querySelector('.drawer-item[data-card="identity-config"]')) {
+                        try { renderGuestModeDrawerCard(); } catch (_) {}
                     }
                 }
                 if (rightBody) {
@@ -7694,7 +7933,10 @@
 
             // 获取当前用户数据（用于判断是否为全球最强模式）
             let currentUser = null;
-            if (summaryOnly) {
+            const isGuestDrawerFlow = (typeof isGuestGatePassed === 'function' && isGuestGatePassed());
+            if (isGuestDrawerFlow) {
+                currentUser = null;
+            } else if (summaryOnly) {
                 currentUser = window.currentUser || null;
                 if (!currentUser && Array.isArray(window.allData) && window.allData.length > 0) {
                     const norm = (fp) => String(fp || '').trim().toLowerCase();
@@ -7747,7 +7989,7 @@
                     console.log('[Drawer] 📊 allData 数据量:', allData.length);
                     
                     // 如果 allData 为空或很少，尝试重新获取数据
-                    if (allData.length === 0 && normalizedCurrentFingerprint) {
+                    if (!isGuestDrawerFlow && allData.length === 0 && normalizedCurrentFingerprint) {
                         console.log('[Drawer] ⚠️ allData 为空，尝试重新获取数据...');
                         // 异步重新获取数据（不阻塞抽屉显示）
                         fetchData().then(() => {
@@ -7762,7 +8004,7 @@
                                        (itemIdentity && itemIdentity === normalizedCurrentFingerprint);
                             });
                             
-                            if (matchedUser) {
+                            if (matchedUser && !isGuestDrawerFlow) {
                                 console.log('[Drawer] ✅ 重新匹配到用户:', matchedUser.user_name || matchedUser.name);
                                 // 【核心保护】使用安全合并，防止allData中数据覆盖已有的高数值
                                 var existingUser = window.currentUser || window.currentUserData || {};
@@ -7782,7 +8024,7 @@
                     }
 
                     // ✅ GitHub 兜底：如果 allData 为空但本机有 GitHub ID，也应尝试 fetchData() 再匹配
-                    if (allData.length === 0 && !currentUser && localGitHubName && isValidGitHubUsername(localGitHubName)) {
+                    if (!isGuestDrawerFlow && allData.length === 0 && !currentUser && localGitHubName && isValidGitHubUsername(localGitHubName)) {
                         console.log('[Drawer] ⚠️ allData 为空（GitHub 用户），尝试重新获取数据...');
                         fetchData().then(() => {
                             allData = window.allData || [];
@@ -7795,7 +8037,7 @@
                                 return itemGitHub && (itemGitHub === normalizedLocalGitHub || itemGitHub === normalizedUrlGitHub);
                             });
 
-                            if (matchedUser) {
+                            if (matchedUser && !isGuestDrawerFlow) {
                                 console.log('[Drawer] ✅ 重新匹配到 GitHub 用户:', matchedUser.user_name || matchedUser.name);
                                 // 【核心保护】使用安全合并，防止覆盖已有的高数值
                                 var existingUser = window.currentUser || window.currentUserData || {};
@@ -7820,7 +8062,7 @@
                                         .ilike('user_name', String(localGitHubName).trim())
                                         .maybeSingle()
                                         .then(({ data: dbUser }) => {
-                                            if (!dbUser) return;
+                                            if (!dbUser || isGuestDrawerFlow) return;
                                             console.log('[Drawer] ✅ Supabase 兜底找到 GitHub 用户:', dbUser.user_name || dbUser.name);
                                             // 【核心保护】使用安全合并，防止覆盖已有的高数值
                                             var existingUser = window.currentUser || window.currentUserData || {};
@@ -7842,7 +8084,7 @@
                     }
                     
                     // 优先通过指纹匹配
-                    if (normalizedCurrentFingerprint || normalizedUrlFingerprint) {
+                    if (!isGuestDrawerFlow && (normalizedCurrentFingerprint || normalizedUrlFingerprint)) {
                         console.log('[Drawer] 🔍 开始指纹匹配，目标指纹:', normalizedCurrentFingerprint || normalizedUrlFingerprint);
                         currentUser = allData.find(item => {
                             const itemFingerprint = normalizeFingerprint(item.fingerprint || item.user_fingerprint);
@@ -7874,7 +8116,7 @@
                     }
                     
                     // 如果指纹未匹配，再退而求其次寻找 github_username
-                    if (!currentUser && localGitHubName && isValidGitHubUsername(localGitHubName)) {
+                    if (!isGuestDrawerFlow && !currentUser && localGitHubName && isValidGitHubUsername(localGitHubName)) {
                         console.log('[Drawer] 🔍 开始 GitHub ID 匹配:', localGitHubName);
                         const normalizedLocalGitHub = normalizeFingerprint(localGitHubName);
                         const normalizedUrlGitHub = normalizeFingerprint(urlGitHubName);
@@ -7890,7 +8132,7 @@
                     }
 
                     // ✅ 最终兜底：allData 里没有但本机有 GitHub ID 时，直接查统一视图
-                    if (!currentUser && localGitHubName && isValidGitHubUsername(localGitHubName)) {
+                    if (!isGuestDrawerFlow && !currentUser && localGitHubName && isValidGitHubUsername(localGitHubName)) {
                         try {
                             if (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.from === 'function') {
                                 supabaseClient
@@ -8037,6 +8279,12 @@
                     leftBody.classList.remove('drawer-loading');
                     const skeletons = leftBody.querySelectorAll('.drawer-skeleton-card');
                     skeletons.forEach(s => s.remove());
+                }
+
+                if (isGuestDrawerFlow) {
+                    console.log('[Drawer] ℹ️ 游客模式，跳过左侧实时活动与私有卡片构建');
+                    if (typeof resetGuestViewerState === 'function') resetGuestViewerState({ renderDrawer: true });
+                    return;
                 }
 
                 if (typeof hasAuthenticatedDrawerAccess === 'function' && !hasAuthenticatedDrawerAccess()) {
@@ -13838,6 +14086,15 @@
                         performStats2SignOut({ button: target });
                         return;
                     }
+                    target = e.target && (e.target.matches && e.target.matches('[data-action="github-login"]') ? e.target : (e.target.closest && e.target.closest('[data-action="github-login"]')));
+                    if (target) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (typeof window.loginWithGitHub === 'function') {
+                            window.loginWithGitHub();
+                        }
+                        return;
+                    }
                     target = e.target && (e.target.id === 'left-drawer-delete-account-btn' || e.target.closest && e.target.closest('#left-drawer-delete-account-btn'));
                     if (target) {
                         e.preventDefault();
@@ -17426,14 +17683,25 @@
          * 调用 Supabase Auth 的 signInWithOAuth 方法
          */
         async function loginWithGitHub() {
-            if (!supabaseClient) {
+            var sb = supabaseClient || window.supabaseClient || window.supabase || null;
+            if (!sb || !sb.auth || typeof sb.auth.signInWithOAuth !== 'function') {
                 console.warn('[Auth] Supabase 客户端未就绪，请稍候');
                 return;
             }
             try {
                 console.log('[Auth] 🚀 开始 GitHub OAuth 登录流程...');
-                const redirectTo = _loc.origin + _loc.pathname;
-                const { data, error } = await supabaseClient.auth.signInWithOAuth({
+                try { if (typeof setGuestGatePassed === 'function') setGuestGatePassed(false); } catch (e) {}
+                try { localStorage.removeItem('stats2_guest_mode'); } catch (e) {}
+                var redirectTo = '';
+                try {
+                    var isStats2Path = /(?:^|\/)stats2(?:\.html)?$/i.test(_loc.pathname || '');
+                    redirectTo = isStats2Path
+                        ? (_loc.origin + _loc.pathname)
+                        : (new URL('stats2.html', _loc.href).toString());
+                } catch (e) {
+                    redirectTo = _loc.origin + '/stats2.html';
+                }
+                const { data, error } = await sb.auth.signInWithOAuth({
                     provider: 'github',
                     options: {
                         redirectTo: redirectTo,
@@ -17480,6 +17748,12 @@
             try {
                 const leftDrawer = document.getElementById('left-drawer');
                 const leftBody = document.getElementById('left-drawer-body');
+
+                if (typeof isGuestGatePassed === 'function' && isGuestGatePassed()) {
+                    console.log('[Auth] ℹ️ 游客模式，跳过同步遮罩渲染');
+                    if (typeof resetGuestViewerState === 'function') resetGuestViewerState({ renderDrawer: true });
+                    return;
+                }
                 
                 if (!leftDrawer || !leftBody) {
                     console.warn('[Auth] ⚠️ 无法找到抽屉元素，跳过显示同步遮罩');
@@ -17519,7 +17793,10 @@
                 
                 // 先移除旧的统计卡片（如果存在）
                 const existingStatsCards = leftBody.querySelectorAll('.drawer-item:not(#syncing-overlay-card)');
-                existingStatsCards.forEach(card => card.remove());
+                existingStatsCards.forEach(card => {
+                    if ((card.getAttribute && card.getAttribute('data-card')) === 'identity-config') return;
+                    card.remove();
+                });
                 
                 // 添加同步占位符
                 leftBody.appendChild(loadingCard);
@@ -17579,6 +17856,8 @@
             try {
                 if (session && session.user) {
                     const user = session.user;
+                    try { if (typeof setGuestGatePassed === 'function') setGuestGatePassed(false); } catch (e) {}
+                    try { localStorage.removeItem('stats2_guest_mode'); } catch (e) {}
                     setAuthenticatedDrawerAccess(true, user);
                     console.log('[Auth] 👤 用户信息:', {
                         id: user.id,
@@ -18440,12 +18719,14 @@
                     } else {
                         clearPrivateDrawerCards({ renderGuestCard: false });
                     }
+                    try { renderGuestLoginCard(); } catch (e) {}
                     updateAuthUI(null);
                 }
             } catch (error) {
                 console.error('[Auth] ❌ 处理认证状态变化失败:', error);
                 setAuthenticatedDrawerAccess(false, null);
                 clearPrivateDrawerCards({ renderGuestCard: false });
+                try { renderGuestLoginCard(); } catch (e) {}
                 updateAuthUI(null);
             } finally {
                 // 【异步流保护】在 finally 块中必须调用 hideSyncingOverlay()，确保无论成功失败，UI 遮罩都能消失
@@ -18543,13 +18824,14 @@
                             loginSection.innerHTML = `
                                 <div class="drawer-item-label mb-2">GitHub 登录</div>
                                 <button 
-                                    onclick="loginWithGitHub()"
+                                    type="button"
+                                    data-action="github-login"
                                     class="w-full px-4 py-3 bg-[#24292e] hover:bg-[#2f363d] border border-[#444d56] rounded-md text-white text-sm font-semibold flex items-center justify-center gap-2 transition-all duration-200 hover:scale-105 active:scale-95 shadow-lg hover:shadow-xl"
                                 >
                                     <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                         <path fill-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clip-rule="evenodd"></path>
                                     </svg>
-                                    <span>使用 GitHub 登录</span>
+                                    <span>GitHub 登录</span>
                                 </button>
                                 <div class="text-[8px] text-[#00ff41]/40 mt-2 text-center">
                                     安全、快速、一键登录
@@ -22654,6 +22936,18 @@
 
             // 【统一入口】仅通过 initApp 触发初始化与首次 fetch，避免多处重复 fetch
             window.initApp = window.initApp || (async function initApp() {
+            const safeClearPrivateDrawerCards = function(options) {
+                try {
+                    if (typeof window !== 'undefined' && typeof window.clearPrivateDrawerCards === 'function') {
+                        return window.clearPrivateDrawerCards(options || {});
+                    }
+                    if (typeof resetGuestViewerState === 'function') {
+                        return resetGuestViewerState({ renderDrawer: true });
+                    }
+                } catch (safeErr) {
+                    console.warn('[Init] clearPrivateDrawerCards fallback failed:', safeErr);
+                }
+            };
             try {
             loadGitHubUsername();
             try { await loadLanguageConfig(); } catch { /* ignore */ }
@@ -22733,7 +23027,10 @@
                 showApiStatusWarning();
             }
             if (typeof isGuestGatePassed === 'function' && isGuestGatePassed()) {
-                resetGuestViewerState({ renderDrawer: false });
+                resetGuestViewerState({ renderDrawer: true });
+            }
+            if (typeof window !== 'undefined' && typeof window.applyLeftDrawerGuestModePermissions === 'function') {
+                try { window.applyLeftDrawerGuestModePermissions(); } catch (e) {}
             }
             
             // 【自动定位】静默初始化：localStorage → my-ip → lastData → currentUser → getUserLocation
@@ -22869,7 +23166,8 @@
                         } else if (typeof setAuthenticatedDrawerAccess === 'function') {
                             setAuthenticatedDrawerAccess(false, null);
                         }
-                        clearPrivateDrawerCards({ renderGuestCard: false });
+                        safeClearPrivateDrawerCards({ renderGuestCard: true });
+                        try { renderGuestLoginCard(); } catch (e) {}
                         updateAuthUI(null);
                     }
                 } catch (error) {
@@ -22939,6 +23237,10 @@
                             }
                         }
                     } else if (event === 'SIGNED_OUT') {
+                        try {
+                            resetGuestViewerState({ renderDrawer: true });
+                            renderGuestLoginCard();
+                        } catch (e) {}
                         await handleAuthStateChange(null);
                     }
                 });
@@ -22963,7 +23265,8 @@
                             } else if (typeof setAuthenticatedDrawerAccess === 'function') {
                                 setAuthenticatedDrawerAccess(false, null);
                             }
-                            clearPrivateDrawerCards({ renderGuestCard: false });
+                            safeClearPrivateDrawerCards({ renderGuestCard: true });
+                            try { renderGuestLoginCard(); } catch (e) {}
                             updateAuthUI(null);
                         }
                     }
@@ -25613,6 +25916,11 @@
         /** 登录后首次同步仅通过读取最新 user_analysis / v_unified_analysis_v2（及现有 API）更新 UI；严禁调用 supabase.rpc('refresh_leaderboard_snapshots')，该 RPC 仅由后端 Worker Cron 执行。 */
         window.refreshUserStats = async function() {
             if (isGlobalInitializing && !window.__allowInitCall) return;
+            if (typeof isGuestGatePassed === 'function' && isGuestGatePassed()) {
+                console.log('[UserStats] ℹ️ 游客模式，跳过 refreshUserStats 私有刷新链路');
+                if (typeof resetGuestViewerState === 'function') resetGuestViewerState({ renderDrawer: true });
+                return;
+            }
             
             // 【等待资源加载】确保 ECharts 及其 Locale 已经准备好，防止 "zh not found"
             let resourceWaitStart = Date.now();

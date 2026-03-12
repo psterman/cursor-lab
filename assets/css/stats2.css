@@ -80,6 +80,26 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
   margin: 0 0 10px 0;
   font-family: var(--font-mono-stack), monospace;
 }
+.stats2-gate-terms-scroll {
+  max-height: 190px;
+  overflow-y: auto;
+  border: 1px solid rgba(0, 255, 65, 0.25);
+  background: rgba(0, 8, 4, 0.48);
+  padding: 10px 12px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: rgba(0, 255, 65, 0.78);
+  font-family: var(--font-mono-stack), monospace;
+}
+.stats2-gate-terms-scroll p {
+  margin: 0 0 8px 0;
+}
+.stats2-gate-terms-scroll p:last-child {
+  margin-bottom: 0;
+}
+.stats2-gate-terms-scroll::-webkit-scrollbar { width: 6px; }
+.stats2-gate-terms-scroll::-webkit-scrollbar-track { background: rgba(0, 255, 65, 0.08); }
+.stats2-gate-terms-scroll::-webkit-scrollbar-thumb { background: rgba(0, 255, 65, 0.35); border-radius: 3px; }
 .stats2-gate-privacy-check {
   display: flex;
   align-items: center;
@@ -254,6 +274,22 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
   color: #00ff41;
   box-shadow: inset 0 0 20px rgba(0, 255, 65, 0.06);
 }
+.stats2-gate-list .country-list-action {
+  margin: 8px 10px 6px;
+  padding: 8px 12px;
+  border: 1px dashed rgba(0, 255, 65, 0.3);
+  color: rgba(0, 255, 65, 0.82);
+  font-family: var(--font-mono-stack), monospace;
+  font-size: 11px;
+  text-align: center;
+  cursor: pointer;
+  background: rgba(0, 255, 65, 0.03);
+}
+.stats2-gate-list .country-list-action:hover {
+  color: #00ff41;
+  border-color: rgba(0, 255, 65, 0.55);
+  background: rgba(0, 255, 65, 0.08);
+}
 
 /* Guest mode: hide private/advanced left-drawer cards */
 body.stats2-guest-mode #left-drawer-body .drawer-item.dashboard-card,
@@ -322,9 +358,9 @@ html.stats2-private-hidden #left-drawer-body #left-drawer-wordcloud-wrap,
   display: none !important;
 }
 
-body.stats2-private-hidden #left-drawer-body .drawer-item:not([data-card="identity-config"]),
-html.stats2-private-hidden #left-drawer-body .drawer-item:not([data-card="identity-config"]),
-#left-drawer-body.stats2-private-hidden .drawer-item:not([data-card="identity-config"]) {
+body.stats2-private-hidden #left-drawer-body .drawer-item:not([data-card="identity-config"]):not([data-card="guest-mode-info"]),
+html.stats2-private-hidden #left-drawer-body .drawer-item:not([data-card="identity-config"]):not([data-card="guest-mode-info"]),
+#left-drawer-body.stats2-private-hidden .drawer-item:not([data-card="identity-config"]):not([data-card="guest-mode-info"]) {
   display: none !important;
 }
 
