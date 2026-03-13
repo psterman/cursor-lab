@@ -22,6 +22,7 @@
         '小白': 'Novice',
         '新手': 'Novice',
         '脱发': 'Professional',
+        '脱发期': 'Professional',
         '实战': 'Professional',
         '霸天': 'Architect',
         '老手': 'Architect',
@@ -655,6 +656,21 @@
             try { window.supabaseAuthUser = enabled && user ? user : null; } catch (e) {}
             try { window.authenticatedUserId = enabled && user && user.id ? String(user.id) : ''; } catch (e) {}
             try { window.__authUserId = enabled && user && user.id ? String(user.id) : ''; } catch (e) {}
+            if (enabled) {
+                try {
+                    if (typeof setGuestGatePassed === 'function') setGuestGatePassed(false);
+                    else localStorage.removeItem('stats2_guest_mode');
+                } catch (e) {}
+                try {
+                    if (document && document.body) document.body.classList.remove('stats2-guest-mode');
+                    if (document && document.documentElement) document.documentElement.classList.remove('stats2-guest-mode');
+                    var enabledLeftBody = document && document.getElementById ? document.getElementById('left-drawer-body') : null;
+                    if (enabledLeftBody) {
+                        enabledLeftBody.classList.remove('stats2-guest-mode');
+                        enabledLeftBody.setAttribute('data-guest-restricted', 'false');
+                    }
+                } catch (e) {}
+            }
             try {
                 if (document && document.body) document.body.classList.toggle('stats2-private-hidden', !enabled);
                 if (document && document.documentElement) document.documentElement.classList.toggle('stats2-private-hidden', !enabled);
@@ -665,9 +681,18 @@
         }
         try { window.setAuthenticatedDrawerAccess = setAuthenticatedDrawerAccess; } catch (e) {}
         function hasAuthenticatedDrawerAccess() {
+            try {
+                var hasAuthSession = window.__stats2HasAuthenticatedSession === true || !!(
+                    (window.supabaseAuthUser && window.supabaseAuthUser.id) ||
+                    window.authenticatedUserId ||
+                    window.__authUserId
+                );
+                if (hasAuthSession) return true;
+            } catch (e) {
+                return false;
+            }
             if (typeof isGuestGatePassed === 'function' && isGuestGatePassed()) return false;
             try {
-                if (window.__stats2HasAuthenticatedSession === true) return true;
                 return !!(
                     (window.supabaseAuthUser && window.supabaseAuthUser.id) ||
                     window.authenticatedUserId ||
@@ -961,6 +986,33 @@
             var overlay = document.getElementById(OVERLAY_ID);
             if (!overlay || overlay.classList.contains('stats2-gate-removed')) return;
             var country = getStoredCountry();
+            // 游客模式：允许不选国家直接进入（默认展示全球数据）
+            if (isGuestGatePassed()) {
+                try { window.__countryPickerForced = false; window.__countrySelectorSelectedCode = ''; } catch (e) {}
+                hideGateOverlay();
+                // 游客进入：自动展开左右抽屉，并默认切到 GLOBAL（右抽屉显示全球数据页）
+                try {
+                    if (!window.__stats2GuestAutoOpened) {
+                        window.__stats2GuestAutoOpened = true;
+                        var leftDrawer = document.getElementById('left-drawer');
+                        var rightDrawer = document.getElementById('right-drawer');
+                        if (leftDrawer) leftDrawer.classList.add('active');
+                        if (rightDrawer) rightDrawer.classList.add('active');
+                        try { localStorage.setItem('left_drawer_open', 'true'); localStorage.setItem('right_drawer_open', 'true'); } catch (_) {}
+                        try { if (typeof switchView === 'function') switchView('global'); } catch (_) {}
+                        // 游客状态也需要加载「高分图谱」人物榜单：确保 topByMetrics 拉取并触发 drawHighScores 渲染
+                        setTimeout(function() {
+                            try {
+                                var hasTopBy = !!(window.lastData && Array.isArray(window.lastData.topByMetrics) && window.lastData.topByMetrics.length > 0);
+                                if (!hasTopBy && typeof updateCountryDashboard === 'function') {
+                                    updateCountryDashboard('GLOBAL', null, { preferCache: true, silent: true });
+                                }
+                            } catch (_) {}
+                        }, 500);
+                    }
+                } catch (e2) {}
+                return;
+            }
             var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
             if (!sb || typeof sb.auth !== 'object') return;
             sb.auth.getSession().then(function(r) {
@@ -1020,10 +1072,18 @@
                     sb.auth.onAuthStateChange(function(event, session) {
                         if (session) runGateCheck();
                     });
-                    showOverlay();
+                    if (isGuestGatePassed()) {
+                        try { hideGateOverlay(); } catch (e0) {}
+                    } else {
+                        showOverlay();
+                    }
                 }).catch(function() {
                     runGateCheck();
-                    showOverlay();
+                    if (isGuestGatePassed()) {
+                        try { hideGateOverlay(); } catch (e0) {}
+                    } else {
+                        showOverlay();
+                    }
                 });
             }, 200);
             setTimeout(function() { clearInterval(poll); }, 15000);
@@ -1037,37 +1097,38 @@
             }
             if (e.target && (e.target.id === 'gate-guest-btn' || (e.target.closest && e.target.closest('#gate-guest-btn')))) {
                 var guestCode = (window.__countrySelectorSelectedCode || getStoredCountry() || '').trim().toUpperCase();
-                var guestPrivacyCheck = document.getElementById('gate-privacy-accept');
-                var guestPrivacyAccepted = !guestPrivacyCheck || guestPrivacyCheck.checked;
-                if (!/^[A-Z]{2}$/.test(guestCode) || !guestPrivacyAccepted) return;
-                try {
-                    localStorage.setItem('selected_country', guestCode);
-                    localStorage.setItem('user_country_fixed', guestCode);
-                    localStorage.setItem('user_manual_location', guestCode);
-                    localStorage.setItem('user_selected_country', guestCode);
-                    localStorage.removeItem('stats2_user_rejected_terms');
-                } catch (err) {}
+                // 游客允许不选国家：不写入 selected_country，进入后展示 GLOBAL 数据
+                try { localStorage.removeItem('stats2_user_rejected_terms'); } catch (err) {}
                 setGuestGatePassed(true);
                 resetGuestViewerState({ renderDrawer: true });
-                try { window.currentCountryCode = guestCode; } catch (err) {}
+                if (/^[A-Z]{2}$/.test(guestCode)) {
+                    var guestCountryName = (typeof countryNameMap !== 'undefined' && countryNameMap && countryNameMap[guestCode])
+                        ? ((typeof currentLang !== 'undefined' && currentLang === 'zh') ? countryNameMap[guestCode].zh : countryNameMap[guestCode].en)
+                        : guestCode;
+                    try { window.currentUserCountry = guestCode; window.currentCountryCode = guestCode; } catch (err) {}
+                    try { if (window.currentDrawerCountry && typeof window.currentDrawerCountry === 'object') { window.currentDrawerCountry.code = guestCode; window.currentDrawerCountry.name = guestCountryName; } } catch (err) {}
+                }
                 hideGateOverlay();
                 if (typeof window.runGateCheck === 'function') {
                     try { window.runGateCheck(); } catch (err) {}
                 }
                 try {
-                    var guestCountryName = (typeof countryNameMap !== 'undefined' && countryNameMap && countryNameMap[guestCode])
-                        ? ((typeof currentLang !== 'undefined' && currentLang === 'zh') ? countryNameMap[guestCode].zh : countryNameMap[guestCode].en)
-                        : guestCode;
-                    if (typeof switchView === 'function') switchView('country', guestCode);
-                    if (typeof onCountrySwitch === 'function') {
-                        onCountrySwitch(guestCode, {
-                            source: 'gate-guest',
-                            name: guestCountryName,
-                            force: true
-                        });
-                    } else if (typeof showDrawersWithCountryData === 'function') {
-                        showDrawersWithCountryData(guestCode, guestCountryName);
-                    }
+                    // 游客入口：强制默认 GLOBAL 视图（右抽屉显示全球数据页），并自动展开左右抽屉
+                    var leftDrawer = document.getElementById('left-drawer');
+                    var rightDrawer = document.getElementById('right-drawer');
+                    if (leftDrawer) leftDrawer.classList.add('active');
+                    if (rightDrawer) rightDrawer.classList.add('active');
+                    try { localStorage.setItem('left_drawer_open', 'true'); localStorage.setItem('right_drawer_open', 'true'); } catch (_) {}
+                    try { if (typeof switchView === 'function') switchView('global'); } catch (e0) {}
+                    // 游客状态也要渲染右抽屉高分图谱人物榜单（topByMetrics）
+                    setTimeout(function() {
+                        try {
+                            var hasTopBy = !!(window.lastData && Array.isArray(window.lastData.topByMetrics) && window.lastData.topByMetrics.length > 0);
+                            if (!hasTopBy && typeof updateCountryDashboard === 'function') {
+                                updateCountryDashboard('GLOBAL', null, { preferCache: true, silent: true });
+                            }
+                        } catch (_) {}
+                    }, 500);
                 } catch (err2) {
                     if (typeof console !== 'undefined' && console.warn) console.warn('[GateGuest] switch failed:', err2);
                 }
@@ -2124,11 +2185,227 @@
             
             return [];
         };
+        function lexiconToIdentityCloud(rawLexicon) {
+            if (!rawLexicon || typeof rawLexicon !== 'object') return null;
+            var noviceRaw = rawLexicon.Novice ?? rawLexicon.slang_list ?? rawLexicon.slang ?? rawLexicon.novice ?? [];
+            var proRaw = rawLexicon.Professional ?? rawLexicon.mantra_top ?? rawLexicon.mantra ?? rawLexicon.professional ?? rawLexicon.merit_board ?? [];
+            var archRaw = rawLexicon.Architect ?? rawLexicon.architect ?? rawLexicon.sv_slang ?? [];
+            return {
+                Novice: dataAdapter(noviceRaw),
+                Professional: dataAdapter(proRaw),
+                Architect: dataAdapter(archRaw)
+            };
+        }
+        function mergeIfSparse(base, rawLexicon) {
+            if (!base || typeof base !== 'object') return base;
+            var total = (base.Novice || []).length + (base.Professional || []).length + (base.Architect || []).length;
+            if (total >= 9) return base;
+            var alt = lexiconToIdentityCloud(rawLexicon);
+            if (!alt) return base;
+            var altTotal = (alt.Novice || []).length + (alt.Professional || []).length + (alt.Architect || []).length;
+            return altTotal > total ? alt : base;
+        }
+        function buildIdentityFromCloud50(cloud50) {
+            if (!Array.isArray(cloud50) || cloud50.length === 0) return null;
+            var novice = [];
+            var professional = [];
+            var architect = [];
+            var other = [];
+            cloud50.forEach(function(item) {
+                if (!item) return;
+                var phrase = String(item.name || item.word || item.phrase || '').trim();
+                if (!phrase) return;
+                var weight = Number(item.value != null ? item.value : (item.count != null ? item.count : item.weight)) || 0;
+                var cat = String(item.category || '').trim();
+                if (cat === 'merit') professional.push({ phrase: phrase, weight: weight });
+                else if (cat === 'uncategorized_hot') professional.push({ phrase: phrase, weight: weight });
+                else if (cat === 'slang') novice.push({ phrase: phrase, weight: weight });
+                else if (cat === 'sv_slang') architect.push({ phrase: phrase, weight: weight });
+                else if (cat === 'phrase') architect.push({ phrase: phrase, weight: weight });
+                else other.push({ phrase: phrase, weight: weight });
+            });
+            var sortBy = function(a, b) { return (b.weight || 0) - (a.weight || 0); };
+            novice.sort(sortBy);
+            professional.sort(sortBy);
+            architect.sort(sortBy);
+            other.sort(sortBy);
+            if (professional.length === 0 && other.length) professional = other.slice(0, 20);
+            if (novice.length === 0 && other.length) novice = other.slice(0, 20);
+            if (architect.length === 0 && other.length) architect = other.slice(0, 20);
+            if (professional.length === 0 || novice.length === 0 || architect.length === 0) {
+                var poolAll = novice.concat(professional).concat(architect).concat(other).sort(sortBy);
+                if (professional.length === 0 && poolAll.length) professional = poolAll.slice(0, 20);
+                if (novice.length === 0 && poolAll.length) novice = poolAll.slice(0, 20);
+                if (architect.length === 0 && poolAll.length) architect = poolAll.slice(0, 20);
+            }
+            return { Novice: novice, Professional: professional, Architect: architect };
+        }
+        function mergeUniqueCloudItems(primary, supplements, limit) {
+            var seen = new Set();
+            var merged = [];
+            [primary, supplements].forEach(function(list) {
+                (Array.isArray(list) ? list : []).forEach(function(item) {
+                    if (!item) return;
+                    var phrase = String(item.phrase || item.word || '').trim();
+                    if (!phrase) return;
+                    if (seen.has(phrase)) return;
+                    seen.add(phrase);
+                    merged.push({
+                        phrase: phrase,
+                        weight: Number(item.weight != null ? item.weight : item.count) || 0
+                    });
+                });
+            });
+            return merged.slice(0, limit || 36);
+        }
+        function buildLevelFromCloud50(cloud50, level) {
+            if (!Array.isArray(cloud50) || cloud50.length === 0) return [];
+            var categoriesByLevel = {
+                Novice: { slang: 1 },
+                Professional: { merit: 1, uncategorized_hot: 1 },
+                Architect: { sv_slang: 1, phrase: 1 }
+            };
+            var allow = categoriesByLevel[level] || categoriesByLevel.Novice;
+            return cloud50.map(function(item) {
+                if (!item) return null;
+                var category = String(item.category || '').trim();
+                if (!allow[category]) return null;
+                var phrase = String(item.name || item.word || item.phrase || '').trim();
+                var weight = Number(item.value != null ? item.value : (item.count != null ? item.count : item.weight)) || 0;
+                return phrase ? { phrase: phrase, weight: weight } : null;
+            }).filter(Boolean).sort(function(a, b) {
+                return (b.weight || 0) - (a.weight || 0);
+            });
+        }
+        function buildLevelFromLexicon(rawLexicon, level) {
+            if (!rawLexicon || typeof rawLexicon !== 'object') return [];
+            var mapped = lexiconToIdentityCloud(rawLexicon);
+            if (!mapped || typeof mapped !== 'object') return [];
+            var list = mapped[level];
+            return Array.isArray(list) ? list : [];
+        }
+        function readPersonalLexiconFallback() {
+            try {
+                var lastStr = localStorage.getItem(PERSONAL_CLOUD_STORAGE_KEY) || '';
+                if (lastStr) {
+                    var lastObj = JSON.parse(lastStr);
+                    var lastLex = (lastObj && lastObj.personality && lastObj.personality.vibe_lexicon) ||
+                        (lastObj && lastObj.stats && lastObj.stats.vibe_lexicon) ||
+                        (lastObj && lastObj.vibe_lexicon) ||
+                        null;
+                    if (lastLex && typeof lastLex === 'object') return lastLex;
+                }
+            } catch (_) {}
+            try {
+                var cu = window.currentUser || window.currentUserData || null;
+                if (cu && typeof cu === 'object') {
+                    var cuLex = (cu.personality && cu.personality.vibe_lexicon) ||
+                        (cu.stats && cu.stats.vibe_lexicon) ||
+                        null;
+                    if (!cuLex && cu.personality_data) {
+                        if (typeof cu.personality_data === 'string') {
+                            try { cuLex = JSON.parse(cu.personality_data).vibe_lexicon; } catch (_) {}
+                        } else if (typeof cu.personality_data === 'object') {
+                            cuLex = cu.personality_data.vibe_lexicon;
+                        }
+                    }
+                    if (cuLex && typeof cuLex === 'object') return cuLex;
+                }
+            } catch (_) {}
+            try {
+                var histStr = localStorage.getItem('cursor_clinical_history') || '';
+                if (histStr) {
+                    var hist = JSON.parse(histStr);
+                    var vr = hist && hist.analysisData && hist.analysisData.vibeResult ? hist.analysisData.vibeResult : null;
+                    var histLex = (vr && vr.personality && vr.personality.vibe_lexicon) ||
+                        (vr && vr.stats && vr.stats.vibe_lexicon) ||
+                        null;
+                    if (!histLex && vr && vr.personality_data) {
+                        if (typeof vr.personality_data === 'string') {
+                            try { histLex = JSON.parse(vr.personality_data).vibe_lexicon; } catch (_) {}
+                        } else if (typeof vr.personality_data === 'object') {
+                            histLex = vr.personality_data.vibe_lexicon;
+                        }
+                    }
+                    if (histLex && typeof histLex === 'object') return histLex;
+                }
+            } catch (_) {}
+            return null;
+        }
+        function readPersonalCloud50Fallback() {
+            try {
+                if (Array.isArray(window.__lastPersonalCloud50) && window.__lastPersonalCloud50.length > 0) {
+                    return window.__lastPersonalCloud50;
+                }
+            } catch (_) {}
+            try {
+                var lastStr = localStorage.getItem(PERSONAL_CLOUD_STORAGE_KEY) || '';
+                if (lastStr) {
+                    var lastObj = JSON.parse(lastStr);
+                    var localCloud50 = (lastObj && lastObj.cloud50) || (lastObj && lastObj.analysis && lastObj.analysis.cloud50) || null;
+                    if (Array.isArray(localCloud50) && localCloud50.length > 0) return localCloud50;
+                }
+            } catch (_) {}
+            try {
+                var histStr = localStorage.getItem('cursor_clinical_history') || '';
+                if (histStr) {
+                    var hist = JSON.parse(histStr);
+                    var vr = hist && hist.analysisData && hist.analysisData.vibeResult ? hist.analysisData.vibeResult : null;
+                    var histCloud50 = (vr && vr.cloud50) || (vr && vr.analysis && vr.analysis.cloud50) || (hist && hist.analysisData && hist.analysisData.cloud50) || null;
+                    if (Array.isArray(histCloud50) && histCloud50.length > 0) return histCloud50;
+                }
+            } catch (_) {}
+            return [];
+        }
         var EMPTY_PERSONAL_CLOUD_TEXT = '初出茅庐，灵魂波段捕获中...';
         var PERSONAL_CLOUD_STORAGE_KEY = 'last_analysis_data';
+        var PERSONAL_CLOUD_HARDCODED_DEMO = {
+            Novice: [
+                { phrase: '怎么改', weight: 18 },
+                { phrase: '先跑一下', weight: 16 },
+                { phrase: '帮我看看', weight: 15 },
+                { phrase: '是不是这里', weight: 14 },
+                { phrase: '先这样吧', weight: 13 },
+                { phrase: '我再试试', weight: 12 },
+                { phrase: '有点奇怪', weight: 11 },
+                { phrase: '哪里报错', weight: 10 }
+            ],
+            Professional: [
+                { phrase: '状态同步', weight: 20 },
+                { phrase: '接口对齐', weight: 18 },
+                { phrase: '缓存失效', weight: 17 },
+                { phrase: '边界条件', weight: 15 },
+                { phrase: '异步竞态', weight: 14 },
+                { phrase: '降级兜底', weight: 13 },
+                { phrase: '渲染链路', weight: 12 },
+                { phrase: '最小修复', weight: 11 }
+            ],
+            Architect: [
+                { phrase: '单一数据源', weight: 22 },
+                { phrase: '状态收敛', weight: 20 },
+                { phrase: '前后端契约', weight: 18 },
+                { phrase: '分层治理', weight: 16 },
+                { phrase: '幂等刷新', weight: 15 },
+                { phrase: '可观测性', weight: 14 },
+                { phrase: '失效策略', weight: 13 },
+                { phrase: '鲁棒性', weight: 12 }
+            ]
+        };
+        function getPersonalCloudDebugFallback() {
+            try {
+                if (window && window.__stats2PersonalCloudDemoMode === true) {
+                    return {
+                        Novice: PERSONAL_CLOUD_HARDCODED_DEMO.Novice.slice(),
+                        Professional: PERSONAL_CLOUD_HARDCODED_DEMO.Professional.slice(),
+                        Architect: PERSONAL_CLOUD_HARDCODED_DEMO.Architect.slice()
+                    };
+                }
+            } catch (_) { /* ignore */ }
+            return null;
+        }
         function normalizeCloudLevel(level) {
             var key = String(level || '').trim();
-            if (key === 'Professional' || key === 'professional' || key === '脱发' || key === '实战') return 'Professional';
+            if (key === 'Professional' || key === 'professional' || key === '脱发' || key === '脱发期' || key === '实战') return 'Professional';
             if (key === 'Architect' || key === 'architect' || key === '霸天' || key === '老手') return 'Architect';
             return 'Novice';
         }
@@ -2142,38 +2419,172 @@
                 null
             );
         }
-        function readPersonalCloudFromLocalStorage() {
+        function normalizeIdentityCloudBuckets(raw) {
+            if (!raw || typeof raw !== 'object') return null;
+            return {
+                Novice: dataAdapter(raw.Novice || raw.novice || []),
+                Professional: dataAdapter(raw.Professional || raw.professional || raw.Pro || []),
+                Architect: dataAdapter(raw.Architect || raw.architect || [])
+            };
+        }
+        function readPersonalCloudFromBroadcast() {
             try {
-                var raw = localStorage.getItem(PERSONAL_CLOUD_STORAGE_KEY);
-                if (!raw) return null;
-                return JSON.parse(raw);
+                var payload = window.last_local_stats && window.last_local_stats.payload;
+                if (!payload || typeof payload !== 'object') return null;
+                return pickIdentityLevelCloud(payload) ||
+                    (payload.stats && payload.stats.identityLevelCloud) ||
+                    payload.identityLevelCloud ||
+                    null;
+            } catch (_) {
+                return null;
+            }
+        }
+        function readPersonalCloudFromLocalStorage() {
+            var raw = '';
+            try {
+                raw = localStorage.getItem(PERSONAL_CLOUD_STORAGE_KEY) || '';
+            } catch (_) {
+                return { raw: '', data: null };
+            }
+            if (!raw) return { raw: '', data: null };
+            try {
+                return { raw: raw, data: JSON.parse(raw) };
+            } catch (_) {
+                return { raw: raw, data: null };
+            }
+        }
+        function readPersonalCloudFromCurrentUser() {
+            try {
+                var cu = window.currentUser || window.currentUserData || null;
+                if (!cu || typeof cu !== 'object') return null;
+                var ilc = (
+                    (cu.stats && cu.stats.identityLevelCloud) ||
+                    cu.identityLevelCloud ||
+                    (cu.analysis && cu.analysis.stats && cu.analysis.stats.identityLevelCloud) ||
+                    (cu.personality && cu.personality.identityLevelCloud) ||
+                    null
+                );
+                if (!ilc && cu.personality_data) {
+                    try {
+                        if (typeof cu.personality_data === 'string') {
+                            var pObj = JSON.parse(cu.personality_data);
+                            ilc = (pObj && pObj.identityLevelCloud) || null;
+                        } else if (typeof cu.personality_data === 'object') {
+                            ilc = cu.personality_data.identityLevelCloud || null;
+                        }
+                    } catch (_) {}
+                }
+                return normalizeIdentityCloudBuckets(ilc);
+            } catch (_) {
+                return null;
+            }
+        }
+        function readPersonalCloudFromHistory() {
+            try {
+                var histStr = localStorage.getItem('cursor_clinical_history') || '';
+                if (!histStr) return null;
+                var hist = JSON.parse(histStr);
+                var vr = hist && hist.analysisData && hist.analysisData.vibeResult ? hist.analysisData.vibeResult : null;
+                if (!vr || typeof vr !== 'object') return null;
+                var ilc = (
+                    (vr.stats && vr.stats.identityLevelCloud) ||
+                    (vr.statistics && vr.statistics.identityLevelCloud) ||
+                    vr.identityLevelCloud ||
+                    null
+                );
+                var cloud50 = vr.cloud50 || (vr.analysis && vr.analysis.cloud50) || (hist.analysisData && hist.analysisData.cloud50) || null;
+                try { window.__lastPersonalCloud50 = cloud50 || null; } catch (_) {}
+                return normalizeIdentityCloudBuckets(ilc);
             } catch (_) {
                 return null;
             }
         }
         function getPersonalIdentityLevelCloudAll() {
-            // 单一权威来源，避免“多处猜测”带来的竞态与不一致
+            // 单一权威来源，避免“多处猜测”带来的竞态与不一致。
+            // 关键：同页内 localStorage.setItem 不会触发 storage 事件，不能永久复用旧空缓存。
+            var rawPayload = '';
+            var localResult = readPersonalCloudFromLocalStorage();
+            var parsed = localResult && localResult.data;
+            rawPayload = String((localResult && localResult.raw) || '');
+            if (window.StatsDataService && typeof window.StatsDataService.getLastAnalysisData === 'function') {
+                try {
+                    var latest = window.StatsDataService.getLastAnalysisData();
+                    if (latest && latest.raw != null) rawPayload = String(latest.raw || '');
+                    if (latest && latest.identityLevelCloud && typeof latest.identityLevelCloud === 'object') {
+                        var serviceCache = window.__personalIdentityLevelCloudCache;
+                        if (serviceCache && serviceCache.raw === rawPayload && serviceCache.v && typeof serviceCache.v === 'object') {
+                            return serviceCache.v;
+                        }
+                        var normalizedFromService = normalizeIdentityCloudBuckets(latest.identityLevelCloud);
+                        window.__personalIdentityLevelCloudCache = { v: normalizedFromService, raw: rawPayload, ts: Date.now() };
+                        return normalizedFromService;
+                    }
+                } catch (_) { /* ignore */ }
+            }
+            if (parsed) {
+                var exactLocalIlc = normalizeIdentityCloudBuckets(pickIdentityLevelCloud(parsed));
+                if (exactLocalIlc && (exactLocalIlc.Novice.length || exactLocalIlc.Professional.length || exactLocalIlc.Architect.length)) {
+                    window.__personalIdentityLevelCloudCache = { v: exactLocalIlc, raw: rawPayload, ts: Date.now() };
+                    return exactLocalIlc;
+                }
+            }
+            try {
+                var exactVibeResults = window.vibeResults && typeof window.vibeResults === 'object'
+                    ? normalizeIdentityCloudBuckets(window.vibeResults)
+                    : null;
+                if (exactVibeResults && (exactVibeResults.Novice.length || exactVibeResults.Professional.length || exactVibeResults.Architect.length)) {
+                    window.__personalIdentityLevelCloudCache = { v: exactVibeResults, raw: '__vibeResults__', ts: Date.now() };
+                    return exactVibeResults;
+                }
+            } catch (_) { /* ignore */ }
+            var broadcastIlc = normalizeIdentityCloudBuckets(readPersonalCloudFromBroadcast());
+            if (broadcastIlc && (broadcastIlc.Novice.length || broadcastIlc.Professional.length || broadcastIlc.Architect.length)) {
+                window.__personalIdentityLevelCloudCache = { v: broadcastIlc, raw: '__broadcast__', ts: Date.now() };
+                return broadcastIlc;
+            }
+            var currentIlc = readPersonalCloudFromCurrentUser();
+            if (currentIlc && (currentIlc.Novice.length || currentIlc.Professional.length || currentIlc.Architect.length)) {
+                window.__personalIdentityLevelCloudCache = { v: currentIlc, raw: '__currentUser__', ts: Date.now() };
+                return currentIlc;
+            }
+
             var cache = window.__personalIdentityLevelCloudCache;
-            if (cache && cache.v && typeof cache.v === 'object') return cache.v;
+            if (cache && cache.v && typeof cache.v === 'object' && cache.raw === rawPayload) return cache.v;
 
             // 只读本地：localStorage.last_analysis_data
-            var parsed = readPersonalCloudFromLocalStorage();
-
             var ilc = pickIdentityLevelCloud(parsed);
             var out = { Novice: [], Professional: [], Architect: [] };
             if (ilc && typeof ilc === 'object') {
-                out.Novice = dataAdapter(ilc.Novice || ilc.novice || []);
-                out.Professional = dataAdapter(ilc.Professional || ilc.professional || []);
-                out.Architect = dataAdapter(ilc.Architect || ilc.architect || []);
+                out = normalizeIdentityCloudBuckets(ilc) || out;
             }
-            window.__personalIdentityLevelCloudCache = { v: out, ts: Date.now() };
+            if (out.Novice.length === 0 && out.Professional.length === 0 && out.Architect.length === 0) {
+                try {
+                    var histIlc = readPersonalCloudFromHistory();
+                    if (histIlc && typeof histIlc === 'object') {
+                        out = normalizeIdentityCloudBuckets(histIlc) || out;
+                    }
+                } catch (_) { /* ignore */ }
+            }
+            if (out.Novice.length === 0 && out.Professional.length === 0 && out.Architect.length === 0) {
+                var debugFallback = getPersonalCloudDebugFallback();
+                if (debugFallback) out = debugFallback;
+            }
+            window.__personalIdentityLevelCloudCache = { v: out, raw: rawPayload, ts: Date.now() };
             return out;
         }
         function getPersonalIdentityCloudByLevel(level) {
             var levelKey = normalizeCloudLevel(level);
             var all = getPersonalIdentityLevelCloudAll();
             var levelData = all && all[levelKey];
-            return Array.isArray(levelData) ? levelData : [];
+            var exactLevelData = Array.isArray(levelData) ? levelData : [];
+            if (exactLevelData.length >= 18) return exactLevelData;
+            var lexiconSupplement = buildLevelFromLexicon(readPersonalLexiconFallback(), levelKey);
+            var cloud50Supplement = buildLevelFromCloud50(readPersonalCloud50Fallback(), levelKey);
+            return mergeUniqueCloudItems(
+                mergeUniqueCloudItems(exactLevelData, lexiconSupplement, 36),
+                cloud50Supplement,
+                36
+            );
         }
         
         // ==========================================
@@ -13856,14 +14267,19 @@
                 const code = (window.__countrySelectorSelectedCode || '').trim().toUpperCase();
                 const privacyCheck = document.getElementById('gate-privacy-accept');
                 const privacyAccepted = !privacyCheck || privacyCheck.checked;
-                const enabled = window.__countryPickerForced && /^[A-Z]{2}$/.test(code) && privacyAccepted;
-                [btn, guestBtn].forEach(function(targetBtn) {
-                    if (!targetBtn) return;
-                    targetBtn.disabled = !enabled;
-                    targetBtn.style.opacity = enabled ? '1' : '0.6';
-                    targetBtn.style.cursor = enabled ? 'pointer' : 'not-allowed';
-                });
-                if (enabled && typeof window.showGitHubSectionIfCountrySelected === 'function') window.showGitHubSectionIfCountrySelected();
+                const githubEnabled = window.__countryPickerForced && /^[A-Z]{2}$/.test(code) && privacyAccepted;
+                if (btn) {
+                    btn.disabled = !githubEnabled;
+                    btn.style.opacity = githubEnabled ? '1' : '0.6';
+                    btn.style.cursor = githubEnabled ? 'pointer' : 'not-allowed';
+                }
+                // 游客入口不依赖国家：允许直接进入 GLOBAL
+                if (guestBtn) {
+                    guestBtn.disabled = false;
+                    guestBtn.style.opacity = '1';
+                    guestBtn.style.cursor = 'pointer';
+                }
+                if (githubEnabled && typeof window.showGitHubSectionIfCountrySelected === 'function') window.showGitHubSectionIfCountrySelected();
             } catch (e) {}
         }
         
@@ -24304,6 +24720,40 @@
             return 'rgba(' + parseInt(m[1], 16) + ',' + parseInt(m[2], 16) + ',' + parseInt(m[3], 16) + ',' + (alpha != null ? alpha : 0.8) + ')';
         }
 
+        function _drawPersonalCloudFallback(canvas, items, baseHex) {
+            if (!canvas || !canvas.getContext) return;
+            var ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            var width = canvas.width || 320;
+            var height = canvas.height || 240;
+            ctx.clearRect(0, 0, width, height);
+            ctx.textBaseline = 'top';
+            ctx.font = '12px "Microsoft YaHei", "微软雅黑", SimHei, sans-serif';
+            var top = (Array.isArray(items) ? items : []).slice(0, 10);
+            if (top.length === 0) return;
+            var lineHeight = 22;
+            var startY = 12;
+            top.forEach(function(item, index) {
+                var ratio = top.length > 1 ? (1 - index / top.length) : 1;
+                ctx.fillStyle = _hexToRgba(baseHex || '#10b981', 0.95 - ratio * 0.15);
+                var text = String(item && item[0] || '').trim();
+                var size = Number(item && item[1]) || 12;
+                var score = Math.max(1, Math.round(size));
+                ctx.fillText(text, 12, startY + index * lineHeight, Math.max(80, width - 70));
+                ctx.fillStyle = 'rgba(255,255,255,0.55)';
+                ctx.fillText(String(score), Math.max(120, width - 48), startY + index * lineHeight, 36);
+            });
+        }
+
+        function _schedulePersonalCloudRetry(fn, retryCount) {
+            var nextRetry = Number(retryCount || 0) + 1;
+            if (nextRetry <= 8) {
+                requestAnimationFrame(function() { fn(nextRetry); });
+                return;
+            }
+            setTimeout(function() { fn(nextRetry); }, 80);
+        }
+
         var LEVEL_TO_KEY_WC = { Novice: 'Novice', Professional: 'Professional', Architect: 'Architect', Pro: 'Professional', novice: 'Novice', pro: 'Professional', architect: 'Architect' };
         // 本人词云使用单 canvas，避免标签切换时的 canvas 竞态
         var PERSONAL_CLOUD_CANVAS_ID = 'personal-identity-cloud-canvas';
@@ -24316,6 +24766,14 @@
             var container = document.getElementById('personal-cloud-container');
             var canvas = document.getElementById(PERSONAL_CLOUD_CANVAS_ID);
             if (!container) return;
+            // DEBUG: surface data source visibility directly in the UI
+            var debugEl = document.getElementById('personal-cloud-debug');
+            if (!debugEl) {
+                debugEl = document.createElement('div');
+                debugEl.id = 'personal-cloud-debug';
+                debugEl.className = 'text-[10px] text-zinc-500 mt-2';
+                container.appendChild(debugEl);
+            }
             var wcSkeleton = document.getElementById('stats2-personal-wc-skeleton');
             if (!canvas) {
                 canvas = document.createElement('canvas');
@@ -24340,7 +24798,117 @@
             if (!Array.isArray(data)) data = [];
             var currentCountry = window.__selectedCountry || localStorage.getItem('user_selected_country') || localStorage.getItem('user_manual_location') || 'UNKNOWN';
             console.log('[PersonalCloud] 渲染本人词云 - 国家:', currentCountry, '等级:', levelKey, '数据源: index/local', '条数:', data.length);
+            try {
+                var rawLast = localStorage.getItem(PERSONAL_CLOUD_STORAGE_KEY) || '';
+                var rawLastLen = rawLast ? rawLast.length : 0;
+                var rawLastOk = false;
+                var lastCount = 0;
+                if (rawLast) {
+                    var lastObj = JSON.parse(rawLast);
+                    rawLastOk = true;
+                    var ilc = pickIdentityLevelCloud(lastObj);
+                    if (ilc && typeof ilc === 'object') {
+                        var arr = ilc[levelKey] || ilc[levelKey.toLowerCase()] || [];
+                        lastCount = Array.isArray(arr) ? arr.length : (arr && typeof arr === 'object' ? Object.keys(arr).length : 0);
+                    }
+                }
+                var histStr = localStorage.getItem('cursor_clinical_history') || '';
+                var histLen = histStr ? histStr.length : 0;
+                var histOk = false;
+                var histCount = 0;
+                if (histStr) {
+                    var hist = JSON.parse(histStr);
+                    histOk = true;
+                    var vr = hist && hist.analysisData && hist.analysisData.vibeResult ? hist.analysisData.vibeResult : null;
+                    var hilc = vr ? (vr.stats && vr.stats.identityLevelCloud) || (vr.statistics && vr.statistics.identityLevelCloud) || vr.identityLevelCloud || null : null;
+                    if (hilc && typeof hilc === 'object') {
+                        var harr = hilc[levelKey] || hilc[levelKey.toLowerCase()] || [];
+                        histCount = Array.isArray(harr) ? harr.length : (harr && typeof harr === 'object' ? Object.keys(harr).length : 0);
+                    }
+                }
+                var vibeResults = window.vibeResults || null;
+                var vibeCount = 0;
+                if (vibeResults && typeof vibeResults === 'object') {
+                    var varr = vibeResults[levelKey] || [];
+                    vibeCount = Array.isArray(varr) ? varr.length : (varr && typeof varr === 'object' ? Object.keys(varr).length : 0);
+                }
+                var cacheInfo = window.__personalIdentityLevelCloudCache;
+                var cacheCount = 0;
+                if (cacheInfo && cacheInfo.v && typeof cacheInfo.v === 'object') {
+                    var carr = cacheInfo.v[levelKey] || [];
+                    cacheCount = Array.isArray(carr) ? carr.length : (carr && typeof carr === 'object' ? Object.keys(carr).length : 0);
+                }
+                debugEl.textContent = [
+                    'dbg',
+                    'lvl=' + levelKey,
+                    'data=' + data.length,
+                    'last=' + lastCount,
+                    'lastLen=' + rawLastLen,
+                    'lastOk=' + (rawLastOk ? '1' : '0'),
+                    'hist=' + histCount,
+                    'histLen=' + histLen,
+                    'histOk=' + (histOk ? '1' : '0'),
+                    'cloud50=' + (Array.isArray(window.__lastPersonalCloud50) ? window.__lastPersonalCloud50.length : 0),
+                    'vibe=' + vibeCount,
+                    'cache=' + cacheCount,
+                    'out=' + (data.length),
+                    'raw=' + (cacheInfo && cacheInfo.raw ? String(cacheInfo.raw).slice(0, 12) : '--')
+                ].join(' | ');
+            } catch (e) {
+                if (debugEl) debugEl.textContent = 'dbg error: ' + (e && e.message ? e.message : String(e));
+            }
             if (data.length === 0) {
+                try {
+                    if (!window.__personalCloudFetchAttempted) {
+                        window.__personalCloudFetchAttempted = true;
+                        var cu = window.currentUser || window.currentUserData || null;
+                        var uid = cu && cu.id ? String(cu.id) : '';
+                        var fp = '';
+                        var uname = '';
+                        try {
+                            fp = String(cu && (cu.fingerprint || cu.fp) ? (cu.fingerprint || cu.fp) : '').trim();
+                            if (!fp) fp = String(localStorage.getItem('user_fingerprint') || localStorage.getItem('vibe_fp') || window.fpId || '').trim();
+                        } catch (_) { fp = ''; }
+                        try { uname = String(cu && (cu.user_name || cu.github_login || cu.github_username) ? (cu.user_name || cu.github_login || cu.github_username) : '').trim(); } catch (_) { uname = ''; }
+                        var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+                        if ((uid || fp || uname) && sb && typeof sb.from === 'function') {
+                            var q = sb.from('user_analysis').select('stats,personality,personality_data');
+                            if (uid) q = q.eq('id', uid);
+                            else if (fp) q = q.eq('fingerprint', fp);
+                            else if (uname) q = q.eq('user_name', uname);
+                            q.maybeSingle()
+                                .then(function(res) {
+                                    var row = res && res.data ? res.data : null;
+                                    var stats = row ? row.stats : null;
+                                    var ilc = stats && stats.identityLevelCloud ? stats.identityLevelCloud : null;
+                                    if (row && row.personality_data) {
+                                        if (typeof row.personality_data === 'string') {
+                                            try {
+                                                var parsedPd = JSON.parse(row.personality_data);
+                                                if (!ilc && parsedPd && parsedPd.identityLevelCloud) ilc = parsedPd.identityLevelCloud;
+                                            } catch (_) {}
+                                        } else if (typeof row.personality_data === 'object') {
+                                            if (!ilc && row.personality_data.identityLevelCloud) ilc = row.personality_data.identityLevelCloud;
+                                        }
+                                    }
+                                    if (!ilc && row && row.personality && row.personality.identityLevelCloud) {
+                                        ilc = row.personality.identityLevelCloud;
+                                    }
+                                    var exact = normalizeIdentityCloudBuckets(ilc);
+                                    if (exact && typeof exact === 'object' && (exact.Novice.length || exact.Professional.length || exact.Architect.length)) {
+                                        window.__personalIdentityLevelCloudCache = {
+                                            v: exact,
+                                            raw: '__user_analysis__',
+                                            ts: Date.now()
+                                        };
+                                        var render = window._renderPersonalIdentityCloud || (typeof _renderPersonalIdentityCloud === 'function' ? _renderPersonalIdentityCloud : null);
+                                        if (render) render(levelKey);
+                                    }
+                                })
+                                .catch(function() { /* ignore */ });
+                        }
+                    }
+                } catch (_) { /* ignore */ }
                 if (renderSeq !== window.__personalCloudRenderSeq) return;
                 if (canvas.getContext) {
                     var ctx = canvas.getContext('2d');
@@ -24403,16 +24971,14 @@
             var width = container.offsetWidth || 0;
             var height = container.offsetHeight || 0;
             if (width <= 0 || height <= 0) {
-                if ((retryCount || 0) >= 4) {
+                if ((retryCount || 0) >= 12) {
                     if (empty) {
                         empty.textContent = EMPTY_PERSONAL_CLOUD_TEXT;
                         empty.classList.remove('hidden');
                     }
                     return;
                 }
-                requestAnimationFrame(function() {
-                    doDraw((retryCount || 0) + 1);
-                });
+                _schedulePersonalCloudRetry(doDraw, retryCount);
                 return;
             }
             canvas.width = width;
@@ -24420,10 +24986,12 @@
             var ctx = canvas.getContext('2d');
             if (ctx) ctx.clearRect(0, 0, width, height);
                 if (typeof WordCloud === 'undefined') {
-                if (empty) {
-                    empty.textContent = EMPTY_PERSONAL_CLOUD_TEXT;
-                    empty.classList.remove('hidden');
+                if ((retryCount || 0) < 12) {
+                    _schedulePersonalCloudRetry(doDraw, retryCount);
+                    return;
                 }
+                _drawPersonalCloudFallback(canvas, list, baseHex);
+                if (empty) empty.classList.add('hidden');
                 return;
             }
             try {
@@ -24474,10 +25042,8 @@
                 }
             } catch (err) {
                 console.warn('[WordCloud] 本国词云渲染失败:', err);
-                if (empty) {
-                    empty.textContent = EMPTY_PERSONAL_CLOUD_TEXT;
-                    empty.classList.remove('hidden');
-                }
+                _drawPersonalCloudFallback(canvas, list, baseHex);
+                if (empty) empty.classList.add('hidden');
                 if (ctx) {
                     ctx.shadowColor = 'transparent';
                     ctx.shadowBlur = 0;
@@ -26227,7 +26793,7 @@
         // 监听 storage 事件，当其他页面更新 localStorage 时自动刷新
         window.addEventListener('storage', (e) => {
             if (isInitialLayoutPending) return;
-            if (e.key === PERSONAL_CLOUD_STORAGE_KEY) {
+            if (e.key === PERSONAL_CLOUD_STORAGE_KEY || e.key === 'cursor_clinical_history') {
                 try { window.__personalIdentityLevelCloudCache = null; } catch (_) {}
                 try {
                     var left = document.getElementById('left-drawer');

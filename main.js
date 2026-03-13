@@ -1324,6 +1324,7 @@ class VibeCodingApp {
           usageDaysLite = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
         }
         const fromResultLite = result?.stats || result?.statistics || {};
+        const ilcLite = result?.identityLevelCloud || result?.statistics?.identityLevelCloud || result?.stats?.identityLevelCloud || fromResultLite.identityLevelCloud || null;
         if (usageDaysLite == null)
           usageDaysLite = fromResultLite.work_days ?? fromResultLite.usageDays ?? fromResultLite.usage_days ?? fromResultLite.days ?? null;
         if (usageDaysLite != null) usageDaysLite = Math.max(1, Number(usageDaysLite));
@@ -1338,6 +1339,7 @@ class VibeCodingApp {
             earliestFileTime: earliestFileTimeLite,
             usageDays: usageDaysLite,
             work_days: usageDaysLite ?? fromResultLite.work_days ?? null,
+            identityLevelCloud: ilcLite,
           },
           meta: context || null,
           vibeIndex: result?.vibeIndex || result?.vibe_index || null,

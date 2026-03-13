@@ -3612,11 +3612,11 @@ export class VibeCodingerAnalyzer {
       } else {
         const ilc = vibeResult?.identityLevelCloud || vibeResult?.statistics?.identityLevelCloud;
         if (ilc && typeof ilc === 'object') {
-          statsToUpload.identityLevelCloud = {
-            Novice: Array.isArray(ilc.Novice) ? ilc.Novice.slice(0, 1).map(x => ({ word: x?.word ?? x?.phrase ?? '', count: Number(x?.count ?? x?.weight ?? 0) || 0 })) : [],
-            Professional: Array.isArray(ilc.Professional) ? ilc.Professional.slice(0, 1).map(x => ({ word: x?.word ?? x?.phrase ?? '', count: Number(x?.count ?? x?.weight ?? 0) || 0 })) : [],
-            Architect: Array.isArray(ilc.Architect) ? ilc.Architect.slice(0, 1).map(x => ({ word: x?.word ?? x?.phrase ?? '', count: Number(x?.count ?? x?.weight ?? 0) || 0 })) : []
-          };
+        statsToUpload.identityLevelCloud = {
+          Novice: Array.isArray(ilc.Novice) ? ilc.Novice.slice(0, 50).map(x => ({ word: x?.word ?? x?.phrase ?? '', count: Number(x?.count ?? x?.weight ?? 0) || 0 })) : [],
+          Professional: Array.isArray(ilc.Professional) ? ilc.Professional.slice(0, 50).map(x => ({ word: x?.word ?? x?.phrase ?? '', count: Number(x?.count ?? x?.weight ?? 0) || 0 })) : [],
+          Architect: Array.isArray(ilc.Architect) ? ilc.Architect.slice(0, 50).map(x => ({ word: x?.word ?? x?.phrase ?? '', count: Number(x?.count ?? x?.weight ?? 0) || 0 })) : []
+        };
         }
       }
       
