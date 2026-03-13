@@ -2876,6 +2876,7 @@ app.post('/api/v2/analyze', async (c) => {
             result.claim_token = claimToken;
           }
           
+          const incomingTotalMessages = Number(v6StatsForStorage?.totalMessages ?? basicAnalysis?.totalMessages ?? 0) || 0;
           const payload: any = {
             // 【唯一键变更】fingerprint 是唯一主键，如果记录已存在（fingerprint 匹配），则更新现有记录
             // 【禁止创建新行】如果 fingerprint 已存在，必须更新原行，不能创建新行
@@ -2911,10 +2912,9 @@ app.post('/api/v2/analyze', async (c) => {
             ketao_count: v6StatsForStorage.ketao_count || basicAnalysis.please || 0,
             
             vibe_index: vibeIndex,
-            // 【三维灵魂绑定】total_messages 持续累加：已有记录时 = 旧值 + 本次会话消息数；country_code 可更新为最新检测，但 total_messages 只增不减
-            total_messages: existingTotalMessages != null
-              ? existingTotalMessages + (v6StatsForStorage.totalMessages ?? basicAnalysis.totalMessages ?? 0)
-              : (v6StatsForStorage.totalMessages ?? basicAnalysis.totalMessages ?? 0),
+            // 【最新快照】total_messages 表示本次上传解析出的真实消息量，禁止按“旧值 + 新值”累加，
+            // 否则同一用户重复分析同一份聊天记录时会把个人统计与国家汇总越叠越大。
+            total_messages: incomingTotalMessages,
             total_chars: (v6StatsForStorage.totalChars ?? basicAnalysis.totalChars ?? 0),
             lpdef: lpdef,
             lang: body.lang || 'zh-CN',
@@ -2952,10 +2952,8 @@ app.post('/api/v2/analyze', async (c) => {
           };
 
           // 【防污染】数据强度校验：若库中 total_messages 大于本次上传量，严禁用弱数据覆盖核心统计字段
-          const incomingTotalMessages = Number(v6StatsForStorage?.totalMessages ?? basicAnalysis?.totalMessages ?? 0) || 0;
           const dbStrongerThanIncoming = existingTotalMessages != null && incomingTotalMessages >= 0 && existingTotalMessages > incomingTotalMessages;
           if (dbStrongerThanIncoming) {
-            payload.total_messages = existingTotalMessages;
             if (existingTotalChars != null) payload.total_chars = existingTotalChars;
             if (existingWorkDays != null) payload.work_days = existingWorkDays;
             if (existingIdentityCloud != null) payload.identity_cloud = existingIdentityCloud;
@@ -2964,6 +2962,7 @@ app.post('/api/v2/analyze', async (c) => {
             console.log('[Worker] 🛡️ 防污染：库中数据更强，保留核心字段不覆盖', {
               db_total_messages: existingTotalMessages,
               incoming_total_messages: incomingTotalMessages,
+              preserved_total_messages: false,
               preserved_user_name: existingUserName ? existingUserName.substring(0, 12) + '...' : null,
             });
           }

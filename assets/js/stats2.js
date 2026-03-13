@@ -21352,7 +21352,8 @@
          * 将 index 广播的 /api/v2/analyze 返回结果转换为左侧抽屉使用的 user 记录形状
          */
         function buildUserDataFromLocalAnalysis(serverUser, localPayload) {
-            if (!localPayload || localPayload.status !== 'success') return serverUser;
+            if (!localPayload || typeof localPayload !== 'object') return serverUser;
+            if (!localPayload.stats && !localPayload.dimensions && !localPayload.analysis) return serverUser;
             var d = localPayload.dimensions || {};
             var st = localPayload.stats || {};
             return Object.assign({}, serverUser, {
@@ -21373,6 +21374,21 @@
                 e_score: d.E != null ? Math.round(d.E) : serverUser.e_score,
                 f_score: d.F != null ? Math.round(d.F) : serverUser.f_score
             });
+        }
+
+        function readLastAnalysisDataForCurrentDevice(user) {
+            try {
+                var raw = localStorage.getItem('last_analysis_data');
+                if (!raw) return null;
+                var payload = JSON.parse(raw);
+                if (!payload || typeof payload !== 'object') return null;
+                var payloadFp = String(payload.fingerprint || payload.meta?.fingerprint || '').trim().toLowerCase();
+                var userFp = String(user?.fingerprint || user?.user_fingerprint || localStorage.getItem('user_fingerprint') || window.fpId || '').trim().toLowerCase();
+                if (payloadFp && userFp && payloadFp !== userFp) return null;
+                return payload;
+            } catch (_) {
+                return null;
+            }
         }
 
         /**
@@ -21404,6 +21420,11 @@
             if (localStats && localStats.payload && (Date.now() - (localStats.ts || 0)) < 300000) {
                 currentUserData = buildUserDataFromLocalAnalysis(currentUserData, localStats.payload);
                 console.log('[UserStats] ✅ 使用 index 本地分析结果覆盖侧边栏数据');
+            }
+            var localStoredAnalysis = readLastAnalysisDataForCurrentDevice(currentUserData);
+            if (localStoredAnalysis) {
+                currentUserData = buildUserDataFromLocalAnalysis(currentUserData, localStoredAnalysis);
+                console.log('[UserStats] ✅ 使用 last_analysis_data 覆盖侧边栏统计口径');
             }
             console.log('[UserStats] 🚀 开始渲染用户统计卡片，currentUserData:', {
                 hasUserData: !!currentUserData,
