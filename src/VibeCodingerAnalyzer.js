@@ -3253,15 +3253,98 @@ export class VibeCodingerAnalyzer {
    * @param {Function} onProgress - 进度回调函数
    * @returns {Promise<Object>} 返回包含 rankPercent、totalUsers、dimensions、roastText、personalityName 的对象
    */
-  async uploadToSupabase(vibeResult = null, chatData = null, onProgress = null) {
+  async uploadToSupabase(vibeResult = null, chatData = null, onProgress = null, options = null) {
+    const opts = options && typeof options === 'object' ? options : {};
+    const sourceEngine = (opts.sourceEngine || '').toLowerCase();
+    const isOpenClaw = sourceEngine === 'openclaw';
     let analyzeUrl = ''; // 在外部定义，以便在 catch 块中使用
     try {
       // 1. 显示加载提示
       if (onProgress) {
         const currentLang = this.lang;
-        onProgress(currentLang === 'en' 
-          ? 'Syncing global ranking in background…' 
-          : '后台同步全球排名中…');
+        onProgress(isOpenClaw
+          ? (currentLang === 'en' ? 'Syncing OpenClaw stats…' : '同步 OpenClaw 数据中…')
+          : (currentLang === 'en' ? 'Syncing global ranking in background…' : '后台同步全球排名中…'));
+      }
+
+      // 【OpenClaw 分流】同步到 user_analysis.openclaw_stats
+      if (isOpenClaw && opts.openclawPortrait && opts.openclawPortrait.dimensions) {
+        try {
+          const apiEndpoint = (() => {
+            try {
+              const meta = typeof document !== 'undefined' && document.querySelector && document.querySelector('meta[name="api-endpoint"]');
+              const c = meta && meta.getAttribute('content');
+              if (c && c.trim()) return c.trim().replace(/\/+$/, '');
+            } catch (_) {}
+            return 'https://cursor-clinical-analysis.psterman.workers.dev';
+          })();
+          const fingerprint = (() => {
+            try {
+              return String(localStorage.getItem('user_fingerprint') || localStorage.getItem('fingerprint') || '').trim().toLowerCase();
+            } catch { return ''; }
+          })();
+          let github_login = '';
+          try {
+            const token = (typeof window !== 'undefined' && window.__VIBE_GITHUB_ACCESS_TOKEN__) || (typeof window !== 'undefined' && window.localStorage && window.localStorage.getItem('vibe_github_access_token')) || '';
+            if (token && token.split('.').length >= 2) {
+              const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+              const meta = payload.user_metadata || payload.meta || {};
+              github_login = meta.user_name || meta.login || meta.preferred_username || meta.full_name || payload.email || '';
+            }
+          } catch (_) {}
+          const portrait = opts.openclawPortrait;
+          const stats = opts.stats || opts.openclawStats || {};
+          const dims = portrait.dimensions || {};
+          const consumption = dims.consumptionCost || {};
+          const modelDim = dims.modelPreference || {};
+          const health = dims.stabilityHealth || {};
+          const toolHeat = dims.toolSkillHeat || {};
+          const taskHabit = dims.taskHabit || {};
+          const hourlyActivity = stats.hourlyActivity || (stats.hourlyHeatmap && Array.isArray(stats.hourlyHeatmap) ? stats.hourlyHeatmap.map((h) => h.count || 0) : Array(24).fill(0));
+          const hourlyHeatmap = Array.isArray(hourlyActivity) && hourlyActivity.length >= 24
+            ? hourlyActivity.map((count, hour) => ({ hour, count }))
+            : Array.from({ length: 24 }, (_, i) => ({ hour: i, count: 0 }));
+          const openclawPayload = {
+            fingerprint,
+            github_login: github_login || null,
+            model_usage: stats.modelUsage || {},
+            tool_usage: stats.toolUsage || {},
+            skills_stats: stats.skillsByName || stats.skillsUsage || {},
+            hourly_heatmap: hourlyHeatmap,
+            total_tokens: consumption.totalTokens ?? stats.usage?.totalTokens ?? 0,
+            prompt_tokens: consumption.promptTokens ?? stats.usage?.promptTokens ?? 0,
+            completion_tokens: consumption.completionTokens ?? stats.usage?.completionTokens ?? 0,
+            cached_tokens: consumption.cachedTokens ?? stats.usage?.cachedTokens ?? 0,
+            total_cost_usd: consumption.totalCostUSD ?? stats.usage?.totalCostUSD ?? 0,
+            cache_hit_rate: consumption.cacheHitRate ?? stats.cacheHitRate ?? 0,
+            top_model_id: modelDim.dominantModelId || null,
+            success_rate: health.successRate ?? stats.successRate ?? 0,
+            abnormal_interrupt_rate: health.abnormalInterruptRate ?? stats.abnormalInterruptRate ?? 0,
+            success_count: health.successCount ?? stats.successCount ?? 0,
+            failure_count: health.failureCount ?? stats.failureCount ?? 0,
+            abnormal_interrupt_count: health.abnormalInterruptions ?? stats.abnormalInterruptions ?? 0,
+            tool_calls_total: stats.toolCallsTotal ?? 0,
+            raw_summary: { dimensions: dims, composite: portrait.composite || {} },
+            analyzed_at: new Date().toISOString(),
+          };
+          const url = apiEndpoint.endsWith('/') ? `${apiEndpoint}api/v2/openclaw/analyze` : `${apiEndpoint}/api/v2/openclaw/analyze`;
+          const authHeaders = { 'Content-Type': 'application/json' };
+          try {
+            const token = (typeof window !== 'undefined' && window.__VIBE_GITHUB_ACCESS_TOKEN__) || (typeof window !== 'undefined' && window.localStorage && window.localStorage.getItem('vibe_github_access_token'));
+            if (token && String(token).trim()) authHeaders['Authorization'] = 'Bearer ' + String(token).trim();
+          } catch (_) {}
+          const response = await fetch(url, { method: 'POST', headers: authHeaders, body: JSON.stringify(openclawPayload) });
+          if (!response.ok) {
+            const errText = await response.text().catch(() => '');
+            throw new Error(`OpenClaw sync failed: ${response.status} ${errText}`);
+          }
+          const result = await response.json().catch(() => ({}));
+          console.log('[VibeAnalyzer] OpenClaw 同步成功', result);
+          return result;
+        } catch (err) {
+          console.warn('[VibeAnalyzer] OpenClaw 同步失败', err);
+          throw err;
+        }
       }
 
       // 2. 获取原始聊天数据（多重降级方案）

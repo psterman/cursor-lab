@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title id="pageTitle">Cursor 行为体检 - Vibe Coding</title>
+    <title id="pageTitle">OpenClaw 养虾盘点 - Vibe Coding</title>
     <!-- API 端点配置（Cloudflare Workers） -->
     <meta name="api-endpoint" content="https://cursor-clinical-analysis.psterman.workers.dev/">
     <!-- 引入必要的库 -->
@@ -31,15 +31,15 @@
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #27272a; border-radius: 0; }
         
-        /* Terminal Hacker Style - 极简终端系统 */
+        /* OpenClaw 养虾风格 - 虾青/活力橙 */
         :root {
-            --bg-color: #050505;
+            --bg-color: #0a0e14;
             --card-bg: rgba(24, 24, 27, 0.8);
             --card-border: #27272a;
             --text-main: #ffffff;
             --text-dim: #71717a;
-            --accent-terminal: #00ff41;
-            --accent-cyan: #3b82f6;
+            --accent-terminal: #008B8B;
+            --accent-cyan: #FF7F50;
             --glass-blur: none;
         }
 
@@ -73,12 +73,12 @@
                     0deg,
                     transparent,
                     transparent 2px,
-                    rgba(0, 255, 65, 0.02) 2px,
-                    rgba(0, 255, 65, 0.02) 4px
+                    rgba(0, 139, 139, 0.02) 2px,
+                    rgba(0, 139, 139, 0.02) 4px
                 ),
                 radial-gradient(
                     circle,
-                    rgba(0, 255, 65, 0.03) 1px,
+                    rgba(0, 139, 139, 0.03) 1px,
                     transparent 1px
                 );
             background-size: 100% 4px, 20px 20px;
@@ -96,7 +96,7 @@
             background: linear-gradient(
                 180deg,
                 transparent 0%,
-                rgba(0, 255, 65, 0.05) 50%,
+                rgba(0, 139, 139, 0.05) 50%,
                 transparent 100%
             );
             animation: scanline 8s linear infinite;
@@ -2249,10 +2249,12 @@
         }
     </style>
 </head>
-<body class="bg-[#050505]">
+<body class="bg-[#0a0e14]" style="background-color: #0a0e14;">
     <div id="root"></div>
     <!-- 完整报告容器（隐藏，等待渲染） -->
     <div id="fullReportContainer" style="display: none;"></div>
+    <!-- OpenClaw 专属报告容器（从 index 跳转并带 sessionStorage 时显示） -->
+    <div id="openclawReportContainer" class="openclaw-report" style="display: none; max-width: 1100px; margin: 0 auto; padding: 20px; padding-bottom: 80px;"></div>
 
     <script type="module">
         // 模块加载逻辑（适配开发和生产环境）
@@ -3285,9 +3287,9 @@
                 container.innerHTML = `
                     <div class="full-report-container" style="max-width: 1100px; margin: 0 auto; padding: 20px; padding-bottom: 80px;">
                         <header style="text-align: center; padding: 60px 20px;">
-                            <div class="logo-box" style="display: inline-block; padding: 8px 16px; background: transparent; border: 1px solid var(--card-border); border-radius: 2px; margin-bottom: 20px; font-size: 14px; color: var(--accent-terminal); text-transform: uppercase; letter-spacing: 0.15em;">> ${getText('dashboard.clinicalAnalysis')}</div>
-                            <h1 style="font-size: clamp(2rem, 5vw, 3.5rem); font-weight: 700; letter-spacing: 0.1em; color: var(--text-main); margin-bottom: 15px; text-transform: uppercase; font-family: 'JetBrains Mono', monospace;"><a href="https://github.com/psterman/cursor-lab" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: none; display: inline-block; transition: all 0.3s ease; position: relative; filter: blur(2px);" onmouseenter="this.style.filter='blur(0px)'; this.style.textShadow='0 0 20px var(--accent-terminal), 0 0 40px var(--accent-terminal)';" onmouseleave="this.style.filter='blur(2px)'; this.style.textShadow='none';">> ${getText('dashboard.reportTitle')}</a></h1>
-                            <p class="subtitle" style="color: var(--text-dim); font-size: 1.1rem;">${getText('dashboard.reportSubtitle')}</p>
+                            <div class="logo-box" style="display: inline-block; padding: 8px 16px; background: transparent; border: 1px solid var(--card-border); border-radius: 2px; margin-bottom: 20px; font-size: 14px; color: var(--accent-terminal); text-transform: uppercase; letter-spacing: 0.15em;">> ${currentLang === 'en' ? 'OpenClaw Shrimp Report' : 'OpenClaw 养虾盘点'}</div>
+                            <h1 style="font-size: clamp(2rem, 5vw, 3.5rem); font-weight: 700; letter-spacing: 0.1em; color: var(--text-main); margin-bottom: 15px; text-transform: uppercase; font-family: 'JetBrains Mono', monospace;"><a href="https://github.com/psterman/cursor-lab" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: none; display: inline-block; transition: all 0.3s ease; position: relative; filter: blur(2px);" onmouseenter="this.style.filter='blur(0px)'; this.style.textShadow='0 0 20px var(--accent-terminal), 0 0 40px var(--accent-terminal)';" onmouseleave="this.style.filter='blur(2px)'; this.style.textShadow='none';">> ${currentLang === 'en' ? 'OpenClaw Shrimp Report - Vibe Coding' : 'OpenClaw 养虾盘点 - Vibe Coding'}</a></h1>
+                            <p class="subtitle" style="color: var(--text-dim); font-size: 1.1rem;">${currentLang === 'en' ? 'Your OpenClaw usage portrait' : '你的 OpenClaw 使用画像'}</p>
                         </header>
                         
                         <div id="dashboardSection">
@@ -3773,7 +3775,7 @@
                 // 更新页面标题
                 const titleElement = document.getElementById('pageTitle');
                 if (titleElement) {
-                    titleElement.textContent = lang === 'en' ? 'Cursor Diagnostics' : 'Cursor 行为体检 - Vibe Coding';
+                    titleElement.textContent = lang === 'en' ? 'OpenClaw Shrimp Report' : 'OpenClaw 养虾盘点 - Vibe Coding';
                 }
             }, [lang]);
 
@@ -4820,13 +4822,13 @@
                 setAnalysisStatusText(
                     resolvedEngine === ENGINE_OPENCLAW
                         ? (lang === 'en' ? 'Loading OpenClaw sessions…' : '正在加载 OpenClaw 会话…')
-                        : (lang === 'en' ? 'Loading Cursor workspace…' : '正在加载 Cursor 工作区…')
+                        : (lang === 'en' ? 'Loading 老虾 workspace…' : '正在加载老虾工作区…')
                 );
                 setLogs([
                     `> ${t('upload.logs.startParsing')}`,
                     `> ${lang === 'en'
-                        ? `Engine detected: ${resolvedEngine === ENGINE_OPENCLAW ? 'OpenClaw' : 'Cursor'}`
-                        : `已识别引擎：${resolvedEngine === ENGINE_OPENCLAW ? 'OpenClaw' : 'Cursor'}`
+                        ? `Engine detected: ${resolvedEngine === ENGINE_OPENCLAW ? 'OpenClaw' : '老虾'}`
+                        : `已识别引擎：${resolvedEngine === ENGINE_OPENCLAW ? 'OpenClaw' : '老虾'}`
                     }`
                 ]);
 
@@ -4902,17 +4904,6 @@
                             setLogs(prev => [...prev, `> ${t('upload.logs.analysisComplete')}`]);
                             setAnalysisStatusText(lang === 'en' ? 'Done' : '完成');
                             setAnalysisProgress(100);
-                            if (resolvedEngine === ENGINE_OPENCLAW) {
-                                try {
-                                    sessionStorage.setItem('openclaw_analysis_data', JSON.stringify(data || {}));
-                                    setTimeout(() => {
-                                        window.location.href = 'openclaw.html';
-                                    }, 500);
-                                    return;
-                                } catch (e) {
-                                    console.warn('openclaw redirect failed', e);
-                                }
-                            }
                             // 500ms 淡出后再进入结果页，减少闪烁
                             setTimeout(() => {
                                 setStep('preview');
@@ -6366,7 +6357,7 @@
                     });
 
                     const link = document.createElement('a');
-                    link.download = `cursor-audit-${new Date().getTime()}.png`;
+                    link.download = `openclaw-audit-${new Date().getTime()}.png`;
                     link.href = canvas.toDataURL('image/png');
                     link.click();
                 } catch (err) {
@@ -6424,7 +6415,7 @@
                     const currentAnalysisData = analysisData || window.shareModeVibeResult || null;
                     const personalityName = currentAnalysisData?.personalityName || currentAnalysisData?.vibeResult?.personalityName || 'personality';
                     const safeName = personalityName.replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
-                    const filename = `cursor-personality-${safeName}-${timestamp}.png`;
+                    const filename = `openclaw-personality-${safeName}-${timestamp}.png`;
                     link.download = filename;
                     link.href = canvas.toDataURL('image/png');
                     link.click();
@@ -6692,8 +6683,8 @@
                                 <Icon name="shuffle" size={12} />
                                 <span>
                                     {lang === 'en'
-                                        ? `Dual Engine Mode · Cursor + OpenClaw (${detectedEngine === 'dual' ? 'Auto' : detectedEngine})`
-                                        : `双引擎模式 · Cursor + OpenClaw（${detectedEngine === 'dual' ? '自动识别' : detectedEngine}）`
+                                        ? `Dual Engine Mode · 老虾 + OpenClaw (${detectedEngine === 'dual' ? 'Auto' : detectedEngine})`
+                                        : `双引擎模式 · 老虾 + OpenClaw（${detectedEngine === 'dual' ? '自动识别' : detectedEngine}）`
                                     }
                                 </span>
                             </div>
@@ -7207,8 +7198,8 @@
                                         <h1>
                                             <span className="text-white">
                                                 {lang === 'en'
-                                                    ? 'Cursor Behavior Report · Global Distribution Map'
-                                                    : 'Cursor行为报告全球分布图'}
+                                                    ? 'OpenClaw Shrimp Report · Global Distribution Map'
+                                                    : 'OpenClaw 养虾盘点全球分布图'}
                                             </span>
                                         </h1>
                                         <p id="sub-title">
@@ -7947,6 +7938,127 @@
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
+    </script>
+    <script type="module">
+    (async function openclawBootstrap() {
+        const raw = sessionStorage.getItem('openclaw_analysis_data');
+        if (!raw) return;
+        let data;
+        try { data = JSON.parse(raw); } catch (e) { return; }
+        const portrait = data.openclawPortrait;
+        if (!portrait || !portrait.dimensions) return;
+        const rootEl = document.getElementById('root');
+        if (rootEl) rootEl.style.display = 'none';
+        const container = document.getElementById('openclawReportContainer');
+        if (!container) return;
+        container.style.display = 'block';
+        const lang = (localStorage.getItem('appLanguage') === 'en') ? 'en' : 'zh';
+        const dims = portrait.dimensions;
+        const comp = portrait.composite || {};
+        const levelLabelsEn = { S: 'Legendary Shrimper', A: 'Pro Shrimper', B: 'Rising Shrimper', C: 'Junior Shrimper', D: 'Shrimp Newbie' };
+        const levelLabelsZh = { S: '传说养虾人', A: '专业养虾', B: '进阶养虾', C: '初级养虾', D: '养虾小白' };
+        const level = comp.level || 'D';
+        const levelText = lang === 'en' ? (levelLabelsEn[level] || level) : (levelLabelsZh[level] || level);
+        const score = comp.score != null ? comp.score : 0;
+        const consumption = dims.consumptionCost || {};
+        const totalTokens = consumption.totalTokens ?? 0;
+        const cacheHitRate = (consumption.cacheHitRate != null ? (consumption.cacheHitRate * 100) : 0).toFixed(1);
+        const totalCostUsd = (consumption.totalCostUSD != null ? Number(consumption.totalCostUSD) : 0).toFixed(4);
+        const modelDim = dims.modelPreference || {};
+        const topModel = modelDim.dominantModelId || '--';
+        const topRatio = (modelDim.dominantRatio != null ? (modelDim.dominantRatio * 100) : 0).toFixed(1);
+        const health = dims.stabilityHealth || {};
+        const successRate = (health.successRate != null ? (health.successRate * 100) : 0).toFixed(1);
+        const abnormalRate = (health.abnormalInterruptRate != null ? (health.abnormalInterruptRate * 100) : 0).toFixed(1);
+        const toolHeat = dims.toolSkillHeat || {};
+        const topTools = toolHeat.topTools || [];
+        const topSkills = toolHeat.topSkills || [];
+        const consumptionLabel = lang === 'en' ? 'Consumption' : '消耗';
+        const modelLabel = lang === 'en' ? 'Model' : '模型';
+        const healthLabel = lang === 'en' ? 'Health' : '健康';
+        const tokensLabel = lang === 'en' ? 'Total Tokens' : '总 Token';
+        const cacheLabel = lang === 'en' ? 'Cache Hit %' : '缓存命中率';
+        const costLabel = lang === 'en' ? 'Cost USD' : '成本 USD';
+        const topModelLabel = lang === 'en' ? 'Top Model' : '首选模型';
+        const ratioLabel = lang === 'en' ? 'Share %' : '占比';
+        const successLabel = lang === 'en' ? 'Success Rate %' : '成功率';
+        const abnormalLabel = lang === 'en' ? 'Abnormal Interrupt %' : '异常中断率';
+        const skillsLabel = lang === 'en' ? 'Skills & Tools' : '技能与工具';
+        container.innerHTML = `
+            <header style="text-align: center; padding: 40px 20px;">
+                <div class="logo-box" style="display: inline-block; padding: 8px 16px; border: 1px solid var(--card-border); border-radius: 2px; margin-bottom: 16px; font-size: 14px; color: var(--accent-terminal); text-transform: uppercase; letter-spacing: 0.15em;">OpenClaw ${lang === 'en' ? 'Shrimp Report' : '养虾盘点'}</div>
+                <h1 style="font-size: clamp(1.5rem, 4vw, 2.5rem); font-weight: 700; color: var(--text-main); margin-bottom: 12px; font-family: 'JetBrains Mono', monospace;">${lang === 'en' ? 'OpenClaw Shrimp Report - Vibe Coding' : 'OpenClaw 养虾盘点 - Vibe Coding'}</h1>
+                <div id="openclaw-level-badge" class="openclaw-level-badge" style="display: inline-flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px 40px; margin-top: 16px; border: 2px solid var(--accent-cyan); border-radius: 8px; background: rgba(255,127,80,0.08); box-shadow: 0 0 12px rgba(255,127,80,0.2);">
+                    <span class="openclaw-level-tier" style="font-size: 28px; font-weight: 800; color: var(--accent-cyan);">L${score >= 90 ? '5' : score >= 80 ? '4' : score >= 70 ? '3' : score >= 60 ? '2' : '1'}: ${level}</span>
+                    <span class="openclaw-level-name" style="font-size: 18px; color: var(--text-main);">${levelText}</span>
+                </div>
+                <button type="button" id="openclaw-export-btn" style="margin-top: 20px; padding: 10px 20px; background: var(--accent-terminal); color: var(--bg-color); border: none; border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-weight: 700; cursor: pointer;">${lang === 'en' ? 'Export PNG' : '导出 PNG'}</button>
+            </header>
+            <div class="openclaw-stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px;">
+                <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 20px;">
+                    <p class="stat-label" style="color: var(--accent-terminal); font-size: 12px; margin-bottom: 8px;">${consumptionLabel}</p>
+                    <p class="stat-value" id="oc-total-tokens" style="font-size: 24px; font-weight: 700;">${Number(totalTokens).toLocaleString()}</p>
+                    <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${tokensLabel}</p>
+                    <p class="stat-value" style="font-size: 18px; margin-top: 8px;">${cacheHitRate}%</p>
+                    <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${cacheLabel}</p>
+                    <p class="stat-value" style="font-size: 18px; margin-top: 4px;">$${totalCostUsd}</p>
+                    <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${costLabel}</p>
+                </div>
+                <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 20px;">
+                    <p class="stat-label" style="color: var(--accent-terminal); font-size: 12px; margin-bottom: 8px;">${modelLabel}</p>
+                    <p class="stat-value" style="font-size: 16px; font-weight: 700; word-break: break-all;">${String(topModel)}</p>
+                    <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${topModelLabel}</p>
+                    <p class="stat-value" style="font-size: 20px; margin-top: 8px;">${topRatio}%</p>
+                    <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${ratioLabel}</p>
+                </div>
+                <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 20px;">
+                    <p class="stat-label" style="color: var(--accent-terminal); font-size: 12px; margin-bottom: 8px;">${healthLabel}</p>
+                    <p class="stat-value" style="font-size: 24px; font-weight: 700;">${successRate}%</p>
+                    <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${successLabel}</p>
+                    <p class="stat-value" style="font-size: 18px; margin-top: 8px;">${abnormalRate}%</p>
+                    <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${abnormalLabel}</p>
+                </div>
+            </div>
+            <div class="openclaw-radar-wrap" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 24px; margin-bottom: 32px;">
+                <h3 class="chart-title" style="text-align: center; margin-bottom: 16px; color: var(--accent-terminal);">${lang === 'en' ? '5-Dimension Portrait' : '五维画像'}</h3>
+                <div class="chart-wrapper" style="max-width: 400px; margin: 0 auto;">
+                    <canvas id="openclawRadarChart"></canvas>
+                </div>
+            </div>
+            <div class="openclaw-wordcloud-wrap" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 24px;">
+                <h3 class="chart-title" style="text-align: center; margin-bottom: 16px; color: var(--accent-terminal);">${skillsLabel}</h3>
+                <div class="wordcloud-container" id="openclawSkillCloudContainer" style="min-height: 300px;"><canvas id="openclawSkillCloud"></canvas></div>
+            </div>
+        `;
+        try {
+            const { renderOpenClawRadar } = await import('./src/OpenClawRadarAdapter.js');
+            const canvas = document.getElementById('openclawRadarChart');
+            if (canvas && window.Chart) renderOpenClawRadar(canvas, portrait, { lang, Chart: window.Chart, showLegend: true });
+        } catch (e) { console.warn('[OpenClaw] Radar render failed', e); }
+        if (typeof WordCloud !== 'undefined' && topTools.length + topSkills.length > 0) {
+            const words = [];
+            topTools.forEach(t => { words.push([t.toolName || t.name || '', Math.max(1, (t.count || 0) / 2 + 10)]); });
+            topSkills.forEach(s => { words.push([s.skillName || s.name || '', Math.max(1, (s.count || 0) / 2 + 8)]); });
+            const canvasEl = document.getElementById('openclawSkillCloud');
+            if (canvasEl && words.length > 0) {
+                try {
+                    WordCloud(canvasEl, { list: words, gridSize: 8, weightFactor: 2, color: '#008B8B', backgroundColor: 'transparent', fontFamily: 'JetBrains Mono, monospace' });
+                } catch (e) { console.warn('[OpenClaw] WordCloud failed', e); }
+            }
+        }
+        const exportBtn = document.getElementById('openclaw-export-btn');
+        if (exportBtn && typeof html2canvas !== 'undefined') {
+            exportBtn.addEventListener('click', async function() {
+                try {
+                    const canvas = await html2canvas(container, { backgroundColor: '#0a0e14', scale: 2, useCORS: true, logging: false });
+                    const link = document.createElement('a');
+                    link.download = 'openclaw-report-' + Date.now() + '.png';
+                    link.href = canvas.toDataURL('image/png');
+                    link.click();
+                } catch (e) { console.warn('[OpenClaw] Export failed', e); }
+            });
+        }
+    })();
     </script>
     
 </body>

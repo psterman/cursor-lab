@@ -4,7 +4,9 @@
  */
 
 import { CursorParser } from './src/CursorParser.js';
+import { OpenClawParser } from './src/OpenClawParser.js';
 import { VibeCodingerAnalyzer, DIMENSIONS } from './src/VibeCodingerAnalyzer.js';
+import { analyzeOpenClawPortrait } from './src/OpenClawPortraitAnalyzer.js';
 
 // ========== 全环境 Auth 拦截器（IIFE，import 之后立即执行） ==========
 (function () {
@@ -1757,6 +1759,7 @@ class VibeCodingApp {
 
 // 全局变量
 let parser = null;
+let parserEngine = 'cursor'; // cursor | openclaw
 let allChatData = [];
 let globalStats = null;
 let vibeAnalyzer = null;
@@ -1784,6 +1787,39 @@ function t(key) {
     return window.i18n.getText(key, getCurrentLang());
   }
   return key;
+}
+
+function normalizeSourceEngine(engine) {
+  return String(engine || '').toLowerCase() === 'openclaw' ? 'openclaw' : 'cursor';
+}
+
+async function ensureParserForEngine(engine = 'cursor') {
+  const targetEngine = normalizeSourceEngine(engine);
+  if (parser && parserEngine === targetEngine) {
+    return parser;
+  }
+
+  if (parser && typeof parser.close === 'function') {
+    try {
+      parser.close();
+    } catch (closeError) {
+      console.warn('[Main] 切换解析引擎时关闭旧解析器失败:', closeError);
+    }
+  }
+
+  parser = targetEngine === 'openclaw'
+    ? new OpenClawParser()
+    : new CursorParser();
+
+  await parser.init();
+  parserEngine = targetEngine;
+  console.log(`[Main] 解析器已就绪: ${parserEngine}`);
+
+  if (vibeCodingApp) {
+    vibeCodingApp.parser = parser;
+  }
+
+  return parser;
 }
 
 // 导出供 React 使用的函数和变量
@@ -1904,13 +1940,13 @@ let perfLogCounter = 0;
 
 // 导出处理函数（需要先初始化）
 export const processFiles = async (files, type, callbacks) => {
-  console.log('[Main] processFiles 被调用', { filesCount: files.length, type });
+  const sourceEngine = normalizeSourceEngine(callbacks?.sourceEngine);
+  console.log('[Main] processFiles 被调用', { filesCount: files.length, type, sourceEngine });
   
   // 确保解析器已初始化
-  if (!parser) {
-    console.log('[Main] 解析器未初始化，正在初始化...');
-    parser = new CursorParser();
-    await parser.init();
+  if (!parser || parserEngine !== sourceEngine || !vibeAnalyzer) {
+    console.log('[Main] 解析器未初始化或引擎切换，正在初始化...');
+    await ensureParserForEngine(sourceEngine);
     vibeAnalyzer = createVibeCodingerAnalyzer();
     console.log('[Main] 解析器初始化完成');
   }
@@ -2471,8 +2507,7 @@ async function uploadStatsToWorker(stats, onProgress = null) {
 export const initializeParser = async () => {
   if (!parser) {
     console.log('[Main] 初始化解析器（模块模式）...');
-    parser = new CursorParser();
-    await parser.init();
+    await ensureParserForEngine('cursor');
     vibeAnalyzer = createVibeCodingerAnalyzer();
     console.log('[Main] 解析器初始化完成');
   }
@@ -2757,8 +2792,7 @@ async function init() {
 
   // 初始化解析器
   console.log('[Main] 初始化 CursorParser...');
-  parser = new CursorParser();
-  await parser.init();
+  await ensureParserForEngine('cursor');
   console.log('[Main] CursorParser 初始化完成');
 
   // 初始化 Vibe Codinger 分析器
@@ -3014,7 +3048,9 @@ async function handleFileUpload(event, type, callbacks = {}) {
   } catch (_) { /* ignore */ }
 
   const { onProgress, onLog, onComplete, onError } = callbacks;
+  const sourceEngine = normalizeSourceEngine(callbacks?.sourceEngine);
   console.log(`[Main] 处理文件上传，类型: ${type}`);
+  console.log(`[Main] 上传来源引擎: ${sourceEngine}`);
   console.log(`[Main] event.files.length: ${event.target.files?.length}`);
 
   const files = Array.from(event.target.files || []);
@@ -3055,33 +3091,59 @@ async function handleFileUpload(event, type, callbacks = {}) {
   }
 
   try {
+    await ensureParserForEngine(sourceEngine);
+
     let dbFiles = [];
     let filteredFiles = [];
 
     if (type === 'folder') {
-      // 文件夹模式：过滤出 state.vscdb 文件
-      dbFiles = files.filter((file) => file.name === 'state.vscdb');
-      filteredFiles = files.filter((file) => file.name !== 'state.vscdb');
+      if (sourceEngine === 'openclaw') {
+        const validExtensions = ['.jsonl'];
+        dbFiles = files.filter((file) =>
+          validExtensions.some(ext => file.name.toLowerCase().endsWith(ext))
+        );
+        filteredFiles = files.filter((file) =>
+          !validExtensions.some(ext => file.name.toLowerCase().endsWith(ext))
+        );
 
-      console.log(`[Main] 文件夹模式：找到 ${dbFiles.length} 个 state.vscdb 文件`);
+        console.log(`[Main] OpenClaw 文件夹模式：找到 ${dbFiles.length} 个 JSONL 文件`);
+        if (filteredFiles.length > 0) {
+          console.log(`[Main] 已过滤 ${filteredFiles.length} 个非 JSONL 文件`);
+          if (filteredFiles.length <= 10) {
+            console.log('[Main] 过滤的文件:', filteredFiles.map(f => f.name));
+          }
+        }
 
-      if (filteredFiles.length > 0) {
-        console.log(`[Main] 已过滤 ${filteredFiles.length} 个非数据库文件`);
-        if (filteredFiles.length <= 10) {
-          console.log('[Main] 过滤的文件:', filteredFiles.map(f => f.name));
+        if (dbFiles.length === 0) {
+          throw new Error('未找到可用的 OpenClaw 会话文件（.jsonl），请检查目录：%USERPROFILE%\\.openclaw\\agents\\main\\sessions\\');
+        }
+      } else {
+        // Cursor 文件夹模式：过滤出 state.vscdb 文件
+        dbFiles = files.filter((file) => file.name === 'state.vscdb');
+        filteredFiles = files.filter((file) => file.name !== 'state.vscdb');
+
+        console.log(`[Main] 文件夹模式：找到 ${dbFiles.length} 个 state.vscdb 文件`);
+
+        if (filteredFiles.length > 0) {
+          console.log(`[Main] 已过滤 ${filteredFiles.length} 个非数据库文件`);
+          if (filteredFiles.length <= 10) {
+            console.log('[Main] 过滤的文件:', filteredFiles.map(f => f.name));
+          }
+        }
+
+        if (dbFiles.length === 0) {
+          const fileList = filteredFiles.slice(0, 5).map(f => f.name).join(', ');
+          const error = filteredFiles.length === 0
+            ? '未找到 state.vscdb 文件，请选择正确的 Cursor workspaceStorage 目录'
+            : `未找到 state.vscdb 文件。选中的文件包括：${fileList}${filteredFiles.length > 5 ? '...' : ''}`;
+          throw new Error(error);
         }
       }
-
-      if (dbFiles.length === 0) {
-        const fileList = filteredFiles.slice(0, 5).map(f => f.name).join(', ');
-        const error = filteredFiles.length === 0
-          ? '未找到 state.vscdb 文件，请选择正确的 Cursor workspaceStorage 目录'
-          : `未找到 state.vscdb 文件。选中的文件包括：${fileList}${filteredFiles.length > 5 ? '...' : ''}`;
-        throw new Error(error);
-      }
     } else {
-      // 单文件模式：过滤出数据库文件
-      const validExtensions = ['.vscdb', '.db', '.sqlite', '.sqlite3'];
+      // 单文件模式：根据引擎过滤文件类型
+      const validExtensions = sourceEngine === 'openclaw'
+        ? ['.jsonl']
+        : ['.vscdb', '.db', '.sqlite', '.sqlite3'];
       dbFiles = files.filter((file) =>
         validExtensions.some(ext => file.name.toLowerCase().endsWith(ext))
       );
@@ -3089,7 +3151,7 @@ async function handleFileUpload(event, type, callbacks = {}) {
         !validExtensions.some(ext => file.name.toLowerCase().endsWith(ext))
       );
 
-      console.log(`[Main] 单文件模式：找到 ${dbFiles.length} 个数据库文件`);
+      console.log(`[Main] 单文件模式：找到 ${dbFiles.length} 个${sourceEngine === 'openclaw' ? ' JSONL ' : '数据库'}文件`);
 
       if (filteredFiles.length > 0) {
         console.log(`[Main] 已过滤 ${filteredFiles.length} 个非数据库文件`);
@@ -3098,9 +3160,13 @@ async function handleFileUpload(event, type, callbacks = {}) {
 
       if (dbFiles.length === 0) {
         const fileList = filteredFiles.slice(0, 3).map(f => f.name).join(', ');
-        const error = filteredFiles.length === 0
-          ? '未找到有效的数据库文件（.vscdb, .db, .sqlite, .sqlite3）'
-          : `未找到有效的数据库文件。选择的是：${fileList}${filteredFiles.length > 3 ? '...' : ''}，请选择数据库文件`;
+        const error = sourceEngine === 'openclaw'
+          ? (filteredFiles.length === 0
+            ? '未找到有效的 OpenClaw 会话文件（.jsonl）'
+            : `未找到有效的 OpenClaw 会话文件。选择的是：${fileList}${filteredFiles.length > 3 ? '...' : ''}`)
+          : (filteredFiles.length === 0
+            ? '未找到有效的数据库文件（.vscdb, .db, .sqlite, .sqlite3）'
+            : `未找到有效的数据库文件。选择的是：${fileList}${filteredFiles.length > 3 ? '...' : ''}，请选择数据库文件`);
         throw new Error(error);
       }
     }
@@ -3159,8 +3225,10 @@ async function handleFileUpload(event, type, callbacks = {}) {
         // 加载数据库
         await parser.loadDatabase(arrayBuffer);
 
-        // 扫描数据库（注入 limit 与进度回调）
-        const scanStatusText = getCurrentLang() === 'en' ? 'Scanning database…' : '正在深度扫描指纹…';
+        // 扫描数据（注入 limit 与进度回调）
+        const scanStatusText = sourceEngine === 'openclaw'
+          ? (getCurrentLang() === 'en' ? 'Scanning OpenClaw sessions…' : '正在扫描 OpenClaw 会话…')
+          : (getCurrentLang() === 'en' ? 'Scanning database…' : '正在深度扫描指纹…');
         const chatData = await parser.scanDatabase({
           limit,
           onProgress: (current, total) => {
@@ -3452,12 +3520,38 @@ async function handleFileUpload(event, type, callbacks = {}) {
 
     // 调用完成回调（不自动显示 Dashboard，由 React 控制）
     // 【数据流】上传 -> analyzeFile(含 uploadToSupabase) -> vibeResult 含 dimensions/rankData/identityLevelCloud/roastText -> 补全 roastText -> 传入预览；三身份词云用 window.vibeResults，预览/排名用 vibeResult，互不覆盖
+    // 【OpenClaw】当引擎为 openclaw 时计算 portrait 并传入，供 openclaw.html 使用
+    let openclawPortrait = null;
+    if (sourceEngine === 'openclaw') {
+      try {
+        if (parser && typeof parser.getPortraitAnalysis === 'function') {
+          openclawPortrait = parser.getPortraitAnalysis();
+        } else {
+          openclawPortrait = analyzeOpenClawPortrait(globalStats);
+        }
+      } catch (e) {
+        console.warn('[Main] OpenClaw portrait 计算失败', e);
+      }
+    }
+    if (openclawPortrait && sourceEngine === 'openclaw' && vibeAnalyzer && typeof vibeAnalyzer.uploadToSupabase === 'function') {
+      try {
+        await vibeAnalyzer.uploadToSupabase(null, null, null, {
+          sourceEngine: 'openclaw',
+          openclawPortrait,
+          stats: globalStats
+        });
+      } catch (e) {
+        console.warn('[Main] OpenClaw 同步失败', e);
+      }
+    }
     if (onComplete) {
-      onComplete({
+      const payload = {
         stats: globalStats,
         chatData: allChatData,
         vibeResult: vibeResult
-      });
+      };
+      if (openclawPortrait) payload.openclawPortrait = openclawPortrait;
+      onComplete(payload);
     } else {
       // 如果没有回调，使用原来的逻辑：500ms 淡出后再显示结果，减少闪烁
       await new Promise(r => setTimeout(r, 500));

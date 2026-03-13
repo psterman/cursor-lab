@@ -3400,6 +3400,113 @@ app.post('/api/v2/analyze', async (c) => {
   }
 });
 
+/**
+ * 路由：/api/v2/openclaw/analyze
+ * 功能：接收 OpenClaw 画像与统计，写入 user_analysis.openclaw_stats，并关联 public.user_analysis（指纹/GitHub）
+ */
+app.post('/api/v2/openclaw/analyze', async (c) => {
+  try {
+    const env = c.env;
+    if (!env.SUPABASE_URL || !(env.SUPABASE_KEY || env.SUPABASE_ANON_KEY)) {
+      return c.json({ success: false, error: 'Supabase not configured' }, 500);
+    }
+    const body = await c.req.json().catch(() => ({})) as Record<string, any>;
+    const fingerprint = (body.fingerprint ?? '').trim() || null;
+    const github_login = (body.github_login ?? '').trim() || null;
+
+    let user_id: string | null = null;
+    const authHeader = c.req.header('Authorization') || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    if (token && token.split('.').length >= 2) {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        const sub = payload.sub || payload.user_id;
+        if (sub && /^[0-9a-fA-F-]{36}$/.test(sub)) user_id = sub;
+      } catch (_) {}
+    }
+    if (!user_id && fingerprint) {
+      const existingUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?select=id&fingerprint=eq.${encodeURIComponent(fingerprint)}&limit=1`;
+      const rows = await fetchSupabaseJson<any[]>(env, existingUrl, { headers: buildSupabaseHeaders(env) }, 5000);
+      const arr = Array.isArray(rows) ? rows : rows ? [rows] : [];
+      if (arr[0]?.id) user_id = arr[0].id;
+    }
+    if (!user_id) {
+      const insertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis`;
+      const newRow = await fetchSupabaseJson<{ id: string }>(env, insertUrl, {
+        method: 'POST',
+        headers: {
+          ...buildSupabaseHeaders(env),
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation',
+        },
+        body: JSON.stringify({
+          fingerprint: fingerprint || undefined,
+          user_name: github_login || 'OpenClaw 用户',
+          user_identity: github_login ? 'github' : 'fingerprint',
+        }),
+      }, 5000);
+      const created = Array.isArray(newRow) ? newRow[0] : newRow;
+      if (created?.id) user_id = created.id;
+    }
+    if (!user_id) {
+      return c.json({ success: false, error: 'Could not resolve or create user_analysis row' }, 400);
+    }
+
+    const toNum = (v: any, def = 0) => (typeof v === 'number' && Number.isFinite(v) ? v : def);
+    const openclawRow = {
+      user_id,
+      source_type: 'openclaw_jsonl',
+      stats_version: 'v1',
+      records_total: toNum(body.records_total, 0),
+      model_usage: body.model_usage && typeof body.model_usage === 'object' ? body.model_usage : {},
+      top_model_id: body.top_model_id && String(body.top_model_id).trim() || null,
+      prompt_tokens: Math.max(0, toNum(body.prompt_tokens, 0)),
+      completion_tokens: Math.max(0, toNum(body.completion_tokens, 0)),
+      total_tokens: Math.max(0, toNum(body.total_tokens, 0)),
+      cached_tokens: Math.max(0, toNum(body.cached_tokens, 0)),
+      total_cost_usd: Math.max(0, toNum(body.total_cost_usd, 0)),
+      cache_hit_rate: Math.max(0, Math.min(1, toNum(body.cache_hit_rate, 0))),
+      tool_usage: body.tool_usage && typeof body.tool_usage === 'object' ? body.tool_usage : {},
+      skills_stats: body.skills_stats && typeof body.skills_stats === 'object' ? body.skills_stats : {},
+      hourly_heatmap: Array.isArray(body.hourly_heatmap) ? body.hourly_heatmap : [],
+      success_rate: Math.max(0, Math.min(1, toNum(body.success_rate, 0))),
+      abnormal_interrupt_rate: Math.max(0, Math.min(1, toNum(body.abnormal_interrupt_rate, 0))),
+      success_count: Math.max(0, toNum(body.success_count, 0)),
+      failure_count: Math.max(0, toNum(body.failure_count, 0)),
+      abnormal_interrupt_count: Math.max(0, toNum(body.abnormal_interrupt_count, 0)),
+      tool_calls_total: Math.max(0, toNum(body.tool_calls_total, 0)),
+      github_login: github_login || null,
+      country_code: (body.country_code ?? '').trim() || null,
+      raw_summary: body.raw_summary && typeof body.raw_summary === 'object' ? body.raw_summary : {},
+      analyzed_at: (body.analyzed_at && new Date(body.analyzed_at).toISOString()) || new Date().toISOString(),
+    };
+
+    const openclawUrl = `${env.SUPABASE_URL}/rest/v1/openclaw_stats`;
+    const insertHeaders = {
+      ...buildSupabaseHeaders(env),
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation',
+      'Accept-Profile': 'user_analysis',
+      'Content-Profile': 'user_analysis',
+    };
+    await fetch(openclawUrl, {
+      method: 'POST',
+      headers: insertHeaders,
+      body: JSON.stringify(openclawRow),
+    }).then(async (res) => {
+      if (!res.ok) {
+        const t = await res.text().catch(() => '');
+        throw new Error(`openclaw_stats insert failed: ${res.status} ${t}`);
+      }
+    });
+
+    return c.json({ success: true });
+  } catch (err: any) {
+    console.error('[Worker] /api/v2/openclaw/analyze 错误:', err);
+    return c.json({ success: false, error: err?.message || 'openclaw sync failed' }, 500);
+  }
+});
+
 /** 国家码 -> 中文名（供 /api/v2/summary _meta.countryName 使用） */
 const COUNTRY_CODE_TO_NAME: Record<string, string> = {
   CN: '中国', US: '美国', JP: '日本', KR: '韩国', GB: '英国', DE: '德国', FR: '法国',
