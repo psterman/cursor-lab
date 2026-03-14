@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenClaw - The AI that actually does things.</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* 1:1 官网背景色及官方红 */
+            --oc-bg: #000000;
+            --oc-red: #E63946;
+            --oc-red-glow: rgba(230, 57, 70, 0.3);
+            --oc-cyan: #00FFFF;
+            --oc-text-main: #FFFFFF;
+            --oc-text-dim: #888888;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--oc-bg);
+            color: var(--oc-text-main);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* 极简背景氛围 */
+        .ambient-glow {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80vw;
+            height: 80vh;
+            background: radial-gradient(circle, rgba(230, 57, 70, 0.03) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        /* 主标题样式还原 */
+        .hero-section {
+            text-align: center;
+            z-index: 20;
+            margin-bottom: 2rem;
+            pointer-events: none;
+        }
+
+        .hero-title {
+            font-size: 3.5rem;
+            font-weight: 700;
+            margin: 0;
+            letter-spacing: -0.02em;
+            background: linear-gradient(to bottom, #fff 0%, #aaa 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .hero-subtitle {
+            font-size: 1.2rem;
+            color: var(--oc-text-dim);
+            margin-top: 0.5rem;
+            font-weight: 400;
+            letter-spacing: 0.05em;
+        }
+
+        /* 虾实体容器 */
+        .entity-container {
+            position: relative;
+            width: 450px;
+            height: 450px;
+            z-index: 10;
+        }
+
+        .oc-svg {
+            width: 100%;
+            height: 100%;
+            filter: drop-shadow(0 0 30px var(--oc-red-glow));
+        }
+
+        /* 悬浮动效 */
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-15px); }
+        }
+
+        .floating {
+            animation: float 5s ease-in-out infinite;
+        }
+
+        /* 数据监测面板 (HUD) */
+        .hud-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        .stat-label {
+            position: absolute;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--oc-red);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            opacity: 0.6;
+        }
+
+        #stat-1 { top: 10%; left: -20%; }
+        #stat-2 { bottom: 20%; right: -25%; text-align: right; }
+
+        /* 底部信息 */
+        .footer {
+            position: fixed;
+            bottom: 30px;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.65rem;
+            color: #333;
+            text-transform: uppercase;
+            z-index: 20;
+        }
+
+        .footer span {
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+
+<div class="ambient-glow"></div>
+
+<div class="hero-section">
+    <h1 class="hero-title">OpenClaw</h1>
+    <p class="hero-subtitle">The AI that actually does things.</p>
+</div>
+
+<div class="entity-container floating">
+    <!-- HUD 标注 -->
+    <div class="hud-overlay">
+        <div class="stat-label" id="stat-1">Core_Status: [OPTIMAL]<br>Memory_Pool: 8.4TB</div>
+        <div class="stat-label" id="stat-2">Action_Stream: ACTIVE<br>Latency: 14ms</div>
+    </div>
+
+    <!-- 1:1 复刻的 OpenClaw SVG -->
+    <svg id="openclaw-svg" class="oc-svg" viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+            <linearGradient id="bodyGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" style="stop-color:#FF4D4D;stop-opacity:1" />
+                <stop offset="100%" style="stop-color:#B91D1D;stop-opacity:1" />
+            </linearGradient>
+        </defs>
+
+        <!-- 虾腿 -->
+        <rect x="215" y="420" width="30" height="40" fill="#B91D1D" rx="4" />
+        <rect x="255" y="420" width="30" height="40" fill="#B91D1D" rx="4" />
+
+        <!-- 触角 -->
+        <path d="M190,120 C160,80 140,95 130,110" stroke="#FF4D4D" stroke-width="14" fill="none" stroke-linecap="round" />
+        <path d="M310,120 C340,80 360,95 370,110" stroke="#FF4D4D" stroke-width="14" fill="none" stroke-linecap="round" />
+
+        <!-- 浑圆主体 -->
+        <path d="M100,260 C100,150 160,100 250,100 C340,100 400,150 400,260 C400,370 340,440 250,440 C160,440 100,370 100,260 Z" fill="url(#bodyGradient)" />
+
+        <!-- 左右大螯 (还原馒头状形态) -->
+        <path d="M110,245 C70,245 45,275 45,305 C45,335 75,355 115,350 C125,320 120,280 110,245 Z" fill="#E63946" />
+        <path d="M390,245 C430,245 455,275 455,305 C455,335 425,355 385,350 C375,320 380,280 390,245 Z" fill="#E63946" />
+
+        <!-- 追踪眼球系统 -->
+        <g id="eye-l-group">
+            <circle cx="195" cy="225" r="30" fill="#000" />
+            <circle id="pupil-l" cx="195" cy="225" r="11" fill="var(--oc-cyan)" filter="blur(1px)" />
+            <circle cx="195" cy="225" r="4" fill="#fff" opacity="0.8" />
+        </g>
+        <g id="eye-r-group">
+            <circle cx="305" cy="225" r="30" fill="#000" />
+            <circle id="pupil-r" cx="305" cy="225" r="11" fill="var(--oc-cyan)" filter="blur(1px)" />
+            <circle cx="305" cy="225" r="4" fill="#fff" opacity="0.8" />
+        </g>
+    </svg>
+</div>
+
+<div class="footer">
+    <span>System: Ready</span>
+    <span>Node: 0x99_ALPHA</span>
+    <span id="timestamp">2024.10.24</span>
+</div>
+
+<script>
+    // 眼神追踪逻辑
+    const pupilL = document.getElementById('pupil-l');
+    const pupilR = document.getElementById('pupil-r');
+    
+    // 眼球中心坐标 (SVG 内)
+    const centers = {
+        l: { x: 195, y: 225 },
+        r: { x: 305, y: 225 }
+    };
+
+    // 追踪限制半径
+    const limit = 12;
+
+    document.addEventListener('mousemove', (e) => {
+        const { clientX, clientY } = e;
+        
+        // 计算左眼
+        updatePupil(pupilL, centers.l, clientX, clientY);
+        // 计算右眼
+        updatePupil(pupilR, centers.r, clientX, clientY);
+    });
+
+    function updatePupil(element, center, mX, mY) {
+        // 获取 SVG 在屏幕中的位置
+        const svg = document.getElementById('openclaw-svg');
+        const rect = svg.getBoundingClientRect();
+        
+        // 将鼠标坐标转换为相对于 SVG 的坐标
+        // 映射比例计算
+        const svgW = rect.width;
+        const svgH = rect.height;
+        const relX = (mX - rect.left) * (500 / svgW);
+        const relY = (mY - rect.top) * (500 / svgH);
+
+        // 计算向量
+        const dx = relX - center.x;
+        const dy = relY - center.y;
+        const angle = Math.atan2(dy, dx);
+        const dist = Math.min(Math.sqrt(dx*dx + dy*dy), limit);
+
+        // 计算偏移后的坐标
+        const targetX = center.x + Math.cos(angle) * dist;
+        const targetY = center.y + Math.sin(angle) * dist;
+
+        element.setAttribute('cx', targetX);
+        element.setAttribute('cy', targetY);
+    }
+
+    // 时间戳更新
+    function updateTime() {
+        const now = new Date();
+        document.getElementById('timestamp').innerText = `${now.getFullYear()}.${(now.getMonth()+1).toString().padStart(2,'0')}.${now.getDate().toString().padStart(2,'0')} // ${now.toTimeString().split(' ')[0]}`;
+    }
+    setInterval(updateTime, 1000);
+    updateTime();
+
+    // 自动对焦模拟
+    setInterval(() => {
+        if (Math.random() > 0.8) {
+            pupilL.setAttribute('r', '14');
+            pupilR.setAttribute('r', '14');
+            setTimeout(() => {
+                pupilL.setAttribute('r', '11');
+                pupilR.setAttribute('r', '11');
+            }, 100);
+        }
+    }, 3000);
+</script>
+
+</body>
+</html>

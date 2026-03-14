@@ -7946,6 +7946,7 @@
         let data;
         try { data = JSON.parse(raw); } catch (e) { return; }
         const portrait = data.openclawPortrait;
+        const sessions = data.openclawSessionsSummary || null;
         if (!portrait || !portrait.dimensions) return;
         const rootEl = document.getElementById('root');
         if (rootEl) rootEl.style.display = 'none';
@@ -7960,19 +7961,107 @@
         const level = comp.level || 'D';
         const levelText = lang === 'en' ? (levelLabelsEn[level] || level) : (levelLabelsZh[level] || level);
         const score = comp.score != null ? comp.score : 0;
+        const sess = sessions || {};
+        const tokenS = sess.token || {};
+        const cacheS = sess.cache || {};
+        const modelS = sess.model || {};
+        const channelS = sess.channel || {};
+        const toolsS = sess.tools || {};
+        const heartbeatS = sess.heartbeat || {};
+        const statusS = sess.status || {};
+        const toFiniteNumber = (value, fallback = 0) => {
+          if (typeof value === 'number' && Number.isFinite(value)) return value;
+          if (typeof value === 'string') {
+            const n = Number(value);
+            if (Number.isFinite(n)) return n;
+          }
+          return fallback;
+        };
         const consumption = dims.consumptionCost || {};
-        const totalTokens = consumption.totalTokens ?? 0;
-        const cacheHitRate = (consumption.cacheHitRate != null ? (consumption.cacheHitRate * 100) : 0).toFixed(1);
-        const totalCostUsd = (consumption.totalCostUSD != null ? Number(consumption.totalCostUSD) : 0).toFixed(4);
+        const portraitTotalTokens = toFiniteNumber(consumption.totalTokens, 0);
+        const summaryInputTokens = Math.max(0, toFiniteNumber(tokenS.inputTokensSum, 0));
+        const summaryOutputTokens = Math.max(0, toFiniteNumber(tokenS.outputTokensSum, 0));
+        const summaryTotalTokensRaw = Math.max(0, toFiniteNumber(tokenS.totalTokensSum, 0));
+        const summaryComputedTotal = summaryInputTokens + summaryOutputTokens;
+        const summaryTotalTokens = summaryTotalTokensRaw > 0
+          ? Math.max(summaryTotalTokensRaw, summaryComputedTotal)
+          : summaryComputedTotal;
+        const totalTokens = portraitTotalTokens > 0 ? portraitTotalTokens : summaryTotalTokens;
+        const totalCostUsdRaw = toFiniteNumber(consumption.totalCostUSD, 0);
+        const summaryCostUsd = Math.max(0, toFiniteNumber(sess.cost?.totalCostUsd, 0));
+        const totalCostUsdValue = totalCostUsdRaw > 0 ? totalCostUsdRaw : summaryCostUsd;
+        const summaryCacheRead = Math.max(0, toFiniteNumber(cacheS.cacheReadSum, 0));
+        const summaryCacheWrite = Math.max(0, toFiniteNumber(cacheS.cacheWriteSum, 0));
+        const summaryCacheHitRate = summaryInputTokens > 0
+          ? Math.max(0, Math.min(1, summaryCacheRead / summaryInputTokens))
+          : Math.max(0, Math.min(1, toFiniteNumber(cacheS.hitRate, 0)));
+        const hasConsumption = totalTokens > 0 ||
+          (consumption.promptTokens ?? 0) > 0 ||
+          (consumption.completionTokens ?? 0) > 0 ||
+          summaryCacheRead > 0 ||
+          summaryCacheWrite > 0 ||
+          totalCostUsdValue > 0;
+        const tokensDisplay = hasConsumption ? Number(totalTokens).toLocaleString() : (lang === 'en' ? 'N/A' : '暂无数据');
+        const portraitCacheHitRate = consumption.cacheHitRate != null ? toFiniteNumber(consumption.cacheHitRate, 0) : 0;
+        const cacheHitRateValue = portraitCacheHitRate > 0 ? portraitCacheHitRate : summaryCacheHitRate;
+        const hasCacheSignal = portraitCacheHitRate > 0 || summaryCacheRead > 0 || summaryCacheWrite > 0 || toFiniteNumber(cacheS.hitRate, 0) > 0;
+        const cacheHitRate = hasCacheSignal ? (cacheHitRateValue * 100).toFixed(1) : (lang === 'en' ? 'N/A' : '暂无数据');
+        const hasCostSignal = totalCostUsdValue > 0;
+        const totalCostUsd = hasCostSignal ? totalCostUsdValue.toFixed(4) : (lang === 'en' ? 'N/A' : '暂无数据');
+        const costDisplay = hasCostSignal ? '$' : '';
+        const usedEstimate = !!consumption.usedEstimate;
+        const tokenSource = consumption.tokenSource || (usedEstimate ? 'estimate' : 'usage');
+        const tokenSourceLabel = lang === 'en'
+          ? (tokenSource === 'thinking' ? 'Estimated from thinking' : tokenSource === 'messages' ? 'Estimated from messages' : tokenSource === 'sessions.json' ? 'sessions.json' : 'Usage')
+          : (tokenSource === 'thinking' ? '基于思考估算' : tokenSource === 'messages' ? '基于消息估算' : tokenSource === 'sessions.json' ? 'sessions.json' : '原始用量');
         const modelDim = dims.modelPreference || {};
-        const topModel = modelDim.dominantModelId || '--';
+        const topModelRaw = modelDim.dominantModelId || '--';
+        const topModel = (topModelRaw === 'unknown' || topModelRaw === '--') ? 'openclaw-default' : topModelRaw;
         const topRatio = (modelDim.dominantRatio != null ? (modelDim.dominantRatio * 100) : 0).toFixed(1);
         const health = dims.stabilityHealth || {};
-        const successRate = (health.successRate != null ? (health.successRate * 100) : 0).toFixed(1);
-        const abnormalRate = (health.abnormalInterruptRate != null ? (health.abnormalInterruptRate * 100) : 0).toFixed(1);
+        const successBase = health.successBase ?? 0;
+        const summarySuccessRate = statusS.successRate != null ? toFiniteNumber(statusS.successRate, 0) : null;
+        const successRateValue = successBase > 0
+          ? (health.successRate != null ? toFiniteNumber(health.successRate, 0) : 0)
+          : (summarySuccessRate != null ? summarySuccessRate : null);
+        const successRate = successRateValue != null
+          ? (successRateValue * 100).toFixed(1)
+          : (lang === 'en' ? 'N/A' : '暂无数据');
+        const portraitAbnormalRate = health.abnormalInterruptionRate != null ? toFiniteNumber(health.abnormalInterruptionRate, 0) : null;
+        const summaryAbnormalRate = statusS.abnormalInterruptionRate != null ? toFiniteNumber(statusS.abnormalInterruptionRate, 0) : null;
+        const abnormalRateValue = (portraitAbnormalRate != null && (portraitAbnormalRate > 0 || summaryAbnormalRate == null))
+          ? portraitAbnormalRate
+          : (summaryAbnormalRate != null ? summaryAbnormalRate : 0);
+        const abnormalRate = (abnormalRateValue * 100).toFixed(1);
         const toolHeat = dims.toolSkillHeat || {};
         const topTools = toolHeat.topTools || [];
         const topSkills = toolHeat.topSkills || [];
+        const habit = dims.taskHabit || {};
+        const consumptionScore = Math.round(consumption.score || 0);
+        const modelScore = Math.round(modelDim.score || 0);
+        const toolScore = Math.round(toolHeat.score || 0);
+        const habitScore = Math.round(habit.score || 0);
+        const stabilityScore = Math.round(health.score || 0);
+        const compositeScore = Math.round(score || 0);
+        const uniqueModels = modelDim.uniqueModelCount ?? 0;
+        const totalModelCalls = modelDim.totalModelCalls ?? 0;
+        const sessionToolNames = Array.isArray(toolsS.toolNames) ? toolsS.toolNames.filter((name) => typeof name === 'string' && name.trim()) : [];
+        const toolCallsFromPortrait = Math.max(0, toFiniteNumber(toolHeat.toolCallsTotal, 0));
+        const toolKindsFromPortrait = Math.max(0, toFiniteNumber(toolHeat.toolKinds, 0));
+        const toolCallsTotal = toolCallsFromPortrait > 0 ? toolCallsFromPortrait : Math.max(0, toFiniteNumber(toolsS.sessionsWithTools, 0));
+        const toolKinds = toolKindsFromPortrait > 0 ? toolKindsFromPortrait : (sessionToolNames.length || 0);
+        const topToolName = topTools[0]?.toolName || sessionToolNames[0] || '--';
+        const topToolCount = (topTools[0]?.count && topTools[0]?.count > 0)
+          ? topTools[0].count
+          : (sessionToolNames.length > 0 ? Math.max(0, toFiniteNumber(toolsS.entriesCount, 0)) : 0);
+        const activeHours = habit.activeHours ?? 0;
+        const peakHours = (Array.isArray(habit.peakHours) && habit.peakHours.length > 0)
+          ? habit.peakHours.map((h) => String(h.hour)).slice(0, 3).join(', ')
+          : '--';
+        const workRhythm = habit.workRhythm || 'unknown';
+        const workRhythmZh = { 'night-owl': '夜猫子', morning: '早起', afternoon: '下午档', evening: '夜间档', unknown: '未知' };
+        const workRhythmEn = { 'night-owl': 'Night Owl', morning: 'Morning', afternoon: 'Afternoon', evening: 'Evening', unknown: 'Unknown' };
+        const workRhythmLabel = lang === 'en' ? (workRhythmEn[workRhythm] || workRhythm) : (workRhythmZh[workRhythm] || workRhythm);
         const consumptionLabel = lang === 'en' ? 'Consumption' : '消耗';
         const modelLabel = lang === 'en' ? 'Model' : '模型';
         const healthLabel = lang === 'en' ? 'Health' : '健康';
@@ -7984,6 +8073,33 @@
         const successLabel = lang === 'en' ? 'Success Rate %' : '成功率';
         const abnormalLabel = lang === 'en' ? 'Abnormal Interrupt %' : '异常中断率';
         const skillsLabel = lang === 'en' ? 'Skills & Tools' : '技能与工具';
+        const scoreLabel = lang === 'en' ? 'Score' : '评分';
+        const compositeLabel = lang === 'en' ? 'Composite' : '综合';
+        const rankScoreLabel = lang === 'en' ? 'Rank Score' : '排行榜分';
+        const habitLabel = lang === 'en' ? 'Habit' : '习惯';
+        const toolLabel = lang === 'en' ? 'Tool' : '工具';
+        const toolCallsLabel = lang === 'en' ? 'Calls' : '调用';
+        const toolTypesLabel = lang === 'en' ? 'Types' : '类型';
+        const peakLabel = lang === 'en' ? 'Peak' : '峰值';
+        const activeLabel = lang === 'en' ? 'Active' : '活跃';
+        const modelCountLabel = lang === 'en' ? 'Models' : '模型';
+        const fmt = (n) => (n != null && Number.isFinite(n) ? Number(n).toLocaleString() : '--');
+        const dataSourceTitle = lang === 'en' ? 'Data source' : '数据来源';
+        const dataSourceDesc = lang === 'en'
+          ? 'Metrics below are aggregated from sessions.json (OpenClaw session index). Token/cache/model/channel/time/skills/tools/context/heartbeat/status and system prompt stats come from this file when uploaded together with session JSONL.'
+          : '以下指标来自 sessions.json（OpenClaw 会话索引）的汇总。上传时若同时包含 sessions.json，则 Token/缓存/模型/渠道/时间/技能/工具/上下文/心跳/状态及 System Prompt 统计均出自该文件。';
+        const sessionsSectionTitle = lang === 'en' ? 'sessions.json core data' : 'sessions.json 核心数据';
+        const cacheReadLabel = lang === 'en' ? 'Cache read' : '缓存读取';
+        const cacheWriteLabel = lang === 'en' ? 'Cache write' : '缓存写入';
+        const contextTokensLabel = lang === 'en' ? 'Context window' : '上下文窗口';
+        const channelLabel = lang === 'en' ? 'Channel' : '渠道';
+        const lastActiveLabel = lang === 'en' ? 'Last active' : '最后活跃';
+        const toolsSchemaLabel = lang === 'en' ? 'Tools schema (max)' : '工具 Schema 数';
+        const heartbeatLabel = lang === 'en' ? 'Heartbeat' : '心跳';
+        const statusLabel = lang === 'en' ? 'Status' : '状态';
+        const systemPromptLabel = lang === 'en' ? 'System prompt chars' : 'System Prompt 字符数';
+        const injectedFilesLabel = lang === 'en' ? 'Injected workspace files' : '工作区注入文件';
+        const sessionCountLabel = lang === 'en' ? 'Sessions' : '会话数';
         container.innerHTML = `
             <header style="text-align: center; padding: 40px 20px;">
                 <div class="logo-box" style="display: inline-block; padding: 8px 16px; border: 1px solid var(--card-border); border-radius: 2px; margin-bottom: 16px; font-size: 14px; color: var(--accent-terminal); text-transform: uppercase; letter-spacing: 0.15em;">OpenClaw ${lang === 'en' ? 'Shrimp Report' : '养虾盘点'}</div>
@@ -7994,14 +8110,63 @@
                 </div>
                 <button type="button" id="openclaw-export-btn" style="margin-top: 20px; padding: 10px 20px; background: var(--accent-terminal); color: var(--bg-color); border: none; border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-weight: 700; cursor: pointer;">${lang === 'en' ? 'Export PNG' : '导出 PNG'}</button>
             </header>
+            <div class="openclaw-data-source" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 16px 20px; margin-bottom: 24px;">
+                <p class="stat-label" style="color: var(--accent-cyan); font-size: 12px; margin-bottom: 8px;">${dataSourceTitle}</p>
+                <p style="font-size: 12px; color: var(--text-dim); line-height: 1.6;">${dataSourceDesc}</p>
+                <p style="font-size: 11px; color: var(--text-dim); margin-top: 10px;">sessions.json → ${lang === 'en' ? 'Token (inputTokens, outputTokens, totalTokens), cache (cacheRead, cacheWrite), model (modelProvider, model), channel (lastChannel, origin.provider/surface), updatedAt, skillsSnapshot.skills, systemPromptReport.tools.entries, contextTokens, lastHeartbeatText/SentAt, abortedLastRun, systemSent, compactionCount, systemPrompt.chars, injectedWorkspaceFiles' : 'Token、缓存、模型、渠道、时间、技能、工具、上下文、心跳、状态、System Prompt 字符、文件注入'}</p>
+            </div>
+            <div class="openclaw-score-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin: 24px 0 32px;">
+                <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 18px;">
+                    <p class="stat-label" style="color: var(--accent-terminal); font-size: 12px; margin-bottom: 8px;">${compositeLabel}</p>
+                    <p class="stat-value" style="font-size: 28px; font-weight: 800;">${compositeScore}</p>
+                    <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${rankScoreLabel}</p>
+                    <p class="stat-value" style="font-size: 14px; margin-top: 8px;">${level} · ${levelText}</p>
+                    <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${scoreLabel}</p>
+                </div>
+                <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 18px;">
+                    <p class="stat-label" style="color: var(--accent-terminal); font-size: 12px; margin-bottom: 8px;">${consumptionLabel}</p>
+                    <p class="stat-value" style="font-size: 26px; font-weight: 800;">${consumptionScore}</p>
+                    <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${scoreLabel}</p>
+                    <p class="stat-value" style="font-size: 13px; margin-top: 8px;">${tokensDisplay}</p>
+                    <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${tokensLabel}${usedEstimate ? ` · ${tokenSourceLabel}` : ''}</p>
+                </div>
+                <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 18px;">
+                    <p class="stat-label" style="color: var(--accent-terminal); font-size: 12px; margin-bottom: 8px;">${modelLabel}</p>
+                    <p class="stat-value" style="font-size: 26px; font-weight: 800;">${modelScore}</p>
+                    <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${scoreLabel}</p>
+                    <p class="stat-value" style="font-size: 13px; margin-top: 8px;">${String(topModel)}</p>
+                    <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${topModelLabel} · ${modelCountLabel} ${uniqueModels}/${totalModelCalls}</p>
+                </div>
+                <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 18px;">
+                    <p class="stat-label" style="color: var(--accent-terminal); font-size: 12px; margin-bottom: 8px;">${toolLabel}</p>
+                    <p class="stat-value" style="font-size: 26px; font-weight: 800;">${toolScore}</p>
+                    <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${scoreLabel}</p>
+                    <p class="stat-value" style="font-size: 13px; margin-top: 8px;">${topToolName} (${topToolCount})</p>
+                    <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${toolCallsLabel} ${toolCallsTotal} · ${toolTypesLabel} ${toolKinds}</p>
+                </div>
+                <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 18px;">
+                    <p class="stat-label" style="color: var(--accent-terminal); font-size: 12px; margin-bottom: 8px;">${habitLabel}</p>
+                    <p class="stat-value" style="font-size: 26px; font-weight: 800;">${habitScore}</p>
+                    <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${scoreLabel}</p>
+                    <p class="stat-value" style="font-size: 13px; margin-top: 8px;">${workRhythmLabel}</p>
+                    <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${peakLabel} ${peakHours} · ${activeLabel} ${activeHours}</p>
+                </div>
+                <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 18px;">
+                    <p class="stat-label" style="color: var(--accent-terminal); font-size: 12px; margin-bottom: 8px;">${healthLabel}</p>
+                    <p class="stat-value" style="font-size: 26px; font-weight: 800;">${stabilityScore}</p>
+                    <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${scoreLabel}${(successBase === 0 && summarySuccessRate == null) ? ` · ${lang === 'en' ? 'Partial data' : '缺少 exitCode'}` : ''}</p>
+                    <p class="stat-value" style="font-size: 13px; margin-top: 8px;">${Number.isFinite(Number(successRate)) ? `${successRate}%` : successRate}</p>
+                    <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${successLabel} · ${abnormalRate}%</p>
+                </div>
+            </div>
             <div class="openclaw-stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px;">
                 <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 20px;">
                     <p class="stat-label" style="color: var(--accent-terminal); font-size: 12px; margin-bottom: 8px;">${consumptionLabel}</p>
-                    <p class="stat-value" id="oc-total-tokens" style="font-size: 24px; font-weight: 700;">${Number(totalTokens).toLocaleString()}</p>
-                    <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${tokensLabel}</p>
-                    <p class="stat-value" style="font-size: 18px; margin-top: 8px;">${cacheHitRate}%</p>
+                    <p class="stat-value" id="oc-total-tokens" style="font-size: 24px; font-weight: 700;">${tokensDisplay}</p>
+                    <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${tokensLabel}${usedEstimate ? ` · ${tokenSourceLabel}` : ''}</p>
+                    <p class="stat-value" style="font-size: 18px; margin-top: 8px;">${Number.isFinite(Number(cacheHitRate)) ? `${cacheHitRate}%` : cacheHitRate}</p>
                     <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${cacheLabel}</p>
-                    <p class="stat-value" style="font-size: 18px; margin-top: 4px;">$${totalCostUsd}</p>
+                    <p class="stat-value" style="font-size: 18px; margin-top: 4px;">${costDisplay}${totalCostUsd}</p>
                     <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${costLabel}</p>
                 </div>
                 <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 20px;">
@@ -8013,10 +8178,86 @@
                 </div>
                 <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 20px;">
                     <p class="stat-label" style="color: var(--accent-terminal); font-size: 12px; margin-bottom: 8px;">${healthLabel}</p>
-                    <p class="stat-value" style="font-size: 24px; font-weight: 700;">${successRate}%</p>
+                    <p class="stat-value" style="font-size: 24px; font-weight: 700;">${Number.isFinite(Number(successRate)) ? `${successRate}%` : successRate}</p>
                     <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${successLabel}</p>
                     <p class="stat-value" style="font-size: 18px; margin-top: 8px;">${abnormalRate}%</p>
                     <p class="stat-desc" style="font-size: 11px; color: var(--text-dim);">${abnormalLabel}</p>
+                </div>
+            </div>
+            <div class="openclaw-sessions-section" style="margin-bottom: 32px;">
+                <h3 class="chart-title" style="text-align: center; margin-bottom: 8px; color: var(--accent-terminal);">${sessionsSectionTitle}</h3>
+                <p style="text-align: center; font-size: 11px; color: var(--text-dim); margin-bottom: 16px;">${lang === 'en' ? 'Upload sessions.json with session JSONL to fill values.' : '上传 sessions.json（与会话 JSONL 一起）后可填充数值。'}</p>
+                <div class="openclaw-sessions-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
+                    <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 16px;">
+                        <p class="stat-label" style="color: var(--accent-cyan); font-size: 11px; margin-bottom: 6px;">${sessionCountLabel}</p>
+                        <p class="stat-value" style="font-size: 22px; font-weight: 700;">${fmt(sess.sessionCount)}</p>
+                        <p class="stat-desc" style="font-size: 10px; color: var(--text-dim);">sessions.json 条目数</p>
+                    </div>
+                    <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 16px;">
+                        <p class="stat-label" style="color: var(--accent-cyan); font-size: 11px; margin-bottom: 6px;">Token · sessions.json</p>
+                        <p class="stat-value" style="font-size: 18px;">${fmt(tokenS.inputTokensSum)}</p>
+                        <p class="stat-desc" style="font-size: 10px; color: var(--text-dim);">inputTokens</p>
+                        <p class="stat-value" style="font-size: 18px; margin-top: 4px;">${fmt(tokenS.outputTokensSum)}</p>
+                        <p class="stat-desc" style="font-size: 10px; color: var(--text-dim);">outputTokens</p>
+                        <p class="stat-value" style="font-size: 18px; margin-top: 4px;">${fmt(tokenS.totalTokensSum)}</p>
+                        <p class="stat-desc" style="font-size: 10px; color: var(--text-dim);">totalTokens</p>
+                    </div>
+                    <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 16px;">
+                        <p class="stat-label" style="color: var(--accent-cyan); font-size: 11px; margin-bottom: 6px;">${cacheReadLabel} / ${cacheWriteLabel}</p>
+                        <p class="stat-value" style="font-size: 18px;">${fmt(cacheS.cacheReadSum)} / ${fmt(cacheS.cacheWriteSum)}</p>
+                        <p class="stat-desc" style="font-size: 10px; color: var(--text-dim);">sessions.json</p>
+                    </div>
+                    <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 16px;">
+                        <p class="stat-label" style="color: var(--accent-cyan); font-size: 11px; margin-bottom: 6px;">${modelLabel} · modelProvider / model</p>
+                        <p class="stat-value" style="font-size: 13px; word-break: break-all;">${(modelS.modelProvider || modelS.model || '--').toString().slice(0, 40)}${(modelS.modelProvider || modelS.model || '').length > 40 ? '…' : ''}</p>
+                        <p class="stat-desc" style="font-size: 10px; color: var(--text-dim);">${modelS.uniqueModels?.length || 0} ${modelCountLabel}</p>
+                    </div>
+                    <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 16px;">
+                        <p class="stat-label" style="color: var(--accent-cyan); font-size: 11px; margin-bottom: 6px;">${channelLabel}</p>
+                        <p class="stat-desc" style="font-size: 11px;">lastChannel: ${(channelS.lastChannel && channelS.lastChannel.length) ? channelS.lastChannel.join(', ') : '--'}</p>
+                        <p class="stat-desc" style="font-size: 10px; color: var(--text-dim);">origin: ${(channelS.originProvider && channelS.originProvider.length) ? channelS.originProvider.join(', ') : '--'} / ${(channelS.originSurface && channelS.originSurface.length) ? channelS.originSurface.join(', ') : '--'}</p>
+                    </div>
+                    <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 16px;">
+                        <p class="stat-label" style="color: var(--accent-cyan); font-size: 11px; margin-bottom: 6px;">${lastActiveLabel} · updatedAt</p>
+                        <p class="stat-value" style="font-size: 12px;">${(sess.lastActiveAt || sess.updatedAt || heartbeatS.lastHeartbeatSentAt) ? String(sess.lastActiveAt || sess.updatedAt || heartbeatS.lastHeartbeatSentAt).slice(0, 24) : '--'}</p>
+                    </div>
+                    <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 16px;">
+                        <p class="stat-label" style="color: var(--accent-cyan); font-size: 11px; margin-bottom: 6px;">${contextTokensLabel}</p>
+                        <p class="stat-value" style="font-size: 18px;">${fmt(tokenS.contextTokensMax)}</p>
+                        <p class="stat-desc" style="font-size: 10px; color: var(--text-dim);">contextTokens max</p>
+                    </div>
+                    <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 16px;">
+                        <p class="stat-label" style="color: var(--accent-cyan); font-size: 11px; margin-bottom: 6px;">${toolsSchemaLabel}</p>
+                        <p class="stat-value" style="font-size: 18px;">${fmt(toolsS.entriesCount)}</p>
+                        <p class="stat-desc" style="font-size: 10px; color: var(--text-dim);">systemPromptReport.tools.entries · ${toolsS.sessionsWithTools || 0} ${sessionCountLabel}</p>
+                        <p class="stat-desc" style="font-size: 10px; color: var(--text-dim); margin-top: 4px;">${sessionToolNames.length > 0 ? sessionToolNames.slice(0, 4).join(', ') + (sessionToolNames.length > 4 ? '…' : '') : '--'}</p>
+                    </div>
+                    <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 16px;">
+                        <p class="stat-label" style="color: var(--accent-cyan); font-size: 11px; margin-bottom: 6px;">${heartbeatLabel}</p>
+                        <p class="stat-desc" style="font-size: 10px; max-height: 36px; overflow: hidden; text-overflow: ellipsis;">${heartbeatS.lastHeartbeatText ? String(heartbeatS.lastHeartbeatText).slice(0, 60) + (heartbeatS.lastHeartbeatText.length > 60 ? '…' : '') : '--'}</p>
+                        <p class="stat-desc" style="font-size: 10px; color: var(--text-dim);">${heartbeatS.lastHeartbeatSentAt || '--'}</p>
+                    </div>
+                    <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 16px;">
+                        <p class="stat-label" style="color: var(--accent-cyan); font-size: 11px; margin-bottom: 6px;">${statusLabel}</p>
+                        <p class="stat-desc" style="font-size: 11px;">abortedLastRun: ${statusS.abortedLastRunCount ?? '--'}</p>
+                        <p class="stat-desc" style="font-size: 11px;">systemSent: ${statusS.systemSentCount ?? '--'}</p>
+                        <p class="stat-desc" style="font-size: 11px;">compactionCount: ${fmt(statusS.compactionCountSum)}</p>
+                    </div>
+                    <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 16px;">
+                        <p class="stat-label" style="color: var(--accent-cyan); font-size: 11px; margin-bottom: 6px;">${systemPromptLabel}</p>
+                        <p class="stat-value" style="font-size: 18px;">${fmt(sess.systemPromptChars)}</p>
+                        <p class="stat-desc" style="font-size: 10px; color: var(--text-dim);">systemPromptReport.systemPrompt.chars</p>
+                    </div>
+                    <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 16px;">
+                        <p class="stat-label" style="color: var(--accent-cyan); font-size: 11px; margin-bottom: 6px;">${injectedFilesLabel}</p>
+                        <p class="stat-value" style="font-size: 18px;">${fmt(sess.injectedWorkspaceFilesCount)}</p>
+                    </div>
+                    ${Array.isArray(sess.skills) && sess.skills.length > 0 ? `
+                    <div class="stat-card openclaw-card" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 16px; grid-column: 1 / -1;">
+                        <p class="stat-label" style="color: var(--accent-cyan); font-size: 11px; margin-bottom: 6px;">${skillsLabel} · skillsSnapshot.skills</p>
+                        <p style="font-size: 11px; color: var(--text-dim);">${sess.skills.slice(0, 24).join(', ')}${sess.skills.length > 24 ? ' …' : ''}</p>
+                    </div>
+                    ` : ''}
                 </div>
             </div>
             <div class="openclaw-radar-wrap" style="background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 24px; margin-bottom: 32px;">
@@ -8035,9 +8276,12 @@
             const canvas = document.getElementById('openclawRadarChart');
             if (canvas && window.Chart) renderOpenClawRadar(canvas, portrait, { lang, Chart: window.Chart, showLegend: true });
         } catch (e) { console.warn('[OpenClaw] Radar render failed', e); }
-        if (typeof WordCloud !== 'undefined' && topTools.length + topSkills.length > 0) {
+        const cloudTools = topTools.length > 0
+          ? topTools
+          : sessionToolNames.map((name) => ({ toolName: name, count: 1 }));
+        if (typeof WordCloud !== 'undefined' && cloudTools.length + topSkills.length > 0) {
             const words = [];
-            topTools.forEach(t => { words.push([t.toolName || t.name || '', Math.max(1, (t.count || 0) / 2 + 10)]); });
+            cloudTools.forEach(t => { words.push([t.toolName || t.name || '', Math.max(1, (t.count || 0) / 2 + 10)]); });
             topSkills.forEach(s => { words.push([s.skillName || s.name || '', Math.max(1, (s.count || 0) / 2 + 8)]); });
             const canvasEl = document.getElementById('openclawSkillCloud');
             if (canvasEl && words.length > 0) {

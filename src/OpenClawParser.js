@@ -11,6 +11,9 @@ const MODEL_PATHS = [
   'modelId',
   'model_id',
   'model',
+  'message.model',
+  'message.modelId',
+  'message.model_id',
   'request.model',
   'request.modelId',
   'response.model',
@@ -32,11 +35,18 @@ const TIMESTAMP_PATHS = [
   'ts',
   'startTime',
   'updatedAt',
+  'message.timestamp',
+  'message.createdAt',
+  'message.created_at',
 ];
 
 const EXIT_CODE_PATHS = [
   'exitCode',
   'exit_code',
+  'message.exitCode',
+  'message.exit_code',
+  'message.details.exitCode',
+  'message.details.exit_code',
   'result.exitCode',
   'result.exit_code',
   'response.exitCode',
@@ -46,6 +56,10 @@ const EXIT_CODE_PATHS = [
 const ERROR_FLAG_PATHS = [
   'isError',
   'is_error',
+  'message.isError',
+  'message.is_error',
+  'message.details.isError',
+  'message.details.is_error',
   'error',
   'hasError',
   'status.isError',
@@ -55,6 +69,10 @@ const ERROR_FLAG_PATHS = [
 const INTERRUPTION_FLAG_PATHS = [
   'isInterrupted',
   'interrupted',
+  'message.isInterrupted',
+  'message.interrupted',
+  'message.details.isInterrupted',
+  'message.details.interrupted',
   'aborted',
   'cancelled',
   'canceled',
@@ -66,6 +84,10 @@ const INTERRUPTION_FLAG_PATHS = [
 const STATUS_PATHS = [
   'status',
   'state',
+  'message.status',
+  'message.state',
+  'message.details.status',
+  'message.details.state',
   'result.status',
   'result.state',
   'finishReason',
@@ -77,6 +99,8 @@ const CWD_PATHS = [
   'cwd',
   'workingDirectory',
   'working_directory',
+  'message.cwd',
+  'message.details.cwd',
   'context.cwd',
   'meta.cwd',
   'metadata.cwd',
@@ -87,6 +111,8 @@ const CWD_PATHS = [
 const TOOL_CALL_PATHS = [
   'tool_calls',
   'toolCalls',
+  'message.tool_calls',
+  'message.toolCalls',
   'tools.calls',
   'tools',
   'toolInvocations',
@@ -109,6 +135,7 @@ const MESSAGE_TEXT_PATHS = [
   'text',
   'message',
   'content',
+  'message.content',
   'prompt',
   'input',
   'input.text',
@@ -320,6 +347,7 @@ export class OpenClawParser {
       userMessages: 0,
       aiMessages: 0,
       invalidJsonLines: 0,
+      parseErrors: 0,
       modelUsage: {},
       modelFrequency: [],
       usage: {
@@ -334,6 +362,7 @@ export class OpenClawParser {
       skillsTree: { name: 'root', count: 0, children: [] },
       skillsSnapshots: 0,
       toolUsage: {},
+      toolFrequency: {},
       toolCallsTotal: 0,
       toolSuccessCount: 0,
       toolFailureCount: 0,
@@ -362,6 +391,10 @@ export class OpenClawParser {
       lastTimestamp: null,
       topPrompts: {},
       topChineseWords: {},
+      thinking_stats: {
+        totalThinkingChars: 0,
+        maxThinkingDepth: 0,
+      },
       sqliteMaterialized: false,
     };
   }
@@ -450,9 +483,13 @@ export class OpenClawParser {
     const total = Math.max(1, selected.length);
     for (let i = 0; i < selected.length; i++) {
       const row = selected[i];
-      const normalized = this.normalizeRecord(row.record, row.lineNumber, i + 1);
-      this.normalizedRecords.push(normalized);
-      this.updateStats(normalized);
+      try {
+        const normalized = this.normalizeRecord(row.record, row.lineNumber, i + 1);
+        this.normalizedRecords.push(normalized);
+        this.updateStats(normalized);
+      } catch (err) {
+        this.stats.parseErrors += 1;
+      }
       this.onProgress(i + 1, total);
     }
 
@@ -514,15 +551,67 @@ export class OpenClawParser {
     return toBoolean(value);
   }
 
+  /**
+   * 解析 OpenClaw 多种时间格式：ISO 字符串、Unix 秒/毫秒时间戳。
+   * 确保返回合法 ISO 字符串，便于后续按小时(0-23)正确分布。
+   */
+  parseTimestamp(value) {
+    if (value == null) return null;
+    if (value instanceof Date) {
+      const t = value.getTime();
+      return Number.isFinite(t) ? value.toISOString() : null;
+    }
+    if (typeof value === 'number') {
+      const ms = Number.isFinite(value) ? (value > 1e12 ? value : value * 1000) : NaN;
+      if (!Number.isFinite(ms)) return null;
+      const d = new Date(ms);
+      return Number.isNaN(d.getTime()) ? null : d.toISOString();
+    }
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const asNum = toFiniteNumber(trimmed);
+    if (asNum != null && /^\d+(\.\d+)?$/.test(trimmed)) {
+      const ms = asNum > 1e12 ? asNum : asNum * 1000;
+      const d = new Date(ms);
+      return Number.isNaN(d.getTime()) ? null : d.toISOString();
+    }
+    const d = new Date(trimmed);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  }
+
   extractTimestamp(record) {
     const fallback = new Date().toISOString();
     const raw = this.getFirstValue(record, TIMESTAMP_PATHS);
-    return toISOTime(raw, fallback);
+    const iso = this.parseTimestamp(raw);
+    return iso || fallback;
   }
 
   extractModelId(record) {
     const value = this.getFirstString(record, MODEL_PATHS);
     return value || 'unknown';
+  }
+
+  /**
+   * 从 message content 数组估算 token：对 text/thinking 累加字符数，中英混合估算 (charCount/4)*1.2。
+   */
+  estimateTokensFromContent(record) {
+    const container = (record && isObject(record.message)) ? record.message : record;
+    const type = record && (record.type || record.kind || container?.type || container?.kind);
+    if (String(type).toLowerCase() !== 'message') return 0;
+    const content = container?.content;
+    if (!Array.isArray(content) || content.length === 0) return 0;
+    let charCount = 0;
+    for (const item of content) {
+      if (!item || typeof item !== 'object') continue;
+      const itemType = (item.type || item.kind || '').toLowerCase();
+      const text = item.text ?? item.content ?? (typeof item === 'string' ? item : '');
+      if (itemType === 'text' || itemType === 'thinking') {
+        charCount += typeof text === 'string' ? text.length : 0;
+      }
+    }
+    if (charCount <= 0) return 0;
+    return Math.round((charCount / 4) * 1.2);
   }
 
   extractUsage(record) {
@@ -532,6 +621,10 @@ export class OpenClawParser {
       'usage.input_tokens',
       'usage.inputTokens',
       'usage.request_tokens',
+      'message.usage.input',
+      'message.usage.inputTokens',
+      'message.usage.prompt',
+      'message.usage.promptTokens',
       'prompt_tokens',
       'promptTokens',
       'input_tokens',
@@ -544,6 +637,8 @@ export class OpenClawParser {
       'usage.output_tokens',
       'usage.outputTokens',
       'usage.response_tokens',
+      'message.usage.output',
+      'message.usage.outputTokens',
       'completion_tokens',
       'completionTokens',
       'output_tokens',
@@ -553,17 +648,24 @@ export class OpenClawParser {
     const totalTokensRaw = this.getFirstNumber(record, [
       'usage.total_tokens',
       'usage.totalTokens',
+      'message.usage.totalTokens',
       'total_tokens',
       'totalTokens',
       'tokens',
     ]);
-    const totalTokens = totalTokensRaw != null ? totalTokensRaw : (promptTokens + completionTokens);
+    let totalTokens = totalTokensRaw != null ? totalTokensRaw : (promptTokens + completionTokens);
+    if (totalTokens <= 0) {
+      const estimated = this.estimateTokensFromContent(record);
+      if (estimated > 0) totalTokens = estimated;
+    }
 
     const cachedTokens = this.getFirstNumber(record, [
       'usage.cached_tokens',
       'usage.cachedTokens',
       'usage.input_tokens_details.cached_tokens',
       'usage.prompt_tokens_details.cached_tokens',
+      'message.usage.cacheRead',
+      'message.usage.cachedTokens',
       'cache.cached_tokens',
       'cache.cachedTokens',
       'cached_tokens',
@@ -576,6 +678,8 @@ export class OpenClawParser {
       'usage.total_cost',
       'usage.totalCost',
       'usage.cost',
+      'message.usage.cost.total',
+      'message.usage.cost.totalUSD',
       'total_cost_usd',
       'totalCostUSD',
       'cost_usd',
@@ -597,7 +701,7 @@ export class OpenClawParser {
       totalTokens: Math.max(0, Math.trunc(totalTokens)),
       cachedTokens: Math.max(0, Math.trunc(cachedTokens)),
       totalCostUSD: Math.max(0, totalCostUSD),
-      cacheHit,
+      cacheHit: cacheHit != null ? cacheHit : (cachedTokens > 0 ? true : null),
     };
   }
 
@@ -690,12 +794,21 @@ export class OpenClawParser {
     }
 
     if (queue.length === 0) {
-      const fallbackName = this.getFirstString(record, ['toolName', 'tool_name', 'tool']);
+      const fallbackName = this.getFirstString(record, [
+        'message.toolName',
+        'message.tool_name',
+        'message.tool',
+        'toolName',
+        'tool_name',
+        'tool',
+      ]);
       if (fallbackName) {
         queue.push({
           name: fallbackName,
           exitCode: this.getFirstNumber(record, EXIT_CODE_PATHS),
           isError: this.getFirstBoolean(record, ERROR_FLAG_PATHS),
+          isInterrupted: this.getFirstBoolean(record, INTERRUPTION_FLAG_PATHS),
+          status: this.getFirstString(record, STATUS_PATHS),
           timestamp: fallbackTimestamp,
           cwd: this.getFirstString(record, CWD_PATHS),
         });
@@ -849,18 +962,104 @@ export class OpenClawParser {
     return null;
   }
 
+  /**
+   * 识别 type===message 且 role===toolResult 的行，提取工具名供 tool_metrics 词云使用。
+   */
+
+  /**
+   * 从 content 数组中解析 type===thinking 的块，得到总字符数与本条消息的思维块数（深度）。
+   */
+
+  /**
+   * 识别 type===message 且 role===toolResult 时的工具名，供 tool_metrics 词云使用。
+   */
+
+  /**
+   * 从 content 数组中解析 type===thinking 的字符数与块数，用于思维链深度统计。
+   */
+
   extractRole(record) {
-    const raw = this.getFirstString(record, ['role', 'type', 'sender', 'author.role']);
+    const raw = this.getFirstString(record, [
+      'message.role',
+      'message.sender',
+      'message.author.role',
+      'role',
+      'sender',
+      'author.role',
+    ]);
     if (!raw) return 'unknown';
     const normalized = raw.toLowerCase();
     if (normalized.includes('user') || normalized.includes('human')) return 'USER';
     if (normalized.includes('assistant') || normalized.includes('ai') || normalized.includes('model') || normalized.includes('system')) {
       return 'AI';
     }
+    if (normalized.includes('tool')) return 'TOOL';
     return 'unknown';
   }
 
+  /**
+   * 识别 type===message 且 role===toolResult 的行，提取工具名供 tool_metrics 词云使用。
+   */
+  extractToolResultName(record) {
+    const type = record && (record.type || record.kind);
+    if (String(type).toLowerCase() !== 'message') return null;
+    const roleRaw = this.getFirstString(record, ['message.role', 'role', 'sender', 'message.sender', 'author.role', 'message.author.role']);
+    const role = (roleRaw || '').toString().toLowerCase();
+    if (role !== 'toolresult' && role !== 'tool_result' && role !== 'tool') return null;
+    const name = this.getFirstString(record, [
+      'message.toolName',
+      'message.tool_name',
+      'message.tool',
+      'message.name',
+      'toolName',
+      'tool_name',
+      'tool',
+      'name',
+      'functionName',
+      'function.name',
+    ]);
+    return name || null;
+  }
+
+  /**
+   * 从 content 数组中解析 type===thinking 的块：总字符数、本条消息的 thinking 块数（深度）。
+   */
+  extractThinkingStats(record) {
+    const container = (record && isObject(record.message)) ? record.message : record;
+    const content = container && container.content;
+    if (!Array.isArray(content) || content.length === 0) {
+      return { totalThinkingChars: 0, thinkingBlockCount: 0 };
+    }
+    let totalThinkingChars = 0;
+    let thinkingBlockCount = 0;
+    for (const item of content) {
+      if (!item || typeof item !== 'object') continue;
+      const itemType = (item.type || item.kind || '').toLowerCase();
+      if (itemType !== 'thinking') continue;
+      thinkingBlockCount += 1;
+      const text = item.text ?? item.content ?? '';
+      totalThinkingChars += typeof text === 'string' ? text.length : 0;
+    }
+    return { totalThinkingChars, thinkingBlockCount };
+  }
+
   extractText(record) {
+    const container = (record && isObject(record.message)) ? record.message : record;
+    const content = container && container.content;
+    if (Array.isArray(content) && content.length > 0) {
+      const chunks = [];
+      for (const item of content) {
+        if (!item || typeof item !== 'object') continue;
+        const itemType = (item.type || item.kind || '').toString().toLowerCase();
+        const text = item.text ?? item.content ?? '';
+        if (typeof text !== 'string' || !text.trim()) continue;
+        if (itemType === 'text' || itemType === 'thinking' || !itemType) {
+          chunks.push(text.trim());
+        }
+      }
+      if (chunks.length > 0) return chunks.join('\n');
+    }
+
     for (const path of MESSAGE_TEXT_PATHS) {
       const value = this.getNestedValue(record, path);
       if (typeof value === 'string' && value.trim()) {
@@ -934,6 +1133,8 @@ export class OpenClawParser {
     const cwd = this.extractCwd(record, toolCalls);
     const role = this.extractRole(record);
     const text = this.extractText(record);
+    const toolResultName = this.extractToolResultName(record);
+    const thinking = this.extractThinkingStats(record);
 
     return {
       sequence,
@@ -950,6 +1151,9 @@ export class OpenClawParser {
       exitCode,
       isError,
       isInterrupted,
+      toolResultName,
+      thinkingChars: thinking.totalThinkingChars,
+      thinkingBlockCount: thinking.thinkingBlockCount,
       raw: record,
     };
   }
@@ -971,14 +1175,22 @@ export class OpenClawParser {
   }
 
   updateStats(normalized) {
+    const rawType = normalized && normalized.raw && (normalized.raw.type || normalized.raw.kind);
+    const type = String(rawType || '').toLowerCase();
+    if (type && type !== 'message') {
+      if (type === 'session') this.stats.totalConversations += 1;
+      return;
+    }
+
     this.stats.totalRecords += 1;
-    this.stats.totalConversations += 1;
 
     if (normalized.role === 'USER') this.stats.userMessages += 1;
     else if (normalized.role === 'AI') this.stats.aiMessages += 1;
 
     const model = normalized.modelId || 'unknown';
-    this.stats.modelUsage[model] = (this.stats.modelUsage[model] || 0) + 1;
+    if (model && model !== 'unknown') {
+      this.stats.modelUsage[model] = (this.stats.modelUsage[model] || 0) + 1;
+    }
 
     this.stats.usage.promptTokens += normalized.usage.promptTokens;
     this.stats.usage.completionTokens += normalized.usage.completionTokens;
@@ -1020,6 +1232,29 @@ export class OpenClawParser {
       }
     }
 
+    if (normalized.toolResultName) {
+      const name = normalized.toolResultName.trim() || 'unknown';
+      if (!normalized.toolCalls || normalized.toolCalls.length === 0) {
+        this.stats.toolCallsTotal += 1;
+        this.stats.toolUsage[name] = (this.stats.toolUsage[name] || 0) + 1;
+        if (normalized.exitCode != null) {
+          if (normalized.exitCode === 0) this.stats.toolSuccessCount += 1;
+          else this.stats.toolFailureCount += 1;
+        } else if (normalized.isError) {
+          this.stats.toolFailureCount += 1;
+        }
+      }
+      this.stats.toolFrequency[name] = (this.stats.toolFrequency[name] || 0) + 1;
+    }
+
+    this.stats.thinking_stats.totalThinkingChars += normalized.thinkingChars || 0;
+    if ((normalized.thinkingBlockCount || 0) > 0) {
+      this.stats.thinking_stats.maxThinkingDepth = Math.max(
+        this.stats.thinking_stats.maxThinkingDepth,
+        normalized.thinkingBlockCount
+      );
+    }
+
     if (normalized.skills.length > 0 || normalized.skillsSnapshot != null) {
       this.stats.skillsSnapshots += 1;
     }
@@ -1038,7 +1273,9 @@ export class OpenClawParser {
     const date = new Date(normalized.timestamp);
     if (!Number.isNaN(date.getTime())) {
       const hour = date.getHours();
-      this.stats.hourlyActivity[hour] += 1;
+      if (Number.isInteger(hour) && hour >= 0 && hour < 24) {
+        this.stats.hourlyActivity[hour] += 1;
+      }
 
       const dateKey = date.toISOString().slice(0, 10);
       this.stats.dailyActivity[dateKey] = (this.stats.dailyActivity[dateKey] || 0) + 1;
@@ -1112,6 +1349,10 @@ export class OpenClawParser {
     this.stats.modelFrequency = Object.entries(this.stats.modelUsage)
       .sort((a, b) => b[1] - a[1])
       .map(([modelId, count]) => ({ modelId, count }));
+
+    if (!Number.isFinite(this.stats.totalConversations) || this.stats.totalConversations <= 0) {
+      this.stats.totalConversations = this.stats.totalRecords > 0 ? 1 : 0;
+    }
 
     this.stats.topCwds = Object.entries(this.stats.cwdUsage)
       .sort((a, b) => b[1] - a[1])
@@ -1298,10 +1539,13 @@ export class OpenClawParser {
   }
 
   getStats() {
+    const toolFreq = this.stats.toolFrequency || this.stats.toolUsage || {};
+    const tool_cloud = Object.entries(toolFreq).map(([name, count]) => ({ name, count }));
     return {
       ...this.stats,
       topPrompts: this.getTopPrompts(50),
       topChineseWordsList: this.getTopChineseWords(50),
+      tool_cloud,
     };
   }
 
@@ -1339,6 +1583,17 @@ export class OpenClawParser {
       timestamp: item.timestamp,
     }));
 
+    const toolFreq = this.stats.toolFrequency || this.stats.toolUsage || {};
+    const tool_cloud = Object.entries(toolFreq).map(([name, count]) => ({ name, count }));
+
+    const first = this.stats.firstTimestamp ? new Date(this.stats.firstTimestamp).getTime() : null;
+    const last = this.stats.lastTimestamp ? new Date(this.stats.lastTimestamp).getTime() : null;
+    const durationSeconds = first != null && last != null && !Number.isNaN(first) && !Number.isNaN(last) && last > first
+      ? (last - first) / 1000
+      : 0;
+    const totalMessages = this.stats.totalRecords || 0;
+    const interaction_density = durationSeconds > 0 ? totalMessages / durationSeconds : totalMessages;
+
     return {
       meta: {
         total_conversations: this.stats.totalConversations,
@@ -1347,6 +1602,8 @@ export class OpenClawParser {
         total_tokens: this.stats.usage.totalTokens,
         total_cost_usd: this.stats.usage.totalCostUSD,
       },
+      tool_cloud,
+      interaction_density,
       messages,
       exportTime: new Date().toISOString(),
     };

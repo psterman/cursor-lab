@@ -3319,7 +3319,7 @@ export class VibeCodingerAnalyzer {
             cache_hit_rate: consumption.cacheHitRate ?? stats.cacheHitRate ?? 0,
             top_model_id: modelDim.dominantModelId || null,
             success_rate: health.successRate ?? stats.successRate ?? 0,
-            abnormal_interrupt_rate: health.abnormalInterruptRate ?? stats.abnormalInterruptRate ?? 0,
+            abnormal_interrupt_rate: health.abnormalInterruptionRate ?? health.abnormalInterruptRate ?? stats.abnormalInterruptionRate ?? stats.abnormalInterruptRate ?? 0,
             success_count: health.successCount ?? stats.successCount ?? 0,
             failure_count: health.failureCount ?? stats.failureCount ?? 0,
             abnormal_interrupt_count: health.abnormalInterruptions ?? stats.abnormalInterruptions ?? 0,

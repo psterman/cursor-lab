@@ -3054,6 +3054,8 @@ async function handleFileUpload(event, type, callbacks = {}) {
   console.log(`[Main] event.files.length: ${event.target.files?.length}`);
 
   const files = Array.from(event.target.files || []);
+  let openclawSessionTokenMap = null;
+  let openclawSessionsSummary = null;
 
   // 清除错误信息（仅在非模块模式下）
   if (!callbacks || !callbacks.onLog) {
@@ -3212,6 +3214,454 @@ async function handleFileUpload(event, type, callbacks = {}) {
     // 重置全局对话数据
     allChatData = [];
 
+    // OpenClaw: optional sessions.json with aggregated token stats + 全量核心数据汇总
+    if (sourceEngine === 'openclaw' && Array.isArray(files) && files.length > 0) {
+      const sessionsIndexFile = files.find((f) => {
+        const name = String(f?.name || '').toLowerCase();
+        return name === 'sessions.json' || (name.endsWith('.json') && name.includes('sessions'));
+      });
+      if (sessionsIndexFile) {
+        try {
+          const text = await sessionsIndexFile.text();
+          const raw = JSON.parse(text);
+          const getNested = (obj, path) => {
+            if (!obj || !path) return undefined;
+            const parts = String(path).split('.');
+            let cur = obj;
+            for (const part of parts) {
+              if (cur == null) return undefined;
+              cur = cur[part];
+            }
+            return cur;
+          };
+          const entriesFromSessionsJson = Array.isArray(raw)
+            ? raw
+            : Array.isArray(raw?.sessions)
+              ? raw.sessions
+              : Array.isArray(raw?.data?.sessions)
+                ? raw.data.sessions
+                : raw && typeof raw === 'object'
+                  ? Object.values(raw)
+                  : [];
+          const sessionsIndex = entriesFromSessionsJson;
+          const map = {};
+          const pickNumber = (obj, keys) => {
+            for (const key of keys) {
+              const v = key.includes('.') ? getNested(obj, key) : (obj && obj[key]);
+              if (typeof v === 'number' && Number.isFinite(v)) return v;
+              if (typeof v === 'string' && /^\d+(\.\d+)?$/.test(v.trim())) return Number(v);
+            }
+            return null;
+          };
+          const pickString = (obj, keys) => {
+            for (const key of keys) {
+              const v = key.includes('.') ? getNested(obj, key) : (obj && obj[key]);
+              if (typeof v === 'string' && v.trim()) return v.trim();
+            }
+            return null;
+          };
+          const pickBoolean = (obj, keys) => {
+            for (const key of keys) {
+              const v = key.includes('.') ? getNested(obj, key) : (obj && obj[key]);
+              if (typeof v === 'boolean') return v;
+              if (typeof v === 'number') return v !== 0;
+              if (typeof v === 'string') {
+                const normalized = v.trim().toLowerCase();
+                if (!normalized) continue;
+                if (['true', '1', 'yes', 'ok', 'y'].includes(normalized)) return true;
+                if (['false', '0', 'no', 'n'].includes(normalized)) return false;
+              }
+            }
+            return null;
+          };
+          const toFiniteNumber = (value) => {
+            if (typeof value === 'number' && Number.isFinite(value)) return value;
+            if (typeof value === 'string' && /^\d+(\.\d+)?$/.test(value.trim())) return Number(value);
+            return null;
+          };
+          const normalize = (value) => String(value || '').replace(/\\/g, '/').toLowerCase();
+          const baseName = (value) => {
+            const parts = normalize(value).split('/');
+            return parts[parts.length - 1] || '';
+          };
+          const parseISOTime = (value) => {
+            if (value == null) return null;
+            let d = null;
+            if (typeof value === 'number' && Number.isFinite(value)) {
+              const ms = value > 1e12 ? value : value * 1000;
+              d = new Date(ms);
+            } else if (typeof value === 'string') {
+              const trimmed = value.trim();
+              if (!trimmed) return null;
+              if (/^\d+(\.\d+)?$/.test(trimmed)) {
+                const n = Number(trimmed);
+                const ms = n > 1e12 ? n : n * 1000;
+                d = new Date(ms);
+              } else {
+                d = new Date(trimmed);
+              }
+            } else if (value instanceof Date) {
+              d = value;
+            }
+            if (!d || Number.isNaN(d.getTime())) return null;
+            return d.toISOString();
+          };
+          const pickTimestamp = (obj, keys) => {
+            for (const key of keys) {
+              const v = key.includes('.') ? getNested(obj, key) : (obj && obj[key]);
+              const iso = parseISOTime(v);
+              if (iso) return iso;
+            }
+            return null;
+          };
+          const addToSet = (targetSet, rawValue) => {
+            if (!targetSet || rawValue == null) return;
+            if (Array.isArray(rawValue)) {
+              rawValue.forEach((item) => addToSet(targetSet, item));
+              return;
+            }
+            const text = String(rawValue || '').trim();
+            if (text) targetSet.add(text);
+          };
+          const collectionCount = (value) => {
+            if (Array.isArray(value)) return value.length;
+            if (value && typeof value === 'object') return Object.keys(value).length;
+            if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.trunc(value));
+            if (typeof value === 'string' && /^\d+(\.\d+)?$/.test(value.trim())) return Math.max(0, Math.trunc(Number(value)));
+            return 0;
+          };
+          const deepFindNumberByKeyRegex = (obj, keyRegex, maxDepth = 6) => {
+            if (!obj || typeof obj !== 'object') return null;
+            const seen = new Set();
+            let best = null;
+            const walk = (node, depth) => {
+              if (!node || typeof node !== 'object' || depth > maxDepth) return;
+              if (seen.has(node)) return;
+              seen.add(node);
+              for (const [k, v] of Object.entries(node)) {
+                if (keyRegex.test(String(k || ''))) {
+                  const n = toFiniteNumber(v);
+                  if (n != null && (best == null || n > best)) best = n;
+                }
+                if (v && typeof v === 'object') walk(v, depth + 1);
+              }
+            };
+            walk(obj, 0);
+            return best;
+          };
+          const deepFindTimestampByKeyRegex = (obj, keyRegex, maxDepth = 6) => {
+            if (!obj || typeof obj !== 'object') return null;
+            const seen = new Set();
+            let latestIso = null;
+            let latestMs = null;
+            const walk = (node, depth) => {
+              if (!node || typeof node !== 'object' || depth > maxDepth) return;
+              if (seen.has(node)) return;
+              seen.add(node);
+              for (const [k, v] of Object.entries(node)) {
+                if (keyRegex.test(String(k || ''))) {
+                  const iso = parseISOTime(v);
+                  if (iso) {
+                    const ms = new Date(iso).getTime();
+                    if (latestMs == null || ms > latestMs) {
+                      latestMs = ms;
+                      latestIso = iso;
+                    }
+                  }
+                }
+                if (v && typeof v === 'object') walk(v, depth + 1);
+              }
+            };
+            walk(obj, 0);
+            return latestIso;
+          };
+          const deepFindCollectionCountByKeyRegex = (obj, keyRegex, maxDepth = 6) => {
+            if (!obj || typeof obj !== 'object') return 0;
+            const seen = new Set();
+            let total = 0;
+            const walk = (node, depth) => {
+              if (!node || typeof node !== 'object' || depth > maxDepth) return;
+              if (seen.has(node)) return;
+              seen.add(node);
+              for (const [k, v] of Object.entries(node)) {
+                if (keyRegex.test(String(k || ''))) {
+                  total += collectionCount(v);
+                }
+                if (v && typeof v === 'object') walk(v, depth + 1);
+              }
+            };
+            walk(obj, 0);
+            return total;
+          };
+          const summary = {
+            token: { inputTokensSum: 0, outputTokensSum: 0, totalTokensSum: 0, contextTokensMax: 0, cachedTokensSum: 0 },
+            cache: { cacheReadSum: 0, cacheWriteSum: 0, hitRate: 0 },
+            cost: { totalCostUsd: 0 },
+            model: { modelProvider: null, model: null, uniqueProviders: [], uniqueModels: [] },
+            channel: { lastChannel: [], originProvider: [], originSurface: [] },
+            updatedAt: null,
+            lastActiveAt: null,
+            skills: [],
+            tools: { entriesCount: 0, sessionsWithTools: 0, toolNames: [] },
+            heartbeat: { lastHeartbeatText: null, lastHeartbeatSentAt: null },
+            status: {
+              abortedLastRunCount: 0,
+              systemSentCount: 0,
+              compactionCountSum: 0,
+              exitCodeCount: 0,
+              successCount: 0,
+              failureCount: 0,
+              successRate: null,
+              abnormalInterruptionsCount: 0,
+              abnormalInterruptionRate: 0,
+            },
+            systemPromptChars: 0,
+            injectedWorkspaceFilesCount: 0,
+            sessionCount: 0,
+            _providerSet: new Set(),
+            _modelSet: new Set(),
+            _channelSet: new Set(),
+            _originProviderSet: new Set(),
+            _originSurfaceSet: new Set(),
+            _skillsSet: new Set(),
+            _toolSet: new Set(),
+            _updatedAtMs: null,
+          };
+          for (const entry of sessionsIndex) {
+            if (!entry || typeof entry !== 'object') continue;
+            const inputTokens = pickNumber(entry, [
+              'inputTokens', 'input_tokens', 'token.inputTokens', 'token.input_tokens',
+              'usage.inputTokens', 'usage.input_tokens', 'message.usage.inputTokens', 'message.usage.input_tokens',
+              'tokenUsage.inputTokens', 'tokenUsage.input_tokens', 'stats.inputTokens',
+            ]);
+            const outputTokens = pickNumber(entry, [
+              'outputTokens', 'output_tokens', 'token.outputTokens', 'token.output_tokens',
+              'usage.outputTokens', 'usage.output_tokens', 'message.usage.outputTokens', 'message.usage.output_tokens',
+              'tokenUsage.outputTokens', 'tokenUsage.output_tokens', 'stats.outputTokens',
+            ]);
+            let totalTokens = pickNumber(entry, [
+              'totalTokens', 'total_tokens', 'token.totalTokens', 'token.total_tokens',
+              'usage.totalTokens', 'usage.total_tokens', 'message.usage.totalTokens', 'message.usage.total_tokens',
+              'tokenUsage.totalTokens', 'tokenUsage.total_tokens', 'stats.totalTokens',
+            ]);
+            const computedTotal = (inputTokens || 0) + (outputTokens || 0);
+            if ((totalTokens == null || totalTokens <= 0 || totalTokens < computedTotal) && computedTotal > 0) {
+              totalTokens = computedTotal;
+            }
+            const contextTokens = pickNumber(entry, [
+              'contextTokens', 'context_tokens', 'usage.contextTokens', 'usage.context_tokens',
+              'message.usage.contextTokens', 'message.usage.context_tokens', 'context.maxTokens',
+            ]);
+            const cachedTokens = pickNumber(entry, [
+              'cachedTokens', 'cached_tokens', 'usage.cachedTokens', 'usage.cached_tokens',
+              'message.usage.cachedTokens', 'message.usage.cached_tokens',
+              'usage.prompt_tokens_details.cached_tokens', 'usage.input_tokens_details.cached_tokens',
+            ]);
+            const costUsd = pickNumber(entry, [
+              'totalCostUSD', 'totalCostUsd', 'total_cost_usd', 'costUSD', 'costUsd', 'cost_usd',
+              'usage.totalCostUSD', 'usage.totalCostUsd', 'usage.total_cost_usd', 'usage.cost.usd', 'usage.cost.total',
+            ]);
+            const tokenSummary = { inputTokens, outputTokens, totalTokens, contextTokens };
+            const sessionFile = pickString(entry, [
+              'sessionFile', 'session_file', 'sessionPath', 'session_path', 'file', 'filePath', 'file_path',
+            ]) || entry.sessionFile || entry.session_file;
+            if (sessionFile) {
+              map[normalize(sessionFile)] = tokenSummary;
+              map[baseName(sessionFile)] = tokenSummary;
+            }
+            summary.sessionCount += 1;
+            if (inputTokens != null) summary.token.inputTokensSum += inputTokens;
+            if (outputTokens != null) summary.token.outputTokensSum += outputTokens;
+            if (totalTokens != null) summary.token.totalTokensSum += totalTokens;
+            if (contextTokens != null) summary.token.contextTokensMax = Math.max(summary.token.contextTokensMax, contextTokens);
+            if (cachedTokens != null) summary.token.cachedTokensSum += cachedTokens;
+            if (costUsd != null) summary.cost.totalCostUsd += costUsd;
+
+            let cacheRead = pickNumber(entry, [
+              'cacheRead', 'cache_read', 'cache.read', 'cache.readTokens', 'cacheReadTokens',
+              'usage.cacheRead', 'usage.cache_read', 'message.usage.cacheRead', 'message.usage.cache_read',
+              'session.cacheRead', 'session.cache_read', 'stats.cacheRead', 'stats.cache_read',
+            ]);
+            const cacheWrite = pickNumber(entry, [
+              'cacheWrite', 'cache_write', 'cache.write', 'cache.writeTokens', 'cacheWriteTokens',
+              'usage.cacheWrite', 'usage.cache_write', 'message.usage.cacheWrite', 'message.usage.cache_write',
+              'session.cacheWrite', 'session.cache_write', 'stats.cacheWrite', 'stats.cache_write',
+            ]);
+            if (cacheRead == null) {
+              cacheRead = deepFindNumberByKeyRegex(entry, /cache.*read|read.*cache/i);
+            }
+            let cacheWriteResolved = cacheWrite;
+            if (cacheWriteResolved == null) {
+              cacheWriteResolved = deepFindNumberByKeyRegex(entry, /cache.*write|write.*cache/i);
+            }
+            if (cacheRead == null && cachedTokens != null) cacheRead = cachedTokens;
+            if (cacheRead != null) summary.cache.cacheReadSum += cacheRead;
+            if (cacheWriteResolved != null) summary.cache.cacheWriteSum += cacheWriteResolved;
+
+            const modelProvider = pickString(entry, ['modelProvider', 'model_provider', 'provider', 'model.provider']);
+            const model = pickString(entry, ['model', 'modelId', 'model_id', 'model.name']);
+            if (modelProvider) summary._providerSet.add(modelProvider);
+            if (model) summary._modelSet.add(model);
+
+            const lastChannel = getNested(entry, 'lastChannel') ?? getNested(entry, 'last_channel');
+            addToSet(summary._channelSet, lastChannel);
+            const origin = entry.origin && typeof entry.origin === 'object' ? entry.origin : {};
+            addToSet(summary._originProviderSet, pickString(origin, ['provider']) || pickString(entry, ['origin.provider']));
+            addToSet(summary._originSurfaceSet, pickString(origin, ['surface']) || pickString(entry, ['origin.surface']));
+
+            const updatedAt = pickTimestamp(entry, [
+              'updatedAt', 'updated_at', 'lastActiveAt', 'last_active_at',
+              'lastHeartbeatSentAt', 'last_heartbeat_sent_at', 'heartbeat.lastSentAt', 'heartbeat.last_sent_at',
+              'session.updatedAt', 'session.updated_at', 'meta.updatedAt', 'meta.updated_at',
+              'metadata.updatedAt', 'metadata.updated_at',
+            ]);
+            const updatedAtResolved = updatedAt || deepFindTimestampByKeyRegex(entry, /updated.?at|last.?active|heartbeat.*sent.?at/i);
+            if (updatedAtResolved) {
+              const ts = new Date(updatedAtResolved).getTime();
+              if (summary._updatedAtMs == null || ts > summary._updatedAtMs) {
+                summary._updatedAtMs = ts;
+                summary.updatedAt = updatedAtResolved;
+              }
+            }
+
+            const skillsSnapshot = entry.skillsSnapshot || entry.skills_snapshot || entry.context?.skillsSnapshot || entry.context?.skills_snapshot;
+            const skillsArr = Array.isArray(skillsSnapshot?.skills) ? skillsSnapshot.skills : [];
+            skillsArr.forEach((s) => {
+              if (!s) return;
+              if (typeof s === 'string') {
+                if (s.trim()) summary._skillsSet.add(s.trim());
+                return;
+              }
+              const name = s.name || s.skillName || s.id || s.key;
+              if (typeof name === 'string' && name.trim()) summary._skillsSet.add(name.trim());
+            });
+
+            const toolsEntries = entry.systemPromptReport?.tools?.entries
+              ?? entry.systemPromptReport?.tools
+              ?? entry.system_prompt_report?.tools?.entries
+              ?? entry.system_prompt_report?.tools
+              ?? [];
+            const entriesArr = Array.isArray(toolsEntries) ? toolsEntries : (toolsEntries && typeof toolsEntries === 'object' ? Object.values(toolsEntries) : []);
+            if (entriesArr.length > 0) {
+              summary.tools.sessionsWithTools += 1;
+              summary.tools.entriesCount = Math.max(summary.tools.entriesCount, entriesArr.length);
+              entriesArr.forEach((toolEntry) => {
+                if (typeof toolEntry === 'string') {
+                  if (toolEntry.trim()) summary._toolSet.add(toolEntry.trim());
+                  return;
+                }
+                const toolName = pickString(toolEntry, ['name', 'toolName', 'tool_name', 'id', 'key', 'title', 'function.name']);
+                if (toolName) summary._toolSet.add(toolName);
+              });
+            }
+
+            const lastHeartbeatText = pickString(entry, ['lastHeartbeatText', 'last_heartbeat_text', 'heartbeat.lastText', 'heartbeat.last_text']);
+            const lastHeartbeatSentAt = pickTimestamp(entry, ['lastHeartbeatSentAt', 'last_heartbeat_sent_at', 'heartbeat.lastSentAt', 'heartbeat.last_sent_at']);
+            if (lastHeartbeatText) summary.heartbeat.lastHeartbeatText = lastHeartbeatText;
+            if (lastHeartbeatSentAt) summary.heartbeat.lastHeartbeatSentAt = lastHeartbeatSentAt;
+
+            const abortedLastRun = (
+              entry.abortedLastRun === true ||
+              entry.aborted_last_run === true ||
+              pickBoolean(entry, ['status.abortedLastRun', 'status.aborted_last_run']) === true
+            );
+            if (abortedLastRun) {
+              summary.status.abortedLastRunCount += 1;
+              summary.status.abnormalInterruptionsCount += 1;
+            }
+            if (
+              entry.systemSent === true ||
+              entry.system_sent === true ||
+              pickBoolean(entry, ['status.systemSent', 'status.system_sent']) === true
+            ) summary.status.systemSentCount += 1;
+            const comp = pickNumber(entry, ['compactionCount', 'compaction_count', 'status.compactionCount', 'status.compaction_count']);
+            if (comp != null) summary.status.compactionCountSum += comp;
+
+            const exitCode = pickNumber(entry, [
+              'exitCode', 'exit_code', 'status.exitCode', 'status.exit_code', 'result.exitCode', 'result.exit_code',
+              'session.exitCode', 'session.exit_code', 'lastRun.exitCode', 'last_run.exit_code',
+            ]) ?? deepFindNumberByKeyRegex(entry, /exit.?code|return.?code/i);
+            if (exitCode != null) {
+              summary.status.exitCodeCount += 1;
+              if (Number(exitCode) === 0) summary.status.successCount += 1;
+              else summary.status.failureCount += 1;
+            }
+            const abnormalInterrupted = pickBoolean(entry, [
+              'isInterrupted', 'is_interrupted', 'abnormalInterrupted', 'abnormal_interrupted',
+              'status.isInterrupted', 'status.is_interrupted', 'status.interrupted',
+              'session.isInterrupted', 'session.is_interrupted', 'session.interrupted',
+            ]);
+            if (abnormalInterrupted === true && !abortedLastRun) summary.status.abnormalInterruptionsCount += 1;
+
+            const sysChars = pickNumber(entry, [
+              'systemPromptReport.systemPrompt.chars',
+              'system_prompt_report.system_prompt.chars',
+              'systemPrompt.chars',
+              'system_prompt.chars',
+            ]) ?? pickNumber(entry.systemPromptReport?.systemPrompt, ['chars']);
+            if (sysChars != null) summary.systemPromptChars += sysChars;
+
+            const injectedExplicitCount = pickNumber(entry, [
+              'injectedWorkspaceFilesCount', 'injected_workspace_files_count',
+              'workspace.injectedWorkspaceFilesCount', 'workspace.injected_workspace_files_count',
+              'session.injectedWorkspaceFilesCount', 'session.injected_workspace_files_count',
+            ]);
+            if (injectedExplicitCount != null) {
+              summary.injectedWorkspaceFilesCount += Math.max(0, Math.trunc(injectedExplicitCount));
+            } else {
+              const injected = entry.injectedWorkspaceFiles
+                ?? entry.injected_workspace_files
+                ?? entry.workspace?.injectedWorkspaceFiles
+                ?? entry.workspace?.injected_workspace_files
+                ?? entry.session?.injectedWorkspaceFiles
+                ?? entry.session?.injected_workspace_files;
+              const injectedCount = collectionCount(injected);
+              if (injectedCount > 0) {
+                summary.injectedWorkspaceFilesCount += injectedCount;
+              } else {
+                summary.injectedWorkspaceFilesCount += deepFindCollectionCountByKeyRegex(entry, /injected.*workspace.*files?|workspace.*injected.*files?/i);
+              }
+            }
+          }
+          if (summary.token.inputTokensSum > 0 && summary.cache.cacheReadSum > 0) {
+            summary.cache.hitRate = summary.cache.cacheReadSum / summary.token.inputTokensSum;
+          }
+          if (summary.status.exitCodeCount > 0) {
+            summary.status.successRate = summary.status.successCount / summary.status.exitCodeCount;
+          }
+          if (summary.sessionCount > 0) {
+            summary.status.abnormalInterruptionRate = summary.status.abnormalInterruptionsCount / summary.sessionCount;
+          }
+          if (!summary.updatedAt && summary.heartbeat.lastHeartbeatSentAt) {
+            summary.updatedAt = summary.heartbeat.lastHeartbeatSentAt;
+          }
+          summary.lastActiveAt = summary.updatedAt || summary.heartbeat.lastHeartbeatSentAt || null;
+          summary.model.modelProvider = summary._providerSet.size > 0 ? [...summary._providerSet].join(', ') : null;
+          summary.model.model = summary._modelSet.size > 0 ? [...summary._modelSet].join(', ') : null;
+          summary.model.uniqueProviders = [...summary._providerSet];
+          summary.model.uniqueModels = [...summary._modelSet];
+          summary.channel.lastChannel = [...summary._channelSet];
+          summary.channel.originProvider = [...summary._originProviderSet];
+          summary.channel.originSurface = [...summary._originSurfaceSet];
+          summary.skills = [...summary._skillsSet];
+          summary.tools.toolNames = [...summary._toolSet];
+          delete summary._providerSet;
+          delete summary._modelSet;
+          delete summary._channelSet;
+          delete summary._originProviderSet;
+          delete summary._originSurfaceSet;
+          delete summary._skillsSet;
+          delete summary._toolSet;
+          delete summary._updatedAtMs;
+          openclawSessionsSummary = summary;
+          openclawSessionTokenMap = map;
+          if (DEBUG_MODE) console.log('[Main] OpenClaw sessions.json loaded', { entries: Object.keys(map).length, summarySessionCount: summary.sessionCount });
+        } catch (e) {
+          console.warn('[Main] OpenClaw sessions.json parse failed', e);
+        }
+      }
+    }
+
     let processedCount = 0;
 
     // 逐个处理数据库文件
@@ -3238,6 +3688,33 @@ async function handleFileUpload(event, type, callbacks = {}) {
             }
           }
         });
+
+        // OpenClaw: override token stats from sessions.json if available
+        if (sourceEngine === 'openclaw' && openclawSessionTokenMap) {
+          const lookupKey = String(file?.name || '').toLowerCase();
+          const tokenEntry = openclawSessionTokenMap[lookupKey];
+          if (tokenEntry) {
+            const inputTokens = Number.isFinite(tokenEntry.inputTokens) ? tokenEntry.inputTokens : 0;
+            const outputTokens = Number.isFinite(tokenEntry.outputTokens) ? tokenEntry.outputTokens : 0;
+            let totalTokens = Number.isFinite(tokenEntry.totalTokens) ? tokenEntry.totalTokens : 0;
+            const computedTotal = inputTokens + outputTokens;
+            if (!Number.isFinite(totalTokens) || totalTokens <= 0 || (computedTotal > 0 && totalTokens < computedTotal)) {
+              totalTokens = computedTotal;
+            }
+            parser.stats.usage = parser.stats.usage || {};
+            parser.stats.usage.promptTokens = inputTokens;
+            parser.stats.usage.completionTokens = outputTokens;
+            parser.stats.usage.totalTokens = totalTokens;
+            if (Number.isFinite(tokenEntry.contextTokens)) {
+              parser.stats.usage.contextTokens = tokenEntry.contextTokens;
+            }
+            parser.stats.usage.tokenSource = 'sessions.json';
+            if (parser.stats.cache && parser.stats.usage.promptTokens > 0 && parser.stats.usage.cachedTokens != null) {
+              parser.stats.cache.tokenHitRate = parser.stats.usage.cachedTokens / parser.stats.usage.promptTokens;
+              parser.stats.cacheHitTokenRate = parser.stats.cache.tokenHitRate;
+            }
+          }
+        }
 
         // 合并到全局数据
         allChatData = allChatData.concat(chatData);
@@ -3290,9 +3767,10 @@ async function handleFileUpload(event, type, callbacks = {}) {
     
     // 使用 setTimeout 让出主线程，确保UI能更新
     await new Promise(resolve => setTimeout(resolve, 10));
-    
-    calculateStatsFromData(allChatData);
-    
+    // OpenClaw：保留 mergeStats 合并结果，不整体覆盖 globalStats，避免 usage/tool/健康度等被清空
+    if (sourceEngine !== 'openclaw') {
+      calculateStatsFromData(allChatData);
+    }
     if (DEBUG_MODE) {
       console.log('[Main] 统计计算完成，词云数据:', {
         chineseWords: Object.keys(globalStats.chineseWords || {}).length,
@@ -3520,15 +3998,11 @@ async function handleFileUpload(event, type, callbacks = {}) {
 
     // 调用完成回调（不自动显示 Dashboard，由 React 控制）
     // 【数据流】上传 -> analyzeFile(含 uploadToSupabase) -> vibeResult 含 dimensions/rankData/identityLevelCloud/roastText -> 补全 roastText -> 传入预览；三身份词云用 window.vibeResults，预览/排名用 vibeResult，互不覆盖
-    // 【OpenClaw】当引擎为 openclaw 时计算 portrait 并传入，供 openclaw.html 使用
+    // 【OpenClaw】当引擎为 openclaw 时用合并后的 globalStats 生成 portrait，保证多文件时数值为汇总
     let openclawPortrait = null;
     if (sourceEngine === 'openclaw') {
       try {
-        if (parser && typeof parser.getPortraitAnalysis === 'function') {
-          openclawPortrait = parser.getPortraitAnalysis();
-        } else {
-          openclawPortrait = analyzeOpenClawPortrait(globalStats);
-        }
+        openclawPortrait = analyzeOpenClawPortrait(globalStats);
       } catch (e) {
         console.warn('[Main] OpenClaw portrait 计算失败', e);
       }
@@ -3551,6 +4025,7 @@ async function handleFileUpload(event, type, callbacks = {}) {
         vibeResult: vibeResult
       };
       if (openclawPortrait) payload.openclawPortrait = openclawPortrait;
+      if (openclawSessionsSummary) payload.openclawSessionsSummary = openclawSessionsSummary;
       onComplete(payload);
     } else {
       // 如果没有回调，使用原来的逻辑：500ms 淡出后再显示结果，减少闪烁
@@ -3678,6 +4153,84 @@ function mergeStats(target, source) {
     for (const [word, count] of Object.entries(source.englishWords)) {
       target.englishWords[word] = (target.englishWords[word] || 0) + count;
     }
+  }
+
+  // OpenClaw：合并 usage、toolUsage、toolFrequency、健康度、cache、thinking_stats、时间戳等
+  if (source.usage && typeof source.usage === 'object') {
+    target.usage = target.usage || {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      cachedTokens: 0,
+      totalCostUSD: 0,
+    };
+    target.usage.promptTokens = (target.usage.promptTokens || 0) + (source.usage.promptTokens || 0);
+    target.usage.completionTokens = (target.usage.completionTokens || 0) + (source.usage.completionTokens || 0);
+    target.usage.totalTokens = (target.usage.totalTokens || 0) + (source.usage.totalTokens || 0);
+    target.usage.cachedTokens = (target.usage.cachedTokens || 0) + (source.usage.cachedTokens || 0);
+    target.usage.totalCostUSD = (target.usage.totalCostUSD || 0) + (source.usage.totalCostUSD || 0);
+  }
+  if (source.toolUsage && typeof source.toolUsage === 'object') {
+    target.toolUsage = target.toolUsage || {};
+    for (const [name, count] of Object.entries(source.toolUsage)) {
+      target.toolUsage[name] = (target.toolUsage[name] || 0) + (typeof count === 'number' ? count : 0);
+    }
+  }
+  if (source.toolFrequency && typeof source.toolFrequency === 'object') {
+    target.toolFrequency = target.toolFrequency || {};
+    for (const [name, count] of Object.entries(source.toolFrequency)) {
+      target.toolFrequency[name] = (target.toolFrequency[name] || 0) + (typeof count === 'number' ? count : 0);
+    }
+  }
+  target.toolCallsTotal = (target.toolCallsTotal || 0) + (source.toolCallsTotal || 0);
+  target.toolSuccessCount = (target.toolSuccessCount || 0) + (source.toolSuccessCount || 0);
+  target.toolFailureCount = (target.toolFailureCount || 0) + (source.toolFailureCount || 0);
+  target.eventsWithExitCode = (target.eventsWithExitCode || 0) + (source.eventsWithExitCode || 0);
+  target.successCount = (target.successCount || 0) + (source.successCount || 0);
+  target.failureCount = (target.failureCount || 0) + (source.failureCount || 0);
+  target.errorCount = (target.errorCount || 0) + (source.errorCount || 0);
+  target.abnormalInterruptions = (target.abnormalInterruptions || 0) + (source.abnormalInterruptions || 0);
+  if (source.cache && typeof source.cache === 'object') {
+    target.cache = target.cache || { requests: 0, hits: 0, hitRate: 0, tokenHitRate: 0 };
+    target.cache.requests = (target.cache.requests || 0) + (source.cache.requests || 0);
+    target.cache.hits = (target.cache.hits || 0) + (source.cache.hits || 0);
+  }
+  if (source.thinking_stats && typeof source.thinking_stats === 'object') {
+    target.thinking_stats = target.thinking_stats || { totalThinkingChars: 0, maxThinkingDepth: 0 };
+    target.thinking_stats.totalThinkingChars = (target.thinking_stats.totalThinkingChars || 0) + (source.thinking_stats.totalThinkingChars || 0);
+    target.thinking_stats.maxThinkingDepth = Math.max(
+      target.thinking_stats.maxThinkingDepth || 0,
+      source.thinking_stats.maxThinkingDepth || 0
+    );
+  }
+  if (source.firstTimestamp != null && source.firstTimestamp !== '') {
+    if (target.firstTimestamp == null || target.firstTimestamp === '' || String(source.firstTimestamp) < String(target.firstTimestamp)) {
+      target.firstTimestamp = source.firstTimestamp;
+    }
+  }
+  if (source.lastTimestamp != null && source.lastTimestamp !== '') {
+    if (target.lastTimestamp == null || target.lastTimestamp === '' || String(source.lastTimestamp) > String(target.lastTimestamp)) {
+      target.lastTimestamp = source.lastTimestamp;
+    }
+  }
+  target.totalRecords = (target.totalRecords || 0) + (source.totalRecords || 0);
+  target.invalidJsonLines = (target.invalidJsonLines || 0) + (source.invalidJsonLines || 0);
+  target.parseErrors = (target.parseErrors || 0) + (source.parseErrors || 0);
+  // 合并后重算派生率（Portrait 侧也会用 usage 重算，此处保证 target 自洽）
+  if (target.cache && target.cache.requests > 0) {
+    target.cache.hitRate = target.cache.hits / target.cache.requests;
+  }
+  if (target.usage && target.usage.promptTokens > 0 && target.usage.cachedTokens != null) {
+    target.cache = target.cache || {};
+    target.cache.tokenHitRate = target.usage.cachedTokens / target.usage.promptTokens;
+  }
+  const evExit = target.eventsWithExitCode || 0;
+  if (evExit > 0) {
+    target.successRate = (target.successCount || 0) / evExit;
+  }
+  const totalRec = target.totalRecords || 0;
+  if (totalRec > 0) {
+    target.abnormalInterruptionRate = (target.abnormalInterruptions || 0) / totalRec;
   }
 }
 

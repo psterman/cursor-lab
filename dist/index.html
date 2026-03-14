@@ -3061,6 +3061,8 @@
             const [hasHistory, setHasHistory] = useState(false); // 是否有历史记录
             const [shareModal, setShareModal] = useState(null); // 分享弹窗数据 { show: boolean, message: string, shareUrl: string }
             const [pathCopyToast, setPathCopyToast] = useState(false); // 路径复制轻 toast
+            const [uploadGuardModal, setUploadGuardModal] = useState(null); // 上传纠错弹窗
+            const [detectedEngine, setDetectedEngine] = useState('dual'); // dual | cursor | openclaw
             const folderInputRef = useRef(null);
             const fileInputRef = useRef(null);
             // 用于保存动画所需的旧值和新值
@@ -4111,6 +4113,91 @@
                 };
             }, []);
 
+            const ENGINE_CURSOR = 'cursor';
+            const ENGINE_OPENCLAW = 'openclaw';
+            const OPENCLAW_SESSION_PATH = '%USERPROFILE%\\.openclaw\\agents\\main\\sessions\\';
+            const FILE_SIGNATURE_SAMPLE_BYTES = 64 * 1024;
+
+            const getFileExtension = (fileName = '') => {
+                const lower = String(fileName || '').toLowerCase();
+                const lastDot = lower.lastIndexOf('.');
+                return lastDot >= 0 ? lower.slice(lastDot) : '';
+            };
+
+            const isCursorExtension = (ext) => ['.sqlite', '.sqlite3', '.db', '.vscdb'].includes(ext);
+            const isOpenClawExtension = (ext) => ext === '.jsonl';
+
+            const readFileSignatureText = async (file) => {
+                const decoder = new TextDecoder('utf-8', { fatal: false });
+                const sampleSize = Math.min(FILE_SIGNATURE_SAMPLE_BYTES, file.size || FILE_SIGNATURE_SAMPLE_BYTES);
+
+                const ranges = [
+                    [0, sampleSize],
+                    [Math.max(0, Math.floor((file.size - sampleSize) / 2)), Math.max(0, Math.floor((file.size - sampleSize) / 2)) + sampleSize],
+                    [Math.max(0, (file.size || 0) - sampleSize), file.size || sampleSize],
+                ];
+
+                const chunks = [];
+                for (const [start, end] of ranges) {
+                    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+                    const buffer = await file.slice(start, end).arrayBuffer();
+                    chunks.push(decoder.decode(new Uint8Array(buffer)).toLowerCase());
+                }
+
+                return chunks.join('\n');
+            };
+
+            const classifySingleFile = async (file) => {
+                const ext = getFileExtension(file?.name || '');
+                const lowerName = String(file?.name || '').toLowerCase();
+                const signature = await readFileSignatureText(file);
+                const hasSessionKeyword = signature.includes('session') || lowerName.includes('session');
+                const hasWorkspaceKeyword = signature.includes('workspace');
+
+                if (isOpenClawExtension(ext) && hasSessionKeyword) {
+                    return ENGINE_OPENCLAW;
+                }
+
+                if (isCursorExtension(ext) && (hasWorkspaceKeyword || lowerName === 'state.vscdb')) {
+                    return ENGINE_CURSOR;
+                }
+
+                return null;
+            };
+
+            const detectUploadEngine = async (files) => {
+                const sampled = (files || [])
+                    .filter((file) => {
+                        const ext = getFileExtension(file?.name || '');
+                        return isOpenClawExtension(ext) || isCursorExtension(ext);
+                    })
+                    .slice(0, 30);
+
+                if (sampled.length === 0) {
+                    return null;
+                }
+
+                let openclawHits = 0;
+                let cursorHits = 0;
+                for (const file of sampled) {
+                    try {
+                        const engine = await classifySingleFile(file);
+                        if (engine === ENGINE_OPENCLAW) openclawHits += 1;
+                        if (engine === ENGINE_CURSOR) cursorHits += 1;
+                    } catch (signatureError) {
+                        console.warn('[UploadDetect] 文件签名读取失败，忽略该文件:', file?.name, signatureError);
+                    }
+                }
+
+                if (openclawHits > 0 && cursorHits === 0) {
+                    return ENGINE_OPENCLAW;
+                }
+                if (cursorHits > 0 && openclawHits === 0) {
+                    return ENGINE_CURSOR;
+                }
+                return null;
+            };
+
             // 处理文件选择
             const handleFileSelect = (type) => {
                 console.log('handleFileSelect 被调用', type);
@@ -4159,11 +4246,37 @@
                 }
 
                 setError(null);
+                const resolvedEngine = await detectUploadEngine(files);
+                if (!resolvedEngine) {
+                    setDetectedEngine('dual');
+                    setUploadGuardModal({
+                        show: true,
+                        title: lang === 'en' ? 'Unrecognized Upload File' : '上传文件不符合要求',
+                        message: lang === 'en'
+                            ? 'Expected: .jsonl + session (OpenClaw) or .sqlite/.db + workspace (Cursor).'
+                            : '仅支持：.jsonl 且含 session（OpenClaw），或 .sqlite/.db 且含 workspace（Cursor）。',
+                        path: OPENCLAW_SESSION_PATH
+                    });
+                    if (event?.target) event.target.value = '';
+                    return;
+                }
+
+                setDetectedEngine(resolvedEngine);
                 setIsSubmitting(true);
                 setStep('analyzing');
                 setAnalysisProgress(0);
-                setAnalysisStatusText(lang === 'en' ? 'Loading database…' : '正在加载数据库…');
-                setLogs([`> ${t('upload.logs.startParsing')}`]);
+                setAnalysisStatusText(
+                    resolvedEngine === ENGINE_OPENCLAW
+                        ? (lang === 'en' ? 'Loading OpenClaw sessions…' : '正在加载 OpenClaw 会话…')
+                        : (lang === 'en' ? 'Loading Cursor workspace…' : '正在加载 Cursor 工作区…')
+                );
+                setLogs([
+                    `> ${t('upload.logs.startParsing')}`,
+                    `> ${lang === 'en'
+                        ? `Engine detected: ${resolvedEngine === ENGINE_OPENCLAW ? 'OpenClaw' : 'Cursor'}`
+                        : `已识别引擎：${resolvedEngine === ENGINE_OPENCLAW ? 'OpenClaw' : 'Cursor'}`
+                    }`
+                ]);
 
                 try {
                     // 检查模块是否加载，如果未加载则等待一段时间
@@ -4210,9 +4323,10 @@
                     }
 
                     // 调用 main.js 的处理函数（注入分析模式与进度回调）
-                    console.log('调用 processFiles...', { analysisMode });
+                    console.log('调用 processFiles...', { analysisMode, resolvedEngine });
                     await window.analysisModule.processFiles(files, type, {
                         analysisMode,
+                        sourceEngine: resolvedEngine,
                         onStatus: (text, percent) => {
                             if (text != null) setAnalysisStatusText(text);
                             if (percent != null) setAnalysisProgress(percent);
@@ -4236,6 +4350,17 @@
                             setLogs(prev => [...prev, `> ${t('upload.logs.analysisComplete')}`]);
                             setAnalysisStatusText(lang === 'en' ? 'Done' : '完成');
                             setAnalysisProgress(100);
+                            if (resolvedEngine === ENGINE_OPENCLAW) {
+                                try {
+                                    sessionStorage.setItem('openclaw_analysis_data', JSON.stringify(data || {}));
+                                    setTimeout(() => {
+                                        window.location.href = 'openclaw.html';
+                                    }, 500);
+                                    return;
+                                } catch (e) {
+                                    console.warn('openclaw redirect failed', e);
+                                }
+                            }
                             // 500ms 淡出后再进入结果页，减少闪烁
                             setTimeout(() => {
                                 setStep('preview');
@@ -5834,7 +5959,7 @@
                     <input 
                         type="file" 
                         ref={fileInputRef}
-                        accept=".vscdb,.db,.sqlite,.sqlite3" 
+                        accept=".jsonl,.vscdb,.db,.sqlite,.sqlite3" 
                         multiple 
                         style={{ display: 'none' }}
                         onChange={(e) => {
@@ -6010,6 +6135,15 @@
                                 <a href="https://github.com/psterman/cursor-lab" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }} onMouseEnter={(e) => e.target.style.color = 'var(--accent-terminal)'} onMouseLeave={(e) => e.target.style.color = 'inherit'}>
                                     <span>{t('dashboard.clinicalAnalysis')}</span>
                                 </a>
+                            </div>
+                            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900 border border-emerald-700/60 text-xs text-emerald-300 mb-2 mx-auto">
+                                <Icon name="shuffle" size={12} />
+                                <span>
+                                    {lang === 'en'
+                                        ? `Dual Engine Mode · Cursor + OpenClaw (${detectedEngine === 'dual' ? 'Auto' : detectedEngine})`
+                                        : `双引擎模式 · Cursor + OpenClaw（${detectedEngine === 'dual' ? '自动识别' : detectedEngine}）`
+                                    }
+                                </span>
                             </div>
                             <h1 style={{
                                 fontSize: 'clamp(2rem, 5vw, 3.5rem)',
@@ -7133,6 +7267,123 @@
                                         }}
                                     >
                                         {lang === 'en' ? 'OK' : '确定'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 上传纠错弹窗 */}
+                    {uploadGuardModal && uploadGuardModal.show && (
+                        <div
+                            style={{
+                                position: 'fixed',
+                                top: 0,
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                backgroundColor: 'rgba(0, 0, 0, 0.75)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                zIndex: 10001,
+                                padding: '20px'
+                            }}
+                            onClick={() => setUploadGuardModal(null)}
+                        >
+                            <div
+                                style={{
+                                    backgroundColor: '#0a0a0a',
+                                    border: '1px solid #ef4444',
+                                    borderRadius: '4px',
+                                    padding: '20px',
+                                    maxWidth: '560px',
+                                    width: '100%',
+                                    boxShadow: '0 0 20px rgba(239, 68, 68, 0.22)'
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                            >
+                                <div style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '8px',
+                                    color: '#f87171',
+                                    fontFamily: "'JetBrains Mono', monospace",
+                                    fontSize: '13px',
+                                    fontWeight: 'bold',
+                                    marginBottom: '10px',
+                                    textTransform: 'uppercase'
+                                }}>
+                                    <Icon name="alert-triangle" size={14} />
+                                    <span>{uploadGuardModal.title}</span>
+                                </div>
+
+                                <div style={{
+                                    color: '#e4e4e7',
+                                    fontFamily: "'JetBrains Mono', monospace",
+                                    fontSize: '12px',
+                                    lineHeight: '1.8',
+                                    whiteSpace: 'pre-line',
+                                    marginBottom: '14px'
+                                }}>
+                                    {uploadGuardModal.message}
+                                </div>
+
+                                <div style={{
+                                    border: '1px solid #3f3f46',
+                                    background: 'rgba(24, 24, 27, 0.9)',
+                                    borderRadius: '2px',
+                                    padding: '10px 12px',
+                                    marginBottom: '16px'
+                                }}>
+                                    <div style={{
+                                        color: '#a1a1aa',
+                                        fontFamily: "'JetBrains Mono', monospace",
+                                        fontSize: '11px',
+                                        marginBottom: '6px'
+                                    }}>
+                                        {lang === 'en' ? 'Recommended path:' : '建议路径：'}
+                                    </div>
+                                    <code style={{
+                                        color: 'var(--accent-terminal)',
+                                        fontSize: '12px',
+                                        wordBreak: 'break-all',
+                                        fontFamily: "'JetBrains Mono', monospace"
+                                    }}>
+                                        {uploadGuardModal.path || OPENCLAW_SESSION_PATH}
+                                    </code>
+                                </div>
+
+                                <div style={{
+                                    display: 'flex',
+                                    justifyContent: 'flex-end'
+                                }}>
+                                    <button
+                                        onClick={() => setUploadGuardModal(null)}
+                                        style={{
+                                            padding: '10px 20px',
+                                            backgroundColor: '#ef4444',
+                                            border: '1px solid #ef4444',
+                                            color: '#050505',
+                                            borderRadius: '2px',
+                                            fontFamily: "'JetBrains Mono', monospace",
+                                            fontSize: '12px',
+                                            fontWeight: 'bold',
+                                            cursor: 'pointer',
+                                            textTransform: 'uppercase',
+                                            letterSpacing: '0.05em',
+                                            transition: 'all 0.2s ease'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.target.style.backgroundColor = 'transparent';
+                                            e.target.style.color = '#ef4444';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.target.style.backgroundColor = '#ef4444';
+                                            e.target.style.color = '#050505';
+                                        }}
+                                    >
+                                        {lang === 'en' ? 'Understood' : '知道了'}
                                     </button>
                                 </div>
                             </div>

@@ -78,7 +78,26 @@ export function calculateConsumptionCost(input) {
   const promptTokens = Math.max(0, toNumber(usage.promptTokens, 0));
   const completionTokens = Math.max(0, toNumber(usage.completionTokens, 0));
   const totalTokensFromUsage = Math.max(0, toNumber(usage.totalTokens, 0));
-  const totalTokens = totalTokensFromUsage > 0 ? totalTokensFromUsage : (promptTokens + completionTokens);
+  let totalTokens = totalTokensFromUsage > 0 ? totalTokensFromUsage : (promptTokens + completionTokens);
+  const thinkingChars = toNumber(stats.thinking_stats?.totalThinkingChars, 0);
+  const totalRecords = Math.max(0, toNumber(stats.totalRecords, 0));
+  let estimatedFromThinking = 0;
+  let estimatedFromMessages = 0;
+  let usedEstimate = false;
+  let tokenSource = 'usage';
+  if (totalTokens <= 0 && (thinkingChars > 0 || totalRecords > 0)) {
+    estimatedFromThinking = thinkingChars > 0 ? Math.round((thinkingChars / 4) * 1.2) : 0;
+    estimatedFromMessages = totalRecords > 0 ? Math.max(0, totalRecords * 50) : 0;
+    const estimated = Math.max(estimatedFromThinking, estimatedFromMessages);
+    if (estimated > 0) {
+      totalTokens = estimated;
+      usedEstimate = true;
+      tokenSource = estimatedFromThinking >= estimatedFromMessages && estimatedFromThinking > 0 ? 'thinking' : 'messages';
+    }
+  }
+  if (!usedEstimate && typeof usage.tokenSource === 'string' && usage.tokenSource.trim()) {
+    tokenSource = usage.tokenSource.trim();
+  }
   const cachedTokens = Math.max(0, toNumber(usage.cachedTokens, 0));
   const totalCostUSD = Math.max(0, toNumber(usage.totalCostUSD, 0));
 
@@ -88,7 +107,7 @@ export function calculateConsumptionCost(input) {
     ? clamp01(cacheHitRateFromStats)
     : clamp01(cacheHitRateFromToken);
 
-  // 使用对数映射 token 规模（避免大用户完全碾压）
+  // 使用对数映射 token 规模（避免大用户完全碾压）；无 usage 时用估算给保底分避免五维塌陷
   const tokenVolumeScore = clamp100((Math.log10(totalTokens + 1) / Math.log10(500000 + 1)) * 100);
   const cacheScore = clamp100(cacheHitRate * 100);
 
@@ -116,6 +135,10 @@ export function calculateConsumptionCost(input) {
     cacheHitRate,
     totalCostUSD,
     costPer1kTokensUSD: costPer1k,
+    usedEstimate,
+    tokenSource,
+    estimatedFromThinking,
+    estimatedFromMessages,
     subScores: {
       tokenVolumeScore,
       cacheScore,
@@ -334,7 +357,10 @@ export function calculateStabilityHealth(input) {
     errorRate,
     errorCount,
     abnormalInterruptionRate,
+    abnormalInterruptRate: abnormalInterruptionRate,
     abnormalInterruptions,
+    successBase: eventsWithExitCode,
+    totalRecords,
     subScores: {
       successScore,
       errorControlScore,
@@ -427,4 +453,3 @@ export class OpenClawPortraitAnalyzer {
     });
   }
 }
-

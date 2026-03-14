@@ -80,6 +80,26 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
   margin: 0 0 10px 0;
   font-family: var(--font-mono-stack), monospace;
 }
+.stats2-gate-terms-scroll {
+  max-height: 190px;
+  overflow-y: auto;
+  border: 1px solid rgba(0, 255, 65, 0.25);
+  background: rgba(0, 8, 4, 0.48);
+  padding: 10px 12px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: rgba(0, 255, 65, 0.78);
+  font-family: var(--font-mono-stack), monospace;
+}
+.stats2-gate-terms-scroll p {
+  margin: 0 0 8px 0;
+}
+.stats2-gate-terms-scroll p:last-child {
+  margin-bottom: 0;
+}
+.stats2-gate-terms-scroll::-webkit-scrollbar { width: 6px; }
+.stats2-gate-terms-scroll::-webkit-scrollbar-track { background: rgba(0, 255, 65, 0.08); }
+.stats2-gate-terms-scroll::-webkit-scrollbar-thumb { background: rgba(0, 255, 65, 0.35); border-radius: 3px; }
 .stats2-gate-privacy-check {
   display: flex;
   align-items: center;
@@ -103,6 +123,7 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
   margin-top: 4px;
 }
 .stats2-gate-buttons-row .stats2-gate-github-btn { flex: 1; margin-top: 0; min-height: 46px; }
+.stats2-gate-buttons-row .stats2-gate-guest-btn { flex: 1; margin-top: 0; min-height: 46px; }
 .stats2-gate-secondary-row {
   display: flex;
   gap: 12px;
@@ -233,6 +254,9 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
   border: 1px solid rgba(0, 255, 65, 0.2);
   padding: 4px 0;
 }
+.stats2-gate-list[hidden] {
+  display: none !important;
+}
 .stats2-gate-list::-webkit-scrollbar { width: 6px; }
 .stats2-gate-list::-webkit-scrollbar-track { background: rgba(0, 255, 65, 0.08); }
 .stats2-gate-list::-webkit-scrollbar-thumb { background: rgba(0, 255, 65, 0.35); border-radius: 3px; }
@@ -253,6 +277,42 @@ body{margin:0;line-height:inherit;font-family:ui-sans-serif,system-ui,-apple-sys
   border-left-color: #00ff41;
   color: #00ff41;
   box-shadow: inset 0 0 20px rgba(0, 255, 65, 0.06);
+}
+.stats2-gate-list .country-list-action {
+  margin: 8px 10px 6px;
+  padding: 8px 12px;
+  border: 1px dashed rgba(0, 255, 65, 0.3);
+  color: rgba(0, 255, 65, 0.82);
+  font-family: var(--font-mono-stack), monospace;
+  font-size: 11px;
+  text-align: center;
+  cursor: pointer;
+  background: rgba(0, 255, 65, 0.03);
+}
+.stats2-gate-list .country-list-action:hover {
+  color: #00ff41;
+  border-color: rgba(0, 255, 65, 0.55);
+  background: rgba(0, 255, 65, 0.08);
+}
+.stats2-gate-expand-btn {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px 14px;
+  border: 1px solid rgba(0, 255, 65, 0.35);
+  background: rgba(0, 255, 65, 0.08);
+  color: #00ff41;
+  font-family: var(--font-mono-stack), monospace;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+.stats2-gate-expand-btn:hover {
+  background: rgba(0, 255, 65, 0.14);
+  border-color: rgba(0, 255, 65, 0.6);
+  box-shadow: 0 0 12px rgba(0, 255, 65, 0.14);
+}
+.stats2-gate-expand-btn[hidden] {
+  display: none !important;
 }
 
 /* Guest mode: hide private/advanced left-drawer cards */

@@ -1101,19 +1101,20 @@
                 try { localStorage.removeItem('stats2_user_rejected_terms'); } catch (err) {}
                 setGuestGatePassed(true);
                 resetGuestViewerState({ renderDrawer: true });
-                if (/^[A-Z]{2}$/.test(guestCode)) {
-                    var guestCountryName = (typeof countryNameMap !== 'undefined' && countryNameMap && countryNameMap[guestCode])
-                        ? ((typeof currentLang !== 'undefined' && currentLang === 'zh') ? countryNameMap[guestCode].zh : countryNameMap[guestCode].en)
-                        : guestCode;
-                    try { window.currentUserCountry = guestCode; window.currentCountryCode = guestCode; } catch (err) {}
-                    try { if (window.currentDrawerCountry && typeof window.currentDrawerCountry === 'object') { window.currentDrawerCountry.code = guestCode; window.currentDrawerCountry.name = guestCountryName; } } catch (err) {}
-                }
+                try { window.__countryPickerForced = false; } catch (err) {}
                 hideGateOverlay();
                 if (typeof window.runGateCheck === 'function') {
                     try { window.runGateCheck(); } catch (err) {}
                 }
                 try {
                     // 游客入口：强制默认 GLOBAL 视图（右抽屉显示全球数据页），并自动展开左右抽屉
+                    if (/^[A-Z]{2}$/.test(guestCode)) {
+                        var guestCountryName = (typeof countryNameMap !== 'undefined' && countryNameMap && countryNameMap[guestCode])
+                            ? ((typeof currentLang !== 'undefined' && currentLang === 'zh') ? countryNameMap[guestCode].zh : countryNameMap[guestCode].en)
+                            : guestCode;
+                        try { window.currentUserCountry = guestCode; window.currentCountryCode = guestCode; } catch (err) {}
+                        try { if (window.currentDrawerCountry && typeof window.currentDrawerCountry === 'object') { window.currentDrawerCountry.code = guestCode; window.currentDrawerCountry.name = guestCountryName; } } catch (err) {}
+                    }
                     var leftDrawer = document.getElementById('left-drawer');
                     var rightDrawer = document.getElementById('right-drawer');
                     if (leftDrawer) leftDrawer.classList.add('active');
@@ -13751,6 +13752,61 @@
             return countries;
         }
 
+        function getAllStats2MapCountries() {
+            const merged = new Map();
+            const appendCountry = function(code, nameEn, nameZh) {
+                const cc = String(code || '').trim().toUpperCase();
+                if (!/^[A-Z]{2}$/.test(cc)) return;
+                if (!merged.has(cc)) {
+                    merged.set(cc, {
+                        code: cc,
+                        nameZh: String(nameZh || ''),
+                        nameEn: String(nameEn || cc)
+                    });
+                    return;
+                }
+                const current = merged.get(cc);
+                if (!current.nameZh && nameZh) current.nameZh = String(nameZh);
+                if ((!current.nameEn || current.nameEn === cc) && nameEn) current.nameEn = String(nameEn);
+            };
+
+            try {
+                const mapObj = (typeof echarts !== 'undefined' && echarts && typeof echarts.getMap === 'function')
+                    ? echarts.getMap('world')
+                    : null;
+                const geoJson = mapObj?.geoJson || mapObj?.geoJSON || mapObj?.geojson || null;
+                const features = geoJson?.features;
+                if (Array.isArray(features)) {
+                    features.forEach(function(feature) {
+                        const props = feature?.properties || {};
+                        const rawName = String(props.name || props.NAME || props.admin || '').trim();
+                        const rawIso2 = String(
+                            props.iso_a2 || props.iso2 || props.ISO_A2 || props.adm0_a3_us || ''
+                        ).trim().toUpperCase();
+                        let code = /^[A-Z]{2}$/.test(rawIso2) ? rawIso2 : '';
+                        if (!code && rawName && typeof resolveCountryCodeFromMapName === 'function') {
+                            code = String(resolveCountryCodeFromMapName(rawName) || '').trim().toUpperCase();
+                        }
+                        if (!/^[A-Z]{2}$/.test(code)) return;
+                        const mapped = (typeof countryNameMap === 'object' && countryNameMap && countryNameMap[code]) || null;
+                        appendCountry(code, mapped?.en || rawName || code, mapped?.zh || '');
+                    });
+                }
+            } catch (e) {
+                console.warn('[CountrySelect] ⚠️ 从地图读取国家列表失败:', e);
+            }
+
+            getAllCountries().forEach(function(country) {
+                appendCountry(country.code, country.nameEn, country.nameZh);
+            });
+
+            return Array.from(merged.values()).sort(function(a, b) {
+                const nameA = (currentLang === 'zh' && a.nameZh) ? a.nameZh : a.nameEn;
+                const nameB = (currentLang === 'zh' && b.nameZh) ? b.nameZh : b.nameEn;
+                return String(nameA || '').localeCompare(String(nameB || ''));
+            });
+        }
+
         /**
          * 初始化左侧抽屉国家选择菜单
          */
@@ -14265,9 +14321,7 @@
                 const guestBtn = document.getElementById('gate-guest-btn');
                 if (!btn && !guestBtn) return;
                 const code = (window.__countrySelectorSelectedCode || '').trim().toUpperCase();
-                const privacyCheck = document.getElementById('gate-privacy-accept');
-                const privacyAccepted = !privacyCheck || privacyCheck.checked;
-                const githubEnabled = window.__countryPickerForced && /^[A-Z]{2}$/.test(code) && privacyAccepted;
+                const githubEnabled = window.__countryPickerForced && /^[A-Z]{2}$/.test(code);
                 if (btn) {
                     btn.disabled = !githubEnabled;
                     btn.style.opacity = githubEnabled ? '1' : '0.6';
@@ -14282,6 +14336,20 @@
                 if (githubEnabled && typeof window.showGitHubSectionIfCountrySelected === 'function') window.showGitHubSectionIfCountrySelected();
             } catch (e) {}
         }
+        function getGateLanguageDefaultCountry() {
+            try {
+                const lang = String(((navigator.languages && navigator.languages[0]) || navigator.language || '')).toLowerCase();
+                if (lang.indexOf('zh') === 0) return 'CN';
+                if (lang.indexOf('en') === 0) return 'US';
+            } catch (e) {}
+            return '';
+        }
+        function getGateCountryDisplayName(country) {
+            const code = String(country && country.code ? country.code : '').toUpperCase();
+            const nameZh = String(country && country.nameZh ? country.nameZh : '');
+            const nameEn = String(country && country.nameEn ? country.nameEn : code);
+            return (currentLang === 'zh' && nameZh) ? `${nameZh} (${code})` : `${nameEn} (${code})`;
+        }
         
         function initCountrySelector() {
             try {
@@ -14289,8 +14357,24 @@
                 const closeBtn = document.getElementById('country-selector-close');
                 const searchInput = document.getElementById('country-search-input');
                 const listContainer = document.getElementById('country-list-container');
+                const expandBtn = document.getElementById('gate-expand-country-list-btn');
                 const githubSaveBtn = document.getElementById('country-selector-github-save-btn');
                 const guestBtn = document.getElementById('gate-guest-btn');
+                let gateListExpanded = false;
+                let gateListHideTimer = null;
+                if (typeof window.__gateCountryListExpanded !== 'boolean') window.__gateCountryListExpanded = false;
+                const setGateListVisible = function(value) {
+                    if (listContainer) listContainer.hidden = !value;
+                };
+                const setGateExpandedState = function(value) {
+                    gateListExpanded = !!value;
+                    window.__gateCountryListExpanded = !!value;
+                    if (listContainer) {
+                        listContainer.dataset.expanded = value ? 'true' : 'false';
+                        listContainer.dataset.mode = value ? 'all' : 'compact';
+                    }
+                    if (expandBtn) expandBtn.hidden = !!value;
+                };
                 
                 if (!modal || !closeBtn || !searchInput || !listContainer) return;
                 
@@ -14308,18 +14392,12 @@
                     }
                 });
                 
-                var privacyCheck = document.getElementById('gate-privacy-accept');
-                if (privacyCheck) {
-                    privacyCheck.addEventListener('change', function() {
-                        if (typeof updateCountrySelectorGitHubButtonState === 'function') updateCountrySelectorGitHubButtonState();
-                    });
-                }
                 if (guestBtn) {
                     guestBtn.addEventListener('click', function() {
                         if (typeof updateCountrySelectorGitHubButtonState === 'function') updateCountrySelectorGitHubButtonState();
                     });
                 }
-                // 「使用 GitHub 登录并保存」按钮：仅在选择国家、同意隐私条款且为强制选籍模式时可用
+                // 「使用 GitHub 登录并保存」按钮：仅在选择国家且为强制选籍模式时可用
                 if (githubSaveBtn) {
                     githubSaveBtn.addEventListener('click', function() {
                         const code = (window.__countrySelectorSelectedCode || '').trim().toUpperCase();
@@ -14346,13 +14424,139 @@
                 searchInput.addEventListener('input', (e) => {
                     if (searchTimeout) clearTimeout(searchTimeout);
                     searchTimeout = setTimeout(() => {
+                        if (gateListHideTimer) clearTimeout(gateListHideTimer);
+                        setGateListVisible(true);
+                        searchInput.dataset.userEdited = 'true';
+                        setGateExpandedState(true);
                         renderCountryList(e.target.value.trim());
                     }, 200);
                 });
+                searchInput.addEventListener('focus', function() {
+                    if (gateListHideTimer) clearTimeout(gateListHideTimer);
+                    setGateListVisible(true);
+                    if (searchInput.dataset.userEdited !== 'true') searchInput.value = '';
+                    if (!searchInput.value.trim()) setGateExpandedState(false);
+                    renderCountryList(searchInput.value.trim());
+                });
+                searchInput.addEventListener('click', function() {
+                    if (gateListHideTimer) clearTimeout(gateListHideTimer);
+                    setGateListVisible(true);
+                    if (searchInput.dataset.userEdited !== 'true') searchInput.value = '';
+                    if (!searchInput.value.trim()) setGateExpandedState(false);
+                    renderCountryList(searchInput.value.trim());
+                });
+                searchInput.addEventListener('blur', function() {
+                    gateListHideTimer = setTimeout(function() {
+                        setGateListVisible(false);
+                    }, 180);
+                });
+
+                if (expandBtn && expandBtn.dataset.bound !== 'true') {
+                    const expandAllCountries = function() {
+                        if (gateListHideTimer) clearTimeout(gateListHideTimer);
+                        setGateListVisible(true);
+                        setGateExpandedState(true);
+                        if (searchInput) {
+                            searchInput.dataset.userEdited = 'true';
+                            searchInput.value = '';
+                        }
+                        Promise.resolve(
+                            (typeof ensureIsoNameToIso2MapLoaded === 'function')
+                                ? ensureIsoNameToIso2MapLoaded()
+                                : null
+                        ).finally(function() {
+                            renderCountryList('');
+                            if (listContainer) listContainer.scrollTop = 0;
+                        });
+                    };
+                    expandBtn.addEventListener('mousedown', function(e) {
+                        if (e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                        }
+                        expandAllCountries();
+                    });
+                    expandBtn.addEventListener('click', function(e) {
+                        if (e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                        }
+                    });
+                    expandBtn.dataset.bound = 'true';
+                }
+
+                // 列表点击事件委托：避免重渲染后按钮监听失效
+                if (listContainer && listContainer.dataset.gateDelegated !== 'true') {
+                    listContainer.addEventListener('click', function(e) {
+                        let target = e && e.target ? e.target : null;
+                        // 兼容文本节点点击：确保后续 closest 可用
+                        if (target && target.nodeType === 3) target = target.parentElement;
+                        if (!target) return;
+                        const item = target.closest ? target.closest('.country-item[data-code]') : null;
+                        if (!item) return;
+                        const code = item.getAttribute('data-code');
+                        const name = item.getAttribute('data-name');
+                        const countries = (typeof window.__getAllGateCountries === 'function') ? window.__getAllGateCountries() : [];
+                        if (window.__countryPickerForced) {
+                            window.__countrySelectorSelectedCode = (code || '').trim().toUpperCase();
+                            const chosen = countries.find(c => String(c.code || '').toUpperCase() === window.__countrySelectorSelectedCode);
+                            if (searchInput && chosen) {
+                                searchInput.value = getGateCountryDisplayName(chosen);
+                                searchInput.dataset.userEdited = 'false';
+                            }
+                            if (typeof updateCountrySelectorGitHubButtonState === 'function') updateCountrySelectorGitHubButtonState();
+                            setGateListVisible(false);
+                            setGateExpandedState(false);
+                            renderCountryList('');
+                            return;
+                        }
+                        selectCountryFromSelector(code, name);
+                    });
+                    listContainer.dataset.gateDelegated = 'true';
+                }
                 
                 // 渲染国家列表（会绑定 item 点击，其中强制模式下仅更新选中状态）
+                const storedCode = (window.__countrySelectorSelectedCode || getStoredCountry() || '').trim().toUpperCase();
+                if (/^[A-Z]{2}$/.test(storedCode)) {
+                    window.__countrySelectorSelectedCode = storedCode;
+                } else {
+                    const fallbackCode = getGateLanguageDefaultCountry();
+                    if (/^[A-Z]{2}$/.test(fallbackCode)) {
+                        window.__countrySelectorSelectedCode = fallbackCode;
+                    }
+                }
+                setGateExpandedState(false);
+                setGateListVisible(false);
                 renderCountryList('');
+                try {
+                    const allCountries = (typeof window.__getAllGateCountries === 'function') ? window.__getAllGateCountries() : [];
+                    const pickedCode = (window.__countrySelectorSelectedCode || '').trim().toUpperCase();
+                    const picked = allCountries.find(c => String(c.code || '').toUpperCase() === pickedCode);
+                    if (picked) {
+                        searchInput.value = getGateCountryDisplayName(picked);
+                        searchInput.dataset.userEdited = 'false';
+                    }
+                } catch (e) {}
                 updateCountrySelectorGitHubButtonState();
+                document.addEventListener('mousedown', function(e) {
+                    if (!listContainer || !searchInput || !expandBtn) return;
+                    const target = e && e.target ? e.target : null;
+                    if (!target) return;
+                    if (target === searchInput || searchInput.contains(target) || listContainer.contains(target) || target === expandBtn || expandBtn.contains(target)) {
+                        return;
+                    }
+                    setGateListVisible(false);
+                });
+
+                window.__isGateCountryListExpanded = function() {
+                    if (listContainer && listContainer.dataset.expanded === 'true') return true;
+                    return (typeof window.__gateCountryListExpanded === 'boolean')
+                        ? window.__gateCountryListExpanded
+                        : gateListExpanded;
+                };
+                window.__setGateCountryListExpanded = function(value) {
+                    setGateExpandedState(value);
+                };
             } catch (e) {
                 console.warn('[CountrySelector] ⚠️ initCountrySelector 失败:', e);
             }
@@ -14533,44 +14737,15 @@
         function renderCountryList(searchQuery) {
             try {
                 const listContainer = document.getElementById('country-list-container');
+                const searchInput = document.getElementById('country-search-input');
                 if (!listContainer) return;
-                
-                // 获取所有国家（从 countryNameMap 和 ISO 映射）
-                const countries = [];
-                
-                // 从 countryNameMap 获取
-                if (typeof countryNameMap !== 'undefined') {
-                    for (const [code, names] of Object.entries(countryNameMap)) {
-                        countries.push({
-                            code: code,
-                            nameZh: names.zh || '',
-                            nameEn: names.en || code
-                        });
-                    }
-                }
-                
-                // 从 ISO 映射获取更多国家（如果有）
-                if (window.__isoNameToIso2 instanceof Map) {
-                    const isoMap = window.__isoNameToIso2;
-                    for (const [name, code] of isoMap.entries()) {
-                        if (!countries.find(c => c.code === code)) {
-                            countries.push({
-                                code: code,
-                                nameZh: '',
-                                nameEn: name
-                            });
-                        }
-                    }
-                }
-                
-                // 排序
-                countries.sort((a, b) => {
-                    const nameA = (currentLang === 'zh' && a.nameZh) ? a.nameZh : a.nameEn;
-                    const nameB = (currentLang === 'zh' && b.nameZh) ? b.nameZh : b.nameEn;
-                    return nameA.localeCompare(nameB);
-                });
-                
-                // 过滤（支持中文/英文/国家码，空名称按空字符串参与匹配）
+
+                const getAllGateCountries = function() {
+                    return getAllStats2MapCountries();
+                };
+                window.__getAllGateCountries = getAllGateCountries;
+
+                const countries = getAllGateCountries();
                 const query = String(searchQuery || '').trim().toLowerCase();
                 const filtered = !query
                     ? countries
@@ -14580,11 +14755,26 @@
                         const code = (c.code != null ? String(c.code) : '').toLowerCase();
                         return nameZh.includes(query) || nameEn.includes(query) || code.includes(query);
                     });
-                
-                // 强制选籍模式下高亮以 __countrySelectorSelectedCode 为准
+
                 const forcedSelectedCode = (window.__countrySelectorSelectedCode || '').trim().toUpperCase();
-                listContainer.innerHTML = filtered.map(c => {
-                    const displayName = (currentLang === 'zh' && c.nameZh) ? `${c.nameZh} (${c.code})` : `${c.nameEn} (${c.code})`;
+                const isExpanded = query
+                    ? true
+                    : (listContainer.dataset.mode === 'all' || listContainer.dataset.expanded === 'true');
+                let displayList = filtered;
+                if (!query && !isExpanded) {
+                    const compactCodes = ['CN', 'US', 'JP', 'KR', 'SG', 'DE', 'FR', 'GB'];
+                    const compactMap = new Map();
+                    compactCodes.forEach(code => {
+                        const row = countries.find(c => String(c.code || '').toUpperCase() === code);
+                        if (row) compactMap.set(code, row);
+                    });
+                    const selected = countries.find(c => String(c.code || '').toUpperCase() === forcedSelectedCode);
+                    if (selected) compactMap.set(forcedSelectedCode, selected);
+                    displayList = Array.from(compactMap.values());
+                }
+
+                let html = displayList.map(c => {
+                    const displayName = getGateCountryDisplayName(c);
                     const isSelected = window.__countryPickerForced
                         ? (forcedSelectedCode === c.code.toUpperCase())
                         : ((window.currentUser?.manual_location || localStorage.getItem('manual_location') || '').toUpperCase() === c.code.toUpperCase());
@@ -14594,21 +14784,9 @@
                         </div>
                     `;
                 }).join('');
-                
-                // 绑定点击事件：强制选籍模式下仅更新选中状态并启用「使用 GitHub 登录并保存」按钮
-                listContainer.querySelectorAll('.country-item').forEach(item => {
-                    item.addEventListener('click', () => {
-                        const code = item.getAttribute('data-code');
-                        const name = item.getAttribute('data-name');
-                        if (window.__countryPickerForced) {
-                            window.__countrySelectorSelectedCode = (code || '').trim().toUpperCase();
-                            if (typeof updateCountrySelectorGitHubButtonState === 'function') updateCountrySelectorGitHubButtonState();
-                            renderCountryList(searchQuery);
-                            return;
-                        }
-                        selectCountryFromSelector(code, name);
-                    });
-                });
+                listContainer.innerHTML = html;
+
+                // 交互事件由 initCountrySelector 中的事件委托统一处理
             } catch (e) {
                 console.warn('[CountrySelector] ⚠️ renderCountryList 失败:', e);
             }
@@ -14905,10 +15083,11 @@
                 if (modal) {
                     modal.style.display = 'block';
                     const searchInput = document.getElementById('country-search-input');
+                    const listContainer = document.getElementById('country-list-container');
                     if (searchInput) {
                         searchInput.value = '';
-                        searchInput.focus();
                     }
+                    if (listContainer) listContainer.hidden = true;
                     renderCountryList('');
                 }
             } catch (e) {
