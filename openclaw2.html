@@ -119,11 +119,22 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.22;ba
 #chat-history .msg-role{font-size:9px;letter-spacing:.1em;text-transform:uppercase;opacity:.7;font-family:'JetBrains Mono',monospace}
 #chat-history .msg-body{word-break:break-word;white-space:pre-wrap;line-height:1.6}
 #chat-history .msg.user .msg-role{color:rgba(0,255,65,.8)}
-#chat-history .msg.user .msg-body{color:rgba(0,255,65,.95);background:rgba(0,255,65,.06);border-left:2px solid rgba(0,255,65,.4);padding:6px 10px;border-radius:0 6px 6px 0}
 #chat-history .msg.ai .msg-role{color:var(--dim)}
-#chat-history .msg.ai .msg-body{color:#d0dcea;background:rgba(255,255,255,.03);border-left:2px solid rgba(255,255,255,.15);padding:6px 10px;border-radius:0 6px 6px 0}
 #chat-history .msg.sys .msg-body{font-size:10px;color:rgba(143,165,190,.6);font-family:'JetBrains Mono',monospace;font-style:italic}
 #chat-history .msg.err .msg-body{color:rgba(230,57,70,.9);font-size:10px;font-family:'JetBrains Mono',monospace}
+/* 系统/握手/心跳等折叠区：默认收起，点击展开 */
+.msg-sys-group{margin-bottom:10px;border:1px solid rgba(255,255,255,.1);border-radius:6px;overflow:hidden;background:rgba(0,0,0,.2)}
+.msg-sys-group-header{font-size:10px;color:var(--dim);padding:6px 10px;cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px;font-family:'JetBrains Mono',monospace;letter-spacing:.06em}
+.msg-sys-group-header:hover{background:rgba(255,255,255,.04);color:rgba(143,165,190,.9)}
+.msg-sys-group-header::before{content:"";width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid currentColor;transition:transform .2s}
+.msg-sys-group.expanded .msg-sys-group-header::before{transform:rotate(180deg)}
+.msg-sys-group-body{max-height:200px;overflow-y:auto;padding:4px 0}
+.msg-sys-group.collapsed .msg-sys-group-body{display:none}
+.msg-sys-line{font-size:10px;color:rgba(143,165,190,.7);padding:3px 10px;border-bottom:1px solid rgba(255,255,255,.04);font-family:'JetBrains Mono',monospace;line-height:1.4}
+.msg-sys-line.err{color:rgba(230,57,70,.85)}
+/* 用户与 AI 消息重点展示 */
+#chat-history .msg.user .msg-body{color:rgba(0,255,65,.95);background:rgba(0,255,65,.08);border-left:3px solid rgba(0,255,65,.5);padding:8px 12px;border-radius:0 8px 8px 0}
+#chat-history .msg.ai .msg-body{color:#e0e8f0;background:rgba(255,255,255,.06);border-left:3px solid rgba(255,255,255,.25);padding:8px 12px;border-radius:0 8px 8px 0}
 #chat-history .msg.ai .msg-body.streaming::after{content:"▍";animation:cursor-blink .7s infinite;color:var(--green)}
 @keyframes cursor-blink{0%,100%{opacity:1}50%{opacity:0}}
 /* AI 核心回复：摘要 + 展开/复制，便于精准对话 */
@@ -498,6 +509,7 @@ const i18n={
     heroTitle:"OpenClaw",
     viewDetails:"[查看详情]",
     close:"关闭",
+    sysGroupHeader:"系统与连接",
     signalPanels:"信号面板",
     radar:"能力雷达",
     wordCloud:"词云",
@@ -543,6 +555,7 @@ const i18n={
     heroTitle:"OpenClaw",
     viewDetails:"[VIEW_DETAILS]",
     close:"CLOSE",
+    sysGroupHeader:"System & connection",
     signalPanels:"Signal Panels",
     radar:"Radar",
     wordCloud:"Word Cloud",
@@ -1199,8 +1212,57 @@ const ClawController={
     if(firstLine.length<=maxCore)return {core:firstLine,full:t};
     return {core:firstLine.slice(0,maxCore)+'…',full:t};
   },
+  _getOrCreateSysGroup(){
+    const el=$("chat-history");if(!el)return null;
+    let group=el.querySelector('.msg-sys-group');
+    if(!group){
+      group=document.createElement('div');
+      group.className='msg-sys-group collapsed';
+      const header=document.createElement('div');
+      header.className='msg-sys-group-header';
+      header.setAttribute('role','button');
+      header.setAttribute('tabindex','0');
+      const L=state.lang||'zh';
+      const t=i18n[L];
+      header.textContent=(t&&t.sysGroupHeader?t.sysGroupHeader:(L==='zh'?'系统与连接':'System & connection'))+' (0)';
+      header.addEventListener('click',()=>{
+        group.classList.toggle('collapsed');
+        this._updateSysGroupHeader(group);
+      });
+      header.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();header.click();}});
+      const body=document.createElement('div');
+      body.className='msg-sys-group-body';
+      group.appendChild(header);
+      group.appendChild(body);
+      el.insertBefore(group,el.firstChild);
+    }
+    return group;
+  },
+  _updateSysGroupHeader(group){
+    if(!group)return;
+    const body=group.querySelector('.msg-sys-group-body');
+    const n=body?body.children.length:0;
+    const L=state.lang||'zh';
+    const t=i18n[L];
+    const label=t&&t.sysGroupHeader?t.sysGroupHeader:(L==='zh'?'系统与连接':'System & connection');
+    const h=group.querySelector('.msg-sys-group-header');
+    if(h)h.textContent=label+' ('+n+')';
+  },
   appendMsg(role, text, streaming=false){
     const el=$("chat-history");if(!el)return null;
+    if(role==='sys'||role==='err'){
+      const group=this._getOrCreateSysGroup();
+      if(!group)return null;
+      const body=group.querySelector('.msg-sys-group-body');
+      if(!body)return null;
+      const line=document.createElement('div');
+      line.className='msg-sys-line'+(role==='err'?' err':'');
+      line.textContent=text||'';
+      body.appendChild(line);
+      this._updateSysGroupHeader(group);
+      body.scrollTop=body.scrollHeight;
+      return line;
+    }
     const wrap=document.createElement('div');
     wrap.className='msg '+role;
     const roleEl=document.createElement('div');
@@ -1798,10 +1860,11 @@ const ptr=(x,y)=>{pupil(pl,eyes.l,x,y);pupil(pr,eyes.r,x,y)};
 function bind(){
   window.addEventListener('mousemove',e=>ptr(e.clientX,e.clientY));
   window.addEventListener('touchmove',e=>{if(e.touches&&e.touches.length)ptr(e.touches[0].clientX,e.touches[0].clientY)},{passive:true});
-  window.addEventListener('wheel',e=>{e.preventDefault();if(!state.themes.length)return;const now=performance.now();if(now-state.lastWheel<180||state.anim)return;state.lastWheel=now;const dir=e.deltaY>0?1:-1;sw((state.idx+dir+state.themes.length)%state.themes.length,dir)},{passive:false});
-  let sy=null;
-  window.addEventListener('touchstart',e=>{sy=e.touches&&e.touches.length?e.touches[0].clientY:null},{passive:true});
-  window.addEventListener('touchend',e=>{if(sy==null||state.anim||!state.themes.length)return;const ey=e.changedTouches&&e.changedTouches.length?e.changedTouches[0].clientY:sy,d=sy-ey;if(Math.abs(d)>42){const dir=d>0?1:-1;sw((state.idx+dir+state.themes.length)%state.themes.length,dir)}sy=null},{passive:true});
+  const stageEl=document.querySelector('.stage');
+  window.addEventListener('wheel',e=>{if(!stageEl||!stageEl.contains(e.target))return;e.preventDefault();if(!state.themes.length)return;const now=performance.now();if(now-state.lastWheel<180||state.anim)return;state.lastWheel=now;const dir=e.deltaY>0?1:-1;sw((state.idx+dir+state.themes.length)%state.themes.length,dir)},{passive:false});
+  let sy=null,touchInStage=false;
+  window.addEventListener('touchstart',e=>{const t=e.touches&&e.touches.length?e.touches[0]:null;sy=t?t.clientY:null;touchInStage=!!(stageEl&&t&&stageEl.contains(t.target));},{passive:true});
+  window.addEventListener('touchend',e=>{if(sy==null||state.anim||!state.themes.length||!touchInStage)return;const ey=e.changedTouches&&e.changedTouches.length?e.changedTouches[0].clientY:sy,d=sy-ey;if(Math.abs(d)>42){const dir=d>0?1:-1;sw((state.idx+dir+state.themes.length)%state.themes.length,dir)}sy=null;touchInStage=false;},{passive:true});
   window.addEventListener('resize',()=>{if(state.anim)return;const cs=orbit.querySelectorAll('.card'),t=cs.length||1;cs.forEach((c,i)=>{const p=pose(i,t);c.dataset.x=String(p.x);c.dataset.y=String(p.y);c.style.transform=`translate3d(${p.x}px,${p.y}px,0) scale(1)`});if(state.idx===DETAIL_IDX)drawRadar(state.metrics?.radar||[],state.lang)});
   const cardModal=$("card-modal"),cardModalClose=$("card-modal-close");
   if(cardModal)cardModal.addEventListener("click",e=>{if(e.target===cardModal)closeCardModal();});
@@ -2077,7 +2140,7 @@ function bind(){
 const setStatus=t=>status.textContent=t,hideBoot=()=>boot.classList.add('hide');
 async function bootstrap(){const L=state.lang;setStatus(i18n[L].statusLoading);const local=localPayload();setStatus(i18n[L].statusFetch);const remote=await workerPayload();state.payload=score(remote)>score(local)?remote:local;try{if(state.payload&&Object.keys(state.payload).length)sessionStorage.setItem('openclaw_analysis_data',JSON.stringify(state.payload));}catch{}setStatus(i18n[L].statusProcess);state.metrics=processStats(state.payload||{},L);state.themes=themes(state.metrics,L);}
 async function init(){applyLang(state.lang);bind();tick();setInterval(tick,1000);setInterval(()=>{if(Math.random()>.82){pl.setAttribute('r','14');pr.setAttribute('r','14');setTimeout(()=>{pl.setAttribute('r','11');pr.setAttribute('r','11')},110)}},2800);await bootstrap();mountNav();renderTheme(state.idx);refreshDetails();setStatus(i18n[state.lang].statusOnline);setTimeout(hideBoot,220);applyLang(state.lang);}
-function applyLang(L){state.lang=L;try{localStorage.setItem("openclaw2_lang",L);}catch{}const t=i18n[L];if(!t)return;$("top-title").textContent=t.topTitle;$("top-sub").textContent=t.topSub;const heroTitle=$("hero-title");if(heroTitle)heroTitle.textContent=t.heroTitle;$("link-report").textContent=t.linkReport;$("link-report").title=t.linkReport;$("link-stats").textContent=t.linkStats;$("link-stats").title=t.linkStats;$("boot").querySelector(".t").textContent=t.bootTitle;const dv=$("detail-view");if(dv){const sigTitle=$("detail-view-signal-title"),sessTitle=$("detail-view-session-title");if(sigTitle)sigTitle.textContent=t.signalPanels;if(sessTitle)sessTitle.textContent=t.sessionList;const leftBlks=dv.querySelectorAll(".detail-view-left .blk .pt");if(leftBlks[0])leftBlks[0].textContent=t.radar;if(leftBlks[1])leftBlks[1].textContent=t.wordCloud;}const dsTitle=$("data-source-title"),dsDesc=$("data-source-desc");if(dsTitle&&t.dataSourceTitle)dsTitle.textContent=t.dataSourceTitle;if(dsDesc&&t.dataSourceDesc)dsDesc.textContent=t.dataSourceDesc;const bzh=$("btn-lang-zh"),ben=$("btn-lang-en");if(bzh)bzh.classList.toggle("active",L==="zh");if(ben)ben.classList.toggle("active",L==="en");document.documentElement.lang=L==="zh"?"zh-CN":"en";if(typeof window.updateMgmtLabels==="function")window.updateMgmtLabels();if(typeof LiveController!=="undefined")LiveController.updateLabels(L);}
+function applyLang(L){state.lang=L;try{localStorage.setItem("openclaw2_lang",L);}catch{}const t=i18n[L];if(!t)return;$("top-title").textContent=t.topTitle;$("top-sub").textContent=t.topSub;const heroTitle=$("hero-title");if(heroTitle)heroTitle.textContent=t.heroTitle;$("link-report").textContent=t.linkReport;$("link-report").title=t.linkReport;$("link-stats").textContent=t.linkStats;$("link-stats").title=t.linkStats;$("boot").querySelector(".t").textContent=t.bootTitle;const dv=$("detail-view");if(dv){const sigTitle=$("detail-view-signal-title"),sessTitle=$("detail-view-session-title");if(sigTitle)sigTitle.textContent=t.signalPanels;if(sessTitle)sessTitle.textContent=t.sessionList;const leftBlks=dv.querySelectorAll(".detail-view-left .blk .pt");if(leftBlks[0])leftBlks[0].textContent=t.radar;if(leftBlks[1])leftBlks[1].textContent=t.wordCloud;}const dsTitle=$("data-source-title"),dsDesc=$("data-source-desc");if(dsTitle&&t.dataSourceTitle)dsTitle.textContent=t.dataSourceTitle;if(dsDesc&&t.dataSourceDesc)dsDesc.textContent=t.dataSourceDesc;const sg=$("chat-history")&&$("chat-history").querySelector(".msg-sys-group");if(sg&&typeof ClawController!=="undefined"&&ClawController._updateSysGroupHeader)ClawController._updateSysGroupHeader(sg);const bzh=$("btn-lang-zh"),ben=$("btn-lang-en");if(bzh)bzh.classList.toggle("active",L==="zh");if(ben)ben.classList.toggle("active",L==="en");document.documentElement.lang=L==="zh"?"zh-CN":"en";if(typeof window.updateMgmtLabels==="function")window.updateMgmtLabels();if(typeof LiveController!=="undefined")LiveController.updateLabels(L);}
 init().catch(()=>{const L=state.lang;sub.textContent=L==="zh"?"数据离线":"DATA OFFLINE";setStatus(i18n[L].statusFailed);state.metrics=processStats({},L);state.themes=themes(state.metrics,L);mountNav();renderTheme(state.idx);refreshDetails();setTimeout(hideBoot,320);applyLang(L);});
 })();
 </script>
