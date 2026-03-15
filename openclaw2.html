@@ -63,6 +63,105 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.22;ba
 .lang-flag-btn:hover:not(.active){opacity:.9;transform:scale(1.15)}
 .lang-flag-btn:hover.active{border:3px solid var(--green);transform:scale(1.15);box-shadow:0 0 20px rgba(0,255,65,.8),0 0 40px rgba(0,255,65,.4),inset 0 0 25px rgba(0,255,65,.15)}
 @media(max-width:768px){.top-header{padding:8px 12px;flex-direction:column;align-items:flex-start;gap:8px}.top-header-left{width:100%}.top-header-right{width:100%;justify-content:space-between}.top-header-title h1{font-size:18px}.top-header-title p{font-size:8px}.top-header-card{padding:6px 10px}.top-header-card-label{font-size:8px}.top-header-card-value{font-size:10px}}
+/* Command Console (HUD) - 聊天对话框 */
+#command-console{position:fixed;top:var(--top-header-height);right:0;bottom:0;width:380px;z-index:45;display:flex;flex-direction:column;background:rgba(6,8,12,.82);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border:1px solid rgba(0,255,65,.4);border-right:none;border-radius:12px 0 0 12px;box-shadow:0 0 30px rgba(0,255,65,.1),inset 0 0 40px rgba(0,0,0,.2);pointer-events:auto;transition:width .3s ease}
+#command-console .console-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid rgba(0,255,65,.2);font-family:'JetBrains Mono',monospace;flex-shrink:0}
+#command-console .console-title{font-size:10px;color:var(--green);letter-spacing:.2em;display:flex;align-items:center;gap:6px}
+#command-console .console-title::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);flex-shrink:0}
+#status-indicator{padding:3px 8px;font-size:9px;font-weight:700;letter-spacing:.12em;border-radius:4px;border:1px solid transparent}
+#status-indicator.linked{color:var(--green);border-color:rgba(0,255,65,.3);background:rgba(0,255,65,.08)}
+#status-indicator.offline{color:var(--red);border-color:rgba(230,57,70,.3);background:rgba(230,57,70,.08);animation:blink 1.5s infinite}
+#status-indicator.connecting{color:#ffd700;border-color:rgba(255,215,0,.3);background:rgba(255,215,0,.08)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+/* Token 输入区 */
+#token-panel{padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.08);background:rgba(0,0,0,.2);flex-shrink:0;display:none;flex-direction:column;gap:6px}
+#token-panel.show{display:flex}
+#token-panel label{font-size:9px;color:var(--dim);letter-spacing:.1em;text-transform:uppercase}
+#token-input-row{display:flex;gap:6px}
+#token-input{flex:1;min-width:0;padding:7px 10px;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--txt);background:rgba(0,0,0,.4);border:1px solid rgba(0,255,65,.3);border-radius:5px;outline:none}
+#token-input::placeholder{color:rgba(143,165,190,.5)}
+#token-input:focus{border-color:var(--green);box-shadow:0 0 8px rgba(0,255,65,.15)}
+#btn-token-save{padding:7px 12px;font-size:9px;font-weight:700;color:var(--green);background:rgba(0,255,65,.1);border:1px solid rgba(0,255,65,.3);border-radius:5px;cursor:pointer;white-space:nowrap;letter-spacing:.05em;transition:.2s}
+#btn-token-save:hover{background:rgba(0,255,65,.2);border-color:var(--green)}
+#token-hint{font-size:9px;color:var(--dim);line-height:1.4}
+#token-hint a{color:var(--green);text-decoration:none}
+#token-hint a:hover{text-decoration:underline}
+/* 带 token 的对话链接区：便于分析页用户复制后自动登录 */
+#token-link-box{margin-top:8px;padding:8px 10px;background:rgba(0,255,65,.06);border:1px solid rgba(0,255,65,.25);border-radius:6px;display:none;flex-direction:column;gap:6px}
+#token-link-box.show{display:flex}
+#token-link-box .label{font-size:9px;color:var(--green);letter-spacing:.08em;text-transform:uppercase}
+#token-link-row{display:flex;gap:6px;align-items:center}
+#token-link-url{flex:1;min-width:0;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--dim);background:rgba(0,0,0,.3);padding:6px 8px;border-radius:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#btn-copy-link{padding:5px 10px;font-size:9px;font-weight:700;color:var(--green);background:rgba(0,255,65,.12);border:1px solid rgba(0,255,65,.35);border-radius:4px;cursor:pointer;white-space:nowrap}
+#btn-copy-link:hover{background:rgba(0,255,65,.2)}
+#btn-copy-link.copied{color:#fff;background:rgba(0,255,65,.5)}
+#btn-fetch-dialogue-link{padding:6px 12px;font-size:10px;font-weight:700;color:var(--green);background:rgba(0,255,65,.1);border:1px solid rgba(0,255,65,.35);border-radius:5px;cursor:pointer;letter-spacing:.05em}
+#btn-fetch-dialogue-link:hover{background:rgba(0,255,65,.2)}
+#btn-fetch-dialogue-link.loading{opacity:.7;cursor:wait}
+.token-fetch-status{font-size:9px;color:var(--dim)}
+.token-fetch-status.err{color:var(--red)}
+#btn-open-dialogue{padding:5px 10px;font-size:9px;font-weight:700;color:var(--green);background:rgba(0,255,65,.12);border:1px solid rgba(0,255,65,.35);border-radius:4px;cursor:pointer;white-space:nowrap}
+#btn-open-dialogue:hover{background:rgba(0,255,65,.2)}
+/* 消息历史区 */
+#chat-history{flex:1;overflow-y:auto;padding:10px 12px;font-size:12px;color:var(--dim);line-height:1.55;scroll-behavior:smooth}
+#chat-history::-webkit-scrollbar{width:3px}
+#chat-history::-webkit-scrollbar-track{background:transparent}
+#chat-history::-webkit-scrollbar-thumb{background:rgba(0,255,65,.2);border-radius:99px}
+#chat-history .msg{display:flex;flex-direction:column;gap:3px;margin-bottom:12px;animation:fadeUp .25s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+#chat-history .msg-role{font-size:9px;letter-spacing:.1em;text-transform:uppercase;opacity:.7;font-family:'JetBrains Mono',monospace}
+#chat-history .msg-body{word-break:break-word;white-space:pre-wrap;line-height:1.6}
+#chat-history .msg.user .msg-role{color:rgba(0,255,65,.8)}
+#chat-history .msg.user .msg-body{color:rgba(0,255,65,.95);background:rgba(0,255,65,.06);border-left:2px solid rgba(0,255,65,.4);padding:6px 10px;border-radius:0 6px 6px 0}
+#chat-history .msg.ai .msg-role{color:var(--dim)}
+#chat-history .msg.ai .msg-body{color:#d0dcea;background:rgba(255,255,255,.03);border-left:2px solid rgba(255,255,255,.15);padding:6px 10px;border-radius:0 6px 6px 0}
+#chat-history .msg.sys .msg-body{font-size:10px;color:rgba(143,165,190,.6);font-family:'JetBrains Mono',monospace;font-style:italic}
+#chat-history .msg.err .msg-body{color:rgba(230,57,70,.9);font-size:10px;font-family:'JetBrains Mono',monospace}
+#chat-history .msg.ai .msg-body.streaming::after{content:"▍";animation:cursor-blink .7s infinite;color:var(--green)}
+@keyframes cursor-blink{0%,100%{opacity:1}50%{opacity:0}}
+/* AI 核心回复：摘要 + 展开/复制，便于精准对话 */
+#chat-history .msg.ai .msg-core{font-weight:600;color:rgba(255,255,255,.95);margin-bottom:6px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.08);line-height:1.5}
+#chat-history .msg.ai .msg-body.has-core .msg-full{display:none}
+#chat-history .msg.ai .msg-body.has-core.expanded .msg-core{border-bottom:none;margin-bottom:4px}
+#chat-history .msg.ai .msg-body.has-core.expanded .msg-full{display:block}
+#chat-history .msg.ai .msg-actions{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+#chat-history .msg.ai .msg-actions button{font-size:9px;padding:3px 8px;border-radius:4px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:var(--dim);cursor:pointer;font-family:'JetBrains Mono',monospace}
+#chat-history .msg.ai .msg-actions button:hover{color:var(--green);border-color:rgba(0,255,65,.4)}
+/* 输入区 */
+#command-console .console-input-area{display:flex;flex-direction:column;gap:0;border-top:1px solid rgba(0,255,65,.15);flex-shrink:0}
+#console-toolbar{display:flex;align-items:center;gap:6px;padding:6px 12px;background:rgba(0,0,0,.2)}
+#btn-toggle-token{font-size:9px;color:var(--dim);background:transparent;border:1px solid rgba(255,255,255,.12);border-radius:4px;padding:3px 8px;cursor:pointer;letter-spacing:.06em;transition:.2s;font-family:'JetBrains Mono',monospace}
+#btn-toggle-token:hover{color:var(--green);border-color:rgba(0,255,65,.3)}
+#btn-clear{font-size:9px;color:var(--dim);background:transparent;border:1px solid rgba(255,255,255,.12);border-radius:4px;padding:3px 8px;cursor:pointer;letter-spacing:.06em;transition:.2s;font-family:'JetBrains Mono',monospace}
+#btn-clear:hover{color:var(--red);border-color:rgba(230,57,70,.3)}
+.toolbar-spacer{flex:1}
+#btn-reconnect{font-size:9px;color:var(--dim);background:transparent;border:1px solid rgba(255,255,255,.12);border-radius:4px;padding:3px 8px;cursor:pointer;letter-spacing:.06em;transition:.2s;font-family:'JetBrains Mono',monospace}
+#btn-reconnect:hover{color:#ffd700;border-color:rgba(255,215,0,.3)}
+#command-console .console-input-row{display:flex;gap:8px;padding:10px 12px;background:rgba(0,0,0,.18)}
+#command-input{flex:1;min-width:0;padding:10px 12px;font-size:12px;font-family:'JetBrains Mono',monospace;color:var(--txt);background:transparent;border:1px solid rgba(0,255,65,.28);border-radius:6px;outline:none;resize:none;height:42px;max-height:120px;line-height:1.4;transition:border-color .2s,box-shadow .2s}
+#command-input::placeholder{color:var(--dim)}
+#command-input:focus{border-color:var(--green);box-shadow:0 0 10px rgba(0,255,65,.15)}
+#command-input:disabled{opacity:.4;cursor:not-allowed}
+#btn-send{padding:10px 14px;font-size:11px;font-weight:700;letter-spacing:.08em;color:#fff;background:linear-gradient(135deg,rgba(230,57,70,.9),rgba(185,29,29,.9));border:1px solid rgba(230,57,70,.5);border-radius:6px;cursor:pointer;box-shadow:0 0 12px rgba(230,57,70,.3);transition:transform .15s,box-shadow .2s,opacity .2s;align-self:flex-end;height:42px}
+#btn-send:hover{transform:scale(1.04);box-shadow:0 0 20px rgba(230,57,70,.5)}
+#btn-send:active{transform:scale(.97)}
+#btn-send:disabled{opacity:.35;cursor:not-allowed;transform:none}
+@media(max-width:900px){#command-console{width:320px}}
+@media(max-width:700px){#command-console{width:100%;border-radius:0;border-left:none;border-top:1px solid rgba(0,255,65,.4);top:auto;height:340px}}
+/* API 嵌入面板（内联于聊天控制台） */
+#api-panel{padding:8px 12px;border-bottom:1px solid rgba(255,215,0,.2);background:rgba(0,0,0,.25);flex-shrink:0;display:none;flex-direction:column;gap:6px}
+#api-panel.show{display:flex}
+#api-panel-title{font-size:9px;color:#ffd700;letter-spacing:.1em;text-transform:uppercase;display:flex;align-items:center;justify-content:space-between}
+#api-panel-subtitle{font-size:9px;color:var(--dim);letter-spacing:.04em;text-transform:none;opacity:.7}
+#api-btns{display:flex;flex-wrap:wrap;gap:4px}
+.api-btn{font-size:9px;font-family:'JetBrains Mono',monospace;color:var(--dim);background:rgba(255,215,0,.05);border:1px solid rgba(255,215,0,.25);border-radius:4px;padding:4px 9px;cursor:pointer;letter-spacing:.04em;transition:.2s}
+.api-btn:hover{color:#ffd700;border-color:rgba(255,215,0,.6);background:rgba(255,215,0,.1)}
+.api-btn:active{transform:scale(.96)}
+.api-btn.loading{opacity:.45;pointer-events:none}
+#api-result{font-size:9px;font-family:'JetBrains Mono',monospace;color:var(--dim);background:rgba(0,0,0,.32);border:1px solid rgba(255,255,255,.1);border-radius:4px;padding:6px 8px;max-height:90px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;display:none;line-height:1.5}
+#api-result.show{display:block}
+#api-result.ok{border-color:rgba(0,255,65,.3);color:rgba(0,255,65,.9)}
+#api-result.err{border-color:rgba(230,57,70,.3);color:rgba(230,57,70,.9)}
 </style>
 </head>
 <body>
@@ -106,8 +205,8 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.22;ba
 <path d="M100,260 C100,150 160,100 250,100 C340,100 400,150 400,260 C400,370 340,440 250,440 C160,440 100,370 100,260 Z" fill="url(#g)"/>
 <path d="M110,245 C70,245 45,275 45,305 C45,335 75,355 115,350 C125,320 120,280 110,245 Z" fill="#E63946"/>
 <path d="M390,245 C430,245 455,275 455,305 C455,335 425,355 385,350 C375,320 380,280 390,245 Z" fill="#E63946"/>
-<g><circle cx="195" cy="225" r="30" fill="#000"/><circle id="pl" cx="195" cy="225" r="11" fill="#00ff41" filter="blur(0.7px)"/><circle cx="195" cy="225" r="4" fill="#fff" opacity="0.8"/></g>
-<g><circle cx="305" cy="225" r="30" fill="#000"/><circle id="pr" cx="305" cy="225" r="11" fill="#00ff41" filter="blur(0.7px)"/><circle cx="305" cy="225" r="4" fill="#fff" opacity="0.8"/></g>
+<g><circle cx="195" cy="225" r="30" fill="#000"/><circle id="pupil-l" cx="195" cy="225" r="11" fill="#00ff41" filter="blur(0.7px)"/><circle cx="195" cy="225" r="4" fill="#fff" opacity="0.8"/></g>
+<g><circle cx="305" cy="225" r="30" fill="#000"/><circle id="pupil-r" cx="305" cy="225" r="11" fill="#00ff41" filter="blur(0.7px)"/><circle cx="305" cy="225" r="4" fill="#fff" opacity="0.8"/></g>
 </svg></div></section></main>
 <button class="view" id="view" type="button">[VIEW_DETAILS]</button>
 <div class="detail" id="detail" aria-hidden="true"><div class="mask" id="mask"></div><button class="close" id="close" type="button">CLOSE</button>
@@ -127,9 +226,62 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.22;ba
     <div class="card-modal-section"><h4 id="card-help-trait-label">主人特点</h4><p id="card-help-trait"></p></div>
   </div>
 </div>
+<div id="command-console">
+  <div class="console-header">
+    <span class="console-title">OPENCLAW CHAT</span>
+    <span id="status-indicator" class="offline" aria-live="polite">OFFLINE</span>
+  </div>
+  <div id="token-panel">
+    <label>GATEWAY TOKEN（从令牌化URL中获取）</label>
+    <div id="token-input-row">
+      <input type="password" id="token-input" placeholder="粘贴 token 或留空（本地模式）" autocomplete="off" />
+      <button type="button" id="btn-token-save">连接</button>
+    </div>
+    <div id="token-hint">后台通过<strong>读取本地文件</strong>（如 <code>.openclaw/gateway-token</code>、<code>OPENCLAW_TOKEN_FILE</code>）或<strong>执行 openclaw dashboard --no-open</strong> 解析输出中的 token，组合成带 token 的对话页 URL。点击「获取对话链接」后即可复制或直接打开，实现自动登录。<br>也可手动粘贴 token 到上方输入框后点击连接。</div>
+    <div id="token-fetch-row" style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <button type="button" id="btn-fetch-dialogue-link">获取对话链接</button>
+      <span id="token-fetch-status" class="token-fetch-status"></span>
+    </div>
+    <div id="token-link-box" aria-label="带 Token 的对话链接">
+      <span class="label">自动登录对话链接（由本地文件或 openclaw dashboard --no-open 获取）</span>
+      <div id="token-link-row">
+        <input type="text" id="token-link-url" readonly aria-label="对话链接" />
+        <button type="button" id="btn-copy-link">复制链接</button>
+        <button type="button" id="btn-open-dialogue">打开对话</button>
+      </div>
+    </div>
+  </div>
+  <!-- HTTP API 控制面板 -->
+  <div id="api-panel">
+    <div id="api-panel-title">API 控制面板 <span id="api-panel-subtitle">ws://127.0.0.1:18789</span></div>
+    <div id="api-btns">
+      <button type="button" class="api-btn" data-action="status">状态</button>
+      <button type="button" class="api-btn" data-action="health">健康</button>
+      <button type="button" class="api-btn" data-action="sessions">会话</button>
+      <button type="button" class="api-btn" data-action="heartbeat">心跳</button>
+      <button type="button" class="api-btn" data-action="models">模型</button>
+      <button type="button" class="api-btn" data-action="config">配置</button>
+    </div>
+    <div id="api-result"></div>
+  </div>
+  <div id="chat-history" role="log" aria-label="Chat history"></div>
+  <div class="console-input-area">
+    <div id="console-toolbar">
+      <button type="button" id="btn-toggle-token">🔑 TOKEN</button>
+      <button type="button" id="btn-clear">✕ 清空</button>
+      <button type="button" id="btn-toggle-api">⚡ API</button>
+      <span class="toolbar-spacer"></span>
+      <button type="button" id="btn-reconnect">↺ 重连</button>
+    </div>
+    <div class="console-input-row">
+      <textarea id="command-input" placeholder="输入消息，Enter 发送，Shift+Enter 换行" autocomplete="off" aria-label="Chat input" rows="1"></textarea>
+      <button type="button" id="btn-send" aria-label="Send">发送</button>
+    </div>
+  </div>
+</div>
 <script>
 (()=>{
-const $=id=>document.getElementById(id),orbit=$("orbit"),sub=$("sub"),nav=$("nav"),time=$("time"),ax=$("ax"),ay=$("ay"),cl=$("cl"),pl=$("pl"),pr=$("pr"),oc=$("oc"),reactor=$("reactor"),view=$("view"),detail=$("detail"),mask=$("mask"),closeBtn=$("close"),radar=$("radar"),wc=$("wc"),list=$("list"),boot=$("boot"),status=$("status");
+const $=id=>document.getElementById(id),orbit=$("orbit"),sub=$("sub"),nav=$("nav"),time=$("time"),ax=$("ax"),ay=$("ay"),cl=$("cl"),pl=$("pupil-l"),pr=$("pupil-r"),oc=$("oc"),reactor=$("reactor"),view=$("view"),detail=$("detail"),mask=$("mask"),closeBtn=$("close"),radar=$("radar"),wc=$("wc"),list=$("list"),boot=$("boot"),status=$("status");
 const state={themes:[],payload:{},metrics:null,idx:0,anim:false,lastWheel:0,dir:1,open:false,lang:(localStorage.getItem("openclaw2_lang")||"zh").replace(/^en$/i,"en").replace(/^zh$/i,"zh")||"zh"};
 const i18n={
   zh:{
@@ -233,8 +385,25 @@ function getApiEndpoint(){const e=(window.__API_ENDPOINT__||window.API_ENDPOINT|
 const base=u=>u?u.endsWith("/")?u:u+"/":"";
 async function fetchJson(url,t=9000){const c=new AbortController(),tm=setTimeout(()=>c.abort(),t);try{const r=await fetch(url,{method:"GET",mode:"cors",cache:"no-store",headers:{"Content-Type":"application/json"},signal:c.signal});if(!r.ok)return null;return await r.json();}catch{return null}finally{clearTimeout(tm)}}
 function pickPayload(raw){if(!raw||typeof raw!=="object")return null;if(raw.openclawPortrait||raw.openclawSessionsSummary)return raw;for(const c of [raw.data,raw.payload,raw.result,raw.analysis,raw.latest]){if(c&&typeof c==="object"&&(c.openclawPortrait||c.openclawSessionsSummary))return c;}return null;}
-function localPayload(){for(const [s,k] of [[sessionStorage,"openclaw_analysis_data"],[localStorage,"openclaw_analysis_data"],[localStorage,"last_analysis_data"]]){try{const r=s.getItem(k);if(!r)continue;const d=JSON.parse(r),p=pickPayload(d);if(p)return p;if(d&&(d.stats||d.statistics))return {legacyStats:d.stats||d.statistics||{},updatedAt:d.updatedAt||d.createdAt||""};}catch{}}return {};}
-async function workerPayload(){const b=base(getApiEndpoint());for(const p of ["api/openclaw/latest","api/openclaw/latest_analysis","api/analysis/latest","api/latest_analysis","api/openclaw/portrait"]){const j=await fetchJson(b+p,7500),d=pickPayload(j);if(d)return d;}return null;}
+function localPayload(){
+  for(const [s,k] of [[sessionStorage,"openclaw_analysis_data"],[localStorage,"openclaw_analysis_data"],[localStorage,"last_analysis_data"]]){
+    try{const r=s.getItem(k);if(!r)continue;const d=JSON.parse(r),p=pickPayload(d);if(p)return p;if(d&&(d.stats||d.statistics))return {legacyStats:d.stats||d.statistics||{},updatedAt:d.updatedAt||d.createdAt||""};}catch{}
+  }
+  try{
+    const hist=localStorage.getItem("cursor_clinical_history");
+    if(hist){const h=JSON.parse(hist);const d=h&&h.analysisData?h.analysisData:h;const p=pickPayload(d);if(p)return p;}
+  }catch{}
+  return {};
+}
+async function workerPayload(){
+  const paths=["api/openclaw/latest","api/openclaw/latest_analysis","api/analysis/latest","api/latest_analysis","api/openclaw/portrait"];
+  const origins=[base(window.location.origin),base(getApiEndpoint())];
+  for(const b of origins){
+    if(!b)continue;
+    for(const p of paths){const j=await fetchJson(b+p,7500),d=pickPayload(j);if(d)return d;}
+  }
+  return null;
+}
 function score(p){if(!p||typeof p!=="object")return 0;const po=p.openclawPortrait||{},se=p.openclawSessionsSummary||{};let s=0;if(Object.keys(po).length)s+=2;if(Object.keys(se).length)s+=2;if(N(po?.dimensions?.consumptionCost?.totalTokens,0)>0)s+=2;if(N(se?.token?.totalTokensSum,0)>0)s+=2;if(N(se?.sessionCount,0)>0)s++;if(Array.isArray(se?.skills)&&se.skills.length)s++;return s;}
 function processStats(payload,L){
 L=L||state.lang;
@@ -242,7 +411,14 @@ const portrait=payload.openclawPortrait||{},dims=portrait.dimensions||{},comp=po
 const consumption=dims.consumptionCost||{},modelDim=dims.modelPreference||{},toolHeat=dims.toolSkillHeat||{},habit=dims.taskHabit||{},health=dims.stabilityHealth||{};
 const tokenS=sess.token||{},cacheS=sess.cache||{},modelS=sess.model||{},channelS=sess.channel||{},toolsS=sess.tools||{},heartbeatS=sess.heartbeat||{},statusS=sess.status||{};
 const topSkills=Array.isArray(habit.topSkills)?habit.topSkills:[],skillsS=Array.isArray(sess.skills)?sess.skills:(Array.isArray(legacy.skills)?legacy.skills:[]);
-const pTok=N(consumption.totalTokens,0),inTok=N(tokenS.inputTokensSum,0),outTok=N(tokenS.outputTokensSum,0),sumTok=N(tokenS.totalTokensSum,0),legacyTok=N(legacy.totalTokens,0)||N(legacy.totalChars,0);
+const usageLegacy=legacy.usage||legacy.tokenUsage||{};
+let inTok=N(tokenS.inputTokensSum,0),outTok=N(tokenS.outputTokensSum,0),sumTok=N(tokenS.totalTokensSum,0);
+if(inTok===0&&outTok===0&&sumTok===0){
+  inTok=N(usageLegacy.promptTokens,0)||N(usageLegacy.inputTokens,0);
+  outTok=N(usageLegacy.completionTokens,0)||N(usageLegacy.outputTokens,0);
+  sumTok=N(usageLegacy.totalTokens,0)||(inTok+outTok)||N(legacy.totalTokens,0)||N(legacy.totalChars,0);
+}
+const pTok=N(consumption.totalTokens,0),legacyTok=N(legacy.totalTokens,0)||N(legacy.totalChars,0);
 const totalTok=pTok>0?pTok:Math.max(sumTok,inTok+outTok,legacyTok);
 const cRead=N(cacheS.cacheReadSum,0),cWrite=N(cacheS.cacheWriteSum,0),cacheHit=(N(consumption.cacheHitRate,0)>0?N(consumption.cacheHitRate,0)*100:(inTok>0?(cRead/inTok)*100:N(cacheS.hitRate,0)*100));
 const cost=N(consumption.totalCostUSD,0)>0?N(consumption.totalCostUSD,0):N(sess?.cost?.totalCostUsd,0);
@@ -287,6 +463,615 @@ function pose(i,t){const o=orbitR(),a=Math.PI*2*i/Math.max(t,1)-Math.PI/2;return
 function cardNode(data,i,t,themeIdx){const c=document.createElement('article');c.className='card';c.setAttribute('role','button');c.setAttribute('tabindex','0');c.dataset.theme=String(themeIdx);c.dataset.card=String(i);c.innerHTML=`<h3>${data.t}</h3><div class="v">${data.v}</div><p class="d">${data.d}</p>`;const p=pose(i,t);c.dataset.x=String(p.x);c.dataset.y=String(p.y);c.style.opacity='0';c.style.transform=`translate3d(${state.dir*10}px,0,0) scale(.35)`;return c;}
 function openCardModal(themeIdx,cardIdx){const L=state.lang;const help=i18n[L].cardHelp;const labels=i18n[L].cardModalLabels;if(!help||!help[themeIdx]||!help[themeIdx][cardIdx])return;const h=help[themeIdx][cardIdx];const th=state.themes[themeIdx];const cardTitle=th&&th.c&&th.c[cardIdx]?th.c[cardIdx].t:"";const modal=$("card-modal");if(!modal)return;modal.querySelector("#card-modal-title").textContent=cardTitle;$("card-help-source").textContent=h.source||"--";$("card-help-analysis").textContent=h.analysis||"--";$("card-help-calc").textContent=h.calculation||"--";$("card-help-trait").textContent=h.ownerTrait||"--";$("card-help-source-label").textContent=labels.source;$("card-help-analysis-label").textContent=labels.analysis;$("card-help-calc-label").textContent=labels.calculation;$("card-help-trait-label").textContent=labels.ownerTrait;modal.classList.add("open");modal.setAttribute("aria-hidden","false");}
 function closeCardModal(){const modal=$("card-modal");if(modal){modal.classList.remove("open");modal.setAttribute("aria-hidden","true");}}
+/* 瞳孔 #pupil-l / #pupil-r 闪烁 r 11->15->11，发送/回车时触发 */
+function blinkEyes(){if(!pl||!pr)return;const open=()=>{pl.setAttribute('r','15');pr.setAttribute('r','15');};const close=()=>{pl.setAttribute('r','11');pr.setAttribute('r','11');};open();setTimeout(close,100);setTimeout(()=>{open();setTimeout(close,100);},200);}
+/* ===== ClawController: 完整聊天控制器 ===== */
+const ClawController={
+  ws:null,
+  msgId:0,
+  authenticated:false,
+  handshakeTimeout:null,
+  retryCount:0,
+  maxRetry:5,
+  retryTimer:null,
+  currentAiEl:null,
+  currentMsgId:null,
+  challengeReceived:false,
+  _pendingNonce:'',
+  _instanceId:null,
+  _connectSending:false,
+  /* 未认证消息限流：最多显示3条，之后折叠 */
+  unauthMsgCount:0,
+  maxUnauthDisplay:3,
+
+  /* ───── 获取 token ───── */
+  getSavedToken(){
+    const keys=['openclaw_gatewayToken','openclaw_token','maca_token'];
+    for(const k of keys){
+      try{const t=localStorage.getItem(k);if(t&&t.trim())return t.trim();}catch{}
+    }
+    return null;
+  },
+
+  /* ───── UI 辅助 ───── */
+  /* 从 AI 正文中提取「核心一句」：首段或前 200 字，用于精准对话 */
+  /* 流式结束后将 AI 气泡改为「核心摘要 + 展开全文」结构 */
+  _finalizeAiMsg(bodyEl){
+    if(!bodyEl||bodyEl.classList.contains('has-core'))return;
+    const text=(bodyEl.textContent||'').trim();
+    if(!text)return;
+    const {core,full}=this._coreSummary(text);
+    if(!full){bodyEl.textContent=text;return;}
+    bodyEl.classList.add('has-core');
+    bodyEl.innerHTML='<div class="msg-core"></div><div class="msg-full"></div>';
+    bodyEl.querySelector('.msg-core').textContent=core;
+    bodyEl.querySelector('.msg-full').textContent=full;
+    const actions=document.createElement('div');
+    actions.className='msg-actions';
+    const btnExpand=document.createElement('button');
+    btnExpand.type='button';
+    btnExpand.textContent='展开全文';
+    btnExpand.addEventListener('click',()=>{bodyEl.classList.toggle('expanded');btnExpand.textContent=bodyEl.classList.contains('expanded')?'收起':'展开全文';});
+    const btnCopy=document.createElement('button');
+    btnCopy.type='button';
+    btnCopy.textContent='复制回复';
+    btnCopy.addEventListener('click',()=>{
+      const fullText=bodyEl.querySelector('.msg-full').textContent||bodyEl.querySelector('.msg-core').textContent;
+      navigator.clipboard&&navigator.clipboard.writeText(fullText).then(()=>{btnCopy.textContent='已复制';setTimeout(()=>btnCopy.textContent='复制回复',1500);}).catch(()=>{});
+    });
+    actions.appendChild(btnExpand);actions.appendChild(btnCopy);
+    bodyEl.appendChild(actions);
+  },
+  _coreSummary(text){
+    const t=(text||'').trim();
+    if(!t)return {core:'',full:''};
+    const maxCore=200;
+    const firstLineEnd=t.indexOf('\n');
+    if(firstLineEnd===-1)return t.length<=maxCore?{core:t,full:''}:{core:t.slice(0,maxCore)+'…',full:t};
+    const firstLine=t.slice(0,firstLineEnd).trim();
+    if(firstLine.length<=maxCore&&t.length<=maxCore+50)return {core:firstLine,full:''};
+    if(firstLine.length<=maxCore)return {core:firstLine,full:t};
+    return {core:firstLine.slice(0,maxCore)+'…',full:t};
+  },
+  appendMsg(role, text, streaming=false){
+    const el=$("chat-history");if(!el)return null;
+    const wrap=document.createElement('div');
+    wrap.className='msg '+role;
+    const roleEl=document.createElement('div');
+    roleEl.className='msg-role';
+    roleEl.textContent=role==='user'?'You':role==='ai'?'OpenClaw':role==='err'?'ERROR':'System';
+    const bodyEl=document.createElement('div');
+    bodyEl.className='msg-body'+(streaming?' streaming':'');
+    if(role==='ai'&&text&&!streaming){
+      const {core,full}=this._coreSummary(text);
+      if(full){
+        bodyEl.classList.add('has-core');
+        bodyEl.innerHTML='<div class="msg-core"></div><div class="msg-full"></div>';
+        bodyEl.querySelector('.msg-core').textContent=core;
+        bodyEl.querySelector('.msg-full').textContent=full;
+        const actions=document.createElement('div');
+        actions.className='msg-actions';
+        const btnExpand=document.createElement('button');
+        btnExpand.type='button';
+        btnExpand.textContent='展开全文';
+        btnExpand.addEventListener('click',()=>{bodyEl.classList.toggle('expanded');btnExpand.textContent=bodyEl.classList.contains('expanded')?'收起':'展开全文';});
+        const btnCopy=document.createElement('button');
+        btnCopy.type='button';
+        btnCopy.textContent='复制回复';
+        btnCopy.addEventListener('click',()=>{
+          const fullText=bodyEl.querySelector('.msg-full').textContent||bodyEl.querySelector('.msg-core').textContent;
+          navigator.clipboard&&navigator.clipboard.writeText(fullText).then(()=>{btnCopy.textContent='已复制';setTimeout(()=>btnCopy.textContent='复制回复',1500);}).catch(()=>{});
+        });
+        actions.appendChild(btnExpand);actions.appendChild(btnCopy);
+        bodyEl.appendChild(actions);
+      }else{
+        bodyEl.textContent=text;
+      }
+    }else{
+      bodyEl.textContent=text||'';
+    }
+    wrap.appendChild(roleEl);
+    wrap.appendChild(bodyEl);
+    el.appendChild(wrap);
+    el.scrollTop=el.scrollHeight;
+    return bodyEl;
+  },
+  setStatus(s){
+    const el=$("status-indicator");if(!el)return;
+    const map={linked:['LINKED','linked'],offline:['OFFLINE','offline'],connecting:['CONNECTING…','connecting']};
+    const [txt,cls]=map[s]||['OFFLINE','offline'];
+    el.textContent=txt;
+    el.className=cls;
+  },
+  clearHistory(){const el=$("chat-history");if(el){el.innerHTML='';this.unauthMsgCount=0;}},
+  setInputEnabled(on){
+    const inp=$("command-input"),btn=$("btn-send");
+    if(inp)inp.disabled=!on;
+    if(btn)btn.disabled=!on;
+  },
+
+  /* ───── 设备身份（Ed25519 via crypto.subtle，localStorage 持久化） ───── */
+  _DEVICE_KEY:'openclaw-device-identity-v1',
+
+  /* 生成 UUID（安全/非安全均可） */
+  _uuid(){
+    try{if(crypto&&crypto.randomUUID)return crypto.randomUUID();}catch{}
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{
+      const r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16);
+    });
+  },
+
+  /* Uint8Array → base64url */
+  _b64u(buf){
+    return btoa(String.fromCharCode(...new Uint8Array(buf)))
+      .replaceAll('+','-').replaceAll('/','_').replaceAll('=','');
+  },
+  /* base64url → Uint8Array */
+  _fromb64u(s){
+    const b=s.replaceAll('-','+').replaceAll('_','/');
+    const pad=b+'='.repeat((4-b.length%4)%4);
+    return Uint8Array.from(atob(pad),c=>c.charCodeAt(0));
+  },
+  /* Uint8Array → hex */
+  _hex(buf){return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');},
+
+  /* 获取或创建设备密钥对（Ed25519，持久化到 localStorage） */
+  async _getOrCreateDeviceIdentity(){
+    const subtle=crypto&&crypto.subtle;
+    if(!subtle)return null;
+    /* 尝试读取已存身份 */
+    try{
+      const raw=localStorage.getItem(this._DEVICE_KEY);
+      if(raw){
+        const d=JSON.parse(raw);
+        if(d&&d.version===1&&d.deviceId&&d.publicKeyJwk&&d.privateKeyJwk){
+          const pub=await subtle.importKey('jwk',d.publicKeyJwk,{name:'Ed25519'},true,['verify']);
+          const priv=await subtle.importKey('jwk',d.privateKeyJwk,{name:'Ed25519'},true,['sign']);
+          return{deviceId:d.deviceId,publicKey:pub,privateKey:priv};
+        }
+      }
+    }catch{}
+    /* 创建新密钥对 */
+    try{
+      const kp=await subtle.generateKey({name:'Ed25519'},true,['sign','verify']);
+      const pubJwk=await subtle.exportKey('jwk',kp.publicKey);
+      const privJwk=await subtle.exportKey('jwk',kp.privateKey);
+      /* deviceId = SHA-256(raw public key bytes) as hex，与官方一致 */
+      const pubRaw=await subtle.exportKey('raw',kp.publicKey);
+      const hashBuf=await subtle.digest('SHA-256',pubRaw);
+      const deviceId=this._hex(hashBuf);
+      localStorage.setItem(this._DEVICE_KEY,JSON.stringify({
+        version:1,deviceId,publicKeyJwk:pubJwk,privateKeyJwk:privJwk,
+        createdAtMs:Date.now()
+      }));
+      return{deviceId,publicKey:kp.publicKey,privateKey:kp.privateKey};
+    }catch(e){
+      console.warn('[ClawCtrl] Ed25519 key generation failed:',e);
+      return null;
+    }
+  },
+
+  /* 构建签名载荷（v2 格式，与官方完全一致）并签名 */
+  async _signDevice(identity,nonce,token,role,scopes){
+    const subtle=crypto.subtle;
+    const signedAtMs=Date.now();
+    /* 导出 public key bytes → base64url（作为 publicKey 字段） */
+    const pubRaw=await subtle.exportKey('raw',identity.publicKey);
+    const publicKeyB64u=this._b64u(pubRaw);
+    /* 签名载荷：v2|deviceId|clientId|clientMode|role|scopes|signedAtMs|token|nonce */
+    const payload=[
+      'v2',
+      identity.deviceId,
+      'openclaw-control-ui',  /* clientId */
+      'webchat',              /* clientMode */
+      role,
+      scopes.join(','),
+      String(signedAtMs),
+      token||'',
+      nonce||''
+    ].join('|');
+    const msgBuf=new TextEncoder().encode(payload);
+    const sigBuf=await subtle.sign({name:'Ed25519'},identity.privateKey,msgBuf);
+    return{
+      id:identity.deviceId,
+      publicKey:publicKeyB64u,
+      signature:this._b64u(sigBuf),
+      signedAt:signedAtMs,
+      nonce:nonce||''
+    };
+  },
+
+  /* ───── 发送 connect 请求（完整设备签名，与官方协议完全一致） ───── */
+  async sendConnectRequest(){
+    /* 防重入 */
+    if(this._connectSending)return;
+    this._connectSending=true;
+    if(!this._instanceId)this._instanceId=this._uuid();
+
+    const savedToken=this.getSavedToken();
+
+    /* 使用 "webchat" 客户端 id（无需设备签名），通过 gateway token 认证 */
+    const params={
+      minProtocol:3,
+      maxProtocol:3,
+      client:{
+        id:'webchat',
+        version:'dev',
+        platform:(typeof navigator!=='undefined'&&navigator.platform)||'web',
+        mode:'webchat',
+        instanceId:this._instanceId
+      },
+      role:'operator',
+      scopes:['operator.admin','operator.approvals','operator.pairing'],
+      caps:[],
+      userAgent:(typeof navigator!=='undefined'&&navigator.userAgent)||'',
+      locale:(typeof navigator!=='undefined'&&navigator.language)||'zh-CN'
+    };
+    if(savedToken)params.auth={token:savedToken};
+
+    const connectMsg={type:'req',id:'connect-'+(++this.msgId),method:'connect',params};
+    console.log('[ClawCtrl] sendConnectRequest token=',savedToken?savedToken.substring(0,8)+'…':'none');
+    try{
+      this.ws.send(JSON.stringify(connectMsg));
+      this.appendMsg('sys','发送认证请求 (token: '+(savedToken?savedToken.substring(0,8)+'…':'无)'));
+    }catch(e){
+      this.appendMsg('err','发送认证请求失败: '+e.message);
+    }finally{
+      this._connectSending=false;
+    }
+  },
+
+  /* ───── 认证握手处理 ───── */
+  handleHandshake(msg){
+    const p=msg.payload||msg.params||msg.result||{};
+    const ev=msg.event||msg.type||msg.method||'';
+
+    /* 1. connect.challenge → 收到挑战，回复 connect */
+    if(ev==='connect.challenge'){
+      clearTimeout(this.handshakeTimeout);
+      this.challengeReceived=true;clearTimeout(this._challengeTimeout);
+      const nonce=p.nonce||'';
+      this._pendingNonce=nonce;  /* 保存 nonce 供签名使用 */
+      this._connectSending=false; /* 重置防重入标志，允许本次发送 */
+      this.appendMsg('sys','收到挑战 (nonce: '+nonce.substring(0,8)+(nonce.length>8?'…':'')+')');
+      this.sendConnectRequest().catch(e=>this.appendMsg('err','认证发送失败: '+e.message));
+      return;
+    }
+
+    /* 2. JSON-RPC connect 响应（id 以 connect- 开头）*/
+    if(typeof msg.id==='string'&&msg.id.startsWith('connect-')){
+      /* 兼容两种格式：
+         1) {error: {...}}
+         2) {ok:false,error:{...}} */
+      if(msg.error||msg.ok===false){
+        const errObj=msg.error||{};
+        const errMsg=errObj.message||JSON.stringify(errObj)||'Auth error';
+        const code=errObj.code||'';
+        const isPairing=errMsg.toLowerCase().includes('pairing')||code==='PAIRING_REQUIRED';
+        if(isPairing){
+          this.appendMsg('sys','设备需配对审批！请在 http://127.0.0.1:18789 后台批准，然后点击「↺ 重连」。');
+        }else{
+          this.appendMsg('err','认证失败: '+errMsg);
+          this.appendMsg('sys','请确认 Token 正确，或留空尝试本地模式（如服务器已配置 trusted-proxy）。');
+        }
+        this.authenticated=false;
+        this.setStatus('offline');
+        this.setInputEnabled(false);
+        this.showTokenPanel(true);
+        try{this.ws.close();}catch{}
+        return;
+      }
+      /* 兼容两种成功格式：
+         1) {result:{...}}
+         2) {ok:true,payload:{...}} */
+      if(msg.result!==undefined||msg.ok===true){
+        const data=msg.result!==undefined?msg.result:(msg.payload||{});
+        this._pendingNonce='';
+        this._connectSending=false;
+        this._onAuthSuccess(data);
+        return;
+      }
+    }
+
+    /* 3. hello-ok 格式（旧版） */
+    if(ev==='hello-ok'||(msg.result&&!msg.error&&this.challengeReceived)){
+      this._onAuthSuccess(p);
+      return;
+    }
+
+    /* 4. hello-error 格式（旧版） */
+    if(ev==='hello-error'||ev==='pairing.required'){
+      const errMsg=p.message||'Auth error';
+      const isPairing=ev==='pairing.required'||errMsg.toLowerCase().includes('pairing');
+      if(isPairing){
+        this.appendMsg('sys','设备需配对审批！请在 http://127.0.0.1:18789 后台批准，然后点击「↺ 重连」。');
+      }else{
+        this.appendMsg('err','认证失败: '+errMsg);
+      }
+      this.authenticated=false;
+      this.setStatus('offline');
+      this.setInputEnabled(false);
+      this.showTokenPanel(true);
+      try{this.ws.close();}catch{}
+    }
+  },
+
+  _onAuthSuccess(result){
+    clearTimeout(this.handshakeTimeout);
+    clearTimeout(this.retryTimer);
+    this.authenticated=true;
+    this.retryCount=0;
+    this.unauthMsgCount=0;
+    this.setStatus('linked');
+    this.setInputEnabled(true);
+    const r=result||{};
+    const deviceToken=r.deviceToken;
+    if(deviceToken){try{localStorage.setItem('openclaw_deviceToken',deviceToken);}catch{}}
+    const methods=(r.methods||[]).length;
+    const events=(r.events||[]).length;
+    this.appendMsg('sys','✓ 认证成功'+(methods?' (methods: '+methods+', events: '+events+')':''));
+  },
+
+  /* ───── 处理收到的消息 ───── */
+  handleMessage(raw){
+    let msg;
+    try{msg=JSON.parse(raw);}catch(e){this.appendMsg('err','消息解析失败: '+e.message);return;}
+
+    console.log('[ClawCtrl] rx:', JSON.stringify(msg).substring(0,300));
+
+    const ev=msg.event||msg.type||msg.method||'';
+
+    /* 握手阶段消息路由 */
+    const isHandshake=
+      ev==='connect.challenge'||
+      ev==='hello-ok'||ev==='hello-error'||ev==='pairing.required'||
+      (typeof msg.id==='string'&&msg.id.startsWith('connect-')&&(msg.result!==undefined||msg.payload!==undefined||msg.error||msg.ok===true||msg.ok===false));
+
+    if(isHandshake){this.handleHandshake(msg);return;}
+
+    /* RPC 响应路由（非握手的 id 请求） */
+    if(msg.id&&this._rpcPending&&this._rpcPending[msg.id]){
+      const p=this._rpcPending[msg.id];
+      delete this._rpcPending[msg.id];
+      clearTimeout(p.timeout);
+      if(msg.error)p.reject(new Error(msg.error.message||JSON.stringify(msg.error)));
+      else p.resolve(msg.result!==undefined?msg.result:msg.payload);
+      return;
+    }
+
+    if(!this.authenticated){
+      /* 过滤心跳/tick，只统计计数；其他未认证消息限量显示 */
+      const silent=['health','tick','ping','pong'];
+      if(silent.includes(ev))return;
+      this.unauthMsgCount++;
+      if(this.unauthMsgCount<=this.maxUnauthDisplay){
+        const shortMsg=raw.length>180?raw.substring(0,180)+'…':raw;
+        this.appendMsg('sys','[未认证] '+shortMsg);
+      }else if(this.unauthMsgCount===this.maxUnauthDisplay+1){
+        this.appendMsg('sys','[未认证消息过多，已静默。请检查 Token 后重连]');
+      }
+      return;
+    }
+
+    /* 已认证后的消息处理 */
+    /* 事件推送：event 字段处理 */
+    if(ev==='event'||ev==='push'||ev==='notification'){
+      const payload=msg.payload||msg.params||{};
+      const evType=payload.event||payload.type||'';
+      const silent2=['health','tick','ping','pong','heartbeat'];
+      if(!silent2.includes(evType)){
+        this.appendMsg('sys','['+evType+'] '+JSON.stringify(payload).substring(0,120));
+      }
+      return;
+    }
+
+    /* 聊天消息响应（streaming） */
+    const respPayload=msg.payload||(msg.result&&typeof msg.result==='object'?msg.result:null);
+    if((ev==='response'||ev==='chat.response'||msg.result!==undefined)&&respPayload){
+      const text=respPayload.text||respPayload.content||respPayload.message||'';
+      if(msg.id&&msg.id===this.currentMsgId&&this.currentAiEl){
+        if(text)this.currentAiEl.textContent+=text;
+        const el=$("chat-history");if(el)el.scrollTop=el.scrollHeight;
+        if(respPayload.done||respPayload.finish_reason||respPayload.finished){
+          this._finalizeAiMsg(this.currentAiEl);
+          this.currentAiEl.classList.remove('streaming');
+          this.currentAiEl=null;this.currentMsgId=null;
+        }
+      }else if(text){
+        this.currentMsgId=msg.id||null;
+        this.currentAiEl=this.appendMsg('ai',text,true);
+      }
+      return;
+    }
+
+    if(ev==='error'||msg.error){
+      const errMsg=msg.payload?.message||msg.error?.message||JSON.stringify(msg.error||'Server error');
+      this.appendMsg('err',errMsg);
+      if(this.currentAiEl){this.currentAiEl.classList.remove('streaming');this.currentAiEl=null;this.currentMsgId=null;}
+      return;
+    }
+
+    /* 其他事件：非 ping/pong/tick/health 才显示 */
+    const silentEvs=['ping','pong','tick','health','heartbeat'];
+    if(ev&&!silentEvs.includes(ev)){
+      this.appendMsg('sys','['+ev+'] '+JSON.stringify(msg.payload||msg.params||{}).substring(0,120));
+    }
+  },
+
+  /* ───── 连接 ───── */
+  connect(tokenOverride){
+    if(this.ws&&(this.ws.readyState===WebSocket.OPEN||this.ws.readyState===WebSocket.CONNECTING))return;
+    if(this.retryCount>=this.maxRetry){
+      this.appendMsg('err','已达最大重试次数('+this.maxRetry+'次)，请手动点击「↺ 重连」或检查 Token。');
+      this.setStatus('offline');this.showTokenPanel(true);return;
+    }
+    if(tokenOverride!==undefined){
+      try{
+        if(tokenOverride)localStorage.setItem('openclaw_gatewayToken',tokenOverride);
+        else localStorage.removeItem('openclaw_gatewayToken');
+      }catch{}
+    }
+    clearTimeout(this.retryTimer);
+    this.authenticated=false;
+    this.challengeReceived=false;
+    this.unauthMsgCount=0;
+    this.setStatus('connecting');
+    this.setInputEnabled(false);
+
+    const savedTok=this.getSavedToken();
+    /* 始终直连 openclaw 服务（WebSocket 无同源限制）
+       token 同时放在 URL query 和 connect 消息的 auth.token 中，确保双通道认证 */
+    const wsBase='ws://127.0.0.1:18789';
+    const qp=[];
+    if(savedTok)qp.push('token='+encodeURIComponent(savedTok));
+    const wsUrl=wsBase+(qp.length?'?'+qp.join('&'):'');
+
+    this.appendMsg('sys',(savedTok?'连接中 (token: '+savedTok.substring(0,10)+'…)':'连接中（无token）')+' [第'+(this.retryCount+1)+'次]');
+
+    try{
+      this.ws=new WebSocket(wsUrl);
+
+      /* 握手超时 12s */
+      this.handshakeTimeout=setTimeout(()=>{
+        if(!this.authenticated&&this.ws){
+          this.appendMsg('err','握手超时（12s），服务可能未运行或 Token 错误。');
+          this.ws.close();
+        }
+      },12000);
+
+      this.ws.onopen=()=>{
+        this.appendMsg('sys','WebSocket 已连接');
+        this._pendingNonce='';
+        this._connectSending=false;
+        /* 等待 challenge（500ms 超时），兼容标准模式和 trusted-proxy 模式 */
+        this._challengeTimeout=setTimeout(()=>{
+          if(!this.challengeReceived&&this.ws&&this.ws.readyState===WebSocket.OPEN){
+            this.appendMsg('sys','未收到挑战，尝试 trusted-proxy 模式...');
+            this.sendConnectRequest().catch(e=>this.appendMsg('err','认证失败：'+e.message));
+          }
+        },500);
+      };
+
+
+      this.ws.onmessage=(e)=>this.handleMessage(e.data);
+
+      this.ws.onerror=(e)=>{
+        console.error('[ClawCtrl] ws error', e);
+        this.setStatus('offline');
+        this.appendMsg('err','WebSocket 连接错误，请确认 OpenClaw 服务运行于 127.0.0.1:18789');
+      };
+
+      this.ws.onclose=(e)=>{
+        clearTimeout(this.handshakeTimeout);
+        this.authenticated=false;
+        this.setStatus('offline');
+        this.setInputEnabled(false);
+        if(this.currentAiEl){this.currentAiEl.classList.remove('streaming');this.currentAiEl=null;this.currentMsgId=null;}
+        const reason=e.reason||'连接关闭';
+        const isAuthFail=(e.code===1008||reason.toLowerCase().includes('auth')||reason.toLowerCase().includes('token')||reason.toLowerCase().includes('unauthorized'));
+        this.appendMsg('sys','断开 (code: '+e.code+(reason?' · '+reason.substring(0,60):'')+')');
+        if(isAuthFail){
+          this.retryCount=this.maxRetry;
+          this.showTokenPanel(true);
+          this.appendMsg('sys','Token 认证失败。请重新输入正确的 Gateway Token。');
+        }else if(this.retryCount<this.maxRetry){
+          this.retryCount++;
+          const delay=Math.min(2000*this.retryCount,10000);
+          this.appendMsg('sys','将在 '+(delay/1000).toFixed(0)+'s 后自动重连…');
+          this.retryTimer=setTimeout(()=>this.connect(),delay);
+        }
+      };
+    }catch(e){
+      this.setStatus('offline');
+      this.appendMsg('err','无法建立 WebSocket: '+e.message);
+      this.retryCount++;
+    }
+  },
+
+  /* ───── 手动重连 ───── */
+  reconnect(){
+    clearTimeout(this.retryTimer);
+    this.retryCount=0;
+    if(this.ws){try{this.ws.close();}catch{}this.ws=null;}
+    this.connect();
+  },
+
+  /* ───── Token 面板开关 ───── */
+  showTokenPanel(show){
+    const panel=$("token-panel");
+    if(panel)panel.classList.toggle('show',show);
+  },
+
+  /* ───── 发送聊天消息 ───── */
+  sendMessage(text){
+    const t=(text||'').trim();if(!t)return;
+    if(!this.ws||this.ws.readyState!==WebSocket.OPEN){
+      this.appendMsg('err','未连接，正在尝试重连…');
+      this.reconnect();return;
+    }
+    if(!this.authenticated){
+      this.appendMsg('err','尚未认证，请等待连接或重新填写 Token。');return;
+    }
+    blinkEyes();
+    this.appendMsg('user',t);
+    this.currentAiEl=null;this.currentMsgId=null;
+    try{
+      const msgId='msg-'+(++this.msgId);
+      this.currentMsgId=msgId;
+      /* OpenClaw Gateway chat.send API 格式 */
+      const msg={
+        type:'req',
+        id:msgId,
+        method:'chat.send',
+        params:{
+          message:t,
+          idempotencyKey:msgId,
+          sessionKey:'main'
+        }
+      };
+      this.ws.send(JSON.stringify(msg));
+    }catch(e){
+      this.appendMsg('err','发送失败: '+e.message);
+    }
+  },
+
+  /* ───── HTTP API 调用（备选，直接调用后台 REST 端点） ───── */
+  async apiRequest(endpoint, options={}){
+    const token=this.getSavedToken();
+    const url='http://127.0.0.1:18789'+endpoint;
+    const cfg={
+      method:options.method||'GET',
+      headers:{'Content-Type':'application/json',...(token?{'Authorization':'Bearer '+token}:{})},
+      mode:'cors',
+      credentials:'include'
+    };
+    if(options.body)cfg.body=JSON.stringify(options.body);
+    const resp=await fetch(url,cfg);
+    if(!resp.ok){
+      const err=await resp.text().catch(()=>resp.statusText);
+      throw new Error('HTTP '+resp.status+': '+err.substring(0,120));
+    }
+    return resp.json().catch(()=>resp.text());
+  },
+
+  /* ───── 通过 WebSocket JSON-RPC 调用后台方法 ───── */
+  rpcCall(method, params={}){
+    return new Promise((resolve,reject)=>{
+      if(!this.ws||this.ws.readyState!==WebSocket.OPEN||!this.authenticated){
+        reject(new Error('未连接'));return;
+      }
+      const id='rpc-'+(++this.msgId);
+      const timeout=setTimeout(()=>{
+        delete this._rpcPending[id];
+        reject(new Error('RPC timeout: '+method));
+      },15000);
+      this._rpcPending=this._rpcPending||{};
+      this._rpcPending[id]={resolve,reject,timeout};
+      const msg={type:'req',id,method,params};
+      this.ws.send(JSON.stringify(msg));
+    });
+  }
+};
 function renderTheme(i){const th=state.themes[i];if(!th)return;sub.textContent=th.n;cl.textContent=String(i+1).padStart(2,'0');orbit.innerHTML='';th.c.forEach((it,idx)=>orbit.appendChild(cardNode(it,idx,th.c.length,i)));requestAnimationFrame(()=>{orbit.querySelectorAll('.card').forEach((c,idx)=>{const x=N(c.dataset.x,0),y=N(c.dataset.y,0);setTimeout(()=>{c.style.opacity='1';c.style.transform=`translate3d(${x}px,${y}px,0) scale(1)`},idx*22);});orbit.querySelectorAll('.card').forEach(card=>{card.addEventListener('click',e=>{e.stopPropagation();const t=Number(card.dataset.theme),j=Number(card.dataset.card);if(Number.isFinite(t)&&Number.isFinite(j))openCardModal(t,j);});card.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();const t=Number(card.dataset.theme),j=Number(card.dataset.card);if(Number.isFinite(t)&&Number.isFinite(j))openCardModal(t,j);}});});});}
 function out(dir){orbit.querySelectorAll('.card').forEach((c,idx)=>{const x=N(c.dataset.x,0),y=N(c.dataset.y,0),len=Math.max(1,Math.sqrt(x*x+y*y)),nx=x/len,ny=y/len,b=118+idx*14;c.style.opacity='0';c.style.transform=`translate3d(${x+nx*b+dir*30}px,${y+ny*b*.72}px,0) scale(.72)`;});}
 function react(dir){reactor.style.transform=`rotate(${dir*8}deg)`;setTimeout(()=>reactor.style.transform='rotate(0deg)',200)}
@@ -296,7 +1081,266 @@ function mountNav(){nav.innerHTML='';state.themes.forEach((th,i)=>{const b=docum
 function tick(){const n=new Date();time.textContent=`${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')} ${n.toTimeString().slice(0,8)}`}
 function pupil(p,c,x,y){const r=oc.getBoundingClientRect(),rx=(x-r.left)*(500/r.width),ry=(y-r.top)*(500/r.height),dx=rx-c.x,dy=ry-c.y,a=Math.atan2(dy,dx),dis=Math.min(Math.sqrt(dx*dx+dy*dy),eyeLimit);p.setAttribute('cx',(c.x+Math.cos(a)*dis).toFixed(2));p.setAttribute('cy',(c.y+Math.sin(a)*dis).toFixed(2));}
 const ptr=(x,y)=>{pupil(pl,eyes.l,x,y);pupil(pr,eyes.r,x,y)};
-function bind(){window.addEventListener('mousemove',e=>ptr(e.clientX,e.clientY));window.addEventListener('touchmove',e=>{if(e.touches&&e.touches.length)ptr(e.touches[0].clientX,e.touches[0].clientY)},{passive:true});window.addEventListener('wheel',e=>{e.preventDefault();if(!state.themes.length)return;const now=performance.now();if(now-state.lastWheel<180||state.anim)return;state.lastWheel=now;const dir=e.deltaY>0?1:-1;sw((state.idx+dir+state.themes.length)%state.themes.length,dir)},{passive:false});let sy=null;window.addEventListener('touchstart',e=>{sy=e.touches&&e.touches.length?e.touches[0].clientY:null},{passive:true});window.addEventListener('touchend',e=>{if(sy==null||state.anim||!state.themes.length)return;const ey=e.changedTouches&&e.changedTouches.length?e.changedTouches[0].clientY:sy,d=sy-ey;if(Math.abs(d)>42){const dir=d>0?1:-1;sw((state.idx+dir+state.themes.length)%state.themes.length,dir)}sy=null},{passive:true});window.addEventListener('resize',()=>{if(state.anim)return;const cs=orbit.querySelectorAll('.card'),t=cs.length||1;cs.forEach((c,i)=>{const p=pose(i,t);c.dataset.x=String(p.x);c.dataset.y=String(p.y);c.style.transform=`translate3d(${p.x}px,${p.y}px,0) scale(1)`});if(state.open)drawRadar(state.metrics?.radar||[],state.lang)});view.addEventListener('click',()=>toggleDetails());closeBtn.addEventListener('click',()=>toggleDetails(false));mask.addEventListener('click',()=>toggleDetails(false));const cardModal=$("card-modal"),cardModalClose=$("card-modal-close");if(cardModal)cardModal.addEventListener("click",e=>{if(e.target===cardModal)closeCardModal();});if(cardModalClose)cardModalClose.addEventListener("click",closeCardModal);document.addEventListener("keydown",e=>{if(e.key==="Escape"&&cardModal&&cardModal.classList.contains("open"))closeCardModal();});const btnZh=$("btn-lang-zh"),btnEn=$("btn-lang-en");if(btnZh)btnZh.addEventListener("click",()=>{const L="zh";state.metrics=processStats(state.payload||{},L);state.themes=themes(state.metrics,L);mountNav();renderTheme(state.idx);refreshDetails();applyLang(L);});if(btnEn)btnEn.addEventListener("click",()=>{const L="en";state.metrics=processStats(state.payload||{},L);state.themes=themes(state.metrics,L);mountNav();renderTheme(state.idx);refreshDetails();applyLang(L);});}
+function bind(){
+  window.addEventListener('mousemove',e=>ptr(e.clientX,e.clientY));
+  window.addEventListener('touchmove',e=>{if(e.touches&&e.touches.length)ptr(e.touches[0].clientX,e.touches[0].clientY)},{passive:true});
+  window.addEventListener('wheel',e=>{e.preventDefault();if(!state.themes.length)return;const now=performance.now();if(now-state.lastWheel<180||state.anim)return;state.lastWheel=now;const dir=e.deltaY>0?1:-1;sw((state.idx+dir+state.themes.length)%state.themes.length,dir)},{passive:false});
+  let sy=null;
+  window.addEventListener('touchstart',e=>{sy=e.touches&&e.touches.length?e.touches[0].clientY:null},{passive:true});
+  window.addEventListener('touchend',e=>{if(sy==null||state.anim||!state.themes.length)return;const ey=e.changedTouches&&e.changedTouches.length?e.changedTouches[0].clientY:sy,d=sy-ey;if(Math.abs(d)>42){const dir=d>0?1:-1;sw((state.idx+dir+state.themes.length)%state.themes.length,dir)}sy=null},{passive:true});
+  window.addEventListener('resize',()=>{if(state.anim)return;const cs=orbit.querySelectorAll('.card'),t=cs.length||1;cs.forEach((c,i)=>{const p=pose(i,t);c.dataset.x=String(p.x);c.dataset.y=String(p.y);c.style.transform=`translate3d(${p.x}px,${p.y}px,0) scale(1)`});if(state.open)drawRadar(state.metrics?.radar||[],state.lang)});
+  view.addEventListener('click',()=>toggleDetails());
+  closeBtn.addEventListener('click',()=>toggleDetails(false));
+  mask.addEventListener('click',()=>toggleDetails(false));
+  const cardModal=$("card-modal"),cardModalClose=$("card-modal-close");
+  if(cardModal)cardModal.addEventListener("click",e=>{if(e.target===cardModal)closeCardModal();});
+  if(cardModalClose)cardModalClose.addEventListener("click",closeCardModal);
+  document.addEventListener("keydown",e=>{if(e.key==="Escape"&&cardModal&&cardModal.classList.contains("open"))closeCardModal();});
+
+  /* ── 聊天输入 ── */
+  const cmdInput=$("command-input"),btnSend=$("btn-send");
+  function doSend(){if(!cmdInput)return;const v=cmdInput.value.trim();if(!v)return;ClawController.sendMessage(v);cmdInput.value='';cmdInput.style.height='42px';}
+  if(cmdInput){
+    cmdInput.addEventListener('keydown',e=>{
+      if((e.key==='Enter'||e.which===13)&&!e.shiftKey){
+        e.preventDefault();doSend();
+      }
+    });
+    cmdInput.addEventListener('input',()=>{
+      cmdInput.style.height='42px';
+      cmdInput.style.height=Math.min(cmdInput.scrollHeight,120)+'px';
+    });
+  }
+  if(btnSend)btnSend.addEventListener('click',doSend);
+
+  /* ── 从 URL hash 或 query 读取并保存 Token（与官方 Dashboard 兼容） ── */
+  (function(){
+    const hash=window.location.hash||'', search=window.location.search||'';
+    const fromHash=hash.match(/(?:^#?|\?|&)token=([^&]+)/);
+    const fromSearch=search.match(/[?&]token=([^&]+)/);
+    const match=fromHash||fromSearch;
+    if(match&&match[1]){
+      const token=decodeURIComponent(match[1].trim());
+      try{
+        localStorage.setItem('openclaw_gatewayToken',token);
+        console.log('[Init] Token saved from URL:',token.substring(0,10)+'...');
+      }catch(e){console.error('[Init] Failed to save token:',e);}
+    }
+  })();
+
+  /* ── 对话链接：通过 /api/dialogue-token 从本地文件或 openclaw dashboard --no-open 获取 token 并组合 URL ── */
+  function showDialogueLinkBox(url){
+    const box=$("token-link-box"),urlInp=$("token-link-url"),btnCopy=$("btn-copy-link"),btnOpen=$("btn-open-dialogue");
+    if(!box||!urlInp)return;
+    urlInp.value=url||'';
+    if(url){
+      box.classList.add('show');
+      if(btnCopy){
+        btnCopy.onclick=function(){
+          navigator.clipboard&&navigator.clipboard.writeText(url).then(()=>{
+            btnCopy.textContent='已复制';btnCopy.classList.add('copied');
+            setTimeout(()=>{btnCopy.textContent='复制链接';btnCopy.classList.remove('copied');},2000);
+          }).catch(()=>{});
+        };
+      }
+      if(btnOpen){btnOpen.onclick=function(){window.open(url,'_blank');};}
+    }else{box.classList.remove('show');}
+  }
+  function setFetchStatus(msg,isErr){
+    const el=$("token-fetch-status");if(el){el.textContent=msg||'';el.classList.toggle('err',!!isErr);}
+  }
+  async function fetchDialogueLink(){
+    const btn=$("btn-fetch-dialogue-link");
+    if(btn)btn.classList.add('loading');
+    setFetchStatus('正在从本地文件或 openclaw 命令获取 token…',false);
+    try{
+      const base=window.location.origin;
+      const r=await fetch(base+'/api/dialogue-token',{cache:'no-store'});
+      const body=await r.json().catch(()=>({}));
+      if(body&&body.ok&&body.dialogueUrl){
+        if(body.token){try{localStorage.setItem('openclaw_gatewayToken',body.token);}catch{}}
+        showDialogueLinkBox(body.dialogueUrl);
+        setFetchStatus('已获取（来源: '+(body.source==='file'?'本地文件':'dashboard 命令')+'）',false);
+      }else{
+        setFetchStatus(body&&body.error?body.error:'无法获取对话链接',true);
+        showDialogueLinkBox('');
+      }
+    }catch(e){
+      setFetchStatus('请求失败: '+(e&&e.message)+'。请确保在本机运行开发服务器 (npm run dev) 以使用此功能。',true);
+      showDialogueLinkBox('');
+    }finally{
+      if(btn)btn.classList.remove('loading');
+    }
+  }
+  const btnFetchLink=$("btn-fetch-dialogue-link");
+  if(btnFetchLink)btnFetchLink.addEventListener('click',fetchDialogueLink);
+
+  /* ── 自动获取并填充 Token（参考 token_optimization.js）：分析完结果后打开本页无需手动填写 ── */
+  async function autoFetchToken(){
+    const statusEl=$("token-fetch-status");
+    const setAutoStatus=(msg,isErr)=>{if(statusEl){statusEl.textContent=msg||'';statusEl.className='token-fetch-status'+(isErr?' err':'');}};
+    setAutoStatus('正在自动获取 Token…',false);
+    try{
+      /* 方法 1：OpenClaw Gateway 直连（若网关暴露 /api/dialogue-token） */
+      try{
+        const r=await fetch('http://127.0.0.1:18789/api/dialogue-token',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({source:'auto'})
+        });
+        if(r.ok){
+          const body=await r.json().catch(()=>({}));
+          if(body&&body.ok&&body.token){
+            try{localStorage.setItem('openclaw_gatewayToken',body.token);}catch{}
+            setAutoStatus('✓ Token 已获取（Gateway）',false);
+            const inp=$("token-input");if(inp)inp.value=body.token.substring(0,10)+'…';
+            return body.token;
+          }
+        }
+      }catch(_){}
+      /* 方法 2：开发服务器接口（读本地文件或执行 openclaw dashboard --no-open） */
+      const base=window.location.origin;
+      const r2=await fetch(base+'/api/dialogue-token',{cache:'no-store'});
+      const body2=await r2.json().catch(()=>({}));
+      if(body2&&body2.ok&&body2.token){
+        try{localStorage.setItem('openclaw_gatewayToken',body2.token);}catch{}
+        setAutoStatus('✓ Token 已获取（'+(body2.source==='file'?'本地文件':'dashboard')+'）',false);
+        const inp=$("token-input");if(inp)inp.value=body2.token.substring(0,10)+'…';
+        if(body2.dialogueUrl)showDialogueLinkBox(body2.dialogueUrl);
+        return body2.token;
+      }
+      throw new Error(body2&&body2.error?body2.error:'未获取到 Token');
+    }catch(e){
+      setAutoStatus('✗ 自动获取失败: '+(e&&e.message?e.message:String(e)),true);
+      return null;
+    }
+  }
+
+  function buildDialogueUrlFromSaved(){
+    const tok=ClawController.getSavedToken();
+    if(!tok)return '';
+    const path=window.location.pathname||'/openclaw2.html';
+    const base=path.endsWith('openclaw2.html')?path:path.replace(/\/?$/, '/openclaw2.html');
+    return window.location.origin+base+'#token='+encodeURIComponent(tok);
+  }
+
+  /* ── Token 面板 ── */
+  const btnToggleToken=$("btn-toggle-token");
+  if(btnToggleToken)btnToggleToken.addEventListener('click',()=>{
+    const panel=$("token-panel");
+    if(panel)panel.classList.toggle('show');
+  });
+  const btnTokenSave=$("btn-token-save");
+  if(btnTokenSave)btnTokenSave.addEventListener('click',()=>{
+    const inp=$("token-input");
+    const tok=(inp?inp.value:'').trim();
+    /* 先保存 token，再 reconnect（只调用一次，避免双重连接） */
+    if(tok){
+      try{localStorage.setItem('openclaw_gatewayToken',tok);}catch{}
+      ClawController.appendMsg('sys','Token 已保存，正在重新连接…');
+    }else{
+      try{localStorage.removeItem('openclaw_gatewayToken');}catch{}
+      ClawController.appendMsg('sys','以本地模式重新连接…');
+    }
+    if(tok&&typeof showDialogueLinkBox==='function')showDialogueLinkBox(buildDialogueUrlFromSaved());
+    const panel=$("token-panel");
+    if(panel)panel.classList.remove('show');
+    ClawController.reconnect(); /* 只调用一次，reconnect 内部会读 localStorage 中的 token */
+  });
+
+  /* ── 清空 ── */
+  const btnClear=$("btn-clear");
+  if(btnClear)btnClear.addEventListener('click',()=>ClawController.clearHistory());
+
+  /* ── 手动重连 ── */
+  const btnReconn=$("btn-reconnect");
+  if(btnReconn)btnReconn.addEventListener('click',()=>ClawController.reconnect());
+
+  /* ── API 控制面板 ── */
+  const btnToggleApi=$("btn-toggle-api");
+  const apiPanel=$("api-panel");
+  const apiResult=$("api-result");
+
+  function showApiResult(text,isOk){
+    if(!apiResult)return;
+    apiResult.textContent=text;
+    apiResult.className='show '+(isOk?'ok':'err');
+  }
+
+  /* API 按钮映射到 RPC 方法或 HTTP 端点 */
+  const apiActionMap={
+    status:  {rpc:'status',          http:null},
+    health:  {rpc:'health',          http:null},
+    sessions:{rpc:'sessions.list',   http:null},
+    heartbeat:{rpc:'last-heartbeat', http:null},
+    models:  {rpc:'models.list',     http:null},
+    config:  {rpc:'config.get',      http:null}
+  };
+
+  async function runApiAction(action){
+    const map=apiActionMap[action];
+    if(!map)return;
+    /* 设置 loading 状态 */
+    const btn=apiPanel?apiPanel.querySelector('[data-action="'+action+'"]'):null;
+    if(btn)btn.classList.add('loading');
+    if(apiResult){apiResult.textContent='请求中…';apiResult.className='show';}
+    try{
+      let result;
+      if(ClawController.authenticated&&ClawController.ws&&ClawController.ws.readyState===WebSocket.OPEN){
+        /* 优先使用 WebSocket RPC */
+        result=await ClawController.rpcCall(map.rpc,{});
+      }else{
+        /* 降级为 HTTP API */
+        const endpoint=map.http||('/api/'+map.rpc.replace(/\./g,'/'));
+        result=await ClawController.apiRequest(endpoint);
+      }
+      const text=typeof result==='string'?result:JSON.stringify(result,null,2);
+      showApiResult(text.substring(0,600)+(text.length>600?'\n…(截断)':''),true);
+    }catch(e){
+      showApiResult('错误: '+e.message,false);
+    }finally{
+      if(btn)btn.classList.remove('loading');
+    }
+  }
+
+  if(btnToggleApi){
+    btnToggleApi.addEventListener('click',()=>{
+      if(!apiPanel)return;
+      const open=apiPanel.classList.toggle('show');
+      btnToggleApi.classList.toggle('active',open);
+      if(apiResult&&!open){apiResult.textContent='';apiResult.className='';}
+    });
+  }
+
+  if(apiPanel){
+    apiPanel.querySelectorAll('.api-btn').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const action=btn.dataset.action;
+        if(action)runApiAction(action);
+      });
+    });
+  }
+
+  /* ── 语言切换 ── */
+  const btnZh=$("btn-lang-zh"),btnEn=$("btn-lang-en");
+  if(btnZh)btnZh.addEventListener('click',()=>{const L='zh';state.metrics=processStats(state.payload||{},L);state.themes=themes(state.metrics,L);mountNav();renderTheme(state.idx);refreshDetails();applyLang(L);});
+  if(btnEn)btnEn.addEventListener('click',()=>{const L='en';state.metrics=processStats(state.payload||{},L);state.themes=themes(state.metrics,L);mountNav();renderTheme(state.idx);refreshDetails();applyLang(L);});
+
+  /* ── 初始化连接：无 token 时先自动获取再连接，实现分析结果页打开即用 ── */
+  (function startConnect(){
+    if(ClawController.getSavedToken()){
+      ClawController.connect();
+      return;
+    }
+    autoFetchToken().then(function(tok){
+      ClawController.connect();
+      if(tok){
+        ClawController.appendMsg('sys','Token 已自动填充，正在连接…');
+        var statusEl=$("token-fetch-status");if(statusEl)statusEl.textContent='';
+      }
+    }).catch(function(){ClawController.connect();});
+  })();
+}
 const setStatus=t=>status.textContent=t,hideBoot=()=>boot.classList.add('hide');
 async function bootstrap(){const L=state.lang;setStatus(i18n[L].statusLoading);const local=localPayload();setStatus(i18n[L].statusFetch);const remote=await workerPayload();state.payload=score(remote)>score(local)?remote:local;try{if(state.payload&&Object.keys(state.payload).length)sessionStorage.setItem('openclaw_analysis_data',JSON.stringify(state.payload));}catch{}setStatus(i18n[L].statusProcess);state.metrics=processStats(state.payload||{},L);state.themes=themes(state.metrics,L);}
 async function init(){applyLang(state.lang);bind();tick();setInterval(tick,1000);setInterval(()=>{if(Math.random()>.82){pl.setAttribute('r','14');pr.setAttribute('r','14');setTimeout(()=>{pl.setAttribute('r','11');pr.setAttribute('r','11')},110)}},2800);await bootstrap();mountNav();renderTheme(state.idx);refreshDetails();setStatus(i18n[state.lang].statusOnline);setTimeout(hideBoot,220);applyLang(state.lang);}
@@ -306,3 +1350,9 @@ init().catch(()=>{const L=state.lang;sub.textContent=L==="zh"?"数据离线":"DA
 </script>
 </body>
 </html>
+
+
+
+
+
+

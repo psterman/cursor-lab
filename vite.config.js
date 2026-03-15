@@ -1,6 +1,114 @@
 import { defineConfig } from 'vite';
 import { copyFileSync, mkdirSync, existsSync, readdirSync, statSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { spawn } from 'child_process';
+
+/** 获取 OpenClaw 对话 Token：先读本地文件，否则执行 openclaw dashboard --no-open 解析输出 */
+async function getDialogueToken(origin) {
+  const tokenFromFile = () => {
+    const envFile = process.env.OPENCLAW_TOKEN_FILE;
+    if (envFile) {
+      try {
+        if (existsSync(envFile)) return readFileSync(envFile, 'utf-8').trim();
+      } catch (e) { /* ignore */ }
+    }
+    const homedir = process.env.HOME || process.env.USERPROFILE || process.env.HOMEPATH || '';
+    const candidates = [
+      join(homedir, '.openclaw', 'gateway-token'),
+      join(homedir, '.openclaw', 'token'),
+      join(process.cwd(), '.openclaw', 'gateway-token'),
+      join(process.cwd(), '.openclaw', 'token'),
+    ];
+    for (const p of candidates) {
+      try {
+        if (existsSync(p)) return readFileSync(p, 'utf-8').trim();
+      } catch (e) { /* ignore */ }
+    }
+    return null;
+  };
+
+  let token = tokenFromFile();
+  if (token) {
+    const base = origin || 'http://localhost:3000';
+    const dialogueUrl = `${base.replace(/\/$/, '')}/openclaw2.html#token=${encodeURIComponent(token)}`;
+    return { ok: true, token, dialogueUrl, source: 'file' };
+  }
+
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      try { child.kill(); } catch (e) { /* ignore */ }
+      resolve({
+        ok: false,
+        error: '未从本地文件读取到 Token，且 openclaw dashboard --no-open 在 8 秒内未输出带 token 的 URL。请先运行 openclaw dashboard --no-open 并将终端中的 #token=xxx 保存到 .openclaw/gateway-token 或设置 OPENCLAW_TOKEN_FILE。',
+      });
+    }, 8000);
+    let resolved = false;
+    const onDone = (result) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timeout);
+      try { child.kill(); } catch (e) { /* ignore */ }
+      resolve(result);
+    };
+    let child;
+    try {
+      child = spawn('openclaw', ['dashboard', '--no-open'], {
+        shell: true,
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (e) {
+      onDone({ ok: false, error: '无法执行 openclaw 命令: ' + (e && e.message) });
+      return;
+    }
+    const tokenRe = /(?:#|\?)token=([^&\s]+)/;
+    const onData = (chunk) => {
+      if (resolved) return;
+      const line = (chunk && chunk.toString()) || '';
+      const m = line.match(tokenRe);
+      if (m && m[1]) {
+        token = decodeURIComponent(m[1].trim());
+        const base = origin || 'http://localhost:3000';
+        const dialogueUrl = `${base.replace(/\/$/, '')}/openclaw2.html#token=${encodeURIComponent(token)}`;
+        onDone({ ok: true, token, dialogueUrl, source: 'dashboard' });
+      }
+    };
+    child.stdout && child.stdout.on('data', onData);
+    child.stderr && child.stderr.on('data', onData);
+    child.on('error', (e) => onDone({ ok: false, error: 'openclaw 执行错误: ' + (e && e.message) }));
+    child.on('exit', (code, signal) => {
+      if (!resolved) onDone({ ok: false, error: `openclaw 退出 code=${code} signal=${signal}，未从输出中解析到 token` });
+    });
+  });
+}
+
+const dialogueTokenPlugin = () => {
+  return {
+    name: 'dialogue-token-api',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (req.url !== '/api/dialogue-token' && !req.url.startsWith('/api/dialogue-token?')) {
+          next();
+          return;
+        }
+        const origin = req.headers.origin || (req.headers.referer && new URL(req.headers.referer).origin) || `http://localhost:${server.config.server.port || 3000}`;
+        getDialogueToken(origin)
+          .then((body) => {
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+            res.setHeader('Cache-Control', 'no-store');
+            res.end(JSON.stringify(body));
+          })
+          .catch((e) => {
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+            res.statusCode = 500;
+            res.end(JSON.stringify({ ok: false, error: String(e && e.message) }));
+          });
+      });
+    },
+  };
+};
 
 // 自定义插件：复制 i18n.js、身份级别词库 JSON 和 assets/js 到 dist 目录
 const copyI18nPlugin = () => {
@@ -93,10 +201,26 @@ export default defineConfig({
   server: {
     port: 3000,
     open: true,
+    // 代理 OpenClaw 本地 API 和 WebSocket，避免 CORS
+    // openclaw2.html 通过 http://localhost:3000/openclaw2.html 访问时走此代理
+    proxy: {
+      '/api/openclaw': {
+        target: 'http://127.0.0.1:18789',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/openclaw/, ''),
+      },
+      // WebSocket 代理：前端连 ws://localhost:3000/ws 自动转发到 openclaw
+      '/ws': {
+        target: 'ws://127.0.0.1:18789',
+        ws: true,
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/ws/, ''),
+      },
+    },
   },
 
   // 插件配置
-  plugins: [copyI18nPlugin()],
+  plugins: [dialogueTokenPlugin(), copyI18nPlugin()],
 
   // 构建配置
   build: {
