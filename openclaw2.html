@@ -110,18 +110,30 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.22;ba
 #btn-open-dialogue{padding:5px 10px;font-size:9px;font-weight:700;color:var(--green);background:rgba(0,255,65,.12);border:1px solid rgba(0,255,65,.35);border-radius:4px;cursor:pointer;white-space:nowrap}
 #btn-open-dialogue:hover{background:rgba(0,255,65,.2)}
 /* 消息历史区 */
-#chat-history{flex:1;overflow-y:auto;padding:10px 12px;font-size:12px;color:var(--dim);line-height:1.55;scroll-behavior:smooth}
-#chat-history::-webkit-scrollbar{width:3px}
-#chat-history::-webkit-scrollbar-track{background:transparent}
-#chat-history::-webkit-scrollbar-thumb{background:rgba(0,255,65,.2);border-radius:99px}
-#chat-history .msg{display:flex;flex-direction:column;gap:3px;margin-bottom:12px;animation:fadeUp .25s ease}
+.chat-history-bar{display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid rgba(255,255,255,.08);flex-shrink:0;font-family:'JetBrains Mono',monospace}
+.chat-history-bar label{font-size:10px;color:var(--dim);letter-spacing:.06em;white-space:nowrap}
+.chat-history-bar select{flex:1;min-width:0;font-size:11px;padding:4px 8px;background:rgba(0,0,0,.3);border:1px solid rgba(0,255,65,.25);border-radius:4px;color:var(--txt);cursor:pointer}
+.chat-history-bar select:hover,.chat-history-bar select:focus{border-color:rgba(0,255,65,.5);outline:none}
+#chat-history{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.chat-agents-tabs{display:flex;flex-wrap:wrap;gap:4px;padding:6px 10px;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;font-family:'JetBrains Mono',monospace;align-items:center}
+.chat-agents-tabs .agent-tab{font-size:10px;padding:4px 10px;border-radius:4px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.04);color:var(--dim);cursor:pointer;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis}
+.chat-agents-tabs .agent-tab:hover{color:var(--txt);border-color:rgba(0,255,65,.3);background:rgba(0,255,65,.06)}
+.chat-agents-tabs .agent-tab.active{color:var(--green);border-color:rgba(0,255,65,.5);background:rgba(0,255,65,.1)}
+#chat-history-content{flex:1;overflow-y:auto;padding:10px 12px;font-size:12px;color:var(--dim);line-height:1.55;scroll-behavior:smooth;display:flex;flex-direction:column;align-items:stretch;gap:2px;min-height:0}
+#chat-history-content::-webkit-scrollbar{width:3px}
+#chat-history-content::-webkit-scrollbar-track{background:transparent}
+#chat-history-content::-webkit-scrollbar-thumb{background:rgba(0,255,65,.2);border-radius:99px}
+#chat-history-content .msg{display:flex;flex-direction:column;gap:3px;margin-bottom:10px;animation:fadeUp .25s ease;max-width:88%;min-width:0}
+#chat-history-content .msg.user{align-self:flex-end}
+#chat-history-content .msg.ai{align-self:flex-start}
+#chat-history-content .msg-sys-group{align-self:stretch;max-width:none}
 @keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-#chat-history .msg-role{font-size:9px;letter-spacing:.1em;text-transform:uppercase;opacity:.7;font-family:'JetBrains Mono',monospace}
-#chat-history .msg-body{word-break:break-word;white-space:pre-wrap;line-height:1.6}
-#chat-history .msg.user .msg-role{color:rgba(0,255,65,.8)}
-#chat-history .msg.ai .msg-role{color:var(--dim)}
-#chat-history .msg.sys .msg-body{font-size:10px;color:rgba(143,165,190,.6);font-family:'JetBrains Mono',monospace;font-style:italic}
-#chat-history .msg.err .msg-body{color:rgba(230,57,70,.9);font-size:10px;font-family:'JetBrains Mono',monospace}
+#chat-history-content .msg-role{font-size:9px;letter-spacing:.1em;text-transform:uppercase;opacity:.7;font-family:'JetBrains Mono',monospace}
+#chat-history-content .msg-body{word-break:break-word;white-space:pre-wrap;line-height:1.6}
+#chat-history-content .msg.user .msg-role{color:rgba(0,255,65,.8);text-align:right}
+#chat-history-content .msg.ai .msg-role{color:var(--dim);text-align:left}
+#chat-history-content .msg.sys .msg-body{font-size:10px;color:rgba(143,165,190,.6);font-family:'JetBrains Mono',monospace;font-style:italic}
+#chat-history-content .msg.err .msg-body{color:rgba(230,57,70,.9);font-size:10px;font-family:'JetBrains Mono',monospace}
 /* 系统/握手/心跳等折叠区：默认收起，点击展开 */
 .msg-sys-group{margin-bottom:10px;border:1px solid rgba(255,255,255,.1);border-radius:6px;overflow:hidden;background:rgba(0,0,0,.2)}
 .msg-sys-group-header{font-size:10px;color:var(--dim);padding:6px 10px;cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px;font-family:'JetBrains Mono',monospace;letter-spacing:.06em}
@@ -133,18 +145,18 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.22;ba
 .msg-sys-line{font-size:10px;color:rgba(143,165,190,.7);padding:3px 10px;border-bottom:1px solid rgba(255,255,255,.04);font-family:'JetBrains Mono',monospace;line-height:1.4}
 .msg-sys-line.err{color:rgba(230,57,70,.85)}
 /* 用户与 AI 消息重点展示 */
-#chat-history .msg.user .msg-body{color:rgba(0,255,65,.95);background:rgba(0,255,65,.08);border-left:3px solid rgba(0,255,65,.5);padding:8px 12px;border-radius:0 8px 8px 0}
-#chat-history .msg.ai .msg-body{color:#e0e8f0;background:rgba(255,255,255,.06);border-left:3px solid rgba(255,255,255,.25);padding:8px 12px;border-radius:0 8px 8px 0}
-#chat-history .msg.ai .msg-body.streaming::after{content:"▍";animation:cursor-blink .7s infinite;color:var(--green)}
+#chat-history-content .msg.user .msg-body{color:rgba(0,255,65,.95);background:rgba(0,255,65,.08);border-right:3px solid rgba(0,255,65,.5);border-left:none;padding:8px 12px;border-radius:8px 0 0 8px}
+#chat-history-content .msg.ai .msg-body{color:#e0e8f0;background:rgba(255,255,255,.06);border-left:3px solid rgba(255,255,255,.25);padding:8px 12px;border-radius:0 8px 8px 0}
+#chat-history-content .msg.ai .msg-body.streaming::after{content:"▍";animation:cursor-blink .7s infinite;color:var(--green)}
 @keyframes cursor-blink{0%,100%{opacity:1}50%{opacity:0}}
 /* AI 核心回复：摘要 + 展开/复制，便于精准对话 */
-#chat-history .msg.ai .msg-core{font-weight:600;color:rgba(255,255,255,.95);margin-bottom:6px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.08);line-height:1.5}
-#chat-history .msg.ai .msg-body.has-core .msg-full{display:none}
-#chat-history .msg.ai .msg-body.has-core.expanded .msg-core{border-bottom:none;margin-bottom:4px}
-#chat-history .msg.ai .msg-body.has-core.expanded .msg-full{display:block}
-#chat-history .msg.ai .msg-actions{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
-#chat-history .msg.ai .msg-actions button{font-size:9px;padding:3px 8px;border-radius:4px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:var(--dim);cursor:pointer;font-family:'JetBrains Mono',monospace}
-#chat-history .msg.ai .msg-actions button:hover{color:var(--green);border-color:rgba(0,255,65,.4)}
+#chat-history-content .msg.ai .msg-core{font-weight:600;color:rgba(255,255,255,.95);margin-bottom:6px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.08);line-height:1.5}
+#chat-history-content .msg.ai .msg-body.has-core .msg-full{display:none}
+#chat-history-content .msg.ai .msg-body.has-core.expanded .msg-core{border-bottom:none;margin-bottom:4px}
+#chat-history-content .msg.ai .msg-body.has-core.expanded .msg-full{display:block}
+#chat-history-content .msg.ai .msg-actions{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
+#chat-history-content .msg.ai .msg-actions button{font-size:9px;padding:3px 8px;border-radius:4px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:var(--dim);cursor:pointer;font-family:'JetBrains Mono',monospace}
+#chat-history-content .msg.ai .msg-actions button:hover{color:var(--green);border-color:rgba(0,255,65,.4)}
 /* 输入区 */
 #command-console .console-input-area{display:flex;flex-direction:column;gap:0;border-top:1px solid rgba(0,255,65,.15);flex-shrink:0}
 #console-toolbar{display:flex;align-items:center;gap:6px;padding:6px 12px;background:rgba(0,0,0,.2)}
@@ -484,7 +496,14 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.22;ba
     </div>
     <div id="api-result"></div>
   </div>
-  <div id="chat-history" role="log" aria-label="Chat history"></div>
+  <div class="chat-history-bar">
+    <label for="chat-load-session" id="chat-load-session-label">加载会话</label>
+    <select id="chat-load-session" aria-label="选择会话加载到对话区"><option value="">选择会话…</option></select>
+  </div>
+  <div id="chat-history">
+    <div class="chat-agents-tabs" id="chat-agents-tabs" role="tablist" aria-label="会话列表"></div>
+    <div id="chat-history-content" role="log" aria-label="Chat history"></div>
+  </div>
   <div class="console-input-area">
     <div id="console-toolbar">
       <button type="button" id="btn-toggle-token">🔑 TOKEN</button>
@@ -862,12 +881,38 @@ const LiveController={
       item.addEventListener('click',()=>this._selectSession(key,item));
       container.appendChild(item);
     });
+    const loadSelect=document.getElementById('chat-load-session');
+    const loadLabel=document.getElementById('chat-load-session-label');
+    if(loadSelect){
+      const L=this._lang();
+      if(loadLabel)loadLabel.textContent=L==='zh'?'加载会话':'Load session';
+      loadSelect.innerHTML='<option value="">'+(L==='zh'?'选择会话…':'Select session…')+'</option>';
+      sessions.forEach(s=>{
+        const key=s.sessionKey||s.key||s.id||'unknown';
+        const opt=document.createElement('option');
+        opt.value=key;
+        opt.textContent=key.length>36?key.slice(0,36)+'…':key;
+        loadSelect.appendChild(opt);
+      });
+      const lastKey=typeof localStorage!=='undefined'?localStorage.getItem('openclaw2_lastSessionKey'):null;
+      const toSelect=lastKey&&sessions.some(s=>(s.sessionKey||s.key||s.id)===''+lastKey)?lastKey:(sessions[0]&&(sessions[0].sessionKey||sessions[0].key||sessions[0].id));
+      if(toSelect){
+        loadSelect.value=toSelect;
+        this._selectSession(toSelect,null);
+      }
+      if(typeof window.renderChatAgentTabs==='function')window.renderChatAgentTabs(sessions,toSelect||null);
+    }
   },
 
   /* ── 选中一条会话 ── */
   _selectSession(key,itemEl){
     this.selectedKey=key;
+    try{localStorage.setItem('openclaw2_lastSessionKey',key);}catch(e){}
     document.querySelectorAll('.live-session-item').forEach(el=>el.classList.toggle('selected',el.dataset.key===key));
+    const loadSelect=document.getElementById('chat-load-session');
+    if(loadSelect)loadSelect.value=key;
+    const tabsEl=document.getElementById('chat-agents-tabs');
+    if(tabsEl)tabsEl.querySelectorAll('.agent-tab').forEach(t=>t.classList.toggle('active',t.dataset.key===key));
     this._loadSessionDetail(key);
   },
 
@@ -882,12 +927,39 @@ const LiveController={
     if(keyEl)keyEl.textContent=key;
     detailContent.style.display='flex';
     placeholder.style.display='none';
-    const session=this._lastSessionsList.find(s=>(s.sessionKey||s.key||s.id)===''+key);
+    const session=this._lastSessionsList&&this._lastSessionsList.find(s=>(s.sessionKey||s.key||s.id)===''+key);
     if(statusEl)statusEl.textContent=session?(session.status||session.state||(session.active?'active':'idle')):'--';
     if(!historyEl)return;
     const L=this._lang();
+    historyEl.innerHTML='<div class="live-detail-loading" id="live-detail-loading">'+(L==='zh'?'加载对话…':'Loading chat…')+'</div>';
+    let messages=[];
+    if(ClawController&&ClawController.authenticated){
+      try{
+        const res=await ClawController.rpcCall('chat.history',{sessionKey:key,limit:100});
+        messages=ClawController.getMessagesFromHistoryResponse?ClawController.getMessagesFromHistoryResponse(res):(Array.isArray(res&&res.messages)?res.messages:[]);
+      }catch(_){}
+    }
+    if(ClawController&&typeof ClawController.syncHistoryFromMessages==='function')ClawController.syncHistoryFromMessages(messages,key);
+    const loadingEl=document.getElementById('live-detail-loading');
+    if(loadingEl)loadingEl.remove();
     if(!session){
       historyEl.innerHTML=`<div style="color:var(--dim);font-size:11px;padding:8px">${L==='zh'?'未找到该会话':'Session not found'}</div>`;
+      if(messages.length){
+        const list=document.createElement('div');
+        list.className='live-chat-messages';
+        list.setAttribute('aria-label',L==='zh'?'最近对话':'Recent messages');
+        messages.forEach(m=>{
+          const role=(m.role||m.type||'').toLowerCase();
+          const isUser=role==='user';
+          const content=typeof m.content==='string'?m.content:(m.text||(m.parts&&m.parts[0]&&m.parts[0].text)||JSON.stringify(m).slice(0,200));
+          const modelHint=m.model?` <span class="live-msg-model">${m.model}</span>`:'';
+          const div=document.createElement('div');
+          div.className='live-msg '+(isUser?'user-msg':'ai-msg');
+          div.innerHTML=`<div class="live-msg-role">${isUser?(L==='zh'?'用户':'User'):(L==='zh'?'助手':'Assistant')}${modelHint}</div><div class="live-msg-bubble">${escapeHtml(content)}</div>`;
+          list.appendChild(div);
+        });
+        historyEl.appendChild(list);
+      }
       return;
     }
     const modelName=session.model||session.modelId||session.defaultModel||'--';
@@ -900,16 +972,7 @@ const LiveController={
     let html=`<div class="live-detail-summary" style="margin-bottom:12px;padding:10px;background:rgba(255,255,255,.04);border-radius:8px;font-size:11px;color:var(--dim);">`;
     rows.forEach(r=>{html+=`<div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:4px;"><span>${r.k}</span><span style="color:var(--txt)">${escapeHtml(r.v)}</span></div>`;});
     html+=`</div>`;
-    historyEl.innerHTML=html+'<div class="live-detail-loading" id="live-detail-loading">'+(L==='zh'?'加载对话…':'Loading chat…')+'</div>';
-    let messages=[];
-    if(ClawController&&ClawController.authenticated){
-      try{
-        const res=await ClawController.rpcCall('chat.history',{sessionKey:key,limit:100});
-        messages=Array.isArray(res&&res.messages)?res.messages:[];
-      }catch(_){}
-    }
-    const loadingEl=document.getElementById('live-detail-loading');
-    if(loadingEl)loadingEl.remove();
+    historyEl.innerHTML=html;
     if(messages.length){
       const list=document.createElement('div');
       list.className='live-chat-messages';
@@ -1212,8 +1275,21 @@ const ClawController={
     if(firstLine.length<=maxCore)return {core:firstLine,full:t};
     return {core:firstLine.slice(0,maxCore)+'…',full:t};
   },
+  _extractDisplayText(v){
+    if(v==null)return '';
+    if(typeof v==='object')return (v.text||v.content||v.message||'').trim();
+    let s=String(v).trim();
+    if(!s)return '';
+    try{
+      const o=JSON.parse(s);
+      if(o&&typeof o==='object')return (o.text||o.content||o.message||s).trim();
+    }catch{}
+    const m=s.match(/"text"\s*:\s*"((?:[^"\\]|\\.)*)"|"content"\s*:\s*"((?:[^"\\]|\\.)*)"|"message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    if(m)return (m[1]||m[2]||m[3]||'').replace(/\\"/g,'"').trim();
+    return s;
+  },
   _getOrCreateSysGroup(){
-    const el=$("chat-history");if(!el)return null;
+    const el=$("chat-history-content");if(!el)return null;
     let group=el.querySelector('.msg-sys-group');
     if(!group){
       group=document.createElement('div');
@@ -1249,7 +1325,7 @@ const ClawController={
     if(h)h.textContent=label+' ('+n+')';
   },
   appendMsg(role, text, streaming=false){
-    const el=$("chat-history");if(!el)return null;
+    const el=$("chat-history-content");if(!el)return null;
     if(role==='sys'||role==='err'){
       const group=this._getOrCreateSysGroup();
       if(!group)return null;
@@ -1270,8 +1346,9 @@ const ClawController={
     roleEl.textContent=role==='user'?'You':role==='ai'?'OpenClaw':role==='err'?'ERROR':'System';
     const bodyEl=document.createElement('div');
     bodyEl.className='msg-body'+(streaming?' streaming':'');
-    if(role==='ai'&&text&&!streaming){
-      const {core,full}=this._coreSummary(text);
+    const displayText=(role==='user'||role==='ai')?this._extractDisplayText(text||''):(text||'');
+    if(role==='ai'&&displayText&&!streaming){
+      const {core,full}=this._coreSummary(displayText);
       if(full){
         bodyEl.classList.add('has-core');
         bodyEl.innerHTML='<div class="msg-core"></div><div class="msg-full"></div>';
@@ -1293,10 +1370,10 @@ const ClawController={
         actions.appendChild(btnExpand);actions.appendChild(btnCopy);
         bodyEl.appendChild(actions);
       }else{
-        bodyEl.textContent=text;
+        bodyEl.textContent=displayText;
       }
     }else{
-      bodyEl.textContent=text||'';
+      bodyEl.textContent=streaming?(text||''):displayText;
     }
     wrap.appendChild(roleEl);
     wrap.appendChild(bodyEl);
@@ -1311,7 +1388,57 @@ const ClawController={
     el.textContent=txt;
     el.className=cls;
   },
-  clearHistory(){const el=$("chat-history");if(el){el.innerHTML='';this.unauthMsgCount=0;}},
+  clearHistory(){const el=$("chat-history-content");if(el){el.innerHTML='';this.unauthMsgCount=0;}},
+  /** 从 chat.history 接口响应中解析出 messages 数组（兼容多种后端返回结构） */
+  getMessagesFromHistoryResponse(res){
+    if(!res)return [];
+    if(Array.isArray(res))return res;
+    if(Array.isArray(res.messages))return res.messages;
+    if(Array.isArray(res.data&&res.data.messages))return res.data.messages;
+    if(Array.isArray(res.result&&res.result.messages))return res.result.messages;
+    if(Array.isArray(res.result&&res.result.data&&res.result.data.messages))return res.result.data.messages;
+    if(Array.isArray(res.history))return res.history;
+    if(Array.isArray(res.data))return res.data;
+    if(Array.isArray(res.items))return res.items;
+    if(Array.isArray(res.result))return res.result;
+    return [];
+  },
+  /** 从单条消息中提取展示用文本（兼容 content 字符串、content 数组 parts、text、message 等） */
+  _getMessageDisplayText(m){
+    if(!m)return '';
+    const c=m.content;
+    if(typeof c==='string'&&c.trim())return c.trim();
+    if(Array.isArray(c)){
+      const parts=c.map(p=>{
+        if(typeof p==='string')return p;
+        if(p&&typeof p==='object')return p.text||p.content||p.message||'';
+        return '';
+      }).filter(Boolean);
+      if(parts.length)return parts.join('\n').trim();
+    }
+    const single=m.text||m.message||m.body||(m.parts&&m.parts[0]&&(m.parts[0].text||m.parts[0].content));
+    if(single!=null&&typeof single==='string')return single.trim();
+    if(typeof single==='object'&&single!==null&&(single.text||single.content))return (single.text||single.content).trim();
+    return '';
+  },
+  /** 将实时后台某会话的对话历史映射到右侧 chat-history（先清空再按条追加 user/ai） */
+  syncHistoryFromMessages(messages,sessionKey){
+    const el=$("chat-history-content");if(!el)return;
+    this.clearHistory();
+    const L=state.lang||'zh';
+    if(sessionKey)this.appendMsg('sys',(L==='zh'?'已加载会话「'+sessionKey+'」的对话历史':'Loaded chat history for session "'+sessionKey+'"'));
+    if(!Array.isArray(messages)||!messages.length)return;
+    messages.forEach(m=>{
+      let role=(m.role||m.type||m.actor||'').toLowerCase().trim();
+      if(role==='assistant')role='ai';
+      if(role==='human')role='user';
+      if(role!=='user'&&role!=='ai')return;
+      const raw=this._getMessageDisplayText(m);
+      const content=raw?this._extractDisplayText(raw):'';
+      if(content)this.appendMsg(role,content,false);
+    });
+    el.scrollTop=el.scrollHeight;
+  },
   setInputEnabled(on){
     const inp=$("command-input"),btn=$("btn-send");
     if(inp)inp.disabled=!on;
@@ -1538,6 +1665,7 @@ const ClawController={
     const methods=(r.methods||[]).length;
     const events=(r.events||[]).length;
     this.appendMsg('sys','✓ 认证成功'+(methods?' (methods: '+methods+', events: '+events+')':''));
+    if(typeof window.refreshChatLoadSession==='function')window.refreshChatLoadSession();
   },
 
   /* ───── 处理收到的消息 ───── */
@@ -1586,6 +1714,11 @@ const ClawController={
     if(ev==='event'||ev==='push'||ev==='notification'){
       const payload=msg.payload||msg.params||{};
       const evType=payload.event||payload.type||'';
+      const aiText=this._extractDisplayText(payload.text||payload.content||payload.message||'');
+      if(aiText){
+        this.appendMsg('ai',aiText,false);
+        return;
+      }
       const silent2=['health','tick','ping','pong','heartbeat'];
       if(!silent2.includes(evType)){
         this.appendMsg('sys','['+evType+'] '+JSON.stringify(payload).substring(0,120));
@@ -1596,10 +1729,10 @@ const ClawController={
     /* 聊天消息响应（streaming） */
     const respPayload=msg.payload||(msg.result&&typeof msg.result==='object'?msg.result:null);
     if((ev==='response'||ev==='chat.response'||msg.result!==undefined)&&respPayload){
-      const text=respPayload.text||respPayload.content||respPayload.message||'';
+      const text=this._extractDisplayText(respPayload.text||respPayload.content||respPayload.message||'');
       if(msg.id&&msg.id===this.currentMsgId&&this.currentAiEl){
         if(text)this.currentAiEl.textContent+=text;
-        const el=$("chat-history");if(el)el.scrollTop=el.scrollHeight;
+        const el=$("chat-history-content");if(el)el.scrollTop=el.scrollHeight;
         if(respPayload.done||respPayload.finish_reason||respPayload.finished){
           this._finalizeAiMsg(this.currentAiEl);
           this.currentAiEl.classList.remove('streaming');
@@ -1619,10 +1752,16 @@ const ClawController={
       return;
     }
 
-    /* 其他事件：非 ping/pong/tick/health 才显示 */
+    /* 其他事件：若含 text/content 则按 AI 回复展示，否则非 ping/pong/tick/health 才记入 sys */
+    const restPayload=msg.payload||msg.params||{};
+    const restText=this._extractDisplayText(restPayload.text||restPayload.content||restPayload.message||'');
+    if(restText){
+      this.appendMsg('ai',restText,false);
+      return;
+    }
     const silentEvs=['ping','pong','tick','health','heartbeat'];
     if(ev&&!silentEvs.includes(ev)){
-      this.appendMsg('sys','['+ev+'] '+JSON.stringify(msg.payload||msg.params||{}).substring(0,120));
+      this.appendMsg('sys','['+ev+'] '+JSON.stringify(restPayload).substring(0,120));
     }
   },
 
@@ -2022,6 +2161,94 @@ function bind(){
     ClawController.reconnect(); /* 只调用一次，reconnect 内部会读 localStorage 中的 token */
   });
 
+  /* ── agent 标签栏：渲染可切换的会话标签，点击即加载该会话聊天记录 ── */
+  window.renderChatAgentTabs=function(sessions,activeKey){
+    const tabsEl=$("chat-agents-tabs");
+    if(!tabsEl)return;
+    tabsEl.innerHTML='';
+    if(!Array.isArray(sessions)||!sessions.length)return;
+    sessions.forEach(s=>{
+      const key=s.sessionKey||s.key||s.id||'unknown';
+      const tab=document.createElement('button');
+      tab.type='button';
+      tab.className='agent-tab'+(key===(activeKey||'').trim()?' active':'');
+      tab.dataset.key=key;
+      tab.textContent=key.length>24?key.slice(0,24)+'…':key;
+      tab.title=key;
+      tab.setAttribute('role','tab');
+      tab.addEventListener('click',function(){
+        const k=(this.dataset.key||'').trim();
+        if(!k)return;
+        const sel=$("chat-load-session");
+        if(sel)sel.value=k;
+        tabsEl.querySelectorAll('.agent-tab').forEach(t=>t.classList.toggle('active',t.dataset.key===k));
+        if(typeof LiveController!=='undefined'&&state.idx===LIVE_IDX){
+          LiveController._selectSession(k,null);
+        }else if(ClawController&&ClawController.authenticated){
+          ClawController.rpcCall('chat.history',{sessionKey:k,limit:100}).then(res=>{
+            const messages=ClawController.getMessagesFromHistoryResponse?ClawController.getMessagesFromHistoryResponse(res):(Array.isArray(res&&res.messages)?res.messages:[]);
+            ClawController.syncHistoryFromMessages(messages,k);
+          }).catch(()=>{});
+        }
+        try{localStorage.setItem('openclaw2_lastSessionKey',k);}catch(e){}
+      });
+      tabsEl.appendChild(tab);
+    });
+  };
+
+  const chatLoadSession=$("chat-load-session");
+  if(chatLoadSession)chatLoadSession.addEventListener('change',async function(){
+    const key=(this.value||'').trim();
+    if(!key)return;
+    if(!ClawController){return;}
+    if(typeof LiveController!=='undefined'&&state.idx===LIVE_IDX){
+      LiveController._selectSession(key,null);
+      try{localStorage.setItem('openclaw2_lastSessionKey',key);}catch(e){}
+      return;
+    }
+    if(!ClawController.authenticated){return;}
+    try{
+      const res=await ClawController.rpcCall('chat.history',{sessionKey:key,limit:100});
+      const messages=ClawController.getMessagesFromHistoryResponse?ClawController.getMessagesFromHistoryResponse(res):(Array.isArray(res&&res.messages)?res.messages:[]);
+      ClawController.syncHistoryFromMessages(messages,key);
+      try{localStorage.setItem('openclaw2_lastSessionKey',key);}catch(e){}
+      const tabsEl=$("chat-agents-tabs");if(tabsEl)tabsEl.querySelectorAll('.agent-tab').forEach(t=>t.classList.toggle('active',t.dataset.key===key));
+    }catch(e){}
+  });
+
+  window.refreshChatLoadSession=async function(){
+    if(!ClawController||!ClawController.authenticated)return;
+    const sel=$("chat-load-session");
+    const lab=$("chat-load-session-label");
+    const L=state.lang||'zh';
+    if(lab)lab.textContent=L==='zh'?'加载会话':'Load session';
+    if(!sel)return;
+    try{
+      const res=await ClawController.rpcCall('sessions.list',{});
+      let sessions=Array.isArray(res)?res:(Array.isArray(res&&res.sessions)?res.sessions:[]);
+      sessions=sessions.slice().sort((a,b)=>(new Date(b.updatedAt||b.createdAt||0)).getTime()-(new Date(a.updatedAt||a.createdAt||0)).getTime());
+      sel.innerHTML='<option value="">'+(L==='zh'?'选择会话…':'Select session…')+'</option>';
+      sessions.forEach(s=>{
+        const key=s.sessionKey||s.key||s.id||'unknown';
+        const opt=document.createElement('option');
+        opt.value=key;
+        opt.textContent=key.length>36?key.slice(0,36)+'…':key;
+        sel.appendChild(opt);
+      });
+      if(typeof window.renderChatAgentTabs==='function')window.renderChatAgentTabs(sessions,null);
+      const lastKey=typeof localStorage!=='undefined'?localStorage.getItem('openclaw2_lastSessionKey'):null;
+      if(lastKey&&sessions.some(s=>(s.sessionKey||s.key||s.id)===''+lastKey)){
+        sel.value=lastKey;
+        try{
+          const hist=await ClawController.rpcCall('chat.history',{sessionKey:lastKey,limit:100});
+          const messages=ClawController.getMessagesFromHistoryResponse?ClawController.getMessagesFromHistoryResponse(hist):(Array.isArray(hist&&hist.messages)?hist.messages:[]);
+          ClawController.syncHistoryFromMessages(messages,lastKey);
+          if(typeof window.renderChatAgentTabs==='function')window.renderChatAgentTabs(sessions,lastKey);
+        }catch(e){}
+      }else if(typeof window.renderChatAgentTabs==='function')window.renderChatAgentTabs(sessions,null);
+    }catch(e){}
+  };
+
   /* ── 清空 ── */
   const btnClear=$("btn-clear");
   if(btnClear)btnClear.addEventListener('click',()=>ClawController.clearHistory());
@@ -2140,7 +2367,7 @@ function bind(){
 const setStatus=t=>status.textContent=t,hideBoot=()=>boot.classList.add('hide');
 async function bootstrap(){const L=state.lang;setStatus(i18n[L].statusLoading);const local=localPayload();setStatus(i18n[L].statusFetch);const remote=await workerPayload();state.payload=score(remote)>score(local)?remote:local;try{if(state.payload&&Object.keys(state.payload).length)sessionStorage.setItem('openclaw_analysis_data',JSON.stringify(state.payload));}catch{}setStatus(i18n[L].statusProcess);state.metrics=processStats(state.payload||{},L);state.themes=themes(state.metrics,L);}
 async function init(){applyLang(state.lang);bind();tick();setInterval(tick,1000);setInterval(()=>{if(Math.random()>.82){pl.setAttribute('r','14');pr.setAttribute('r','14');setTimeout(()=>{pl.setAttribute('r','11');pr.setAttribute('r','11')},110)}},2800);await bootstrap();mountNav();renderTheme(state.idx);refreshDetails();setStatus(i18n[state.lang].statusOnline);setTimeout(hideBoot,220);applyLang(state.lang);}
-function applyLang(L){state.lang=L;try{localStorage.setItem("openclaw2_lang",L);}catch{}const t=i18n[L];if(!t)return;$("top-title").textContent=t.topTitle;$("top-sub").textContent=t.topSub;const heroTitle=$("hero-title");if(heroTitle)heroTitle.textContent=t.heroTitle;$("link-report").textContent=t.linkReport;$("link-report").title=t.linkReport;$("link-stats").textContent=t.linkStats;$("link-stats").title=t.linkStats;$("boot").querySelector(".t").textContent=t.bootTitle;const dv=$("detail-view");if(dv){const sigTitle=$("detail-view-signal-title"),sessTitle=$("detail-view-session-title");if(sigTitle)sigTitle.textContent=t.signalPanels;if(sessTitle)sessTitle.textContent=t.sessionList;const leftBlks=dv.querySelectorAll(".detail-view-left .blk .pt");if(leftBlks[0])leftBlks[0].textContent=t.radar;if(leftBlks[1])leftBlks[1].textContent=t.wordCloud;}const dsTitle=$("data-source-title"),dsDesc=$("data-source-desc");if(dsTitle&&t.dataSourceTitle)dsTitle.textContent=t.dataSourceTitle;if(dsDesc&&t.dataSourceDesc)dsDesc.textContent=t.dataSourceDesc;const sg=$("chat-history")&&$("chat-history").querySelector(".msg-sys-group");if(sg&&typeof ClawController!=="undefined"&&ClawController._updateSysGroupHeader)ClawController._updateSysGroupHeader(sg);const bzh=$("btn-lang-zh"),ben=$("btn-lang-en");if(bzh)bzh.classList.toggle("active",L==="zh");if(ben)ben.classList.toggle("active",L==="en");document.documentElement.lang=L==="zh"?"zh-CN":"en";if(typeof window.updateMgmtLabels==="function")window.updateMgmtLabels();if(typeof LiveController!=="undefined")LiveController.updateLabels(L);}
+function applyLang(L){state.lang=L;try{localStorage.setItem("openclaw2_lang",L);}catch{}const t=i18n[L];if(!t)return;$("top-title").textContent=t.topTitle;$("top-sub").textContent=t.topSub;const heroTitle=$("hero-title");if(heroTitle)heroTitle.textContent=t.heroTitle;$("link-report").textContent=t.linkReport;$("link-report").title=t.linkReport;$("link-stats").textContent=t.linkStats;$("link-stats").title=t.linkStats;$("boot").querySelector(".t").textContent=t.bootTitle;const dv=$("detail-view");if(dv){const sigTitle=$("detail-view-signal-title"),sessTitle=$("detail-view-session-title");if(sigTitle)sigTitle.textContent=t.signalPanels;if(sessTitle)sessTitle.textContent=t.sessionList;const leftBlks=dv.querySelectorAll(".detail-view-left .blk .pt");if(leftBlks[0])leftBlks[0].textContent=t.radar;if(leftBlks[1])leftBlks[1].textContent=t.wordCloud;}const dsTitle=$("data-source-title"),dsDesc=$("data-source-desc");if(dsTitle&&t.dataSourceTitle)dsTitle.textContent=t.dataSourceTitle;if(dsDesc&&t.dataSourceDesc)dsDesc.textContent=t.dataSourceDesc;const sg=$("chat-history-content")&&$("chat-history-content").querySelector(".msg-sys-group");if(sg&&typeof ClawController!=="undefined"&&ClawController._updateSysGroupHeader)ClawController._updateSysGroupHeader(sg);const bzh=$("btn-lang-zh"),ben=$("btn-lang-en");if(bzh)bzh.classList.toggle("active",L==="zh");if(ben)ben.classList.toggle("active",L==="en");document.documentElement.lang=L==="zh"?"zh-CN":"en";if(typeof window.updateMgmtLabels==="function")window.updateMgmtLabels();if(typeof LiveController!=="undefined")LiveController.updateLabels(L);}
 init().catch(()=>{const L=state.lang;sub.textContent=L==="zh"?"数据离线":"DATA OFFLINE";setStatus(i18n[L].statusFailed);state.metrics=processStats({},L);state.themes=themes(state.metrics,L);mountNav();renderTheme(state.idx);refreshDetails();setTimeout(hideBoot,320);applyLang(L);});
 })();
 </script>
