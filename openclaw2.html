@@ -162,6 +162,54 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.22;ba
 #api-result.show{display:block}
 #api-result.ok{border-color:rgba(0,255,65,.3);color:rgba(0,255,65,.9)}
 #api-result.err{border-color:rgba(230,57,70,.3);color:rgba(230,57,70,.9)}
+.mgmt-section{margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08)}
+.mgmt-section-title{font-size:9px;color:var(--green);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px}
+.api-btns-mgmt{display:flex;flex-wrap:wrap;gap:4px}
+
+/* ── Live View ── */
+.live-view{position:fixed;inset:0;z-index:20;background:var(--bg);display:none;flex-direction:column;padding:calc(var(--top-header-height,56px) + 56px) 0 0 0}
+.live-view.active{display:flex}
+.live-layout{display:grid;grid-template-columns:280px 1fr;height:100%;min-height:0;gap:0}
+.live-sessions-panel{background:rgba(0,0,0,.28);border-right:1px solid var(--line);display:flex;flex-direction:column;overflow:hidden}
+.live-panel-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--line);flex-shrink:0}
+.live-panel-title{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--green)}
+.live-panel-actions{display:flex;align-items:center;gap:8px}
+.live-status-dot{width:8px;height:8px;border-radius:50%;background:#555;transition:background .3s}
+.live-status-dot.connected{background:var(--green);box-shadow:0 0 6px rgba(0,255,65,.6)}
+.live-status-dot.error{background:var(--red)}
+.live-sessions-list{flex:1;overflow-y:auto;padding:6px 0}
+.live-empty{padding:24px 14px;font-size:11px;color:var(--dim);text-align:center}
+.live-session-item{display:flex;flex-direction:column;gap:3px;padding:9px 14px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.04);transition:background .18s}
+.live-session-item:hover{background:rgba(0,255,65,.06)}
+.live-session-item.selected{background:rgba(0,255,65,.10);border-left:2px solid var(--green)}
+.live-session-item .si-key{font-size:11px;color:var(--txt);font-family:'JetBrains Mono',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.live-session-item .si-meta{font-size:10px;color:var(--dim);display:flex;gap:8px;align-items:center}
+.live-session-item .si-status{font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(0,255,65,.12);color:var(--green)}
+.live-session-item .si-status.inactive{background:rgba(255,255,255,.06);color:var(--dim)}
+.live-main-panel{display:flex;flex-direction:column;overflow:hidden}
+.live-status-bar{display:flex;gap:0;border-bottom:1px solid var(--line);flex-shrink:0;flex-wrap:wrap}
+.live-stat-item{display:flex;flex-direction:column;gap:2px;padding:8px 16px;border-right:1px solid rgba(255,255,255,.06)}
+.live-stat-label{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
+.live-stat-value{font-size:13px;color:var(--txt);font-family:'JetBrains Mono',monospace}
+.live-session-detail{flex:1;overflow:hidden;display:flex;flex-direction:column}
+.live-detail-placeholder{flex:1;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:12px}
+.live-detail-content{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.live-detail-header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--line);flex-shrink:0}
+.live-detail-meta{display:flex;align-items:center;gap:10px}
+.live-detail-key{font-size:12px;font-family:'JetBrains Mono',monospace;color:var(--green)}
+.live-detail-status{font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(0,255,65,.12);color:var(--green)}
+.live-chat-history{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:8px}
+.live-msg{display:flex;flex-direction:column;gap:3px;max-width:86%}
+.live-msg.user-msg{align-self:flex-end}
+.live-msg.ai-msg{align-self:flex-start}
+.live-msg-role{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px}
+.live-msg.user-msg .live-msg-role{text-align:right}
+.live-msg-bubble{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:8px 11px;font-size:12px;color:var(--txt);line-height:1.6;white-space:pre-wrap;word-break:break-word}
+.live-msg.user-msg .live-msg-bubble{background:rgba(0,255,65,.09);border-color:rgba(0,255,65,.2)}
+.live-msg.ai-msg .live-msg-bubble{background:rgba(159,211,255,.06);border-color:rgba(159,211,255,.15)}
+.live-action-btn{background:transparent;border:1px solid var(--line);color:var(--dim);padding:3px 8px;border-radius:4px;cursor:pointer;font-size:12px;transition:color .2s,border-color .2s}
+.live-action-btn:hover{color:var(--green);border-color:var(--green)}
+@media(max-width:640px){.live-layout{grid-template-columns:1fr}.live-sessions-panel{max-height:200px;border-right:none;border-bottom:1px solid var(--line)}.live-status-bar{overflow-x:auto;flex-wrap:nowrap}}
 </style>
 </head>
 <body>
@@ -208,6 +256,51 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.22;ba
 <g><circle cx="195" cy="225" r="30" fill="#000"/><circle id="pupil-l" cx="195" cy="225" r="11" fill="#00ff41" filter="blur(0.7px)"/><circle cx="195" cy="225" r="4" fill="#fff" opacity="0.8"/></g>
 <g><circle cx="305" cy="225" r="30" fill="#000"/><circle id="pupil-r" cx="305" cy="225" r="11" fill="#00ff41" filter="blur(0.7px)"/><circle cx="305" cy="225" r="4" fill="#fff" opacity="0.8"/></g>
 </svg></div></section></main>
+<!-- Live Backend View -->
+<div id="live-view" class="live-view" aria-hidden="true">
+  <div class="live-layout">
+    <!-- 左：会话列表 -->
+    <aside class="live-sessions-panel">
+      <div class="live-panel-header">
+        <span class="live-panel-title" id="live-sessions-title">实时会话</span>
+        <div class="live-panel-actions">
+          <button type="button" class="live-action-btn" id="live-refresh-btn" title="刷新">&#8635;</button>
+          <span class="live-status-dot" id="live-status-dot"></span>
+        </div>
+      </div>
+      <div class="live-sessions-list" id="live-sessions-list">
+        <div class="live-empty" id="live-sessions-empty">等待 Gateway 连接...</div>
+      </div>
+    </aside>
+    <!-- 右：选中会话详情 + 快捷状态 -->
+    <div class="live-main-panel">
+      <!-- 顶部：快捷状态条 -->
+      <div class="live-status-bar" id="live-status-bar">
+        <div class="live-stat-item"><span class="live-stat-label" id="lbl-gw-status">Gateway</span><span class="live-stat-value" id="live-gw-status">--</span></div>
+        <div class="live-stat-item"><span class="live-stat-label" id="lbl-sess-cnt">会话数</span><span class="live-stat-value" id="live-sess-cnt">--</span></div>
+        <div class="live-stat-item"><span class="live-stat-label" id="lbl-task-cnt">任务</span><span class="live-stat-value" id="live-task-cnt">--</span></div>
+        <div class="live-stat-item"><span class="live-stat-label" id="lbl-usage">用量</span><span class="live-stat-value" id="live-usage">--</span></div>
+        <div class="live-stat-item"><span class="live-stat-label" id="lbl-presence">在线</span><span class="live-stat-value" id="live-presence">--</span></div>
+      </div>
+      <!-- 会话详情 / Chat 历史 -->
+      <div class="live-session-detail" id="live-session-detail">
+        <div class="live-detail-placeholder" id="live-detail-placeholder">
+          <p id="live-select-hint">← 选择一条会话查看详情</p>
+        </div>
+        <div class="live-detail-content" id="live-detail-content" style="display:none">
+          <div class="live-detail-header">
+            <div class="live-detail-meta">
+              <span class="live-detail-key" id="live-detail-key"></span>
+              <span class="live-detail-status" id="live-detail-status"></span>
+            </div>
+            <button type="button" class="live-action-btn" id="live-detail-close" title="关闭详情">✕</button>
+          </div>
+          <div class="live-chat-history" id="live-chat-history"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 <button class="view" id="view" type="button">[VIEW_DETAILS]</button>
 <div class="detail" id="detail" aria-hidden="true"><div class="mask" id="mask"></div><button class="close" id="close" type="button">CLOSE</button>
 <div class="panels">
@@ -251,7 +344,7 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.22;ba
       </div>
     </div>
   </div>
-  <!-- HTTP API 控制面板 -->
+  <!-- API 控制面板 + 管理命令（借鉴 Control Center 思路：总览/会话/任务/审批/员工/通道，自有实现） -->
   <div id="api-panel">
     <div id="api-panel-title">API 控制面板 <span id="api-panel-subtitle">ws://127.0.0.1:18789</span></div>
     <div id="api-btns">
@@ -261,6 +354,17 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.22;ba
       <button type="button" class="api-btn" data-action="heartbeat">心跳</button>
       <button type="button" class="api-btn" data-action="models">模型</button>
       <button type="button" class="api-btn" data-action="config">配置</button>
+    </div>
+    <div id="mgmt-section" class="mgmt-section">
+      <div class="mgmt-section-title" id="mgmt-section-title">管理命令</div>
+      <div id="api-btns-mgmt" class="api-btns-mgmt">
+        <button type="button" class="api-btn" data-action="tasks">任务</button>
+        <button type="button" class="api-btn" data-action="projects">项目</button>
+        <button type="button" class="api-btn" data-action="approvals">审批</button>
+        <button type="button" class="api-btn" data-action="presence">在线节点</button>
+        <button type="button" class="api-btn" data-action="channels">通道</button>
+        <button type="button" class="api-btn" data-action="usage">用量</button>
+      </div>
     </div>
     <div id="api-result"></div>
   </div>
@@ -320,7 +424,7 @@ const i18n={
     ],
     radarLabels:["消耗","模型","工具","习惯","健康","综合"],
     rowLabels:["会话数","输入Token","输出Token","Token总量","缓存读/写","模型提供商","模型","最近渠道","来源","最近活跃","上下文上限","工具种类数","使用工具会话数","工具名","心跳时间","心跳内容","异常中断次数","systemSent","compactionCount","系统提示字数","注入工作区文件","技能"],
-    themeNames:["核心信号","算力消耗","模型与工具","健康与状态","会话核心"],
+    themeNames:["核心信号","算力消耗","模型与工具","健康与状态","会话核心","实时后台"],
     themes:[
       [{t:"OpenClaw 最爱用的关键词",d:"工具与技能激活信号"},{t:"等级评定",d:null},{t:"综合能力值",d:"综合得分"},{t:"能力向量",d:"消耗/模型/工具"},{t:"工作节奏",d:null},{t:"峰值时段",d:null},{t:"活跃时长",d:null},{t:"习惯分",d:"taskHabit.score"},{t:"健康分",d:"stabilityHealth.score"}],
       [{t:"OpenClaw Token 总量",d:"画像+会话汇总"},{t:"输入/输出",d:null},{t:"缓存命中率",d:null},{t:"花费(美元)",d:"consumption.totalCostUSD"},{t:"上下文窗口",d:"token.contextTokensMax"},{t:"缓存读取",d:"cacheReadSum"},{t:"缓存写入",d:"cacheWriteSum"},{t:"Token合计",d:"totalTokensSum"},{t:"数据来源",d:null}],
@@ -365,7 +469,7 @@ const i18n={
     ],
     radarLabels:["Consumption","Model","Tool","Habit","Health","Composite"],
     rowLabels:["Session Count","Token Input","Token Output","Token Total","Cache Read / Write","Model Provider","Model","Last Channel","Origin","Last Active","Context Tokens Max","Tools Schema Count","Tools Sessions","Tool Names","Heartbeat","Heartbeat Text","abortedLastRun","systemSent","compactionCount","systemPromptChars","workspaceInjectedFiles","skills"],
-    themeNames:["Core Signal","Resource","Model + Tool","Health + Status","sessions.json Core"],
+    themeNames:["Core Signal","Resource","Model + Tool","Health + Status","sessions.json Core","Live Backend"],
     themes:[
       [{t:"Top 3 Keywords",d:"Tool + skill activation signals"},{t:"Rank Grade",d:null},{t:"Core Ability",d:"composite score"},{t:"Capability Vector",d:"consumption / model / tool"},{t:"Work Rhythm",d:null},{t:"Peak Hours",d:null},{t:"Active Hours",d:null},{t:"Habit Score",d:"taskHabit.score"},{t:"Health Score",d:"stabilityHealth.score"}],
       [{t:"Total Token",d:"portrait + sessions summary"},{t:"Input / Output",d:null},{t:"Cache Hit Rate",d:null},{t:"Cost USD",d:"consumption.totalCostUSD"},{t:"Context Window",d:"token.contextTokensMax"},{t:"Cache Read",d:"cacheReadSum"},{t:"Cache Write",d:"cacheWriteSum"},{t:"Token Sum",d:"totalTokensSum"},{t:"Data source",d:null}],
@@ -450,7 +554,7 @@ const c1=[{t:themesArr[1][0].t,v:m.tokens,d:(themesArr[1][0].d||"portrait + sess
 const c2=[{t:themesArr[2][0].t,v:m.topModel,d:getCardDesc(2,0,m,L)},{t:themesArr[2][1].t,v:m.modelSpread,d:getCardDesc(2,1,m,L)},{t:themesArr[2][2].t,v:m.topTool,d:getCardDesc(2,2,m,L)},{t:themesArr[2][3].t,v:m.toolCalls,d:getCardDesc(2,3,m,L)},{t:themesArr[2][4].t,v:m.provider,d:getCardDesc(2,4,m,L)},{t:themesArr[2][5].t,v:m.modelRaw,d:themesArr[2][5].d||""},{t:themesArr[2][6].t,v:m.toolKinds,d:themesArr[2][6].d||""},{t:themesArr[2][7].t,v:m.topToolCount,d:themesArr[2][7].d||""}];
 const c3=[{t:themesArr[3][0].t,v:fmt(m.health),d:themesArr[3][0].d||"stabilityHealth.score"},{t:themesArr[3][1].t,v:m.success,d:(themesArr[3][1].d||"health.successRate / status.successRate")+(m.partialDataHint?" · "+m.partialDataHint:"")},{t:themesArr[3][2].t,v:m.abnormal,d:themesArr[3][2].d||"health.abnormalInterruptionRate"},{t:themesArr[3][3].t,v:m.last,d:themesArr[3][3].d||"sessions.updatedAt / heartbeat"},{t:themesArr[3][4].t,v:`${m.sessCnt} ${L==="zh"?"次会话":"sessions"}`,d:getCardDesc(3,4,m,L)},{t:themesArr[3][5].t,v:m.channel,d:themesArr[3][5].d||""},{t:themesArr[3][6].t,v:m.origin,d:themesArr[3][6].d||""},{t:themesArr[3][7].t,v:m.abortedCount,d:themesArr[3][7].d||""}];
 const c4=[{t:themesArr[4][0].t,v:m.channel,d:getCardDesc(4,0,m,L)},{t:themesArr[4][1].t,v:m.ctx,d:themesArr[4][1].d||"token.contextTokensMax"},{t:themesArr[4][2].t,v:m.injected,d:getCardDesc(4,2,m,L)},{t:themesArr[4][3].t,v:`${m.cacheRead} / ${m.cacheWrite}`,d:getCardDesc(4,3,m,L)},{t:themesArr[4][4].t,v:m.last,d:getCardDesc(4,4,m,L)},{t:themesArr[4][5].t,v:m.provider,d:themesArr[4][5].d||""},{t:themesArr[4][6].t,v:m.spChars,d:themesArr[4][6].d||""},{t:themesArr[4][7].t,v:m.abortedCount,d:themesArr[4][7].d||""},{t:themesArr[4][8].t,v:(m.heartbeatText||"--").slice(0,50)+(m.heartbeatText&&m.heartbeatText.length>50?"…":""),d:themesArr[4][8].d||""}];
-return [{n:names[0],c:c0},{n:names[1],c:c1},{n:names[2],c:c2},{n:names[3],c:c3},{n:names[4],c:c4}];}
+return [{n:names[0],c:c0},{n:names[1],c:c1},{n:names[2],c:c2},{n:names[3],c:c3},{n:names[4],c:c4},{n:names[5],c:[]}];}
 function renderCloud(words){wc.innerHTML='';const pal=['#00ff41','#f4f8ff','#9fd3ff','#ff9c9c','#ffd28a'];words.forEach((it,i)=>{const s=document.createElement('span');const w=Math.max(6,Math.min(28,N(it.weight,10)));s.textContent=String(it.word||'--');s.style.fontSize=`${10+w}px`;s.style.color=pal[i%pal.length];s.style.borderColor=i%2===0?'rgba(0,255,65,.34)':'rgba(230,57,70,.34)';wc.appendChild(s);});}
 function drawRadar(scores,L){L=L||state.lang;const ctx=radar.getContext('2d'),r=window.devicePixelRatio||1,size=Math.min(radar.clientWidth||380,380);radar.width=Math.floor(size*r);radar.height=Math.floor(size*r);radar.style.width=`${size}px`;radar.style.height=`${size}px`;ctx.setTransform(r,0,0,r,0,0);ctx.clearRect(0,0,size,size);const labels=(i18n[L]&&i18n[L].radarLabels)||['Consumption','Model','Tool','Habit','Health','Composite'],c={x:size/2,y:size/2},rad=size*.34,p=labels.length;for(let k=1;k<=5;k++){ctx.beginPath();for(let i=0;i<p;i++){const a=Math.PI*2*i/p-Math.PI/2,rr=rad*k/5,x=c.x+Math.cos(a)*rr,y=c.y+Math.sin(a)*rr;i?ctx.lineTo(x,y):ctx.moveTo(x,y);}ctx.closePath();ctx.strokeStyle='rgba(255,255,255,.16)';ctx.stroke();}
 for(let i=0;i<p;i++){const a=Math.PI*2*i/p-Math.PI/2,x=c.x+Math.cos(a)*rad,y=c.y+Math.sin(a)*rad;ctx.beginPath();ctx.moveTo(c.x,c.y);ctx.lineTo(x,y);ctx.strokeStyle='rgba(255,255,255,.18)';ctx.stroke();ctx.fillStyle='#8fa5be';ctx.font='11px JetBrains Mono';ctx.textAlign='center';ctx.fillText(labels[i],c.x+Math.cos(a)*(rad+22),c.y+Math.sin(a)*(rad+22));}
@@ -463,6 +567,198 @@ function pose(i,t){const o=orbitR(),a=Math.PI*2*i/Math.max(t,1)-Math.PI/2;return
 function cardNode(data,i,t,themeIdx){const c=document.createElement('article');c.className='card';c.setAttribute('role','button');c.setAttribute('tabindex','0');c.dataset.theme=String(themeIdx);c.dataset.card=String(i);c.innerHTML=`<h3>${data.t}</h3><div class="v">${data.v}</div><p class="d">${data.d}</p>`;const p=pose(i,t);c.dataset.x=String(p.x);c.dataset.y=String(p.y);c.style.opacity='0';c.style.transform=`translate3d(${state.dir*10}px,0,0) scale(.35)`;return c;}
 function openCardModal(themeIdx,cardIdx){const L=state.lang;const help=i18n[L].cardHelp;const labels=i18n[L].cardModalLabels;if(!help||!help[themeIdx]||!help[themeIdx][cardIdx])return;const h=help[themeIdx][cardIdx];const th=state.themes[themeIdx];const cardTitle=th&&th.c&&th.c[cardIdx]?th.c[cardIdx].t:"";const modal=$("card-modal");if(!modal)return;modal.querySelector("#card-modal-title").textContent=cardTitle;$("card-help-source").textContent=h.source||"--";$("card-help-analysis").textContent=h.analysis||"--";$("card-help-calc").textContent=h.calculation||"--";$("card-help-trait").textContent=h.ownerTrait||"--";$("card-help-source-label").textContent=labels.source;$("card-help-analysis-label").textContent=labels.analysis;$("card-help-calc-label").textContent=labels.calculation;$("card-help-trait-label").textContent=labels.ownerTrait;modal.classList.add("open");modal.setAttribute("aria-hidden","false");}
 function closeCardModal(){const modal=$("card-modal");if(modal){modal.classList.remove("open");modal.setAttribute("aria-hidden","true");}}
+/* ===== LiveController: 实时后台标签数据轮询与渲染 ===== */
+const LiveController={
+  pollTimer:null,
+  detailTimer:null,
+  selectedKey:null,
+  _lastSessionsList:[],
+  POLL_INTERVAL:8000,
+  DETAIL_INTERVAL:12000,
+  _lang:()=>state.lang||'zh',
+
+  /* ── 启动轮询 ── */
+  start(){
+    this.stop();
+    this._updateStatusDot(ClawController&&ClawController.authenticated?'connected':'idle');
+    this._pollAll();
+    this.pollTimer=setInterval(()=>this._pollAll(),this.POLL_INTERVAL);
+  },
+
+  /* ── 停止轮询 ── */
+  stop(){
+    if(this.pollTimer){clearInterval(this.pollTimer);this.pollTimer=null;}
+    if(this.detailTimer){clearInterval(this.detailTimer);this.detailTimer=null;}
+  },
+
+  /* ── 一次性拉取所有摘要 ── */
+  async _pollAll(){
+    if(!ClawController||!ClawController.authenticated)return;
+    try{
+      const [statusRes,sessRes,tasksRes,usageRes,presRes]=await Promise.allSettled([
+        ClawController.rpcCall('status',{}),
+        ClawController.rpcCall('sessions.list',{}),
+        ClawController.rpcCall('tasks.list',{}),
+        ClawController.rpcCall('usage-cost',{}),
+        ClawController.rpcCall('system-presence',{})
+      ]);
+      this._updateStatusBar(statusRes,sessRes,tasksRes,usageRes,presRes);
+      if(sessRes.status==='fulfilled'&&sessRes.value)this._renderSessionList(sessRes.value);
+      this._updateStatusDot('connected');
+    }catch(e){this._updateStatusDot('error');}
+  },
+
+  /* ── 更新顶部状态条 ── */
+  _updateStatusBar(statusRes,sessRes,tasksRes,usageRes,presRes){
+    const $=id=>document.getElementById(id);
+    const gwEl=$('live-gw-status'),scEl=$('live-sess-cnt'),tcEl=$('live-task-cnt'),ucEl=$('live-usage'),pcEl=$('live-presence');
+    if(gwEl){
+      let gwTxt='--';
+      if(statusRes.status==='fulfilled'&&statusRes.value){const s=statusRes.value;gwTxt=s.status||s.state||'OK';}
+      gwEl.textContent=gwTxt;
+    }
+    if(scEl){
+      let cnt='--';
+      if(sessRes.status==='fulfilled'&&sessRes.value){const v=sessRes.value;cnt=Array.isArray(v)?v.length:(Array.isArray(v&&v.sessions)?v.sessions.length:'?');}
+      scEl.textContent=cnt;
+    }
+    if(tcEl){
+      let tc='--';
+      if(tasksRes.status==='fulfilled'&&tasksRes.value){const v=tasksRes.value;tc=Array.isArray(v)?v.length:(Array.isArray(v&&v.tasks)?v.tasks.length:'?');}
+      tcEl.textContent=tc;
+    }
+    if(ucEl){
+      let uc='--';
+      if(usageRes.status==='fulfilled'&&usageRes.value){const v=usageRes.value;uc=v.totalCostUSD!=null?`$${Number(v.totalCostUSD).toFixed(4)}`:v.cost||'?';}
+      ucEl.textContent=uc;
+    }
+    if(pcEl){
+      let pc='--';
+      if(presRes.status==='fulfilled'&&presRes.value){const v=presRes.value;pc=Array.isArray(v)?v.length:(v&&v.count!=null?v.count:'?');}
+      pcEl.textContent=pc;
+    }
+  },
+
+  /* ── 渲染会话列表 ── */
+  _renderSessionList(data){
+    const container=document.getElementById('live-sessions-list');
+    const emptyEl=document.getElementById('live-sessions-empty');
+    if(!container)return;
+    const sessions=Array.isArray(data)?data:(Array.isArray(data&&data.sessions)?data.sessions:[]);
+    this._lastSessionsList=sessions;
+    if(!sessions.length){
+      container.innerHTML='';
+      if(emptyEl){emptyEl.style.display='block';emptyEl.textContent=this._lang()==='zh'?'暂无会话数据':'No sessions';}
+      return;
+    }
+    if(emptyEl)emptyEl.style.display='none';
+    container.innerHTML='';
+    sessions.forEach(s=>{
+      const key=s.sessionKey||s.key||s.id||'unknown';
+      const active=s.status==='active'||s.active||s.running;
+      const ts=s.updatedAt||s.createdAt||s.lastActivity||'';
+      const tsStr=ts?new Date(ts).toLocaleTimeString():'';
+      const item=document.createElement('div');
+      item.className='live-session-item'+(this.selectedKey===key?' selected':'');
+      item.dataset.key=key;
+      item.innerHTML=`<div class="si-key" title="${key}">${key}</div><div class="si-meta"><span class="si-status${active?'':' inactive'}">${active?'active':'idle'}</span>${tsStr?`<span>${tsStr}</span>`:''}</div>`;
+      item.addEventListener('click',()=>this._selectSession(key,item));
+      container.appendChild(item);
+    });
+  },
+
+  /* ── 选中一条会话 ── */
+  _selectSession(key,itemEl){
+    this.selectedKey=key;
+    document.querySelectorAll('.live-session-item').forEach(el=>el.classList.toggle('selected',el.dataset.key===key));
+    this._loadSessionDetail(key);
+  },
+
+  /* ── 加载会话详情（仅用 sessions.list 数据，Gateway 无 sessions.get） ── */
+  _loadSessionDetail(key){
+    const detailContent=document.getElementById('live-detail-content');
+    const placeholder=document.getElementById('live-detail-placeholder');
+    const keyEl=document.getElementById('live-detail-key');
+    const statusEl=document.getElementById('live-detail-status');
+    const historyEl=document.getElementById('live-chat-history');
+    if(!detailContent||!placeholder)return;
+    if(keyEl)keyEl.textContent=key;
+    detailContent.style.display='flex';
+    placeholder.style.display='none';
+    const session=this._lastSessionsList.find(s=>(s.sessionKey||s.key||s.id)===''+key);
+    if(statusEl)statusEl.textContent=session?(session.status||session.state||(session.active?'active':'idle')):'--';
+    if(!historyEl)return;
+    if(!session){
+      historyEl.innerHTML=`<div style="color:var(--dim);font-size:11px;padding:8px">${this._lang()==='zh'?'未找到该会话':'Session not found'}</div>`;
+      return;
+    }
+    const L=this._lang();
+    const rows=[];
+    if(session.updatedAt||session.createdAt)rows.push({k:L==='zh'?'更新时间':'Updated',v:new Date(session.updatedAt||session.createdAt).toLocaleString()});
+    if(session.createdAt&&session.updatedAt!==session.createdAt)rows.push({k:L==='zh'?'创建时间':'Created',v:new Date(session.createdAt).toLocaleString()});
+    Object.keys(session).filter(x=>!['sessionKey','key','id','status','state','active','updatedAt','createdAt','lastActivity'].includes(x)).slice(0,12).forEach(k=>{const v=session[k];if(v!=null&&typeof v!=='object')rows.push({k,v:String(v)});});
+    let html=`<div class="live-detail-summary" style="margin-bottom:12px;padding:10px;background:rgba(255,255,255,.04);border-radius:8px;font-size:11px;color:var(--dim);">`;
+    rows.forEach(r=>{html+=`<div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:4px;"><span>${r.k}</span><span style="color:var(--txt)">${r.v}</span></div>`;});
+    html+=`</div><p style="font-size:11px;color:var(--dim);">${L==='zh'?'当前 Gateway 协议仅支持 sessions.list，不提供单会话聊天历史接口。会话概要见上。':'Gateway only supports sessions.list; per-session chat history is not available.'}</p>`;
+    historyEl.innerHTML=html;
+  },
+
+  /* ── 状态点 ── */
+  _updateStatusDot(state){
+    const dot=document.getElementById('live-status-dot');
+    if(!dot)return;
+    dot.classList.remove('connected','error');
+    if(state==='connected')dot.classList.add('connected');
+    else if(state==='error')dot.classList.add('error');
+  },
+
+  /* ── 无 Gateway 时显示提示 ── */
+  showOffline(){
+    const container=document.getElementById('live-sessions-list');
+    const emptyEl=document.getElementById('live-sessions-empty');
+    const L=this._lang();
+    if(emptyEl){emptyEl.style.display='block';emptyEl.textContent=L==='zh'?'未连接 Gateway，请先连接 127.0.0.1:18789':'Gateway not connected. Please connect to 127.0.0.1:18789';}
+    const gwEl=document.getElementById('live-gw-status');
+    if(gwEl)gwEl.textContent=L==='zh'?'未连接':'Offline';
+    this._updateStatusDot('error');
+  },
+
+  /* ── 更新标签语言 ── */
+  updateLabels(L){
+    const map={
+      'live-sessions-title':{'zh':'实时会话','en':'Live Sessions'},
+      'lbl-gw-status':{'zh':'Gateway','en':'Gateway'},
+      'lbl-sess-cnt':{'zh':'会话数','en':'Sessions'},
+      'lbl-task-cnt':{'zh':'任务','en':'Tasks'},
+      'lbl-usage':{'zh':'用量','en':'Usage'},
+      'lbl-presence':{'zh':'在线','en':'Online'},
+      'live-sessions-empty':{'zh':'等待 Gateway 连接...','en':'Waiting for Gateway...'},
+      'live-select-hint':{'zh':'← 选择一条会话查看详情','en':'← Select a session to view details'}
+    };
+    Object.entries(map).forEach(([id,texts])=>{const el=document.getElementById(id);if(el)el.textContent=texts[L]||texts['zh'];});
+  }
+};
+
+/* 绑定实时视图 close 按钮 */
+(function(){
+  const closeBtn=document.getElementById('live-detail-close');
+  if(closeBtn)closeBtn.addEventListener('click',()=>{
+    const dc=document.getElementById('live-detail-content');
+    const ph=document.getElementById('live-detail-placeholder');
+    if(dc)dc.style.display='none';
+    if(ph)ph.style.display='flex';
+    LiveController.selectedKey=null;
+    document.querySelectorAll('.live-session-item').forEach(el=>el.classList.remove('selected'));
+  });
+  const refreshBtn=document.getElementById('live-refresh-btn');
+  if(refreshBtn)refreshBtn.addEventListener('click',()=>{
+    if(state.idx===LIVE_IDX){
+      if(ClawController&&ClawController.authenticated)LiveController._pollAll();
+      else LiveController.showOffline();
+    }
+  });
+})();
+
 /* 瞳孔 #pupil-l / #pupil-r 闪烁 r 11->15->11，发送/回车时触发 */
 function blinkEyes(){if(!pl||!pr)return;const open=()=>{pl.setAttribute('r','15');pr.setAttribute('r','15');};const close=()=>{pl.setAttribute('r','11');pr.setAttribute('r','11');};open();setTimeout(close,100);setTimeout(()=>{open();setTimeout(close,100);},200);}
 /* ===== ClawController: 完整聊天控制器 ===== */
@@ -1072,11 +1368,52 @@ const ClawController={
     });
   }
 };
-function renderTheme(i){const th=state.themes[i];if(!th)return;sub.textContent=th.n;cl.textContent=String(i+1).padStart(2,'0');orbit.innerHTML='';th.c.forEach((it,idx)=>orbit.appendChild(cardNode(it,idx,th.c.length,i)));requestAnimationFrame(()=>{orbit.querySelectorAll('.card').forEach((c,idx)=>{const x=N(c.dataset.x,0),y=N(c.dataset.y,0);setTimeout(()=>{c.style.opacity='1';c.style.transform=`translate3d(${x}px,${y}px,0) scale(1)`},idx*22);});orbit.querySelectorAll('.card').forEach(card=>{card.addEventListener('click',e=>{e.stopPropagation();const t=Number(card.dataset.theme),j=Number(card.dataset.card);if(Number.isFinite(t)&&Number.isFinite(j))openCardModal(t,j);});card.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();const t=Number(card.dataset.theme),j=Number(card.dataset.card);if(Number.isFinite(t)&&Number.isFinite(j))openCardModal(t,j);}});});});}
+const LIVE_IDX=5;
+function renderTheme(i){
+  const liveView=document.getElementById('live-view');
+  const stageEl=document.querySelector('.stage');
+  const heroEl=document.querySelector('.hero');
+  const viewBtn=document.getElementById('view');
+  if(i===LIVE_IDX){
+    // 进入实时后台视图：隐藏 orbit/眼睛/view按钮，显示 live-view
+    if(liveView){liveView.style.display='flex';liveView.classList.add('active');liveView.setAttribute('aria-hidden','false');}
+    if(stageEl)stageEl.style.visibility='hidden';
+    if(heroEl)heroEl.style.visibility='hidden';
+    if(viewBtn)viewBtn.style.display='none';
+    const th=state.themes[i];
+    if(th)sub.textContent=th.n;
+    cl.textContent=String(i+1).padStart(2,'0');
+    return;
+  }
+  // 非实时后台视图：恢复原始 UI
+  if(liveView){liveView.style.display='none';liveView.classList.remove('active');liveView.setAttribute('aria-hidden','true');}
+  if(stageEl)stageEl.style.visibility='';
+  if(heroEl)heroEl.style.visibility='';
+  if(viewBtn)viewBtn.style.display='';
+  const th=state.themes[i];if(!th)return;sub.textContent=th.n;cl.textContent=String(i+1).padStart(2,'0');orbit.innerHTML='';th.c.forEach((it,idx)=>orbit.appendChild(cardNode(it,idx,th.c.length,i)));requestAnimationFrame(()=>{orbit.querySelectorAll('.card').forEach((c,idx)=>{const x=N(c.dataset.x,0),y=N(c.dataset.y,0);setTimeout(()=>{c.style.opacity='1';c.style.transform=`translate3d(${x}px,${y}px,0) scale(1)`},idx*22);});orbit.querySelectorAll('.card').forEach(card=>{card.addEventListener('click',e=>{e.stopPropagation();const t=Number(card.dataset.theme),j=Number(card.dataset.card);if(Number.isFinite(t)&&Number.isFinite(j))openCardModal(t,j);});card.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();const t=Number(card.dataset.theme),j=Number(card.dataset.card);if(Number.isFinite(t)&&Number.isFinite(j))openCardModal(t,j);}});});});
+}
 function out(dir){orbit.querySelectorAll('.card').forEach((c,idx)=>{const x=N(c.dataset.x,0),y=N(c.dataset.y,0),len=Math.max(1,Math.sqrt(x*x+y*y)),nx=x/len,ny=y/len,b=118+idx*14;c.style.opacity='0';c.style.transform=`translate3d(${x+nx*b+dir*30}px,${y+ny*b*.72}px,0) scale(.72)`;});}
 function react(dir){reactor.style.transform=`rotate(${dir*8}deg)`;setTimeout(()=>reactor.style.transform='rotate(0deg)',200)}
 function navState(){nav.querySelectorAll('.btn').forEach(b=>b.classList.toggle('on',Number(b.dataset.i)===state.idx));}
-function sw(next,dir){if(state.anim||next===state.idx)return;state.anim=true;state.dir=dir>=0?1:-1;react(state.dir);out(state.dir);setTimeout(()=>{state.idx=next;renderTheme(state.idx);navState();setTimeout(()=>state.anim=false,780)},260)}
+function sw(next,dir){
+  if(state.anim||next===state.idx)return;
+  const prevIdx=state.idx;
+  state.anim=true;state.dir=dir>=0?1:-1;react(state.dir);
+  if(prevIdx!==LIVE_IDX)out(state.dir);
+  setTimeout(()=>{
+    // 离开实时标签时停止轮询
+    if(prevIdx===LIVE_IDX)LiveController.stop();
+    state.idx=next;
+    renderTheme(state.idx);
+    navState();
+    // 进入实时标签时启动轮询
+    if(next===LIVE_IDX){
+      if(ClawController&&ClawController.authenticated)LiveController.start();
+      else LiveController.showOffline();
+    }
+    setTimeout(()=>state.anim=false,780);
+  },260);
+}
 function mountNav(){nav.innerHTML='';state.themes.forEach((th,i)=>{const b=document.createElement('button');b.className='btn';b.type='button';b.dataset.i=String(i);b.textContent=th.n;b.addEventListener('click',()=>sw(i,i>state.idx?1:-1));nav.appendChild(b);});navState();}
 function tick(){const n=new Date();time.textContent=`${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')} ${n.toTimeString().slice(0,8)}`}
 function pupil(p,c,x,y){const r=oc.getBoundingClientRect(),rx=(x-r.left)*(500/r.width),ry=(y-r.top)*(500/r.height),dx=rx-c.x,dy=ry-c.y,a=Math.atan2(dy,dx),dis=Math.min(Math.sqrt(dx*dx+dy*dy),eyeLimit);p.setAttribute('cx',(c.x+Math.cos(a)*dis).toFixed(2));p.setAttribute('cy',(c.y+Math.sin(a)*dis).toFixed(2));}
@@ -1267,14 +1604,20 @@ function bind(){
     apiResult.className='show '+(isOk?'ok':'err');
   }
 
-  /* API 按钮映射到 RPC 方法或 HTTP 端点 */
+  /* API 按钮映射到 RPC 方法（借鉴 Control Center 思路：总览/会话/任务/审批/员工/通道，自有实现） */
   const apiActionMap={
-    status:  {rpc:'status',          http:null},
-    health:  {rpc:'health',          http:null},
-    sessions:{rpc:'sessions.list',   http:null},
-    heartbeat:{rpc:'last-heartbeat', http:null},
-    models:  {rpc:'models.list',     http:null},
-    config:  {rpc:'config.get',      http:null}
+    status:  {rpc:'status',            http:null},
+    health:  {rpc:'health',            http:null},
+    sessions:{rpc:'sessions.list',    http:null},
+    heartbeat:{rpc:'last-heartbeat',  http:null},
+    models:  {rpc:'models.list',      http:null},
+    config:  {rpc:'config.get',       http:null},
+    tasks:   {rpc:'tasks.list',       http:'/tasks'},
+    projects:{rpc:'projects.list',    http:'/projects'},
+    approvals:{rpc:'approvals.list',  http:'/api/action-queue'},
+    presence:{rpc:'system-presence',   http:null},
+    channels:{rpc:'channels.list',    http:null},
+    usage:   {rpc:'usage-cost',       http:'/api/usage-cost'}
   };
 
   async function runApiAction(action){
@@ -1321,6 +1664,22 @@ function bind(){
     });
   }
 
+  /* 管理命令区文案随语言更新（供 applyLang 调用） */
+  function updateMgmtLabels(){
+    const L=state.lang;
+    const t=L==='zh'?{title:'管理命令',tasks:'任务',projects:'项目',approvals:'审批',presence:'在线节点',channels:'通道',usage:'用量'}
+      :{title:'Management',tasks:'Tasks',projects:'Projects',approvals:'Approvals',presence:'Presence',channels:'Channels',usage:'Usage'};
+    const titleEl=document.getElementById('mgmt-section-title');
+    if(titleEl)titleEl.textContent=t.title;
+    const mgmtBtns=document.querySelectorAll('#api-btns-mgmt .api-btn');
+    mgmtBtns.forEach(btn=>{
+      const a=btn.dataset.action;
+      if(t[a])btn.textContent=t[a];
+    });
+  }
+  window.updateMgmtLabels=updateMgmtLabels;
+  if(document.getElementById('mgmt-section'))updateMgmtLabels();
+
   /* ── 语言切换 ── */
   const btnZh=$("btn-lang-zh"),btnEn=$("btn-lang-en");
   if(btnZh)btnZh.addEventListener('click',()=>{const L='zh';state.metrics=processStats(state.payload||{},L);state.themes=themes(state.metrics,L);mountNav();renderTheme(state.idx);refreshDetails();applyLang(L);});
@@ -1344,7 +1703,7 @@ function bind(){
 const setStatus=t=>status.textContent=t,hideBoot=()=>boot.classList.add('hide');
 async function bootstrap(){const L=state.lang;setStatus(i18n[L].statusLoading);const local=localPayload();setStatus(i18n[L].statusFetch);const remote=await workerPayload();state.payload=score(remote)>score(local)?remote:local;try{if(state.payload&&Object.keys(state.payload).length)sessionStorage.setItem('openclaw_analysis_data',JSON.stringify(state.payload));}catch{}setStatus(i18n[L].statusProcess);state.metrics=processStats(state.payload||{},L);state.themes=themes(state.metrics,L);}
 async function init(){applyLang(state.lang);bind();tick();setInterval(tick,1000);setInterval(()=>{if(Math.random()>.82){pl.setAttribute('r','14');pr.setAttribute('r','14');setTimeout(()=>{pl.setAttribute('r','11');pr.setAttribute('r','11')},110)}},2800);await bootstrap();mountNav();renderTheme(state.idx);refreshDetails();setStatus(i18n[state.lang].statusOnline);setTimeout(hideBoot,220);applyLang(state.lang);}
-function applyLang(L){state.lang=L;try{localStorage.setItem("openclaw2_lang",L);}catch{}const t=i18n[L];if(!t)return;$("top-title").textContent=t.topTitle;$("top-sub").textContent=t.topSub;const heroTitle=$("hero-title");if(heroTitle)heroTitle.textContent=t.heroTitle;$("link-report").textContent=t.linkReport;$("link-report").title=t.linkReport;$("link-stats").textContent=t.linkStats;$("link-stats").title=t.linkStats;$("view").textContent=t.viewDetails;closeBtn.textContent=t.close;$("boot").querySelector(".t").textContent=t.bootTitle;const leftPanel=$("detail").querySelector(".panel.left"),rightPanel=$("detail").querySelector(".panel.right");if(leftPanel){const h=leftPanel.querySelector("h3.pt");if(h)h.textContent=t.signalPanels;const blks=leftPanel.querySelectorAll(".blk");if(blks[0])blks[0].querySelector(".pt").textContent=t.radar;if(blks[1])blks[1].querySelector(".pt").textContent=t.wordCloud;}if(rightPanel){const h=rightPanel.querySelector("h3.pt");if(h)h.textContent=t.sessionList;const dsTitle=$("data-source-title"),dsDesc=$("data-source-desc");if(dsTitle&&t.dataSourceTitle)dsTitle.textContent=t.dataSourceTitle;if(dsDesc&&t.dataSourceDesc)dsDesc.textContent=t.dataSourceDesc;}const bzh=$("btn-lang-zh"),ben=$("btn-lang-en");if(bzh)bzh.classList.toggle("active",L==="zh");if(ben)ben.classList.toggle("active",L==="en");document.documentElement.lang=L==="zh"?"zh-CN":"en";}
+function applyLang(L){state.lang=L;try{localStorage.setItem("openclaw2_lang",L);}catch{}const t=i18n[L];if(!t)return;$("top-title").textContent=t.topTitle;$("top-sub").textContent=t.topSub;const heroTitle=$("hero-title");if(heroTitle)heroTitle.textContent=t.heroTitle;$("link-report").textContent=t.linkReport;$("link-report").title=t.linkReport;$("link-stats").textContent=t.linkStats;$("link-stats").title=t.linkStats;$("view").textContent=t.viewDetails;closeBtn.textContent=t.close;$("boot").querySelector(".t").textContent=t.bootTitle;const leftPanel=$("detail").querySelector(".panel.left"),rightPanel=$("detail").querySelector(".panel.right");if(leftPanel){const h=leftPanel.querySelector("h3.pt");if(h)h.textContent=t.signalPanels;const blks=leftPanel.querySelectorAll(".blk");if(blks[0])blks[0].querySelector(".pt").textContent=t.radar;if(blks[1])blks[1].querySelector(".pt").textContent=t.wordCloud;}if(rightPanel){const h=rightPanel.querySelector("h3.pt");if(h)h.textContent=t.sessionList;const dsTitle=$("data-source-title"),dsDesc=$("data-source-desc");if(dsTitle&&t.dataSourceTitle)dsTitle.textContent=t.dataSourceTitle;if(dsDesc&&t.dataSourceDesc)dsDesc.textContent=t.dataSourceDesc;}const bzh=$("btn-lang-zh"),ben=$("btn-lang-en");if(bzh)bzh.classList.toggle("active",L==="zh");if(ben)ben.classList.toggle("active",L==="en");document.documentElement.lang=L==="zh"?"zh-CN":"en";if(typeof window.updateMgmtLabels==="function")window.updateMgmtLabels();if(typeof LiveController!=="undefined")LiveController.updateLabels(L);}
 init().catch(()=>{const L=state.lang;sub.textContent=L==="zh"?"数据离线":"DATA OFFLINE";setStatus(i18n[L].statusFailed);state.metrics=processStats({},L);state.themes=themes(state.metrics,L);mountNav();renderTheme(state.idx);refreshDetails();setTimeout(hideBoot,320);applyLang(L);});
 })();
 </script>
