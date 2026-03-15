@@ -84,11 +84,74 @@ async function getDialogueToken(origin) {
   });
 }
 
+/** 通过本地命令行执行 openclaw gateway restart（正确子命令为 gateway restart） */
+function runGatewayRestart() {
+  return new Promise((resolve) => {
+    const isWin = process.platform === 'win32';
+    let child;
+    try {
+      if (isWin) {
+        child = spawn('openclaw', ['gateway', 'restart'], {
+          shell: true,
+          detached: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+      } else {
+        // 非 Windows：用 nohup 脱开执行，避免父进程退出导致 restart 未完成（参见 openclaw#41978）
+        child = spawn('nohup', ['bash', '-c', 'sleep 2 && openclaw gateway restart > /dev/null 2>&1'], {
+          shell: false,
+          detached: true,
+          stdio: 'ignore',
+        });
+        child.unref();
+      }
+    } catch (e) {
+      resolve({ ok: false, error: '无法执行 openclaw 命令: ' + (e && e.message) });
+      return;
+    }
+    if (isWin) {
+      const timeout = setTimeout(() => {
+        try { child.kill(); } catch (err) { /* ignore */ }
+        resolve({ ok: true, message: 'openclaw gateway restart 已执行（超时断开）' });
+      }, 8000);
+      child.on('error', (e) => {
+        clearTimeout(timeout);
+        resolve({ ok: false, error: 'openclaw 执行错误: ' + (e && e.message) });
+      });
+      child.on('exit', (code, signal) => {
+        clearTimeout(timeout);
+        if (code === 0) {
+          resolve({ ok: true, message: 'openclaw gateway restart 已执行' });
+        } else {
+          resolve({ ok: false, error: `openclaw 退出 code=${code} signal=${signal}` });
+        }
+      });
+    } else {
+      resolve({ ok: true, message: 'openclaw gateway restart 已在后台执行（约 2 秒后生效）' });
+    }
+  });
+}
+
 const dialogueTokenPlugin = () => {
   return {
     name: 'dialogue-token-api',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
+        if (req.method === 'POST' && (req.url === '/api/gateway-restart' || req.url === '/api/gateway-restart/')) {
+          runGatewayRestart()
+            .then((body) => {
+              res.setHeader('Content-Type', 'application/json; charset=utf-8');
+              res.setHeader('Cache-Control', 'no-store');
+              res.statusCode = body.ok ? 200 : 500;
+              res.end(JSON.stringify(body));
+            })
+            .catch((e) => {
+              res.setHeader('Content-Type', 'application/json; charset=utf-8');
+              res.statusCode = 500;
+              res.end(JSON.stringify({ ok: false, error: String(e && e.message) }));
+            });
+          return;
+        }
         if (req.url !== '/api/dialogue-token' && !req.url.startsWith('/api/dialogue-token?')) {
           next();
           return;
