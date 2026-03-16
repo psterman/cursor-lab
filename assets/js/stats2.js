@@ -21822,19 +21822,92 @@
             });
         }
 
+        function getAnalysisFingerprint(payload) {
+            try {
+                return String(
+                    payload?.fingerprint ||
+                    payload?.meta?.fingerprint ||
+                    payload?.analysisData?.fingerprint ||
+                    payload?.analysisData?.meta?.fingerprint ||
+                    ''
+                ).trim().toLowerCase();
+            } catch (_) {
+                return '';
+            }
+        }
+
+        function getCurrentUserFingerprintForAnalysis(user) {
+            try {
+                return String(
+                    user?.fingerprint ||
+                    user?.user_fingerprint ||
+                    localStorage.getItem('user_fingerprint') ||
+                    window.fpId ||
+                    ''
+                ).trim().toLowerCase();
+            } catch (_) {
+                return '';
+            }
+        }
+
         function readLastAnalysisDataForCurrentDevice(user) {
             try {
                 var raw = getCursorAnalysisCache();
                 if (!raw) return null;
                 var payload = JSON.parse(raw);
                 if (!payload || typeof payload !== 'object') return null;
-                var payloadFp = String(payload.fingerprint || payload.meta?.fingerprint || '').trim().toLowerCase();
-                var userFp = String(user?.fingerprint || user?.user_fingerprint || localStorage.getItem('user_fingerprint') || window.fpId || '').trim().toLowerCase();
+                var payloadFp = getAnalysisFingerprint(payload);
+                var userFp = getCurrentUserFingerprintForAnalysis(user);
                 if (payloadFp && userFp && payloadFp !== userFp) return null;
                 return payload;
             } catch (_) {
                 return null;
             }
+        }
+
+        function readCursorHistoryForCurrentDevice(user) {
+            try {
+                if (typeof localStorage === 'undefined') return null;
+                var raw = localStorage.getItem('cursor_clinical_history') || '';
+                if (!raw) return null;
+                var history = JSON.parse(raw);
+                var analysisData = history && history.analysisData;
+                if (!analysisData || typeof analysisData !== 'object') return null;
+                var payloadFp = getAnalysisFingerprint(analysisData);
+                var userFp = getCurrentUserFingerprintForAnalysis(user);
+                if (payloadFp && userFp && payloadFp !== userFp) return null;
+                var hasChatData = Array.isArray(analysisData.chatData) && analysisData.chatData.length > 0;
+                var hasStats = !!(analysisData.stats && typeof analysisData.stats === 'object');
+                var hasVibeResult = !!(analysisData.vibeResult && typeof analysisData.vibeResult === 'object');
+                if (!hasChatData && !hasStats && !hasVibeResult) return null;
+                return analysisData;
+            } catch (_) {
+                return null;
+            }
+        }
+
+        function normalizeCursorHistoryToAnalysisPayload(analysisData) {
+            if (!analysisData || typeof analysisData !== 'object') return null;
+            var vibeResult = analysisData.vibeResult && typeof analysisData.vibeResult === 'object' ? analysisData.vibeResult : {};
+            var stats = analysisData.stats && typeof analysisData.stats === 'object'
+                ? analysisData.stats
+                : ((vibeResult.stats && typeof vibeResult.stats === 'object') ? vibeResult.stats : ((vibeResult.statistics && typeof vibeResult.statistics === 'object') ? vibeResult.statistics : {}));
+            var dimensions = vibeResult.dimensions && typeof vibeResult.dimensions === 'object'
+                ? vibeResult.dimensions
+                : (analysisData.dimensions && typeof analysisData.dimensions === 'object' ? analysisData.dimensions : {});
+            if (!Object.keys(stats).length && !Object.keys(dimensions).length) return null;
+            return {
+                fingerprint: getAnalysisFingerprint(analysisData),
+                stats: stats,
+                dimensions: dimensions,
+                roastText: vibeResult.roastText ?? vibeResult.roast_text,
+                personalityType: vibeResult.personalityType ?? vibeResult.personality_type,
+                personalityName: vibeResult.personalityName ?? vibeResult.personality_name,
+                vibeIndex: vibeResult.vibeIndex ?? vibeResult.vibe_index,
+                lpdef: vibeResult.lpdef,
+                personality: vibeResult.personality || analysisData.personality || null,
+                analysis: vibeResult.analysis || analysisData.analysis || null
+            };
         }
 
         /**
@@ -21871,6 +21944,14 @@
             if (localStoredAnalysis) {
                 currentUserData = buildUserDataFromLocalAnalysis(currentUserData, localStoredAnalysis);
                 console.log('[UserStats] ✅ 使用 last_analysis_data 覆盖侧边栏统计口径');
+            }
+            var localHistoryAnalysis = readCursorHistoryForCurrentDevice(currentUserData);
+            if (localHistoryAnalysis) {
+                var normalizedHistoryAnalysis = normalizeCursorHistoryToAnalysisPayload(localHistoryAnalysis);
+                if (normalizedHistoryAnalysis) {
+                    currentUserData = buildUserDataFromLocalAnalysis(currentUserData, normalizedHistoryAnalysis);
+                    console.log('[UserStats] ✅ 使用 cursor_clinical_history 覆盖侧边栏统计口径');
+                }
             }
             console.log('[UserStats] 🚀 开始渲染用户统计卡片，currentUserData:', {
                 hasUserData: !!currentUserData,
@@ -22059,30 +22140,104 @@
                     }
                 }
 
-                // 【占位卡】仅在“本地 + 服务端都没有 Cursor 战力数据，且无法再向后端查询”时，才渲染「未激活」占位卡
-                var hasLocalCursorData = !!(localStoredAnalysis || (localStats && localStats.payload));
-                try {
-                    var rawCursor = (typeof localStorage !== 'undefined' && (localStorage.getItem('last_analysis_data') || localStorage.getItem('cursor_clinical_history') || (typeof getCursorAnalysisCache === 'function' ? getCursorAnalysisCache() : ''))) || '';
-                    if (rawCursor && String(rawCursor).length > 20) hasLocalCursorData = true;
-                } catch (_) {}
-                var hasServerStats =
+                // 【占位卡】只有拿到明确的 Cursor 分析结果时才渲染真实 stats，避免误把 GitHub/OpenClaw/默认值当成 Cursor 聊天数据
+                var hasLocalCursorData = !!(localStoredAnalysis || localHistoryAnalysis || (localStats && localStats.payload));
+                var serverStatsObj = (function(rawStats) {
+                    if (!rawStats) return null;
+                    if (typeof rawStats === 'string') {
+                        try { return JSON.parse(rawStats); } catch (_) { return null; }
+                    }
+                    return typeof rawStats === 'object' ? rawStats : null;
+                })(currentUserData && currentUserData.stats);
+                var explicitServerQuestionCount = Number(
+                    currentUserData.question_message_count ??
+                    serverStatsObj?.question_message_count ??
+                    0
+                ) || 0;
+                var serverQuestionCount = Number(
+                    currentUserData.question_message_count ??
+                    currentUserData.total_messages ??
+                    serverStatsObj?.question_message_count ??
+                    serverStatsObj?.totalMessages ??
+                    serverStatsObj?.total_messages ??
+                    0
+                ) || 0;
+                var serverTotalChars = Number(
+                    currentUserData.total_chars ??
+                    currentUserData.totalUserChars ??
+                    currentUserData['total_user_chars'] ??
+                    serverStatsObj?.totalChars ??
+                    serverStatsObj?.total_chars ??
+                    serverStatsObj?.totalUserChars ??
+                    serverStatsObj?.['total_user_chars'] ??
+                    0
+                ) || 0;
+                var serverAvgMessageLength = Number(
+                    currentUserData.avg_message_length ??
+                    currentUserData.avg_user_message_length ??
+                    currentUserData.avgMessageLength ??
+                    currentUserData.avgUserMessageLength ??
+                    serverStatsObj?.avg_message_length ??
+                    serverStatsObj?.avg_user_message_length ??
+                    serverStatsObj?.avgMessageLength ??
+                    serverStatsObj?.avgUserMessageLength ??
+                    0
+                ) || 0;
+                var serverCursorAnchor =
+                    currentUserData.first_chat_at ||
+                    serverStatsObj?.first_chat_at ||
+                    serverStatsObj?.firstChatAt ||
+                    currentUserData.earliestFileTime ||
+                    currentUserData.earliest_file_time ||
+                    serverStatsObj?.earliestFileTime ||
+                    serverStatsObj?.earliest_file_time ||
+                    '';
+                var hasExplicitServerCursorMarker =
+                    !!String(serverCursorAnchor || '').trim() ||
+                    explicitServerQuestionCount > 0;
+                var hasMeaningfulServerCursorMetrics =
+                    serverQuestionCount > 0 ||
+                    serverTotalChars > 0 ||
+                    serverAvgMessageLength > 0 ||
                     !!currentUserData.dimensions ||
-                    !!currentUserData.stats ||
-                    (currentUserData.total_messages != null && currentUserData.total_messages > 0) ||
-                    (currentUserData.total_chars != null && currentUserData.total_chars > 0);
+                    hasAnyScore;
+                var hasServerCursorData =
+                    hasExplicitServerCursorMarker &&
+                    hasMeaningfulServerCursorMetrics;
+                var hasAuthenticatedSession = !(typeof hasAuthenticatedDrawerAccess === 'function') || hasAuthenticatedDrawerAccess();
                 var shouldShowCursorPlaceholder =
                     !hasLocalCursorData &&
-                    !hasServerStats &&
-                    !isGitHubUser &&
-                    !canQuerySupabase;
+                    !hasServerCursorData;
                 if (shouldShowCursorPlaceholder) {
                     var cursorPlaceholder = document.createElement('div');
                     cursorPlaceholder.className = 'drawer-item stats2-inactive-placeholder hacker-border';
                     cursorPlaceholder.setAttribute('data-card', 'cursor-inactive-placeholder');
-                    cursorPlaceholder.innerHTML = '<div class="stats2-inactive-placeholder-title">Cursor 战力未激活</div>' +
-                        '<div class="stats2-inactive-placeholder-desc">当前还没有上传 Cursor 聊天记录，请返回体检首页上传一次，以解锁赛博战力报告。</div>' +
-                        '<button type="button" class="stats2-inactive-placeholder-btn" onclick="typeof window.navigateToIndexPage === \'function\' && window.navigateToIndexPage()" aria-label="返回体检首页补全 Cursor 数据">返回体检首页</button>';
-                    leftBody.querySelectorAll('.drawer-item[data-card="cursor-inactive-placeholder"]').forEach(function(c) { c.remove(); });
+                    cursorPlaceholder.innerHTML = '<div class="stats2-inactive-placeholder-title">Cursor 数据未就绪</div>' +
+                        '<div class="stats2-inactive-placeholder-desc">' + (hasAuthenticatedSession
+                            ? '当前还没有可用的 Cursor 聊天分析结果。请返回体检首页上传一次 Cursor 聊天记录，随后这里才会显示真实 stats。'
+                            : '当前还没有可用的 Cursor 聊天分析结果。请先登录，再回到体检首页上传 Cursor 聊天记录，以获取真实 stats。') + '</div>' +
+                        '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+                            (!hasAuthenticatedSession
+                                ? '<button type="button" class="stats2-inactive-placeholder-btn" data-action="github-login" aria-label="GitHub 登录获取真实数据">GitHub 登录</button>'
+                                : '') +
+                            '<button type="button" class="stats2-inactive-placeholder-btn" onclick="typeof window.navigateToIndexPage === \'function\' && window.navigateToIndexPage()" aria-label="返回体检首页补全 Cursor 数据">返回体检首页</button>' +
+                        '</div>';
+                    leftBody.querySelectorAll('.drawer-item').forEach(function(card) {
+                        if (card.getAttribute('data-card') === 'identity-config') return;
+                        if (card.getAttribute('data-card') === 'cursor-inactive-placeholder') {
+                            card.remove();
+                            return;
+                        }
+                        var label = card.querySelector('.drawer-item-label');
+                        if (label && (
+                            label.textContent === '我的数据统计' ||
+                            label.textContent === 'My Stats' ||
+                            label.textContent === '数据同步中' ||
+                            label.textContent === 'Syncing'
+                        )) {
+                            card.remove();
+                        }
+                    });
                     var openclawMountRef = document.getElementById('openclaw-monitor-mount') || document.getElementById('openclaw-monitor-card');
                     var insertAfter = openclawMountRef && openclawMountRef.parentNode === leftBody ? openclawMountRef : leftBody.querySelector('.drawer-item[data-card="identity-config"]');
                     if (insertAfter && insertAfter.nextSibling) leftBody.insertBefore(cursorPlaceholder, insertAfter.nextSibling);
@@ -23153,6 +23308,7 @@
                         card.remove();
                     }
                 });
+                leftBody.querySelectorAll('.drawer-item[data-card="cursor-inactive-placeholder"]').forEach(function(c) { c.remove(); });
                 leftBody.querySelectorAll('.github-power-card').forEach(function(c) { c.remove(); });
                 
                 // 将统计卡片插入到身份配置卡片之后（优先定位 data-card=identity-config）
