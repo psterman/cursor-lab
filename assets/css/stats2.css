@@ -2411,6 +2411,55 @@ html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
             transition: width 0.3s ease;
         }
 
+        /* 未激活占位卡片：赛博科技感（虚线框、低透明度） */
+        .stats2-inactive-placeholder {
+            border: 1px dashed rgba(0, 255, 65, 0.4);
+            border-radius: 4px;
+            background: rgba(0, 0, 0, 0.35);
+            box-shadow: 0 0 12px rgba(0, 255, 65, 0.08), inset 0 0 8px rgba(0, 255, 65, 0.03);
+            padding: 16px;
+            font-family: 'JetBrains Mono', var(--font-mono-stack), monospace;
+            opacity: 0.92;
+        }
+        .stats2-inactive-placeholder:hover {
+            border-color: rgba(0, 255, 65, 0.55);
+            box-shadow: 0 0 16px rgba(0, 255, 65, 0.12);
+        }
+        .stats2-inactive-placeholder-title {
+            color: rgba(0, 255, 65, 0.9);
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 8px;
+        }
+        .stats2-inactive-placeholder-desc {
+            color: rgba(0, 255, 65, 0.6);
+            font-size: 10px;
+            line-height: 1.5;
+            margin-bottom: 12px;
+        }
+        .stats2-inactive-placeholder-btn {
+            display: inline-block;
+            padding: 8px 14px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--accent-terminal, #00ff41);
+            background: rgba(0, 255, 65, 0.08);
+            border: 1px solid rgba(0, 255, 65, 0.45);
+            border-radius: 2px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-family: inherit;
+        }
+        .stats2-inactive-placeholder-btn:hover {
+            background: rgba(0, 255, 65, 0.15);
+            border-color: rgba(0, 255, 65, 0.7);
+            box-shadow: 0 0 12px rgba(0, 255, 65, 0.25);
+        }
+
         /* =========================
            Language Switch (Flags)
            ========================= */

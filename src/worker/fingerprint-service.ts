@@ -649,6 +649,36 @@ export async function migrateFingerprintToUserId(
         }
       }
 
+      // 【OpenClaw 合并】累加 total_tokens、合并 skills_tags、保留 primary_model、取最新 last_active_at、合并 openclaw_metadata
+      const targetTokens = Number(targetUserById.total_tokens) || 0;
+      const sourceTokens = Number(sourceRecord.total_tokens) || 0;
+      updateData.total_tokens = (targetTokens || 0) + (sourceTokens || 0);
+
+      const targetSkills = Array.isArray(targetUserById.skills_tags) ? targetUserById.skills_tags : [];
+      const sourceSkills = Array.isArray(sourceRecord.skills_tags) ? sourceRecord.skills_tags : [];
+      const mergedSkills = [...new Set([...targetSkills, ...sourceSkills])];
+      updateData.skills_tags = mergedSkills.slice(0, 24);
+
+      if (sourceTokens > targetTokens && sourceRecord.primary_model) {
+        updateData.primary_model = sourceRecord.primary_model;
+      } else if (targetUserById.primary_model) {
+        updateData.primary_model = targetUserById.primary_model;
+      } else if (sourceRecord.primary_model) {
+        updateData.primary_model = sourceRecord.primary_model;
+      }
+
+      const targetActive = targetUserById.last_active_at ? new Date(targetUserById.last_active_at).getTime() : 0;
+      const sourceActive = sourceRecord.last_active_at ? new Date(sourceRecord.last_active_at).getTime() : 0;
+      updateData.last_active_at = new Date(Math.max(targetActive, sourceActive, Date.now())).toISOString();
+
+      if (sourceRecord.openclaw_metadata && typeof sourceRecord.openclaw_metadata === 'object') {
+        if (!targetUserById.openclaw_metadata || typeof targetUserById.openclaw_metadata !== 'object') {
+          updateData.openclaw_metadata = sourceRecord.openclaw_metadata;
+        } else {
+          updateData.openclaw_metadata = { ...targetUserById.openclaw_metadata, ...sourceRecord.openclaw_metadata };
+        }
+      }
+
       // 【唯一键变更】基于 fingerprint 更新（fingerprint 是唯一主键）
       const updateUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?fingerprint=eq.${encodeURIComponent(targetUserById.fingerprint)}`;
       const response = await fetch(updateUrl, {
@@ -697,6 +727,7 @@ export async function migrateFingerprintToUserId(
         user_identity: 'github',
         claim_token: null, // 清除 claim_token
         updated_at: new Date().toISOString(),
+        last_active_at: sourceRecord.last_active_at || new Date().toISOString(),
         // 【保护创建时间】不包含 created_at，保持原有值
       };
       

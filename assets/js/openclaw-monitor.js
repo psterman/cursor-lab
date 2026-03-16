@@ -549,11 +549,19 @@
     function getOpenClawLocalData() {
         try {
             var parsed = null;
+            var parsedLast = null;
             var parsedSession = null;
             var parsedHistory = null;
             var raw = typeof localStorage !== 'undefined' && localStorage.getItem(VIBE_OPENCLAW_CACHE);
             if (raw) {
                 try { parsed = JSON.parse(raw); } catch (_) {}
+            }
+            var rawLast = typeof localStorage !== 'undefined' && (
+                localStorage.getItem('last_analysis_data') ||
+                localStorage.getItem('vibe_cursor_analysis_cache')
+            );
+            if (rawLast) {
+                try { parsedLast = JSON.parse(rawLast); } catch (_) {}
             }
             var rawSession = typeof sessionStorage !== 'undefined' && sessionStorage.getItem('openclaw_analysis_data');
             if (rawSession) {
@@ -568,30 +576,63 @@
             }
             if (
                 (!parsed || typeof parsed !== 'object') &&
+                (!parsedLast || typeof parsedLast !== 'object') &&
                 (!parsedSession || typeof parsedSession !== 'object') &&
                 (!parsedHistory || typeof parsedHistory !== 'object')
             ) return null;
             if (!parsed || typeof parsed !== 'object') parsed = {};
+            if (!parsedLast || typeof parsedLast !== 'object') parsedLast = {};
             if (!parsedSession || typeof parsedSession !== 'object') parsedSession = {};
             if (!parsedHistory || typeof parsedHistory !== 'object') parsedHistory = {};
             var merged = {
                 ...parsedHistory,
+                ...parsedLast,
                 ...parsedSession,
                 ...parsed,
                 stats: {
                     ...(parsedHistory.stats || {}),
+                    ...(parsedLast.stats || {}),
                     ...(parsedSession.stats || {}),
                     ...(parsed.stats || {})
                 }
             };
+            var nestedSources = [parsedHistory, parsedLast, parsedSession, parsed];
+            nestedSources.forEach(function(source) {
+                if (!source || typeof source !== 'object') return;
+                var nestedOpenclaw = source.stats && source.stats.openclaw;
+                var nestedOpenclawStats = source.stats && source.stats.openclaw_stats;
+                if (!merged.openclawPortrait && nestedOpenclaw && typeof nestedOpenclaw === 'object' && nestedOpenclaw.portrait) {
+                    merged.openclawPortrait = nestedOpenclaw.portrait;
+                }
+                if (!merged.openclawSessionsSummary && nestedOpenclaw && typeof nestedOpenclaw === 'object' && nestedOpenclaw.sessionsSummary) {
+                    merged.openclawSessionsSummary = nestedOpenclaw.sessionsSummary;
+                }
+                if (nestedOpenclaw && typeof nestedOpenclaw === 'object' && nestedOpenclaw.stats && typeof nestedOpenclaw.stats === 'object') {
+                    merged.stats = Object.assign({}, nestedOpenclaw.stats, merged.stats || {});
+                }
+                if (nestedOpenclawStats && typeof nestedOpenclawStats === 'object') {
+                    merged.stats = Object.assign({}, nestedOpenclawStats, merged.stats || {});
+                }
+            });
             if (!merged.openclawPortrait && parsedHistory.openclawPortrait) merged.openclawPortrait = parsedHistory.openclawPortrait;
+            if (!merged.openclawPortrait && parsedLast.openclawPortrait) merged.openclawPortrait = parsedLast.openclawPortrait;
             if (!merged.openclawPortrait && parsedSession.openclawPortrait) merged.openclawPortrait = parsedSession.openclawPortrait;
             if (!merged.openclawSessionsSummary && parsedHistory.openclawSessionsSummary) merged.openclawSessionsSummary = parsedHistory.openclawSessionsSummary;
+            if (!merged.openclawSessionsSummary && parsedLast.openclawSessionsSummary) merged.openclawSessionsSummary = parsedLast.openclawSessionsSummary;
             if (!merged.openclawSessionsSummary && parsedSession.openclawSessionsSummary) merged.openclawSessionsSummary = parsedSession.openclawSessionsSummary;
             var hasOpenClaw = !!(
                 merged.openclawPortrait ||
                 merged.openclawSessionsSummary ||
-                (merged.stats && (merged.stats.modelUsage || merged.stats.usage || merged.stats.skillsByName || merged.stats.skillsUsage))
+                (merged.stats && (
+                    merged.stats.modelUsage ||
+                    merged.stats.model_usage ||
+                    merged.stats.usage ||
+                    merged.stats.raw_summary ||
+                    merged.stats.tool_usage ||
+                    merged.stats.skillsByName ||
+                    merged.stats.skillsUsage ||
+                    merged.stats.skills_stats
+                ))
             );
             return hasOpenClaw ? merged : null;
         } catch (e) {
@@ -602,13 +643,105 @@
     /**
      * 从 Supabase v_openclaw_stats_latest 获取远程数据
      */
-    function getOpenClawSupabaseData(userId, fingerprint) {
+    function normalizeOpenClawRemoteRecord(record) {
+        if (!record || typeof record !== 'object') return null;
+        var asObject = function(value) {
+            if (!value) return {};
+            if (typeof value === 'string') {
+                try { return JSON.parse(value); } catch (_) { return {}; }
+            }
+            return (typeof value === 'object') ? value : {};
+        };
+        var statsRoot = asObject(record.stats);
+        var openclawRoot = asObject(statsRoot.openclaw || record.openclaw);
+        var openclawStats = asObject(openclawRoot.stats || statsRoot.openclaw_stats || record.openclaw_stats);
+        var portrait = asObject(record.portrait || openclawRoot.portrait || openclawStats.portrait);
+        var modelUsage = record.model_usage || openclawStats.model_usage || openclawRoot.modelUsage || {};
+        var skillsStats = record.skills_stats || openclawStats.skills_stats || {};
+        var rawSummary = record.raw_summary || openclawStats.raw_summary || {};
+        var hasOpenClawPayload = !!(
+            Object.keys(openclawStats).length ||
+            Object.keys(openclawRoot).length ||
+            record.model_usage ||
+            record.raw_summary ||
+            record.skills_stats ||
+            record.total_tokens != null ||
+            record.top_model_id ||
+            record.primary_model
+        );
+        if (!hasOpenClawPayload) return null;
+        return Object.assign({}, openclawStats, record, {
+            user_id: record.user_id || openclawStats.user_id || record.id || null,
+            total_tokens: record.total_tokens != null ? record.total_tokens : openclawStats.total_tokens,
+            primary_model: record.primary_model || openclawStats.primary_model || openclawStats.top_model_id || record.top_model_id || null,
+            top_model_id: record.top_model_id || openclawStats.top_model_id || openclawStats.primary_model || record.primary_model || null,
+            skills_tags: record.skills_tags || openclawStats.skills_tags || [],
+            analyzed_at: record.analyzed_at || openclawStats.analyzed_at || record.last_active_at || record.last_sync_at || record.updated_at || null,
+            last_sync_at: record.last_sync_at || record.last_active_at || record.updated_at || openclawStats.analyzed_at || null,
+            github_synced_at: record.github_synced_at || null,
+            first_event_at: record.first_event_at || openclawStats.first_event_at || portrait.startedAt || null,
+            portrait: portrait,
+            model_usage: modelUsage,
+            skills_stats: skillsStats,
+            raw_summary: rawSummary,
+            total_messages: record.total_messages != null ? record.total_messages : (openclawStats.total_messages != null ? openclawStats.total_messages : openclawStats.records_total),
+            records_total: record.records_total != null ? record.records_total : (openclawStats.records_total != null ? openclawStats.records_total : openclawStats.total_messages)
+        });
+    }
+
+    function getOpenClawSupabaseData(userId, fingerprint, identityHint) {
         return new Promise(function(resolve) {
             var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
             if (!sb || !sb.from) {
                 resolve(null);
                 return;
             }
+            var userAnalysisFields = 'id, stats, total_tokens, primary_model, skills_tags, last_active_at, last_sync_at, github_synced_at, updated_at';
+            var resolveUserAnalysisByIdentity = function(identity) {
+                var login = String(identity || '').trim();
+                if (!login) {
+                    resolve(null);
+                    return;
+                }
+                sb.from('user_analysis')
+                    .select(userAnalysisFields)
+                    .eq('github_login', login)
+                    .limit(1)
+                    .maybeSingle()
+                    .then(function(r) {
+                        if (r && r.data) {
+                            resolve(normalizeOpenClawRemoteRecord(r.data));
+                            return;
+                        }
+                        return sb.from('user_analysis')
+                            .select(userAnalysisFields)
+                            .ilike('user_name', login)
+                            .limit(1)
+                            .maybeSingle()
+                            .then(function(r2) {
+                                resolve(normalizeOpenClawRemoteRecord(r2.data || null));
+                            });
+                    })
+                    .catch(function() {
+                        resolve(null);
+                    });
+            };
+            var resolveUserAnalysisById = function(uid) {
+                if (!uid) {
+                    resolve(null);
+                    return;
+                }
+                sb.from('user_analysis')
+                    .select(userAnalysisFields)
+                    .eq('id', uid)
+                    .maybeSingle()
+                    .then(function(r) {
+                        resolve(normalizeOpenClawRemoteRecord(r.data || null));
+                    })
+                    .catch(function() {
+                        resolve(null);
+                    });
+            };
             var resolveUserId = function(uid) {
                 if (!uid) {
                     resolve(null);
@@ -619,10 +752,14 @@
                     .eq('user_id', uid)
                     .maybeSingle()
                     .then(function(r) {
-                        resolve(r.data || null);
+                        if (r && r.data) {
+                            resolve(normalizeOpenClawRemoteRecord(r.data));
+                            return;
+                        }
+                        resolveUserAnalysisById(uid);
                     })
                     .catch(function() {
-                        resolve(null);
+                        resolveUserAnalysisById(uid);
                     });
             };
             if (userId) {
@@ -631,16 +768,24 @@
             }
             if (fingerprint) {
                 sb.from('user_analysis')
-                    .select('id')
+                    .select('id, stats, total_tokens, primary_model, skills_tags, last_active_at, last_sync_at, github_synced_at, updated_at')
                     .eq('fingerprint', fingerprint)
                     .limit(1)
                     .maybeSingle()
                     .then(function(r) {
-                        resolveUserId(r.data && r.data.id ? r.data.id : null);
+                        if (r && r.data && r.data.id) {
+                            resolveUserId(r.data.id);
+                            return;
+                        }
+                        resolve(normalizeOpenClawRemoteRecord(r.data || null));
                     })
                     .catch(function() {
                         resolve(null);
                     });
+                return;
+            }
+            if (identityHint) {
+                resolveUserAnalysisByIdentity(identityHint);
                 return;
             }
             resolve(null);
@@ -651,6 +796,44 @@
      * 合并本地与远程数据
      */
     function mergeOpenClawData(local, remote) {
+        var currentUserRecord = window.currentUserData || window.currentUser || null;
+        var asObject = function(value) {
+            if (!value) return {};
+            if (typeof value === 'string') {
+                try { return JSON.parse(value); } catch (_) { return {}; }
+            }
+            return (typeof value === 'object') ? value : {};
+        };
+        var asStringList = function(value) {
+            if (Array.isArray(value)) return value;
+            if (typeof value === 'string') {
+                try {
+                    var parsed = JSON.parse(value);
+                    if (Array.isArray(parsed)) return parsed;
+                } catch (_) {}
+                return value.split(/[,\n|/]/).map(function(item) { return String(item || '').trim(); }).filter(Boolean);
+            }
+            return [];
+        };
+        var currentStatsRoot = asObject(currentUserRecord && currentUserRecord.stats);
+        var currentOpenclaw = asObject(currentStatsRoot.openclaw);
+        var currentOpenclawStats = asObject(currentOpenclaw.stats || currentStatsRoot.openclaw_stats);
+        var currentPortrait = asObject(currentOpenclaw.portrait);
+        var accumulateModelCounts = function(bucket, source) {
+            if (!source || typeof source !== 'object') return;
+            if (Array.isArray(source)) {
+                source.forEach(function(item) {
+                    if (!item) return;
+                    var id = item.modelId || item.name || item.id || item.label || String(item);
+                    var count = item.count != null ? item.count : (item.value != null ? item.value : item.ratio);
+                    bucket[id] = (bucket[id] || 0) + (Number(count) || 0);
+                });
+                return;
+            }
+            Object.keys(source).forEach(function(k) {
+                bucket[k] = (bucket[k] || 0) + (Number(source[k]) || 0);
+            });
+        };
         var merged = {
             longevity: null,
             first_seen: null,
@@ -671,16 +854,38 @@
         var localTotalTokens = (localUsage && localUsage.totalTokens) || (localPortrait && localPortrait.dimensions && localPortrait.dimensions.consumptionCost && localPortrait.dimensions.consumptionCost.totalTokens) || 0;
         var localEarliest = (localStats && localStats.earliestFileTime) || null;
         var localSkills = (localStats && (localStats.skillsByName || localStats.skillsUsage)) || {};
-        var remoteTotalTokens = (remote && remote.total_tokens) || 0;
-        var remoteModelUsage = (remote && remote.model_usage) || {};
-        var remoteSkills = (remote && remote.skills_stats) || {};
-        var remoteRawSummary = (remote && remote.raw_summary) || {};
-        var remoteEarliest = (remote && (remote.first_event_at || remote.analyzed_at)) || null;
+        var remoteTotalTokens = (remote && remote.total_tokens) ||
+            (currentUserRecord && currentUserRecord.total_tokens) ||
+            (currentOpenclawStats && currentOpenclawStats.total_tokens) ||
+            getNestedValue(currentOpenclawStats, 'raw_summary.dimensions.consumptionCost.totalTokens') ||
+            0;
+        var remoteModelUsage = (remote && remote.model_usage) ||
+            currentOpenclawStats.model_usage ||
+            currentOpenclaw.modelUsage ||
+            getNestedValue(currentOpenclawStats, 'raw_summary.dimensions.modelPreference.distribution') ||
+            {};
+        var remoteSkills = (remote && remote.skills_stats) || currentOpenclawStats.skills_stats || {};
+        var remoteRawSummary = (remote && remote.raw_summary) || currentOpenclawStats.raw_summary || {};
+        var remoteEarliest = (remote && (remote.first_event_at || remote.analyzed_at)) ||
+            currentPortrait.startedAt ||
+            currentOpenclawStats.first_event_at ||
+            currentOpenclawStats.analyzed_at ||
+            (currentUserRecord && currentUserRecord.last_active_at) ||
+            null;
 
         merged.total_tokens = Math.max(Number(localTotalTokens) || 0, Number(remoteTotalTokens) || 0);
-        merged.total_messages = (localStats && localStats.totalMessages) || (remote && remote.total_messages) || 0;
-        merged.last_sync_at = (remote && remote.analyzed_at) || (window.currentUser && window.currentUser.last_sync_at) || null;
-        merged.github_synced_at = (window.currentUser && window.currentUser.github_synced_at) || null;
+        merged.total_messages = (localStats && localStats.totalMessages) ||
+            (remote && remote.total_messages) ||
+            (remote && remote.records_total) ||
+            currentOpenclawStats.total_messages ||
+            currentOpenclawStats.records_total ||
+            currentPortrait.totalDialogRounds ||
+            0;
+        merged.last_sync_at = (remote && remote.analyzed_at) ||
+            (currentUserRecord && (currentUserRecord.last_active_at || currentUserRecord.last_sync_at)) ||
+            currentOpenclawStats.analyzed_at ||
+            null;
+        merged.github_synced_at = (currentUserRecord && currentUserRecord.github_synced_at) || null;
 
         var firstSeen = null;
         if (localEarliest && Number(localEarliest) > 0) firstSeen = Number(localEarliest);
@@ -698,24 +903,8 @@
         }
 
         var modelCounts = {};
-        if (localModelUsage && typeof localModelUsage === 'object') {
-            if (Array.isArray(localModelUsage)) {
-                localModelUsage.forEach(function(x) {
-                    var id = x.modelId || x.name || String(x);
-                    var c = x.count || 1;
-                    modelCounts[id] = (modelCounts[id] || 0) + c;
-                });
-            } else {
-                Object.keys(localModelUsage).forEach(function(k) {
-                    modelCounts[k] = (modelCounts[k] || 0) + (Number(localModelUsage[k]) || 0);
-                });
-            }
-        }
-        if (remoteModelUsage && typeof remoteModelUsage === 'object') {
-            Object.keys(remoteModelUsage).forEach(function(k) {
-                modelCounts[k] = (modelCounts[k] || 0) + (Number(remoteModelUsage[k]) || 0);
-            });
-        }
+        accumulateModelCounts(modelCounts, localModelUsage);
+        accumulateModelCounts(modelCounts, remoteModelUsage);
         var topModel = null;
         var topCount = 0;
         Object.keys(modelCounts).forEach(function(k) {
@@ -724,7 +913,12 @@
                 topModel = k;
             }
         });
-        merged.primary_model = topModel || (remote && remote.top_model_id) || (localPortrait && localPortrait.dimensions && localPortrait.dimensions.modelPreference && localPortrait.dimensions.modelPreference.dominantModelId) || null;
+        merged.primary_model = topModel ||
+            (remote && (remote.top_model_id || remote.primary_model)) ||
+            (currentUserRecord && currentUserRecord.primary_model) ||
+            currentOpenclawStats.top_model_id ||
+            (localPortrait && localPortrait.dimensions && localPortrait.dimensions.modelPreference && localPortrait.dimensions.modelPreference.dominantModelId) ||
+            null;
 
         var skillsSet = {};
         if (localSkills && typeof localSkills === 'object') {
@@ -737,6 +931,12 @@
                 if (k && k.trim()) skillsSet[k.trim()] = true;
             });
         }
+        asStringList(currentOpenclawStats.skills_tags).forEach(function(k) {
+            if (k && String(k).trim()) skillsSet[String(k).trim()] = true;
+        });
+        asStringList(currentUserRecord && currentUserRecord.skills_tags).forEach(function(k) {
+            if (k && String(k).trim()) skillsSet[String(k).trim()] = true;
+        });
         merged.skills_tags = Object.keys(skillsSet).slice(0, 12);
 
         var installedSkillsSet = new Set();
@@ -746,10 +946,14 @@
         addStringsToSet(installedSkillsSet, localStats && localStats.skillsUsage);
         addStringsToSet(installedSkillsSet, remote && remote.skills_tags);
         addStringsToSet(installedSkillsSet, remoteSkills);
+        addStringsToSet(installedSkillsSet, currentOpenclawStats.skills_tags);
+        addStringsToSet(installedSkillsSet, currentUserRecord && currentUserRecord.skills_tags);
         addSkillNamesFromArray(installedSkillsSet, getNestedValue(localPortrait, 'dimensions.taskHabit.topSkills'));
         addSkillNamesFromArray(installedSkillsSet, getNestedValue(localPortrait, 'dimensions.toolSkillHeat.skillHeat'));
         addSkillNamesFromArray(installedSkillsSet, getNestedValue(localPortrait, 'dimensions.toolSkillHeat.topTools'));
         addSkillNamesFromArray(installedSkillsSet, getNestedValue(remoteRawSummary, 'sessions.skills'));
+        addSkillNamesFromArray(installedSkillsSet, getNestedValue(currentOpenclawStats, 'raw_summary.dimensions.toolSkillHeat.skillHeat'));
+        addSkillNamesFromArray(installedSkillsSet, getNestedValue(currentOpenclawStats, 'raw_summary.dimensions.toolSkillHeat.topTools'));
         merged.installed_skills = Array.from(installedSkillsSet).slice(0, 24);
         if (merged.skills_tags.length === 0 && merged.installed_skills.length > 0) {
             merged.skills_tags = merged.installed_skills.slice(0, 12);
@@ -816,6 +1020,19 @@
     }
 
     /**
+     * 渲染 OpenClaw 未激活占位内容（本地缓存为空时）
+     */
+    function renderOpenClawInactivePlaceholder(card) {
+        if (!card) return;
+        var body = card.querySelector('.openclaw-monitor-body');
+        if (!body) return;
+        card.classList.add('stats2-inactive-placeholder');
+        body.innerHTML = '<div class="stats2-inactive-placeholder-title">OpenClaw 监视器未激活</div>' +
+            '<div class="stats2-inactive-placeholder-desc">当前还没有检测到 OpenClaw 本地数据，请返回体检首页完成一次 OpenClaw 采集。</div>' +
+            '<button type="button" class="stats2-inactive-placeholder-btn" onclick="typeof window.navigateToIndexPage === \'function\' && window.navigateToIndexPage()" aria-label="返回体检首页补全 OpenClaw 数据">返回体检首页</button>';
+    }
+
+    /**
      * 渲染 OpenClaw 监视器卡片
      */
     function renderOpenClawMonitorCard(merged) {
@@ -830,9 +1047,40 @@
         var channelsEl = document.getElementById('oc-channels');
         var skillsEl = document.getElementById('oc-skills');
         var syncEl = document.getElementById('oc-github-sync');
-        if (!longevityEl || !genomeEl || !tokensEl || !skillsEl || !syncEl) return;
+        if (!longevityEl || !genomeEl || !tokensEl || !skillsEl || !syncEl) {
+            var body = card.querySelector('.openclaw-monitor-body');
+            if (body) {
+                body.innerHTML = '<div class="openclaw-row"><span class="label">Longevity</span><span id="oc-longevity">--</span></div>' +
+                    '<div class="openclaw-row"><span class="label">Genome</span><span id="oc-genome">--</span></div>' +
+                    '<div class="openclaw-row"><span class="label">Tokens</span><span id="oc-tokens">--</span></div>' +
+                    '<div class="openclaw-row"><span class="label">Channels</span><div id="oc-channels" class="oc-channel-icons" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">--</div></div>' +
+                    '<div class="openclaw-row openclaw-row-skills"><span class="label">Skills</span><div id="oc-skills" class="oc-tags"></div></div>' +
+                    '<div class="openclaw-row"><span class="label">Status</span><span id="oc-github-sync">--</span></div>';
+                ensureOpenClawCardEnhancements(card);
+            }
+            longevityEl = document.getElementById('oc-longevity');
+            genomeEl = document.getElementById('oc-genome');
+            tokensEl = document.getElementById('oc-tokens');
+            channelsEl = document.getElementById('oc-channels');
+            skillsEl = document.getElementById('oc-skills');
+            syncEl = document.getElementById('oc-github-sync');
+            if (!longevityEl || !genomeEl || !tokensEl || !skillsEl || !syncEl) return;
+        }
 
-        if (!merged || (merged.total_tokens <= 0 && !merged.longevity && merged.skills_tags.length === 0)) {
+        var hasMeaningfulData = merged && (
+            merged.total_tokens > 0 ||
+            merged.longevity ||
+            merged.primary_model ||
+            (merged.active_channels && merged.active_channels.length > 0) ||
+            (merged.skills_tags && merged.skills_tags.length > 0) ||
+            (merged.installed_skills && merged.installed_skills.length > 0)
+        );
+        if (!hasMeaningfulData) {
+            var localData = getOpenClawLocalData();
+            if (!localData) {
+                renderOpenClawInactivePlaceholder(card);
+                return;
+            }
             longevityEl.textContent = '--';
             genomeEl.textContent = '--';
             tokensEl.textContent = '--';
@@ -841,6 +1089,27 @@
             syncEl.textContent = '--';
             return;
         }
+
+        card.classList.remove('stats2-inactive-placeholder');
+        if (!longevityEl || !genomeEl || !tokensEl || !skillsEl || !syncEl) {
+            var body = card.querySelector('.openclaw-monitor-body');
+            if (body) {
+                body.innerHTML = '<div class="openclaw-row"><span class="label">寿命 (Longevity)</span><span id="oc-longevity">--</span></div>' +
+                    '<div class="openclaw-row"><span class="label">基因模型 (Genome)</span><span id="oc-genome">--</span></div>' +
+                    '<div class="openclaw-row"><span class="label">生物能量 (Tokens)</span><span id="oc-tokens">--</span></div>' +
+                    '<div class="openclaw-row"><span class="label">已开通频道</span><div id="oc-channels" class="oc-channel-icons" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">--</div></div>' +
+                    '<div class="openclaw-row openclaw-row-skills"><span class="label">已安装 Skills</span><div id="oc-skills" class="oc-tags"></div></div>' +
+                    '<div class="openclaw-row"><span class="label">任务状态</span><span id="oc-github-sync">--</span></div>';
+                ensureOpenClawCardEnhancements(card);
+            }
+        }
+        longevityEl = document.getElementById('oc-longevity');
+        genomeEl = document.getElementById('oc-genome');
+        tokensEl = document.getElementById('oc-tokens');
+        channelsEl = document.getElementById('oc-channels');
+        skillsEl = document.getElementById('oc-skills');
+        syncEl = document.getElementById('oc-github-sync');
+        if (!longevityEl || !genomeEl || !tokensEl || !skillsEl || !syncEl) return;
 
         longevityEl.textContent = merged.longevity != null ? merged.longevity + ' 天' : '--';
         genomeEl.textContent = merged.primary_model || '--';
@@ -886,6 +1155,46 @@
     }
 
     /**
+     * 识别安装环境机型
+     */
+    function detectPlatform() {
+        try {
+            var ua = (navigator.userAgent || '').toLowerCase();
+            var platform = (navigator.platform || '').toLowerCase();
+
+            // Mac 系列识别
+            if (/macintosh|mac os x/i.test(ua) || /mac/i.test(platform)) {
+                if (/mac mini/i.test(ua)) return 'Mac mini';
+                if (/macbook pro/i.test(ua)) return 'MacBook Pro';
+                if (/macbook air/i.test(ua)) return 'MacBook Air';
+                if (/macbook/i.test(ua)) return 'MacBook';
+                if (/imac/i.test(ua)) return 'iMac';
+                if (/mac studio/i.test(ua)) return 'Mac Studio';
+                return 'Mac';
+            }
+
+            // Windows 识别
+            if (/win/i.test(platform) || /windows/i.test(ua)) {
+                if (/windows nt 10/i.test(ua)) return 'Windows 10/11';
+                return 'Windows';
+            }
+
+            // Linux 识别
+            if (/linux/i.test(platform) || /x11/i.test(ua)) {
+                if (/ubuntu/i.test(ua)) return 'Ubuntu';
+                if (/fedora/i.test(ua)) return 'Fedora';
+                if (/arch/i.test(ua)) return 'Arch Linux';
+                if (/debian/i.test(ua)) return 'Debian';
+                return 'Linux';
+            }
+
+            return 'Unknown';
+        } catch (_) {
+            return 'Unknown';
+        }
+    }
+
+    /**
      * 将本地 OpenClaw 数据上报到后端，写入 openclaw_stats 与 user_analysis，打通全球统计
      */
     function syncOpenClawToUserAnalysis(local) {
@@ -916,28 +1225,131 @@
                 github_login = meta.user_name || meta.login || meta.preferred_username || meta.full_name || payload.email || '';
             }
         } catch (_) {}
+        // 计算寿命天数（从最早记录到现在）
+        var lifeDays = 0;
+        try {
+            var earliestTime = stats.earliestFileTime || portrait.startedAt;
+            if (earliestTime && Number(earliestTime) > 0) {
+                lifeDays = Math.max(1, Math.floor((Date.now() - Number(earliestTime)) / 86400000));
+            }
+        } catch (_) {}
+
+        // 计算总对话回合数
+        var totalDialogRounds = 0;
+        try {
+            totalDialogRounds = stats.totalMessages || (consumption && consumption.totalMessages) || (portrait && portrait.totalConversations) || 0;
+        } catch (_) {}
+
+        // 提取技能标签数组（确保是字符串数组）
+        var skillsArray = [];
+        try {
+            var skillsObj = stats.skillsByName || stats.skillsUsage || {};
+            if (typeof skillsObj === 'object' && !Array.isArray(skillsObj)) {
+                skillsArray = Object.keys(skillsObj).slice(0, 20);
+            } else if (Array.isArray(skillsObj)) {
+                skillsArray = skillsObj.map(function(s) { return String(s || '').trim(); }).filter(Boolean).slice(0, 20);
+            }
+        } catch (_) {}
+
+        // 识别机型
+        var detectedPlatform = detectPlatform();
+
+        // 从 localStorage 缓存补充数据（兜底）
+        var cacheRaw = null;
+        try { cacheRaw = localStorage.getItem(VIBE_OPENCLAW_CACHE); } catch (_) {}
+        var cacheData = null;
+        if (cacheRaw) { try { cacheData = JSON.parse(cacheRaw); } catch (_) {} }
+        var cachedStats = (cacheData && cacheData.stats) || {};
+        var cachedUsage = cachedStats.usage || {};
+        var cachedPortrait = (cacheData && cacheData.openclawPortrait) || {};
+        var cachedConsumption = (cachedPortrait.dimensions && cachedPortrait.dimensions.consumptionCost) || {};
+
+        // 从 modelUsage 动态计算 primary_model（使用次数最多的模型）
+        var modelCounts = {};
+        var mu = stats.modelUsage || cachedStats.modelUsage || {};
+        if (mu && typeof mu === 'object') {
+            if (Array.isArray(mu)) {
+                mu.forEach(function(x) {
+                    var id = x.modelId || x.name || String(x);
+                    var c = x.count || 1;
+                    modelCounts[id] = (modelCounts[id] || 0) + c;
+                });
+            } else {
+                Object.keys(mu).forEach(function(k) {
+                    modelCounts[k] = (modelCounts[k] || 0) + (Number(mu[k]) || 0);
+                });
+            }
+        }
+        var computedPrimaryModel = null;
+        var topCount = 0;
+        Object.keys(modelCounts).forEach(function(k) {
+            if (modelCounts[k] > topCount) {
+                topCount = modelCounts[k];
+                computedPrimaryModel = k;
+            }
+        });
+        var primaryModel = computedPrimaryModel || modelDim.dominantModelId || null;
+
+        // 技能标签：从缓存补充（若本地为空）
+        if (skillsArray.length === 0 && cachedStats.skillsByName) {
+            skillsArray = Object.keys(cachedStats.skillsByName).slice(0, 20);
+        }
+        if (skillsArray.length === 0 && cachedStats.skillsUsage && typeof cachedStats.skillsUsage === 'object') {
+            skillsArray = Object.keys(cachedStats.skillsUsage).slice(0, 20);
+        }
+        if (skillsArray.length === 0 && cachedStats.skills && Array.isArray(cachedStats.skills)) {
+            skillsArray = cachedStats.skills.map(function(s) { return String(s || '').trim(); }).filter(Boolean).slice(0, 20);
+        }
+
+        var totalTokensVal = (consumption && consumption.totalTokens) != null ? consumption.totalTokens : ((stats.usage && stats.usage.totalTokens) != null ? stats.usage.totalTokens : ((cachedUsage && cachedUsage.totalTokens) != null ? cachedUsage.totalTokens : ((cachedConsumption && cachedConsumption.totalTokens) != null ? cachedConsumption.totalTokens : 0)));
+        var promptTokensVal = (consumption && consumption.promptTokens) != null ? consumption.promptTokens : ((stats.usage && stats.usage.promptTokens) != null ? stats.usage.promptTokens : ((cachedUsage && cachedUsage.promptTokens) != null ? cachedUsage.promptTokens : 0));
+        var completionTokensVal = (consumption && consumption.completionTokens) != null ? consumption.completionTokens : ((stats.usage && stats.usage.completionTokens) != null ? stats.usage.completionTokens : ((cachedUsage && cachedUsage.completionTokens) != null ? cachedUsage.completionTokens : 0));
+        var cachedTokensVal = (consumption && consumption.cachedTokens) != null ? consumption.cachedTokens : ((stats.usage && stats.usage.cachedTokens) != null ? stats.usage.cachedTokens : ((cachedUsage && cachedUsage.cachedTokens) != null ? cachedUsage.cachedTokens : 0));
+        var totalCostVal = (consumption && consumption.totalCostUSD) != null ? consumption.totalCostUSD : ((stats.usage && stats.usage.totalCostUSD) != null ? stats.usage.totalCostUSD : ((cachedUsage && cachedUsage.totalCostUSD) != null ? cachedUsage.totalCostUSD : 0));
+        var cacheHitRateVal = (consumption && consumption.cacheHitRate) != null ? consumption.cacheHitRate : (stats.cacheHitRate != null ? stats.cacheHitRate : ((cachedStats && cachedStats.cacheHitRate != null) ? cachedStats.cacheHitRate : 0));
+
+        var lastActiveAt = new Date().toISOString();
+
         var body = {
             fingerprint: fingerprint,
             github_login: github_login || null,
-            model_usage: stats.modelUsage || {},
-            tool_usage: stats.toolUsage || {},
-            skills_stats: stats.skillsByName || stats.skillsUsage || {},
+            model_usage: stats.modelUsage || cachedStats.modelUsage || {},
+            tool_usage: stats.toolUsage || cachedStats.toolUsage || {},
+            skills_stats: stats.skillsByName || stats.skillsUsage || cachedStats.skillsByName || cachedStats.skillsUsage || {},
+            skills_tags: skillsArray,
             hourly_heatmap: hourlyHeatmap,
-            total_tokens: consumption.totalTokens ?? stats.usage?.totalTokens ?? 0,
-            prompt_tokens: consumption.promptTokens ?? stats.usage?.promptTokens ?? 0,
-            completion_tokens: consumption.completionTokens ?? stats.usage?.completionTokens ?? 0,
-            cached_tokens: consumption.cachedTokens ?? stats.usage?.cachedTokens ?? 0,
-            total_cost_usd: consumption.totalCostUSD ?? stats.usage?.totalCostUSD ?? 0,
-            cache_hit_rate: consumption.cacheHitRate ?? stats.cacheHitRate ?? 0,
-            top_model_id: modelDim.dominantModelId || null,
-            success_rate: health.successRate ?? stats.successRate ?? 0,
-            abnormal_interrupt_rate: health.abnormalInterruptRate ?? stats.abnormalInterruptRate ?? 0,
-            success_count: health.successCount ?? stats.successCount ?? 0,
-            failure_count: health.failureCount ?? stats.failureCount ?? 0,
-            abnormal_interrupt_count: health.abnormalInterruptions ?? stats.abnormalInterruptions ?? 0,
-            tool_calls_total: stats.toolCallsTotal ?? 0,
+            records_total: stats.totalMessages || stats.recordsTotal || cachedStats.totalMessages || cachedStats.recordsTotal || 0,
+            total_tokens: totalTokensVal,
+            prompt_tokens: promptTokensVal,
+            completion_tokens: completionTokensVal,
+            cached_tokens: cachedTokensVal,
+            total_cost_usd: totalCostVal,
+            cache_hit_rate: cacheHitRateVal,
+            top_model_id: primaryModel,
+            primary_model: primaryModel,
+            success_rate: (health && health.successRate) != null ? health.successRate : (stats.successRate != null ? stats.successRate : 0),
+            abnormal_interrupt_rate: (health && health.abnormalInterruptRate) != null ? health.abnormalInterruptRate : (stats.abnormalInterruptRate != null ? stats.abnormalInterruptRate : 0),
+            success_count: (health && health.successCount) != null ? health.successCount : (stats.successCount != null ? stats.successCount : 0),
+            failure_count: (health && health.failureCount) != null ? health.failureCount : (stats.failureCount != null ? stats.failureCount : 0),
+            abnormal_interrupt_count: (health && health.abnormalInterruptions) != null ? health.abnormalInterruptions : (stats.abnormalInterruptions != null ? stats.abnormalInterruptions : 0),
+            tool_calls_total: stats.toolCallsTotal != null ? stats.toolCallsTotal : 0,
             raw_summary: { dimensions: dims, composite: portrait.composite || {} },
-            analyzed_at: new Date().toISOString(),
+            analyzed_at: lastActiveAt,
+            last_active_at: lastActiveAt,
+            portrait: {
+                device: detectedPlatform,
+                lifeDays: lifeDays,
+                totalDialogRounds: totalDialogRounds,
+                startedAt: stats.earliestFileTime || (portrait && portrait.startedAt) || null,
+                lastActiveAt: lastActiveAt,
+                environment: {
+                    platform: detectedPlatform,
+                    userAgent: navigator.userAgent || '',
+                    hardwareConcurrency: navigator.hardwareConcurrency || 0,
+                    language: navigator.language || 'en-US',
+                    timezone: (function() { try { return (typeof Intl !== 'undefined' && Intl.DateTimeFormat) ? (Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC') : 'UTC'; } catch (_) { return 'UTC'; } })()
+                }
+            }
         };
         var apiEndpoint = '';
         try {
@@ -981,21 +1393,26 @@
             });
         };
         var local = getOpenClawLocalData();
+        var currentUserRef = window.currentUserData || window.currentUser || null;
         var userId = (window.currentUser && window.currentUser.id) || (window.currentUserData && window.currentUserData.id) || (window.supabaseAuthUser && window.supabaseAuthUser.id) || '';
+        var identityHint = '';
+        try {
+            identityHint = String((currentUserRef && (currentUserRef.github_login || currentUserRef.user_name || currentUserRef.github_username || currentUserRef.name)) || '').trim();
+        } catch (_) {}
         var fingerprint = '';
         try {
             fingerprint = (localStorage.getItem('user_fingerprint') || window.fpId || '').trim();
         } catch (_) {}
         if (local) {
             syncOpenClawToUserAnalysis(local).then(function() {
-                getOpenClawSupabaseData(userId, fingerprint).then(function(remote) {
+                getOpenClawSupabaseData(userId, fingerprint, identityHint).then(function(remote) {
                     var merged = mergeOpenClawData(local, remote);
                     renderWithGatewayChannels(merged);
                 }).catch(function() {
                     renderWithGatewayChannels(mergeOpenClawData(local, null));
                 });
             }).catch(function() {
-                getOpenClawSupabaseData(userId, fingerprint).then(function(remote) {
+                getOpenClawSupabaseData(userId, fingerprint, identityHint).then(function(remote) {
                     var merged = mergeOpenClawData(local, remote);
                     renderWithGatewayChannels(merged);
                 }).catch(function() {
@@ -1003,7 +1420,7 @@
                 });
             });
         } else {
-            getOpenClawSupabaseData(userId, fingerprint).then(function(remote) {
+            getOpenClawSupabaseData(userId, fingerprint, identityHint).then(function(remote) {
                 var merged = mergeOpenClawData(null, remote);
                 renderWithGatewayChannels(merged);
             }).catch(function() {

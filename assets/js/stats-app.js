@@ -16841,6 +16841,59 @@ var _loc = window.location;
                 // 调试日志
                 console.log('[renderUserStatsCards] dayCount 最终结果:', { dayCount, dayEarliestTs, source: daySource, dimensionValuesDay: dimensionValues.day });
                 
+                // OpenClaw / Cursor 使用统计（来自 user_analysis 扩展字段）
+                const totalTokensRaw = Number(
+                    (currentUserData.total_tokens != null ? currentUserData.total_tokens : currentUserData.totalTokens) ??
+                    (currentUserData.stats && (currentUserData.stats.total_tokens ?? currentUserData.stats.totalTokens))
+                ) || 0;
+                const totalTokensText = totalTokensRaw > 0 ? nf.format(totalTokensRaw) : '0';
+                
+                const primaryModelRaw =
+                    currentUserData.primary_model ||
+                    currentUserData.primaryModel ||
+                    currentUserData.top_model_id ||
+                    currentUserData.topModelId ||
+                    null;
+                const primaryModelText = primaryModelRaw
+                    ? String(primaryModelRaw)
+                    : (currentLang === 'en' ? 'N/A' : '未识别');
+                
+                let skillsTags = [];
+                try {
+                    let st = currentUserData.skills_tags || currentUserData.skillsTags;
+                    if (typeof st === 'string') {
+                        try { st = JSON.parse(st); } catch (_) {}
+                    }
+                    if (Array.isArray(st)) {
+                        skillsTags = st.map(function (x) { return String(x || '').trim(); }).filter(Boolean);
+                    }
+                } catch (_) {}
+                const skillsTagsHtml = skillsTags.length
+                    ? skillsTags.slice(0, 8).map(function(tag) {
+                        return '<span class="inline-flex items-center px-1.5 py-0.5 rounded border border-[var(--border-ui)] text-[9px] text-zinc-300/90 mr-1 mb-1 bg-black/20">' + esc(tag) + '</span>';
+                    }).join('')
+                    : '';
+                
+                const lastActiveIso = currentUserData.last_active_at || currentUserData.lastActiveAt || null;
+                let lastActiveText = currentLang === 'en' ? 'N/A' : '--';
+                if (lastActiveIso) {
+                    try {
+                        const d = new Date(lastActiveIso);
+                        if (!isNaN(d.getTime())) {
+                            const diffMs = Date.now() - d.getTime();
+                            const diffH = diffMs / 3600000;
+                            if (diffH < 24) {
+                                lastActiveText = currentLang === 'en' ? 'Active today' : '今日活跃';
+                            } else {
+                                const daysAgo = Math.floor(diffH / 24);
+                                lastActiveText = currentLang === 'en'
+                                    ? (daysAgo + ' days ago')
+                                    : (daysAgo + ' 天前');
+                            }
+                        }
+                    } catch (_) {}
+                }
+                
                 // 3. 甲方爸爸上身次数（no维度）
                 const noCount = dimensionValues.no !== undefined && dimensionValues.no !== null 
                     ? nf.format(dimensionValues.no) 
@@ -17419,6 +17472,35 @@ var _loc = window.location;
                             <span class="drawer-item-value text-sm">${avgLength} ${getI18nText('metric.avg_len_unit') || (currentLang === 'en' ? 'chars/msg' : '字/条')}</span>
                         </div>
                     </div>
+                    
+                    ${(
+                        totalTokensRaw > 0 ||
+                        (primaryModelRaw && String(primaryModelRaw).trim() !== '') ||
+                        skillsTagsHtml ||
+                        (lastActiveText && lastActiveText !== '--' && lastActiveText !== 'N/A')
+                    ) ? `
+                    <!-- Cursor / OpenClaw 使用统计 -->
+                    <div class="space-y-2 mb-3 pt-2 border-t border-[var(--border-ui)]">
+                        <div class="flex items-center justify-between">
+                            <span class="dashboard-metric-label text-[10px]">⚡ ${(getI18nText('metric.total_tokens') || (currentLang === 'en' ? 'Total Tokens' : '总 Tokens'))}</span>
+                            <span class="drawer-item-value text-sm">${totalTokensText}</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="dashboard-metric-label text-[10px]">🧠 ${(getI18nText('metric.primary_model') || (currentLang === 'en' ? 'Primary Model' : '主力模型'))}</span>
+                            <span class="drawer-item-value text-[11px] truncate max-w-[160px]">${esc(primaryModelText)}</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="dashboard-metric-label text-[10px]">⏱ ${(getI18nText('metric.last_active') || (currentLang === 'en' ? 'Last Active' : '最后活跃'))}</span>
+                            <span class="drawer-item-value text-[11px]">${esc(lastActiveText)}</span>
+                        </div>
+                        ${skillsTagsHtml ? `
+                        <div class="mt-1">
+                            <div class="dashboard-metric-label text-[10px] mb-1">🏷 ${(getI18nText('metric.skills_tags') || (currentLang === 'en' ? 'Skills Tags' : '技能标签'))}</div>
+                            <div class="flex flex-wrap">${skillsTagsHtml}</div>
+                        </div>
+                        ` : ''}
+                    </div>
+                    ` : ''}
                     
                     <!-- 人格称号（与 index 一致：优先由 vibe_index 从 personalityNames.json 解析） -->
                     <div class="mb-3 pb-3 border-b border-[var(--border-ui)]">
@@ -18379,6 +18461,64 @@ var _loc = window.location;
                     console.error('[Auth] ❌ 初始化认证监听失败:', error);
                 }
                 
+                // 登录后自动刷新左抽屉（身份卡片 + GitHub 战力 + OpenClaw 等）
+                function autoRefreshLeftDrawerAfterLogin() {
+                    try {
+                        var leftDrawer = document.getElementById('left-drawer');
+                        var leftBody = document.getElementById('left-drawer-body');
+                        if (!leftDrawer || !leftBody) return;
+                        var cu = window.currentUserData || window.currentUser;
+                        if (!cu) return;
+                        var cc = (typeof window.safeGetCountry === 'function')
+                            ? window.safeGetCountry(cu)
+                            : (cu.current_location || cu.manual_location || cu.country_code || 'US');
+                        if (!cc) return;
+                        var code = String(cc).trim().toUpperCase();
+                        if (!code) return;
+                        var name = code;
+                        try {
+                            if (typeof countryNameMap !== 'undefined' && countryNameMap[code]) {
+                                name = currentLang === 'zh'
+                                    ? (countryNameMap[code].zh || code)
+                                    : (countryNameMap[code].en || code);
+                            }
+                        } catch (_) {}
+                        if (typeof showDrawersWithCountryData === 'function') {
+                            // 不保留国家面板视图，由 showDrawersWithCountryData 负责打开抽屉并刷新所有卡片
+                            showDrawersWithCountryData(code, name || code, undefined, { preserveCountryPanel: false });
+                        }
+                    } catch (e) {
+                        console.warn('[Auth] ⚠️ autoRefreshLeftDrawerAfterLogin 失败:', e);
+                    }
+                }
+
+                // 登录后补渲染 cursor 用户统计卡片 & OpenClaw 监视器
+                function renderCursorDataAfterLogin() {
+                    try {
+                        var leftBody = document.getElementById('left-drawer-body');
+                        if (!leftBody) return;
+                        var cu = window.currentUserData || window.currentUser;
+                        if (!cu) return;
+                        if (typeof getBestUserRecordForStats === 'function' && typeof renderUserStatsCards === 'function') {
+                            try {
+                                renderUserStatsCards(leftBody, getBestUserRecordForStats(cu));
+                            } catch (e) {
+                                console.warn('[Auth] ⚠️ renderUserStatsCards 执行失败:', e);
+                            }
+                        }
+                        // 刷新 OpenClaw / cursor 使用监视器卡片
+                        try {
+                            if (typeof window.refreshOpenClawMonitor === 'function') {
+                                window.refreshOpenClawMonitor();
+                            }
+                        } catch (e2) {
+                            console.warn('[Auth] ⚠️ refreshOpenClawMonitor 执行失败:', e2);
+                        }
+                    } catch (e) {
+                        console.warn('[Auth] ⚠️ renderCursorDataAfterLogin 异常:', e);
+                    }
+                }
+
                 // 监听认证状态变化
                 supabaseClient.auth.onAuthStateChange(async (event, session) => {
                     console.log('[Auth] 🔔 认证状态变化事件:', event, session ? '有会话' : '无会话');
@@ -18396,7 +18536,7 @@ var _loc = window.location;
                                     console.log('[Auth] ✅ fetchData 执行完成');
                                 }
                                 
-                                // 再刷新用户统计数据
+                                // 再刷新用户统计数据（会设置 currentUser / currentUserData）
                                 if (typeof window.refreshUserStats === 'function') {
                                     try {
                                         await window.refreshUserStats();
@@ -18410,6 +18550,10 @@ var _loc = window.location;
                                         }
                                     }
                                 }
+
+                                // 登录完成后，强制刷新一次左抽屉的所有数据卡片 + cursor 统计
+                                autoRefreshLeftDrawerAfterLogin();
+                                renderCursorDataAfterLogin();
                             } catch (refreshError) {
                                 // 【修复 AbortError】特殊处理 AbortError
                                 if (refreshError.name === 'AbortError' || refreshError.message?.includes('aborted')) {

@@ -362,7 +362,29 @@
             });
         } catch (e) { /* ignore */ }
     };
-    
+
+    /**
+     * 统一跳转到体检首页（index.html），用于占位卡「返回体检首页」按钮。
+     * 优先使用前端路由（若存在），否则回退到 location 跳转。
+     */
+    window.navigateToIndexPage = function() {
+        try {
+            if (typeof window.appRouter !== 'undefined' && window.appRouter && typeof window.appRouter.navigate === 'function') {
+                window.appRouter.navigate('/');
+                return;
+            }
+            if (typeof window.router !== 'undefined' && window.router && typeof window.router.push === 'function') {
+                window.router.push('/');
+                return;
+            }
+            var path = (typeof _loc !== 'undefined' && _loc && _loc.pathname) ? _loc.pathname : '';
+            var indexUrl = (path && /\/stats2(\.html)?$/i.test(path)) ? path.replace(/\/stats2(\.html)?$/i, '/index.html') : 'index.html';
+            var base = (typeof _loc !== 'undefined' && _loc && _loc.origin) ? _loc.origin : '';
+            window.location.href = base ? (base + (indexUrl.indexOf('/') === 0 ? indexUrl : '/' + indexUrl.replace(/^\//, ''))) : indexUrl;
+        } catch (e) {
+            try { window.location.href = 'index.html'; } catch (_) {}
+        }
+    };
 
     // --- Script Block ---
 
@@ -523,7 +545,7 @@
 
                 var identityCard = leftBody.querySelector('.drawer-item[data-card="identity-config"]');
                 var openclawCard = document.getElementById('openclaw-monitor-card');
-                var statsCard = leftBody.querySelector('.drawer-item.dashboard-card.backdrop-blur.clinic-card');
+                var statsCard = leftBody.querySelector('.drawer-item.dashboard-card.backdrop-blur.clinic-card') || leftBody.querySelector('.drawer-item[data-card="cursor-inactive-placeholder"]');
                 var githubCard = leftBody.querySelector('.drawer-item.github-combat-card');
                 var wordcloudCard = document.getElementById('left-drawer-wordcloud-wrap');
                 var ordered = [identityCard, openclawCard, statsCard, githubCard, wordcloudCard];
@@ -720,6 +742,25 @@
                     window.__authUserId
                 );
                 if (hasAuthSession) return true;
+                var hasResolvedUserData = !!(
+                    (window.currentUser && (
+                        window.currentUser.id ||
+                        window.currentUser.user_id ||
+                        window.currentUser.github_username ||
+                        window.currentUser.github_login ||
+                        window.currentUser.user_name ||
+                        window.currentUser.fingerprint
+                    )) ||
+                    (window.currentUserData && (
+                        window.currentUserData.id ||
+                        window.currentUserData.user_id ||
+                        window.currentUserData.github_username ||
+                        window.currentUserData.github_login ||
+                        window.currentUserData.user_name ||
+                        window.currentUserData.fingerprint
+                    ))
+                );
+                if (hasResolvedUserData) return true;
             } catch (e) {
                 return false;
             }
@@ -728,7 +769,9 @@
                 return !!(
                     (window.supabaseAuthUser && window.supabaseAuthUser.id) ||
                     window.authenticatedUserId ||
-                    window.__authUserId
+                    window.__authUserId ||
+                    (window.currentUser && (window.currentUser.id || window.currentUser.user_name || window.currentUser.fingerprint)) ||
+                    (window.currentUserData && (window.currentUserData.id || window.currentUserData.user_name || window.currentUserData.fingerprint))
                 );
             } catch (e) {
                 return false;
@@ -738,7 +781,8 @@
             try {
                 var leftBody = document && document.getElementById ? document.getElementById('left-drawer-body') : null;
                 if (!leftBody) return;
-                var isGuestMode = !window.currentUser || (typeof isGuestGatePassed === 'function' && isGuestGatePassed());
+                var hasAccess = hasAuthenticatedDrawerAccess();
+                var isGuestMode = (typeof isGuestGatePassed === 'function' && isGuestGatePassed()) || !hasAccess;
                 if (isGuestMode) {
                     try {
                         var hasIdentityCard = !!leftBody.querySelector('.drawer-item[data-card="identity-config"]');
@@ -756,7 +800,7 @@
                         }
                     } catch (e) {}
                 }
-                var shouldHideUserData = isGuestMode || !hasAuthenticatedDrawerAccess();
+                var shouldHideUserData = isGuestMode;
                 var hasAuth = !shouldHideUserData;
                 if (!hasAuth) {
                     try { renderGuestLoginCard(); } catch (e) {}
@@ -2394,7 +2438,11 @@
         var VIBE_CURSOR_CACHE = 'vibe_cursor_analysis_cache';
         function getCursorAnalysisCache() {
             try {
-                return localStorage.getItem(VIBE_CURSOR_CACHE) || getCursorAnalysisCache() || '';
+                if (typeof localStorage === 'undefined') return '';
+                // 优先读取 last_analysis_data；该键由 index/main.js 作为稳定源持续写入。
+                return localStorage.getItem('last_analysis_data') ||
+                    localStorage.getItem(VIBE_CURSOR_CACHE) ||
+                    '';
             } catch (_) { return ''; }
         }
         var PERSONAL_CLOUD_HARDCODED_DEMO = {
@@ -2465,11 +2513,135 @@
                 Architect: dataAdapter(raw.Architect || raw.architect || [])
             };
         }
+        function parseStats2ObjectLoose(value) {
+            if (!value) return {};
+            if (typeof value === 'string') {
+                try {
+                    var parsed = JSON.parse(value);
+                    return (parsed && typeof parsed === 'object') ? parsed : {};
+                } catch (_) {
+                    return {};
+                }
+            }
+            return (typeof value === 'object') ? value : {};
+        }
+        function getStats2NestedValue(root, path) {
+            var cur = root;
+            var parts = String(path || '').split('.');
+            for (var i = 0; i < parts.length; i += 1) {
+                if (!cur || typeof cur !== 'object') return null;
+                cur = cur[parts[i]];
+            }
+            return cur == null ? null : cur;
+        }
+        function buildOpenClawCloudItemsFromArray(list, options) {
+            var opts = options || {};
+            var nameKeys = Array.isArray(opts.nameKeys) ? opts.nameKeys : ['name', 'label', 'word', 'phrase'];
+            var valueKeys = Array.isArray(opts.valueKeys) ? opts.valueKeys : ['count', 'heat', 'value', 'weight', 'ratio'];
+            var out = [];
+            var seen = new Set();
+            (Array.isArray(list) ? list : []).forEach(function(item, idx) {
+                if (!item) return;
+                var phrase = '';
+                if (typeof item === 'string') {
+                    phrase = item;
+                } else {
+                    for (var i = 0; i < nameKeys.length; i += 1) {
+                        if (item[nameKeys[i]] != null) {
+                            phrase = item[nameKeys[i]];
+                            break;
+                        }
+                    }
+                }
+                phrase = String(phrase || '').replace(/[_]+/g, ' ').trim();
+                if (!phrase || seen.has(phrase)) return;
+                var weight = 0;
+                if (typeof item === 'string') {
+                    weight = Math.max(8, 30 - idx);
+                } else {
+                    for (var j = 0; j < valueKeys.length; j += 1) {
+                        if (item[valueKeys[j]] != null) {
+                            weight = Number(item[valueKeys[j]]) || 0;
+                            break;
+                        }
+                    }
+                }
+                out.push({ phrase: phrase, weight: weight > 0 ? weight : Math.max(8, 30 - idx) });
+                seen.add(phrase);
+            });
+            out.sort(function(a, b) { return (b.weight || 0) - (a.weight || 0); });
+            return out.slice(0, Number(opts.limit) || 12);
+        }
+        function buildOpenClawCloudItemsFromObject(raw, limit) {
+            var source = parseStats2ObjectLoose(raw);
+            var out = [];
+            Object.keys(source).forEach(function(key) {
+                var item = source[key];
+                var phrase = String(key || '').replace(/[_]+/g, ' ').trim();
+                if (!phrase) return;
+                var weight = 0;
+                if (item && typeof item === 'object') {
+                    weight = Number(item.count != null ? item.count : (item.heat != null ? item.heat : (item.value != null ? item.value : item.weight))) || 0;
+                } else {
+                    weight = Number(item) || 0;
+                }
+                out.push({ phrase: phrase, weight: weight > 0 ? weight : 8 });
+            });
+            out.sort(function(a, b) { return (b.weight || 0) - (a.weight || 0); });
+            return out.slice(0, limit || 12);
+        }
+        function buildIdentityCloudFromOpenClaw(raw) {
+            var root = parseStats2ObjectLoose(raw);
+            if (!root || typeof root !== 'object') return null;
+            var statsRoot = parseStats2ObjectLoose(root.stats);
+            var openclawRoot = parseStats2ObjectLoose(statsRoot.openclaw || root.openclaw);
+            var openclawStats = parseStats2ObjectLoose(openclawRoot.stats || statsRoot.openclaw_stats || root.openclaw_stats);
+            if (!Object.keys(openclawStats).length && !Object.keys(openclawRoot).length) return null;
+            var novice = buildOpenClawCloudItemsFromArray(
+                getStats2NestedValue(openclawStats, 'raw_summary.dimensions.toolSkillHeat.topTools') ||
+                getStats2NestedValue(openclawStats, 'raw_summary.dimensions.toolSkillHeat.toolHeat'),
+                { nameKeys: ['toolName', 'name', 'label'], valueKeys: ['count', 'heat', 'value', 'weight'], limit: 12 }
+            );
+            if (novice.length === 0) {
+                novice = buildOpenClawCloudItemsFromObject(openclawStats.tool_usage, 12);
+            }
+            var professional = buildOpenClawCloudItemsFromArray(
+                getStats2NestedValue(openclawStats, 'raw_summary.dimensions.toolSkillHeat.skillHeat'),
+                { nameKeys: ['skillName', 'name', 'label'], valueKeys: ['count', 'heat', 'value', 'weight'], limit: 12 }
+            );
+            if (professional.length === 0) {
+                professional = buildOpenClawCloudItemsFromObject(openclawStats.skills_stats || root.skills_stats, 12);
+            }
+            if (professional.length === 0) {
+                professional = buildOpenClawCloudItemsFromArray(openclawStats.skills_tags || root.skills_tags, { limit: 12 });
+            }
+            var architect = buildOpenClawCloudItemsFromArray(
+                getStats2NestedValue(openclawStats, 'raw_summary.dimensions.modelPreference.distribution'),
+                { nameKeys: ['modelId', 'name', 'label'], valueKeys: ['count', 'ratio', 'weight', 'value'], limit: 12 }
+            );
+            if (architect.length === 0) {
+                architect = buildOpenClawCloudItemsFromObject(openclawStats.model_usage || openclawRoot.modelUsage || root.model_usage, 12);
+            }
+            if (architect.length === 0 && openclawStats.primary_model) {
+                architect = [{ phrase: String(openclawStats.primary_model).trim(), weight: 24 }];
+            }
+            var pool = novice.concat(professional).concat(architect).sort(function(a, b) { return (b.weight || 0) - (a.weight || 0); });
+            if (novice.length === 0 && pool.length) novice = pool.slice(0, 10);
+            if (professional.length === 0 && pool.length) professional = pool.slice(0, 10);
+            if (architect.length === 0 && pool.length) architect = pool.slice(0, 10);
+            if (novice.length === 0 && professional.length === 0 && architect.length === 0) return null;
+            return {
+                Novice: novice,
+                Professional: professional,
+                Architect: architect
+            };
+        }
         function readPersonalCloudFromBroadcast() {
             try {
                 var payload = window.last_local_stats && window.last_local_stats.payload;
                 if (!payload || typeof payload !== 'object') return null;
                 return pickIdentityLevelCloud(payload) ||
+                    buildIdentityCloudFromOpenClaw(payload) ||
                     (payload.stats && payload.stats.identityLevelCloud) ||
                     payload.identityLevelCloud ||
                     null;
@@ -2495,8 +2667,9 @@
             try {
                 var cu = window.currentUser || window.currentUserData || null;
                 if (!cu || typeof cu !== 'object') return null;
+                var statsObj = parseStats2ObjectLoose(cu.stats);
                 var ilc = (
-                    (cu.stats && cu.stats.identityLevelCloud) ||
+                    (statsObj && statsObj.identityLevelCloud) ||
                     cu.identityLevelCloud ||
                     (cu.analysis && cu.analysis.stats && cu.analysis.stats.identityLevelCloud) ||
                     (cu.personality && cu.personality.identityLevelCloud) ||
@@ -2512,6 +2685,7 @@
                         }
                     } catch (_) {}
                 }
+                if (!ilc) ilc = buildIdentityCloudFromOpenClaw(cu);
                 return normalizeIdentityCloudBuckets(ilc);
             } catch (_) {
                 return null;
@@ -2565,6 +2739,11 @@
                     window.__personalIdentityLevelCloudCache = { v: exactLocalIlc, raw: rawPayload, ts: Date.now() };
                     return exactLocalIlc;
                 }
+                var openclawLocalIlc = normalizeIdentityCloudBuckets(buildIdentityCloudFromOpenClaw(parsed));
+                if (openclawLocalIlc && (openclawLocalIlc.Novice.length || openclawLocalIlc.Professional.length || openclawLocalIlc.Architect.length)) {
+                    window.__personalIdentityLevelCloudCache = { v: openclawLocalIlc, raw: rawPayload, ts: Date.now() };
+                    return openclawLocalIlc;
+                }
             }
             try {
                 var exactVibeResults = window.vibeResults && typeof window.vibeResults === 'object'
@@ -2590,7 +2769,7 @@
             if (cache && cache.v && typeof cache.v === 'object' && cache.raw === rawPayload) return cache.v;
 
             // 只读本地：localStorage.last_analysis_data
-            var ilc = pickIdentityLevelCloud(parsed);
+            var ilc = pickIdentityLevelCloud(parsed) || buildIdentityCloudFromOpenClaw(parsed);
             var out = { Novice: [], Professional: [], Architect: [] };
             if (ilc && typeof ilc === 'object') {
                 out = normalizeIdentityCloudBuckets(ilc) || out;
@@ -9516,19 +9695,21 @@
                 if (typeof window.__statsSourceType !== 'string') window.__statsSourceType = 'all';
                 var switcher = mount.querySelector('#statsSourceSwitcher');
                 if (switcher) {
+                    var syncSwitcherState = function(src) {
+                        var normalized = (src === 'cursor' || src === 'openclaw' || src === 'all') ? src : 'all';
+                        switcher.querySelectorAll('.source-btn').forEach(function(b) {
+                            var active = (b.getAttribute('data-source') || 'all') === normalized;
+                            b.classList.toggle('active', active);
+                            b.classList.toggle('text-zinc-500', !active);
+                            b.style.borderColor = active ? 'rgba(0,255,65,0.4)' : 'transparent';
+                        });
+                    };
+                    syncSwitcherState(window.__statsSourceType);
                     switcher.querySelectorAll('.source-btn').forEach(function(btn) {
                         btn.onclick = function() {
                             var src = btn.getAttribute('data-source') || 'all';
                             window.__statsSourceType = src;
-                            switcher.querySelectorAll('.source-btn').forEach(function(b) {
-                                if (b.getAttribute('data-source') === src) {
-                                    b.classList.add('active'); b.classList.remove('text-zinc-500');
-                                    b.style.borderColor = 'rgba(0,255,65,0.4)';
-                                } else {
-                                    b.classList.remove('active'); b.classList.add('text-zinc-500');
-                                    b.style.borderColor = 'transparent';
-                                }
-                            });
+                            syncSwitcherState(src);
                             if (typeof updateCountryDashboard === 'function') updateCountryDashboard(cc, name, { preferCache: false });
                         };
                     });
@@ -9626,6 +9807,17 @@
             if (state.isGlobalInitializing && !window.__allowInitCall) return;
             console.log('[switchView] 切换到视图:', view);
             var targetView = (view || '').toUpperCase();
+            var sourceByView = {
+                global: 'all',
+                country: 'all',
+                ranking: 'all',
+                leaderboard: 'github',
+                openclaw: 'openclaw'
+            };
+            if (view && sourceByView[view]) {
+                window.__statsSourceType = sourceByView[view];
+                window.__rightDrawerDataSource = sourceByView[view];
+            }
             // 视图拦截：目标视图与目标国家均与当前一致时跳过数据拉取，避免死循环
             if (state.currentViewState === targetView) {
                 if (targetView !== 'COUNTRY') return;
@@ -21561,6 +21753,19 @@
                 }
             }
             best = best || user;
+            // 同一用户的 allData / Supabase / 本地缓存会分散在不同记录里，这里先做一次补全合并，
+            // 避免选中了“更高分但字段更少”的记录后把 github/openclaw 数据丢掉。
+            if (typeof safeMaxMergeUserData === 'function') {
+                candidates.forEach(function(cand) {
+                    if (!cand || cand === best) return;
+                    best = safeMaxMergeUserData(best, cand);
+                });
+            } else {
+                candidates.forEach(function(cand) {
+                    if (!cand || cand === best) return;
+                    best = Object.assign({}, best, cand);
+                });
+            }
             // 【合并 github_stats】若 best 没有有效 github_stats，从同人任一条记录中取，避免左侧抽屉战力卡片无数据
             var bestGs = best.github_stats;
             if (!bestGs || typeof bestGs !== 'object' || !bestGs.login) {
@@ -21646,16 +21851,16 @@
                 console.warn('[UserStats] ⚠️ currentUserData 不存在，跳过渲染');
                 return;
             }
+            try {
+                window.currentUserData = currentUserData;
+                window.currentUser = currentUserData;
+            } catch (_) {}
                 if (typeof isGuestGatePassed === 'function' && isGuestGatePassed()) {
                     console.log('[UserStats] ℹ️ 游客模式，跳过个人统计卡片渲染');
                     if (typeof resetGuestViewerState === 'function') resetGuestViewerState({ renderDrawer: true });
                     return;
                 }
-                if (typeof hasAuthenticatedDrawerAccess === 'function' && !hasAuthenticatedDrawerAccess()) {
-                    console.log('[UserStats] ℹ️ 当前未登录，阻止渲染个人统计卡片');
-                    clearPrivateDrawerCards({ renderGuestCard: false });
-                    return;
-                }
+                // 登录状态的判定在其它认证流中已经处理，这里不再清空抽屉，避免竞态导致数据卡片被误删
             // 【侧边栏拦截】若存在刚完成的本地分析（last_local_stats），优先用本地数据覆盖，忽略服务器可能延迟或累加错误的旧数据
             var localStats = window.last_local_stats;
             if (localStats && localStats.payload && (Date.now() - (localStats.ts || 0)) < 300000) {
@@ -21709,7 +21914,67 @@
                     } catch (e) { return '--'; }
                 };
 
-                const githubStats = currentUserData.github_stats || null;
+                const githubStats = (function(raw) {
+                    if (!raw) return null;
+                    if (typeof raw === 'string') {
+                        try { return JSON.parse(raw); } catch (_) { return null; }
+                    }
+                    return typeof raw === 'object' ? raw : null;
+                })(currentUserData.github_stats);
+                if (githubStats && currentUserData.github_stats !== githubStats) {
+                    currentUserData.github_stats = githubStats;
+                }
+                var hasOpenClawPayload = (function(user) {
+                    if (!user) return false;
+                    if (user.total_tokens != null || user.primary_model || user.last_active_at) return true;
+                    var stats = user.stats;
+                    if (!stats) return false;
+                    if (typeof stats === 'string') return stats.indexOf('"openclaw"') !== -1 || stats.indexOf('"openclaw_stats"') !== -1;
+                    if (typeof stats !== 'object') return false;
+                    return !!(stats.openclaw || stats.openclaw_stats);
+                })(currentUserData);
+                if (!hasOpenClawPayload && !currentUserData.__openclawHydrationAttempted) {
+                    try {
+                        var sbOpenClaw = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+                        var openclawUserId = currentUserData.id || currentUserData.user_id || '';
+                        var openclawFingerprint = currentUserData.fingerprint || currentUserData.user_fingerprint || '';
+                        if (!openclawFingerprint) {
+                            try { openclawFingerprint = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+                        }
+                        var openclawUserName = currentUserData.user_name || currentUserData.github_login || currentUserData.github_username || '';
+                        if (sbOpenClaw && typeof sbOpenClaw.from === 'function' && (openclawUserId || openclawFingerprint || openclawUserName)) {
+                            currentUserData.__openclawHydrationAttempted = true;
+                            var openclawQuery = sbOpenClaw
+                                .from('user_analysis')
+                                .select('id, stats, total_tokens, primary_model, skills_tags, last_active_at, last_sync_at, github_synced_at');
+                            if (openclawUserId) openclawQuery = openclawQuery.eq('id', openclawUserId);
+                            else if (openclawFingerprint) openclawQuery = openclawQuery.eq('fingerprint', openclawFingerprint);
+                            else openclawQuery = openclawQuery.ilike('user_name', String(openclawUserName).trim());
+                            openclawQuery
+                                .limit(1)
+                                .maybeSingle()
+                                .then(function(res) {
+                                    var row = res && res.data ? res.data : null;
+                                    if (!row) return;
+                                    var mergedUser = (typeof safeMaxMergeUserData === 'function')
+                                        ? safeMaxMergeUserData(currentUserData, row)
+                                        : Object.assign({}, currentUserData, row);
+                                    try {
+                                        window.currentUser = mergedUser;
+                                        window.currentUserData = mergedUser;
+                                    } catch (_) {}
+                                    if (typeof window.refreshOpenClawMonitor === 'function') window.refreshOpenClawMonitor();
+                                    var lb = document.getElementById('left-drawer-body');
+                                    if (lb && mergedUser !== currentUserData) renderUserStatsCards(lb, mergedUser);
+                                })
+                                .catch(function(err) {
+                                    console.warn('[UserStats] OpenClaw 字段补全失败:', err);
+                                });
+                        }
+                    } catch (err) {
+                        console.warn('[UserStats] OpenClaw 补全流程启动失败:', err);
+                    }
+                }
 
                 // 【Task 4】检查是否为新用户（维度/统计为空或为默认值）
                 // 修复：统一视图/隐私裁剪可能不返回 l_score..f_score，但仍可能返回其它统计字段（total_messages 等）
@@ -21794,7 +22059,39 @@
                     }
                 }
 
-                // 只有在确定是“完全没有数据的匿名用户/占位记录”时才显示同步中
+                // 【占位卡】仅在“本地 + 服务端都没有 Cursor 战力数据，且无法再向后端查询”时，才渲染「未激活」占位卡
+                var hasLocalCursorData = !!(localStoredAnalysis || (localStats && localStats.payload));
+                try {
+                    var rawCursor = (typeof localStorage !== 'undefined' && (localStorage.getItem('last_analysis_data') || localStorage.getItem('cursor_clinical_history') || (typeof getCursorAnalysisCache === 'function' ? getCursorAnalysisCache() : ''))) || '';
+                    if (rawCursor && String(rawCursor).length > 20) hasLocalCursorData = true;
+                } catch (_) {}
+                var hasServerStats =
+                    !!currentUserData.dimensions ||
+                    !!currentUserData.stats ||
+                    (currentUserData.total_messages != null && currentUserData.total_messages > 0) ||
+                    (currentUserData.total_chars != null && currentUserData.total_chars > 0);
+                var shouldShowCursorPlaceholder =
+                    !hasLocalCursorData &&
+                    !hasServerStats &&
+                    !isGitHubUser &&
+                    !canQuerySupabase;
+                if (shouldShowCursorPlaceholder) {
+                    var cursorPlaceholder = document.createElement('div');
+                    cursorPlaceholder.className = 'drawer-item stats2-inactive-placeholder hacker-border';
+                    cursorPlaceholder.setAttribute('data-card', 'cursor-inactive-placeholder');
+                    cursorPlaceholder.innerHTML = '<div class="stats2-inactive-placeholder-title">Cursor 战力未激活</div>' +
+                        '<div class="stats2-inactive-placeholder-desc">当前还没有上传 Cursor 聊天记录，请返回体检首页上传一次，以解锁赛博战力报告。</div>' +
+                        '<button type="button" class="stats2-inactive-placeholder-btn" onclick="typeof window.navigateToIndexPage === \'function\' && window.navigateToIndexPage()" aria-label="返回体检首页补全 Cursor 数据">返回体检首页</button>';
+                    leftBody.querySelectorAll('.drawer-item[data-card="cursor-inactive-placeholder"]').forEach(function(c) { c.remove(); });
+                    var openclawMountRef = document.getElementById('openclaw-monitor-mount') || document.getElementById('openclaw-monitor-card');
+                    var insertAfter = openclawMountRef && openclawMountRef.parentNode === leftBody ? openclawMountRef : leftBody.querySelector('.drawer-item[data-card="identity-config"]');
+                    if (insertAfter && insertAfter.nextSibling) leftBody.insertBefore(cursorPlaceholder, insertAfter.nextSibling);
+                    else if (insertAfter) leftBody.appendChild(cursorPlaceholder);
+                    else leftBody.insertBefore(cursorPlaceholder, leftBody.firstChild);
+                    if (typeof normalizeLeftDrawerCardOrder === 'function') normalizeLeftDrawerCardOrder();
+                    return;
+                }
+
                 const isNewUser = (!hasDimensions || isDefaultScores) && !currentUserData.id && !isGitHubUser;
                 
                 if (isNewUser) {
@@ -22743,8 +23040,25 @@
                     } catch { /* ignore */ }
                 }
                 
+                var hasRenderableUserData = !!(currentUserData && (
+                    currentUserData.id ||
+                    currentUserData.user_id ||
+                    currentUserData.user_name ||
+                    currentUserData.github_username ||
+                    currentUserData.github_login ||
+                    currentUserData.fingerprint ||
+                    currentUserData.total_messages != null ||
+                    currentUserData.total_chars != null ||
+                    currentUserData.github_stats
+                ));
+                var allowPrivateCards = hasRenderableUserData || !(typeof hasAuthenticatedDrawerAccess === 'function') || hasAuthenticatedDrawerAccess();
+                if (hasRenderableUserData && typeof setAuthenticatedDrawerAccess === 'function') {
+                    try {
+                        setAuthenticatedDrawerAccess(true, currentUserData && currentUserData.id ? currentUserData : (window.supabaseAuthUser || currentUserData || null));
+                    } catch (_) {}
+                }
                 // 创建用户统计卡片容器（赛博病理风格：border-white/10 bg-[#0a0a0a]/80 backdrop-blur）
-                if (typeof hasAuthenticatedDrawerAccess === 'function' && !hasAuthenticatedDrawerAccess()) {
+                if (!allowPrivateCards) {
                     console.log('[UserStats] ℹ️ 当前未登录，取消创建统计卡片 DOM');
                     clearPrivateDrawerCards({ renderGuestCard: false });
                     return;
@@ -22861,14 +23175,43 @@
                     var apiBase = (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content) || '';
                     apiBase = String(apiBase).trim().replace(/\/$/, '');
                     var defaultAvatarSt2 = (window.STATS_CONSTANTS && window.STATS_CONSTANTS.DEFAULT_AVATAR) || '';
-                    var ghUserSt2 = (typeof localStorage !== 'undefined' && localStorage.getItem('github_username')) || '';
-                    var userIdentitySt2 = (currentUserData && currentUserData.user_identity) || null;
+                    var githubLoginFromStatsSt2 = (githubStats && (githubStats.login || githubStats.username || githubStats.user_name)) || '';
+                    var ghUserSt2 = (
+                        (currentUserData && (
+                            currentUserData.github_login ||
+                            currentUserData.github_username ||
+                            currentUserData.user_name ||
+                            currentUserData.name
+                        )) ||
+                        githubLoginFromStatsSt2 ||
+                        ((typeof localStorage !== 'undefined' && localStorage.getItem('github_username')) || '')
+                    );
+                    ghUserSt2 = String(ghUserSt2 || '').trim();
+                    if (ghUserSt2) {
+                        try {
+                            if (typeof localStorage !== 'undefined') localStorage.setItem('github_username', ghUserSt2);
+                        } catch (_) {}
+                    }
+                    var userIdentitySt2 = (currentUserData && currentUserData.user_identity) || (ghUserSt2 ? 'github' : null);
                     var isFpOnlySt2 = !ghUserSt2 || (typeof isValidGitHubUsername === 'function' && !isValidGitHubUsername(ghUserSt2, userIdentitySt2));
                     var fpSt2 = (typeof localStorage !== 'undefined' && localStorage.getItem('user_fingerprint')) || '';
                     var fpPrefixSt2 = fpSt2 ? fpSt2.substring(0, 6).toUpperCase() : '';
-                    var dispNameSt2 = isFpOnlySt2 && fpSt2 ? ('匿名专家 ' + fpPrefixSt2) : (ghUserSt2 || '未设置');
+                    var displayNameSourceSt2 = (
+                        (currentUserData && (
+                            currentUserData.user_name ||
+                            currentUserData.github_login ||
+                            currentUserData.github_username ||
+                            currentUserData.name
+                        )) ||
+                        githubLoginFromStatsSt2 ||
+                        ghUserSt2
+                    );
+                    var dispNameSt2 = isFpOnlySt2 && fpSt2 ? ('匿名专家 ' + fpPrefixSt2) : (displayNameSourceSt2 || '未设置');
                     var dispLabelSt2 = isFpOnlySt2 && fpSt2 ? '设备指纹' : 'GitHub ID';
-                    var avUrlSt2 = isFpOnlySt2 && fpSt2 ? ('https://api.dicebear.com/7.x/identicon/svg?seed=' + encodeURIComponent(fpSt2)) : (ghUserSt2 && typeof getGitHubAvatarUrl === 'function' ? getGitHubAvatarUrl(ghUserSt2) : defaultAvatarSt2);
+                    var avatarSourceSt2 = (githubStats && (githubStats.avatarUrl || githubStats.avatar_url)) || (currentUserData && (currentUserData.avatar_url || currentUserData.avatarUrl)) || '';
+                    var avUrlSt2 = isFpOnlySt2 && fpSt2
+                        ? ('https://api.dicebear.com/7.x/identicon/svg?seed=' + encodeURIComponent(fpSt2))
+                        : (avatarSourceSt2 || (ghUserSt2 && typeof getGitHubAvatarUrl === 'function' ? getGitHubAvatarUrl(ghUserSt2) : defaultAvatarSt2));
                     var totalMsgsSt2 = Number(currentUserData && (currentUserData.total_messages != null ? currentUserData.total_messages : currentUserData.totalMessages)) || 0;
                     var badgeSt2 = totalMsgsSt2 >= 500 ? '<span class="inline-flex items-center ml-1 animate-pulse" style="filter: drop-shadow(0 0 5px rgba(255,0,0,0.6));" title="病入膏肓">🏆</span>' : (totalMsgsSt2 < 10 && totalMsgsSt2 > 0 ? '<span class="inline-flex items-center ml-1 text-[#00ff41]/50" title="病情可控">🌱</span>' : '');
                     var curStatusSt2 = (typeof localStorage !== 'undefined' && localStorage.getItem('user_status')) || 'idle';
@@ -22992,9 +23335,7 @@
                         githubCardEl = window.renderGithubCard(githubStats, cardOpts);
                     } else {
                         var isGuestModeSt2 = (typeof isGuestGatePassed === 'function' && isGuestGatePassed());
-                        var hasAuthSt2 = (typeof hasAuthenticatedDrawerAccess === 'function')
-                            ? hasAuthenticatedDrawerAccess()
-                            : !!(window.__stats2HasAuthenticatedSession);
+                        var hasAuthSt2 = allowPrivateCards;
                         var shouldShowIdentityOnly = isGuestModeSt2 || !hasAuthSt2;
                         if (shouldShowIdentityOnly) {
                             window.renderGithubCard(null, cardOpts);
@@ -25321,7 +25662,7 @@
                             q.maybeSingle()
                                 .then(function(res) {
                                     var row = res && res.data ? res.data : null;
-                                    var stats = row ? row.stats : null;
+                                    var stats = row ? parseStats2ObjectLoose(row.stats) : null;
                                     var ilc = stats && stats.identityLevelCloud ? stats.identityLevelCloud : null;
                                     if (row && row.personality_data) {
                                         if (typeof row.personality_data === 'string') {
@@ -25335,6 +25676,9 @@
                                     }
                                     if (!ilc && row && row.personality && row.personality.identityLevelCloud) {
                                         ilc = row.personality.identityLevelCloud;
+                                    }
+                                    if (!ilc) {
+                                        ilc = buildIdentityCloudFromOpenClaw(row);
                                     }
                                     var exact = normalizeIdentityCloudBuckets(ilc);
                                     if (exact && typeof exact === 'object' && (exact.Novice.length || exact.Professional.length || exact.Architect.length)) {
@@ -27491,7 +27835,7 @@ document.addEventListener('click', function(e) {
                 var leftBody = document.getElementById('left-drawer-body');
                 var cu = window.currentUser || window.currentUserData;
                 if (leftBody && cu && typeof renderUserStatsCards === 'function') {
-                    supabase.from('user_analysis').select('id, github_login, github_stats, github_stars, github_score, github_synced_at, last_sync_at').eq('id', userId).single().then(async function(r) {
+                    supabase.from('user_analysis').select('id, github_login, github_stats, github_stars, github_score, github_synced_at, last_sync_at, stats, total_tokens, primary_model, skills_tags, last_active_at').eq('id', userId).single().then(async function(r) {
                         if (r.data && cu) {
                             var merged = Object.assign({}, cu, r.data);
                             try { window.currentUser = merged; window.currentUserData = merged; } catch (e) {}
@@ -27540,7 +27884,7 @@ document.addEventListener('click', function(e) {
                                     }
                                 }).then(function(result) {
                                     if (result && result.success && result.data) {
-                                        supabase.from('user_analysis').select('id, github_login, github_stats, github_stars, github_score, github_synced_at, last_sync_at').eq('id', userId).single().then(function(r2) {
+                                        supabase.from('user_analysis').select('id, github_login, github_stats, github_stars, github_score, github_synced_at, last_sync_at, stats, total_tokens, primary_model, skills_tags, last_active_at').eq('id', userId).single().then(function(r2) {
                                             if (r2.data && cu) {
                                                 var m2 = Object.assign({}, cu, r2.data);
                                                 try { window.currentUser = m2; window.currentUserData = m2; } catch (e) {}

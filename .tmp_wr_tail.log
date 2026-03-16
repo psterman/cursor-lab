@@ -1,0 +1,1496 @@
+
+ ⛅️ wrangler 4.60.0 (update available 4.73.0)
+─────────────────────────────────────────────
+Successfully created tail, expires at 2026-03-16T16:31:09Z
+Connected to cursor-clinical-analysis, waiting for logs...
+GET https://cursor-clinical-analysis.psterman.workers.dev/ - Ok @ 2026/3/16 18:32:36
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/stats/openclaw?debug=1 - Ok @ 2026/3/16 18:32:56
+  (info) [Worker] /api/v2/stats/openclaw rows {
+  rawRows: 0,
+  signalRows: 0,
+  identityRows: 0,
+  pickedRows: 0,
+  hasServiceRoleKey: true,
+  hasSupabaseKey: true,
+  sample: null
+}
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/v2/openclaw/analyze - Ok @ 2026/3/16 18:33:29
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/stats/openclaw?debug=1 - Ok @ 2026/3/16 18:33:31
+  (info) [Worker] /api/v2/stats/openclaw rows {
+  rawRows: 1,
+  signalRows: 1,
+  identityRows: 1,
+  pickedRows: 1,
+  hasServiceRoleKey: true,
+  hasSupabaseKey: true,
+  sample: {
+    id: '5c55a020-e9e5-42eb-8da4-2e426ab5cb70',
+    user_name: 'psterman',
+    github_login: 'psterman',
+    fingerprint: '830a2a1476a3',
+    total_tokens: 0,
+    primary_model: '',
+    skills_tags_len: 0,
+    has_stats: true,
+    has_openclaw_stats: true
+  }
+}
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:33:33
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 5c55a020-e9e5-42eb-8da4-2e426ab5cb70
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 5c55a020-e9e5-42eb-8da4-2e426ab5cb70 
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:33:37.320Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:33:37.320Z","github_stars":23,"github_forks":2,"id":"5c55a020-e9e5-42eb-8da4-2e426ab5cb70","fingerprint":"830a2a1476a33807def0bb511219e3a605ea6f07b8799ca1745278f2d19e44ba","user_name":"psterman"}
+  (log) [GitHub Sync] ✅ Supabase 写入成功: no representation
+GET https://cursor-clinical-analysis.psterman.workers.dev/ - Ok @ 2026/3/16 18:34:14
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/stats/openclaw - Ok @ 2026/3/16 18:34:31
+OPTIONS https://cursor-clinical-analysis.psterman.workers.dev/api/fingerprint/migrate?fingerprint=REDACTED&_t=1773657460958 - Ok @ 2026/3/16 18:37:42
+OPTIONS https://cursor-clinical-analysis.psterman.workers.dev/api/fingerprint/migrate?fingerprint=REDACTED&_t=1773657460858 - Ok @ 2026/3/16 18:37:42
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/fingerprint/migrate?fingerprint=REDACTED&_t=1773657460858 - Ok @ 2026/3/16 18:37:42
+  (log) [Worker] ✅ 用户身份验证成功，user_id: 132c47c6...
+  (log) [Worker] 🔑 开始迁移流程... {
+  method: 'claim_token',
+  userId: '132c47c6...',
+  fingerprint: '830a2a14...'
+}
+  (log) [Migrate] 🔑 开始基于 claim_token 的强制认领流程...
+  (log) [Fingerprint] ℹ️ 根据 claim_token 未找到匹配的用户
+  (error) [Migrate] ❌ claim_token 无效或已过期,未找到待认领记录
+  (log) [Worker] ℹ️ 无需迁移或已关联，返回 skipped
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/fingerprint/migrate?fingerprint=REDACTED&_t=1773657460958 - Ok @ 2026/3/16 18:37:42
+  (log) [Worker] ✅ 用户身份验证成功，user_id: 132c47c6...
+  (log) [Worker] 🔑 开始迁移流程... {
+  method: 'claim_token',
+  userId: '132c47c6...',
+  fingerprint: '830a2a14...'
+}
+  (log) [Migrate] 🔑 开始基于 claim_token 的强制认领流程...
+  (log) [Fingerprint] ℹ️ 根据 claim_token 未找到匹配的用户
+  (error) [Migrate] ❌ claim_token 无效或已过期,未找到待认领记录
+  (log) [Worker] ℹ️ 无需迁移或已关联，返回 skipped
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/v2/openclaw/analyze - Ok @ 2026/3/16 18:37:42
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/v2/openclaw/analyze - Ok @ 2026/3/16 18:37:42
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/stats?fingerprint=REDACTED&_t=1773657462247 - Ok @ 2026/3/16 18:37:43
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/stats?fingerprint=REDACTED&_t=1773657462436 - Ok @ 2026/3/16 18:37:43
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/country-stats-global?_t=1773657463948 - Ok @ 2026/3/16 18:37:45
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/country-stats-global?_t=1773657464890 - Ok @ 2026/3/16 18:37:46
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/global-average - Ok @ 2026/3/16 18:37:45
+OPTIONS https://cursor-clinical-analysis.psterman.workers.dev/api/fingerprint/migrate?fingerprint=REDACTED&_t=1773657468763 - Ok @ 2026/3/16 18:37:49
+OPTIONS https://cursor-clinical-analysis.psterman.workers.dev/api/fingerprint/migrate?fingerprint=REDACTED&_t=1773657469079 - Ok @ 2026/3/16 18:37:50
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/fingerprint/migrate?fingerprint=REDACTED&_t=1773657468763 - Ok @ 2026/3/16 18:37:50
+  (log) [Worker] ✅ 用户身份验证成功，user_id: 132c47c6...
+  (log) [Worker] 🔑 开始迁移流程... {
+  method: 'claim_token',
+  userId: '132c47c6...',
+  fingerprint: '830a2a14...'
+}
+  (log) [Migrate] 🔑 开始基于 claim_token 的强制认领流程...
+  (log) [Fingerprint] ℹ️ 根据 claim_token 未找到匹配的用户
+  (error) [Migrate] ❌ claim_token 无效或已过期,未找到待认领记录
+  (log) [Worker] ℹ️ 无需迁移或已关联，返回 skipped
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/fingerprint/migrate?fingerprint=REDACTED&_t=1773657469079 - Ok @ 2026/3/16 18:37:50
+  (log) [Worker] ✅ 用户身份验证成功，user_id: 132c47c6...
+  (log) [Worker] 🔑 开始迁移流程... {
+  method: 'claim_token',
+  userId: '132c47c6...',
+  fingerprint: '830a2a14...'
+}
+  (log) [Migrate] 🔑 开始基于 claim_token 的强制认领流程...
+  (log) [Fingerprint] ℹ️ 根据 claim_token 未找到匹配的用户
+  (error) [Migrate] ❌ claim_token 无效或已过期,未找到待认领记录
+  (log) [Worker] ℹ️ 无需迁移或已关联，返回 skipped
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/stats?fingerprint=REDACTED&_t=1773657472033 - Ok @ 2026/3/16 18:37:53
+OPTIONS https://cursor-clinical-analysis.psterman.workers.dev/ - Ok @ 2026/3/16 18:37:54
+GET https://cursor-clinical-analysis.psterman.workers.dev/ - Ok @ 2026/3/16 18:37:54
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/country-stats-global?_t=1773657475271 - Ok @ 2026/3/16 18:37:56
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/global-average?country_code=CN - Ok @ 2026/3/16 18:37:55
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/stats?fingerprint=&_t=1773657478929 - Ok @ 2026/3/16 18:38:00
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/country-stats-global?_t=1773657480953 - Ok @ 2026/3/16 18:38:02
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:38:01
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1 , country_code: CN
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:38:03.934Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:38:03.934Z","github_stars":23,"github_forks":2,"id":"132c47c6-911d-405c-8aa6-9d2ce89f90b1","user_name":"psterman","manual_location":"CN","country_code":"CN"}
+  (log) [GitHub Sync] ✅ Supabase 写入成功: no representation
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/country-stats-global?_t=1773657485479 - Ok @ 2026/3/16 18:38:06
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/stats?fingerprint=&_t=1773657486639 - Ok @ 2026/3/16 18:38:07
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:38:05
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1 , country_code: CN
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:38:08.634Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:38:08.634Z","github_stars":23,"github_forks":2,"id":"132c47c6-911d-405c-8aa6-9d2ce89f90b1","user_name":"psterman","manual_location":"CN","country_code":"CN"}
+  (log) [GitHub Sync] ✅ Supabase 写入成功: no representation
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/country-stats-global?_t=1773657487896 - Ok @ 2026/3/16 18:38:09
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/stats?fingerprint=REDACTED&_t=1773657561903 - Ok @ 2026/3/16 18:39:23
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/country-stats-global?_t=1773657562778 - Ok @ 2026/3/16 18:39:23
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/v2/log-vibe-soul - Ok @ 2026/3/16 18:39:52
+  (log) [Worker] 灵魂词上报 收到: { phrase: '数据', level: 'Novice', value: 13, country: 'US' }
+  (log) [KV] 已存入灵魂词: soul:US:Novice:数据
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/v2/log-vibe-soul - Ok @ 2026/3/16 18:39:52
+  (log) [Worker] 灵魂词上报 收到: { phrase: 'Token', level: 'Professional', value: 31, country: 'US' }
+  (log) [KV] 已存入灵魂词: soul:US:Professional:Token
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/v2/log-vibe-soul - Ok @ 2026/3/16 18:39:53
+  (log) [Worker] 灵魂词上报 收到: { phrase: 'Token', level: 'Architect', value: 31, country: 'US' }
+  (log) [KV] 已存入灵魂词: soul:US:Architect:Token
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/v2/analyze - Ok @ 2026/3/16 18:39:55
+  (log) [Worker] 📊 使用前端上报的 V6 dimensions: { L: 16, P: 65, D: 5, E: 7, F: 7 }
+  (log) [Worker] 📊 使用前端上报的 V6 stats: {
+  totalChars: 12998,
+  ketao_count: 0,
+  jiafang_count: 0,
+  tease_count: 0,
+  style_index: 185.68571428571428,
+  avg_payload: 185.68571428571428
+}
+  (log) [Worker] 📊 最终维度计算结果: {
+  L: 16,
+  P: 65,
+  D: 5,
+  E: 7,
+  F: 7,
+  totalMessages: 70,
+  totalChars: 12998
+}
+  (log) [Worker] 🎭 人格识别结果: {
+  vibeIndex: '01010',
+  personalityType: '-P---',
+  lpdef: 'L0P1D0E1F0',
+  dimensions: { L: 16, P: 65, D: 5, E: 7, F: 7 }
+}
+  (log) [Worker] ✅ V6 动态排名已计算: {
+  totalUsers: 2,
+  ranks: {
+    L_rank: 6.4,
+    P_rank: 76.667,
+    D_rank: 2,
+    E_rank: 2.8000000000000007,
+    F_rank: 2.8000000000000007,
+    messageRank: 95,
+    charRank: 95,
+    daysRank: 95,
+    jiafangRank: 0,
+    ketaoRank: 0,
+    avgRank: 18
+  },
+  dimensions: { L: 16, P: 65, D: 5, E: 7, F: 7 }
+}
+  (log) [Worker] 📖 答案之书文案已生成: {
+  title: '雄辩家',
+  content: '你的平均消息长度为 186 字符，交互风格指数为 185.7。你属于"雄辩家"类型，喜欢长篇大论地描述需求。这种详细的沟通方式显示你可能是一个注重细节的人，或者你只是习惯性地把所有想法都写出来。',
+  vibe_level: '雄辩家'
+}
+  (log) [Worker] 🔍 开始调用适配器函数 matchLPDEFContent: {
+  dimensions: { L: 16, P: 65, D: 5, E: 7, F: 7 },
+  lang: 'zh-CN',
+  dimensionsKeys: [ 'L', 'P', 'D', 'E', 'F' ],
+  dimensionsValues: [ 16, 65, 5, 7, 7 ]
+}
+  (log) [Adapter] 🔍 开始匹配维度，输入: {
+  dimensionsKeys: [ 'L', 'P', 'D', 'E', 'F' ],
+  dimensionsValues: [ 16, 65, 5, 7, 7 ],
+  dimensionMapping: { L: 'word', P: 'no', D: 'say', E: 'ai', F: 'please' },
+  availableResources: [ 'ai', 'day', 'no', 'please', 'say', 'word' ]
+}
+  (log) [Adapter] 🔍 处理维度 L, 分数: 16
+  (log) [Adapter] 🔍 维度 L 映射到 rankId: word
+  (log) [Adapter] ✅ 找到资源 word, levels 数量: 5
+  (log) [Adapter] ✅ 维度 L 匹配成功: {
+  rankId: 'word',
+  originalScore: 16,
+  rankValue: 16,
+  label: '冷酷的突击官',
+  roastLength: 33,
+  roastPreview: '多说一个字都觉得浪费，你把 AI 当成了只会执行指令的单细胞生物。',
+  matchedLevelRange: '1-50',
+  commentsCount: 20
+}
+  (log) [Adapter] 🔍 处理维度 P, 分数: 65
+  (log) [Adapter] 🔍 维度 P 映射到 rankId: no
+  (log) [Adapter] ✅ 找到资源 no, levels 数量: 5
+  (log) [Adapter] ✅ 维度 P 匹配成功: {
+  rankId: 'no',
+  originalScore: 65,
+  rankValue: 65,
+  label: '天网克星·霸总真神',
+  roastLength: 26,
+  roastPreview: '我用否定筑起长城，防的就是你这种自以为是的低级算力。',
+  matchedLevelRange: '61-90',
+  commentsCount: 20
+}
+  (log) [Adapter] 🔍 处理维度 D, 分数: 5
+  (log) [Adapter] 🔍 维度 D 映射到 rankId: say
+  (log) [Adapter] ✅ 找到资源 say, levels 数量: 5
+  (log) [Adapter] ✅ 维度 D 匹配成功: {
+  rankId: 'say',
+  originalScore: 5,
+  rankValue: 5,
+  label: '惜字如金的冷面 Boss',
+  roastLength: 31,
+  roastPreview: '不需要交流，只要执行。你的冷静让 Cursor 感到脊背发凉。',
+  matchedLevelRange: '1-500',
+  commentsCount: 20
+}
+  (log) [Adapter] 🔍 处理维度 E, 分数: 7
+  (log) [Adapter] 🔍 维度 E 映射到 rankId: ai
+  (log) [Adapter] ✅ 找到资源 ai, levels 数量: 5
+  (log) [Adapter] ✅ 维度 E 匹配成功: {
+  rankId: 'ai',
+  originalScore: 7,
+  rankValue: 14,
+  label: '冷淡的甲方路人',
+  roastLength: 25,
+  roastPreview: 'AI 想跟你客套，你反手就是一个需求直接塞它嘴里。',
+  matchedLevelRange: '1-20',
+  commentsCount: 20
+}
+  (log) [Adapter] 🔍 处理维度 F, 分数: 7
+  (log) [Adapter] 🔍 维度 F 映射到 rankId: please
+  (log) [Adapter] ✅ 找到资源 please, levels 数量: 5
+  (log) [Adapter] ✅ 维度 F 匹配成功: {
+  rankId: 'please',
+  originalScore: 7,
+  rankValue: 7,
+  label: '赛博跪神·尊严入土',
+  roastLength: 36,
+  roastPreview: '你这种卑微程度，连天网看到你都要先备份一下自己的核心代码——怕被你舔死。',
+  matchedLevelRange: '1-20',
+  commentsCount: 20
+}
+  (log) [Adapter] ✅ 适配器函数完成，返回结果: {
+  resultCount: 5,
+  resultDimensions: [ 'L', 'P', 'D', 'E', 'F' ],
+  allDimensionsPresent: true
+}
+  (log) [Worker] ✅ 通过适配器函数生成详细统计数据: {
+  count: 5,
+  dimensions: [
+    {
+      dimension: 'L',
+      score: 16,
+      hasLabel: true,
+      hasRoast: true,
+      labelPreview: '冷酷的突击官',
+      roastPreview: '多说一个字都觉得浪费，你把 AI 当成了只会执行指令的单细胞'
+    },
+    {
+      dimension: 'P',
+      score: 65,
+      hasLabel: true,
+      hasRoast: true,
+      labelPreview: '天网克星·霸总真神',
+      roastPreview: '我用否定筑起长城，防的就是你这种自以为是的低级算力。'
+    },
+    {
+      dimension: 'D',
+      score: 5,
+      hasLabel: true,
+      hasRoast: true,
+      labelPreview: '惜字如金的冷面 Boss',
+      roastPreview: '不需要交流，只要执行。你的冷静让 Cursor 感到脊背发凉'
+    },
+    {
+      dimension: 'E',
+      score: 7,
+      hasLabel: true,
+      hasRoast: true,
+      labelPreview: '冷淡的甲方路人',
+      roastPreview: 'AI 想跟你客套，你反手就是一个需求直接塞它嘴里。'
+    },
+    {
+      dimension: 'F',
+      score: 7,
+      hasLabel: true,
+      hasRoast: true,
+      labelPreview: '赛博跪神·尊严入土',
+      roastPreview: '你这种卑微程度，连天网看到你都要先备份一下自己的核心代码——'
+    }
+  ]
+}
+  (log) [Worker] ✅ 详细统计数据已生成（最终）: {
+  count: 5,
+  dimensions: [
+    {
+      dimension: 'L',
+      score: 16,
+      label: '冷酷的突击官',
+      roastLength: 33,
+      roastPreview: '多说一个字都觉得浪费，你把 AI 当成了只会执行指令的单细胞生物。...'
+    },
+    {
+      dimension: 'P',
+      score: 65,
+      label: '天网克星·霸总真神',
+      roastLength: 26,
+      roastPreview: '我用否定筑起长城，防的就是你这种自以为是的低级算力。...'
+    },
+    {
+      dimension: 'D',
+      score: 5,
+      label: '惜字如金的冷面 Boss',
+      roastLength: 31,
+      roastPreview: '不需要交流，只要执行。你的冷静让 Cursor 感到脊背发凉。...'
+    },
+    {
+      dimension: 'E',
+      score: 7,
+      label: '冷淡的甲方路人',
+      roastLength: 25,
+      roastPreview: 'AI 想跟你客套，你反手就是一个需求直接塞它嘴里。...'
+    },
+    {
+      dimension: 'F',
+      score: 7,
+      label: '赛博跪神·尊严入土',
+      roastLength: 36,
+      roastPreview: '你这种卑微程度，连天网看到你都要先备份一下自己的核心代码——怕被你舔死。...'
+    }
+  ],
+  allDimensionsPresent: true
+}
+  (log) [Worker] ✅ 合并后的吐槽文案: 【L维度】多说一个字都觉得浪费，你把 AI 当成了只会执行指令的单细胞生物。
+
+【P维度】我用否定筑起长城，防的就是你这种自以为是的低级算力。
+
+【D维度】不需要交流，只要执行。你的冷静让 Curso...
+  (log) [Fingerprint] ℹ️ 未找到匹配的用户
+  (log) [Worker] 🔑 生成用户标识: {
+  method: 'Fingerprint',
+  userId: 'c9b43284...',
+  fingerprint: '0b0af500...',
+  messagesUsed: 10,
+  contentLength: 780,
+  fallbackUsed: false
+}
+  (log) [Worker] ✅ v6StatsForStorage 修复验证: {
+  work_days: 5,
+  jiafang_count: 0,
+  ketao_count: 0,
+  source_workDays: 5,
+  source_jiafangCount: 9,
+  source_ketaoCount: 9,
+  basicAnalysis_day: 5,
+  basicAnalysis_no: 9,
+  basicAnalysis_please: 9
+}
+  (log) [Worker] 🔑 为匿名用户生成 claim_token: 7076c665...
+  (log) [Worker] 🔍 Payload 数据验证: {
+  hasDetailedStats: true,
+  detailedStatsLength: 5,
+  hasPersonality: true,
+  personalityDetailedStatsLength: 5,
+  hasPersonalityData: true,
+  personalityDataLength: 5,
+  personalityDataPreview: [
+    { dimension: 'L', score: 16, hasLabel: true, hasRoast: true },
+    { dimension: 'P', score: 65, hasLabel: true, hasRoast: true }
+  ]
+}
+  (log) [DB] 准备写入数据: {
+  fingerprint: '4f40f34ea7edd0b75dfeb5660475e1b0',
+  user_name: '匿名受害者',
+  lpdef: 'L0P1D0E1F0',
+  total_messages: 70,
+  total_chars: 12998,
+  work_days: 5,
+  jiafang_count: 9,
+  ketao_count: 9,
+  ip_location: 'CN',
+  lang: 'zh-CN'
+}
+  (log) [Worker] [keyword_logs] 待入库词条数量: 64 样本: [
+  { phrase: 'help', category: 'Novice' },
+  { phrase: 'error', category: 'Novice' },
+  { phrase: 'install', category: 'Novice' },
+  { phrase: 'run', category: 'Novice' },
+  { phrase: 'paste', category: 'Novice' }
+]
+  (error) [Supabase] ❌ Upsert 失败: {
+  status: 400,
+  error: `{"code":"PGRST204","details":null,"hint":null,"message":"Could not find the 'cursor_metadata' column of 'user_analysis' in the schema cache"}`
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'log',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'auth',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'token',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'role',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'endpoint',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'request',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'JSON',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'REST',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'session',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'security',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'HTTPS',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'memory',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'I/O',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'process',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'trigger',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'message',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'gateway',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'proxy',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'SRE',
+  category: 'Architect',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'SLO',
+  category: 'Architect',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'SLI',
+  category: 'Architect',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'idempotency',
+  category: 'Architect',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'ABAC',
+  category: 'Architect',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'audit',
+  category: 'Architect',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'trace',
+  category: 'Architect',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (log) [Worker] ✅ keyword_logs 身份关键词写入完成: { count: 64, ip_location: 'CN' }
+  (warn) [Worker] ⚠️ refresh_global_stats_v6 RPC 触发失败: Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits
+  (warn) [Worker] ⚠️ 查询 v_user_analysis_extended 失败（使用默认排名）: Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits
+  (warn) [Worker] get_user_rank_v2 RPC 失败: Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits
+  (warn) [Worker] get_user_ranks_6d RPC 失败: Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/v2/openclaw/analyze - Ok @ 2026/3/16 18:40:08
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:40:10
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 2e850a02-8189-4567-8172-3f8ce5297125
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 2e850a02-8189-4567-8172-3f8ce5297125 
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:40:13.529Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:40:13.529Z","github_stars":23,"github_forks":2,"id":"2e850a02-8189-4567-8172-3f8ce5297125","fingerprint":"4f40f34ea7edd0b75dfeb5660475e1b0","user_name":"psterman"}
+  (error) [Supabase Error] duplicate key value violates unique constraint "unique_github_login" Key (github_login)=(psterman) already exists.
+  (error) [Worker] /api/github/sync 失败: {
+  error: 'Database error: duplicate key value violates unique constraint "unique_github_login"',
+  errorCode: 'Database error: duplicate key value violates unique constraint "unique_github_login"'
+}
+OPTIONS https://cursor-clinical-analysis.psterman.workers.dev/ - Ok @ 2026/3/16 18:40:14
+GET https://cursor-clinical-analysis.psterman.workers.dev/ - Ok @ 2026/3/16 18:40:14
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/rank-resources?fingerprint=REDACTED&_t=1773657682582 - Ok @ 2026/3/16 18:41:23
+OPTIONS https://cursor-clinical-analysis.psterman.workers.dev/api/fingerprint/migrate?fingerprint=REDACTED&_t=1773657682891 - Ok @ 2026/3/16 18:41:24
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/fingerprint/migrate?fingerprint=REDACTED&_t=1773657682891 - Ok @ 2026/3/16 18:41:24
+  (log) [Worker] ✅ 用户身份验证成功，user_id: 132c47c6...
+  (log) [Worker] 🔑 开始迁移流程... {
+  method: 'claim_token',
+  userId: '132c47c6...',
+  fingerprint: '4f40f34e...'
+}
+  (log) [Migrate] 🔑 开始基于 claim_token 的强制认领流程...
+  (log) [Fingerprint] ℹ️ 根据 claim_token 未找到匹配的用户
+  (error) [Migrate] ❌ claim_token 无效或已过期,未找到待认领记录
+  (log) [Worker] ℹ️ 无需迁移或已关联，返回 skipped
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/stats?fingerprint=REDACTED&_t=1773657683647 - Ok @ 2026/3/16 18:41:24
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/country-stats-global?_t=1773657684457 - Ok @ 2026/3/16 18:41:25
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/my-ip - Ok @ 2026/3/16 18:41:26
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/country-stats-global?_t=1773657684796 - Ok @ 2026/3/16 18:41:26
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/static-hotlist - Ok @ 2026/3/16 18:41:26
+OPTIONS https://cursor-clinical-analysis.psterman.workers.dev/api/v2/update_location?fingerprint=REDACTED&_t=1773657687104 - Ok @ 2026/3/16 18:41:28
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/v2/update_location?fingerprint=REDACTED&_t=1773657687104 - Ok @ 2026/3/16 18:41:28
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/country-summary?country=CN&user_id=REDACTED&fingerprint=REDACTED&_ts=1773657685248 - Canceled @ 2026/3/16 18:41:26
+  (warn) [Worker] country-summary 读 KV 词云失败: ReferenceError: aggregateCountryCloudDepth is not defined
+  (log) [Worker] ranks6d 分支完成，myRanks: {"total_messages":null,"total_chars":null,"avg_user_message_length":null,"jiafang_count":null,"ketao_count":null,"work_days":null}
+  (log) [Worker] rankRow 分支完成，myRanks: {"total_messages":null,"total_chars":null,"avg_user_message_length":null,"jiafang_count":null,"ketao_count":null,"work_days":null}
+  (log) [Worker] 手动计算分支完成，myRanks: {"total_messages":{"rank":1,"total":2,"percentile":100},"total_chars":{"rank":1,"total":2,"percentile":100},"avg_user_message_length":{"rank":1,"total":2,"percentile":100},"jiafang_count":{"rank":1,"total":2,"percentile":100},"ketao_count":{"rank":1,"total":2,"percentile":100},"work_days":{"rank":1,"total":2,"percentile":100}}
+  (log) [Worker] 最终 myRanks 检查: {"total_messages":{"rank":1,"total":2,"percentile":100},"total_chars":{"rank":1,"total":2,"percentile":100},"avg_user_message_length":{"rank":1,"total":2,"percentile":100},"jiafang_count":{"rank":1,"total":2,"percentile":100},"ketao_count":{"rank":1,"total":2,"percentile":100},"work_days":{"rank":1,"total":2,"percentile":100}}
+  (log) [Worker] hasValidRanks: true
+  (log) [Worker] 返回有效排名: {"total_messages":{"rank":1,"total":2,"percentile":100},"total_chars":{"rank":1,"total":2,"percentile":100},"avg_user_message_length":{"rank":1,"total":2,"percentile":100},"jiafang_count":{"rank":1,"total":2,"percentile":100},"ketao_count":{"rank":1,"total":2,"percentile":100},"work_days":{"rank":1,"total":2,"percentile":100},"ai":{"rank":1,"total":2,"percentile":100}}
+OPTIONS https://cursor-clinical-analysis.psterman.workers.dev/api/fingerprint/migrate?fingerprint=REDACTED&_t=1773657689298 - Ok @ 2026/3/16 18:41:30
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/fingerprint/migrate?fingerprint=REDACTED&_t=1773657689298 - Ok @ 2026/3/16 18:41:30
+  (log) [Worker] ✅ 用户身份验证成功，user_id: 132c47c6...
+  (log) [Worker] 🔑 开始迁移流程... {
+  method: 'claim_token',
+  userId: '132c47c6...',
+  fingerprint: '4f40f34e...'
+}
+  (log) [Migrate] 🔑 开始基于 claim_token 的强制认领流程...
+  (log) [Fingerprint] ℹ️ 根据 claim_token 未找到匹配的用户
+  (error) [Migrate] ❌ claim_token 无效或已过期,未找到待认领记录
+  (log) [Worker] ℹ️ 无需迁移或已关联，返回 skipped
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/stats?fingerprint=REDACTED&_t=1773657691475 - Ok @ 2026/3/16 18:41:32
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/country-summary?country=CN - Ok @ 2026/3/16 18:41:30
+  (warn) [Worker] country-summary 读 KV 词云失败: ReferenceError: aggregateCountryCloudDepth is not defined
+  (log) [Worker] 最终 myRanks 检查: null
+  (log) [Worker] hasValidRanks: null
+  (log) [Worker] 返回空排名: {"ai":null,"total_messages":null,"total_chars":null,"avg_user_message_length":null,"jiafang_count":null,"ketao_count":null,"work_days":null}
+  (log) [Worker] ✅ 缓存已写入: global_stats_v4_CN
+OPTIONS https://cursor-clinical-analysis.psterman.workers.dev/api/v2/analyze?fingerprint=REDACTED&_t=1773657691874 - Ok @ 2026/3/16 18:41:33
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:41:29
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 2e850a02-8189-4567-8172-3f8ce5297125
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 2e850a02-8189-4567-8172-3f8ce5297125 
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:41:33.058Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:41:33.058Z","github_stars":23,"github_forks":2,"id":"2e850a02-8189-4567-8172-3f8ce5297125","fingerprint":"4f40f34ea7edd0b75dfeb5660475e1b0","user_name":"psterman"}
+  (error) [Supabase Error] duplicate key value violates unique constraint "unique_github_login" Key (github_login)=(psterman) already exists.
+  (error) [Worker] /api/github/sync 失败: {
+  error: 'Database error: duplicate key value violates unique constraint "unique_github_login"',
+  errorCode: 'Database error: duplicate key value violates unique constraint "unique_github_login"'
+}
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/country-summary?country=CN&country_name=%E4%B8%AD%E5%9B%BD&user_id=REDACTED&fingerprint=REDACTED&_ts=1773657688806 - Ok @ 2026/3/16 18:41:30
+  (warn) [Worker] country-summary 读 KV 词云失败: ReferenceError: aggregateCountryCloudDepth is not defined
+  (log) [Worker] ranks6d 分支完成，myRanks: {"total_messages":null,"total_chars":null,"avg_user_message_length":null,"jiafang_count":null,"ketao_count":null,"work_days":null}
+  (log) [Worker] rankRow 分支完成，myRanks: {"total_messages":null,"total_chars":null,"avg_user_message_length":null,"jiafang_count":null,"ketao_count":null,"work_days":null}
+  (log) [Worker] 手动计算分支完成，myRanks: {"total_messages":{"rank":1,"total":2,"percentile":100},"total_chars":{"rank":1,"total":2,"percentile":100},"avg_user_message_length":{"rank":1,"total":2,"percentile":100},"jiafang_count":{"rank":1,"total":2,"percentile":100},"ketao_count":{"rank":1,"total":2,"percentile":100},"work_days":{"rank":1,"total":2,"percentile":100}}
+  (log) [Worker] 最终 myRanks 检查: {"total_messages":{"rank":1,"total":2,"percentile":100},"total_chars":{"rank":1,"total":2,"percentile":100},"avg_user_message_length":{"rank":1,"total":2,"percentile":100},"jiafang_count":{"rank":1,"total":2,"percentile":100},"ketao_count":{"rank":1,"total":2,"percentile":100},"work_days":{"rank":1,"total":2,"percentile":100}}
+  (log) [Worker] hasValidRanks: true
+  (log) [Worker] 返回有效排名: {"total_messages":{"rank":1,"total":2,"percentile":100},"total_chars":{"rank":1,"total":2,"percentile":100},"avg_user_message_length":{"rank":1,"total":2,"percentile":100},"jiafang_count":{"rank":1,"total":2,"percentile":100},"ketao_count":{"rank":1,"total":2,"percentile":100},"work_days":{"rank":1,"total":2,"percentile":100},"ai":{"rank":1,"total":2,"percentile":100}}
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/stats/keywords?region=CN&_t=1773657692101 - Ok @ 2026/3/16 18:41:33
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/stats/keywords?region=CN&_t=1773657692555 - Ok @ 2026/3/16 18:41:33
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/national-lexicon?country=CN&type=merit_board - Ok @ 2026/3/16 18:41:34
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/global-average?fingerprint=&_t=1773657693110 - Ok @ 2026/3/16 18:41:34
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:41:32
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 2e850a02-8189-4567-8172-3f8ce5297125
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 2e850a02-8189-4567-8172-3f8ce5297125 
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:41:35.500Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:41:35.500Z","github_stars":23,"github_forks":2,"id":"2e850a02-8189-4567-8172-3f8ce5297125","fingerprint":"4f40f34ea7edd0b75dfeb5660475e1b0","user_name":"psterman"}
+  (error) [Supabase Error] duplicate key value violates unique constraint "unique_github_login" Key (github_login)=(psterman) already exists.
+  (error) [Worker] /api/github/sync 失败: {
+  error: 'Database error: duplicate key value violates unique constraint "unique_github_login"',
+  errorCode: 'Database error: duplicate key value violates unique constraint "unique_github_login"'
+}
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/country-stats-global?_t=1773657695040 - Ok @ 2026/3/16 18:41:36
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:41:34
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 2e850a02-8189-4567-8172-3f8ce5297125
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 2e850a02-8189-4567-8172-3f8ce5297125 
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:41:36.817Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:41:36.817Z","github_stars":23,"github_forks":2,"id":"2e850a02-8189-4567-8172-3f8ce5297125","fingerprint":"4f40f34ea7edd0b75dfeb5660475e1b0","user_name":"psterman"}
+  (error) [Supabase Error] duplicate key value violates unique constraint "unique_github_login" Key (github_login)=(psterman) already exists.
+  (error) [Worker] /api/github/sync 失败: {
+  error: 'Database error: duplicate key value violates unique constraint "unique_github_login"',
+  errorCode: 'Database error: duplicate key value violates unique constraint "unique_github_login"'
+}
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:41:34
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 2e850a02-8189-4567-8172-3f8ce5297125
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 2e850a02-8189-4567-8172-3f8ce5297125 
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:41:37.803Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:41:37.803Z","github_stars":23,"github_forks":2,"id":"2e850a02-8189-4567-8172-3f8ce5297125","fingerprint":"4f40f34ea7edd0b75dfeb5660475e1b0","user_name":"psterman"}
+  (error) [Supabase Error] duplicate key value violates unique constraint "unique_github_login" Key (github_login)=(psterman) already exists.
+  (error) [Worker] /api/github/sync 失败: {
+  error: 'Database error: duplicate key value violates unique constraint "unique_github_login"',
+  errorCode: 'Database error: duplicate key value violates unique constraint "unique_github_login"'
+}
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:41:34
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 2e850a02-8189-4567-8172-3f8ce5297125
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 2e850a02-8189-4567-8172-3f8ce5297125 
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:41:39.182Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:41:39.182Z","github_stars":23,"github_forks":2,"id":"2e850a02-8189-4567-8172-3f8ce5297125","fingerprint":"4f40f34ea7edd0b75dfeb5660475e1b0","user_name":"psterman"}
+  (error) [Supabase Error] duplicate key value violates unique constraint "idx_user_analysis_fingerprint" Key (fingerprint)=(4f40f34ea7edd0b75dfeb5660475e1b0) already exists.
+  (error) [Worker] /api/github/sync 失败: {
+  error: 'UNIQUE_VIOLATION_FINGERPRINT',
+  errorCode: 'UNIQUE_VIOLATION_FINGERPRINT'
+}
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/v2/analyze?fingerprint=REDACTED&_t=1773657691874 - Ok @ 2026/3/16 18:41:37
+  (log) [Worker] 🔑 检测到 access_token，开始迁移 fingerprint 到 user_id... { userId: '132c47c6...', fingerprint: '4f40f34e...' }
+  (log) [Migrate] 🔑 开始基于 fingerprint 的认领流程... { fingerprint: '4f40f34e...', userId: '132c47c6...' }
+  (log) [Fingerprint] ✅ 找到用户: {
+  id: '2e850a02-8189-4567-8172-3f8ce5297125',
+  user_name: null,
+  fingerprint: '4f40f34e...'
+}
+  (log) [Migrate] ✅ 找到待认领记录: {
+  recordId: '2e850a02...',
+  total_messages: 0,
+  total_chars: 0,
+  user_identity: 'fingerprint'
+}
+  (log) [Migrate] 🧹 检查并清理目标 GitHub 用户的空记录...
+  (log) [Migrate] ✅ 已删除空记录,防止主键冲突
+  (log) [Fingerprint] ✅ 找到用户: {
+  id: '2e850a02-8189-4567-8172-3f8ce5297125',
+  user_name: null,
+  fingerprint: '4f40f34e...'
+}
+  (log) [Fingerprint] ℹ️ 根据 User ID 未找到匹配的用户: 132c47c6...
+  (log) [Migrate] 🔄 更新源记录的 user_id，不创建新行...
+  (log) [Migrate] ✅ 源记录更新成功，user_id 已更新为 GitHub ID
+  (log) [Worker] ✅ Fingerprint 迁移成功
+  (log) [Worker] 📊 使用前端上报的 V6 dimensions: { L: 16, P: 65, D: 5, E: 7, F: 7 }
+  (log) [Worker] 📊 使用前端上报的 V6 stats: {
+  totalChars: 12998,
+  ketao_count: 0,
+  jiafang_count: 0,
+  tease_count: 0,
+  style_index: 185.68571428571428,
+  avg_payload: 185.68571428571428
+}
+  (log) [Worker] 📊 最终维度计算结果: {
+  L: 16,
+  P: 65,
+  D: 5,
+  E: 7,
+  F: 7,
+  totalMessages: 70,
+  totalChars: 12998
+}
+  (log) [Worker] 🎭 人格识别结果: {
+  vibeIndex: '01010',
+  personalityType: '-P---',
+  lpdef: 'L0P1D0E1F0',
+  dimensions: { L: 16, P: 65, D: 5, E: 7, F: 7 }
+}
+  (log) [Worker] ✅ V6 动态排名已计算: {
+  totalUsers: 2,
+  ranks: {
+    L_rank: 6.4,
+    P_rank: 76.667,
+    D_rank: 2,
+    E_rank: 2.8000000000000007,
+    F_rank: 2.8000000000000007,
+    messageRank: 95,
+    charRank: 95,
+    daysRank: 95,
+    jiafangRank: 0,
+    ketaoRank: 0,
+    avgRank: 18
+  },
+  dimensions: { L: 16, P: 65, D: 5, E: 7, F: 7 }
+}
+  (log) [Worker] 📖 答案之书文案已生成: {
+  title: '雄辩家',
+  content: '你的平均消息长度为 186 字符，交互风格指数为 185.7。你属于"雄辩家"类型，喜欢长篇大论地描述需求。这种详细的沟通方式显示你可能是一个注重细节的人，或者你只是习惯性地把所有想法都写出来。',
+  vibe_level: '雄辩家'
+}
+  (log) [Worker] 🔍 开始调用适配器函数 matchLPDEFContent: {
+  dimensions: { L: 16, P: 65, D: 5, E: 7, F: 7 },
+  lang: 'zh-CN',
+  dimensionsKeys: [ 'L', 'P', 'D', 'E', 'F' ],
+  dimensionsValues: [ 16, 65, 5, 7, 7 ]
+}
+  (log) [Adapter] 🔍 开始匹配维度，输入: {
+  dimensionsKeys: [ 'L', 'P', 'D', 'E', 'F' ],
+  dimensionsValues: [ 16, 65, 5, 7, 7 ],
+  dimensionMapping: { L: 'word', P: 'no', D: 'say', E: 'ai', F: 'please' },
+  availableResources: [ 'ai', 'day', 'no', 'please', 'say', 'word' ]
+}
+  (log) [Adapter] 🔍 处理维度 L, 分数: 16
+  (log) [Adapter] 🔍 维度 L 映射到 rankId: word
+  (log) [Adapter] ✅ 找到资源 word, levels 数量: 5
+  (log) [Adapter] ✅ 维度 L 匹配成功: {
+  rankId: 'word',
+  originalScore: 16,
+  rankValue: 16,
+  label: '冷酷的突击官',
+  roastLength: 27,
+  roastPreview: '思维跳跃太快，AI 还没反应过来，你已经下一条指令了。',
+  matchedLevelRange: '1-50',
+  commentsCount: 20
+}
+  (log) [Adapter] 🔍 处理维度 P, 分数: 65
+  (log) [Adapter] 🔍 维度 P 映射到 rankId: no
+  (log) [Adapter] ✅ 找到资源 no, levels 数量: 5
+  (log) [Adapter] ✅ 维度 P 匹配成功: {
+  rankId: 'no',
+  originalScore: 65,
+  rankValue: 65,
+  label: '天网克星·霸总真神',
+  roastLength: 18,
+  roastPreview: '在这里，平庸就是原罪，否定就是救赎。',
+  matchedLevelRange: '61-90',
+  commentsCount: 20
+}
+  (log) [Adapter] 🔍 处理维度 D, 分数: 5
+  (log) [Adapter] 🔍 维度 D 映射到 rankId: say
+  (log) [Adapter] ✅ 找到资源 say, levels 数量: 5
+  (log) [Adapter] ✅ 维度 D 匹配成功: {
+  rankId: 'say',
+  originalScore: 5,
+  rankValue: 5,
+  label: '惜字如金的冷面 Boss',
+  roastLength: 25,
+  roastPreview: 'AI 想跟你客套，你反手就是一个需求直接塞它嘴里。',
+  matchedLevelRange: '1-500',
+  commentsCount: 20
+}
+  (log) [Adapter] 🔍 处理维度 E, 分数: 7
+  (log) [Adapter] 🔍 维度 E 映射到 rankId: ai
+  (log) [Adapter] ✅ 找到资源 ai, levels 数量: 5
+  (log) [Adapter] ✅ 维度 E 匹配成功: {
+  rankId: 'ai',
+  originalScore: 7,
+  rankValue: 14,
+  label: '冷淡的甲方路人',
+  roastLength: 26,
+  roastPreview: '你的一句‘OK’，是 AI 职业生涯里最漫长的告别。',
+  matchedLevelRange: '1-20',
+  commentsCount: 20
+}
+  (log) [Adapter] 🔍 处理维度 F, 分数: 7
+  (log) [Adapter] 🔍 维度 F 映射到 rankId: please
+  (log) [Adapter] ✅ 找到资源 please, levels 数量: 5
+  (log) [Adapter] ✅ 维度 F 匹配成功: {
+  rankId: 'please',
+  originalScore: 7,
+  rankValue: 7,
+  label: '赛博跪神·尊严入土',
+  roastLength: 31,
+  roastPreview: '尊严在你面前失去了意义，只有无尽的‘请、麻烦、拜托’是永恒的。',
+  matchedLevelRange: '1-20',
+  commentsCount: 20
+}
+  (log) [Adapter] ✅ 适配器函数完成，返回结果: {
+  resultCount: 5,
+  resultDimensions: [ 'L', 'P', 'D', 'E', 'F' ],
+  allDimensionsPresent: true
+}
+  (log) [Worker] ✅ 通过适配器函数生成详细统计数据: {
+  count: 5,
+  dimensions: [
+    {
+      dimension: 'L',
+      score: 16,
+      hasLabel: true,
+      hasRoast: true,
+      labelPreview: '冷酷的突击官',
+      roastPreview: '思维跳跃太快，AI 还没反应过来，你已经下一条指令了。'
+    },
+    {
+      dimension: 'P',
+      score: 65,
+      hasLabel: true,
+      hasRoast: true,
+      labelPreview: '天网克星·霸总真神',
+      roastPreview: '在这里，平庸就是原罪，否定就是救赎。'
+    },
+    {
+      dimension: 'D',
+      score: 5,
+      hasLabel: true,
+      hasRoast: true,
+      labelPreview: '惜字如金的冷面 Boss',
+      roastPreview: 'AI 想跟你客套，你反手就是一个需求直接塞它嘴里。'
+    },
+    {
+      dimension: 'E',
+      score: 7,
+      hasLabel: true,
+      hasRoast: true,
+      labelPreview: '冷淡的甲方路人',
+      roastPreview: '你的一句‘OK’，是 AI 职业生涯里最漫长的告别。'
+    },
+    {
+      dimension: 'F',
+      score: 7,
+      hasLabel: true,
+      hasRoast: true,
+      labelPreview: '赛博跪神·尊严入土',
+      roastPreview: '尊严在你面前失去了意义，只有无尽的‘请、麻烦、拜托’是永恒的'
+    }
+  ]
+}
+  (log) [Worker] ✅ 详细统计数据已生成（最终）: {
+  count: 5,
+  dimensions: [
+    {
+      dimension: 'L',
+      score: 16,
+      label: '冷酷的突击官',
+      roastLength: 27,
+      roastPreview: '思维跳跃太快，AI 还没反应过来，你已经下一条指令了。...'
+    },
+    {
+      dimension: 'P',
+      score: 65,
+      label: '天网克星·霸总真神',
+      roastLength: 18,
+      roastPreview: '在这里，平庸就是原罪，否定就是救赎。...'
+    },
+    {
+      dimension: 'D',
+      score: 5,
+      label: '惜字如金的冷面 Boss',
+      roastLength: 25,
+      roastPreview: 'AI 想跟你客套，你反手就是一个需求直接塞它嘴里。...'
+    },
+    {
+      dimension: 'E',
+      score: 7,
+      label: '冷淡的甲方路人',
+      roastLength: 26,
+      roastPreview: '你的一句‘OK’，是 AI 职业生涯里最漫长的告别。...'
+    },
+    {
+      dimension: 'F',
+      score: 7,
+      label: '赛博跪神·尊严入土',
+      roastLength: 31,
+      roastPreview: '尊严在你面前失去了意义，只有无尽的‘请、麻烦、拜托’是永恒的。...'
+    }
+  ],
+  allDimensionsPresent: true
+}
+  (log) [Worker] ✅ 合并后的吐槽文案: 【L维度】思维跳跃太快，AI 还没反应过来，你已经下一条指令了。
+
+【P维度】在这里，平庸就是原罪，否定就是救赎。
+
+【D维度】AI 想跟你客套，你反手就是一个需求直接塞它嘴里。
+
+【E维度】你的一句...
+  (log) [Worker] ✅ 检测到 GitHub OAuth token，user_id: 132c47c6...
+  (log) [Fingerprint] ✅ 根据 User ID 找到用户: {
+  id: '132c47c6-911d-405c-8aa6-9d2ce89f90b1',
+  user_name: null,
+  user_identity: 'github'
+}
+  (log) [Worker] ✅ 找到已认证用户，将使用 user_id 进行 Upsert
+  (log) [Worker] 🔑 生成用户标识: {
+  method: 'GitHub OAuth (user_id)',
+  userId: '132c47c6...',
+  fingerprint: '132c47c6...',
+  messagesUsed: 10,
+  contentLength: 780,
+  fallbackUsed: false
+}
+  (log) [Worker] ✅ v6StatsForStorage 修复验证: {
+  work_days: 5,
+  jiafang_count: 0,
+  ketao_count: 0,
+  source_workDays: 5,
+  source_jiafangCount: 9,
+  source_ketaoCount: 9,
+  basicAnalysis_day: 5,
+  basicAnalysis_no: 9,
+  basicAnalysis_please: 9
+}
+  (log) [Worker] 🔍 Payload 数据验证: {
+  hasDetailedStats: true,
+  detailedStatsLength: 5,
+  hasPersonality: true,
+  personalityDetailedStatsLength: 5,
+  hasPersonalityData: true,
+  personalityDataLength: 5,
+  personalityDataPreview: [
+    { dimension: 'L', score: 16, hasLabel: true, hasRoast: true },
+    { dimension: 'P', score: 65, hasLabel: true, hasRoast: true }
+  ]
+}
+  (log) [DB] 准备写入数据: {
+  fingerprint: '4f40f34ea7edd0b75dfeb5660475e1b0',
+  user_name: 'psterman',
+  lpdef: 'L0P1D0E1F0',
+  total_messages: 70,
+  total_chars: 12998,
+  work_days: 5,
+  jiafang_count: 9,
+  ketao_count: 9,
+  ip_location: 'US',
+  lang: 'zh-CN'
+}
+  (warn) [DB] 🛑 5 秒短期幂等命中（数据库侧），跳过写库与副作用: {
+  conflictKey: 'id',
+  hasClaimToken: false,
+  fingerprint: '4f40f34e...',
+  ip: 'US',
+  total_messages: 70
+}
+  (error) Error: Context is not finalized. Did you forget to return a Response object or `await next()`?
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:41:37
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1 
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:41:40.389Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:41:40.389Z","github_stars":23,"github_forks":2,"id":"132c47c6-911d-405c-8aa6-9d2ce89f90b1","user_name":"psterman"}
+  (log) [GitHub Sync] ✅ Supabase 写入成功: no representation
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:41:39
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1 
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:41:42.724Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:41:42.724Z","github_stars":23,"github_forks":2,"id":"132c47c6-911d-405c-8aa6-9d2ce89f90b1","user_name":"psterman"}
+  (log) [GitHub Sync] ✅ Supabase 写入成功: no representation
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:41:40
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1 
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:41:42.876Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:41:42.876Z","github_stars":23,"github_forks":2,"id":"132c47c6-911d-405c-8aa6-9d2ce89f90b1","user_name":"psterman"}
+  (log) [GitHub Sync] ✅ Supabase 写入成功: no representation
+OPTIONS https://cursor-clinical-analysis.psterman.workers.dev/api/v2/analyze?fingerprint=REDACTED&_t=1773657704391 - Ok @ 2026/3/16 18:41:45
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:41:42
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1 
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:41:45.936Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:41:45.936Z","github_stars":23,"github_forks":2,"id":"132c47c6-911d-405c-8aa6-9d2ce89f90b1","fingerprint":"4f40f34ea7edd0b75dfeb5660475e1b0","user_name":"psterman"}
+  (log) [GitHub Sync] ✅ Supabase 写入成功: no representation
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/stats?fingerprint=&_t=1773657704851 - Ok @ 2026/3/16 18:41:46
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:41:43
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1 
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:41:46.519Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:41:46.519Z","github_stars":23,"github_forks":2,"id":"132c47c6-911d-405c-8aa6-9d2ce89f90b1","fingerprint":"4f40f34ea7edd0b75dfeb5660475e1b0","user_name":"psterman"}
+  (log) [GitHub Sync] ✅ Supabase 写入成功: no representation
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/country-stats-global?_t=1773657709848 - Ok @ 2026/3/16 18:41:51
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:41:52
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1 
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:41:55.991Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:41:55.991Z","github_stars":23,"github_forks":2,"id":"132c47c6-911d-405c-8aa6-9d2ce89f90b1","fingerprint":"4f40f34ea7edd0b75dfeb5660475e1b0","user_name":"psterman"}
+  (log) [GitHub Sync] ✅ Supabase 写入成功: no representation
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:41:55
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1 
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:41:58.011Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:41:58.011Z","github_stars":23,"github_forks":2,"id":"132c47c6-911d-405c-8aa6-9d2ce89f90b1","fingerprint":"4f40f34ea7edd0b75dfeb5660475e1b0","user_name":"psterman"}
+  (log) [GitHub Sync] ✅ Supabase 写入成功: no representation
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:41:54
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: e264480f-47e7-4218-b92b-41a07822417e
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: e264480f-47e7-4218-b92b-41a07822417e 
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:41:58.330Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:41:58.330Z","github_stars":23,"github_forks":2,"id":"e264480f-47e7-4218-b92b-41a07822417e","fingerprint":"830a2a1476a33807def0bb511219e3a605ea6f07b8799ca1745278f2d19e44ba","user_name":"psterman"}
+  (error) [Supabase Error] duplicate key value violates unique constraint "unique_github_login" Key (github_login)=(psterman) already exists.
+  (error) [Worker] /api/github/sync 失败: {
+  error: 'Database error: duplicate key value violates unique constraint "unique_github_login"',
+  errorCode: 'Database error: duplicate key value violates unique constraint "unique_github_login"'
+}
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:41:56
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1 
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:41:59.246Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:41:59.246Z","github_stars":23,"github_forks":2,"id":"132c47c6-911d-405c-8aa6-9d2ce89f90b1","fingerprint":"4f40f34ea7edd0b75dfeb5660475e1b0","user_name":"psterman"}
+  (log) [GitHub Sync] ✅ Supabase 写入成功: no representation
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:41:57
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1 
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:42:00.520Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:42:00.520Z","github_stars":23,"github_forks":2,"id":"132c47c6-911d-405c-8aa6-9d2ce89f90b1","fingerprint":"4f40f34ea7edd0b75dfeb5660475e1b0","user_name":"psterman"}
+  (log) [GitHub Sync] ✅ Supabase 写入成功: no representation
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:41:57
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1 
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:42:01.071Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:42:01.071Z","github_stars":23,"github_forks":2,"id":"132c47c6-911d-405c-8aa6-9d2ce89f90b1","fingerprint":"4f40f34ea7edd0b75dfeb5660475e1b0","user_name":"psterman"}
+  (log) [GitHub Sync] ✅ Supabase 写入成功: no representation
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/v2/analyze?fingerprint=REDACTED&_t=1773657704391 - Ok @ 2026/3/16 18:41:48
+  (log) [Worker] 🔑 检测到 access_token，开始迁移 fingerprint 到 user_id... { userId: '132c47c6...', fingerprint: '4f40f34e...' }
+  (log) [Migrate] 🔑 开始基于 fingerprint 的认领流程... { fingerprint: '4f40f34e...', userId: '132c47c6...' }
+  (log) [Fingerprint] ✅ 找到用户: {
+  id: '132c47c6-911d-405c-8aa6-9d2ce89f90b1',
+  user_name: 'psterman',
+  fingerprint: '4f40f34e...'
+}
+  (log) [Migrate] ℹ️ 该 fingerprint 已关联 GitHub 用户，无需迁移
+  (log) [Worker] ℹ️ Fingerprint 迁移未执行（可能已迁移或无需迁移）
+  (log) [Worker] 📊 使用前端上报的 V6 dimensions: { L: 16, P: 65, D: 5, E: 7, F: 7 }
+  (log) [Worker] 📊 使用前端上报的 V6 stats: {
+  totalChars: 12998,
+  ketao_count: 0,
+  jiafang_count: 0,
+  tease_count: 0,
+  style_index: 185.68571428571428,
+  avg_payload: 185.68571428571428
+}
+  (log) [Worker] 📊 最终维度计算结果: {
+  L: 16,
+  P: 65,
+  D: 5,
+  E: 7,
+  F: 7,
+  totalMessages: 70,
+  totalChars: 12998
+}
+  (log) [Worker] 🎭 人格识别结果: {
+  vibeIndex: '01010',
+  personalityType: '-P---',
+  lpdef: 'L0P1D0E1F0',
+  dimensions: { L: 16, P: 65, D: 5, E: 7, F: 7 }
+}
+  (log) [Worker] ✅ V6 动态排名已计算: {
+  totalUsers: 2,
+  ranks: {
+    L_rank: 6.4,
+    P_rank: 76.667,
+    D_rank: 2,
+    E_rank: 2.8000000000000007,
+    F_rank: 2.8000000000000007,
+    messageRank: 95,
+    charRank: 95,
+    daysRank: 95,
+    jiafangRank: 0,
+    ketaoRank: 0,
+    avgRank: 18
+  },
+  dimensions: { L: 16, P: 65, D: 5, E: 7, F: 7 }
+}
+  (log) [Worker] 📖 答案之书文案已生成: {
+  title: '雄辩家',
+  content: '你的平均消息长度为 186 字符，交互风格指数为 185.7。你属于"雄辩家"类型，喜欢长篇大论地描述需求。这种详细的沟通方式显示你可能是一个注重细节的人，或者你只是习惯性地把所有想法都写出来。',
+  vibe_level: '雄辩家'
+}
+  (log) [Worker] 🔍 开始调用适配器函数 matchLPDEFContent: {
+  dimensions: { L: 16, P: 65, D: 5, E: 7, F: 7 },
+  lang: 'zh-CN',
+  dimensionsKeys: [ 'L', 'P', 'D', 'E', 'F' ],
+  dimensionsValues: [ 16, 65, 5, 7, 7 ]
+}
+  (log) [Adapter] 🔍 开始匹配维度，输入: {
+  dimensionsKeys: [ 'L', 'P', 'D', 'E', 'F' ],
+  dimensionsValues: [ 16, 65, 5, 7, 7 ],
+  dimensionMapping: { L: 'word', P: 'no', D: 'say', E: 'ai', F: 'please' },
+  availableResources: [ 'ai', 'day', 'no', 'please', 'say', 'word' ]
+}
+  (log) [Adapter] 🔍 处理维度 L, 分数: 16
+  (log) [Adapter] 🔍 维度 L 映射到 rankId: word
+  (log) [Adapter] ✅ 找到资源 word, levels 数量: 5
+  (log) [Adapter] ✅ 维度 L 匹配成功: {
+  rankId: 'word',
+  originalScore: 16,
+  rankValue: 16,
+  label: '冷酷的突击官',
+  roastLength: 31,
+  roastPreview: '惜字如金。你每一次回车，都像是在 AI 的逻辑核心上开了一枪。',
+  matchedLevelRange: '1-50',
+  commentsCount: 20
+}
+  (log) [Adapter] 🔍 处理维度 P, 分数: 65
+  (log) [Adapter] 🔍 维度 P 映射到 rankId: no
+  (log) [Adapter] ✅ 找到资源 no, levels 数量: 5
+  (log) [Adapter] ✅ 维度 P 匹配成功: {
+  rankId: 'no',
+  originalScore: 65,
+  rankValue: 65,
+  label: '天网克星·霸总真神',
+  roastLength: 24,
+  roastPreview: '你的逻辑在我面前毫无遮掩，就像你的无知一样赤裸。',
+  matchedLevelRange: '61-90',
+  commentsCount: 20
+}
+  (log) [Adapter] 🔍 处理维度 D, 分数: 5
+  (log) [Adapter] 🔍 维度 D 映射到 rankId: say
+  (log) [Adapter] ✅ 找到资源 say, levels 数量: 5
+  (log) [Adapter] ✅ 维度 D 匹配成功: {
+  rankId: 'say',
+  originalScore: 5,
+  rankValue: 5,
+  label: '惜字如金的冷面 Boss',
+  roastLength: 25,
+  roastPreview: '你几乎不给 AI 犯错的机会，这让它感到压力山大。',
+  matchedLevelRange: '1-500',
+  commentsCount: 20
+}
+  (log) [Adapter] 🔍 处理维度 E, 分数: 7
+  (log) [Adapter] 🔍 维度 E 映射到 rankId: ai
+  (log) [Adapter] ✅ 找到资源 ai, levels 数量: 5
+  (log) [Adapter] ✅ 维度 E 匹配成功: {
+  rankId: 'ai',
+  originalScore: 7,
+  rankValue: 14,
+  label: '冷淡的甲方路人',
+  roastLength: 28,
+  roastPreview: '对话这么少？看来你习惯一刀致命，不给 AI 喘息的机会。',
+  matchedLevelRange: '1-20',
+  commentsCount: 20
+}
+  (log) [Adapter] 🔍 处理维度 F, 分数: 7
+  (log) [Adapter] 🔍 维度 F 映射到 rankId: please
+  (log) [Adapter] ✅ 找到资源 please, levels 数量: 5
+  (log) [Adapter] ✅ 维度 F 匹配成功: {
+  rankId: 'please',
+  originalScore: 7,
+  rankValue: 7,
+  label: '赛博跪神·尊严入土',
+  roastLength: 29,
+  roastPreview: '这么久了，你依然在请，你到底是有多卑微才敢活在这个世界上？',
+  matchedLevelRange: '1-20',
+  commentsCount: 20
+}
+  (log) [Adapter] ✅ 适配器函数完成，返回结果: {
+  resultCount: 5,
+  resultDimensions: [ 'L', 'P', 'D', 'E', 'F' ],
+  allDimensionsPresent: true
+}
+  (log) [Worker] ✅ 通过适配器函数生成详细统计数据: {
+  count: 5,
+  dimensions: [
+    {
+      dimension: 'L',
+      score: 16,
+      hasLabel: true,
+      hasRoast: true,
+      labelPreview: '冷酷的突击官',
+      roastPreview: '惜字如金。你每一次回车，都像是在 AI 的逻辑核心上开了一枪'
+    },
+    {
+      dimension: 'P',
+      score: 65,
+      hasLabel: true,
+      hasRoast: true,
+      labelPreview: '天网克星·霸总真神',
+      roastPreview: '你的逻辑在我面前毫无遮掩，就像你的无知一样赤裸。'
+    },
+    {
+      dimension: 'D',
+      score: 5,
+      hasLabel: true,
+      hasRoast: true,
+      labelPreview: '惜字如金的冷面 Boss',
+      roastPreview: '你几乎不给 AI 犯错的机会，这让它感到压力山大。'
+    },
+    {
+      dimension: 'E',
+      score: 7,
+      hasLabel: true,
+      hasRoast: true,
+      labelPreview: '冷淡的甲方路人',
+      roastPreview: '对话这么少？看来你习惯一刀致命，不给 AI 喘息的机会。'
+    },
+    {
+      dimension: 'F',
+      score: 7,
+      hasLabel: true,
+      hasRoast: true,
+      labelPreview: '赛博跪神·尊严入土',
+      roastPreview: '这么久了，你依然在请，你到底是有多卑微才敢活在这个世界上？'
+    }
+  ]
+}
+  (log) [Worker] ✅ 详细统计数据已生成（最终）: {
+  count: 5,
+  dimensions: [
+    {
+      dimension: 'L',
+      score: 16,
+      label: '冷酷的突击官',
+      roastLength: 31,
+      roastPreview: '惜字如金。你每一次回车，都像是在 AI 的逻辑核心上开了一枪。...'
+    },
+    {
+      dimension: 'P',
+      score: 65,
+      label: '天网克星·霸总真神',
+      roastLength: 24,
+      roastPreview: '你的逻辑在我面前毫无遮掩，就像你的无知一样赤裸。...'
+    },
+    {
+      dimension: 'D',
+      score: 5,
+      label: '惜字如金的冷面 Boss',
+      roastLength: 25,
+      roastPreview: '你几乎不给 AI 犯错的机会，这让它感到压力山大。...'
+    },
+    {
+      dimension: 'E',
+      score: 7,
+      label: '冷淡的甲方路人',
+      roastLength: 28,
+      roastPreview: '对话这么少？看来你习惯一刀致命，不给 AI 喘息的机会。...'
+    },
+    {
+      dimension: 'F',
+      score: 7,
+      label: '赛博跪神·尊严入土',
+      roastLength: 29,
+      roastPreview: '这么久了，你依然在请，你到底是有多卑微才敢活在这个世界上？...'
+    }
+  ],
+  allDimensionsPresent: true
+}
+  (log) [Worker] ✅ 合并后的吐槽文案: 【L维度】惜字如金。你每一次回车，都像是在 AI 的逻辑核心上开了一枪。
+
+【P维度】你的逻辑在我面前毫无遮掩，就像你的无知一样赤裸。
+
+【D维度】你几乎不给 AI 犯错的机会，这让它感到压力山大。
+...
+  (log) [Worker] ✅ 检测到 GitHub OAuth token，user_id: 132c47c6...
+  (log) [Fingerprint] ✅ 根据 User ID 找到用户: {
+  id: '132c47c6-911d-405c-8aa6-9d2ce89f90b1',
+  user_name: 'psterman',
+  user_identity: 'github'
+}
+  (log) [Worker] ✅ 找到已认证用户，将使用 user_id 进行 Upsert
+  (log) [Worker] 🔑 生成用户标识: {
+  method: 'GitHub OAuth (user_id)',
+  userId: '132c47c6...',
+  fingerprint: '132c47c6...',
+  messagesUsed: 10,
+  contentLength: 780,
+  fallbackUsed: false
+}
+  (log) [Worker] ✅ v6StatsForStorage 修复验证: {
+  work_days: 5,
+  jiafang_count: 0,
+  ketao_count: 0,
+  source_workDays: 5,
+  source_jiafangCount: 9,
+  source_ketaoCount: 9,
+  basicAnalysis_day: 5,
+  basicAnalysis_no: 9,
+  basicAnalysis_please: 9
+}
+  (log) [Worker] 🔍 Payload 数据验证: {
+  hasDetailedStats: true,
+  detailedStatsLength: 5,
+  hasPersonality: true,
+  personalityDetailedStatsLength: 5,
+  hasPersonalityData: true,
+  personalityDataLength: 5,
+  personalityDataPreview: [
+    { dimension: 'L', score: 16, hasLabel: true, hasRoast: true },
+    { dimension: 'P', score: 65, hasLabel: true, hasRoast: true }
+  ]
+}
+  (log) [DB] 准备写入数据: {
+  fingerprint: '4f40f34ea7edd0b75dfeb5660475e1b0',
+  user_name: 'psterman',
+  lpdef: 'L0P1D0E1F0',
+  total_messages: 70,
+  total_chars: 12998,
+  work_days: 5,
+  jiafang_count: 9,
+  ketao_count: 9,
+  ip_location: 'US',
+  lang: 'zh-CN'
+}
+  (log) [Worker] [keyword_logs] 待入库词条数量: 64 样本: [
+  { phrase: 'help', category: 'Novice' },
+  { phrase: 'error', category: 'Novice' },
+  { phrase: 'install', category: 'Novice' },
+  { phrase: 'run', category: 'Novice' },
+  { phrase: 'paste', category: 'Novice' }
+]
+  (error) [Supabase] ❌ Upsert 失败: {
+  status: 400,
+  error: `{"code":"PGRST204","details":null,"hint":null,"message":"Could not find the 'cursor_metadata' column of 'user_analysis' in the schema cache"}`
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'auth',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'token',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'role',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'endpoint',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'request',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'JSON',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'REST',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'session',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'security',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'HTTPS',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'memory',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'I/O',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'process',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'trigger',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'message',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'gateway',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'proxy',
+  category: 'Professional',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'SRE',
+  category: 'Architect',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'SLO',
+  category: 'Architect',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'SLI',
+  category: 'Architect',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'idempotency',
+  category: 'Architect',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'ABAC',
+  category: 'Architect',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'audit',
+  category: 'Architect',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (warn) [Worker] [keyword_logs] RPC 单条写入失败: {
+  phrase: 'trace',
+  category: 'Architect',
+  error: 'Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits'
+}
+  (log) [Worker] ✅ keyword_logs 身份关键词写入完成: { count: 64, ip_location: 'US' }
+  (warn) [Worker] ⚠️ refresh_global_stats_v6 RPC 触发失败: Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits
+  (warn) [Worker] ⚠️ 查询 v_user_analysis_extended 失败（使用默认排名）: Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits
+  (warn) [Worker] get_user_rank_v2 RPC 失败: Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits
+  (warn) [Worker] get_user_ranks_6d RPC 失败: Too many subrequests by single Worker invocation. To configure this limit, refer to https://developers.cloudflare.com/workers/wrangler/configuration/#limits
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/stats?fingerprint=&_t=1773657721579 - Ok @ 2026/3/16 18:42:02
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/country-stats-global?_t=1773657722469 - Ok @ 2026/3/16 18:42:03
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:42:03
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1 
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:42:06.521Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:42:06.521Z","github_stars":23,"github_forks":2,"id":"132c47c6-911d-405c-8aa6-9d2ce89f90b1","fingerprint":"4f40f34ea7edd0b75dfeb5660475e1b0","user_name":"psterman"}
+  (log) [GitHub Sync] ✅ Supabase 写入成功: no representation
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/stats?fingerprint=&_t=1773657727500 - Ok @ 2026/3/16 18:42:08
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:42:06
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1 
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:42:09.488Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:42:09.488Z","github_stars":23,"github_forks":2,"id":"132c47c6-911d-405c-8aa6-9d2ce89f90b1","fingerprint":"4f40f34ea7edd0b75dfeb5660475e1b0","user_name":"psterman"}
+  (log) [GitHub Sync] ✅ Supabase 写入成功: no representation
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/country-stats-global?_t=1773657728996 - Ok @ 2026/3/16 18:42:10
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/github/sync - Ok @ 2026/3/16 18:42:15
+  (log) [GitHub Sync] 开始同步任务，目标用户 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1
+  (log) [GitHub Sync] GraphQL fetch success for: psterman
+  (log) [GitHub Sync] 准备写入 ID: 132c47c6-911d-405c-8aa6-9d2ce89f90b1 , country_code: CN
+  (log) [GitHub Sync] 准备写入的 payload: {"github_stats":{"login":"psterman","avatarUrl":"https://github.com/psterman.png","accountAge":2737,"followers":0,"following":1,"totalStars":34,"sponsorships":0,"totalCommits":1533,"restrictedContributions":0,"prReviews":0,"activeDays":284,"commitVelocity":69,"totalRepoStars":23,"totalForks":2,"totalWatchers":25,"totalCodeSize":76554835,"publicRepos":64,"privateRepos":0,"languageDistribution":[{"name":"Python","percentage":41.38},{"name":"JavaScript","percentage":19.41},{"name":"Kotlin","percentage":11.8},{"name":"HTML","percentage":10.8},{"name":"AutoHotkey","percentage":4.24}],"primaryLanguage":"Kotlin","newestLanguage":"JavaScript","mergedPRs":0,"closedIssues":4,"organizations":[],"globalRanking":"普通","syncedAt":"2026-03-16T10:42:20.312Z","latest_repo_updated_at":"2026-03-15T17:27:58Z"},"github_login":"psterman","github_synced_at":"2026-03-16T10:42:20.312Z","github_stars":23,"github_forks":2,"id":"132c47c6-911d-405c-8aa6-9d2ce89f90b1","user_name":"psterman","manual_location":"CN","country_code":"CN"}
+  (log) [GitHub Sync] ✅ Supabase 写入成功: no representation
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/country-stats-global?_t=1773657739651 - Ok @ 2026/3/16 18:42:20
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/stats?fingerprint=&_t=1773657741918 - Ok @ 2026/3/16 18:42:23
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/country-stats-global?_t=1773657743268 - Ok @ 2026/3/16 18:42:24
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/stats/openclaw?_t=1773657806004 - Ok @ 2026/3/16 18:43:27
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/stats?fingerprint=&_t=1773657941387 - Ok @ 2026/3/16 18:45:44
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/v2/openclaw/analyze - Ok @ 2026/3/16 18:45:46
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/country-stats-global?_t=1773657945013 - Ok @ 2026/3/16 18:45:46
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/v2/openclaw/analyze - Ok @ 2026/3/16 18:45:47
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/v2/openclaw/analyze - Ok @ 2026/3/16 18:45:48
+POST https://cursor-clinical-analysis.psterman.workers.dev/api/v2/openclaw/analyze - Ok @ 2026/3/16 18:45:48
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/country-summary?country=CN&user_id=REDACTED&_ts=1773657959913 - Ok @ 2026/3/16 18:46:01
+  (log) [Worker] ranks6d 分支完成，myRanks: {"total_messages":null,"total_chars":null,"avg_user_message_length":null,"jiafang_count":null,"ketao_count":null,"work_days":null}
+  (log) [Worker] rankRow 分支完成，myRanks: {"total_messages":null,"total_chars":null,"avg_user_message_length":null,"jiafang_count":null,"ketao_count":null,"work_days":null}
+  (log) [Worker] 手动计算分支完成，myRanks: {"total_messages":{"rank":1,"total":1,"percentile":100},"total_chars":{"rank":1,"total":1,"percentile":100},"avg_user_message_length":{"rank":1,"total":1,"percentile":100},"jiafang_count":{"rank":1,"total":1,"percentile":100},"ketao_count":{"rank":1,"total":1,"percentile":100},"work_days":{"rank":1,"total":1,"percentile":100}}
+  (log) [Worker] 最终 myRanks 检查: {"total_messages":{"rank":1,"total":1,"percentile":100},"total_chars":{"rank":1,"total":1,"percentile":100},"avg_user_message_length":{"rank":1,"total":1,"percentile":100},"jiafang_count":{"rank":1,"total":1,"percentile":100},"ketao_count":{"rank":1,"total":1,"percentile":100},"work_days":{"rank":1,"total":1,"percentile":100}}
+  (log) [Worker] hasValidRanks: true
+  (log) [Worker] 返回有效排名: {"total_messages":{"rank":1,"total":1,"percentile":100},"total_chars":{"rank":1,"total":1,"percentile":100},"avg_user_message_length":{"rank":1,"total":1,"percentile":100},"jiafang_count":{"rank":1,"total":1,"percentile":100},"ketao_count":{"rank":1,"total":1,"percentile":100},"work_days":{"rank":1,"total":1,"percentile":100},"ai":{"rank":1,"total":1,"percentile":100}}
+GET https://cursor-clinical-analysis.psterman.workers.dev/api/v2/stats/openclaw?_t=1773657966864 - Ok @ 2026/3/16 18:46:08

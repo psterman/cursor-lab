@@ -720,6 +720,25 @@
                     window.__authUserId
                 );
                 if (hasAuthSession) return true;
+                var hasResolvedUserData = !!(
+                    (window.currentUser && (
+                        window.currentUser.id ||
+                        window.currentUser.user_id ||
+                        window.currentUser.github_username ||
+                        window.currentUser.github_login ||
+                        window.currentUser.user_name ||
+                        window.currentUser.fingerprint
+                    )) ||
+                    (window.currentUserData && (
+                        window.currentUserData.id ||
+                        window.currentUserData.user_id ||
+                        window.currentUserData.github_username ||
+                        window.currentUserData.github_login ||
+                        window.currentUserData.user_name ||
+                        window.currentUserData.fingerprint
+                    ))
+                );
+                if (hasResolvedUserData) return true;
             } catch (e) {
                 return false;
             }
@@ -728,7 +747,9 @@
                 return !!(
                     (window.supabaseAuthUser && window.supabaseAuthUser.id) ||
                     window.authenticatedUserId ||
-                    window.__authUserId
+                    window.__authUserId ||
+                    (window.currentUser && (window.currentUser.id || window.currentUser.user_name || window.currentUser.fingerprint)) ||
+                    (window.currentUserData && (window.currentUserData.id || window.currentUserData.user_name || window.currentUserData.fingerprint))
                 );
             } catch (e) {
                 return false;
@@ -738,7 +759,8 @@
             try {
                 var leftBody = document && document.getElementById ? document.getElementById('left-drawer-body') : null;
                 if (!leftBody) return;
-                var isGuestMode = !window.currentUser || (typeof isGuestGatePassed === 'function' && isGuestGatePassed());
+                var hasAccess = hasAuthenticatedDrawerAccess();
+                var isGuestMode = (typeof isGuestGatePassed === 'function' && isGuestGatePassed()) || !hasAccess;
                 if (isGuestMode) {
                     try {
                         var hasIdentityCard = !!leftBody.querySelector('.drawer-item[data-card="identity-config"]');
@@ -756,7 +778,7 @@
                         }
                     } catch (e) {}
                 }
-                var shouldHideUserData = isGuestMode || !hasAuthenticatedDrawerAccess();
+                var shouldHideUserData = isGuestMode;
                 var hasAuth = !shouldHideUserData;
                 if (!hasAuth) {
                     try { renderGuestLoginCard(); } catch (e) {}
@@ -2796,7 +2818,7 @@
             })();
             const cName = (typeof currentDrawerCountry !== 'undefined' && currentDrawerCountry && currentDrawerCountry.name) ? currentDrawerCountry.name : '';
             const refreshLexicon = !!(opts && opts.refreshLexicon);
-            const statsSource = (typeof window.__statsSourceType === 'string' && window.__statsSourceType) ? window.__statsSourceType : 'all';
+            const statsSource = (typeof window.__statsSourceType === 'string' && window.__statsSourceType) ? window.__statsSourceType : 'cursor';
             const url = effectiveIsGlobal
                 ? `${API_ENDPOINT}api/global-average`
                 : `${API_ENDPOINT}api/country-summary?country=${encodeURIComponent(target_country)}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${uid ? `&user_id=${encodeURIComponent(uid)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}${statsSource !== 'all' ? `&source_type=${encodeURIComponent(statsSource)}` : ''}${refreshLexicon ? '&refresh=true' : ''}&_ts=${Date.now()}`;
@@ -9513,22 +9535,24 @@
 
             // 将“暂无数据”的占位渲染出来，避免空白
             try {
-                if (typeof window.__statsSourceType !== 'string') window.__statsSourceType = 'all';
+                if (typeof window.__statsSourceType !== 'string') window.__statsSourceType = 'cursor';
                 var switcher = mount.querySelector('#statsSourceSwitcher');
                 if (switcher) {
+                    var syncSwitcherState = function(src) {
+                        var normalized = (src === 'openclaw' || src === 'all') ? src : 'cursor';
+                        switcher.querySelectorAll('.source-btn').forEach(function(b) {
+                            var active = (b.getAttribute('data-source') || 'cursor') === normalized;
+                            b.classList.toggle('active', active);
+                            b.classList.toggle('text-zinc-500', !active);
+                            b.style.borderColor = active ? 'rgba(0,255,65,0.4)' : 'transparent';
+                        });
+                    };
+                    syncSwitcherState(window.__statsSourceType);
                     switcher.querySelectorAll('.source-btn').forEach(function(btn) {
                         btn.onclick = function() {
                             var src = btn.getAttribute('data-source') || 'all';
                             window.__statsSourceType = src;
-                            switcher.querySelectorAll('.source-btn').forEach(function(b) {
-                                if (b.getAttribute('data-source') === src) {
-                                    b.classList.add('active'); b.classList.remove('text-zinc-500');
-                                    b.style.borderColor = 'rgba(0,255,65,0.4)';
-                                } else {
-                                    b.classList.remove('active'); b.classList.add('text-zinc-500');
-                                    b.style.borderColor = 'transparent';
-                                }
-                            });
+                            syncSwitcherState(src);
                             if (typeof updateCountryDashboard === 'function') updateCountryDashboard(cc, name, { preferCache: false });
                         };
                     });
@@ -9626,6 +9650,17 @@
             if (state.isGlobalInitializing && !window.__allowInitCall) return;
             console.log('[switchView] 切换到视图:', view);
             var targetView = (view || '').toUpperCase();
+            var sourceByView = {
+                global: 'cursor',
+                country: 'cursor',
+                ranking: 'cursor',
+                leaderboard: 'github',
+                openclaw: 'openclaw'
+            };
+            if (view && sourceByView[view]) {
+                window.__statsSourceType = sourceByView[view];
+                window.__rightDrawerDataSource = sourceByView[view];
+            }
             // 视图拦截：目标视图与目标国家均与当前一致时跳过数据拉取，避免死循环
             if (state.currentViewState === targetView) {
                 if (targetView !== 'COUNTRY') return;
@@ -22743,8 +22778,20 @@
                     } catch { /* ignore */ }
                 }
                 
+                var hasRenderableUserData = !!(currentUserData && (
+                    currentUserData.id ||
+                    currentUserData.user_id ||
+                    currentUserData.user_name ||
+                    currentUserData.github_username ||
+                    currentUserData.github_login ||
+                    currentUserData.fingerprint ||
+                    currentUserData.total_messages != null ||
+                    currentUserData.total_chars != null ||
+                    currentUserData.github_stats
+                ));
+                var allowPrivateCards = hasRenderableUserData || !(typeof hasAuthenticatedDrawerAccess === 'function') || hasAuthenticatedDrawerAccess();
                 // 创建用户统计卡片容器（赛博病理风格：border-white/10 bg-[#0a0a0a]/80 backdrop-blur）
-                if (typeof hasAuthenticatedDrawerAccess === 'function' && !hasAuthenticatedDrawerAccess()) {
+                if (!allowPrivateCards) {
                     console.log('[UserStats] ℹ️ 当前未登录，取消创建统计卡片 DOM');
                     clearPrivateDrawerCards({ renderGuestCard: false });
                     return;
@@ -22992,9 +23039,7 @@
                         githubCardEl = window.renderGithubCard(githubStats, cardOpts);
                     } else {
                         var isGuestModeSt2 = (typeof isGuestGatePassed === 'function' && isGuestGatePassed());
-                        var hasAuthSt2 = (typeof hasAuthenticatedDrawerAccess === 'function')
-                            ? hasAuthenticatedDrawerAccess()
-                            : !!(window.__stats2HasAuthenticatedSession);
+                        var hasAuthSt2 = allowPrivateCards;
                         var shouldShowIdentityOnly = isGuestModeSt2 || !hasAuthSt2;
                         if (shouldShowIdentityOnly) {
                             window.renderGithubCard(null, cardOpts);

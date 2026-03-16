@@ -410,11 +410,11 @@ function createTimeoutSignal(timeoutMs: number): { signal: AbortSignal; cancel: 
   return { signal: controller.signal, cancel: () => clearTimeout(timer) };
 }
 
-/** 构建 Supabase 请求头：必须同时带 apikey 与 Authorization: Bearer，否则会报 No API key found */
+/** 构建 Supabase 请求头：服务端优先使用 Service Role 以避免被 RLS 过滤 */
 function buildSupabaseHeaders(env: Env, extra?: Record<string, string>): Record<string, string> {
-  const apikey = (env.SUPABASE_KEY || env.SUPABASE_ANON_KEY || '').trim();
+  const apikey = (env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_KEY || env.SUPABASE_ANON_KEY || '').trim();
   if (!apikey) {
-    console.warn('[Worker] buildSupabaseHeaders: SUPABASE_KEY 与 SUPABASE_ANON_KEY 均为空，Supabase 请求可能报 No API key found');
+    console.warn('[Worker] buildSupabaseHeaders: SUPABASE_SERVICE_ROLE_KEY / SUPABASE_KEY / SUPABASE_ANON_KEY 均为空，Supabase 请求可能报 No API key found');
   }
   return {
     'apikey': apikey,
@@ -3423,6 +3423,7 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
     const body = await c.req.json().catch(() => ({})) as Record<string, any>;
     const fingerprint = (body.fingerprint ?? '').trim() || null;
     const github_login = (body.github_login ?? '').trim() || null;
+    const normalizedGitHubLogin = github_login && github_login !== 'OpenClaw 用户' ? github_login : null;
 
     let user_id: string | null = null;
     const authHeader = c.req.header('Authorization') || '';
@@ -3440,6 +3441,19 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
       const arr = Array.isArray(rows) ? rows : rows ? [rows] : [];
       if (arr[0]?.id) user_id = arr[0].id;
     }
+    if (!user_id && normalizedGitHubLogin) {
+      const existingByGithubUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
+      existingByGithubUrl.searchParams.set('select', 'id');
+      existingByGithubUrl.searchParams.set('or', `(github_login.eq.${encodeURIComponent(normalizedGitHubLogin)},user_name.eq.${encodeURIComponent(normalizedGitHubLogin)})`);
+      existingByGithubUrl.searchParams.set('order', 'updated_at.desc');
+      existingByGithubUrl.searchParams.set('limit', '1');
+      const rows = await fetchSupabaseJson<any[]>(env, existingByGithubUrl.toString(), { headers: buildSupabaseHeaders(env) }, 5000).catch(() => []);
+      const arr = Array.isArray(rows) ? rows : rows ? [rows] : [];
+      if (arr[0]?.id) user_id = arr[0].id;
+    }
+    if (!user_id && !fingerprint && !normalizedGitHubLogin) {
+      return c.json({ success: false, error: 'fingerprint, github_login or auth user_id is required' }, 400);
+    }
     if (!user_id) {
       const insertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis`;
       const newRow = await fetchSupabaseJson<{ id: string }>(env, insertUrl, {
@@ -3451,8 +3465,9 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
         },
         body: JSON.stringify({
           fingerprint: fingerprint || undefined,
-          user_name: github_login || 'OpenClaw 用户',
-          user_identity: github_login ? 'github' : 'fingerprint',
+          user_name: normalizedGitHubLogin || undefined,
+          github_login: normalizedGitHubLogin || undefined,
+          user_identity: normalizedGitHubLogin ? 'github' : 'fingerprint',
         }),
       }, 5000);
       const created = Array.isArray(newRow) ? newRow[0] : newRow;
@@ -3491,53 +3506,73 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
       analyzed_at: (body.analyzed_at && new Date(body.analyzed_at).toISOString()) || new Date().toISOString(),
     };
 
-    const openclawUrl = `${env.SUPABASE_URL}/rest/v1/openclaw_stats`;
-    const insertHeaders = {
-      ...buildSupabaseHeaders(env),
-      'Content-Type': 'application/json',
-      'Prefer': 'return=representation',
-      'Accept-Profile': 'user_analysis',
-      'Content-Profile': 'user_analysis',
-    };
-    await fetch(openclawUrl, {
-      method: 'POST',
-      headers: insertHeaders,
-      body: JSON.stringify(openclawRow),
-    }).then(async (res) => {
-      if (!res.ok) {
-        const t = await res.text().catch(() => '');
-        throw new Error(`openclaw_stats insert failed: ${res.status} ${t}`);
-      }
-    });
+    let existingUserRow: any = null;
+    try {
+      const existingUserUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(user_id)}&select=id,user_name,github_login,user_identity,total_tokens,primary_model,skills_tags,stats,last_active_at&limit=1`;
+      const rows = await fetchSupabaseJson<any[]>(env, existingUserUrl, { headers: buildSupabaseHeaders(env) }, 5000).catch(() => []);
+      const arr = Array.isArray(rows) ? rows : rows ? [rows] : [];
+      existingUserRow = arr[0] || null;
+    } catch (_) {
+      existingUserRow = null;
+    }
 
-    // 同步更新 public.user_analysis：total_tokens, primary_model, skills_tags, last_active_at, openclaw_metadata
     const skillsTags = body.skills_tags && Array.isArray(body.skills_tags)
       ? body.skills_tags
       : (body.skills_stats && typeof body.skills_stats === 'object')
         ? Object.keys(body.skills_stats).slice(0, 20)
         : [];
-    const patchPayload: Record<string, unknown> = {
-      total_tokens: Math.max(0, toNum(body.total_tokens, 0)),
-      primary_model: body.top_model_id && String(body.top_model_id).trim() || null,
-      skills_tags: skillsTags,
-      last_active_at: new Date().toISOString(),
-      openclaw_metadata: {
-        stats: openclawRow,
-        portrait: body.portrait && typeof body.portrait === 'object' ? body.portrait : {},
-        analyzed_at: openclawRow.analyzed_at,
-        source: 'openclaw_jsonl',
-      },
+    const mergedSkillsTags = Array.from(new Set([
+      ...((Array.isArray(existingUserRow?.skills_tags) ? existingUserRow.skills_tags : []).map((item: any) => String(item || '').trim()).filter(Boolean)),
+      ...skillsTags.map((item: any) => String(item || '').trim()).filter(Boolean),
+    ])).slice(0, 20);
+    const existingStats = existingUserRow?.stats && typeof existingUserRow.stats === 'object' ? existingUserRow.stats : {};
+    const existingOpenclawStats = existingStats?.openclaw && typeof existingStats.openclaw === 'object' ? existingStats.openclaw : {};
+    const openclawState = {
+      ...(existingOpenclawStats || {}),
+      stats: openclawRow,
+      portrait: body.portrait && typeof body.portrait === 'object' ? body.portrait : {},
+      environment: body.portrait?.environment && typeof body.portrait.environment === 'object' ? body.portrait.environment : {},
+      modelUsage: body.model_usage && typeof body.model_usage === 'object' ? body.model_usage : {},
+      analyzed_at: openclawRow.analyzed_at,
+      source: 'openclaw_jsonl',
     };
+    const incomingLastActiveAt = (body.last_active_at && new Date(body.last_active_at).toISOString()) || new Date().toISOString();
+    const existingLastActiveAt = existingUserRow?.last_active_at ? new Date(existingUserRow.last_active_at).toISOString() : null;
+    const finalLastActiveAt = existingLastActiveAt && existingLastActiveAt > incomingLastActiveAt ? existingLastActiveAt : incomingLastActiveAt;
+    const incomingTotalTokens = Math.max(0, toNum(body.total_tokens, 0));
+    const existingTotalTokens = Math.max(0, toNum(existingUserRow?.total_tokens, 0));
+    const patchPayload: Record<string, unknown> = {
+      total_tokens: Math.max(existingTotalTokens, incomingTotalTokens),
+      primary_model: (body.primary_model || body.top_model_id || existingUserRow?.primary_model || '').toString().trim() || null,
+      skills_tags: mergedSkillsTags,
+      last_active_at: finalLastActiveAt,
+      stats: {
+        ...existingStats,
+        openclaw: openclawState,
+      },
+      updated_at: new Date().toISOString(),
+    };
+    if (normalizedGitHubLogin) {
+      patchPayload.github_login = normalizedGitHubLogin;
+      if (!existingUserRow?.user_name || existingUserRow.user_name === 'OpenClaw 用户') {
+        patchPayload.user_name = normalizedGitHubLogin;
+      }
+      if (existingUserRow?.user_identity !== 'github') {
+        patchPayload.user_identity = 'github';
+      }
+    }
     const uaPatchUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(user_id)}`;
-    await fetch(uaPatchUrl, {
+    const patchRes = await fetch(uaPatchUrl, {
       method: 'PATCH',
-      headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+      headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
       body: JSON.stringify(patchPayload),
-    }).catch((err) => {
-      console.warn('[Worker] /api/v2/openclaw/analyze user_analysis PATCH 失败（不阻断）:', err?.message);
     });
+    if (!patchRes.ok) {
+      const patchText = await patchRes.text().catch(() => '');
+      throw new Error(`user_analysis patch failed: ${patchRes.status} ${patchText}`);
+    }
 
-    return c.json({ success: true });
+    return c.json({ success: true, user_id, persisted_to: 'user_analysis' });
   } catch (err: any) {
     console.error('[Worker] /api/v2/openclaw/analyze 错误:', err);
     return c.json({ success: false, error: err?.message || 'openclaw sync failed' }, 500);
@@ -7683,14 +7718,20 @@ function getJsonb(obj: any, path: string): any {
 }
 
 function parseNumFromPaths(row: any, paths: string[]): number {
-  const meta = row?.openclaw_metadata;
-  const stats = meta?.stats;
-  const portrait = meta?.portrait;
+  const openclawRoot = row?.openclaw_metadata && typeof row.openclaw_metadata === 'object'
+    ? row.openclaw_metadata
+    : (row?.stats?.openclaw && typeof row.stats.openclaw === 'object' ? row.stats.openclaw : {});
+  const stats = openclawRoot?.stats && typeof openclawRoot.stats === 'object'
+    ? openclawRoot.stats
+    : (row?.stats?.openclaw_stats && typeof row.stats.openclaw_stats === 'object' ? row.stats.openclaw_stats : {});
+  const portrait = openclawRoot?.portrait && typeof openclawRoot.portrait === 'object'
+    ? openclawRoot.portrait
+    : (row?.stats?.openclaw_portrait && typeof row.stats.openclaw_portrait === 'object' ? row.stats.openclaw_portrait : {});
   for (const p of paths) {
     let v: any = null;
     if (p.startsWith('stats.')) v = getJsonb(stats, p.slice(6));
     else if (p.startsWith('portrait.')) v = getJsonb(portrait, p.slice(9));
-    else v = getJsonb(meta, p);
+    else v = getJsonb(openclawRoot, p);
     if (v != null) {
       const n = Number(v);
       if (Number.isFinite(n) && n >= 0) return Math.floor(n);
@@ -7700,14 +7741,20 @@ function parseNumFromPaths(row: any, paths: string[]): number {
 }
 
 function parseBigintFromPaths(row: any, paths: string[]): number {
-  const meta = row?.openclaw_metadata;
-  const stats = meta?.stats;
-  const portrait = meta?.portrait;
+  const openclawRoot = row?.openclaw_metadata && typeof row.openclaw_metadata === 'object'
+    ? row.openclaw_metadata
+    : (row?.stats?.openclaw && typeof row.stats.openclaw === 'object' ? row.stats.openclaw : {});
+  const stats = openclawRoot?.stats && typeof openclawRoot.stats === 'object'
+    ? openclawRoot.stats
+    : (row?.stats?.openclaw_stats && typeof row.stats.openclaw_stats === 'object' ? row.stats.openclaw_stats : {});
+  const portrait = openclawRoot?.portrait && typeof openclawRoot.portrait === 'object'
+    ? openclawRoot.portrait
+    : (row?.stats?.openclaw_portrait && typeof row.stats.openclaw_portrait === 'object' ? row.stats.openclaw_portrait : {});
   for (const p of paths) {
     let v: any = null;
     if (p.startsWith('stats.')) v = getJsonb(stats, p.slice(6));
     else if (p.startsWith('portrait.')) v = getJsonb(portrait, p.slice(9));
-    else v = getJsonb(meta, p);
+    else v = getJsonb(openclawRoot, p);
     if (v != null) {
       const n = typeof v === 'string' ? parseInt(v, 10) : Number(v);
       if (Number.isFinite(n) && n >= 0) return Math.floor(n);
@@ -7758,8 +7805,7 @@ app.get('/api/v2/stats/openclaw', async (c) => {
 
   try {
     const uaUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
-    uaUrl.searchParams.set('select', 'id,user_name,avatar_url,github_login,openclaw_metadata,total_tokens,primary_model,skills_tags,updated_at,last_active_at');
-    uaUrl.searchParams.set('openclaw_metadata', 'not.is.null');
+    uaUrl.searchParams.set('select', 'id,user_name,github_login,fingerprint,stats,github_stats,total_tokens,primary_model,skills_tags,created_at,updated_at,last_active_at');
     uaUrl.searchParams.set('order', 'updated_at.desc');
     uaUrl.searchParams.set('limit', '500');
 
@@ -7767,29 +7813,49 @@ app.get('/api/v2/stats/openclaw', async (c) => {
       headers: buildSupabaseHeaders(env),
     }, 15000);
 
-    const arr = Array.isArray(rows) ? rows : rows ? [rows] : [];
+    const rawRows = Array.isArray(rows) ? rows : rows ? [rows] : [];
+    const isPlaceholderRow = (r: any) => {
+      const name = String(r?.user_name || '').trim();
+      const login = String(r?.github_login || '').trim();
+      const fp = String(r?.fingerprint || '').trim();
+      return !fp && !login && (!name || name === 'OpenClaw 用户');
+    };
+    const signalRows = rawRows.filter((r) => {
+      const tags = Array.isArray(r?.skills_tags) ? r.skills_tags.filter(Boolean) : [];
+      const tokens = parseBigintFromPaths(r, ['stats.totalTokens', 'stats.total_tokens']) || Number(r?.total_tokens || 0) || 0;
+      const hasStatsBlob = !!(r?.stats && typeof r.stats === 'object' && (r.stats.openclaw || r.stats.openclaw_stats));
+      const hasSignal = tokens > 0 || tags.length > 0 || !!String(r?.primary_model || '').trim() || hasStatsBlob;
+      return !isPlaceholderRow(r) && hasSignal;
+    });
+    const identityRows = rawRows.filter((r) => !isPlaceholderRow(r));
+    const arr = signalRows.length > 0 ? signalRows : (identityRows.length === 1 ? identityRows : []);
     if (arr.length === 0) {
       return c.json({ ...empty, success: true });
     }
 
     type RankRow = { id: string; name: string; avatar: string; device?: string; primaryModel?: string; tags?: string[] };
     const toRankRow = (r: any): RankRow => {
-      const metaStats = r?.openclaw_metadata?.stats;
+      const openclawStats = r?.stats?.openclaw?.stats || r?.stats?.openclaw_stats || {};
       const primaryModel =
         (r?.primary_model as string | undefined) ||
-        (metaStats && (metaStats.top_model_id as string | undefined)) ||
+        (openclawStats && (openclawStats.top_model_id as string | undefined)) ||
         undefined;
-      const device = getJsonb(r?.openclaw_metadata?.portrait, 'device') ?? undefined;
+      const device =
+        getJsonb(r?.stats?.openclaw?.portrait, 'device') ||
+        getJsonb(r?.stats?.openclaw_portrait, 'device') ||
+        getJsonb(r?.stats?.openclaw?.stats, 'device') ||
+        undefined;
       const tags =
         Array.isArray(r?.skills_tags)
           ? r.skills_tags
-          : metaStats && metaStats.skills_stats && typeof metaStats.skills_stats === 'object'
-            ? Object.keys(metaStats.skills_stats)
+          : openclawStats && openclawStats.skills_stats && typeof openclawStats.skills_stats === 'object'
+            ? Object.keys(openclawStats.skills_stats)
             : [];
+      const avatar = String(r?.github_stats?.avatarUrl || '') || (r?.github_login ? `https://github.com/${encodeURIComponent(r.github_login)}.png` : '');
       return {
         id: String(r?.id || ''),
         name: String(r?.user_name || r?.github_login || '匿名龙虾'),
-        avatar: String(r?.avatar_url || '') || (r?.github_login ? `https://github.com/${encodeURIComponent(r.github_login)}.png` : ''),
+        avatar,
         device,
         primaryModel,
         tags,
@@ -7801,10 +7867,10 @@ app.get('/api/v2/stats/openclaw', async (c) => {
     const lifeDays = arr.map((r) => {
       let days = parseNumFromPaths(r, ['portrait.lifeDays', 'portrait.life_days', 'stats.life_days', 'stats.lifeDays']);
       if (days <= 0) {
-        const updated = r?.updated_at || r?.last_active_at;
-        if (updated) {
-          const diff = nowMs - new Date(updated).getTime();
-          days = Math.max(0, Math.floor(diff / msPerDay));
+        const startedAt = r?.created_at || r?.updated_at || r?.last_active_at;
+        if (startedAt) {
+          const diff = nowMs - new Date(startedAt).getTime();
+          days = Math.max(1, Math.ceil(diff / msPerDay));
         }
       }
       return { row: r, days };
@@ -7821,7 +7887,7 @@ app.get('/api/v2/stats/openclaw', async (c) => {
 
     const skillsCount = arr.map((r) => {
       const tags = r?.skills_tags;
-      const stats = r?.openclaw_metadata?.stats;
+      const stats = r?.stats?.openclaw?.stats || r?.stats?.openclaw_stats || {};
       let count = 0;
       if (Array.isArray(tags)) count = tags.length;
       else if (stats?.skills_stats && typeof stats.skills_stats === 'object') count = Object.keys(stats.skills_stats).length;
@@ -7836,7 +7902,7 @@ app.get('/api/v2/stats/openclaw', async (c) => {
 
     const modelUsage: Record<string, number> = { claude: 0, gpt: 0, deepseek: 0, other: 0 };
     for (const r of arr) {
-      const mu = getJsonb(r?.openclaw_metadata?.stats, 'model_usage');
+      const mu = getJsonb(r?.stats?.openclaw?.stats, 'model_usage') || getJsonb(r?.stats?.openclaw_stats, 'model_usage');
       let allocated = false;
       if (mu && typeof mu === 'object') {
         for (const [k, v] of Object.entries(mu)) {
@@ -7848,9 +7914,9 @@ app.get('/api/v2/stats/openclaw', async (c) => {
         }
       }
       if (!allocated) {
-        const topModel = r?.primary_model || getJsonb(r?.openclaw_metadata?.stats, 'top_model_id');
+        const topModel = r?.primary_model || getJsonb(r?.stats?.openclaw?.stats, 'top_model_id') || getJsonb(r?.stats?.openclaw_stats, 'top_model_id');
         const tokens = parseBigintFromPaths(r, ['stats.totalTokens', 'stats.total_tokens']) || Number(r?.total_tokens || 0) || 0;
-        if (topModel && tokens > 0) modelUsage[mapModelToCampaign(topModel)] += tokens;
+        if (topModel) modelUsage[mapModelToCampaign(topModel)] += tokens > 0 ? tokens : 1;
       }
     }
     const totalModel = modelUsage.claude + modelUsage.gpt + modelUsage.deepseek + modelUsage.other;
@@ -7858,7 +7924,7 @@ app.get('/api/v2/stats/openclaw', async (c) => {
 
     const deviceCount: Record<string, number> = { mac: 0, windows: 0, linux: 0, other: 0 };
     for (const r of arr) {
-      const dev = getJsonb(r?.openclaw_metadata?.portrait, 'device') || getJsonb(r?.openclaw_metadata?.stats, 'device') || '';
+      const dev = getJsonb(r?.stats?.openclaw?.portrait, 'device') || getJsonb(r?.stats?.openclaw_portrait, 'device') || getJsonb(r?.stats?.openclaw?.stats, 'device') || '';
       deviceCount[mapDeviceToCampaign(dev)] += 1;
     }
     const totalDev = deviceCount.mac + deviceCount.windows + deviceCount.linux + deviceCount.other;
@@ -7875,9 +7941,17 @@ app.get('/api/v2/stats/openclaw', async (c) => {
     const hourlyMap: Record<number, number> = {};
     for (let h = 0; h < 24; h++) hourlyMap[h] = 0;
     for (const r of arr) {
-      const heatmap = getJsonb(r?.openclaw_metadata?.stats, 'hourly_heatmap');
+      const heatmap = getJsonb(r?.stats?.openclaw?.stats, 'hourly_heatmap') || getJsonb(r?.stats?.openclaw_stats, 'hourly_heatmap');
       if (Array.isArray(heatmap) && heatmap.length >= 24) {
         for (let h = 0; h < 24; h++) hourlyMap[h] += Number(heatmap[h]) || 0;
+      } else if (Array.isArray(heatmap) && heatmap.length > 0) {
+        for (const entry of heatmap) {
+          const hour = Number((entry as any)?.hour);
+          const value = Number((entry as any)?.count ?? (entry as any)?.value ?? 0);
+          if (Number.isInteger(hour) && hour >= 0 && hour < 24 && value > 0) {
+            hourlyMap[hour] = (hourlyMap[hour] || 0) + value;
+          }
+        }
       } else {
         const updated = r?.updated_at || r?.last_active_at;
         if (updated) {
@@ -7892,6 +7966,9 @@ app.get('/api/v2/stats/openclaw', async (c) => {
     const dialogRounds = arr.map((r) => ({
       row: r,
       rounds: parseBigintFromPaths(r, ['portrait.totalDialogRounds', 'portrait.total_dialog_rounds', 'stats.total_conversations', 'stats.records_total']),
+    })).map((item) => ({
+      ...item,
+      rounds: item.rounds > 0 ? item.rounds : 1,
     })).filter((x) => x.rounds > 0);
     dialogRounds.sort((a, b) => b.rounds - a.rounds || (new Date(b.row?.last_active_at || 0).getTime() - new Date(a.row?.last_active_at || 0).getTime()));
     const dialogTop10 = dialogRounds.slice(0, 10).map((x) => ({ ...toRankRow(x.row), dialogRounds: x.rounds }));
