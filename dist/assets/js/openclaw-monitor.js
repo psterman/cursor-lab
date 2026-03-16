@@ -515,9 +515,10 @@
         }
 
         if (!leftBody.contains(mount)) {
-            var scroll = document.getElementById('left-drawer-scroll');
-            if (scroll && scroll.parentNode === leftBody) leftBody.insertBefore(mount, scroll);
-            else leftBody.insertBefore(mount, leftBody.firstChild || null);
+            leftBody.insertBefore(mount, leftBody.firstChild || null);
+        }
+        if (leftBody.firstElementChild !== mount) {
+            leftBody.insertBefore(mount, leftBody.firstChild || null);
         }
 
         var card = document.getElementById('openclaw-monitor-card');
@@ -539,6 +540,9 @@
             card.style.visibility = 'visible';
             card.setAttribute('aria-hidden', 'false');
         }
+        try {
+            if (typeof window.normalizeLeftDrawerCardOrder === 'function') window.normalizeLeftDrawerCardOrder();
+        } catch (_) {}
         return { mount: mount, card: card };
     }
 

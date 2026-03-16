@@ -513,6 +513,30 @@
             } catch (e) {}
             syncGuestModeDomState(enabled);
         }
+        function normalizeLeftDrawerCardOrder() {
+            try {
+                var leftBody = document.getElementById('left-drawer-body');
+                if (!leftBody) return;
+
+                var staleScroll = document.getElementById('left-drawer-scroll');
+                if (staleScroll && staleScroll.parentNode) staleScroll.parentNode.removeChild(staleScroll);
+
+                var identityCard = leftBody.querySelector('.drawer-item[data-card="identity-config"]');
+                var openclawMount = document.getElementById('openclaw-monitor-mount');
+                var statsCard = leftBody.querySelector('.drawer-item.dashboard-card.backdrop-blur.clinic-card');
+                var githubCard = leftBody.querySelector('.drawer-item.github-combat-card');
+                var wordcloudCard = document.getElementById('left-drawer-wordcloud-wrap');
+                var ordered = [identityCard, openclawMount, statsCard, githubCard, wordcloudCard];
+
+                ordered.forEach(function(node) {
+                    if (!node || node.parentNode !== leftBody) return;
+                    leftBody.appendChild(node);
+                });
+            } catch (e) {
+                console.warn('[LeftDrawer] normalizeLeftDrawerCardOrder failed:', e);
+            }
+        }
+        window.normalizeLeftDrawerCardOrder = normalizeLeftDrawerCardOrder;
         function renderGuestModeDrawerCard() {
             var leftBody = document.getElementById('left-drawer-body');
             if (!leftBody) return;
@@ -535,12 +559,20 @@
                         currentStatus: 'idle',
                         defaultAvatar: defaultAvatar
                     };
-                    window.renderGithubCard(null, {
-                        container: leftBody,
-                        insertFirst: true,
-                        lang: (typeof currentLang !== 'undefined' ? currentLang : 'en'),
-                        identity: identity
-                    });
+                    if (typeof window.renderGithubIdentityCard === 'function') {
+                        window.renderGithubIdentityCard(identity, {
+                            container: leftBody,
+                            insertFirst: true,
+                            lang: (typeof currentLang !== 'undefined' ? currentLang : 'en')
+                        });
+                    } else {
+                        window.renderGithubCard(null, {
+                            container: leftBody,
+                            insertFirst: true,
+                            lang: (typeof currentLang !== 'undefined' ? currentLang : 'en'),
+                            identity: identity
+                        });
+                    }
                 }
             } catch (e) {}
             try { applyLeftDrawerGuestModePermissions(); } catch (e) {}
@@ -8025,7 +8057,6 @@
                     const isGuestDrawerMode = (typeof isGuestGatePassed === 'function' && isGuestGatePassed());
                     const wordcloudCard = document.getElementById('left-drawer-wordcloud-wrap');
                     const openclawMount = document.getElementById('openclaw-monitor-mount');
-                    const leftDrawerScroll = document.getElementById('left-drawer-scroll');
                     const identityCard = isGuestDrawerMode ? leftBody.querySelector('.drawer-item[data-card="identity-config"]') : null;
                     const tempHolder = document.createDocumentFragment();
                     if (identityCard && identityCard.parentNode) {
@@ -8033,9 +8064,6 @@
                     }
                     if (openclawMount && openclawMount.parentNode) {
                         tempHolder.appendChild(openclawMount);
-                    }
-                    if (leftDrawerScroll && leftDrawerScroll.parentNode) {
-                        tempHolder.appendChild(leftDrawerScroll);
                     }
                     if (wordcloudCard && wordcloudCard.parentNode) {
                         tempHolder.appendChild(wordcloudCard);
@@ -8045,6 +8073,7 @@
                     if (tempHolder.childNodes.length > 0) {
                         leftBody.appendChild(tempHolder);
                     }
+                    normalizeLeftDrawerCardOrder();
                     if (isGuestDrawerMode && !leftBody.querySelector('.drawer-item[data-card="identity-config"]')) {
                         try { renderGuestModeDrawerCard(); } catch (_) {}
                     }
@@ -8715,23 +8744,12 @@
                     return;
                 }
 
-                // 添加实时诊断活动卡片（带渐入动画）
-                const activityCard = document.createElement('div');
-                activityCard.className = 'drawer-item clinic-card';
-                activityCard.style.opacity = '0';
-                activityCard.style.transform = 'translateY(12px)';
-                activityCard.innerHTML = `
-                    <div class="flex items-center justify-between mb-3">
-                        <span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">📡</span>
-                        <span class="text-[8px] leading-none text-[#00ff41] border border-[#00ff41]/40 px-1 py-0.5 tracking-widest uppercase bg-[#00ff41]/5">
-                            ${escapeHtml(getI18nText('badge.live') || 'LIVE')}
-                        </span>
-                    </div>
-                    <div class="drawer-item-label mb-3">${escapeHtml((i18n[currentLang] && i18n[currentLang]['recent-activity']) ? i18n[currentLang]['recent-activity'] : (currentLang === 'en' ? 'Live Activity Feed' : '实时诊断活动'))}</div>
-                    <div id="drawer-recentActivity" class="flex-1 overflow-y-auto max-h-[400px] text-[10px] font-mono space-y-3 pr-2"></div>
-                `;
+                // 需求：移除左侧抽屉中的独立实时活动卡片（drawer-item clinic-card）
+                leftBody.querySelectorAll('.drawer-item.clinic-card:not(.dashboard-card)').forEach(function(node) {
+                    node.remove();
+                });
                 
-                // 【词云卡片自适应定位兜底】插入实时诊断活动之前，确保词云卡片在正确位置
+                // 【词云卡片自适应定位兜底】确保词云卡片在正确位置
                 // 如果「我的数据统计」已存在，词云应在其之后；否则词云在身份配置卡片之后
                 try {
                     const wordcloudCard = document.getElementById('left-drawer-wordcloud-wrap');
@@ -8773,73 +8791,6 @@
                     }
                 } catch (e) {
                     console.warn('[Identity] ⚠️ 词云卡片定位调整失败:', e);
-                }
-                
-                leftBody.appendChild(activityCard);
-                
-                // 触发渐入动画
-                requestAnimationFrame(() => {
-                    activityCard.style.transition = 'opacity 0.35s ease-out, transform 0.35s ease-out';
-                    activityCard.style.opacity = '1';
-                    activityCard.style.transform = 'translateY(0)';
-                });
-                
-                // 渲染实时诊断活动
-                const data = window.lastData || {};
-                const activityData = data.latestRecords || data.recentVictims || [];
-                const drawerActivityList = document.getElementById('drawer-recentActivity');
-                if (drawerActivityList) {
-                    if (activityData.length === 0) {
-                        drawerActivityList.innerHTML = `<div class="text-zinc-500 text-center py-4 text-[10px]">${escapeHtml(getI18nText('common.no_data') || (currentLang === 'en' ? 'No data' : '暂无数据'))}</div>`;
-                    } else {
-                        drawerActivityList.innerHTML = activityData.map((v, index) => {
-                            const time = v.time || v.created_at || new Date().toISOString();
-                            const type = v.type || v.personality_type || 'UNKNOWN';
-                            const location = v.location || v.ip_location || (currentLang === 'en' ? 'Unknown' : '未知');
-                            const name = v.name || (currentLang === 'en' ? `Record ${index + 1}` : `记录${index + 1}`);
-                            
-                            const avatarUrl = v.avatar_url || null;
-                            // 活跃节点：优先 github_username，无则用 user_name（Cloudflare 上 API 可能只返回 user_name）
-                            const githubUsername = v.github_username || v.user_name || null;
-                            
-                            // 【修复】将 recordUserIdentity 定义移到 if 块外，确保在所有情况下都能访问
-                            const recordUserIdentity = v.user_identity || null;
-                            
-                            let finalAvatarUrl = avatarUrl;
-                            if (!finalAvatarUrl && githubUsername) {
-                                // 【Task 3】传入 user_identity，对 fingerprint 用户跳过严格校验
-                                if (isValidGitHubUsername(githubUsername, recordUserIdentity)) {
-                                    finalAvatarUrl = getGitHubAvatarUrl(githubUsername);
-                                } else {
-                                    finalAvatarUrl = DEFAULT_AVATAR;
-                                }
-                            }
-                            if (!finalAvatarUrl) {
-                                finalAvatarUrl = DEFAULT_AVATAR;
-                            }
-                            
-                            const finalUsername = githubUsername || name;
-                            // 【修复】传入 user_identity，对 fingerprint 用户跳过严格校验
-                            // 只传有效的 GitHub 用户名，避免"记录1"这样的值触发校验警告
-                            const usernameForAvatar = githubUsername && isValidGitHubUsername(githubUsername, recordUserIdentity) 
-                                ? githubUsername 
-                                : null;
-                            const avatarHtml = createAvatarHtml(finalAvatarUrl, usernameForAvatar, 24, recordUserIdentity);
-                            
-                            return `
-                                <div class="border-l-2 border-[#00ff41]/20 pl-2 py-1.5 flex items-start gap-2">
-                                    <div class="flex-shrink-0 mt-0.5">
-                                        ${avatarHtml}
-                                    </div>
-                                    <div class="flex-1 min-w-0">
-                                        <div class="text-zinc-500 text-[9px]">${new Date(time).toLocaleTimeString(currentLang === 'en' ? 'en-US' : 'zh-CN')}</div>
-                                        <div class="text-white text-[10px] font-bold">${name.length > 8 ? name.slice(0,8) + '...' : name}</div>
-                                        <div class="text-[#00ff41] text-[9px]">${type} @ ${location}</div>
-                                    </div>
-                                </div>
-                            `;
-                        }).join('');
-                    }
                 }
                 
                 // 移除左侧骨架屏
@@ -10595,12 +10546,12 @@
 
         /**
          * 渲染全局矩阵绿天梯榜（强制静态挂载，无条件执行）
-         * 优先写入右侧 Ranking 视图的 ladders-container，否则写入左侧 global-ranking-area
+         * 优先写入右侧 Ranking 视图的 ladders-container
          */
         async function renderGlobalLadders() {
             console.log('[MatrixLadders] 🚀 renderGlobalLadders 被调用');
             let isRankingLoading = true;
-            const container = document.getElementById('ladders-container') || document.getElementById('global-ranking-area');
+            const container = document.getElementById('ladders-container');
             console.log('[MatrixLadders] container:', container?.id);
             const contentTarget = (container && container.id === 'ladders-container')
                 ? (container.querySelector('#global-ranking-grids') || container)
@@ -10608,7 +10559,7 @@
             console.log('[MatrixLadders] contentTarget:', contentTarget?.id || contentTarget?.className);
 
             if (!container || !contentTarget) {
-                console.warn('[MatrixLadders] ⚠️ ladders-container / global-ranking-area 不存在，等待 DOM 就绪');
+                console.warn('[MatrixLadders] ⚠️ ladders-container 不存在，等待 DOM 就绪');
                 isRankingLoading = false;
                 setTimeout(() => {
                     renderGlobalLadders().catch(err => console.error('[MatrixLadders] 重试失败:', err));
@@ -20559,7 +20510,12 @@
                 var gs = (data && data.stats && data.stats.github_stats) || (data && data.github_stats) || (window.currentUser && window.currentUser.github_stats);
                 if (leftBody && gs && typeof gs === 'object' && typeof window.renderGithubCard === 'function') {
                     try {
-                        window.renderGithubCard(gs, { container: leftBody, insertFirst: true, lang: (typeof currentLang !== 'undefined' ? currentLang : 'en') });
+                        window.renderGithubCard(gs, {
+                            container: leftBody,
+                            insertFirst: true,
+                            afterSelector: '.drawer-item[data-card="identity-config"]',
+                            lang: (typeof currentLang !== 'undefined' ? currentLang : 'en')
+                        });
                     } catch (re) { if (typeof console !== 'undefined' && console.warn) console.warn('[SWR] renderDashboard renderGithubCard 失败:', re); }
                 }
             } catch (e) { /* ignore */ }
@@ -20859,7 +20815,12 @@
                     var leftBody = document.getElementById('left-drawer-body');
                     if (leftBody && cu.github_stats && typeof cu.github_stats === 'object' && typeof window.renderGithubCard === 'function') {
                         try {
-                            window.renderGithubCard(cu.github_stats, { container: leftBody, insertFirst: true, lang: typeof currentLang !== 'undefined' ? currentLang : 'en' });
+                            window.renderGithubCard(cu.github_stats, {
+                                container: leftBody,
+                                insertFirst: true,
+                                afterSelector: '.drawer-item[data-card="identity-config"]',
+                                lang: typeof currentLang !== 'undefined' ? currentLang : 'en'
+                            });
                         } catch (re) { if (typeof console !== 'undefined' && console.warn) console.warn('[SWR] renderGithubCard 失败:', re); }
                     }
                 }
@@ -22521,7 +22482,6 @@
                     clearPrivateDrawerCards({ renderGuestCard: false });
                     return;
                 }
-                var drawerStarsResolved = (typeof resolveDisplayStars === 'function' ? resolveDisplayStars(currentUserData) : null);
                 const statsCard = document.createElement('div');
                 statsCard.className = 'drawer-item dashboard-card backdrop-blur';
                 statsCard.innerHTML = `
@@ -22570,23 +22530,6 @@
                             <span class="drawer-item-value text-sm">${avgLength} ${getI18nText('metric.avg_len_unit') || (currentLang === 'en' ? 'chars/msg' : '字/条')}</span>
                         </div>
                         
-                        <!-- GitHub 战力同步字段（代码量、星标、时间） -->
-                        ${(githubStats && githubStats.login) ? `
-                        <div class="pt-2 mt-2 border-t border-[var(--border-ui)]/30 space-y-2">
-                            <div class="flex items-center justify-between">
-                                <span class="dashboard-metric-label text-[10px]">📦 ${getI18nText('github.total_code_size') || (currentLang === 'en' ? 'Code Quantity' : '代码量')}</span>
-                                <span class="drawer-item-value text-sm">${formatBytes(githubStats.totalCodeSize || 0)}</span>
-                            </div>
-                            <div class="flex items-center justify-between">
-                                <span class="dashboard-metric-label text-[10px]">⭐ ${getI18nText('github.total_stars') || (currentLang === 'en' ? 'Total Stars' : '星标总数')}</span>
-                                <span class="drawer-item-value text-sm">${drawerStarsResolved != null ? drawerStarsResolved.toLocaleString() : (githubStats.totalRepoStars > 0 ? githubStats.totalRepoStars.toLocaleString() : '—')}</span>
-                            </div>
-                            <div class="flex items-center justify-between">
-                                <span class="dashboard-metric-label text-[10px]">🕒 ${getI18nText('github.last_repo_update') || (currentLang === 'en' ? 'Repo Updated' : '仓库更新')}</span>
-                                <span class="drawer-item-value text-[10px] text-zinc-400">${formatSyncedAt(githubStats.latest_repo_updated_at, currentLang)}</span>
-                            </div>
-                        </div>
-                        ` : ''}
                     </div>
                     
                     <!-- 人格鉴定结果（与 index 一致：优先由 vibe_index 从 personalityNames.json 解析） -->
@@ -22636,6 +22579,7 @@
                 statsCard.style.opacity = '0';
                 statsCard.style.transform = 'translateY(12px)';
                 leftBody.insertBefore(statsCard, leftBody.firstChild);
+                normalizeLeftDrawerCardOrder();
                 
                 // 触发渐入动画
                 requestAnimationFrame(() => {
@@ -22762,7 +22706,21 @@
                     // githubStats already defined at start of function
                     var hasValidStats = githubStats && typeof githubStats === 'object' && Object.keys(githubStats).length > 0 && githubStats.login;
                     var githubCardEl;
-                    var cardOpts = { container: leftBody, onRefresh: handleGithubSync, lang: typeof currentLang !== 'undefined' ? currentLang : 'en', insertFirst: true, identity: identityForCardSt2 };
+                    var githubCardLang = typeof currentLang !== 'undefined' ? currentLang : 'en';
+                    if (typeof window.renderGithubIdentityCard === 'function') {
+                        window.renderGithubIdentityCard(identityForCardSt2, {
+                            container: leftBody,
+                            insertFirst: true,
+                            lang: githubCardLang
+                        });
+                    }
+                    var cardOpts = {
+                        container: leftBody,
+                        onRefresh: handleGithubSync,
+                        lang: githubCardLang,
+                        insertFirst: true,
+                        afterSelector: '.drawer-item[data-card="identity-config"]'
+                    };
                     if (hasValidStats) {
                         githubCardEl = window.renderGithubCard(githubStats, cardOpts);
                     } else {
@@ -22774,7 +22732,11 @@
                         if (shouldShowIdentityOnly) {
                             window.renderGithubCard(null, cardOpts);
                         } else if (typeof window.renderGithubCardLoading === 'function') {
-                            window.renderGithubCardLoading(leftBody, { lang: typeof currentLang !== 'undefined' ? currentLang : 'en', insertFirst: true });
+                            window.renderGithubCardLoading(leftBody, {
+                                lang: githubCardLang,
+                                insertFirst: true,
+                                afterSelector: '.drawer-item[data-card="identity-config"]'
+                            });
                         } else {
                             window.renderGithubCard(null, cardOpts);
                         }

@@ -1347,7 +1347,7 @@ html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
             top: var(--top-header-height, 60px); /* 在顶部 header 下方，不遮盖 header */
             width: 400px;
             height: calc(100vh - var(--top-header-height, 60px)); /* 减去 header 高度 */
-            z-index: 100; /* 高于顶部 header (z-index: 50) */
+            z-index: 130; /* 保持高于底部活跃节点抽屉，避免被遮挡 */
             pointer-events: none;
             transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         }
@@ -2918,7 +2918,7 @@ html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
             bottom: 0;
             left: 0;
             right: 0;
-            z-index: 100;
+            z-index: 90;
             transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
         

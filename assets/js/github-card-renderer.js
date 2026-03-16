@@ -165,6 +165,65 @@
         ].join('');
     }
 
+    function removeExistingCard(container, selector) {
+        if (!container || !selector) return;
+        var existing = container.querySelector(selector);
+        if (existing) existing.remove();
+    }
+
+    function insertDrawerCard(container, card, options) {
+        if (!container || !card) return;
+        options = options || {};
+        var afterSelector = options.afterSelector || '';
+        if (afterSelector) {
+            var afterNode = container.querySelector(afterSelector);
+            if (afterNode && afterNode.parentNode === container) {
+                if (afterNode.nextSibling) container.insertBefore(card, afterNode.nextSibling);
+                else container.appendChild(card);
+                try {
+                    if (typeof window.normalizeLeftDrawerCardOrder === 'function') window.normalizeLeftDrawerCardOrder();
+                } catch (_) {}
+                return;
+            }
+        }
+        if (options.insertFirst) {
+            var openclawMount = container.querySelector('#openclaw-monitor-mount');
+            if (openclawMount && openclawMount.parentNode === container) {
+                if (openclawMount.nextSibling) container.insertBefore(card, openclawMount.nextSibling);
+                else container.appendChild(card);
+                try {
+                    if (typeof window.normalizeLeftDrawerCardOrder === 'function') window.normalizeLeftDrawerCardOrder();
+                } catch (_) {}
+                return;
+            }
+            if (container.firstChild) container.insertBefore(card, container.firstChild);
+            else container.appendChild(card);
+            try {
+                if (typeof window.normalizeLeftDrawerCardOrder === 'function') window.normalizeLeftDrawerCardOrder();
+            } catch (_) {}
+            return;
+        }
+        container.appendChild(card);
+        try {
+            if (typeof window.normalizeLeftDrawerCardOrder === 'function') window.normalizeLeftDrawerCardOrder();
+        } catch (_) {}
+    }
+
+    function renderIdentityConfigCard(identity, options) {
+        options = options || {};
+        var container = options.container || (options.containerId ? document.getElementById(options.containerId) : null);
+        if (!container || !identity || typeof identity !== 'object') return null;
+        var lang = getLang(options);
+        var card = document.createElement('div');
+        card.className = 'drawer-item github-identity-card hacker-border';
+        card.setAttribute('data-card', 'identity-config');
+        card.style.cssText = 'background:' + CARD_BG + ';border-radius:8px;padding:14px;font-family:\'JetBrains Mono\',\'Fira Code\',monospace;';
+        card.innerHTML = buildIdentityBlock(identity, lang);
+        removeExistingCard(container, '.drawer-item[data-card="identity-config"]');
+        insertDrawerCard(container, card, options);
+        return card;
+    }
+
     function getLang(options) {
         var lang = (options && options.lang) || (typeof window.currentLang === 'string' ? window.currentLang : '');
         if (lang === 'zh' || lang === 'zh-CN') return 'zh';
@@ -276,6 +335,7 @@
         var desc = t(lang, 'analyzingDesc');
         var card = document.createElement('div');
         card.className = 'drawer-item github-combat-card hacker-border';
+        card.setAttribute('data-card', 'github-combat');
         card.setAttribute('data-github-combat', '1');
         card.style.cssText = 'background:' + CARD_BG + ';border-radius:8px;padding:14px;font-family:\'JetBrains Mono\',\'Fira Code\',monospace;';
         card.innerHTML = [
@@ -288,10 +348,8 @@
             '  <div class="text-[10px] text-zinc-500 mt-3">' + esc(desc) + '</div>',
             '</div>'
         ].join('');
-        var existing = container.querySelector('.github-combat-card');
-        if (existing) existing.remove();
-        var insertFirst = !!(options && options.insertFirst);
-        if (insertFirst && container.firstChild) container.insertBefore(card, container.firstChild); else container.appendChild(card);
+        removeExistingCard(container, '.github-combat-card');
+        insertDrawerCard(container, card, options);
         return card;
     }
 
@@ -434,20 +492,9 @@
         var onRefresh = typeof options.onRefresh === 'function' ? options.onRefresh : null;
         var lang = getLang(options);
 
-        var insertFirst = !!(options && options.insertFirst);
-        var identityHtml = (options && options.identity) ? buildIdentityBlock(options.identity, lang) : '';
         if (!stats || typeof stats !== 'object') {
-            var emptyCard = document.createElement('div');
-            emptyCard.className = 'drawer-item github-combat-card hacker-border';
-            emptyCard.setAttribute('data-card', 'identity-config');
-            emptyCard.setAttribute('data-github-combat', '1');
-            emptyCard.style.cssText = 'background:' + CARD_BG + ';border-radius:8px;padding:14px;font-family:\'JetBrains Mono\',\'Fira Code\',monospace;';
-            var identityOnly = !!(options && options.identity && !options.identity.isLoggedIn);
-            emptyCard.innerHTML = identityOnly ? identityHtml : (identityHtml + '<div class="p-4 text-center text-zinc-500 text-sm">' + esc(t(lang, 'syncToUnlock')) + '</div>');
-            var existing = container.querySelector('.github-combat-card');
-            if (existing) existing.remove();
-            if (insertFirst && container.firstChild) container.insertBefore(emptyCard, container.firstChild); else container.appendChild(emptyCard);
-            return emptyCard;
+            removeExistingCard(container, '.github-combat-card');
+            return null;
         }
 
         stats = normalizeGithubStats(stats);
@@ -482,18 +529,9 @@
 
         var card = document.createElement('div');
         card.className = 'drawer-item github-combat-card hacker-border';
-        card.setAttribute('data-card', 'identity-config');
+        card.setAttribute('data-card', 'github-combat');
         card.setAttribute('data-github-combat', '1');
         card.style.cssText = 'background:' + CARD_BG + ';border-radius:8px;padding:14px;font-family:\'JetBrains Mono\',\'Fira Code\',monospace;';
-
-        var identityOnlyMode = !!(options && options.identity && !options.identity.isLoggedIn);
-        if (identityOnlyMode) {
-            card.innerHTML = identityHtml;
-            var existingIdentityOnly = container.querySelector('.github-combat-card');
-            if (existingIdentityOnly) existingIdentityOnly.remove();
-            if (insertFirst && container.firstChild) container.insertBefore(card, container.firstChild); else container.appendChild(card);
-            return card;
-        }
 
         var orgsHtml = '';
         try {
@@ -509,9 +547,8 @@
             if (typeof console !== 'undefined' && console.error) console.error('[GitHubCard] organizations render error:', e);
         }
 
-        var identityBlock = identityHtml ? [identityHtml] : [];
         var combatValue = globalRanking;
-        card.innerHTML = identityBlock.concat([
+        card.innerHTML = [
             '<div class="card-header github-combat-header mb-3 flex items-center gap-3">',
             '  <div class="flex-shrink-0" style="color:#00ff41;">' + GITHUB_ICON_SVG + '</div>',
             '  <div class="flex-1 min-w-0">',
@@ -600,11 +637,10 @@
             '<div class="flex justify-end mt-3">',
             '<button type="button" class="github-combat-refresh-btn px-3 py-1.5 rounded text-xs font-bold border border-[#00ff41] text-[#00ff41] bg-transparent cursor-pointer hover:bg-[#00ff41]/10 transition-colors" style="font-family:inherit;">' + esc(t(lang, 'refresh')) + '</button>',
             '</div>'
-        ]).join('');
+        ].join('');
 
-        var existing = container.querySelector('.github-combat-card');
-        if (existing) existing.remove();
-        if (insertFirst && container.firstChild) container.insertBefore(card, container.firstChild); else container.appendChild(card);
+        removeExistingCard(container, '.github-combat-card');
+        insertDrawerCard(container, card, options);
 
         var valueEls = card.querySelectorAll('.stat-value[data-target]');
         var duration = 800;
@@ -627,7 +663,13 @@
                         if (result && result.success && result.data) {
                             var parent = card.parentNode;
                             if (parent) {
-                                renderGithubCard(result.data, { container: parent, onRefresh: onRefresh, lang: lang, insertFirst: insertFirst });
+                                renderGithubCard(result.data, {
+                                    container: parent,
+                                    onRefresh: onRefresh,
+                                    lang: lang,
+                                    insertFirst: !!options.insertFirst,
+                                    afterSelector: options.afterSelector || ''
+                                });
                             }
                             setTimeout(function () {
                                 if (typeof window.refreshUserStats === 'function') window.refreshUserStats().catch(function () {});
@@ -646,6 +688,7 @@
         return card;
     }
 
+    window.renderGithubIdentityCard = renderIdentityConfigCard;
     window.renderGithubCard = renderGithubCard;
     window.renderGithubCardLoading = renderLoadingState;
 })();
