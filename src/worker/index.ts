@@ -7671,6 +7671,248 @@ app.get('/api/v2/stats/keywords', async (c) => {
   }
 });
 
+/** OpenClaw 龙虾榜：从 openclaw_metadata 读取深层字段的辅助函数 */
+function getJsonb(obj: any, path: string): any {
+  if (!obj || !path) return null;
+  let cur: any = obj;
+  for (const seg of path.split('.')) {
+    if (cur == null || typeof cur !== 'object') return null;
+    cur = cur[seg];
+  }
+  return cur;
+}
+
+function parseNumFromPaths(row: any, paths: string[]): number {
+  const meta = row?.openclaw_metadata;
+  const stats = meta?.stats;
+  const portrait = meta?.portrait;
+  for (const p of paths) {
+    let v: any = null;
+    if (p.startsWith('stats.')) v = getJsonb(stats, p.slice(6));
+    else if (p.startsWith('portrait.')) v = getJsonb(portrait, p.slice(9));
+    else v = getJsonb(meta, p);
+    if (v != null) {
+      const n = Number(v);
+      if (Number.isFinite(n) && n >= 0) return Math.floor(n);
+    }
+  }
+  return 0;
+}
+
+function parseBigintFromPaths(row: any, paths: string[]): number {
+  const meta = row?.openclaw_metadata;
+  const stats = meta?.stats;
+  const portrait = meta?.portrait;
+  for (const p of paths) {
+    let v: any = null;
+    if (p.startsWith('stats.')) v = getJsonb(stats, p.slice(6));
+    else if (p.startsWith('portrait.')) v = getJsonb(portrait, p.slice(9));
+    else v = getJsonb(meta, p);
+    if (v != null) {
+      const n = typeof v === 'string' ? parseInt(v, 10) : Number(v);
+      if (Number.isFinite(n) && n >= 0) return Math.floor(n);
+    }
+  }
+  return 0;
+}
+
+function mapModelToCampaign(modelId: string): 'claude' | 'gpt' | 'deepseek' | 'other' {
+  const s = String(modelId || '').toLowerCase();
+  if (/claude|anthropic/i.test(s)) return 'claude';
+  if (/gpt|o1|o3|openai/i.test(s)) return 'gpt';
+  if (/deepseek/i.test(s)) return 'deepseek';
+  return 'other';
+}
+
+function mapDeviceToCampaign(device: string): 'mac' | 'windows' | 'linux' | 'other' {
+  const s = String(device || '').toLowerCase();
+  if (/mac\s*mini|macbook|imac|mac\s*studio|apple/i.test(s)) return 'mac';
+  if (/win|windows|pc/i.test(s)) return 'windows';
+  if (/linux|ubuntu|arch|fedora|debian/i.test(s)) return 'linux';
+  return 'other';
+}
+
+/**
+ * GET /api/v2/stats/openclaw
+ * 龙虾榜赛博生态看板：从 user_analysis.openclaw_metadata 聚合 7 维度数据
+ */
+app.get('/api/v2/stats/openclaw', async (c) => {
+  const env = c.env;
+  c.header('Cache-Control', 'public, max-age=60');
+
+  const empty = {
+    success: false,
+    generatedAt: new Date().toISOString(),
+    survivalTop10: [],
+    tokenTop10: [],
+    skillsTop10: [],
+    modelShare: { claude: 0, gpt: 0, deepseek: 0, other: 0, total: 0 },
+    deviceShare: [] as { id: string; label: string; icon: string; value: number; pct: number }[],
+    hourlyRhythm: Array.from({ length: 24 }, (_, i) => ({ hour: i, value: 0 })),
+    dialogTop10: [],
+  };
+
+  if (!env.SUPABASE_URL || !(env.SUPABASE_KEY || env.SUPABASE_ANON_KEY)) {
+    return c.json(empty);
+  }
+
+  try {
+    const uaUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
+    uaUrl.searchParams.set('select', 'id,user_name,avatar_url,github_login,openclaw_metadata,total_tokens,primary_model,skills_tags,updated_at,last_active_at');
+    uaUrl.searchParams.set('openclaw_metadata', 'not.is.null');
+    uaUrl.searchParams.set('order', 'updated_at.desc');
+    uaUrl.searchParams.set('limit', '500');
+
+    const rows = await fetchSupabaseJson<any[]>(env, uaUrl.toString(), {
+      headers: buildSupabaseHeaders(env),
+    }, 15000);
+
+    const arr = Array.isArray(rows) ? rows : rows ? [rows] : [];
+    if (arr.length === 0) {
+      return c.json({ ...empty, success: true });
+    }
+
+    type RankRow = { id: string; name: string; avatar: string; device?: string; primaryModel?: string; tags?: string[] };
+    const toRankRow = (r: any): RankRow => {
+      const metaStats = r?.openclaw_metadata?.stats;
+      const primaryModel =
+        (r?.primary_model as string | undefined) ||
+        (metaStats && (metaStats.top_model_id as string | undefined)) ||
+        undefined;
+      const device = getJsonb(r?.openclaw_metadata?.portrait, 'device') ?? undefined;
+      const tags =
+        Array.isArray(r?.skills_tags)
+          ? r.skills_tags
+          : metaStats && metaStats.skills_stats && typeof metaStats.skills_stats === 'object'
+            ? Object.keys(metaStats.skills_stats)
+            : [];
+      return {
+        id: String(r?.id || ''),
+        name: String(r?.user_name || r?.github_login || '匿名龙虾'),
+        avatar: String(r?.avatar_url || '') || (r?.github_login ? `https://github.com/${encodeURIComponent(r.github_login)}.png` : ''),
+        device,
+        primaryModel,
+        tags,
+      };
+    };
+
+    const nowMs = Date.now();
+    const msPerDay = 86400000;
+    const lifeDays = arr.map((r) => {
+      let days = parseNumFromPaths(r, ['portrait.lifeDays', 'portrait.life_days', 'stats.life_days', 'stats.lifeDays']);
+      if (days <= 0) {
+        const updated = r?.updated_at || r?.last_active_at;
+        if (updated) {
+          const diff = nowMs - new Date(updated).getTime();
+          days = Math.max(0, Math.floor(diff / msPerDay));
+        }
+      }
+      return { row: r, days };
+    }).filter((x) => x.days > 0);
+    lifeDays.sort((a, b) => b.days - a.days || (new Date(b.row?.last_active_at || 0).getTime() - new Date(a.row?.last_active_at || 0).getTime()));
+    const survivalTop10 = lifeDays.slice(0, 10).map((x) => ({ ...toRankRow(x.row), days: x.days }));
+
+    const totalTokens = arr.map((r) => ({
+      row: r,
+      tokens: parseBigintFromPaths(r, ['stats.totalTokens', 'stats.total_tokens']) || Number(r?.total_tokens || 0) || 0,
+    })).filter((x) => x.tokens > 0);
+    totalTokens.sort((a, b) => b.tokens - a.tokens || (new Date(b.row?.last_active_at || 0).getTime() - new Date(a.row?.last_active_at || 0).getTime()));
+    const tokenTop10 = totalTokens.slice(0, 10).map((x) => ({ ...toRankRow(x.row), totalTokens: x.tokens }));
+
+    const skillsCount = arr.map((r) => {
+      const tags = r?.skills_tags;
+      const stats = r?.openclaw_metadata?.stats;
+      let count = 0;
+      if (Array.isArray(tags)) count = tags.length;
+      else if (stats?.skills_stats && typeof stats.skills_stats === 'object') count = Object.keys(stats.skills_stats).length;
+      return { row: r, count };
+    }).filter((x) => x.count > 0);
+    skillsCount.sort((a, b) => b.count - a.count || (new Date(b.row?.last_active_at || 0).getTime() - new Date(a.row?.last_active_at || 0).getTime()));
+    const skillsTop10 = skillsCount.slice(0, 10).map((x) => ({
+      ...toRankRow(x.row),
+      skillsCount: x.count,
+      topSkills: (toRankRow(x.row).tags || []).slice(0, 5),
+    }));
+
+    const modelUsage: Record<string, number> = { claude: 0, gpt: 0, deepseek: 0, other: 0 };
+    for (const r of arr) {
+      const mu = getJsonb(r?.openclaw_metadata?.stats, 'model_usage');
+      let allocated = false;
+      if (mu && typeof mu === 'object') {
+        for (const [k, v] of Object.entries(mu)) {
+          const val = typeof v === 'number' ? v : (typeof v === 'object' && v != null && typeof (v as any).tokens === 'number' ? (v as any).tokens : Number(v) || 0);
+          if (val > 0) {
+            modelUsage[mapModelToCampaign(k)] += val;
+            allocated = true;
+          }
+        }
+      }
+      if (!allocated) {
+        const topModel = r?.primary_model || getJsonb(r?.openclaw_metadata?.stats, 'top_model_id');
+        const tokens = parseBigintFromPaths(r, ['stats.totalTokens', 'stats.total_tokens']) || Number(r?.total_tokens || 0) || 0;
+        if (topModel && tokens > 0) modelUsage[mapModelToCampaign(topModel)] += tokens;
+      }
+    }
+    const totalModel = modelUsage.claude + modelUsage.gpt + modelUsage.deepseek + modelUsage.other;
+    const modelShare = { ...modelUsage, total: totalModel };
+
+    const deviceCount: Record<string, number> = { mac: 0, windows: 0, linux: 0, other: 0 };
+    for (const r of arr) {
+      const dev = getJsonb(r?.openclaw_metadata?.portrait, 'device') || getJsonb(r?.openclaw_metadata?.stats, 'device') || '';
+      deviceCount[mapDeviceToCampaign(dev)] += 1;
+    }
+    const totalDev = deviceCount.mac + deviceCount.windows + deviceCount.linux + deviceCount.other;
+    const deviceIcons: Record<string, string> = { mac: '🍎', windows: '🪟', linux: '🐧', other: '💻' };
+    const deviceLabels: Record<string, string> = { mac: 'Mac', windows: 'Windows', linux: 'Linux', other: 'Other' };
+    const deviceShare = (['mac', 'windows', 'linux', 'other'] as const).map((id) => ({
+      id,
+      label: deviceLabels[id],
+      icon: deviceIcons[id],
+      value: deviceCount[id],
+      pct: totalDev > 0 ? Math.round((deviceCount[id] / totalDev) * 1000) / 10 : 0,
+    }));
+
+    const hourlyMap: Record<number, number> = {};
+    for (let h = 0; h < 24; h++) hourlyMap[h] = 0;
+    for (const r of arr) {
+      const heatmap = getJsonb(r?.openclaw_metadata?.stats, 'hourly_heatmap');
+      if (Array.isArray(heatmap) && heatmap.length >= 24) {
+        for (let h = 0; h < 24; h++) hourlyMap[h] += Number(heatmap[h]) || 0;
+      } else {
+        const updated = r?.updated_at || r?.last_active_at;
+        if (updated) {
+          const d = new Date(updated);
+          const h = d.getUTCHours();
+          hourlyMap[h] = (hourlyMap[h] || 0) + 1;
+        }
+      }
+    }
+    const hourlyRhythm = Array.from({ length: 24 }, (_, i) => ({ hour: i, value: hourlyMap[i] || 0 }));
+
+    const dialogRounds = arr.map((r) => ({
+      row: r,
+      rounds: parseBigintFromPaths(r, ['portrait.totalDialogRounds', 'portrait.total_dialog_rounds', 'stats.total_conversations', 'stats.records_total']),
+    })).filter((x) => x.rounds > 0);
+    dialogRounds.sort((a, b) => b.rounds - a.rounds || (new Date(b.row?.last_active_at || 0).getTime() - new Date(a.row?.last_active_at || 0).getTime()));
+    const dialogTop10 = dialogRounds.slice(0, 10).map((x) => ({ ...toRankRow(x.row), dialogRounds: x.rounds }));
+
+    return c.json({
+      success: true,
+      generatedAt: new Date().toISOString(),
+      survivalTop10,
+      tokenTop10,
+      skillsTop10,
+      modelShare,
+      deviceShare,
+      hourlyRhythm,
+      dialogTop10,
+    });
+  } catch (e: any) {
+    console.warn('[Worker] /api/v2/stats/openclaw 聚合失败:', e?.message || String(e));
+    return c.json(empty);
+  }
+});
+
 
 /**
  * 【国家摘要】GET /api/country-summary?country=CN（get_country_summary_v3）

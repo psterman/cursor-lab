@@ -4342,6 +4342,11 @@
                         onComplete: (data) => {
                             console.log('onComplete:', data);
                             setAnalysisData(data);
+                            try {
+                                if (data && (data.openclawPortrait || data.openclawSessionsSummary)) {
+                                    sessionStorage.setItem('openclaw_analysis_data', JSON.stringify(data));
+                                }
+                            } catch (e) { console.warn('[index] openclaw_analysis_data write failed', e); }
                             const vr = data?.vibeResult;
                             if (vr && (vr.rankData?.totalUsers != null || vr.statistics?.totalUsers != null)) {
                                 const total = Number(vr.rankData?.totalUsers ?? vr.statistics?.totalUsers ?? 0) || 0;
@@ -4350,20 +4355,13 @@
                             setLogs(prev => [...prev, `> ${t('upload.logs.analysisComplete')}`]);
                             setAnalysisStatusText(lang === 'en' ? 'Done' : '完成');
                             setAnalysisProgress(100);
-                            if (resolvedEngine === ENGINE_OPENCLAW) {
-                                try {
-                                    sessionStorage.setItem('openclaw_analysis_data', JSON.stringify(data || {}));
-                                    setTimeout(() => {
-                                        window.location.href = 'openclaw.html';
-                                    }, 500);
-                                    return;
-                                } catch (e) {
-                                    console.warn('openclaw redirect failed', e);
-                                }
-                            }
-                            // 500ms 淡出后再进入结果页，减少闪烁
+                            // OpenClaw 分析完成后跳转 openclaw.html 专属数据卡片页；其他引擎进 fullReport
                             setTimeout(() => {
-                                setStep('preview');
+                                if (data && (data.openclawPortrait || data.openclawSessionsSummary)) {
+                                    window.location.href = 'openclaw.html';
+                                } else {
+                                    showFullReport(data);
+                                }
                                 setIsSubmitting(false);
                             }, 500);
                         },
@@ -4403,8 +4401,10 @@
                 return Math.floor(diffMs / (1000 * 60 * 60 * 24));
             };
 
-            // 进入完整报告
-            const showFullReport = async () => {
+            // 进入完整报告（可选传入数据：分析完成后直接进入时传入，避免闭包旧值）
+            const showFullReport = async (optionalData) => {
+                const dataToUse = optionalData !== undefined && optionalData !== null ? optionalData : analysisData;
+                if (!dataToUse) return;
                 // 【性能优化】立即切换到 fullReport 页面，渲染和数据准备并行执行
                 setStep('fullReport');
                 
@@ -4469,21 +4469,21 @@
                 }
                 
                 // 【关键优化】将数据保存到全局变量（立即执行，不阻塞）
-                if (analysisData && window.analysisModule) {
-                    if (analysisData.stats) window.analysisModule.setGlobalStats(analysisData.stats);
-                    if (analysisData.vibeResult) {
-                        window.analysisModule.setVibeResult(analysisData.vibeResult);
+                if (dataToUse && window.analysisModule) {
+                    if (dataToUse.stats) window.analysisModule.setGlobalStats(dataToUse.stats);
+                    if (dataToUse.vibeResult) {
+                        window.analysisModule.setVibeResult(dataToUse.vibeResult);
                         try {
-                            const ab = analysisData.vibeResult.answer_book || analysisData.vibeResult.answerBook;
+                            const ab = dataToUse.vibeResult.answer_book || dataToUse.vibeResult.answerBook;
                             if (ab && (ab.title || ab.content)) {
                                 localStorage.setItem('user_answer_book', JSON.stringify(ab));
                             }
-                            if (analysisData.vibeResult.vibeIndex || analysisData.vibeResult.vibe_index) {
-                                localStorage.setItem('user_vibe_index', analysisData.vibeResult.vibeIndex || analysisData.vibeResult.vibe_index);
+                            if (dataToUse.vibeResult.vibeIndex || dataToUse.vibeResult.vibe_index) {
+                                localStorage.setItem('user_vibe_index', dataToUse.vibeResult.vibeIndex || dataToUse.vibeResult.vibe_index);
                             }
                         } catch { /* ignore */ }
                     }
-                    if (analysisData.chatData) window.analysisModule.setAllChatData(analysisData.chatData);
+                    if (dataToUse.chatData) window.analysisModule.setAllChatData(dataToUse.chatData);
                 }
                 
                 // 【关键优化】使用 requestAnimationFrame 完成所有渲染，避免多层嵌套 setTimeout
@@ -4522,7 +4522,7 @@
                 setTimeout(() => {
                     try {
                         const historyData = {
-                            analysisData: analysisData,
+                            analysisData: dataToUse,
                             rankings: window.userRankings || null,
                             timestamp: Date.now()
                         };

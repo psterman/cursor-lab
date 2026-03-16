@@ -9606,6 +9606,13 @@
                 }
                 return;
             }
+            if (view === 'OPENCLAW') {
+                try {
+                    if (typeof renderOpenclawBoard === 'function') renderOpenclawBoard();
+                } catch (e) { /* ignore */ }
+                done();
+                return;
+            }
             done();
         }
         window.refreshRightDrawerContent = refreshRightDrawerContent;
@@ -9649,7 +9656,8 @@
                 global: document.getElementById('panel-global-view'),
                 country: document.getElementById('panel-country-view'),
                 ranking: document.getElementById('panel-ranking-view'),
-                leaderboard: document.getElementById('panel-leaderboard-view')
+                leaderboard: document.getElementById('panel-leaderboard-view'),
+                openclaw: document.getElementById('panel-openclaw-view')
             };
             const tabs = document.querySelectorAll('.drawer-tab');
             
@@ -9783,6 +9791,15 @@
                         window.loadGitHubLeaderboard();
                     }
                     break;
+                case 'openclaw':
+                    // 龙虾榜赛博生态看板
+                    console.log('[switchView] 触发 openclaw 视图');
+                    if (typeof renderOpenclawBoard === 'function') {
+                        renderOpenclawBoard();
+                    } else if (typeof window.renderOpenclawBoard === 'function') {
+                        window.renderOpenclawBoard();
+                    }
+                    break;
             }
             
             console.log('[switchView] 已切换到:', view);
@@ -9839,6 +9856,227 @@
             
             console.log('[renderRankingView] 排行榜渲染完成');
         }
+
+        /**
+         * 龙虾榜赛博生态看板：7 维度卡片渲染
+         */
+        function renderOpenclawBoard() {
+            var grid = document.getElementById('openclaw-board-grid');
+            var genEl = document.getElementById('openclaw-generated-at');
+            if (!grid) return;
+            grid.innerHTML = '<div class="col-span-full text-center text-[#00ff41] text-sm py-6">正在同步全球龙虾数据...</div>';
+            var base = (window.API_ENDPOINT_MANAGER && window.API_ENDPOINT_MANAGER.getCurrent && window.API_ENDPOINT_MANAGER.getCurrent()) || (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content) || '';
+            var url = (base.replace(/\/$/, '') || '') + '/api/v2/stats/openclaw?_t=' + Date.now();
+            fetch(url).then(function(res) { return res.json(); }).then(function(data) {
+                var hasPayload =
+                    !!data &&
+                    typeof data === 'object' &&
+                    (Array.isArray(data.survivalTop10) ||
+                     Array.isArray(data.tokenTop10) ||
+                     Array.isArray(data.skillsTop10) ||
+                     Array.isArray(data.deviceShare) ||
+                     Array.isArray(data.hourlyRhythm) ||
+                     !!data.modelShare);
+                if (!data || (data.success === false && !hasPayload)) {
+                    grid.innerHTML = '<div class="col-span-full text-center text-zinc-500 text-xs py-8">数据源离线，正在捕捉全球龙虾指纹...</div>';
+                    if (genEl) genEl.textContent = '';
+                    return;
+                }
+                var genAt = data.generatedAt || '';
+                if (genEl) {
+                    try {
+                        var d = genAt ? new Date(genAt) : new Date();
+                        genEl.textContent = 'Synced ' + (d.getUTCHours() + ':' + String(d.getUTCMinutes()).padStart(2, '0') + ' UTC');
+                    } catch (e) { genEl.textContent = ''; }
+                }
+                var hourlyRhythm = data.hourlyRhythm || [];
+                var peakHour = 0;
+                var peakVal = 0;
+                for (var i = 0; i < hourlyRhythm.length; i++) {
+                    var v = Number(hourlyRhythm[i].value) || 0;
+                    if (v > peakVal) { peakVal = v; peakHour = i; }
+                }
+                var isNightOwl = peakHour >= 0 && peakHour <= 5;
+                grid.innerHTML = '';
+                renderOpenclawCardSurvival(grid, data.survivalTop10 || [], isNightOwl);
+                renderOpenclawCardTokens(grid, data.tokenTop10 || [], isNightOwl);
+                renderOpenclawCardSkills(grid, data.skillsTop10 || [], isNightOwl);
+                renderOpenclawCardModelShare(grid, data.modelShare || {});
+                renderOpenclawCardDeviceShare(grid, data.deviceShare || []);
+                renderOpenclawCardHourlyRhythm(grid, hourlyRhythm);
+                renderOpenclawCardDialog(grid, data.dialogTop10 || [], isNightOwl);
+            }).catch(function(err) {
+                console.warn('[renderOpenclawBoard] 请求失败:', err);
+                grid.innerHTML = '<div class="col-span-full text-center text-zinc-500 text-xs py-8">数据源离线，正在捕捉全球龙虾指纹...</div>';
+                if (genEl) genEl.textContent = '';
+            });
+        }
+        window.renderOpenclawBoard = renderOpenclawBoard;
+
+        function openclawFormatTokens(n) {
+            if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+            if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+            return String(n);
+        }
+
+        function openclawGetLabels(row, isNightOwl) {
+            var labels = [];
+            var dev = (row.device || '').toLowerCase();
+            if (/mac\s*mini|macbook|imac/i.test(dev)) labels.push('[精致寄主]');
+            if (/linux|ubuntu|arch/i.test(dev) && (row.totalTokens > 100000 || row.skillsCount > 5)) labels.push('[地下矿工]');
+            if (isNightOwl && (row.dialogRounds > 0 || row.days > 0 || row.totalTokens > 0)) labels.push('[赛博猫头鹰]');
+            return labels;
+        }
+
+        function renderOpenclawRankingCard(rootEl, type, items, valueKey, valueLabel, valueFmt, isNightOwl) {
+            if (!rootEl) return;
+            var card = document.createElement('div');
+            card.className = 'openclaw-dimension-card hacker-border clinic-card p-4 rounded-sm bg-[rgba(5,5,5,0.85)] border border-[rgba(0,255,65,0.3)] hover:border-[rgba(0,255,65,0.5)] transition-colors';
+            var titles = { longevity: '生存战力', tokens: '能量吞噬', skills: '智慧进化', dialog: '社交频率' };
+            var icons = { longevity: '🦞', tokens: '⚡', skills: '🧠', dialog: '💬' };
+            card.innerHTML = '<div class="flex items-center justify-between mb-3"><span class="text-[#00ff41] text-xs font-bold uppercase tracking-widest">' + (titles[type] || type) + '</span><span class="text-[10px] text-zinc-500">Top 10</span></div><div class="openclaw-rank-list space-y-1"></div>';
+            var list = card.querySelector('.openclaw-rank-list');
+            if (!items || items.length === 0) {
+                list.innerHTML = '<div class="text-zinc-500 text-[10px] py-4 text-center">暂无数据</div>';
+            } else {
+                items.forEach(function(item, idx) {
+                    var labels = openclawGetLabels(item, isNightOwl);
+                    var rankClass = idx === 0 ? 'rank-1' : (idx === 1 ? 'rank-2' : (idx === 2 ? 'rank-3' : ''));
+                    var val = item[valueKey];
+                    var disp = valueFmt ? valueFmt(val) : String(val);
+                    var avatar = item.avatar || (item.id ? 'https://ui-avatars.com/api/?name=' + encodeURIComponent(item.name || '?') + '&size=24' : '');
+                    var rowEl = document.createElement('div');
+                    rowEl.className = 'openclaw-rank-row flex items-center gap-2 py-1.5 px-2 rounded cursor-pointer hover:bg-[rgba(0,255,65,0.08)] transition-colors ' + rankClass;
+                    rowEl.dataset.userId = item.id || '';
+                    rowEl.dataset.userName = item.name || '';
+                    rowEl.innerHTML = '<span class="text-[10px] text-zinc-500 w-5">' + (idx + 1) + '</span>' +
+                        '<img class="w-6 h-6 rounded-full object-cover flex-shrink-0" src="' + (avatar || '') + '" alt="" onerror="this.style.display=\'none\'" />' +
+                        '<div class="flex-1 min-w-0"><span class="text-[11px] text-white truncate block">' + (item.name || '匿名') + '</span>' +
+                        (labels.length ? '<span class="text-[9px] text-[#00ff41]/80">' + labels.join(' ') + '</span>' : '') + '</div>' +
+                        '<span class="text-[11px] font-mono text-[#00ff41] font-bold">' + disp + '</span>';
+                    rowEl.onclick = function() { if (typeof window.focusOpenclawUser === 'function') window.focusOpenclawUser(item); };
+                    list.appendChild(rowEl);
+                });
+            }
+            rootEl.appendChild(card);
+        }
+
+        function renderOpenclawCardSurvival(root, items, isNightOwl) {
+            renderOpenclawRankingCard(root, 'longevity', items, 'days', '天', function(v) { return v + ' 天'; }, isNightOwl);
+        }
+        function renderOpenclawCardTokens(root, items, isNightOwl) {
+            renderOpenclawRankingCard(root, 'tokens', items, 'totalTokens', 'Tokens', openclawFormatTokens, isNightOwl);
+        }
+        function renderOpenclawCardSkills(root, items, isNightOwl) {
+            renderOpenclawRankingCard(root, 'skills', items, 'skillsCount', '技能点', function(v) { return v + ''; }, isNightOwl);
+        }
+        function renderOpenclawCardDialog(root, items, isNightOwl) {
+            renderOpenclawRankingCard(root, 'dialog', items, 'dialogRounds', '回合', function(v) { return v + ' 回合'; }, isNightOwl);
+        }
+
+        function renderOpenclawCardModelShare(root, modelShare) {
+            var card = document.createElement('div');
+            card.className = 'openclaw-dimension-card hacker-border clinic-card p-4 rounded-sm bg-[rgba(5,5,5,0.85)] border border-[rgba(0,255,65,0.3)] hover:border-[rgba(0,255,65,0.5)] transition-colors';
+            var total = modelShare.total || 1;
+            var arr = [
+                { name: 'Claude', key: 'claude', color: '#d97706' },
+                { name: 'GPT', key: 'gpt', color: '#10b981' },
+                { name: 'DeepSeek', key: 'deepseek', color: '#3b82f6' },
+                { name: 'Other', key: 'other', color: '#6b7280' }
+            ];
+            var data = arr.map(function(x) {
+                var v = Number(modelShare[x.key]) || 0;
+                return { value: v, name: x.name, pct: total > 0 ? Math.round((v / total) * 1000) / 10 : 0 };
+            }).filter(function(x) { return x.value > 0; });
+            var pkText = '';
+            if (data.length >= 2) {
+                data.sort(function(a, b) { return b.pct - a.pct; });
+                var lead = data[0], second = data[1];
+                pkText = lead.name + ' 阵营当前对 ' + second.name + ' 形成 ' + (lead.pct - second.pct).toFixed(0) + '% 优势';
+            }
+            card.innerHTML = '<div class="flex items-center justify-between mb-3"><span class="text-[#00ff41] text-xs font-bold uppercase tracking-widest">血统分布</span></div>' +
+                '<div id="openclaw-model-share-chart" style="height:160px;width:100%;"></div>' +
+                (pkText ? '<p class="text-[10px] text-[#00ff41]/80 mt-2 font-mono">' + pkText + '</p>' : '');
+            root.appendChild(card);
+            if (typeof echarts !== 'undefined' && data.length > 0) {
+                setTimeout(function() {
+                    var dom = document.getElementById('openclaw-model-share-chart');
+                    if (!dom) return;
+                    var ch = echarts.init(dom, null, { renderer: 'canvas' });
+                    ch.setOption({
+                        tooltip: { trigger: 'item' },
+                        series: [{ type: 'pie', radius: ['40%', '70%'], data: data.map(function(d) { return { value: d.value, name: d.name }; }), label: { color: '#9ca3af' }, itemStyle: { borderColor: '#0a0a0a', borderWidth: 2 } }],
+                        color: ['#d97706', '#10b981', '#3b82f6', '#6b7280']
+                    });
+                    window.addEventListener('resize', function() { ch.resize(); });
+                }, 50);
+            }
+        }
+
+        function renderOpenclawCardDeviceShare(root, deviceShare) {
+            var card = document.createElement('div');
+            card.className = 'openclaw-dimension-card hacker-border clinic-card p-4 rounded-sm bg-[rgba(5,5,5,0.85)] border border-[rgba(0,255,65,0.3)] hover:border-[rgba(0,255,65,0.5)] transition-colors';
+            var list = Array.isArray(deviceShare) ? deviceShare : [];
+            var mac = (list.find(function(d) { return d.id === 'mac'; }) || {}).value || 0;
+            var win = (list.find(function(d) { return d.id === 'windows'; }) || {}).value || 0;
+            var pkText = '';
+            if (mac > 0 && win > 0) {
+                var diff = Math.round(((mac - win) / win) * 100);
+                pkText = diff >= 0 ? 'Mac 阵营目前的算力产出正领先 Windows ' + diff + '%' : 'Windows 阵营暂时领先 Mac ' + (-diff) + '%';
+            }
+            var rows = list.map(function(d) {
+                return '<div class="flex items-center justify-between py-1.5"><span class="text-[11px] flex items-center gap-2">' + (d.icon || '') + ' ' + (d.label || d.id) + '</span><span class="text-[11px] font-mono text-[#00ff41]">' + (d.pct || 0) + '%</span></div><div class="h-1 bg-zinc-800 rounded overflow-hidden"><div class="h-full bg-[#00ff41]/60" style="width:' + (d.pct || 0) + '%"></div></div>';
+            }).join('');
+            card.innerHTML = '<div class="flex items-center justify-between mb-3"><span class="text-[#00ff41] text-xs font-bold uppercase tracking-widest">寄生宿主</span></div>' +
+                '<div class="space-y-2">' + (rows || '<div class="text-zinc-500 text-[10px] py-4 text-center">暂无数据</div>') + '</div>' +
+                (pkText ? '<p class="text-[10px] text-[#00ff41]/80 mt-2 font-mono">' + pkText + '</p>' : '');
+            root.appendChild(card);
+        }
+
+        function renderOpenclawCardHourlyRhythm(root, hourlyRhythm) {
+            var card = document.createElement('div');
+            card.className = 'openclaw-dimension-card hacker-border clinic-card p-4 rounded-sm bg-[rgba(5,5,5,0.85)] border border-[rgba(0,255,65,0.3)] hover:border-[rgba(0,255,65,0.5)] transition-colors';
+            card.innerHTML = '<div class="flex items-center justify-between mb-3"><span class="text-[#00ff41] text-xs font-bold uppercase tracking-widest">生物节律</span></div>' +
+                '<div id="openclaw-hourly-rhythm-chart" style="height:140px;width:100%;"></div>';
+            root.appendChild(card);
+            var data = (hourlyRhythm || []).map(function(d) { return [d.hour, d.value || 0]; });
+            if (typeof echarts !== 'undefined' && data.length > 0) {
+                setTimeout(function() {
+                    var dom = document.getElementById('openclaw-hourly-rhythm-chart');
+                    if (!dom) return;
+                    var ch = echarts.init(dom, null, { renderer: 'canvas' });
+                    ch.setOption({
+                        tooltip: { trigger: 'axis' },
+                        xAxis: { type: 'category', data: data.map(function(d) { return d[0] + 'h'; }), axisLabel: { color: '#9ca3af' } },
+                        yAxis: { type: 'value', axisLabel: { color: '#9ca3af' }, splitLine: { lineStyle: { color: 'rgba(0,255,65,0.1)' } } },
+                        series: [{ type: 'line', data: data.map(function(d) { return d[1]; }), smooth: true, lineStyle: { color: '#00ff41' }, areaStyle: { color: 'rgba(0,255,65,0.15)' } }],
+                        grid: { left: 40, right: 20, top: 20, bottom: 30 }
+                    });
+                    window.addEventListener('resize', function() { ch.resize(); });
+                }, 50);
+            }
+        }
+
+        function focusOpenclawUser(row) {
+            if (!row) return;
+            window.__openclawActiveUser = row;
+            var leftDrawer = document.getElementById('left-drawer');
+            if (leftDrawer) leftDrawer.classList.add('active');
+            var card = document.getElementById('openclaw-monitor-card');
+            if (card) {
+                var set = function(id, val) { var el = document.getElementById(id); if (el) el.textContent = String(val != null && val !== '' ? val : '--'); };
+                set('oc-longevity', row.days != null ? row.days + ' 天' : '--');
+                set('oc-genome', row.primaryModel || '--');
+                set('oc-tokens', row.totalTokens != null ? openclawFormatTokens(row.totalTokens) : '--');
+                var skillsEl = document.getElementById('oc-skills');
+                if (skillsEl) {
+                    var tags = row.tags || row.topSkills || [];
+                    skillsEl.innerHTML = Array.isArray(tags) && tags.length ? tags.slice(0, 8).map(function(t) { return '<span class="oc-tag">' + String(t || '').trim() + '</span>'; }).join('') : '--';
+                }
+                set('oc-github-sync', '查看中: ' + (row.name || '匿名'));
+            }
+        }
+        window.focusOpenclawUser = focusOpenclawUser;
 
         /** 22 个天梯维度 key（与后端 leaderboard_snapshots 一致） */
         var LEADERBOARD_METRIC_KEYS = [

@@ -682,6 +682,27 @@ html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
             border-radius: var(--radius-card) 0 0 0;
         }
 
+        /* 龙虾榜前三名呼吸灯动效 */
+        @keyframes openclaw-pulse-glow {
+            0% { box-shadow: 0 0 4px currentColor; opacity: 0.9; }
+            100% { box-shadow: 0 0 12px currentColor; opacity: 1; }
+        }
+        .openclaw-rank-row.rank-1 {
+            color: #fbbf24;
+            border-left: 2px solid #fbbf24;
+            animation: openclaw-pulse-glow 2.4s ease-in-out infinite alternate;
+        }
+        .openclaw-rank-row.rank-2 {
+            color: #9ca3af;
+            border-left: 2px solid #9ca3af;
+            animation: openclaw-pulse-glow 2.4s ease-in-out infinite alternate 0.3s;
+        }
+        .openclaw-rank-row.rank-3 {
+            color: #d97706;
+            border-left: 2px solid #d97706;
+            animation: openclaw-pulse-glow 2.4s ease-in-out infinite alternate 0.6s;
+        }
+
         /* 天梯榜 22 卡片网格 */
         #leaderboards-grid {
             display: grid;

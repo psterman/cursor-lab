@@ -360,7 +360,7 @@
                     <span class="tab-icon">🏰</span>
                     <span class="tab-text" data-t="tab.country" data-i18n="tab.country">国家</span>
                 </button>
-                <button type="button" class="drawer-tab" data-tab="openclaw" onclick="(function(){ window.__statsSourceType='openclaw'; if (typeof switchView==='function') switchView('country'); })()">
+                <button type="button" class="drawer-tab" data-tab="openclaw" onclick="(function(){ window.__statsSourceType='openclaw'; if (typeof switchView==='function') switchView('openclaw'); })()">
                     <span class="tab-icon">🦞</span>
                     <span class="tab-text" data-t="tab.openclaw" data-i18n="tab.openclaw">龙虾榜</span>
                 </button>
@@ -387,6 +387,18 @@
                         <p class="text-zinc-500 text-xs mt-1">22 维度 · 昨日最强 / 全网最强</p>
                     </div>
                     <div id="leaderboards-grid" class="flex-1 overflow-y-auto p-4 min-h-0" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; align-content: start;"></div>
+                </div>
+                <!-- 【龙虾榜】赛博生态看板：7 维度卡片 Grid -->
+                <div id="panel-openclaw-view" class="right-drawer-panel hidden flex-col h-full overflow-y-auto">
+                    <div class="openclaw-live-node-bar flex items-center gap-2 px-4 py-2 border-b border-[#00ff41]/20 bg-[rgba(0,255,65,0.03)]">
+                        <span class="w-2 h-2 rounded-full bg-[#00ff41] animate-pulse"></span>
+                        <span class="text-[10px] font-mono text-[#00ff41]/90 uppercase tracking-widest">Live Node // Global Syncing</span>
+                        <span id="openclaw-generated-at" class="ml-auto text-[9px] text-zinc-500 font-mono"></span>
+                    </div>
+                    <div id="openclaw-board-grid" class="flex-1 overflow-y-auto p-4 min-h-0" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; align-content: start;">
+                        <!-- 7 维度卡片由 renderOpenclawBoard 动态填充 -->
+                        <div class="col-span-full text-center text-zinc-500 text-xs py-8">正在捕捉全球龙虾指纹...</div>
+                    </div>
                 </div>
                 <!-- 【新增】排行榜视图 - 六个全球排行榜卡片 + 高分图谱 -->
                 <div id="panel-ranking-view" class="right-drawer-panel hidden flex-col h-full overflow-y-auto">
