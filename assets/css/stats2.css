@@ -320,7 +320,7 @@ body.stats2-guest-mode #left-drawer-body .drawer-item.dashboard-card,
 body.stats2-guest-mode #left-drawer-body .drawer-item.backdrop-blur,
 body.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
 body.stats2-guest-mode #left-drawer-body .drawer-item.github-combat-card:not([data-card="identity-config"]),
-body.stats2-guest-mode #left-drawer-body .drawer-item.hacker-border:not([data-card="identity-config"]),
+body.stats2-guest-mode #left-drawer-body .drawer-item.hacker-border:not([data-card="identity-config"]):not([data-card="openclaw-monitor"]),
 body.stats2-guest-mode #left-drawer-body .drawer-skeleton-card,
 body.stats2-guest-mode #left-drawer-body #syncing-overlay-card,
 body.stats2-guest-mode #left-drawer-body [data-github-combat="1"],
@@ -330,7 +330,7 @@ html.stats2-guest-mode #left-drawer-body .drawer-item.dashboard-card,
 html.stats2-guest-mode #left-drawer-body .drawer-item.backdrop-blur,
 html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
 html.stats2-guest-mode #left-drawer-body .drawer-item.github-combat-card:not([data-card="identity-config"]),
-html.stats2-guest-mode #left-drawer-body .drawer-item.hacker-border:not([data-card="identity-config"]),
+html.stats2-guest-mode #left-drawer-body .drawer-item.hacker-border:not([data-card="identity-config"]):not([data-card="openclaw-monitor"]),
 html.stats2-guest-mode #left-drawer-body .drawer-skeleton-card,
 html.stats2-guest-mode #left-drawer-body #syncing-overlay-card,
 html.stats2-guest-mode #left-drawer-body [data-github-combat="1"],
@@ -340,7 +340,7 @@ html.stats2-guest-mode #left-drawer-body #left-drawer-wordcloud-wrap,
 #left-drawer-body.stats2-guest-mode .drawer-item.backdrop-blur,
 #left-drawer-body.stats2-guest-mode .drawer-item.clinic-card,
 #left-drawer-body.stats2-guest-mode .drawer-item.github-combat-card:not([data-card="identity-config"]),
-#left-drawer-body.stats2-guest-mode .drawer-item.hacker-border:not([data-card="identity-config"]),
+#left-drawer-body.stats2-guest-mode .drawer-item.hacker-border:not([data-card="identity-config"]):not([data-card="openclaw-monitor"]),
 #left-drawer-body.stats2-guest-mode .drawer-skeleton-card,
 #left-drawer-body.stats2-guest-mode #syncing-overlay-card,
 #left-drawer-body.stats2-guest-mode [data-github-combat="1"],
@@ -353,7 +353,7 @@ body.stats2-private-hidden #left-drawer-body .drawer-item.dashboard-card,
 body.stats2-private-hidden #left-drawer-body .drawer-item.backdrop-blur,
 body.stats2-private-hidden #left-drawer-body .drawer-item.clinic-card,
 body.stats2-private-hidden #left-drawer-body .drawer-item.github-combat-card:not([data-card="identity-config"]),
-body.stats2-private-hidden #left-drawer-body .drawer-item.hacker-border:not([data-card="identity-config"]),
+body.stats2-private-hidden #left-drawer-body .drawer-item.hacker-border:not([data-card="identity-config"]):not([data-card="openclaw-monitor"]),
 body.stats2-private-hidden #left-drawer-body .drawer-skeleton-card,
 body.stats2-private-hidden #left-drawer-body #syncing-overlay-card,
 body.stats2-private-hidden #left-drawer-body [data-github-combat="1"],
@@ -363,7 +363,7 @@ html.stats2-private-hidden #left-drawer-body .drawer-item.dashboard-card,
 html.stats2-private-hidden #left-drawer-body .drawer-item.backdrop-blur,
 html.stats2-private-hidden #left-drawer-body .drawer-item.clinic-card,
 html.stats2-private-hidden #left-drawer-body .drawer-item.github-combat-card:not([data-card="identity-config"]),
-html.stats2-private-hidden #left-drawer-body .drawer-item.hacker-border:not([data-card="identity-config"]),
+html.stats2-private-hidden #left-drawer-body .drawer-item.hacker-border:not([data-card="identity-config"]):not([data-card="openclaw-monitor"]),
 html.stats2-private-hidden #left-drawer-body .drawer-skeleton-card,
 html.stats2-private-hidden #left-drawer-body #syncing-overlay-card,
 html.stats2-private-hidden #left-drawer-body [data-github-combat="1"],
@@ -373,7 +373,7 @@ html.stats2-private-hidden #left-drawer-body #left-drawer-wordcloud-wrap,
 #left-drawer-body.stats2-private-hidden .drawer-item.backdrop-blur,
 #left-drawer-body.stats2-private-hidden .drawer-item.clinic-card,
 #left-drawer-body.stats2-private-hidden .drawer-item.github-combat-card:not([data-card="identity-config"]),
-#left-drawer-body.stats2-private-hidden .drawer-item.hacker-border:not([data-card="identity-config"]),
+#left-drawer-body.stats2-private-hidden .drawer-item.hacker-border:not([data-card="identity-config"]):not([data-card="openclaw-monitor"]),
 #left-drawer-body.stats2-private-hidden .drawer-skeleton-card,
 #left-drawer-body.stats2-private-hidden #syncing-overlay-card,
 #left-drawer-body.stats2-private-hidden [data-github-combat="1"],
@@ -2312,6 +2312,82 @@ html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
             border-color: var(--accent-terminal);
             transform: translateY(-2px);
             box-shadow: 0 0 20px rgba(0, 255, 65, 0.1);
+        }
+
+        /* OpenClaw 个人数据监视器卡片 */
+        .openclaw-monitor-card {
+            font-family: 'JetBrains Mono', var(--font-mono-stack), monospace;
+            background: linear-gradient(165deg, rgba(5, 5, 5, 0.95), rgba(8, 18, 12, 0.92));
+            border-color: rgba(0, 255, 65, 0.45);
+            box-shadow: 0 0 16px rgba(0, 255, 65, 0.12), inset 0 0 12px rgba(0, 255, 65, 0.04);
+        }
+        .openclaw-monitor-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(0, 255, 65, 0.2);
+        }
+        .openclaw-monitor-title {
+            color: var(--accent-terminal, #00ff41);
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+        .openclaw-monitor-body {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .openclaw-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+        }
+        .openclaw-row .label {
+            color: rgba(0, 255, 65, 0.7);
+            font-size: 10px;
+            flex-shrink: 0;
+        }
+        .openclaw-row > span:last-child {
+            color: var(--accent-terminal, #00ff41);
+            font-variant-numeric: tabular-nums;
+        }
+        .openclaw-row-skills {
+            align-items: flex-start;
+        }
+        .openclaw-row-skills .oc-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            justify-content: flex-end;
+        }
+        .oc-tag {
+            padding: 2px 6px;
+            font-size: 9px;
+            background: rgba(0, 255, 65, 0.15);
+            border: 1px solid rgba(0, 255, 65, 0.35);
+            border-radius: 2px;
+            color: var(--accent-terminal, #00ff41);
+        }
+        .oc-token-bar {
+            display: inline-block;
+            width: 60px;
+            height: 6px;
+            background: rgba(0, 255, 65, 0.15);
+            border-radius: 2px;
+            overflow: hidden;
+            vertical-align: middle;
+            margin-left: 6px;
+        }
+        .oc-token-fill {
+            height: 100%;
+            background: linear-gradient(90deg, rgba(0, 255, 65, 0.6), var(--accent-terminal, #00ff41));
+            border-radius: 2px;
+            transition: width 0.3s ease;
         }
 
         /* =========================

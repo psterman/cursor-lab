@@ -3500,6 +3500,27 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
       }
     });
 
+    // 同步更新 public.user_analysis：total_tokens, primary_model, skills_tags, last_active_at
+    const skillsTags = body.skills_tags && Array.isArray(body.skills_tags)
+      ? body.skills_tags
+      : (body.skills_stats && typeof body.skills_stats === 'object')
+        ? Object.keys(body.skills_stats).slice(0, 20)
+        : [];
+    const patchPayload: Record<string, unknown> = {
+      total_tokens: Math.max(0, toNum(body.total_tokens, 0)),
+      primary_model: body.top_model_id && String(body.top_model_id).trim() || null,
+      skills_tags: skillsTags,
+      last_active_at: new Date().toISOString(),
+    };
+    const uaPatchUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(user_id)}`;
+    await fetch(uaPatchUrl, {
+      method: 'PATCH',
+      headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(patchPayload),
+    }).catch((err) => {
+      console.warn('[Worker] /api/v2/openclaw/analyze user_analysis PATCH 失败（不阻断）:', err?.message);
+    });
+
     return c.json({ success: true });
   } catch (err: any) {
     console.error('[Worker] /api/v2/openclaw/analyze 错误:', err);

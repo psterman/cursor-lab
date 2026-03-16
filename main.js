@@ -4018,6 +4018,34 @@ async function handleFileUpload(event, type, callbacks = {}) {
         console.warn('[Main] OpenClaw 同步失败', e);
       }
     }
+    // 【OpenClaw 数据流】将 openclawPortrait 合并进 last_analysis_data，供 stats2 左侧抽屉监视器读取
+    if (openclawPortrait && sourceEngine === 'openclaw' && typeof localStorage !== 'undefined') {
+      try {
+        let existing = {};
+        const raw = localStorage.getItem('last_analysis_data');
+        if (raw) {
+          try {
+            existing = JSON.parse(raw);
+          } catch (_) {}
+        }
+        const merged = {
+          ...existing,
+          openclawPortrait,
+          stats: {
+            ...(existing.stats || {}),
+            ...(globalStats || {}),
+            modelUsage: globalStats?.modelUsage || existing.stats?.modelUsage,
+            usage: globalStats?.usage || existing.stats?.usage,
+            earliestFileTime: globalStats?.earliestFileTime || existing.stats?.earliestFileTime,
+            skillsByName: globalStats?.skillsByName || existing.stats?.skillsByName,
+            skillsUsage: globalStats?.skillsUsage || existing.stats?.skillsUsage,
+          },
+        };
+        localStorage.setItem('last_analysis_data', JSON.stringify(merged));
+      } catch (e) {
+        console.warn('[Main] OpenClaw last_analysis_data 写入失败', e);
+      }
+    }
     if (onComplete) {
       const payload = {
         stats: globalStats,

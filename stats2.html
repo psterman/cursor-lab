@@ -283,6 +283,22 @@
                 </div>
             </div>
             <div class="drawer-body left-drawer-body" id="left-drawer-body">
+                <!-- OpenClaw 监视器挂载点（脚本依赖此 id 定位容器） -->
+                <div id="openclaw-monitor-mount">
+                <div id="openclaw-monitor-card" class="drawer-item openclaw-monitor-card hacker-border" data-card="openclaw-monitor">
+                    <div class="openclaw-monitor-header">
+                        <span class="drawer-icon pulse">◉</span>
+                        <span class="openclaw-monitor-title">OpenClaw 个人数据监视器</span>
+                    </div>
+                    <div class="openclaw-monitor-body font-mono text-[11px]">
+                        <div class="openclaw-row"><span class="label">寿命 (Longevity)</span><span id="oc-longevity">--</span></div>
+                        <div class="openclaw-row"><span class="label">基因模型 (Genome)</span><span id="oc-genome">--</span></div>
+                        <div class="openclaw-row"><span class="label">生物能量 (Tokens)</span><span id="oc-tokens">--</span></div>
+                        <div class="openclaw-row openclaw-row-skills"><span class="label">技能树 (Skills)</span><div id="oc-skills" class="oc-tags"></div></div>
+                        <div class="openclaw-row"><span class="label">任务状态</span><span id="oc-github-sync">--</span></div>
+                    </div>
+                </div>
+                </div>
                 <!-- 上方可滚动：矩阵绿天梯榜 -->
                 <div class="left-drawer-scroll" id="left-drawer-scroll">
                     <div id="global-ranking-area" class="space-y-6 block"></div>
@@ -811,6 +827,7 @@
     <script src="assets/js/stats-data-service.js" defer></script>
     <script src="assets/js/stats-ui-renderer.js" defer></script>
     <script src="assets/js/github-card-renderer.js" defer></script>
+    <script src="assets/js/openclaw-monitor.js" defer></script>
     <script src="assets/js/stats2.js" defer></script>
 </body>
 </html>

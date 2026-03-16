@@ -4531,6 +4531,7 @@
                                 var leftBody = document.getElementById('left-drawer-body');
                                 if (leftBody && typeof renderUserStatsCards === 'function') renderUserStatsCards(leftBody, getBestUserRecordForStats(merged));
                                 if (typeof renderRankCards === 'function' && (merged.id || merged.fingerprint)) renderRankCards(merged);
+                                if (typeof window.refreshOpenClawMonitor === 'function') window.refreshOpenClawMonitor();
                             } catch (e) { console.warn('[updateCountryDashboard] 注入左侧名片失败:', e); }
                             try { if (typeof window.highlightSelectedCountry === 'function') window.highlightSelectedCountry(); } catch (e) {}
                         }
@@ -5082,6 +5083,7 @@
                         if (lb && window.currentUser && typeof renderUserStatsCards === 'function') {
                             renderUserStatsCards(lb, getBestUserRecordForStats(window.currentUser));
                         }
+                        if (typeof window.refreshOpenClawMonitor === 'function') window.refreshOpenClawMonitor();
                     }
                 };
             }
@@ -8022,10 +8024,18 @@
                 if (leftBody) {
                     const isGuestDrawerMode = (typeof isGuestGatePassed === 'function' && isGuestGatePassed());
                     const wordcloudCard = document.getElementById('left-drawer-wordcloud-wrap');
+                    const openclawMount = document.getElementById('openclaw-monitor-mount');
+                    const leftDrawerScroll = document.getElementById('left-drawer-scroll');
                     const identityCard = isGuestDrawerMode ? leftBody.querySelector('.drawer-item[data-card="identity-config"]') : null;
                     const tempHolder = document.createDocumentFragment();
                     if (identityCard && identityCard.parentNode) {
                         tempHolder.appendChild(identityCard);
+                    }
+                    if (openclawMount && openclawMount.parentNode) {
+                        tempHolder.appendChild(openclawMount);
+                    }
+                    if (leftDrawerScroll && leftDrawerScroll.parentNode) {
+                        tempHolder.appendChild(leftDrawerScroll);
                     }
                     if (wordcloudCard && wordcloudCard.parentNode) {
                         tempHolder.appendChild(wordcloudCard);
@@ -8850,8 +8860,10 @@
                     const userForStats = getBestUserRecordForStats(currentUser);
                     console.log('[Drawer] 📊 开始渲染用户统计卡片，使用', userForStats !== currentUser ? 'allData 中的完整记录' : '当前用户记录');
                     renderUserStatsCards(leftBody, userForStats);
+                    if (typeof window.refreshOpenClawMonitor === 'function') window.refreshOpenClawMonitor();
                 } else {
                     console.log('[Drawer] ⚠️ 未找到用户数据，跳过统计卡片渲染');
+                    if (typeof window.refreshOpenClawMonitor === 'function') window.refreshOpenClawMonitor();
                     // 即使没有匹配到用户，如果 localStorage 中有 fingerprint：
                     // - 先尝试直接从 v_unified_analysis_v2 按 fingerprint 拉取（避免一直 WAIT）
                     // - 失败则有限次数重试，最终给出明确提示（避免无限“处理中”）
@@ -20757,6 +20769,7 @@
                     var best = typeof getBestUserRecordForStats === 'function' ? getBestUserRecordForStats(userRecord) : userRecord;
                     renderUserStatsCards(leftBody, best);
                 }
+                if (typeof window.refreshOpenClawMonitor === 'function') window.refreshOpenClawMonitor();
                 console.log('[SWR] ✅ 已从缓存展示界面');
             } catch (e) { if (typeof console !== 'undefined' && console.warn) console.warn('[SWR] loadFromSWRCache:', e); }
         }
@@ -26887,6 +26900,7 @@
                     
                     // 刷新排名卡片
                     renderRankCards(currentUser);
+                    if (typeof window.refreshOpenClawMonitor === 'function') window.refreshOpenClawMonitor();
                     
                     // 如果左侧抽屉已打开，用当前用户（已合并校准）刷新；若已锁定校准则强制显示校准国家，避免竟态导致切回 IP 定位
                     const leftDrawer = document.getElementById('left-drawer');
