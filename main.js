@@ -3398,7 +3398,7 @@ async function handleFileUpload(event, type, callbacks = {}) {
             cache: { cacheReadSum: 0, cacheWriteSum: 0, hitRate: 0 },
             cost: { totalCostUsd: 0 },
             model: { modelProvider: null, model: null, uniqueProviders: [], uniqueModels: [] },
-            channel: { lastChannel: [], originProvider: [], originSurface: [] },
+            channel: { lastChannel: [], originProvider: [], originSurface: [], deliveryChannel: [], routeHints: [] },
             updatedAt: null,
             lastActiveAt: null,
             skills: [],
@@ -3423,6 +3423,8 @@ async function handleFileUpload(event, type, callbacks = {}) {
             _channelSet: new Set(),
             _originProviderSet: new Set(),
             _originSurfaceSet: new Set(),
+            _deliveryChannelSet: new Set(),
+            _routeHintSet: new Set(),
             _skillsSet: new Set(),
             _toolSet: new Set(),
             _updatedAtMs: null,
@@ -3505,9 +3507,13 @@ async function handleFileUpload(event, type, callbacks = {}) {
 
             const lastChannel = getNested(entry, 'lastChannel') ?? getNested(entry, 'last_channel');
             addToSet(summary._channelSet, lastChannel);
+            addToSet(summary._deliveryChannelSet, pickString(entry, ['deliveryContext.channel', 'delivery_context.channel']));
             const origin = entry.origin && typeof entry.origin === 'object' ? entry.origin : {};
             addToSet(summary._originProviderSet, pickString(origin, ['provider']) || pickString(entry, ['origin.provider']));
             addToSet(summary._originSurfaceSet, pickString(origin, ['surface']) || pickString(entry, ['origin.surface']));
+            addToSet(summary._routeHintSet, pickString(entry, ['deliveryContext.to', 'delivery_context.to', 'lastTo', 'last_to']));
+            addToSet(summary._routeHintSet, pickString(origin, ['to', 'from', 'label']));
+            addToSet(summary._routeHintSet, pickString(entry, ['origin.to', 'origin.from', 'origin.label']));
 
             const updatedAt = pickTimestamp(entry, [
               'updatedAt', 'updated_at', 'lastActiveAt', 'last_active_at',
@@ -3643,6 +3649,8 @@ async function handleFileUpload(event, type, callbacks = {}) {
           summary.channel.lastChannel = [...summary._channelSet];
           summary.channel.originProvider = [...summary._originProviderSet];
           summary.channel.originSurface = [...summary._originSurfaceSet];
+          summary.channel.deliveryChannel = [...summary._deliveryChannelSet];
+          summary.channel.routeHints = [...summary._routeHintSet];
           summary.skills = [...summary._skillsSet];
           summary.tools.toolNames = [...summary._toolSet];
           delete summary._providerSet;
@@ -3650,6 +3658,8 @@ async function handleFileUpload(event, type, callbacks = {}) {
           delete summary._channelSet;
           delete summary._originProviderSet;
           delete summary._originSurfaceSet;
+          delete summary._deliveryChannelSet;
+          delete summary._routeHintSet;
           delete summary._skillsSet;
           delete summary._toolSet;
           delete summary._updatedAtMs;
@@ -4031,6 +4041,7 @@ async function handleFileUpload(event, type, callbacks = {}) {
         const merged = {
           ...existing,
           openclawPortrait,
+          openclawSessionsSummary: openclawSessionsSummary || existing.openclawSessionsSummary || null,
           stats: {
             ...(existing.stats || {}),
             ...(globalStats || {}),
