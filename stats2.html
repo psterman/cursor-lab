@@ -283,8 +283,7 @@
                 </div>
             </div>
             <div class="drawer-body left-drawer-body" id="left-drawer-body">
-                <!-- OpenClaw 监视器挂载点（脚本依赖此 id 定位容器） -->
-                <div id="openclaw-monitor-mount">
+                <!-- OpenClaw 个人数据监视器卡片（顶部） -->
                 <div id="openclaw-monitor-card" class="drawer-item openclaw-monitor-card hacker-border" data-card="openclaw-monitor">
                     <div class="openclaw-monitor-header">
                         <span class="drawer-icon pulse">◉</span>
@@ -297,7 +296,6 @@
                         <div class="openclaw-row openclaw-row-skills"><span class="label">技能树 (Skills)</span><div id="oc-skills" class="oc-tags"></div></div>
                         <div class="openclaw-row"><span class="label">任务状态</span><span id="oc-github-sync">--</span></div>
                     </div>
-                </div>
                 </div>
                 <!-- 上方可滚动：矩阵绿天梯榜 -->
                 <!-- 最下方：本国词云卡片（左抽屉风格、自适应高度） -->
@@ -361,6 +359,10 @@
                 <button type="button" class="drawer-tab" data-tab="country" onclick="switchView('country')">
                     <span class="tab-icon">🏰</span>
                     <span class="tab-text" data-t="tab.country" data-i18n="tab.country">国家</span>
+                </button>
+                <button type="button" class="drawer-tab" data-tab="openclaw" onclick="(function(){ window.__statsSourceType='openclaw'; if (typeof switchView==='function') switchView('country'); })()">
+                    <span class="tab-icon">🦞</span>
+                    <span class="tab-text" data-t="tab.openclaw" data-i18n="tab.openclaw">龙虾榜</span>
                 </button>
             </div>
             
@@ -502,9 +504,16 @@
 
                 <!-- [01.7] COUNTRY TOTALS -->
                 <div class="clinic-card">
-                    <div class="card-header">
-                        <i data-lucide="bar-chart-3"></i>
-                        <span class="card-title" data-t="panel.country_totals" data-i18n="panel.country_totals">国家累计</span>
+                    <div class="card-header flex justify-between items-center">
+                        <div class="flex items-center gap-2">
+                            <i data-lucide="bar-chart-3"></i>
+                            <span class="card-title" data-t="panel.country_totals" data-i18n="panel.country_totals">国家累计</span>
+                        </div>
+                        <div class="stats-source-switcher flex gap-1" id="statsSourceSwitcher">
+                            <button type="button" class="source-btn active text-[10px] px-2 py-0.5 rounded border border-[var(--accent-terminal)]/40" data-source="all">全部</button>
+                            <button type="button" class="source-btn text-[10px] px-2 py-0.5 rounded border border-transparent text-zinc-500" data-source="cursor">Cursor</button>
+                            <button type="button" class="source-btn text-[10px] px-2 py-0.5 rounded border border-transparent text-zinc-500" data-source="openclaw">OpenClaw</button>
+                        </div>
                     </div>
                     <div id="rtCountryTotals" class="space-y-2 text-[11px] leading-snug"></div>
                 </div>

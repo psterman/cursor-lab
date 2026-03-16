@@ -8,6 +8,11 @@ import { OpenClawParser } from './src/OpenClawParser.js';
 import { VibeCodingerAnalyzer, DIMENSIONS } from './src/VibeCodingerAnalyzer.js';
 import { analyzeOpenClawPortrait } from './src/OpenClawPortraitAnalyzer.js';
 
+/** Cursor 分析结果缓存键（战力报告） */
+const VIBE_CURSOR_CACHE = 'vibe_cursor_analysis_cache';
+/** OpenClaw 分析结果缓存键（监视器） */
+const VIBE_OPENCLAW_CACHE = 'vibe_openclaw_analysis_cache';
+
 // ========== 全环境 Auth 拦截器（IIFE，import 之后立即执行） ==========
 (function () {
   if (typeof window === 'undefined') return;
@@ -1310,10 +1315,10 @@ class VibeCodingApp {
         roastTextEn: result?.roastTextEn || result?.roast_text_en || null,
         analysis: result?.analysis || null,
       };
-      localStorage.setItem('last_analysis_data', JSON.stringify(payloadForStats2));
+      localStorage.setItem(VIBE_CURSOR_CACHE, JSON.stringify(payloadForStats2));
     } catch (e) {
       try {
-        // 降级：避免存不下导致完全没有 last_analysis_data
+        // 降级：避免存不下导致完全没有 Cursor 缓存
         const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
         const safeFp = (context && context.fingerprint) ? String(context.fingerprint) : (localStorage.getItem('user_fingerprint') || null);
         // 【修复】降级模式下也保存 earliestFileTime 和 usageDays（含云端 work_days 兜底）
@@ -1348,7 +1353,7 @@ class VibeCodingApp {
           personalityType: result?.personalityType || result?.personality_type || null,
           note: 'localStorage_limit_exceeded',
         };
-        localStorage.setItem('last_analysis_data', JSON.stringify(payloadLite));
+        localStorage.setItem(VIBE_CURSOR_CACHE, JSON.stringify(payloadLite));
       } catch { /* ignore */ }
     }
     
@@ -1661,7 +1666,7 @@ class VibeCodingApp {
     // 保存结果
     this.vibeResult = result;
 
-    // 【关键修复】缓存最后一次分析数据（同步方法同样写入，供 stats2.html 回填；含 usageDays/work_days 供 Cloudflare 显示上岗天数）
+    // 【数据隔离】缓存 Cursor 分析结果到 VIBE_CURSOR_CACHE（同步方法同样写入，供 stats2 回填）
     try {
       const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
       const safeFp = (context && context.fingerprint) ? String(context.fingerprint) : (localStorage.getItem('user_fingerprint') || null);
@@ -1684,7 +1689,7 @@ class VibeCodingApp {
         vibeIndex: result?.vibeIndex || result?.vibe_index || null,
         personalityType: result?.personalityType || result?.personality_type || null,
       };
-      localStorage.setItem('last_analysis_data', JSON.stringify(payloadForStats2));
+      localStorage.setItem(VIBE_CURSOR_CACHE, JSON.stringify(payloadForStats2));
     } catch (e) {
       try {
         const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
@@ -1709,7 +1714,7 @@ class VibeCodingApp {
           personalityType: result?.personalityType || result?.personality_type || null,
           note: 'localStorage_limit_exceeded',
         };
-        localStorage.setItem('last_analysis_data', JSON.stringify(payloadLite));
+        localStorage.setItem(VIBE_CURSOR_CACHE, JSON.stringify(payloadLite));
       } catch { /* ignore */ }
     }
     
@@ -4028,33 +4033,24 @@ async function handleFileUpload(event, type, callbacks = {}) {
         console.warn('[Main] OpenClaw 同步失败', e);
       }
     }
-    // 【OpenClaw 数据流】将 openclawPortrait 合并进 last_analysis_data，供 stats2 左侧抽屉监视器读取
+    // 【数据隔离】OpenClaw 分析结果写入 VIBE_OPENCLAW_CACHE，供 stats2 左侧抽屉监视器读取
     if (openclawPortrait && sourceEngine === 'openclaw' && typeof localStorage !== 'undefined') {
       try {
-        let existing = {};
-        const raw = localStorage.getItem('last_analysis_data');
-        if (raw) {
-          try {
-            existing = JSON.parse(raw);
-          } catch (_) {}
-        }
-        const merged = {
-          ...existing,
+        const payload = {
           openclawPortrait,
-          openclawSessionsSummary: openclawSessionsSummary || existing.openclawSessionsSummary || null,
-          stats: {
-            ...(existing.stats || {}),
-            ...(globalStats || {}),
-            modelUsage: globalStats?.modelUsage || existing.stats?.modelUsage,
-            usage: globalStats?.usage || existing.stats?.usage,
-            earliestFileTime: globalStats?.earliestFileTime || existing.stats?.earliestFileTime,
-            skillsByName: globalStats?.skillsByName || existing.stats?.skillsByName,
-            skillsUsage: globalStats?.skillsUsage || existing.stats?.skillsUsage,
-          },
+          openclawSessionsSummary: openclawSessionsSummary || null,
+          stats: globalStats ? {
+            modelUsage: globalStats.modelUsage,
+            usage: globalStats.usage,
+            earliestFileTime: globalStats.earliestFileTime,
+            skillsByName: globalStats.skillsByName,
+            skillsUsage: globalStats.skillsUsage,
+          } : {},
+          timestamp: Date.now(),
         };
-        localStorage.setItem('last_analysis_data', JSON.stringify(merged));
+        localStorage.setItem(VIBE_OPENCLAW_CACHE, JSON.stringify(payload));
       } catch (e) {
-        console.warn('[Main] OpenClaw last_analysis_data 写入失败', e);
+        console.warn('[Main] OpenClaw VIBE_OPENCLAW_CACHE 写入失败', e);
       }
     }
     if (onComplete) {

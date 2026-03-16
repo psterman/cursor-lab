@@ -5,7 +5,7 @@
 (function() {
     'use strict';
 
-    var PERSONAL_CLOUD_STORAGE_KEY = 'last_analysis_data';
+    var VIBE_OPENCLAW_CACHE = 'vibe_openclaw_analysis_cache';
     var TOKEN_EVOLUTION_MAX = 500000;
     var GATEWAY_CHANNEL_CACHE_KEY = 'openclaw_channel_status_cache_v1';
     var GATEWAY_CHANNEL_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -501,7 +501,7 @@
     }
 
     /**
-     * 确保左侧抽屉里始终存在 OpenClaw 卡片（某些渲染流程会清空 left-drawer-body）
+     * 确保左侧抽屉里始终存在 OpenClaw 卡片（直接挂在 left-drawer-body 顶部）
      */
     function ensureOpenClawMonitorCard() {
         if (isGuestDrawerMode()) return null;
@@ -515,9 +515,6 @@
         }
 
         if (!leftBody.contains(mount)) {
-            leftBody.insertBefore(mount, leftBody.firstChild || null);
-        }
-        if (leftBody.firstElementChild !== mount) {
             leftBody.insertBefore(mount, leftBody.firstChild || null);
         }
 
@@ -554,7 +551,7 @@
             var parsed = null;
             var parsedSession = null;
             var parsedHistory = null;
-            var raw = typeof localStorage !== 'undefined' && localStorage.getItem(PERSONAL_CLOUD_STORAGE_KEY);
+            var raw = typeof localStorage !== 'undefined' && localStorage.getItem(VIBE_OPENCLAW_CACHE);
             if (raw) {
                 try { parsed = JSON.parse(raw); } catch (_) {}
             }
@@ -1024,7 +1021,7 @@
 
     if (typeof window.addEventListener === 'function') {
         window.addEventListener('storage', function(e) {
-            if (e.key === PERSONAL_CLOUD_STORAGE_KEY || e.key === 'cursor_clinical_history') {
+            if (e.key === VIBE_OPENCLAW_CACHE || e.key === 'cursor_clinical_history') {
                 refreshOpenClawMonitor();
             }
         });

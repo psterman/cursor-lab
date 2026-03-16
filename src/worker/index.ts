@@ -2949,6 +2949,16 @@ app.post('/api/v2/analyze', async (c) => {
             // 【新增】personality_data 字段：包含称号和随机吐槽的五个维度数组（JSONB）
             // 格式：Array<{ dimension, score, label, roast }>
             personality_data: detailedStats, // 直接使用 detailedStats 数组
+
+            // 【数据隔离】Cursor 分析结果存入 cursor_metadata JSONB，供 stats2 按 source_type 统计
+            cursor_metadata: {
+              stats: v6StatsForStorage,
+              dimensions: v6Dimensions || { L: dimensions.L, P: dimensions.P, D: dimensions.D, E: dimensions.E, F: dimensions.F },
+              personality: { type: personalityType, roast: combinedRoastText },
+              roast_text: combinedRoastText || null,
+              analyzed_at: new Date().toISOString(),
+              source: 'cursor_chat_history',
+            },
           };
 
           // 【防污染】数据强度校验：若库中 total_messages 大于本次上传量，严禁用弱数据覆盖核心统计字段
@@ -3500,7 +3510,7 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
       }
     });
 
-    // 同步更新 public.user_analysis：total_tokens, primary_model, skills_tags, last_active_at
+    // 同步更新 public.user_analysis：total_tokens, primary_model, skills_tags, last_active_at, openclaw_metadata
     const skillsTags = body.skills_tags && Array.isArray(body.skills_tags)
       ? body.skills_tags
       : (body.skills_stats && typeof body.skills_stats === 'object')
@@ -3511,6 +3521,12 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
       primary_model: body.top_model_id && String(body.top_model_id).trim() || null,
       skills_tags: skillsTags,
       last_active_at: new Date().toISOString(),
+      openclaw_metadata: {
+        stats: openclawRow,
+        portrait: body.portrait && typeof body.portrait === 'object' ? body.portrait : {},
+        analyzed_at: openclawRow.analyzed_at,
+        source: 'openclaw_jsonl',
+      },
     };
     const uaPatchUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(user_id)}`;
     await fetch(uaPatchUrl, {
@@ -7687,6 +7703,8 @@ app.get('/api/country-summary', async (c) => {
     const countryNameRaw = (c.req.query('country_name') || c.req.query('countryName') || '').trim();
     const fingerprint = (c.req.query('fingerprint') || c.req.query('fp') || '').trim();
     const userId = (c.req.query('user_id') || c.req.query('userId') || c.req.query('id') || '').trim();
+    const sourceTypeRaw = (c.req.query('source_type') || c.req.query('sourceType') || '').trim().toLowerCase();
+    const sourceType = sourceTypeRaw === 'cursor' || sourceTypeRaw === 'openclaw' ? sourceTypeRaw : 'all';
     const cc = countryCode;
     const country = cc;
 
@@ -7784,8 +7802,9 @@ app.get('/api/country-summary', async (c) => {
     let identityLevelCloudFromKV: { Novice: Array<{ word: string; count: number; fingerprints?: string[] }>; Professional: Array<{ word: string; count: number; fingerprints?: string[] }>; Architect: Array<{ word: string; count: number; fingerprints?: string[] }> } | null = null;
 
     // SUM/RANK 仅在请求带 cc 或 country 参数时生效，不修改 Global 视图的 fetch 逻辑
+    // 【source_type 过滤】当 source_type=cursor|openclaw 时跳过视图，直接查 user_analysis 以应用 metadata 过滤
     let viewCountryRow: any = null;
-    if (hasExplicitCc) {
+    if (hasExplicitCc && sourceType === 'all') {
     try {
       // 优先用 v_country_stats 返回该国 total_chars / total_messages / total_work_days 等真实聚合（兼容 country_code 与 country 列）
       const viewUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_country_stats`);
@@ -7852,8 +7871,9 @@ app.get('/api/country-summary', async (c) => {
 
     // ----------------------------
     // 【异步聚合 + KV 缓存】国家累积：无视图时从 KV 读取，KV 无数据时降级调用 RPC
+    // source_type 非 all 时跳过 KV/RPC，直接走 user_analysis 过滤查询
     // ----------------------------
-    let shouldSkipKV = forceRefresh;
+    let shouldSkipKV = forceRefresh || sourceType !== 'all';
     
     if (!totals && !shouldSkipKV && kvCountry?.country_level?.length) {
       countryRow = kvCountry.country_level.find((it: any) => String(it?.country_code || '').trim().toUpperCase() === cc);
@@ -7907,8 +7927,8 @@ app.get('/api/country-summary', async (c) => {
       };
     }
 
-    // 降级：KV 无数据时调用 RPC get_country_ranks_v3 实时获取排名
-    if (!totals) {
+    // 降级：KV 无数据时调用 RPC get_country_ranks_v3 实时获取排名（source_type 非 all 时跳过，直接走 user_analysis）
+    if (!totals && sourceType === 'all') {
       try {
         const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_country_ranks_v3`;
         const rpcRows = await fetchSupabaseJson<any[]>(env, rpcUrl, {
@@ -7960,11 +7980,17 @@ app.get('/api/country-summary', async (c) => {
     }
 
     // 【最终降级：直接查基表】RPC 失败时查 user_analysis，四字段任一为国即计入该国（中文用户上报 CN 即进中国区）
+    // 【source_type 过滤】cursor=仅 cursor_metadata 非空；openclaw=仅 openclaw_metadata 非空；all=不过滤
     if (!totals) {
       try {
         const directQueryUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
         directQueryUrl.searchParams.set('select', 'total_messages,total_chars,work_days,jiafang_count,ketao_count,fingerprint');
         directQueryUrl.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc},manual_location.eq.${cc},current_location.eq.${cc})`);
+        if (sourceType === 'cursor') {
+          directQueryUrl.searchParams.set('cursor_metadata', 'not.is.null');
+        } else if (sourceType === 'openclaw') {
+          directQueryUrl.searchParams.set('openclaw_metadata', 'not.is.null');
+        }
 
         const directRows = await fetchSupabaseJson<any[]>(
           env,

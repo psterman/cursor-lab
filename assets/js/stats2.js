@@ -522,11 +522,11 @@
                 if (staleScroll && staleScroll.parentNode) staleScroll.parentNode.removeChild(staleScroll);
 
                 var identityCard = leftBody.querySelector('.drawer-item[data-card="identity-config"]');
-                var openclawMount = document.getElementById('openclaw-monitor-mount');
+                var openclawCard = document.getElementById('openclaw-monitor-card');
                 var statsCard = leftBody.querySelector('.drawer-item.dashboard-card.backdrop-blur.clinic-card');
                 var githubCard = leftBody.querySelector('.drawer-item.github-combat-card');
                 var wordcloudCard = document.getElementById('left-drawer-wordcloud-wrap');
-                var ordered = [identityCard, openclawMount, statsCard, githubCard, wordcloudCard];
+                var ordered = [identityCard, openclawCard, statsCard, githubCard, wordcloudCard];
 
                 ordered.forEach(function(node) {
                     if (!node || node.parentNode !== leftBody) return;
@@ -970,7 +970,7 @@
                             persona = (last && last.personality) ? last.personality : null;
                         }
                         if (!ilc) {
-                            var raw = localStorage.getItem('last_analysis_data') || '';
+                            var raw = getCursorAnalysisCache() || '';
                             if (raw) {
                                 var data = JSON.parse(raw);
                                 var root = (data && data.analysis != null) ? data.analysis : data;
@@ -2319,7 +2319,7 @@
         }
         function readPersonalLexiconFallback() {
             try {
-                var lastStr = localStorage.getItem(PERSONAL_CLOUD_STORAGE_KEY) || '';
+                var lastStr = getCursorAnalysisCache();
                 if (lastStr) {
                     var lastObj = JSON.parse(lastStr);
                     var lastLex = (lastObj && lastObj.personality && lastObj.personality.vibe_lexicon) ||
@@ -2372,7 +2372,7 @@
                 }
             } catch (_) {}
             try {
-                var lastStr = localStorage.getItem(PERSONAL_CLOUD_STORAGE_KEY) || '';
+                var lastStr = getCursorAnalysisCache();
                 if (lastStr) {
                     var lastObj = JSON.parse(lastStr);
                     var localCloud50 = (lastObj && lastObj.cloud50) || (lastObj && lastObj.analysis && lastObj.analysis.cloud50) || null;
@@ -2391,7 +2391,12 @@
             return [];
         }
         var EMPTY_PERSONAL_CLOUD_TEXT = '初出茅庐，灵魂波段捕获中...';
-        var PERSONAL_CLOUD_STORAGE_KEY = 'last_analysis_data';
+        var VIBE_CURSOR_CACHE = 'vibe_cursor_analysis_cache';
+        function getCursorAnalysisCache() {
+            try {
+                return localStorage.getItem(VIBE_CURSOR_CACHE) || getCursorAnalysisCache() || '';
+            } catch (_) { return ''; }
+        }
         var PERSONAL_CLOUD_HARDCODED_DEMO = {
             Novice: [
                 { phrase: '怎么改', weight: 18 },
@@ -2475,7 +2480,7 @@
         function readPersonalCloudFromLocalStorage() {
             var raw = '';
             try {
-                raw = localStorage.getItem(PERSONAL_CLOUD_STORAGE_KEY) || '';
+                raw = getCursorAnalysisCache();
             } catch (_) {
                 return { raw: '', data: null };
             }
@@ -2791,9 +2796,10 @@
             })();
             const cName = (typeof currentDrawerCountry !== 'undefined' && currentDrawerCountry && currentDrawerCountry.name) ? currentDrawerCountry.name : '';
             const refreshLexicon = !!(opts && opts.refreshLexicon);
+            const statsSource = (typeof window.__statsSourceType === 'string' && window.__statsSourceType) ? window.__statsSourceType : 'all';
             const url = effectiveIsGlobal
                 ? `${API_ENDPOINT}api/global-average`
-                : `${API_ENDPOINT}api/country-summary?country=${encodeURIComponent(target_country)}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${uid ? `&user_id=${encodeURIComponent(uid)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}${refreshLexicon ? '&refresh=true' : ''}&_ts=${Date.now()}`;
+                : `${API_ENDPOINT}api/country-summary?country=${encodeURIComponent(target_country)}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${uid ? `&user_id=${encodeURIComponent(uid)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}${statsSource !== 'all' ? `&source_type=${encodeURIComponent(statsSource)}` : ''}${refreshLexicon ? '&refresh=true' : ''}&_ts=${Date.now()}`;
 
             // DOM 绑定点
             const usersValEl = document.getElementById('rtDiagnosedTotal');
@@ -4142,7 +4148,7 @@
                             }
                         })();
                         // 国家视图且主请求已是 country-summary：直接复用 data 作为 payload2，不再二次请求，即时刷新
-                        const cacheKey2 = `CT:${String(countryCode || '').toUpperCase()}`;
+                        const cacheKey2 = `CT:${String(countryCode || '').toUpperCase()}:${statsSource}`;
                         if (!window.__countryTotalsCache) window.__countryTotalsCache = new Map();
                         const useMainDataAsPayload2 = !effectiveIsGlobal && data && data.countryTotals && typeof data.countryTotals === 'object';
                         let payload2 = useMainDataAsPayload2 ? data : null;
@@ -4152,7 +4158,7 @@
                            payload2 = { ...data.__raw, ...payload2 };
                         }
                         if (!useMainDataAsPayload2) {
-                        const url2 = `${API_ENDPOINT}api/country-summary?country=${encodeURIComponent(String(target_country || countryCode || '').toUpperCase())}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${uid ? `&user_id=${encodeURIComponent(uid)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}&_ts=${Date.now()}`;
+                        const url2 = `${API_ENDPOINT}api/country-summary?country=${encodeURIComponent(String(target_country || countryCode || '').toUpperCase())}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${uid ? `&user_id=${encodeURIComponent(uid)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}${statsSource !== 'all' ? `&source_type=${encodeURIComponent(statsSource)}` : ''}&_ts=${Date.now()}`;
                         const hit2 = window.__countryTotalsCache.get(cacheKey2);
                         if (hit2 && typeof hit2 === 'object') {
                             if (totalsBox && hit2.totalsHtml) totalsBox.innerHTML = hit2.totalsHtml;
@@ -9506,6 +9512,29 @@
             }
 
             // 将“暂无数据”的占位渲染出来，避免空白
+            try {
+                if (typeof window.__statsSourceType !== 'string') window.__statsSourceType = 'all';
+                var switcher = mount.querySelector('#statsSourceSwitcher');
+                if (switcher) {
+                    switcher.querySelectorAll('.source-btn').forEach(function(btn) {
+                        btn.onclick = function() {
+                            var src = btn.getAttribute('data-source') || 'all';
+                            window.__statsSourceType = src;
+                            switcher.querySelectorAll('.source-btn').forEach(function(b) {
+                                if (b.getAttribute('data-source') === src) {
+                                    b.classList.add('active'); b.classList.remove('text-zinc-500');
+                                    b.style.borderColor = 'rgba(0,255,65,0.4)';
+                                } else {
+                                    b.classList.remove('active'); b.classList.add('text-zinc-500');
+                                    b.style.borderColor = 'transparent';
+                                }
+                            });
+                            if (typeof updateCountryDashboard === 'function') updateCountryDashboard(cc, name, { preferCache: false });
+                        };
+                    });
+                }
+            } catch (e) { /* ignore */ }
+
             const realtimeBox = q('#rtRealtimeList');
             if (realtimeBox && !realtimeBox.innerHTML.trim()) {
                 realtimeBox.innerHTML = `<div class="text-zinc-500 text-xs">${escapeHtml(getI18nText('realtime.none') || (currentLang === 'en' ? 'No personality distribution yet' : '暂无人格分布数据'))}</div>`;
@@ -18516,7 +18545,7 @@
                         // 【自动合并】检测到指纹 + GitHub 登录后直接执行迁移，不再弹出确认框
                         const claimToken = localStorage.getItem('vibe_claim_token');
                         const hasLocalData = claimToken || currentFp;
-                        const localDataExists = localStorage.getItem('last_analysis_data') || claimToken;
+                        const localDataExists = getCursorAnalysisCache() || claimToken;
                         if (hasLocalData && localDataExists) {
                             console.log('[Auth] ✅ 检测到本地数据，自动合并到 GitHub 账号');
                         } else {
@@ -18665,7 +18694,7 @@
                                 localStorage.removeItem('user_fingerprint');
                                 if (window.fpId) delete window.fpId;
                                 if (window.__countryTotalsCache) window.__countryTotalsCache.clear();
-                                try { localStorage.removeItem('last_analysis_data'); } catch (_) {}
+                                try { localStorage.removeItem('last_analysis_data'); localStorage.removeItem('vibe_cursor_analysis_cache'); } catch (_) {}
                                 console.log('[Auth] ✅ 已清除匿名缓存，将强制刷新视图数据');
                                 
                                 // 迁移成功后，更新 window.allData
@@ -18934,7 +18963,7 @@
                             
                             // 尝试从 localStorage 获取最后一次分析数据
                             try {
-                                const lastAnalysisData = localStorage.getItem('last_analysis_data');
+                                const lastAnalysisData = getCursorAnalysisCache();
                                 if (lastAnalysisData) {
                                     const analysisData = JSON.parse(lastAnalysisData);
                                     console.log('[Auth] 📊 找到本地缓存的最后一次分析数据，准备同步...');
@@ -20772,7 +20801,7 @@
                 var fp = '';
                 try { fp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
                 var lastAnalysis = null;
-                try { var la = localStorage.getItem('last_analysis_data'); if (la) lastAnalysis = JSON.parse(la); } catch (_) {}
+                try { var la = getCursorAnalysisCache(); if (la) lastAnalysis = JSON.parse(la); } catch (_) {}
                 var ghUser = (localStorage.getItem('github_username') || '').trim();
                 var body = {
                     fingerprint: fp,
@@ -21352,7 +21381,7 @@
 
         function readLastAnalysisDataForCurrentDevice(user) {
             try {
-                var raw = localStorage.getItem('last_analysis_data');
+                var raw = getCursorAnalysisCache();
                 if (!raw) return null;
                 var payload = JSON.parse(raw);
                 if (!payload || typeof payload !== 'object') return null;
@@ -21825,7 +21854,7 @@
                     // 【步骤1】优先从本地 localStorage 获取 earliestFileTime 或 usageDays（Cloudflare 环境强化）
                     if (dayCount === 'N/A' || dayCount === '1') { // 如果是1天，可能是默认值，尝试从本地获取更准确值
                         try {
-                            const raw = localStorage.getItem('last_analysis_data');
+                            const raw = getCursorAnalysisCache();
                             console.log('[renderUserStatsCards] 本地数据 raw:', raw ? '存在' : '不存在');
                             if (raw) {
                                 const obj = JSON.parse(raw);
@@ -22001,7 +22030,7 @@
                             if (personalityName) console.log('[UserStats] ✅ 从 cursor_clinical_history 补充人格称号:', personalityName);
                         }
                         if (!personalityName) {
-                            var lastStr = localStorage.getItem('last_analysis_data');
+                            var lastStr = getCursorAnalysisCache();
                             if (lastStr) {
                                 var lastObj = JSON.parse(lastStr);
                                 personalityName = lastObj && (lastObj.personalityName || lastObj.personality_name) ? (lastObj.personalityName || lastObj.personality_name) : null;
@@ -22166,7 +22195,7 @@
                     // 如果没有 cursor_clinical_history，尝试从 last_analysis_data 构建
                     if (!vr) {
                         try {
-                            const lastAnalysisStr = localStorage.getItem('last_analysis_data');
+                            const lastAnalysisStr = getCursorAnalysisCache();
                             if (lastAnalysisStr) {
                                 const lastAnalysis = JSON.parse(lastAnalysisStr);
                                 if (lastAnalysis) {
@@ -22991,7 +23020,7 @@
                                     (cloudUsageDays != null && Number(cloudUsageDays) > 0);
             if ((day == null || !(Number(day) > 0)) && !hasCloudDayValue) {
                 try {
-                    const raw = localStorage.getItem('last_analysis_data');
+                    const raw = getCursorAnalysisCache();
                     if (raw) {
                         const obj = JSON.parse(raw);
                         const st = obj && obj.stats ? obj.stats : null;
@@ -24974,7 +25003,7 @@
             var currentCountry = window.__selectedCountry || localStorage.getItem('user_selected_country') || localStorage.getItem('user_manual_location') || 'UNKNOWN';
             console.log('[PersonalCloud] 渲染本人词云 - 国家:', currentCountry, '等级:', levelKey, '数据源: index/local', '条数:', data.length);
             try {
-                var rawLast = localStorage.getItem(PERSONAL_CLOUD_STORAGE_KEY) || '';
+                var rawLast = getCursorAnalysisCache();
                 var rawLastLen = rawLast ? rawLast.length : 0;
                 var rawLastOk = false;
                 var lastCount = 0;
@@ -25504,7 +25533,7 @@
                 var isLocalUser = (region === (localStorage.getItem('user_manual_location') || window.currentUserCountry || '').toUpperCase());
                 if (isLocalUser) {
                     try {
-                        var lastStr = localStorage.getItem('last_analysis_data');
+                        var lastStr = getCursorAnalysisCache();
                         if (lastStr) {
                             var lastData = JSON.parse(lastStr);
                             var ilc = (lastData && lastData.stats && lastData.stats.identityLevelCloud) || (lastData && lastData.identityLevelCloud) || null;
@@ -26969,7 +26998,7 @@
         // 监听 storage 事件，当其他页面更新 localStorage 时自动刷新
         window.addEventListener('storage', (e) => {
             if (isInitialLayoutPending) return;
-            if (e.key === PERSONAL_CLOUD_STORAGE_KEY || e.key === 'cursor_clinical_history') {
+            if (e.key === (typeof VIBE_CURSOR_CACHE !== 'undefined' ? VIBE_CURSOR_CACHE : 'vibe_cursor_analysis_cache') || e.key === 'last_analysis_data' || e.key === 'cursor_clinical_history') {
                 try { window.__personalIdentityLevelCloudCache = null; } catch (_) {}
                 try {
                     var left = document.getElementById('left-drawer');
