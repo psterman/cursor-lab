@@ -7885,7 +7885,7 @@
                 'personality_name', 'personalityName',
                 'personality_type', 'personalityType',
                 'lpdef', 'vibe_index_str', 'vibeIndexStr',
-                'user_name', 'userName', 'github_username'
+                'user_name', 'userName', 'github_username', 'github_login'
             ];
             nonEmptyProtectedFields.forEach(function(field) {
                 const existingVal = existing[field];
@@ -7895,6 +7895,36 @@
 
                 if (existingHas && !incomingHas) {
                     // 已有值有效但新值为空，保留已有值
+                    merged[field] = existingVal;
+                }
+            });
+
+            // 保护 GitHub 战力对象与核心字段，避免上传 Cursor 分析后被空对象/空字段覆盖
+            const parseGithubStatsSafe = function(raw) {
+                if (!raw) return null;
+                if (typeof raw === 'string') {
+                    try { raw = JSON.parse(raw); } catch (_) { return null; }
+                }
+                return raw && typeof raw === 'object' ? raw : null;
+            };
+            const hasUsableGithubStats = function(raw) {
+                var obj = parseGithubStatsSafe(raw);
+                return !!(obj && (
+                    (obj.login && String(obj.login).trim()) ||
+                    Number(obj.totalRepoStars) > 0 ||
+                    Number(obj.totalStars) > 0 ||
+                    Number(obj.totalCommits) > 0
+                ));
+            };
+            if (hasUsableGithubStats(existing.github_stats) && !hasUsableGithubStats(incoming.github_stats)) {
+                merged.github_stats = existing.github_stats;
+            }
+            ['github_stars', 'github_score'].forEach(function(field) {
+                const existingVal = Number(existing[field]);
+                const incomingVal = Number(incoming[field]);
+                const existingValid = Number.isFinite(existingVal) && existingVal > 0;
+                const incomingValid = Number.isFinite(incomingVal) && incomingVal > 0;
+                if (existingValid && !incomingValid) {
                     merged[field] = existingVal;
                 }
             });
@@ -21685,6 +21715,19 @@
             if (!user) return null;
             const allData = window.allData || [];
             const normalize = (v) => (v == null ? '' : String(v).trim().toLowerCase());
+            const hasUsableGithubStats = (raw) => {
+                if (!raw) return false;
+                var obj = raw;
+                if (typeof obj === 'string') {
+                    try { obj = JSON.parse(obj); } catch (_) { return false; }
+                }
+                return !!(obj && typeof obj === 'object' && (
+                    (obj.login && String(obj.login).trim()) ||
+                    Number(obj.totalRepoStars) > 0 ||
+                    Number(obj.totalStars) > 0 ||
+                    Number(obj.totalCommits) > 0
+                ));
+            };
             const isSameUser = (item) => {
                 if (!item) return false;
                 if (item.id != null && user.id != null && item.id === user.id) return true;
@@ -21736,8 +21779,7 @@
                 if (u.answer_book || u.answerBook) s += 1;
                 if (u.personality_name || u.personalityName) s += 1;
                 // 【GitHub 战力】有有效 github_stats 的记录优先，确保左侧抽屉能显示 22 项战力卡片
-                var gs = u.github_stats;
-                if (gs && typeof gs === 'object' && (gs.login || gs.totalRepoStars !== undefined)) s += 5;
+                if (hasUsableGithubStats(u.github_stats)) s += 5;
 
                 return s;
             };
@@ -21768,10 +21810,10 @@
             }
             // 【合并 github_stats】若 best 没有有效 github_stats，从同人任一条记录中取，避免左侧抽屉战力卡片无数据
             var bestGs = best.github_stats;
-            if (!bestGs || typeof bestGs !== 'object' || !bestGs.login) {
+            if (!hasUsableGithubStats(bestGs)) {
                 for (var gi = 0; gi < candidates.length; gi++) {
                     var cand = candidates[gi];
-                    if (cand && cand.github_stats && typeof cand.github_stats === 'object' && cand.github_stats.login) {
+                    if (cand && hasUsableGithubStats(cand.github_stats)) {
                         best = Object.assign({}, best, { github_stats: cand.github_stats });
                         break;
                     }
@@ -21995,13 +22037,181 @@
                     } catch (e) { return '--'; }
                 };
 
-                const githubStats = (function(raw) {
+                const parseGithubStatsForDrawer = function(raw) {
                     if (!raw) return null;
                     if (typeof raw === 'string') {
                         try { return JSON.parse(raw); } catch (_) { return null; }
                     }
                     return typeof raw === 'object' ? raw : null;
-                })(currentUserData.github_stats);
+                };
+                const buildGithubStatsSnapshotForDrawer = function(user, authCtx) {
+                    var base = parseGithubStatsForDrawer(user && user.github_stats) || {};
+                    var login = String(
+                        base.login ||
+                        base.github_login ||
+                        user && (user.github_login || user.github_username || user.user_name || user.login) ||
+                        authCtx && authCtx.githubLogin ||
+                        ''
+                    ).trim();
+                    var avatarUrl = String(
+                        base.avatarUrl ||
+                        base.avatar_url ||
+                        user && (user.avatar_url || user.avatarUrl) ||
+                        authCtx && authCtx.avatarUrl ||
+                        ''
+                    ).trim();
+                    return {
+                        login: login || '--',
+                        avatarUrl: avatarUrl,
+                        globalRanking: String(base.globalRanking || base.global_ranking || user && (user.github_score || user.global_rank || user.globalRanking) || '--'),
+                        accountAge: Number(base.accountAge != null ? base.accountAge : base.account_age) || 0,
+                        syncedAt: String(base.syncedAt || base.synced_at || user && (user.github_synced_at || user.last_sync_at) || ''),
+                        latest_repo_updated_at: String(base.latest_repo_updated_at || base.latestRepoUpdatedAt || ''),
+                        organizations: Array.isArray(base.organizations) ? base.organizations : [],
+                        mergedPRs: Number(base.mergedPRs != null ? base.mergedPRs : base.merged_prs) || 0,
+                        totalRepoStars: Number(base.totalRepoStars != null ? base.totalRepoStars : (base.total_repo_stars != null ? base.total_repo_stars : (base.totalStars != null ? base.totalStars : user && user.github_stars))) || 0,
+                        commitVelocity: Number(base.commitVelocity != null ? base.commitVelocity : base.commit_velocity) || 0,
+                        prReviews: Number(base.prReviews != null ? base.prReviews : base.pr_reviews) || 0,
+                        activeDays: Number(base.activeDays != null ? base.activeDays : base.active_days) || 0,
+                        publicRepos: Number(base.publicRepos != null ? base.publicRepos : base.public_repos) || 0,
+                        privateRepos: Number(base.privateRepos != null ? base.privateRepos : base.private_repos) || 0,
+                        languageDistribution: Array.isArray(base.languageDistribution) ? base.languageDistribution : [],
+                        followers: Number(base.followers != null ? base.followers : user && user.github_followers) || 0,
+                        following: Number(base.following) || 0,
+                        totalStars: Number(base.totalStars != null ? base.totalStars : (base.total_stars != null ? base.total_stars : user && user.github_stars)) || 0,
+                        totalCommits: Number(base.totalCommits != null ? base.totalCommits : base.total_commits) || 0,
+                        sponsorships: Number(base.sponsorships) || 0,
+                        restrictedContributions: Number(base.restrictedContributions != null ? base.restrictedContributions : base.restricted_contributions) || 0,
+                        totalForks: Number(base.totalForks != null ? base.totalForks : (base.total_forks != null ? base.total_forks : user && user.github_forks)) || 0,
+                        totalWatchers: Number(base.totalWatchers != null ? base.totalWatchers : (base.total_watchers != null ? base.total_watchers : user && user.github_watchers)) || 0,
+                        totalCodeSize: Number(base.totalCodeSize != null ? base.totalCodeSize : base.total_code_size) || 0,
+                        closedIssues: Number(base.closedIssues != null ? base.closedIssues : base.closed_issues) || 0,
+                        primaryLanguage: base.primaryLanguage || base.primary_language || base.mainLanguage || base.main_language || null,
+                        newestLanguage: base.newestLanguage || base.newest_language || null
+                    };
+                };
+                const hasUsableGithubStatsForDrawer = function(raw, user, authCtx) {
+                    var obj = buildGithubStatsSnapshotForDrawer(user || { github_stats: raw }, authCtx);
+                    return !!(
+                        Number(obj.totalRepoStars) > 0 ||
+                        Number(obj.totalStars) > 0 ||
+                        Number(obj.totalForks) > 0 ||
+                        Number(obj.totalWatchers) > 0 ||
+                        Number(obj.totalCommits) > 0 ||
+                        Number(obj.followers) > 0 ||
+                        Number(obj.publicRepos) > 0 ||
+                        Number(obj.privateRepos) > 0 ||
+                        Number(obj.mergedPRs) > 0 ||
+                        Number(obj.commitVelocity) > 0 ||
+                        Number(obj.prReviews) > 0 ||
+                        Number(obj.activeDays) > 0 ||
+                        Number(obj.accountAge) > 0
+                    );
+                };
+                const getGithubAuthContextForDrawer = async function() {
+                    var ctx = {
+                        authUserId: '',
+                        githubLogin: '',
+                        fingerprint: '',
+                        accessToken: '',
+                        avatarUrl: '',
+                        session: null
+                    };
+                    try {
+                        if (typeof localStorage !== 'undefined') {
+                            ctx.githubLogin = String(localStorage.getItem('github_username') || '').trim();
+                            ctx.fingerprint = String(localStorage.getItem('user_fingerprint') || '').trim();
+                            ctx.accessToken = String(
+                                localStorage.getItem('github_token') ||
+                                localStorage.getItem('vibe_github_access_token') ||
+                                ''
+                            ).trim();
+                            ctx.authUserId = String(
+                                localStorage.getItem('github_user_id') ||
+                                localStorage.getItem('supabase_user_id') ||
+                                localStorage.getItem('auth_user_id') ||
+                                localStorage.getItem('user_id') ||
+                                ''
+                            ).trim();
+                        }
+                    } catch (_) {}
+                    if (!ctx.fingerprint) {
+                        try { ctx.fingerprint = String(window.fpId || '').trim(); } catch (_) {}
+                    }
+                    var sbAuth = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+                    if (sbAuth && sbAuth.auth && typeof sbAuth.auth.getSession === 'function') {
+                        try {
+                            var sessRes = await sbAuth.auth.getSession();
+                            var session = sessRes && sessRes.data && sessRes.data.session;
+                            var user = session && session.user ? session.user : null;
+                            ctx.session = session || null;
+                            if (session && session.provider_token) {
+                                ctx.accessToken = String(session.provider_token || '').trim() || ctx.accessToken;
+                            }
+                            if (user) {
+                                var sessionGithubLogin = user.user_metadata && (
+                                    user.user_metadata.user_name ||
+                                    user.user_metadata.preferred_username ||
+                                    user.user_metadata.login
+                                );
+                                ctx.authUserId = String(user.id || '').trim() || ctx.authUserId;
+                                ctx.githubLogin = String(sessionGithubLogin || user.email && user.email.split('@')[0] || '').trim() || ctx.githubLogin;
+                                ctx.avatarUrl = String(
+                                    user.user_metadata && (
+                                        user.user_metadata.avatar_url ||
+                                        user.user_metadata.picture
+                                    ) || ''
+                                ).trim();
+                            }
+                        } catch (e) {
+                            console.warn('[UserStats] 获取 GitHub session 上下文失败:', e);
+                        }
+                    }
+                    return ctx;
+                };
+                const fetchExistingGithubUserForDrawer = async function(sbClient, githubLogin, authUserId, fingerprint) {
+                    if (!sbClient || typeof sbClient.from !== 'function') return null;
+                    var selectFields = 'id, user_name, fingerprint, github_login, github_stats, github_stars, github_forks, github_watchers, github_followers, github_score, github_synced_at, last_sync_at';
+                    var row = null;
+                    if (githubLogin) {
+                        var byGithubLogin = await sbClient
+                            .from('user_analysis')
+                            .select(selectFields)
+                            .eq('github_login', githubLogin)
+                            .limit(1)
+                            .maybeSingle();
+                        row = byGithubLogin && byGithubLogin.data ? byGithubLogin.data : null;
+                    }
+                    if (!row && authUserId) {
+                        var byId = await sbClient
+                            .from('user_analysis')
+                            .select(selectFields)
+                            .eq('id', authUserId)
+                            .limit(1)
+                            .maybeSingle();
+                        row = byId && byId.data ? byId.data : null;
+                    }
+                    if (!row && githubLogin) {
+                        var byUserName = await sbClient
+                            .from('user_analysis')
+                            .select(selectFields)
+                            .ilike('user_name', githubLogin)
+                            .limit(1)
+                            .maybeSingle();
+                        row = byUserName && byUserName.data ? byUserName.data : null;
+                    }
+                    if (!row && fingerprint) {
+                        var byFp = await sbClient
+                            .from('user_analysis')
+                            .select(selectFields)
+                            .eq('fingerprint', fingerprint)
+                            .limit(1)
+                            .maybeSingle();
+                        row = byFp && byFp.data ? byFp.data : null;
+                    }
+                    return row;
+                };
+                let githubStats = buildGithubStatsSnapshotForDrawer(currentUserData, null);
                 if (githubStats && currentUserData.github_stats !== githubStats) {
                     currentUserData.github_stats = githubStats;
                 }
@@ -22244,7 +22454,9 @@
                     else if (insertAfter) leftBody.appendChild(cursorPlaceholder);
                     else leftBody.insertBefore(cursorPlaceholder, leftBody.firstChild);
                     if (typeof normalizeLeftDrawerCardOrder === 'function') normalizeLeftDrawerCardOrder();
-                    return;
+                    // 若有 GitHub 数据需展示，不提前 return，继续执行后续渲染（GitHub 战力卡片等）
+                    var hasGithubToShow = isGitHubUser || (currentUserData.github_stats && typeof hasUsableGithubStatsForDrawer === 'function' && hasUsableGithubStatsForDrawer(currentUserData.github_stats, currentUserData, null));
+                    if (!hasGithubToShow) return;
                 }
 
                 const isNewUser = (!hasDimensions || isDefaultScores) && !currentUserData.id && !isGitHubUser;
@@ -23212,6 +23424,74 @@
                         setAuthenticatedDrawerAccess(true, currentUserData && currentUserData.id ? currentUserData : (window.supabaseAuthUser || currentUserData || null));
                     } catch (_) {}
                 }
+                var authGithubContextSt2 = null;
+                if (allowPrivateCards) {
+                    try {
+                        authGithubContextSt2 = await getGithubAuthContextForDrawer();
+                    } catch (e) {
+                        console.warn('[UserStats] 读取 GitHub 登录态失败:', e);
+                    }
+                }
+                if (authGithubContextSt2) {
+                    if (!currentUserData.github_login && authGithubContextSt2.githubLogin) currentUserData.github_login = authGithubContextSt2.githubLogin;
+                    if (!currentUserData.github_username && authGithubContextSt2.githubLogin) currentUserData.github_username = authGithubContextSt2.githubLogin;
+                    if (!currentUserData.fingerprint && authGithubContextSt2.fingerprint) currentUserData.fingerprint = authGithubContextSt2.fingerprint;
+                }
+                var githubIdentityForDrawer = String(
+                    authGithubContextSt2 && authGithubContextSt2.githubLogin ||
+                    currentUserData.github_login ||
+                    currentUserData.github_username ||
+                    currentUserData.user_name ||
+                    currentUserData.login ||
+                    ''
+                ).trim();
+                githubStats = buildGithubStatsSnapshotForDrawer(currentUserData, authGithubContextSt2);
+                currentUserData.github_stats = githubStats;
+                if (allowPrivateCards && githubIdentityForDrawer && !hasUsableGithubStatsForDrawer(githubStats, currentUserData, authGithubContextSt2) && !currentUserData.__githubHydrationAttempted) {
+                    try {
+                        var sbGithubHydration = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+                        var githubHydrationId = String(
+                            authGithubContextSt2 && authGithubContextSt2.authUserId ||
+                            currentUserData.id ||
+                            currentUserData.user_id ||
+                            ''
+                        ).trim();
+                        var githubHydrationFp = String(
+                            currentUserData.fingerprint ||
+                            currentUserData.user_fingerprint ||
+                            authGithubContextSt2 && authGithubContextSt2.fingerprint ||
+                            ''
+                        ).trim();
+                        currentUserData.__githubHydrationAttempted = true;
+                        if (sbGithubHydration && typeof sbGithubHydration.from === 'function' && (githubHydrationId || githubIdentityForDrawer || githubHydrationFp)) {
+                            var githubHydrationRow = await fetchExistingGithubUserForDrawer(sbGithubHydration, githubIdentityForDrawer, githubHydrationId, githubHydrationFp);
+                            if (githubHydrationRow && (
+                                hasUsableGithubStatsForDrawer(githubHydrationRow.github_stats, githubHydrationRow, authGithubContextSt2) ||
+                                (githubHydrationRow.github_login && String(githubHydrationRow.github_login).trim()) ||
+                                Number(githubHydrationRow.github_stars) > 0 ||
+                                Number(githubHydrationRow.github_forks) > 0 ||
+                                Number(githubHydrationRow.github_watchers) > 0 ||
+                                Number(githubHydrationRow.github_followers) > 0 ||
+                                Number(githubHydrationRow.github_score) > 0
+                            )) {
+                                var mergedGithubUser = (typeof safeMaxMergeUserData === 'function')
+                                    ? safeMaxMergeUserData(currentUserData, githubHydrationRow)
+                                    : Object.assign({}, currentUserData, githubHydrationRow);
+                                mergedGithubUser.github_stats = buildGithubStatsSnapshotForDrawer(mergedGithubUser, authGithubContextSt2);
+                                mergedGithubUser.__githubHydrationAttempted = true;
+                                try {
+                                    window.currentUser = mergedGithubUser;
+                                    window.currentUserData = mergedGithubUser;
+                                } catch (_) {}
+                                console.log('[UserStats] ✅ 已从登录态补全 GitHub 战力数据:', githubIdentityForDrawer || githubHydrationRow.github_login || githubHydrationRow.user_name);
+                                renderUserStatsCards(leftBody, typeof getBestUserRecordForStats === 'function' ? getBestUserRecordForStats(mergedGithubUser) : mergedGithubUser);
+                                return;
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('[UserStats] GitHub 战力补全失败:', e);
+                    }
+                }
                 // 创建用户统计卡片容器（赛博病理风格：border-white/10 bg-[#0a0a0a]/80 backdrop-blur）
                 if (!allowPrivateCards) {
                     console.log('[UserStats] ℹ️ 当前未登录，取消创建统计卡片 DOM');
@@ -23331,8 +23611,12 @@
                     var apiBase = (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content) || '';
                     apiBase = String(apiBase).trim().replace(/\/$/, '');
                     var defaultAvatarSt2 = (window.STATS_CONSTANTS && window.STATS_CONSTANTS.DEFAULT_AVATAR) || '';
+                    githubStats = buildGithubStatsSnapshotForDrawer(currentUserData, authGithubContextSt2);
+                    currentUserData.github_stats = githubStats;
                     var githubLoginFromStatsSt2 = (githubStats && (githubStats.login || githubStats.username || githubStats.user_name)) || '';
+                    var githubLoginFromAuthSt2 = (authGithubContextSt2 && authGithubContextSt2.githubLogin) || '';
                     var ghUserSt2 = (
+                        githubLoginFromAuthSt2 ||
                         (currentUserData && (
                             currentUserData.github_login ||
                             currentUserData.github_username ||
@@ -23348,11 +23632,12 @@
                             if (typeof localStorage !== 'undefined') localStorage.setItem('github_username', ghUserSt2);
                         } catch (_) {}
                     }
-                    var userIdentitySt2 = (currentUserData && currentUserData.user_identity) || (ghUserSt2 ? 'github' : null);
+                    var userIdentitySt2 = (currentUserData && currentUserData.user_identity) || (githubLoginFromAuthSt2 || ghUserSt2 ? 'github' : null);
                     var isFpOnlySt2 = !ghUserSt2 || (typeof isValidGitHubUsername === 'function' && !isValidGitHubUsername(ghUserSt2, userIdentitySt2));
                     var fpSt2 = (typeof localStorage !== 'undefined' && localStorage.getItem('user_fingerprint')) || '';
                     var fpPrefixSt2 = fpSt2 ? fpSt2.substring(0, 6).toUpperCase() : '';
                     var displayNameSourceSt2 = (
+                        githubLoginFromAuthSt2 ||
                         (currentUserData && (
                             currentUserData.user_name ||
                             currentUserData.github_login ||
@@ -23364,7 +23649,7 @@
                     );
                     var dispNameSt2 = isFpOnlySt2 && fpSt2 ? ('匿名专家 ' + fpPrefixSt2) : (displayNameSourceSt2 || '未设置');
                     var dispLabelSt2 = isFpOnlySt2 && fpSt2 ? '设备指纹' : 'GitHub ID';
-                    var avatarSourceSt2 = (githubStats && (githubStats.avatarUrl || githubStats.avatar_url)) || (currentUserData && (currentUserData.avatar_url || currentUserData.avatarUrl)) || '';
+                    var avatarSourceSt2 = (authGithubContextSt2 && authGithubContextSt2.avatarUrl) || (githubStats && (githubStats.avatarUrl || githubStats.avatar_url)) || (currentUserData && (currentUserData.avatar_url || currentUserData.avatarUrl)) || '';
                     var avUrlSt2 = isFpOnlySt2 && fpSt2
                         ? ('https://api.dicebear.com/7.x/identicon/svg?seed=' + encodeURIComponent(fpSt2))
                         : (avatarSourceSt2 || (ghUserSt2 && typeof getGitHubAvatarUrl === 'function' ? getGitHubAvatarUrl(ghUserSt2) : defaultAvatarSt2));
@@ -23398,7 +23683,8 @@
                         }
                     } catch (e) {}
                     var handleGithubSync = async function() {
-                        var token = (window.__githubAccessToken || (typeof localStorage !== 'undefined' && localStorage.getItem('github_token')) || (typeof localStorage !== 'undefined' && localStorage.getItem('vibe_github_access_token')) || '').trim();
+                        var sbGithubSync = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+                        var token = ((authGithubContextSt2 && authGithubContextSt2.accessToken) || window.__githubAccessToken || (typeof localStorage !== 'undefined' && localStorage.getItem('github_token')) || (typeof localStorage !== 'undefined' && localStorage.getItem('vibe_github_access_token')) || '').trim();
                         if (!token && typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.auth.getSession === 'function') {
                             try {
                                 var sess = await supabaseClient.auth.getSession();
@@ -23422,14 +23708,42 @@
                             console.warn('[GitHub Sync] 无 accessToken，跳过战力同步');
                             return { success: false, error: 'accessToken 必填' };
                         }
+                        var syncGithubLoginSt2 = String(
+                            authGithubContextSt2 && authGithubContextSt2.githubLogin ||
+                            currentUserData.github_login ||
+                            currentUserData.github_username ||
+                            currentUserData.user_name ||
+                            currentUserData.login ||
+                            ''
+                        ).trim();
+                        var syncFingerprintSt2 = String(
+                            currentUserData.fingerprint ||
+                            currentUserData.user_fingerprint ||
+                            authGithubContextSt2 && authGithubContextSt2.fingerprint ||
+                            ''
+                        ).trim();
+                        var syncAuthUserIdSt2 = String(
+                            authGithubContextSt2 && authGithubContextSt2.authUserId ||
+                            currentUserData.id ||
+                            currentUserData.user_id ||
+                            ''
+                        ).trim();
+                        var tryRecoverGithubBindingSt2 = async function() {
+                            var existingGithubRow = await fetchExistingGithubUserForDrawer(sbGithubSync, syncGithubLoginSt2, syncAuthUserIdSt2, syncFingerprintSt2);
+                            if (existingGithubRow) {
+                                existingGithubRow.github_stats = buildGithubStatsSnapshotForDrawer(existingGithubRow, authGithubContextSt2);
+                                return { success: true, data: existingGithubRow, recovered: true };
+                            }
+                            return null;
+                        };
                         return fetch(apiBase ? apiBase + '/api/github/sync' : '/api/github/sync', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 accessToken: token,
-                                userId: (currentUserData.user_name || currentUserData.login || currentUserData.github_login || '').trim(),
-                                fingerprint: currentUserData.fingerprint || '',
-                                id: currentUserData.id || ''
+                                userId: syncGithubLoginSt2,
+                                fingerprint: syncFingerprintSt2,
+                                id: syncAuthUserIdSt2
                             })
                         }).then(async function(r) {
                             var text = await r.text();
@@ -23447,6 +23761,15 @@
                                     if (errJson && errJson.error) errMsg = errJson.error;
                                 } catch (e) {}
                                 var isUniqueViolation = errMsg.indexOf('UNIQUE_VIOLATION_FINGERPRINT') !== -1 || /duplicate key|unique constraint|violates unique constraint/i.test(errMsg);
+                                var isGithubLoginConflict = /unique_github_login|github_login/i.test(errMsg);
+                                if (isGithubLoginConflict) {
+                                    try {
+                                        var recoveredRow = await tryRecoverGithubBindingSt2();
+                                        if (recoveredRow && recoveredRow.success) return recoveredRow;
+                                    } catch (recoverErr) {
+                                        console.warn('[GitHub Sync] github_login 冲突恢复失败:', recoverErr);
+                                    }
+                                }
                                 var tip = isUniqueViolation ? '正在合并游客数据，请稍后刷新。' : (errMsg.indexOf('401') !== -1 || errMsg.indexOf('Bad credentials') !== -1) ? 'GitHub 凭证无效（401），请退出后重新用 GitHub 登录一次以刷新授权。' : (errMsg.indexOf('RLS') !== -1 || errMsg.indexOf('permission') !== -1) ? '数据库权限受限（RLS 拦截），请检查服务端配置。' : (errMsg.indexOf('Token') !== -1 || errMsg.indexOf('accessToken') !== -1) ? 'Token 失效或未授权，请重新使用 GitHub 登录。' : errMsg;
                                 console.warn('[GitHub Sync] 战力同步失败:', tip);
                                 return { success: false, status: 'error', error: text || ('HTTP ' + r.status) };
@@ -23458,6 +23781,15 @@
                             }
                             if (parsed && (parsed.success === false || parsed.status === 'error')) {
                                 var errStr = String(parsed.error || '');
+                                var isGithubLoginConflict = /unique_github_login|github_login/i.test(errStr);
+                                if (isGithubLoginConflict) {
+                                    try {
+                                        var recovered = await tryRecoverGithubBindingSt2();
+                                        if (recovered && recovered.success) return recovered;
+                                    } catch (recoverErr) {
+                                        console.warn('[GitHub Sync] github_login 冲突恢复失败:', recoverErr);
+                                    }
+                                }
                                 if (errStr.indexOf('401') !== -1 || errStr.indexOf('Bad credentials') !== -1) {
                                     if (typeof window.__clearGitHubTokenAndResetSyncUI === 'function') window.__clearGitHubTokenAndResetSyncUI();
                                 }
@@ -23470,7 +23802,7 @@
                         });
                     };
                     // githubStats already defined at start of function
-                    var hasValidStats = githubStats && typeof githubStats === 'object' && Object.keys(githubStats).length > 0 && githubStats.login;
+                    var hasValidStats = hasUsableGithubStatsForDrawer(githubStats, currentUserData, authGithubContextSt2);
                     var githubCardEl;
                     var githubCardLang = typeof currentLang !== 'undefined' ? currentLang : 'en';
                     if (typeof window.renderGithubIdentityCard === 'function') {
@@ -23505,9 +23837,22 @@
                             window.renderGithubCard(null, cardOpts);
                         }
                         if (!shouldShowIdentityOnly) {
-                            var userIdForSync = (currentUserData.user_name || currentUserData.login || currentUserData.github_login || '').trim();
-                        var needAutoSync = !(currentUserData.github_login && currentUserData.github_login.trim()) || !hasValidStats;
-                        if (needAutoSync && (userIdForSync || (currentUserData.id && currentUserData.id.trim()))) {
+                            var userIdForSync = String(
+                                githubLoginFromAuthSt2 ||
+                                currentUserData.github_login ||
+                                currentUserData.github_username ||
+                                currentUserData.user_name ||
+                                currentUserData.login ||
+                                ''
+                            ).trim();
+                        var authUserIdForSync = String(
+                                authGithubContextSt2 && authGithubContextSt2.authUserId ||
+                                currentUserData.id ||
+                                currentUserData.user_id ||
+                                ''
+                            ).trim();
+                        var needAutoSync = !userIdForSync || !hasValidStats;
+                        if (needAutoSync && (userIdForSync || authUserIdForSync)) {
                             handleGithubSync().then(function(result) {
                                 if (result && result.success && result.data) {
                                     window.renderGithubCard(result.data, cardOpts);
@@ -23515,7 +23860,7 @@
                                 } else {
                                     var fallbackStars = (typeof resolveDisplayStars === 'function' ? resolveDisplayStars(currentUserData) : null);
                                     var fallback = {
-                                        login: currentUserData.user_name || currentUserData.login || '--',
+                                        login: userIdForSync || currentUserData.user_name || currentUserData.login || '--',
                                         avatarUrl: '',
                                         globalRanking: '--',
                                         totalRepoStars: (fallbackStars != null ? Number(fallbackStars) : 0) || Number(currentUserData.github_stars) || 0,
@@ -23528,7 +23873,7 @@
                             }).catch(function() {
                                 var fs = (typeof resolveDisplayStars === 'function' ? resolveDisplayStars(currentUserData) : null);
                                 var fallback = {
-                                    login: currentUserData.user_name || currentUserData.login || '--',
+                                    login: userIdForSync || currentUserData.user_name || currentUserData.login || '--',
                                     avatarUrl: '', globalRanking: '--',
                                     totalRepoStars: (fs != null ? Number(fs) : 0) || Number(currentUserData.github_stars) || 0,
                                     mergedPRs: 0, commitVelocity: 0, prReviews: 0, activeDays: 0,
@@ -23540,7 +23885,7 @@
                         } else {
                             var fs2 = (typeof resolveDisplayStars === 'function' ? resolveDisplayStars(currentUserData) : null);
                             var fallback = {
-                                login: currentUserData.user_name || currentUserData.login || '--',
+                                login: userIdForSync || currentUserData.user_name || currentUserData.login || '--',
                                 avatarUrl: '', globalRanking: '--',
                                 totalRepoStars: (fs2 != null ? Number(fs2) : 0) || Number(currentUserData.github_stars) || 0,
                                 mergedPRs: 0, commitVelocity: 0, prReviews: 0, activeDays: 0,
@@ -23784,7 +24129,7 @@
             }
             
             // no (甲方上身)：映射 jiafang_count
-            // 字段回退：jiafang_count -> f_score -> f -> F
+            // 字段回退：jiafang_count -> f_score -> f -> F，最后从本地 Cursor 分析缓存补全
             let no = undefined;
             if (userData.jiafang_count !== undefined && userData.jiafang_count !== null) {
                 no = Number(userData.jiafang_count);
@@ -23797,7 +24142,7 @@
             }
             
             // please (赛博磕头)：映射 ketao_count
-            // 字段回退：ketao_count -> e_score -> e -> E
+            // 字段回退：ketao_count -> e_score -> e -> E，最后从本地 Cursor 分析缓存补全
             let please = undefined;
             if (userData.ketao_count !== undefined && userData.ketao_count !== null) {
                 please = Number(userData.ketao_count);
@@ -23807,6 +24152,41 @@
                 please = Number(userData.e);
             } else if (userData.E !== undefined && userData.E !== null) {
                 please = Number(userData.E);
+            }
+            
+            // 【本地 Cursor 记录补全】云端无 jiafang_count/ketao_count 时，从 last_analysis_data / cursor_clinical_history 读取
+            if ((no === undefined || no === null || Number(no) === 0) || (please === undefined || please === null || Number(please) === 0)) {
+                try {
+                    var localRaw = getCursorAnalysisCache();
+                    if (localRaw) {
+                        var localObj = JSON.parse(localRaw);
+                        var localStats = (localObj && (localObj.stats || localObj.statistics)) || (localObj && localObj.result && (localObj.result.stats || localObj.result.statistics)) || null;
+                        if (localStats) {
+                            if ((no === undefined || no === null || Number(no) === 0) && localStats.jiafang_count != null) {
+                                no = Number(localStats.jiafang_count);
+                            }
+                            if ((please === undefined || please === null || Number(please) === 0) && localStats.ketao_count != null) {
+                                please = Number(localStats.ketao_count);
+                            }
+                        }
+                    }
+                    if ((no === undefined || no === null || Number(no) === 0) || (please === undefined || please === null || Number(please) === 0)) {
+                        var histStr = typeof localStorage !== 'undefined' ? localStorage.getItem('cursor_clinical_history') : '';
+                        var hist = histStr ? JSON.parse(histStr) : null;
+                        var vr = hist && hist.analysisData && hist.analysisData.vibeResult ? hist.analysisData.vibeResult : null;
+                        var vrStats = (vr && (vr.statistics || vr.stats)) || null;
+                        if (vrStats) {
+                            if ((no === undefined || no === null || Number(no) === 0) && (vrStats.jiafang_count != null || vrStats.buCount != null)) {
+                                no = Number(vrStats.jiafang_count ?? vrStats.buCount);
+                            }
+                            if ((please === undefined || please === null || Number(please) === 0) && (vrStats.ketao_count != null || vrStats.qingCount != null)) {
+                                please = Number(vrStats.ketao_count ?? vrStats.qingCount);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[extractDimensionValues] 本地 Cursor 记录补全 jiafang/ketao 失败:', e);
+                }
             }
 
             return { 
