@@ -1899,6 +1899,14 @@
                 console.warn('[drawHighScores] ❌ 找不到容器，无法渲染高分图谱');
                 return;
             }
+            // Global tab 仅保留国家榜容器，禁止 LPDEF/高分图谱插入
+            try {
+                var isInGlobalPanel = !!(container.closest && (container.closest('#panel-global-view') || container.closest('#panel-global-content')));
+                var isGlobalPkBoard = container.id === 'global-country-pk-leaderboard';
+                if (isInGlobalPanel || isGlobalPkBoard || (typeof currentViewState === 'string' && currentViewState === 'GLOBAL')) {
+                    return;
+                }
+            } catch (_) { /* ignore */ }
             console.log('[drawHighScores] ✅ 找到容器:', container);
             var metricOrder = ['total_user_chars', 'total_messages', 'jiafang_count', 'ketao_count', 'work_days'];
             var metricLabels = [
