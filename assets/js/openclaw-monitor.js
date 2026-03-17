@@ -9,6 +9,8 @@
     var TOKEN_EVOLUTION_MAX = 500000;
     var GATEWAY_CHANNEL_CACHE_KEY = 'openclaw_channel_status_cache_v1';
     var GATEWAY_CHANNEL_CACHE_TTL_MS = 5 * 60 * 1000;
+    var GATEWAY_UNAVAILABLE_CACHE_KEY = 'openclaw_gateway_unavailable_until_v1';
+    var GATEWAY_UNAVAILABLE_TTL_MS = 5 * 60 * 1000;
     var OPENCLAW_CARD_TEMPLATE = '' +
         '<div id="openclaw-monitor-card" class="drawer-item openclaw-monitor-card hacker-border" data-card="openclaw-monitor">' +
             '<div class="openclaw-monitor-header">' +
@@ -166,6 +168,30 @@
         } catch (_) {}
     }
 
+    function readGatewayUnavailableUntil() {
+        try {
+            if (typeof localStorage === 'undefined') return 0;
+            var raw = localStorage.getItem(GATEWAY_UNAVAILABLE_CACHE_KEY);
+            var until = Number(raw || 0) || 0;
+            return until > Date.now() ? until : 0;
+        } catch (_) {
+            return 0;
+        }
+    }
+
+    function markGatewayUnavailable() {
+        try {
+            var until = Date.now() + GATEWAY_UNAVAILABLE_TTL_MS;
+            if (typeof localStorage !== 'undefined') localStorage.setItem(GATEWAY_UNAVAILABLE_CACHE_KEY, String(until));
+        } catch (_) {}
+    }
+
+    function clearGatewayUnavailable() {
+        try {
+            if (typeof localStorage !== 'undefined') localStorage.removeItem(GATEWAY_UNAVAILABLE_CACHE_KEY);
+        } catch (_) {}
+    }
+
     function parseGatewayPayloadToIcons(payload) {
         if (!payload || typeof payload !== 'object') return [];
         var direct = parseGatewayChannels(payload);
@@ -236,14 +262,24 @@
                 resolve(cached);
                 return;
             }
+            if (readGatewayUnavailableUntil() > Date.now()) {
+                resolve([]);
+                return;
+            }
             var token = getGatewayToken();
+            if (!token) {
+                resolve([]);
+                return;
+            }
             fetchGatewayConfiguredChannelIconsViaHttp(token).then(function(httpIcons) {
                 if (Array.isArray(httpIcons) && httpIcons.length > 0) {
+                    clearGatewayUnavailable();
                     writeGatewayChannelCache(httpIcons);
                     resolve(httpIcons);
                     return;
                 }
                 if (typeof WebSocket === 'undefined' || !token) {
+                    markGatewayUnavailable();
                     resolve([]);
                     return;
                 }
@@ -261,7 +297,10 @@
                     done = true;
                     try { if (timeout) clearTimeout(timeout); } catch (_) {}
                     try { if (ws && ws.readyState === 1) ws.close(); } catch (_) {}
-                    resolve(Array.isArray(icons) ? icons : []);
+                    var finalIcons = Array.isArray(icons) ? icons : [];
+                    if (finalIcons.length > 0) clearGatewayUnavailable();
+                    else markGatewayUnavailable();
+                    resolve(finalIcons);
                 };
 
                 var send = function(payload) {
@@ -339,6 +378,7 @@
                     }
                 };
             }).catch(function() {
+                markGatewayUnavailable();
                 resolve([]);
             });
         });

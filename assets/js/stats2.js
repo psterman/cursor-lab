@@ -3941,7 +3941,8 @@
                                             tried[ccForRetry] = true;
                                             window.__countryCloudRefreshTried = tried;
                                             setTimeout(function() {
-                                                updateCountryDashboard(ccForRetry, (currentDrawerCountry && currentDrawerCountry.name) || ccForRetry, null, { forceRefresh: true, refreshLexicon: true });
+                                                // 修复：updateCountryDashboard 仅支持 3 个参数（第三参为 options）
+                                                updateCountryDashboard(ccForRetry, null, { forceRefresh: true, refreshLexicon: true });
                                             }, 300);
                                         }
                                     } catch (e) { /* ignore */ }
@@ -4185,8 +4186,8 @@
                     null;
                 // 国家视图：仅从 countryTotals 读取，不落回全局根节点
                 const globalTotalAnalysisRaw = effectiveIsGlobal
-                    ? (data.countryTotals?.ai ?? data.ai ?? data.totalAnalysis ?? data.total_analysis ?? data.totalanalysis ?? null)
-                    : (data.countryTotals?.ai ?? data.total_messages ?? data.totalAnalysis ?? data.total_analysis ?? data.totalanalysis ?? null);
+                    ? (data.countryTotals?.ai ?? data.countryTotals?.total_messages ?? data.ai ?? data.total_messages ?? data.totalAnalysis ?? data.total_analysis ?? data.totalanalysis ?? null)
+                    : (data.countryTotals?.ai ?? data.countryTotals?.total_messages ?? data.total_messages ?? data.totalAnalysis ?? data.total_analysis ?? data.totalanalysis ?? null);
 
                 // 雷达图数据：优先 RPC record（has_valid_data 时）强制 parseFloat，否则 country-summary 的 avg_/globalAverage，仅无有效数据时用 50 占位
                 const toRadarVal = (v) => {
@@ -4223,8 +4224,8 @@
 
                 // 国家视图：仅从 countryTotals 读取（say/total_chars）
                 const totalCharsSumRaw = effectiveIsGlobal
-                    ? (data.countryTotals?.say ?? data.say ?? data.totalCharsSum ?? data.total_chars_sum ?? data.totalChars ?? data.total_chars ?? null)
-                    : (data.countryTotals?.say ?? data.total_chars ?? data.totalCharsSum ?? data.total_chars_sum ?? data.totalChars ?? data.total_chars ?? null);
+                    ? (data.countryTotals?.say ?? data.countryTotals?.total_chars ?? data.say ?? data.total_chars ?? data.totalCharsSum ?? data.total_chars_sum ?? data.totalChars ?? data.total_chars ?? null)
+                    : (data.countryTotals?.say ?? data.countryTotals?.total_chars ?? data.total_chars ?? data.totalCharsSum ?? data.total_chars_sum ?? data.totalChars ?? data.total_chars ?? null);
                 const totalCharsSum = Number(totalCharsSumRaw);
                 if (meritEl) {
                     // 0 也应显示（否则看起来像“未加载”）
@@ -5091,6 +5092,31 @@
                 (async function renderPersonalityDistributionForDrawer() {
                     const box = document.getElementById('rtRealtimeList');
                     if (!box) return;
+                    const renderDistribution = (rows) => {
+                        if (!Array.isArray(rows) || rows.length === 0) return false;
+                        const distribution = rows.map((row) => ({
+                            type: String(row.personality_type ?? row.type ?? row.personality_type_code ?? 'UNKNOWN').toUpperCase(),
+                            count: Number(row.count ?? row.cnt ?? row.total ?? 0) || 0
+                        })).filter((it) => it.count > 0).sort((a, b) => b.count - a.count);
+                        if (distribution.length === 0) return false;
+                        const total = distribution.reduce((s, it) => s + it.count, 0);
+                        const maxPct = total > 0 ? Math.max(...distribution.map((it) => (it.count / total) * 100)) : 0;
+                        box.className = 'personality-vbar-chart';
+                        box.innerHTML = distribution.map((item) => {
+                            const pctVal = total > 0 ? (item.count / total) * 100 : 0;
+                            const pct = pctVal.toFixed(1);
+                            const heightPct = maxPct > 0 ? Math.max(4, (pctVal / maxPct) * 100) : 0;
+                            const title = typeof getPersonalityTitle === 'function' ? getPersonalityTitle(item, currentLang) : (item.type || '');
+                            return `<div class="personality-vbar-col"><div class="personality-vbar-bar-wrap"><div class="personality-vbar-fill" style="height: ${heightPct}%;"></div></div><span class="personality-vbar-name" title="${escapeHtml(title)}">${escapeHtml(title)}</span><span class="personality-vbar-pct">${pct}%</span></div>`;
+                        }).join('');
+                        return true;
+                    };
+
+                    // 优先使用 country-summary 已返回的人格分布，避免再次 RPC 失败时退化成 latest_records 的“近样本估计”。
+                    if (renderDistribution((Array.isArray(data.personalityDistribution) && data.personalityDistribution.length > 0) ? data.personalityDistribution : data.personalityRank)) {
+                        return;
+                    }
+
                     if (!effectiveIsGlobal && target_country && (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function')) {
                         try {
                             var distData = null;
@@ -5102,21 +5128,7 @@
                                 var distRes = await supabaseClient.rpc('get_country_personality_distribution', { target_country_code: target_country });
                                 distData = distRes && !distRes.error ? distRes.data : null;
                             }
-                            if (Array.isArray(distData) && distData.length > 0) {
-                                const distribution = distData.map((row) => ({
-                                    type: String(row.personality_type ?? row.type ?? row.personality_type_code ?? 'UNKNOWN').toUpperCase(),
-                                    count: Number(row.count ?? row.cnt ?? row.total ?? 0) || 0
-                                })).filter((it) => it.count > 0).sort((a, b) => b.count - a.count);
-                                const total = distribution.reduce((s, it) => s + it.count, 0);
-                                const maxPct = total > 0 ? Math.max(...distribution.map((it) => (it.count / total) * 100)) : 0;
-                                box.className = 'personality-vbar-chart';
-                                box.innerHTML = distribution.map((item) => {
-                                    const pctVal = total > 0 ? (item.count / total) * 100 : 0;
-                                    const pct = pctVal.toFixed(1);
-                                    const heightPct = maxPct > 0 ? Math.max(4, (pctVal / maxPct) * 100) : 0;
-                                    const title = typeof getPersonalityTitle === 'function' ? getPersonalityTitle(item, currentLang) : (item.type || '');
-                                    return `<div class="personality-vbar-col"><div class="personality-vbar-bar-wrap"><div class="personality-vbar-fill" style="height: ${heightPct}%;"></div></div><span class="personality-vbar-name" title="${escapeHtml(title)}">${escapeHtml(title)}</span><span class="personality-vbar-pct">${pct}%</span></div>`;
-                                }).join('');
+                            if (renderDistribution(distData)) {
                                 return;
                             }
                         } catch (e) { console.warn('[updateCountryDashboard] get_country_personality_distribution 失败，回退 latest_records:', e); }
@@ -10470,10 +10482,14 @@
             if (state.isGlobalInitializing && !window.__allowInitCall) return;
             console.log('[switchView] 切换到视图:', view);
             var targetView = (view || '').toUpperCase();
+            // 数据源策略：
+            // - global / country / ranking：默认走全量口径（all），避免 source_type 过滤导致国家面板大量字段为 0 或缺失
+            // - leaderboard：GitHub
+            // - openclaw：OpenClaw
             var sourceByView = {
-                global: 'cursor',
-                country: 'cursor',
-                ranking: 'cursor',
+                global: 'all',
+                country: 'all',
+                ranking: 'all',
                 leaderboard: 'github',
                 openclaw: 'openclaw'
             };
@@ -10625,7 +10641,8 @@
                             switchToCountryView(currentDrawerCountry.code, currentDrawerCountry.name);
                             setTimeout(() => { window.__renderingCountryView = false; }, 100);
                         } else if (countryMount && window.__renderingCountryView !== true) {
-                            updateCountryDashboard(currentDrawerCountry.code, currentDrawerCountry.name, null, { forceRefresh: false });
+                            // 修复：避免 4 参调用导致 options 丢失、命中 sameCountry 缓存而不刷新
+                            updateCountryDashboard(currentDrawerCountry.code, null, { forceRefresh: false });
                         }
                     }
                     // 触发国家视图显示事件，通知词云组件自动加载数据
@@ -20155,6 +20172,19 @@
                                             // 兼容：若 last_analysis_data 里没有 lang/fingerprint，这里补齐
                                             const safeLang = (analysisData && analysisData.lang) ? analysisData.lang : (localStorage.getItem('appLanguage') || 'zh-CN');
                                             const safeFp = currentFp || (analysisData && analysisData.fingerprint) || null;
+                                            let safeCountryCode = '';
+                                            try {
+                                                const ccRaw = (localStorage.getItem('manual_location') ||
+                                                    analysisData.current_location ||
+                                                    analysisData.country_code ||
+                                                    updatedUser.current_location ||
+                                                    updatedUser.manual_location ||
+                                                    updatedUser.country_code ||
+                                                    updatedUser.ip_location ||
+                                                    window.currentUserCountry ||
+                                                    '').toString().trim().toUpperCase();
+                                                if (/^[A-Z]{2}$/.test(ccRaw)) safeCountryCode = ccRaw;
+                                            } catch (_) {}
                                             
                                             // 如果没有 chatData（可能因 localStorage 容量限制被降级），则只做本地回填，不发请求
                                             if (!analysisData.chatData || !Array.isArray(analysisData.chatData) || analysisData.chatData.length === 0) {
@@ -20202,7 +20232,12 @@
                                                     // /api/v2/analyze 识别用户名字段为 userName（驼峰）
                                                     userName: normalizedUsername,
                                                     lang: safeLang,
-                                                    fingerprint: safeFp
+                                                    fingerprint: safeFp,
+                                                    ...(safeCountryCode ? {
+                                                        manual_location: safeCountryCode,
+                                                        current_location: safeCountryCode,
+                                                        country_code: safeCountryCode
+                                                    } : {})
                                                 })
                                             });
                                             
@@ -21978,12 +22013,30 @@
                 var lastAnalysis = null;
                 try { var la = getCursorAnalysisCache(); if (la) lastAnalysis = JSON.parse(la); } catch (_) {}
                 var ghUser = (localStorage.getItem('github_username') || '').trim();
+                var safeCountryCodeSWR = '';
+                try {
+                    var ccRawSWR = (
+                        localStorage.getItem('manual_location') ||
+                        (window.currentUser && (window.currentUser.current_location || window.currentUser.manual_location || window.currentUser.country_code || window.currentUser.ip_location)) ||
+                        (window.currentUserData && (window.currentUserData.current_location || window.currentUserData.manual_location || window.currentUserData.country_code || window.currentUserData.ip_location)) ||
+                        (lastAnalysis && (lastAnalysis.current_location || lastAnalysis.country_code)) ||
+                        window.currentUserCountry ||
+                        ''
+                    );
+                    ccRawSWR = String(ccRawSWR || '').trim().toUpperCase();
+                    if (/^[A-Z]{2}$/.test(ccRawSWR)) safeCountryCodeSWR = ccRawSWR;
+                } catch (_) {}
                 var body = {
                     fingerprint: fp,
                     chatData: (lastAnalysis && Array.isArray(lastAnalysis.chatData) && lastAnalysis.chatData.length > 0) ? lastAnalysis.chatData : ['.'],
                     lang: (lastAnalysis && lastAnalysis.lang) ? lastAnalysis.lang : (localStorage.getItem('appLanguage') || 'zh-CN'),
                     dimensions: lastAnalysis && lastAnalysis.dimensions ? lastAnalysis.dimensions : undefined,
-                    stats: lastAnalysis && lastAnalysis.stats ? lastAnalysis.stats : undefined
+                    stats: lastAnalysis && lastAnalysis.stats ? lastAnalysis.stats : undefined,
+                    ...(safeCountryCodeSWR ? {
+                        manual_location: safeCountryCodeSWR,
+                        current_location: safeCountryCodeSWR,
+                        country_code: safeCountryCodeSWR
+                    } : {})
                 };
                 if (ghUser) body.userName = ghUser;
                 if (typeof supabaseClient !== 'undefined' && supabaseClient) {
@@ -25072,8 +25125,8 @@
                                 // 甲方上身：映射 jiafang_count
                                 if (championRecord && championRecord.jiafang_count !== undefined && championRecord.jiafang_count !== null) {
                                     avgValue = Number(championRecord.jiafang_count);
-                                } else if (averages.L !== undefined && averages.L !== null) {
-                                    avgValue = Number(averages.L);
+                                } else if (averages.F !== undefined && averages.F !== null) {
+                                    avgValue = Number(averages.F);
                                 }
                             } else if (dimId === 'say') {
                                 // 总字数：使用 totalChars 或 totalRoastWords
@@ -25086,8 +25139,8 @@
                                 // 赛博磕头：映射 ketao_count
                                 if (championRecord && championRecord.ketao_count !== undefined && championRecord.ketao_count !== null) {
                                     avgValue = Number(championRecord.ketao_count);
-                                } else if (averages.P !== undefined && averages.P !== null) {
-                                    avgValue = Number(averages.P);
+                                } else if (averages.E !== undefined && averages.E !== null) {
+                                    avgValue = Number(averages.E);
                                 }
                             }
                             
