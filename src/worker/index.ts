@@ -110,21 +110,27 @@ function chooseTopModel(modelCounts: Map<string, number>): string {
   return best || '';
 }
 
-async function buildGlobalCountryStatsSnapshot(env: Env): Promise<{ success: boolean; snapshot?: GlobalCountryStatsSnapshot; updatedAtSec?: number; error?: string }> {
+async function buildGlobalCountryStatsSnapshot(
+  env: Env,
+  options?: { force?: boolean }
+): Promise<{ success: boolean; snapshot?: GlobalCountryStatsSnapshot; updatedAtSec?: number; error?: string }> {
   if (!env.SUPABASE_URL || !env.SUPABASE_KEY) return { success: false, error: 'Supabase 未配置' };
   if (!env.STATS_STORE) return { success: false, error: 'STATS_STORE 未绑定' };
+  const forceRefresh = !!options?.force;
 
   // 短路：避免 cron 多处调用导致重复全表扫描
   const minIntervalSec = 10 * 60; // 10 分钟
-  try {
-    const last = await env.STATS_STORE.get(KV_KEY_GLOBAL_COUNTRY_STATS_SNAPSHOT_UPDATED_AT, 'text');
-    const lastSec = last ? safeNonNegativeInt(last) : 0;
-    const nowSec = Math.floor(Date.now() / 1000);
-    if (lastSec > 0 && nowSec - lastSec < minIntervalSec) {
-      return { success: true, updatedAtSec: lastSec };
+  if (!forceRefresh) {
+    try {
+      const last = await env.STATS_STORE.get(KV_KEY_GLOBAL_COUNTRY_STATS_SNAPSHOT_UPDATED_AT, 'text');
+      const lastSec = last ? safeNonNegativeInt(last) : 0;
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (lastSec > 0 && nowSec - lastSec < minIntervalSec) {
+        return { success: true, updatedAtSec: lastSec };
+      }
+    } catch {
+      // ignore
     }
-  } catch {
-    // ignore
   }
 
   type Row = { country_code: string | null; total_chars?: any; total_tokens?: any; primary_model?: any; github_score?: any };
@@ -9678,9 +9684,19 @@ app.get('/api/global-aggregate', async (c) => {
       if (!env.STATS_STORE) {
         return c.json({ success: false, error: 'STATS_STORE 未绑定' }, 500);
       }
-      const snapshot = (await env.STATS_STORE.get(KV_KEY_GLOBAL_COUNTRY_STATS_SNAPSHOT, 'json').catch(() => null)) as GlobalCountryStatsSnapshot | null;
-      const updatedAtSecText = await env.STATS_STORE.get(KV_KEY_GLOBAL_COUNTRY_STATS_SNAPSHOT_UPDATED_AT, 'text').catch(() => null);
-      const updatedAtSec = updatedAtSecText ? safeNonNegativeInt(updatedAtSecText) : null;
+      let snapshot = (await env.STATS_STORE.get(KV_KEY_GLOBAL_COUNTRY_STATS_SNAPSHOT, 'json').catch(() => null)) as GlobalCountryStatsSnapshot | null;
+      let updatedAtSecText = await env.STATS_STORE.get(KV_KEY_GLOBAL_COUNTRY_STATS_SNAPSHOT_UPDATED_AT, 'text').catch(() => null);
+      let updatedAtSec = updatedAtSecText ? safeNonNegativeInt(updatedAtSecText) : null;
+      const hasSnapshot = !!(snapshot && typeof snapshot === 'object' && Object.keys(snapshot).length > 0);
+      if (!hasSnapshot) {
+        const rebuilt = await buildGlobalCountryStatsSnapshot(env, { force: true });
+        if (rebuilt.success && rebuilt.snapshot && Object.keys(rebuilt.snapshot).length > 0) {
+          snapshot = rebuilt.snapshot;
+          updatedAtSec = rebuilt.updatedAtSec ?? updatedAtSec;
+        } else {
+          snapshot = snapshot || {};
+        }
+      }
       c.header('Cache-Control', 'public, max-age=600');
       return c.json({
         success: true,
