@@ -1913,10 +1913,12 @@
             var filtered = raw.filter(function (it) {
                 var k = String((it && it.key) || '');
                 if (k === 'total_chars') return true;
+                if (k === 'day') return true; // 打工榜：接口可能返回 day，需映射为 work_days
                 return allowed5[k];
             }).map(function (it) {
                 var k = String((it && it.key) || '');
                 if (k === 'total_chars') return Object.assign({}, it, { key: 'total_user_chars' });
+                if (k === 'day') return Object.assign({}, it, { key: 'work_days' }); // 打工榜：day -> work_days
                 return it;
             });
             var sorted = filtered.slice().sort(function (a, b) { return metricOrder.indexOf(String((a && a.key) || '')) - metricOrder.indexOf(String((b && b.key) || '')); });
@@ -4507,6 +4509,7 @@
                                 (u.id && window.currentUserData.id && String(u.id) === String(window.currentUserData.id)) ||
                                 (u.fingerprint && u.fingerprint === window.currentUserData.fingerprint) ||
                                 (u.github_username && u.github_username === window.currentUserData.github_username) ||
+                                (u.github_login && u.github_login === window.currentUserData.github_login) ||
                                 (u.user_name && window.currentUserData.user_name && String(u.user_name).toLowerCase() === String(window.currentUserData.user_name).toLowerCase())
                             );
                             if (myIndex !== -1) {
@@ -7975,6 +7978,366 @@
         }
 
         /**
+         * 从本地 Cursor 分析缓存（last_analysis_data / cursor_clinical_history）拼出六维汇总，供右侧抽屉在无接口数据时展示
+         * @returns {{ ai: number, say: number, day: number, word: number, no: number, please: number } | null}
+         */
+        function getLocalCursorTotalsForDrawer() {
+            try {
+                var ai = 0, say = 0, day = 0, word = 0, no = 0, please = 0;
+                var raw = typeof getCursorAnalysisCache === 'function' ? getCursorAnalysisCache() : '';
+                if (raw) {
+                    var obj = JSON.parse(raw);
+                    var st = (obj && (obj.stats || obj.statistics)) || (obj && obj.result && (obj.result.stats || obj.result.statistics)) || null;
+                    if (st) {
+                        ai = Number(st.total_messages ?? st.totalMessages ?? st.userMessages ?? st.question_message_count ?? 0) || 0;
+                        say = Number(st.total_chars ?? st.totalChars ?? st.totalUserChars ?? st.total_roast_words ?? 0) || 0;
+                        no = Number(st.jiafang_count ?? st.buCount ?? 0) || 0;
+                        please = Number(st.ketao_count ?? st.qingCount ?? 0) || 0;
+                        day = Number(st.work_days ?? st.usageDays ?? st.usage_days ?? st.days ?? 0) || 0;
+                        word = Number(st.avg_user_message_length ?? st.avg_message_length ?? st.avgMessageLength ?? 0) || 0;
+                        if (word === 0 && ai > 0 && say > 0) word = Math.round(say / ai);
+                    }
+                }
+                if ((no === 0 && please === 0) || (!ai && !say)) {
+                    var histStr = typeof localStorage !== 'undefined' ? localStorage.getItem('cursor_clinical_history') : '';
+                    var hist = histStr ? JSON.parse(histStr) : null;
+                    var vr = hist && hist.analysisData && hist.analysisData.vibeResult ? hist.analysisData.vibeResult : null;
+                    var vrSt = (vr && (vr.statistics || vr.stats)) || null;
+                    if (vrSt) {
+                        if (ai === 0) ai = Number(vrSt.total_messages ?? vrSt.totalMessages ?? 0) || 0;
+                        if (say === 0) say = Number(vrSt.total_chars ?? vrSt.totalChars ?? 0) || 0;
+                        if (no === 0) no = Number(vrSt.jiafang_count ?? vrSt.buCount ?? 0) || 0;
+                        if (please === 0) please = Number(vrSt.ketao_count ?? vrSt.qingCount ?? 0) || 0;
+                        if (day === 0) day = Number(vrSt.work_days ?? vrSt.usageDays ?? 0) || 0;
+                        if (word === 0 && ai > 0 && say > 0) word = Math.round(say / ai);
+                    }
+                }
+                if (ai > 0 || say > 0 || no > 0 || please > 0 || day > 0) {
+                    return { ai: ai, say: say, day: day, word: word, no: no, please: please };
+                }
+                return null;
+            } catch (e) {
+                console.warn('[Drawer] getLocalCursorTotalsForDrawer 失败:', e);
+                return null;
+            }
+        }
+
+        /**
+         * 用本地 Cursor 数据构建排行榜（高分图谱）所需的 topByMetrics 结构，供 lastData.topByMetrics 为空时兜底
+         * 保证右侧抽屉排行榜/打工榜至少显示当前用户一条记录
+         * @returns {Array<{ key: string, labelZh: string, labelEn: string, leaders: Array }>}
+         */
+        function buildTopByFromLocalCursor() {
+            var totals = typeof getLocalCursorTotalsForDrawer === 'function' ? getLocalCursorTotalsForDrawer() : null;
+            if (!totals || (totals.ai === 0 && totals.say === 0 && totals.no === 0 && totals.please === 0 && totals.day === 0)) return [];
+            var cu = window.currentUserData || window.currentUser || {};
+            var displayName = (cu.user_name || cu.name || cu.github_username || cu.github_login || (typeof localStorage !== 'undefined' && localStorage.getItem('github_username')) || '').trim() || (typeof currentLang !== 'undefined' && currentLang === 'en' ? 'Me' : '我');
+            var user = { user_name: displayName, github_username: cu.github_username || cu.github_login || displayName };
+            var baseLeader = { rank: 1, rn: 1, user: user };
+            var metricOrder = ['total_user_chars', 'total_messages', 'jiafang_count', 'ketao_count', 'work_days'];
+            var labels = [
+                { key: 'total_user_chars', labelZh: '废话输出', labelEn: 'User Chars' },
+                { key: 'total_messages', labelZh: '调戏AI次数', labelEn: 'Messages' },
+                { key: 'jiafang_count', labelZh: '甲方上身', labelEn: 'Jiafang' },
+                { key: 'ketao_count', labelZh: '磕头', labelEn: 'Ketao' },
+                { key: 'work_days', labelZh: '上岗天数', labelEn: 'Work Days' }
+            ];
+            var valueByKey = {
+                total_user_chars: totals.say,
+                total_messages: totals.ai,
+                jiafang_count: totals.no,
+                ketao_count: totals.please,
+                work_days: totals.day
+            };
+            return metricOrder.map(function (key) {
+                var val = valueByKey[key];
+                if (val === undefined || val === null) val = 0;
+                var lab = labels.filter(function (m) { return m.key === key; })[0] || { labelZh: key, labelEn: key };
+                return {
+                    key: key,
+                    labelZh: lab.labelZh,
+                    labelEn: lab.labelEn,
+                    leaders: [{ score: Number(val), vibe_index_num: Number(val), user: user, rank: 1, rn: 1 }]
+                };
+            });
+        }
+
+        /**
+         * 用本地 Cursor 数据构建「六榜」结构（与 fetchGlobalRankings 返回格式一致），供排行榜视图在接口无数据时兜底
+         * @returns {Object|null} 同 fetchGlobalRankings 的返回值，无数据时返回 null
+         */
+        function buildGlobalRankingsFromLocalCursor() {
+            var totals = typeof getLocalCursorTotalsForDrawer === 'function' ? getLocalCursorTotalsForDrawer() : null;
+            if (!totals || (totals.ai === 0 && totals.say === 0 && totals.no === 0 && totals.please === 0 && totals.day === 0)) return null;
+            var cu = window.currentUserData || window.currentUser || {};
+            var displayName = (cu.user_name || cu.name || cu.github_username || cu.github_login || (typeof localStorage !== 'undefined' && localStorage.getItem('github_username')) || '').trim() || (typeof currentLang !== 'undefined' && currentLang === 'en' ? 'Me' : '我');
+            var fp = (cu.fingerprint || cu.user_fingerprint || (typeof localStorage !== 'undefined' && localStorage.getItem('user_fingerprint')) || window.fpId || '').trim() || ('fp_' + Math.random().toString(36).slice(2, 8));
+            var identity = (cu.user_identity && String(cu.user_identity).trim()) || (displayName && displayName !== '我' ? 'github' : 'fingerprint');
+            var defAvatar = (typeof DEFAULT_AVATAR !== 'undefined' ? DEFAULT_AVATAR : '') || '';
+            var avatar = (identity === 'github' && displayName) ? ('https://github.com/' + encodeURIComponent(displayName) + '.png?size=64') : defAvatar;
+            var baseRow = {
+                rank: 1,
+                fingerprint: fp,
+                username: displayName ? '@' + displayName : ('user_' + fp.slice(0, 6)),
+                user_name: displayName,
+                user_identity: identity,
+                avatar: avatar,
+                countryCode: 'UN',
+                manual_location: null,
+                country_code: 'UN',
+                personality_title: '--',
+                vibe_index_str: ''
+            };
+            var avgWord = (totals.ai > 0 && totals.say > 0) ? Math.round(totals.say / totals.ai) : 0;
+            var dims = [
+                { key: 'ketao_count', label: '磕头榜', desc: '顶级礼貌大户', value: totals.please },
+                { key: 'jiafang_count', label: '霸总榜', desc: '对 AI 极限否定', value: totals.no },
+                { key: 'work_days', label: '打工榜', desc: '上岗天数', value: totals.day },
+                { key: 'total_messages', label: '话痨榜', desc: '对话回合', value: totals.ai },
+                { key: 'avg_user_message_length', label: '纠结榜', desc: '单次指令厚度', value: avgWord },
+                { key: 'total_chars', label: '社畜榜', desc: 'Token 霸权', value: totals.say }
+            ];
+            var out = {};
+            dims.forEach(function (d) {
+                out[d.key] = {
+                    key: d.key,
+                    label: d.label,
+                    desc: d.desc,
+                    data: [{ value: d.value, ...baseRow }]
+                };
+            });
+            return out;
+        }
+
+        function getCurrentUserForRankingOverlay() {
+            try {
+                var current = window.currentUserData || window.currentUser || null;
+                if (!current || typeof current !== 'object') return null;
+                var merged = current;
+                var localStats = window.last_local_stats;
+                if (localStats && localStats.payload && (Date.now() - (localStats.ts || 0)) < 300000 && typeof buildUserDataFromLocalAnalysis === 'function') {
+                    merged = buildUserDataFromLocalAnalysis(merged, localStats.payload);
+                }
+                if (typeof readLastAnalysisDataForCurrentDevice === 'function' && typeof buildUserDataFromLocalAnalysis === 'function') {
+                    var localStoredAnalysis = readLastAnalysisDataForCurrentDevice(merged);
+                    if (localStoredAnalysis) {
+                        merged = buildUserDataFromLocalAnalysis(merged, localStoredAnalysis);
+                    }
+                }
+                if (typeof readCursorHistoryForCurrentDevice === 'function' &&
+                    typeof normalizeCursorHistoryToAnalysisPayload === 'function' &&
+                    typeof buildUserDataFromLocalAnalysis === 'function') {
+                    var cursorHistory = readCursorHistoryForCurrentDevice(merged);
+                    if (cursorHistory) {
+                        var normalizedHistory = normalizeCursorHistoryToAnalysisPayload(cursorHistory);
+                        if (normalizedHistory) {
+                            merged = buildUserDataFromLocalAnalysis(merged, normalizedHistory);
+                        }
+                    }
+                }
+                if (typeof getBestUserRecordForStats === 'function') {
+                    merged = getBestUserRecordForStats(merged) || merged;
+                }
+                return merged;
+            } catch (e) {
+                console.warn('[RankingOverlay] getCurrentUserForRankingOverlay failed:', e);
+                return window.currentUserData || window.currentUser || null;
+            }
+        }
+
+        function isSameUserForRankingOverlay(row, user) {
+            try {
+                if (!row || !user) return false;
+                var normalize = function(v) { return v == null ? '' : String(v).trim().toLowerCase(); };
+                var rowFp = normalize(row.fingerprint || row.user_fingerprint || row.user?.fingerprint || row.user?.user_fingerprint);
+                var userFp = normalize(user.fingerprint || user.user_fingerprint);
+                if (rowFp && userFp && rowFp === userFp) return true;
+                var rowGitHub = normalize(
+                    row.github_login ||
+                    row.github_username ||
+                    row.user_name ||
+                    row.username ||
+                    row.user?.github_login ||
+                    row.user?.github_username ||
+                    row.user?.user_name ||
+                    row.user?.username
+                );
+                var userGitHub = normalize(user.github_login || user.github_username || user.user_name || user.name);
+                if (rowGitHub && userGitHub && rowGitHub === userGitHub) return true;
+                var rowIdentity = normalize(row.user_identity || row.user?.user_identity);
+                var userIdentity = normalize(user.user_identity);
+                return !!(rowIdentity && userIdentity && rowIdentity === userIdentity);
+            } catch (_) {
+                return false;
+            }
+        }
+
+        function getRankingMetricValueForUser(metricKey, user) {
+            if (!user || typeof extractDimensionValues !== 'function') return 0;
+            var values = extractDimensionValues(user) || {};
+            switch (metricKey) {
+                case 'total_messages':
+                    return Number(values.ai) || 0;
+                case 'total_chars':
+                case 'total_user_chars':
+                    return Number(values.say) || 0;
+                case 'avg_user_message_length':
+                case 'avg_message_length':
+                    return Number(values.word) || 0;
+                case 'work_days':
+                    return Number(values.day) || 0;
+                case 'jiafang_count':
+                    return Number(values.no) || 0;
+                case 'ketao_count':
+                    return Number(values.please) || 0;
+                default:
+                    return Number(user[metricKey]) || 0;
+            }
+        }
+
+        function buildCurrentUserRankingRow(metricKey, user) {
+            if (!user) return null;
+            var value = getRankingMetricValueForUser(metricKey, user);
+            if (!(value > 0)) return null;
+            var displayName = String(user.github_login || user.github_username || user.user_name || user.name || '').trim();
+            var userIdentity = String(user.user_identity || (displayName ? 'github' : 'fingerprint') || '').trim() || 'fingerprint';
+            var vibeIndexStr = String(user.vibe_index_str || user.lpdef || '').trim();
+            if (!vibeIndexStr && typeof scoresToVibeIndexStr === 'function') {
+                vibeIndexStr = String(scoresToVibeIndexStr(user) || '').trim();
+            }
+            var personalityTitle = vibeIndexStr || '--';
+            if (typeof getPersonalityTitle === 'function' && vibeIndexStr) {
+                try {
+                    var titleResult = getPersonalityTitle({ vibe_index_str: vibeIndexStr, user_identity: userIdentity }, currentLang || 'zh');
+                    if (titleResult && String(titleResult).trim()) {
+                        personalityTitle = String(titleResult).trim();
+                    }
+                } catch (_) {}
+            }
+            var manualLoc = String(user.manual_location || '').trim();
+            var rawCountry = String(user.country_code || user.countryCode || '').trim();
+            var countryCode = (manualLoc.length === 2 && /^[A-Za-z]{2}$/.test(manualLoc)) ? manualLoc.toUpperCase() : (rawCountry || 'UN');
+            var avatarName = displayName || String(user.user_name || '').trim();
+            var avatar = (userIdentity === 'github' && avatarName)
+                ? ('https://github.com/' + encodeURIComponent(avatarName) + '.png?size=64')
+                : (typeof DEFAULT_AVATAR !== 'undefined' ? DEFAULT_AVATAR : '');
+            var flagEmoji = typeof getFlagEmoji === 'function' ? getFlagEmoji(countryCode) : '';
+            return {
+                fingerprint: String(user.fingerprint || user.user_fingerprint || '').trim(),
+                username: displayName ? ('@' + displayName) : '',
+                avatar: avatar,
+                github_login: String(user.github_login || '').trim(),
+                github_username: String(user.github_username || user.github_login || '').trim(),
+                user_name: String(user.user_name || displayName || '').trim(),
+                value: value,
+                user_identity: userIdentity,
+                vibe_index_str: vibeIndexStr,
+                personality_title: personalityTitle,
+                countryCode: countryCode,
+                manual_location: manualLoc || null,
+                country_code: countryCode,
+                flagEmoji: flagEmoji
+            };
+        }
+
+        function applyCurrentUserOverlayToGlobalRankings(rankings, topN) {
+            if (!rankings || typeof rankings !== 'object') return rankings;
+            var currentUser = getCurrentUserForRankingOverlay();
+            if (!currentUser) return rankings;
+            var limit = Number(topN) || 10;
+            Object.keys(rankings).forEach(function(metricKey) {
+                var rankingData = rankings[metricKey];
+                if (!rankingData || typeof rankingData !== 'object') return;
+                var overlayRow = buildCurrentUserRankingRow(metricKey, currentUser);
+                if (!overlayRow) return;
+                var rows = Array.isArray(rankingData.data) ? rankingData.data.slice() : [];
+                var hitIndex = rows.findIndex(function(row) { return isSameUserForRankingOverlay(row, currentUser); });
+                if (hitIndex >= 0) {
+                    rows[hitIndex] = Object.assign({}, rows[hitIndex], overlayRow);
+                } else {
+                    rows.push(overlayRow);
+                }
+                rows = rows.filter(function(row) {
+                    return row && Number(row.value) > 0;
+                }).sort(function(a, b) {
+                    return (Number(b && b.value) || 0) - (Number(a && a.value) || 0);
+                }).slice(0, limit).map(function(row, idx) {
+                    return Object.assign({}, row, { rank: idx + 1 });
+                });
+                rankings[metricKey] = Object.assign({}, rankingData, { data: rows });
+            });
+            return rankings;
+        }
+
+        function applyCurrentUserOverlayToTopByMetrics(topBy, topN) {
+            var list = Array.isArray(topBy) ? topBy.slice() : [];
+            var currentUser = getCurrentUserForRankingOverlay();
+            if (!currentUser) return list;
+            var limit = Number(topN) || 10;
+            var metricDefs = [
+                { key: 'total_user_chars', labelZh: '废话输出', labelEn: 'User Chars' },
+                { key: 'total_messages', labelZh: '调戏AI次数', labelEn: 'Messages' },
+                { key: 'jiafang_count', labelZh: '甲方上身', labelEn: 'Jiafang' },
+                { key: 'ketao_count', labelZh: '磕头', labelEn: 'Ketao' },
+                { key: 'work_days', labelZh: '上岗天数', labelEn: 'Work Days' }
+            ];
+            var displayName = String(currentUser.user_name || currentUser.github_login || currentUser.github_username || currentUser.name || '').trim();
+            var githubName = String(currentUser.github_login || currentUser.github_username || displayName || '').trim();
+            var userPayload = {
+                fingerprint: String(currentUser.fingerprint || currentUser.user_fingerprint || '').trim(),
+                user_name: displayName,
+                github_login: String(currentUser.github_login || '').trim(),
+                github_username: githubName,
+                user_identity: String(currentUser.user_identity || (githubName ? 'github' : 'fingerprint') || '').trim() || 'fingerprint',
+                lpdef: String(currentUser.lpdef || '').trim()
+            };
+            metricDefs.forEach(function(metricDef) {
+                var overlayValue = getRankingMetricValueForUser(metricDef.key, currentUser);
+                if (!(overlayValue > 0)) return;
+                var idx = list.findIndex(function(item) {
+                    var itemKey = String(item && item.key || '').trim();
+                    return itemKey === metricDef.key || (metricDef.key === 'total_user_chars' && itemKey === 'total_chars');
+                });
+                var metricItem = idx >= 0 ? Object.assign({}, list[idx]) : {
+                    key: metricDef.key,
+                    labelZh: metricDef.labelZh,
+                    labelEn: metricDef.labelEn,
+                    leaders: []
+                };
+                var leaders = Array.isArray(metricItem.leaders) ? metricItem.leaders.slice() : [];
+                var rowIndex = leaders.findIndex(function(row) {
+                    return isSameUserForRankingOverlay(row && row.user ? row.user : row, currentUser);
+                });
+                var overlayLeader = {
+                    score: Number(overlayValue),
+                    vibe_index_num: Number(overlayValue),
+                    user: Object.assign({}, userPayload)
+                };
+                if (rowIndex >= 0) {
+                    leaders[rowIndex] = Object.assign({}, leaders[rowIndex], overlayLeader, {
+                        user: Object.assign({}, leaders[rowIndex].user || {}, overlayLeader.user)
+                    });
+                } else {
+                    leaders.push(overlayLeader);
+                }
+                leaders = leaders.filter(function(row) {
+                    return row && Number(row.score ?? row.vibe_index_num ?? 0) > 0;
+                }).sort(function(a, b) {
+                    return (Number(b && (b.score ?? b.vibe_index_num)) || 0) - (Number(a && (a.score ?? a.vibe_index_num)) || 0);
+                }).slice(0, limit).map(function(row, rankIndex) {
+                    return Object.assign({}, row, { rank: rankIndex + 1, rn: rankIndex + 1 });
+                });
+                metricItem.key = metricDef.key;
+                metricItem.labelZh = metricItem.labelZh || metricDef.labelZh;
+                metricItem.labelEn = metricItem.labelEn || metricDef.labelEn;
+                metricItem.leaders = leaders;
+                if (idx >= 0) list[idx] = metricItem;
+                else list.push(metricItem);
+            });
+            return list;
+        }
+
+        /**
          * 全能抓取：从 KV/接口混乱字段名中归一化出 countryTotals（支持 data 嵌套、根节点、全小写、下划线、驼峰）
          * 若 countryTotals 为 undefined，则从根节点/rawData 顶层补全，确保 COUNTRY 视图累计字数等不为 N/A
          */
@@ -8453,6 +8816,20 @@
             }
             // 统一用归一化结果覆盖 countryTotals，确保后续卡片使用的全是归一化后的六维数据（打通全维度数据链）
             rightDrawerData.countryTotals = normalizeStats(rightDrawerData).countryTotals;
+            // 【右侧抽屉 Cursor 补全】当接口/缓存无数据时，用本地 Cursor 分析缓存填充右侧抽屉，避免一直为 0
+            var ct = rightDrawerData.countryTotals || {};
+            var ctEmpty = !(Number(ct.ai) > 0 || Number(ct.say) > 0 || Number(ct.no) > 0 || Number(ct.please) > 0 || Number(ct.day) > 0);
+            if (ctEmpty && typeof getLocalCursorTotalsForDrawer === 'function') {
+                var localTotals = getLocalCursorTotalsForDrawer();
+                if (localTotals && (localTotals.ai > 0 || localTotals.say > 0 || localTotals.no > 0 || localTotals.please > 0)) {
+                    rightDrawerData.countryTotals = {
+                        ai: localTotals.ai, say: localTotals.say, day: localTotals.day,
+                        word: localTotals.word, no: localTotals.no, please: localTotals.please,
+                        total_messages: localTotals.ai, total_chars: localTotals.say, work_days: localTotals.day,
+                        jiafang_count: localTotals.no, ketao_count: localTotals.please, avg_user_message_length: localTotals.word
+                    };
+                }
+            }
             
             // 【调试】检查 rightDrawerData 结构（在渲染卡片之前）
             // 注意：isGlobalViewForCards 在这里还未定义，需要在后面检查
@@ -8611,7 +8988,7 @@
                     currentUser = window.allData.find(item => {
                         const ifp = norm(item.fingerprint || item.user_fingerprint);
                         const iid = norm(item.user_identity);
-                        return (ifp && (ifp === norm(localFp) || iid === norm(localFp))) || (iid && iid === norm(localFp)) || (localGh && norm(String(item.github_username || item.user_name || '')) === norm(localGh));
+                        return (ifp && (ifp === norm(localFp) || iid === norm(localFp))) || (iid && iid === norm(localFp)) || (localGh && norm(String(item.github_login || item.github_username || item.user_name || '')) === norm(localGh));
                     }) || null;
                 }
             } else {
@@ -8699,7 +9076,7 @@
                             const normalizedLocalGitHub = normalizeFingerprint(localGitHubName);
                             const normalizedUrlGitHub = normalizeFingerprint(urlGitHubName);
                             const matchedUser = allData.find(item => {
-                                const itemGitHub = normalizeFingerprint(item.github_username || item.github_id || item.user_name || item.name);
+                                const itemGitHub = normalizeFingerprint(item.github_login || item.github_username || item.github_id || item.user_name || item.name);
                                 return itemGitHub && (itemGitHub === normalizedLocalGitHub || itemGitHub === normalizedUrlGitHub);
                             });
 
@@ -8724,12 +9101,19 @@
                                     supabaseClient
                                         .from('v_user_analysis_extended')
                                         .select('*')
-                                        // GitHub 用户名大小写不敏感：避免 user_name 大小写不一致导致查不到
-                                        .ilike('user_name', String(localGitHubName).trim())
+                                        .ilike('github_login', String(localGitHubName).trim())
                                         .maybeSingle()
                                         .then(({ data: dbUser }) => {
+                                            if (dbUser || isGuestDrawerFlow) return { data: dbUser };
+                                            return supabaseClient
+                                                .from('v_user_analysis_extended')
+                                                .select('*')
+                                                .ilike('user_name', String(localGitHubName).trim())
+                                                .maybeSingle();
+                                        })
+                                        .then(({ data: dbUser }) => {
                                             if (!dbUser || isGuestDrawerFlow) return;
-                                            console.log('[Drawer] ✅ Supabase 兜底找到 GitHub 用户:', dbUser.user_name || dbUser.name);
+                                            console.log('[Drawer] ✅ Supabase 兜底找到 GitHub 用户:', dbUser.github_login || dbUser.user_name || dbUser.name);
                                             // 【核心保护】使用安全合并，防止覆盖已有的高数值
                                             var existingUser = window.currentUser || window.currentUserData || {};
                                             var mergedUser = (typeof safeMaxMergeUserData === 'function')
@@ -8788,7 +9172,7 @@
                         const normalizedUrlGitHub = normalizeFingerprint(urlGitHubName);
                         
                         currentUser = allData.find(item => {
-                            const itemGitHub = normalizeFingerprint(item.github_username || item.user_name || item.name);
+                            const itemGitHub = normalizeFingerprint(item.github_login || item.github_username || item.user_name || item.name);
                             return itemGitHub && (itemGitHub === normalizedLocalGitHub || itemGitHub === normalizedUrlGitHub);
                         });
                         
@@ -8804,12 +9188,19 @@
                                 supabaseClient
                                     .from('v_user_analysis_extended')
                                     .select('*')
-                                    // GitHub 用户名大小写不敏感：避免 user_name 大小写不一致导致查不到
-                                    .ilike('user_name', String(localGitHubName).trim())
+                                    .ilike('github_login', String(localGitHubName).trim())
                                     .maybeSingle()
                                     .then(({ data: dbUser }) => {
+                                        if (dbUser) return { data: dbUser };
+                                        return supabaseClient
+                                            .from('v_user_analysis_extended')
+                                            .select('*')
+                                            .ilike('user_name', String(localGitHubName).trim())
+                                            .maybeSingle();
+                                    })
+                                    .then(({ data: dbUser }) => {
                                         if (!dbUser) return;
-                                        console.log('[Drawer] ✅ Supabase 最终兜底找到 GitHub 用户:', dbUser.user_name || dbUser.name);
+                                        console.log('[Drawer] ✅ Supabase 最终兜底找到 GitHub 用户:', dbUser.github_login || dbUser.user_name || dbUser.name);
                                         // 【核心保护】使用安全合并，防止覆盖已有的高数值
                                         var existingUser = window.currentUser || window.currentUserData || {};
                                         var mergedUser = (typeof safeMaxMergeUserData === 'function')
@@ -9497,6 +9888,9 @@
                         // 【重构】只有在排行榜视图可见时才渲染高分图谱
                         if (typeof drawHighScores === 'function' && currentViewState === 'RANKING') {
                             var topBy = (window.lastData && window.lastData.topByMetrics) ? window.lastData.topByMetrics : [];
+                            if (!Array.isArray(topBy) || !topBy.length) {
+                                if (typeof buildTopByFromLocalCursor === 'function') topBy = buildTopByFromLocalCursor();
+                            }
                             if (Array.isArray(topBy) && topBy.length > 0) {
                                 console.log('[showDrawersWithCountryData] 准备渲染高分图谱到排行榜视图');
                                 drawHighScores(topBy);
@@ -10035,9 +10429,14 @@
             console.log('[renderRankingView] 开始渲染排行榜视图');
             
             var gridsEl = document.querySelector('#panel-ranking-view #global-ranking-grids') || document.getElementById('global-ranking-grids');
+            var vibeContainer = document.querySelector('#panel-ranking-view .vibe-index-leaderboard');
             console.log('[renderRankingView] gridsEl:', gridsEl);
             if (gridsEl) {
                 gridsEl.innerHTML = '<div class="col-span-full text-center text-[#00ff41] text-sm py-6">加载中...</div>';
+            }
+            if (vibeContainer) {
+                vibeContainer.innerHTML = '';
+                vibeContainer.style.display = 'none';
             }
             
             // 详细调试信息
@@ -10062,18 +10461,6 @@
                 console.error('[renderRankingView] 未找到排行榜函数！');
                 console.log('[renderRankingView] 请检查 stats2.app.js 是否正确加载');
                 if (gridsEl) gridsEl.innerHTML = '<div class="col-span-full text-center text-zinc-500 text-sm py-4">排行榜脚本未加载，请刷新页面</div>';
-            }
-            
-            var topBy = window.lastData && window.lastData.topByMetrics ? window.lastData.topByMetrics : [];
-            var vibeContainer = document.querySelector('#panel-ranking-view .vibe-index-leaderboard');
-            if (!topBy.length) {
-                if (vibeContainer) {
-                    vibeContainer.innerHTML = '<div class="text-zinc-500 text-xs text-center py-8">暂无高分图谱数据</div>';
-                }
-            } else {
-                if (typeof drawHighScores === 'function') {
-                    drawHighScores(topBy);
-                }
             }
             
             console.log('[renderRankingView] 排行榜渲染完成');
@@ -10443,6 +10830,45 @@
                 console.error('[Leaderboard] fetchAllLeaderboardSnapshots:', e);
                 return null;
             }
+        }
+
+        async function fetchLeaderboardSnapshotsViaRpcFallback() {
+            var sb = (typeof supabaseClient !== 'undefined' && supabaseClient) ? supabaseClient : (window.supabase || null);
+            if (!sb || typeof sb.rpc !== 'function') return null;
+            try {
+                var grouped = await getCachedOrFetch('vibe_leaderboard_snapshots_rpc_fallback', 30 * 60 * 1000, async function() {
+                    var out = {};
+                    await Promise.all(LEADERBOARD_METRIC_KEYS.map(async function(metricKey) {
+                        out[metricKey] = { daily: {}, all_time: {} };
+                        await Promise.all(['daily', 'all_time'].map(async function(rankingType) {
+                            try {
+                                var rows = await getLeaderboardPageCached(sb, metricKey, rankingType, 0, 10);
+                                out[metricKey][rankingType] = {
+                                    top_data: Array.isArray(rows) ? rows : [],
+                                    updated_at: new Date().toISOString()
+                                };
+                            } catch (err) {
+                                console.warn('[Leaderboard] RPC fallback failed:', metricKey, rankingType, err);
+                                out[metricKey][rankingType] = { top_data: [], updated_at: '' };
+                            }
+                        }));
+                    }));
+                    var hasAnyRows = Object.keys(out).some(function(metricKey) {
+                        var item = out[metricKey] || {};
+                        var dailyRows = item.daily && Array.isArray(item.daily.top_data) ? item.daily.top_data : [];
+                        var allTimeRows = item.all_time && Array.isArray(item.all_time.top_data) ? item.all_time.top_data : [];
+                        return dailyRows.length > 0 || allTimeRows.length > 0;
+                    });
+                    return hasAnyRows ? out : null;
+                });
+                if (grouped && typeof grouped === 'object') {
+                    __leaderboardSnapshots = grouped;
+                    return grouped;
+                }
+            } catch (e) {
+                console.warn('[Leaderboard] fetchLeaderboardSnapshotsViaRpcFallback:', e);
+            }
+            return null;
         }
 
         /**
@@ -11004,6 +11430,9 @@
             }
             gridEl.innerHTML = '<div class="col-span-full text-zinc-500 text-sm py-8 text-center" style="grid-column:1/-1;">加载中...</div>';
             var snap = await fetchAllLeaderboardSnapshots();
+            if (!snap || typeof snap !== 'object' || Object.keys(snap).length === 0) {
+                snap = await fetchLeaderboardSnapshotsViaRpcFallback();
+            }
             gridEl.innerHTML = '';
             if (!snap || typeof snap !== 'object') {
                 gridEl.innerHTML = '<div class="col-span-full text-zinc-500 text-sm py-8 text-center" style="grid-column:1/-1;">未连接数据库或暂无快照</div>';
@@ -11322,9 +11751,7 @@
                     console.log('[GlobalRankings] ✅ 返回缓存数据');
                     return __globalRankingsCache.data;
                 }
-                if (!supabaseClient || typeof supabaseClient.from !== 'function') {
-                    console.warn('[GlobalRankings] ⚠️ Supabase 客户端未初始化, supabaseClient:', typeof supabaseClient);
-                    // 返回空排行榜结构，而不是 null
+                var getEmptyRankings = function() {
                     return {
                         ketao_count: { key: 'ketao_count', data: [], label: '磕头榜', desc: '顶级礼貌大户' },
                         jiafang_count: { key: 'jiafang_count', data: [], label: '霸总榜', desc: '对 AI 极限否定' },
@@ -11333,6 +11760,20 @@
                         avg_user_message_length: { key: 'avg_user_message_length', data: [], label: '纠结榜', desc: '单次指令厚度' },
                         total_chars: { key: 'total_chars', data: [], label: '社畜榜', desc: 'Token 霸权' }
                     };
+                };
+                var getLocalFallbackRankings = function() {
+                    var fallback = typeof buildGlobalRankingsFromLocalCursor === 'function' ? buildGlobalRankingsFromLocalCursor() : null;
+                    if (fallback && Object.keys(fallback).length > 0) {
+                        fallback = typeof applyCurrentUserOverlayToGlobalRankings === 'function'
+                            ? applyCurrentUserOverlayToGlobalRankings(fallback, topN)
+                            : fallback;
+                        return fallback;
+                    }
+                    return getEmptyRankings();
+                };
+                if (!supabaseClient || typeof supabaseClient.from !== 'function') {
+                    console.warn('[GlobalRankings] ⚠️ Supabase 客户端未初始化, supabaseClient:', typeof supabaseClient);
+                    return getLocalFallbackRankings();
                 }
                 console.log('[GlobalRankings] ✅ Supabase 客户端已初始化，开始从 v_unified_analysis_v2 获取排行榜数据');
 
@@ -11396,9 +11837,8 @@
                             return { key: dim.key, data: [], label: dim.label, desc: dim.desc };
                         }
 
-                        // 严格容错处理：如果 data 为空或不是数组，返回空数组
+                        // 严格容错处理：如果 data 为空或不是数组，返回空数组（不逐条 warn，由末尾统一汇总）
                         if (!data || !Array.isArray(data) || data.length === 0) {
-                            console.warn(`[GlobalRankings] ⚠️ ${dim.key} 排行榜数据为空`);
                             return { key: dim.key, data: [], label: dim.label, desc: dim.desc };
                         }
 
@@ -11529,9 +11969,20 @@
                     }
                 });
                 
+                rankings = typeof applyCurrentUserOverlayToGlobalRankings === 'function'
+                    ? applyCurrentUserOverlayToGlobalRankings(rankings, topN)
+                    : rankings;
                 __globalRankingsCache = { data: rankings, ts: Date.now() };
                 var emptyCount = Object.keys(rankings).filter(function(k) { return !rankings[k].data || rankings[k].data.length === 0; }).length;
                 if (emptyCount === dimensions.length) {
+                    var fallback = typeof buildGlobalRankingsFromLocalCursor === 'function' ? buildGlobalRankingsFromLocalCursor() : null;
+                    if (fallback && Object.keys(fallback).length > 0) {
+                        fallback = typeof applyCurrentUserOverlayToGlobalRankings === 'function'
+                            ? applyCurrentUserOverlayToGlobalRankings(fallback, topN)
+                            : fallback;
+                        console.log('[GlobalRankings] 六榜接口无数据，已用本地 Cursor 数据兜底展示');
+                        return fallback;
+                    }
                     console.warn('[GlobalRankings] ⚠️ 六个榜单均无数据，请检查：1) Supabase 视图 v_unified_analysis_v2 是否已创建并包含 jiafang_count/ketao_count 等列；2) user_analysis 表中是否有对应数据；3) RLS 是否允许匿名读取');
                 } else {
                     console.log('[GlobalRankings] ✅ 数据获取成功:', Object.keys(rankings), '空榜数:', emptyCount);
@@ -11543,15 +11994,7 @@
                 } else {
                     console.error('[GlobalRankings] ❌ 获取全局排行榜失败:', error);
                 }
-                // 返回空排行榜结构，而不是 null，确保 UI 能正常渲染
-                return {
-                    ketao_count: { key: 'ketao_count', data: [], label: '磕头榜', desc: '顶级礼貌大户' },
-                    jiafang_count: { key: 'jiafang_count', data: [], label: '霸总榜', desc: '对 AI 极限否定' },
-                    work_days: { key: 'work_days', data: [], label: '打工榜', desc: '上岗天数' },
-                    total_messages: { key: 'total_messages', data: [], label: '话痨榜', desc: '对话回合' },
-                    avg_user_message_length: { key: 'avg_user_message_length', data: [], label: '纠结榜', desc: '单次指令厚度' },
-                    total_chars: { key: 'total_chars', data: [], label: '社畜榜', desc: 'Token 霸权' }
-                };
+                return getLocalFallbackRankings();
             }
         }
 
@@ -11779,16 +12222,26 @@
                 }
 
                 // 从 v_unified_analysis_v2 获取用户数据
-                const { data: userData, error: userError } = await supabaseClient
+                const { data: rawUserData, error: userError } = await supabaseClient
                     .from('v_unified_analysis_v2')
                     .select('fingerprint, user_name, user_identity, country_code, vibe_index_str, ketao_count, jiafang_count, work_days, total_messages, avg_user_message_length, total_chars')
                     .eq('fingerprint', data.fingerprint)
                     .limit(1)
                     .single();
+                let userData = rawUserData;
 
                 if (userError || !userData) {
                     console.error('[UserRankingDetail] ❌ 获取用户数据失败:', userError);
                     return;
+                }
+
+                if (typeof getCurrentUserForRankingOverlay === 'function' && typeof isSameUserForRankingOverlay === 'function') {
+                    var currentOverlayUser = getCurrentUserForRankingOverlay();
+                    if (currentOverlayUser && isSameUserForRankingOverlay(data, currentOverlayUser)) {
+                        userData = typeof safeMaxMergeUserData === 'function'
+                            ? safeMaxMergeUserData(userData, currentOverlayUser)
+                            : Object.assign({}, userData, currentOverlayUser);
+                    }
                 }
 
                 // 获取用户在所有六个维度中的排名
@@ -21844,9 +22297,16 @@
             if (!localPayload.stats && !localPayload.dimensions && !localPayload.analysis) return serverUser;
             var d = localPayload.dimensions || {};
             var st = localPayload.stats || {};
+            var totalMessages = st.question_message_count ?? st.total_messages ?? st.totalMessages ?? serverUser.total_messages;
+            var totalChars = st.total_chars ?? st.totalChars ?? st.totalUserChars ?? st.total_user_chars ?? serverUser.total_chars;
+            var avgMessageLength = st.avg_user_message_length ?? st.avg_message_length ?? st.avgMessageLength ?? serverUser.avg_message_length ?? serverUser.avg_user_message_length;
             return Object.assign({}, serverUser, {
-                total_messages: st.totalMessages ?? serverUser.total_messages,
-                total_chars: st.totalChars ?? serverUser.total_chars,
+                total_messages: totalMessages,
+                question_message_count: totalMessages,
+                total_chars: totalChars,
+                total_user_chars: totalChars,
+                avg_message_length: avgMessageLength,
+                avg_user_message_length: avgMessageLength,
                 work_days: st.work_days ?? serverUser.work_days,
                 stats: st,
                 roast_text: localPayload.roastText ?? serverUser.roast_text,
