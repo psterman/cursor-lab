@@ -66,6 +66,160 @@ export type Env = {
   GITHUB_TOKEN?: string; // 可选，用于 GitHub API 代理提升限流额度
 };
 
+type GlobalCountryStatsSnapshot = Record<
+  string,
+  { avgChars: number; totalTokens: number; userCount: number; topModel: string; githubScore: number }
+>;
+
+function normalizeIso2CountryCode(raw: unknown): string | null {
+  const cc = String(raw ?? '').trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(cc) ? cc : null;
+}
+
+function safeNumber(raw: unknown, fallback = 0): number {
+  const n = typeof raw === 'number' ? raw : Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return n;
+}
+
+function safeNonNegativeInt(raw: unknown): number {
+  const n = Math.floor(safeNumber(raw, 0));
+  return n > 0 ? n : 0;
+}
+
+function round2(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 100) / 100;
+}
+
+function chooseTopModel(modelCounts: Map<string, number>): string {
+  let best = '';
+  let bestCount = 0;
+  for (const [m, c] of modelCounts.entries()) {
+    if (!m) continue;
+    if (c > bestCount) {
+      best = m;
+      bestCount = c;
+      continue;
+    }
+    if (c === bestCount && c > 0) {
+      // 并列时稳定选择：字典序更小者优先
+      if (!best || m < best) best = m;
+    }
+  }
+  return best || '';
+}
+
+async function buildGlobalCountryStatsSnapshot(env: Env): Promise<{ success: boolean; snapshot?: GlobalCountryStatsSnapshot; updatedAtSec?: number; error?: string }> {
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) return { success: false, error: 'Supabase 未配置' };
+  if (!env.STATS_STORE) return { success: false, error: 'STATS_STORE 未绑定' };
+
+  // 短路：避免 cron 多处调用导致重复全表扫描
+  const minIntervalSec = 10 * 60; // 10 分钟
+  try {
+    const last = await env.STATS_STORE.get(KV_KEY_GLOBAL_COUNTRY_STATS_SNAPSHOT_UPDATED_AT, 'text');
+    const lastSec = last ? safeNonNegativeInt(last) : 0;
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (lastSec > 0 && nowSec - lastSec < minIntervalSec) {
+      return { success: true, updatedAtSec: lastSec };
+    }
+  } catch {
+    // ignore
+  }
+
+  type Row = { country_code: string | null; total_chars?: any; total_tokens?: any; primary_model?: any; github_score?: any };
+  const perCountry = new Map<
+    string,
+    { sumChars: number; sumTokens: number; sumGithub: number; userCount: number; modelCounts: Map<string, number> }
+  >();
+
+  const pageSize = 1000;
+  const maxPages = 500; // 硬上限，防止异常导致无限循环
+  let offset = 0;
+  let totalRows = 0;
+
+  for (let page = 0; page < maxPages; page++) {
+    const url = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
+    url.searchParams.set('select', 'country_code,total_chars,total_tokens,primary_model,github_score');
+    url.searchParams.set('country_code', 'not.is.null');
+    url.searchParams.set('limit', String(pageSize));
+    url.searchParams.set('offset', String(offset));
+
+    let rows: Row[] = [];
+    try {
+      const raw = await fetchSupabaseJson<any>(env, url.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS);
+      rows = Array.isArray(raw) ? (raw as Row[]) : [];
+    } catch (e: any) {
+      // 轻量重试一次，提升 cron 稳健性
+      try {
+        await new Promise((r) => setTimeout(r, 800));
+        const raw2 = await fetchSupabaseJson<any>(env, url.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS);
+        rows = Array.isArray(raw2) ? (raw2 as Row[]) : [];
+      } catch (e2: any) {
+        return { success: false, error: e2?.message || e?.message || '查询 user_analysis 失败' };
+      }
+    }
+
+    if (!rows.length) break;
+    totalRows += rows.length;
+
+    for (const r of rows) {
+      const cc = normalizeIso2CountryCode(r?.country_code);
+      if (!cc) continue;
+
+      let agg = perCountry.get(cc);
+      if (!agg) {
+        agg = { sumChars: 0, sumTokens: 0, sumGithub: 0, userCount: 0, modelCounts: new Map<string, number>() };
+        perCountry.set(cc, agg);
+      }
+
+      const chars = Math.max(0, safeNumber((r as any)?.total_chars, 0));
+      const tokens = Math.max(0, safeNumber((r as any)?.total_tokens, 0));
+      const github = Math.max(0, safeNumber((r as any)?.github_score, 0));
+
+      agg.userCount += 1;
+      agg.sumChars += chars;
+      agg.sumTokens += tokens;
+      agg.sumGithub += github;
+
+      const pm = String((r as any)?.primary_model ?? '').trim();
+      if (pm) agg.modelCounts.set(pm, (agg.modelCounts.get(pm) || 0) + 1);
+    }
+
+    if (rows.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  const snapshot: GlobalCountryStatsSnapshot = {};
+  for (const [cc, agg] of perCountry.entries()) {
+    const userCount = Math.max(0, agg.userCount);
+    if (userCount <= 0) continue;
+    snapshot[cc] = {
+      avgChars: round2(agg.sumChars / userCount),
+      totalTokens: round2(agg.sumTokens),
+      userCount,
+      topModel: chooseTopModel(agg.modelCounts),
+      githubScore: round2(agg.sumGithub / userCount),
+    };
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  try {
+    await secureKVPut(env, KV_KEY_GLOBAL_COUNTRY_STATS_SNAPSHOT, JSON.stringify(snapshot), 7200);
+    await secureKVPut(env, KV_KEY_GLOBAL_COUNTRY_STATS_SNAPSHOT_UPDATED_AT, String(nowSec), 7200);
+  } catch (e: any) {
+    return { success: false, error: e?.message || 'KV 写入失败' };
+  }
+
+  console.log('[Worker] ✅ GLOBAL_COUNTRY_STATS_SNAPSHOT 已写入 KV', {
+    countries: Object.keys(snapshot).length,
+    rows: totalRows,
+    updatedAt: nowSec,
+  });
+
+  return { success: true, snapshot, updatedAtSec: nowSec };
+}
+
 async function refreshCountryStatsCurrent(env: Env): Promise<{ success: boolean; error?: string }> {
   try {
     if (!env.SUPABASE_URL || !env.SUPABASE_KEY) return { success: false, error: 'Supabase 未配置' };
@@ -76,6 +230,13 @@ async function refreshCountryStatsCurrent(env: Env): Promise<{ success: boolean;
       headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json' }),
       body: JSON.stringify({}),
     }, SUPABASE_FETCH_TIMEOUT_MS);
+    // 国家 PK 榜快照：Worker 端预聚合写 KV，读路径 0 次 Supabase
+    try {
+      const snap = await buildGlobalCountryStatsSnapshot(env);
+      if (!snap.success) console.warn('[Worker] ⚠️ GLOBAL_COUNTRY_STATS_SNAPSHOT 聚合失败:', snap.error);
+    } catch (snapErr: any) {
+      console.warn('[Worker] ⚠️ GLOBAL_COUNTRY_STATS_SNAPSHOT 聚合异常:', snapErr?.message || String(snapErr));
+    }
     return { success: true };
   } catch (e: any) {
     return { success: false, error: e?.message || String(e) };
@@ -257,6 +418,8 @@ const KV_KEY_GLOBAL_STATS_CACHE = 'GLOBAL_STATS_CACHE'; // 完整统计数据缓
 const KV_KEY_GLOBAL_STATS_V6 = 'GLOBAL_STATS_V6'; // V6 协议全局统计（用于动态排名）
 const KV_KEY_GLOBAL_DASHBOARD_DATA = 'GLOBAL_DASHBOARD_DATA'; // 右侧抽屉：大盘数据缓存（v_global_stats_v6）
 const KV_KEY_GLOBAL_COUNTRY_STATS = 'GLOBAL_COUNTRY_STATS'; // 国家维度累积排行（冷数据，仅定时任务写入，接口只读 KV）
+const KV_KEY_GLOBAL_COUNTRY_STATS_SNAPSHOT = 'GLOBAL_COUNTRY_STATS_SNAPSHOT'; // 国家 PK 榜（生产力/养虾/信仰/GitHub）预聚合快照
+const KV_KEY_GLOBAL_COUNTRY_STATS_SNAPSHOT_UPDATED_AT = 'GLOBAL_COUNTRY_STATS_SNAPSHOT_UPDATED_AT'; // 快照更新时间戳（秒）
 const KV_KEY_COUNTRY_HOT_LIST_PREFIX = 'country-hot-list'; // 国家级灵魂词云缓存，key: country-hot-list:${CC}，TTL 600s
 const KV_KEY_STATIC_VIBE_SNAPSHOT = 'STATIC_VIBE_SNAPSHOT'; // 全量国家词云快照（Cron 写入，读路径 0 DB）
 const KV_KEY_VIBE_HOTLIST_CACHE = 'VIBE_HOTLIST_CACHE'; // static-hotlist 专用，严禁 Supabase，仅读此键
@@ -5718,14 +5881,21 @@ app.get('/api/global-average', async (c) => {
   const region = normalizeRegion(countryCode);
   const wantsUS = isUSLocation(region);
   const wantsSnapshotRegion = /^[A-Z]{2}$/.test(String(region || '').toUpperCase()) && String(region).toUpperCase() !== 'GLOBAL';
+  const sourceTypeRaw = (c.req.query('source_type') ?? c.req.query('sourceType') ?? '').trim().toLowerCase();
+  const sourceType = sourceTypeRaw === 'cursor' || sourceTypeRaw === 'openclaw' ? sourceTypeRaw : 'all';
 
   if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
     return c.json({ success: false, error: 'Supabase 未配置' }, 500);
   }
 
-  // 1) Cache Hit：优先读 KV（按 region 分 key，避免跨国缓存污染）
+  // 1) Cache Hit：优先读 KV（按 region + source_type 分 key；仅全球支持 source_type 过滤）
   let baseRow: any | null = null;
-  const kvKey = region === 'Global' ? KV_KEY_GLOBAL_DASHBOARD_DATA : `${KV_KEY_GLOBAL_DASHBOARD_DATA}:${String(region).toUpperCase()}`;
+  const kvKey =
+    region === 'Global'
+      ? sourceType === 'all'
+        ? KV_KEY_GLOBAL_DASHBOARD_DATA
+        : `${KV_KEY_GLOBAL_DASHBOARD_DATA}:${sourceType}`
+      : `${KV_KEY_GLOBAL_DASHBOARD_DATA}:${String(region).toUpperCase()}`;
   if (env.STATS_STORE) {
     try {
       baseRow = await env.STATS_STORE.get(kvKey, 'json');
@@ -5734,10 +5904,87 @@ app.get('/api/global-average', async (c) => {
     }
   }
 
-  // 2) Cache Miss：回源 Supabase（优先 RPC：快照聚合；否则回退旧全局视图 v_global_stats_v6）
+  // 2) Cache Miss：回源 Supabase（全球 + source_type=cursor|openclaw 时直查 user_analysis 聚合；否则优先 RPC / v_global_stats_v6）
   if (!baseRow) {
     try {
-      if (wantsSnapshotRegion) {
+      if (region === 'Global' && (sourceType === 'cursor' || sourceType === 'openclaw')) {
+        const metaKey = sourceType === 'cursor' ? 'cursor_metadata' : 'openclaw_metadata';
+        const buildUrl = (select: string, opts?: { order?: string; limit?: number }) => {
+          const url = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
+          url.searchParams.set('select', select);
+          url.searchParams.set(metaKey, 'not.is.null');
+          if (opts?.order) url.searchParams.set('order', opts.order);
+          if (opts?.limit != null) url.searchParams.set('limit', String(opts.limit));
+          return url.toString();
+        };
+        const [msgRes, charsRes, dimsRes, latestRes] = await Promise.all([
+          fetchSupabase(env, buildUrl('total_messages'), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS),
+          fetchSupabase(env, buildUrl('total_chars'), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS),
+          fetchSupabase(env, buildUrl('work_days,jiafang_count,ketao_count,l,p,d,e,f'), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS),
+          fetchSupabase(env, buildUrl('personality_type,ip_location,created_at,user_name,work_days,github_username,user_identity,fingerprint,updated_at', { order: 'updated_at.desc', limit: 20 }), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS),
+        ]);
+        let totalUsers = 0;
+        let totalAnalysis = 0;
+        let totalCharsSum = 0;
+        let workDaysSum = 0;
+        let jiafangSum = 0;
+        let ketaoSum = 0;
+        const dimSums = { l: 0, p: 0, d: 0, e: 0, f: 0 };
+        const msgData = msgRes.ok ? await msgRes.json().catch(() => []) : [];
+        const charsData = charsRes.ok ? await charsRes.json().catch(() => []) : [];
+        const dimsData = dimsRes.ok ? await dimsRes.json().catch(() => []) : [];
+        const latestData = latestRes.ok ? await latestRes.json().catch(() => []) : [];
+        if (Array.isArray(msgData)) totalAnalysis = msgData.reduce((s: number, r: any) => s + (Number(r.total_messages) || 0), 0);
+        if (Array.isArray(charsData)) totalCharsSum = charsData.reduce((s: number, r: any) => s + (Number(r.total_chars) || 0), 0);
+        if (Array.isArray(dimsData)) {
+          totalUsers = dimsData.length;
+          dimsData.forEach((r: any) => {
+            workDaysSum += Number(r.work_days) || 0;
+            jiafangSum += Number(r.jiafang_count) || 0;
+            ketaoSum += Number(r.ketao_count) || 0;
+            dimSums.l += parseFloat(r.l) || 0;
+            dimSums.p += parseFloat(r.p) || 0;
+            dimSums.d += parseFloat(r.d) || 0;
+            dimSums.e += parseFloat(r.e) || 0;
+            dimSums.f += parseFloat(r.f) || 0;
+          });
+        }
+        const n = totalUsers || 1;
+        baseRow = {
+          totalUsers: totalUsers,
+          total_users: totalUsers,
+          totalAnalysis,
+          total_analysis: totalAnalysis,
+          totalChars: totalCharsSum,
+          total_chars: totalCharsSum,
+          totalchars: totalCharsSum,
+          totalRoastWords: totalCharsSum,
+          work_days: workDaysSum,
+          totaldays: workDaysSum,
+          jiafang_count: jiafangSum,
+          totalno: jiafangSum,
+          ketao_count: ketaoSum,
+          totalplease: ketaoSum,
+          globalAverage: {
+            L: Math.round(dimSums.l / n) || 50,
+            P: Math.round(dimSums.p / n) || 50,
+            D: Math.round(dimSums.d / n) || 50,
+            E: Math.round(dimSums.e / n) || 50,
+            F: Math.round(dimSums.f / n) || 50,
+          },
+          latest_records: (Array.isArray(latestData) ? latestData : []).slice(0, 20).map((r: any, i: number) => ({
+            personality_type: r.personality_type || 'UNKNOWN',
+            ip_location: r.ip_location || '',
+            created_at: r.created_at,
+            user_name: r.user_name || `用户${i + 1}`,
+            type: r.personality_type || 'UNKNOWN',
+            location: r.ip_location || '',
+            time: r.updated_at || r.created_at,
+            work_days: r.work_days,
+            updated_at: r.updated_at,
+          })),
+        };
+      } else if (wantsSnapshotRegion) {
         // ✅ 新策略：国家聚合按行为快照（analysis_events.snapshot_country / keyword_logs.snapshot_country）
         // 若 RPC/表尚未部署，会自动回退旧逻辑，不阻塞上线。
         const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_country_dashboard_v1`;
@@ -5937,7 +6184,8 @@ app.get('/api/global-average', async (c) => {
   if (region === 'Global' && env.SUPABASE_URL && env.SUPABASE_KEY) {
     try {
       const fr = finalRow as any;
-      const needAgg = !Number(fr.totalAnalysis ?? fr.total_analysis);
+      const hasTotalChars = Number(fr.totalChars ?? fr.total_chars ?? fr.totalchars ?? fr.totalRoastWords ?? 0) > 0;
+      const needAgg = !Number(fr.totalAnalysis ?? fr.total_analysis) || !hasTotalChars;
       const needLocation = !Array.isArray(fr.locationRank) || fr.locationRank.length === 0;
       const needPersonality = !Array.isArray(fr.personalityDistribution) && !Array.isArray(fr.personalityRank);
       if (needLocation || needAgg || needPersonality) {
@@ -6008,6 +6256,31 @@ app.get('/api/global-average', async (c) => {
   if (ipCountry && /^[A-Z]{2}$/.test(ipCountry)) {
     (finalRow as any).ip_country = ipCountry;
   }
+
+  // 【全球统计补全】确保 KV 命中路径也包含 countryTotals 和全球统计字段，供前端六维数据卡片渲染
+  const fr = finalRow as any;
+  const frTotalAnalysis = Number(fr.totalAnalysis ?? fr.total_analysis ?? fr.totalanalysis ?? fr.msg_count ?? 0) || 0;
+  const frTotalChars = Number(fr.totalChars ?? fr.totalchars ?? fr.total_chars ?? fr.totalRoastWords ?? 0) || 0;
+  const frWorkDays = Number(fr.work_days ?? fr.totaldays ?? fr.systemDays ?? 0) || 0;
+  const frJiafang = Number(fr.jiafang_count ?? fr.totalno ?? 0) || 0;
+  const frKetao = Number(fr.ketao_count ?? fr.totalplease ?? 0) || 0;
+  const frAvgWord = Number(fr.avgPerScan ?? fr.avg_per_scan ?? fr.avg_user_message_length ?? 0) || 0;
+  if (!fr.countryTotals || typeof fr.countryTotals !== 'object' ||
+      !(Number(fr.countryTotals.ai) > 0 || Number(fr.countryTotals.say) > 0)) {
+    fr.countryTotals = {
+      ai: frTotalAnalysis,
+      say: frTotalChars,
+      day: frWorkDays,
+      no: frJiafang,
+      please: frKetao,
+      word: frAvgWord,
+    };
+  }
+  if (!fr.jiafang_count && frJiafang > 0) fr.jiafang_count = frJiafang;
+  if (!fr.ketao_count && frKetao > 0) fr.ketao_count = frKetao;
+  if (!fr.work_days && frWorkDays > 0) fr.work_days = frWorkDays;
+  if (!fr.totalAnalysis && frTotalAnalysis > 0) fr.totalAnalysis = frTotalAnalysis;
+  if (!fr.totalChars && frTotalChars > 0) fr.totalChars = frTotalChars;
 
   c.header('Cache-Control', 'public, max-age=600');
   return c.json(finalRow);
@@ -9398,6 +9671,26 @@ app.get('/api/country-summary', async (c) => {
 app.get('/api/global-aggregate', async (c) => {
   try {
     const env = c.env;
+
+    // 国家 PK 榜（global 视图）：直接从 KV 读取预聚合快照，避免返回全量用户列表/避免 Supabase 压力
+    const viewState = String(c.req.query('currentViewState') ?? c.req.query('view') ?? '').trim().toLowerCase();
+    if (viewState === 'global') {
+      if (!env.STATS_STORE) {
+        return c.json({ success: false, error: 'STATS_STORE 未绑定' }, 500);
+      }
+      const snapshot = (await env.STATS_STORE.get(KV_KEY_GLOBAL_COUNTRY_STATS_SNAPSHOT, 'json').catch(() => null)) as GlobalCountryStatsSnapshot | null;
+      const updatedAtSecText = await env.STATS_STORE.get(KV_KEY_GLOBAL_COUNTRY_STATS_SNAPSHOT_UPDATED_AT, 'text').catch(() => null);
+      const updatedAtSec = updatedAtSecText ? safeNonNegativeInt(updatedAtSecText) : null;
+      c.header('Cache-Control', 'public, max-age=600');
+      return c.json({
+        success: true,
+        currentViewState: 'global',
+        snapshot: snapshot || {},
+        updated_at: updatedAtSec ? new Date(updatedAtSec * 1000).toISOString() : null,
+        updated_at_sec: updatedAtSec,
+      });
+    }
+
     if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
       return c.json({ success: false, error: 'Supabase 未配置' }, 500);
     }
@@ -9859,6 +10152,21 @@ async function fetchFromSupabase(
     return c.json(responseData);
   }
 
+  const sourceTypeRaw = (c.req.query('source_type') ?? c.req.query('sourceType') ?? '').trim().toLowerCase();
+  const sourceType = sourceTypeRaw === 'cursor' || sourceTypeRaw === 'openclaw' ? sourceTypeRaw : 'all';
+  const buildScopedUserAnalysisUrl = (select: string, options?: { order?: string; limit?: number }) => {
+    const url = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
+    url.searchParams.set('select', select);
+    if (sourceType === 'cursor') {
+      url.searchParams.set('cursor_metadata', 'not.is.null');
+    } else if (sourceType === 'openclaw') {
+      url.searchParams.set('openclaw_metadata', 'not.is.null');
+    }
+    if (options?.order) url.searchParams.set('order', options.order);
+    if (options?.limit != null) url.searchParams.set('limit', String(options.limit));
+    return url.toString();
+  };
+
   // 用于跟踪是否使用了降级方案（直接查询 user_analysis）
   let usedFallbackQuery = false;
   
@@ -9869,17 +10177,21 @@ async function fetchFromSupabase(
     // 聚合查询：获取总记录数和 total_chars 总和
     const [globalStatsRes, extendedStatsRes, aggregationRes] = await Promise.all([
       // 视图 A：从 v_global_stats_v6 获取平均分和总用户数
-      fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/v_global_stats_v6?select=*`),
+      sourceType === 'all'
+        ? fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/v_global_stats_v6?select=*`)
+        : fetchSupabase(env, buildScopedUserAnalysisUrl('l,p,d,e,f,total_chars,total_messages')),
       // 视图 B：获取地理位置排行和最近受害者
-      fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/extended_stats_view?select=*`),
+      sourceType === 'all'
+        ? fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/extended_stats_view?select=*`)
+        : fetchSupabase(env, buildScopedUserAnalysisUrl('personality_type,ip_location,created_at,user_name,work_days,github_username,user_identity,fingerprint,updated_at', { order: 'updated_at.desc', limit: 20 })),
       // 聚合查询：SUM 结果完整映射到根节点和 countryTotals，供前端消除 0 值
       Promise.all([
-        fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/user_analysis?select=created_at&order=created_at.asc&limit=1`),
-        fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/user_analysis?select=total_chars`, { headers: { 'Prefer': 'count=exact' } }),
-        fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/user_analysis?select=total_messages`),
-        fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/user_analysis?select=work_days,jiafang_count,ketao_count`),
-        fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/user_analysis?select=personality_type`),
-        fetchSupabase(env, `${env.SUPABASE_URL}/rest/v1/user_analysis?select=personality_type,ip_location,created_at,user_name,work_days,github_username,user_identity,fingerprint,updated_at&order=updated_at.desc&limit=20`),
+        fetchSupabase(env, buildScopedUserAnalysisUrl('created_at', { order: 'created_at.asc', limit: 1 })),
+        fetchSupabase(env, buildScopedUserAnalysisUrl('total_chars'), { headers: { 'Prefer': 'count=exact' } }),
+        fetchSupabase(env, buildScopedUserAnalysisUrl('total_messages')),
+        fetchSupabase(env, buildScopedUserAnalysisUrl('work_days,jiafang_count,ketao_count')),
+        fetchSupabase(env, buildScopedUserAnalysisUrl('personality_type')),
+        fetchSupabase(env, buildScopedUserAnalysisUrl('personality_type,ip_location,created_at,user_name,work_days,github_username,user_identity,fingerprint,updated_at', { order: 'updated_at.desc', limit: 20 })),
       ]),
     ]);
 
@@ -9907,7 +10219,7 @@ async function fetchFromSupabase(
       console.warn('[Worker] ⚠️ v_global_stats_v6 查询失败，降级到直接查询 user_analysis 表');
       
       // 注意：user_analysis 表标准字段是 total_chars（不是 total_user_chars）
-      const userAnalysisRes = await fetch(`${env.SUPABASE_URL}/rest/v1/user_analysis?select=l,p,d,e,f,total_chars`, {
+      const userAnalysisRes = await fetch(buildScopedUserAnalysisUrl('l,p,d,e,f,total_chars'), {
         headers: {
           'apikey': env.SUPABASE_KEY,
           'Authorization': `Bearer ${env.SUPABASE_KEY}`,
@@ -9970,6 +10282,31 @@ async function fetchFromSupabase(
     } else {
       try {
         const statsData = await globalStatsRes.json();
+        if (sourceType !== 'all' && Array.isArray(statsData)) {
+          usedFallbackQuery = true;
+          const scopedRows = statsData;
+          const count = scopedRows.length;
+          const sum = scopedRows.reduce((acc, item) => ({
+            L: acc.L + (parseFloat(item?.l) || 0),
+            P: acc.P + (parseFloat(item?.p) || 0),
+            D: acc.D + (parseFloat(item?.d) || 0),
+            E: acc.E + (parseFloat(item?.e) || 0),
+            F: acc.F + (parseFloat(item?.f) || 0),
+          }), { L: 0, P: 0, D: 0, E: 0, F: 0 });
+          if (count > 0) {
+            globalAverage = {
+              L: Math.round(sum.L / count),
+              P: Math.round(sum.P / count),
+              D: Math.round(sum.D / count),
+              E: Math.round(sum.E / count),
+              F: Math.round(sum.F / count),
+            };
+            totalUsers = count;
+            totalRoastWords = scopedRows.reduce((s: number, item: any) => s + (Number(item?.total_chars) || 0), 0);
+          } else {
+            totalUsers = 0;
+          }
+        } else {
         let row = statsData[0] || {};
         
         // 【保底逻辑】如果数据库还没写入（第一个用户），手动返回保底对象
@@ -10034,6 +10371,7 @@ async function fetchFromSupabase(
           avgPerScan,
           avgCharsPerUser,
         });
+        }
         
         // 【处理聚合查询】SUM 结果完整映射，所有数值 Number() 防止字符串干扰
         try {
@@ -10233,6 +10571,24 @@ async function fetchFromSupabase(
     } else {
       try {
         const extendedData = await extendedStatsRes.json();
+        if (sourceType !== 'all' && Array.isArray(extendedData)) {
+          const locationMap = new Map<string, number>();
+          extendedData.forEach((item: any) => {
+            const cc = String(item?.ip_location || '').trim().toUpperCase();
+            if (!cc) return;
+            locationMap.set(cc, (locationMap.get(cc) || 0) + 1);
+          });
+          locationRank = Array.from(locationMap.entries())
+            .map(([name, value]) => ({ name, value }))
+            .sort((a, b) => b.value - a.value)
+            .slice(0, 5);
+          recentVictims = extendedData.slice(0, 5).map((item: any, index: number) => ({
+            name: item?.user_name || `匿名受害者${index + 1}`,
+            location: item?.ip_location || '未知',
+            time: item?.updated_at || item?.created_at || new Date().toISOString(),
+            type: item?.personality_type || 'UNKNOWN',
+          }));
+        } else {
         const row = extendedData[0] || {};
         
         // 【字段映射转换】处理地理位置排行
@@ -10268,6 +10624,7 @@ async function fetchFromSupabase(
           locationRankCount: locationRank.length,
           recentVictimsCount: recentVictims.length,
         });
+        }
       } catch (error: any) {
         console.error('[View Error] extended_stats_view:', error.message || '解析失败');
       }
@@ -10368,9 +10725,9 @@ async function fetchFromSupabase(
     const finalTotalUsers = totalUsers || 1;
     
     // 【确保 source 字段正确】根据数据来源设置正确的 source 值
-    let dataSource = 'supabase';
+    let dataSource = sourceType === 'all' ? 'supabase' : `${sourceType}_direct`;
     if (usedFallbackQuery) {
-      dataSource = 'database_direct';
+      dataSource = sourceType === 'all' ? 'database_direct' : `${sourceType}_direct`;
     } else if (updateKV) {
       dataSource = 'supabase_and_kv';
     }
@@ -10439,6 +10796,7 @@ async function fetchFromSupabase(
       personalityDistribution: personalityDistribution, // 人格分布（前三个）- 格式：{ type: string, count: number }[]
       latestRecords: latestRecords, // 最新记录（最近 5 条）- 格式：{ personality_type: string, ip_location: string, created_at: string, name: string, type: string, location: string, time: string }[]
       source: dataSource, // supabase_and_kv 或 database_direct 或 supabase
+      source_type: sourceType,
     };
 
     // 【调试日志】添加调试日志：console.log('[Debug] 最终合成数据:', JSON.stringify(responseData))

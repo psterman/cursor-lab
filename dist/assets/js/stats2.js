@@ -2820,7 +2820,7 @@
             const refreshLexicon = !!(opts && opts.refreshLexicon);
             const statsSource = (typeof window.__statsSourceType === 'string' && window.__statsSourceType) ? window.__statsSourceType : 'cursor';
             const url = effectiveIsGlobal
-                ? `${API_ENDPOINT}api/global-average`
+                ? `${API_ENDPOINT}api/global-average?${[fp ? `fingerprint=${encodeURIComponent(fp)}` : '', uid ? `user_id=${encodeURIComponent(uid)}` : '', statsSource !== 'all' ? `source_type=${encodeURIComponent(statsSource)}` : '', `_ts=${Date.now()}`].filter(Boolean).join('&')}`
                 : `${API_ENDPOINT}api/country-summary?country=${encodeURIComponent(target_country)}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${uid ? `&user_id=${encodeURIComponent(uid)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}${statsSource !== 'all' ? `&source_type=${encodeURIComponent(statsSource)}` : ''}${refreshLexicon ? '&refresh=true' : ''}&_ts=${Date.now()}`;
 
             // DOM 绑定点
@@ -4052,9 +4052,9 @@
                 const ctForDrawer = data.countryTotals || {};
                 const firstRecord = Array.isArray(data.latest_records) && data.latest_records[0] ? data.latest_records[0] : null;
                 const stats = data.statistics || data.stats || (firstRecord && (firstRecord.statistics || firstRecord.stats)) || {};
-                const jiafangVal = effectiveIsGlobal ? (data.jiafang_count ?? stats.jiafang_count ?? firstRecord?.jiafang_count ?? null) : (ctForDrawer.no ?? ctForDrawer.jiafang_count ?? data.jiafang_count ?? stats.jiafang_count ?? firstRecord?.jiafang_count ?? null);
-                const ketaoVal = effectiveIsGlobal ? (data.ketao_count ?? stats.ketao_count ?? firstRecord?.ketao_count ?? null) : (ctForDrawer.please ?? ctForDrawer.ketao_count ?? data.ketao_count ?? stats.ketao_count ?? firstRecord?.ketao_count ?? null);
-                const workDaysVal = effectiveIsGlobal ? (data.work_days ?? stats.work_days ?? firstRecord?.work_days ?? null) : (ctForDrawer.day ?? ctForDrawer.work_days ?? data.work_days ?? stats.work_days ?? firstRecord?.work_days ?? null);
+                const jiafangVal = effectiveIsGlobal ? (data.jiafang_count ?? data.totalno ?? ctForDrawer.no ?? ctForDrawer.jiafang_count ?? stats.jiafang_count ?? firstRecord?.jiafang_count ?? null) : (ctForDrawer.no ?? ctForDrawer.jiafang_count ?? data.jiafang_count ?? stats.jiafang_count ?? firstRecord?.jiafang_count ?? null);
+                const ketaoVal = effectiveIsGlobal ? (data.ketao_count ?? data.totalplease ?? ctForDrawer.please ?? ctForDrawer.ketao_count ?? stats.ketao_count ?? firstRecord?.ketao_count ?? null) : (ctForDrawer.please ?? ctForDrawer.ketao_count ?? data.ketao_count ?? stats.ketao_count ?? firstRecord?.ketao_count ?? null);
+                const workDaysVal = effectiveIsGlobal ? (data.work_days ?? data.totaldays ?? ctForDrawer.day ?? ctForDrawer.work_days ?? stats.work_days ?? firstRecord?.work_days ?? null) : (ctForDrawer.day ?? ctForDrawer.work_days ?? data.work_days ?? stats.work_days ?? firstRecord?.work_days ?? null);
                 const rtJiafang = document.getElementById('rtJiafangCount');
                 const rtKetao = document.getElementById('rtKetaoCount');
                 const rtWorkDays = document.getElementById('rtWorkDays');
@@ -7619,8 +7619,44 @@
          */
         function getLatestGlobalData() {
             // 有 lastData 即用（不再要求 totalAnalysis>100），保证 Global 视图有数据可展示
-            if (window.lastData && typeof window.lastData === 'object') return window.lastData;
-            return (window.cachedSummary || {});
+            var base = (window.lastData && typeof window.lastData === 'object') ? window.lastData : (window.cachedSummary || {});
+            if (!base || typeof base !== 'object') return {};
+            var merged = Object.assign({}, base);
+            // 全球视图：清除国家级排名字段，防止国家 summary 残留数据污染全球卡片
+            delete merged.countryTotalsRanks;
+            delete merged.myCountryRanks;
+            delete merged.country_user_ranks;
+            if (merged.totalUsers == null) merged.totalUsers = merged.total_users ?? merged.user_count;
+            if (merged.totalAnalysis == null) merged.totalAnalysis = merged.totalanalysis ?? merged.total_analysis ?? merged.msg_count;
+            if (merged.totalChars == null) merged.totalChars = merged.totalchars ?? merged.total_chars ?? merged.totalRoastWords;
+            if (merged.avgPerScan == null) merged.avgPerScan = merged.avg_per_scan ?? merged.avg_user_message_length;
+            // 用全局统计构建全球口径的 countryTotals，供六维数据卡片（调戏AI次数/平均长度/上岗天数等）渲染
+            var gAi = Number(merged.totalAnalysis ?? merged.totalanalysis ?? merged.total_analysis ?? merged.msg_count ?? 0) || 0;
+            var gSay = Number(merged.totalChars ?? merged.totalchars ?? merged.total_chars ?? merged.totalRoastWords ?? 0) || 0;
+            var gDay = Number(merged.work_days ?? merged.totaldays ?? merged.systemDays ?? 0) || 0;
+            var gNo = Number(merged.jiafang_count ?? merged.totalno ?? 0) || 0;
+            var gPlease = Number(merged.ketao_count ?? merged.totalplease ?? 0) || 0;
+            var gWord = Number(merged.avgPerScan ?? merged.avg_per_scan ?? merged.avg_user_message_length ?? 0) || 0;
+            var eCt = merged.countryTotals;
+            var eCtValid = eCt && typeof eCt === 'object' && (
+                Number(eCt.ai) > 0 || Number(eCt.say) > 0 || Number(eCt.no) > 0 || Number(eCt.please) > 0
+            );
+            if (eCtValid) {
+                merged.countryTotals = {
+                    ai: Number(eCt.ai ?? 0) || 0,
+                    say: Number(eCt.say ?? 0) || 0,
+                    day: Number(eCt.day ?? 0) || 0,
+                    no: Number(eCt.no ?? 0) || 0,
+                    please: Number(eCt.please ?? 0) || 0,
+                    word: Number(eCt.word ?? 0) || 0
+                };
+            } else if (gAi > 0 || gSay > 0 || gNo > 0 || gPlease > 0) {
+                merged.countryTotals = {
+                    ai: gAi, say: gSay, day: gDay,
+                    no: gNo, please: gPlease, word: gWord
+                };
+            }
+            return merged;
         }
 
         /**
@@ -9724,34 +9760,29 @@
             // 根据视图类型执行对应逻辑
             switch(view) {
                 case 'global':
-                    // 全球视图：用已对齐的 cachedSummary 触发 renderCardsStaggered，确保字段 fallback 与 Number() 已生效
-                    let globalCode = currentDrawerCountry && currentDrawerCountry.code ? currentDrawerCountry.code : null;
-                    let globalName = currentDrawerCountry && currentDrawerCountry.name ? currentDrawerCountry.name : null;
-                    if (!globalCode) {
-                        const userCountry = window.currentUserCountry ||
-                            (window.currentUser && (window.currentUser.country_code || window.currentUser.ip_location)) ||
-                            (window.currentUserData && (window.currentUserData.country_code || window.currentUserData.ip_location)) ||
-                            'US';
-                        if (userCountry && /^[A-Z]{2}$/.test(String(userCountry).trim().toUpperCase())) {
-                            globalCode = String(userCountry).trim().toUpperCase();
-                            const countryInfo = countryNameMap[globalCode];
-                            globalName = countryInfo ? (currentLang === 'zh' ? countryInfo.zh : countryInfo.en) : globalCode;
+                    // 全球视图：调用 api/global-average 获取全球总和数据（调戏AI次数/平均长度/上岗天数等全球累计）
+                    let globalCode = 'GLOBAL';
+                    let globalName = currentLang === 'en' ? 'Global' : '全球';
+                    {
+                        // 先用已有缓存立即渲染，避免空白等待
+                        var _cachedGlobal = getLatestGlobalData();
+                        var _hasGlobalCache = _cachedGlobal && typeof _cachedGlobal === 'object' && (
+                            Number(_cachedGlobal.totalUsers) > 0 ||
+                            Number(_cachedGlobal.totalAnalysis) > 0 ||
+                            (_cachedGlobal.countryTotals && (Number(_cachedGlobal.countryTotals.ai) > 0 || Number(_cachedGlobal.countryTotals.say) > 0))
+                        );
+                        if (_hasGlobalCache) {
+                            showDrawersWithCountryData(globalCode, globalName, _cachedGlobal, { summaryOnly: true });
                         }
-                    }
-                    if (globalCode && globalName) {
-                        // Global 视图应显示「该国」口径：调戏AI次数=该国用户与AI对话总次数，平均长度=该国人均每次对话字符数，平均篇幅=该国人均/单次字符数
-                        if (typeof fetchCountrySummaryV3 === 'function') {
-                            fetchCountrySummaryV3(globalCode).then(function (summary) {
-                                if (summary && (summary.countryTotals || (summary.data && summary.data.countryTotals))) {
-                                    showDrawersWithCountryData(globalCode, globalName, summary, { summaryOnly: true });
-                                } else {
-                                    showDrawersWithCountryData(globalCode, globalName, getLatestGlobalData(), { summaryOnly: true });
-                                }
-                            }).catch(function () {
-                                showDrawersWithCountryData(globalCode, globalName, getLatestGlobalData(), { summaryOnly: true });
-                            });
-                        } else {
-                            showDrawersWithCountryData(globalCode, globalName, getLatestGlobalData(), { summaryOnly: true });
+                        // 拉取最新全球数据
+                        if (typeof updateCountryDashboard === 'function') {
+                            Promise.resolve(updateCountryDashboard('GLOBAL', null, { preferCache: false, silent: true, forceRefresh: !_hasGlobalCache }))
+                                .then(function () {
+                                    if (typeof currentViewState === 'string' && currentViewState === 'GLOBAL') {
+                                        showDrawersWithCountryData(globalCode, globalName, getLatestGlobalData(), { summaryOnly: true });
+                                    }
+                                })
+                                .catch(function () {});
                         }
                     }
                     

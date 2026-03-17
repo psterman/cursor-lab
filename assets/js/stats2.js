@@ -2979,7 +2979,12 @@
             const refreshLexicon = !!(opts && opts.refreshLexicon);
             const statsSource = (typeof window.__statsSourceType === 'string' && window.__statsSourceType) ? window.__statsSourceType : 'all';
             const url = effectiveIsGlobal
-                ? `${API_ENDPOINT}api/global-average`
+                ? `${API_ENDPOINT}api/global-average?${[
+                    fp ? `fingerprint=${encodeURIComponent(fp)}` : '',
+                    uid ? `user_id=${encodeURIComponent(uid)}` : '',
+                    statsSource !== 'all' ? `source_type=${encodeURIComponent(statsSource)}` : '',
+                    `_ts=${Date.now()}`
+                ].filter(Boolean).join('&')}`
                 : `${API_ENDPOINT}api/country-summary?country=${encodeURIComponent(target_country)}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${uid ? `&user_id=${encodeURIComponent(uid)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}${statsSource !== 'all' ? `&source_type=${encodeURIComponent(statsSource)}` : ''}${refreshLexicon ? '&refresh=true' : ''}&_ts=${Date.now()}`;
 
             // DOM 绑定点
@@ -3472,7 +3477,17 @@
                 // 后端返回可能是“顶层完整字段 + data(兼容包装)”的结构。
                 const root = (payload && typeof payload === 'object') ? payload : {};
                 const nested = (root && typeof root.data === 'object' && root.data) ? root.data : {};
-                const data = { ...root, ...nested };
+                let data = { ...root, ...nested };
+                if (effectiveIsGlobal && typeof normalizeData === 'function') {
+                    try {
+                        const normalizedGlobal = normalizeData(data);
+                        if (normalizedGlobal && typeof normalizedGlobal === 'object') {
+                            data = Object.assign({}, data, normalizedGlobal);
+                        }
+                    } catch (normalizeErr) {
+                        console.warn('[updateCountryDashboard] GLOBAL normalizeData failed:', normalizeErr);
+                    }
+                }
                 // 请求校验：返回的 country_code 与当前选中国家不一致则丢弃，防止网络延迟导致错误数据写入
                 var countryCodeMismatch = false;
                 if (!effectiveIsGlobal && countryCode && data && data.country_code != null) {
@@ -3547,26 +3562,34 @@
                     if (!window.__countryDashboardCache) window.__countryDashboardCache = new Map();
                     window.__countryDashboardCache.set(cacheKey, { data, ts: Date.now() });
                 } catch { /* ignore */ }
-                // 修复缓存污染：禁止直接覆盖，用深度合并保留 countryStats、_sum 等字段
+                var globalSnapshot = effectiveIsGlobal ? buildGlobalDrawerPayload(data) : null;
+                // 修复缓存污染：global 与 country 分开存，不再把国家 summary 混进 global 快照
                 try {
-                    window.cachedSummary = typeof mergeDeep === 'function'
-                        ? mergeDeep(window.cachedSummary || {}, data)
-                        : Object.assign({}, window.cachedSummary || {}, data);
+                    if (effectiveIsGlobal) {
+                        window.cachedGlobalSummary = globalSnapshot;
+                    } else {
+                        window.cachedSummary = typeof mergeDeep === 'function'
+                            ? mergeDeep(window.cachedSummary || {}, data)
+                            : Object.assign({}, window.cachedSummary || {}, data);
+                    }
                 } catch (e) { /* ignore */ }
-                // 写入 lastData，供天梯榜 Tab 等读取 topByMetrics
+                // 写入 lastData，供全球/排行榜读取
                 try {
-                    // 【修复】确保topByMetrics被正确保存到window.lastData
                     if (data.topByMetrics && Array.isArray(data.topByMetrics) && data.topByMetrics.length > 0) {
                         console.log('[updateCountryDashboard] ✅ 保存topByMetrics到lastData:', data.topByMetrics.length, '个维度');
                     }
-                    window.lastData = typeof mergeDeep === 'function'
-                        ? mergeDeep(window.lastData || {}, data)
-                        : Object.assign({}, window.lastData || {}, data);
-                    // 【修复】确保topByMetrics被正确保存
+                    window.lastData = effectiveIsGlobal
+                        ? globalSnapshot
+                        : (typeof mergeDeep === 'function'
+                            ? mergeDeep(window.lastData || {}, data)
+                            : Object.assign({}, window.lastData || {}, data));
+                    if (effectiveIsGlobal) {
+                        window.lastGlobalData = globalSnapshot;
+                    }
                     if (window.lastData && !window.lastData.topByMetrics && data.topByMetrics) {
                         window.lastData.topByMetrics = data.topByMetrics;
                     }
-                } catch (e) { 
+                } catch (e) {
                     console.warn('[updateCountryDashboard] ⚠️ 保存lastData失败:', e);
                 }
 
@@ -4211,9 +4234,9 @@
                 const ctForDrawer = data.countryTotals || {};
                 const firstRecord = Array.isArray(data.latest_records) && data.latest_records[0] ? data.latest_records[0] : null;
                 const stats = data.statistics || data.stats || (firstRecord && (firstRecord.statistics || firstRecord.stats)) || {};
-                const jiafangVal = effectiveIsGlobal ? (data.jiafang_count ?? stats.jiafang_count ?? firstRecord?.jiafang_count ?? null) : (ctForDrawer.no ?? ctForDrawer.jiafang_count ?? data.jiafang_count ?? stats.jiafang_count ?? firstRecord?.jiafang_count ?? null);
-                const ketaoVal = effectiveIsGlobal ? (data.ketao_count ?? stats.ketao_count ?? firstRecord?.ketao_count ?? null) : (ctForDrawer.please ?? ctForDrawer.ketao_count ?? data.ketao_count ?? stats.ketao_count ?? firstRecord?.ketao_count ?? null);
-                const workDaysVal = effectiveIsGlobal ? (data.work_days ?? stats.work_days ?? firstRecord?.work_days ?? null) : (ctForDrawer.day ?? ctForDrawer.work_days ?? data.work_days ?? stats.work_days ?? firstRecord?.work_days ?? null);
+                const jiafangVal = effectiveIsGlobal ? (data.jiafang_count ?? data.totalno ?? ctForDrawer.no ?? ctForDrawer.jiafang_count ?? stats.jiafang_count ?? firstRecord?.jiafang_count ?? null) : (ctForDrawer.no ?? ctForDrawer.jiafang_count ?? data.jiafang_count ?? stats.jiafang_count ?? firstRecord?.jiafang_count ?? null);
+                const ketaoVal = effectiveIsGlobal ? (data.ketao_count ?? data.totalplease ?? ctForDrawer.please ?? ctForDrawer.ketao_count ?? stats.ketao_count ?? firstRecord?.ketao_count ?? null) : (ctForDrawer.please ?? ctForDrawer.ketao_count ?? data.ketao_count ?? stats.ketao_count ?? firstRecord?.ketao_count ?? null);
+                const workDaysVal = effectiveIsGlobal ? (data.work_days ?? data.totaldays ?? ctForDrawer.day ?? ctForDrawer.work_days ?? stats.work_days ?? firstRecord?.work_days ?? null) : (ctForDrawer.day ?? ctForDrawer.work_days ?? data.work_days ?? stats.work_days ?? firstRecord?.work_days ?? null);
                 const rtJiafang = document.getElementById('rtJiafangCount');
                 const rtKetao = document.getElementById('rtKetaoCount');
                 const rtWorkDays = document.getElementById('rtWorkDays');
@@ -7774,13 +7797,136 @@
         if (!window.__drawerFetchInProgress) window.__drawerFetchInProgress = new Map();
 
         /**
-         * 统一数据源：lastData 足够完整时用 lastData，否则用缓存摘要（避免视图切换时数据源不一致）
-         * @returns {object} 用于全球/国家视图渲染的根数据
+         * 将任意统计 payload 归一化为核心字段，避免 undefined 进入合并/渲染链路。
+         * @param {object} raw
+         * @returns {object}
+         */
+        function normalizeCoreStatsPayload(raw) {
+            if (!raw || typeof raw !== 'object') return {};
+            var out = Object.assign({}, raw);
+            var pickNumber = function(keys, fallback) {
+                for (var i = 0; i < keys.length; i++) {
+                    var v = out[keys[i]];
+                    if (v === null || v === undefined || v === '') continue;
+                    var n = Number(v);
+                    if (Number.isFinite(n)) return n;
+                }
+                return Number(fallback) || 0;
+            };
+            var totalMessages = pickNumber(['total_messages', 'totalMessages', 'msg_count', 'question_message_count', 'questionMessageCount'], 0);
+            var totalAnalysis = pickNumber(['totalAnalysis', 'total_analysis', 'totalanalysis', 'msg_count', 'total_messages', 'totalMessages'], totalMessages);
+            var totalChars = pickNumber(['total_chars', 'totalChars', 'totalchars', 'totalCharsSum', 'total_chars_sum', 'total_user_chars', 'totalUserChars', 'say', 'totalRoastWords', 'total_roast_words'], 0);
+            var totalTokens = pickNumber(['total_tokens', 'totalTokens'], 0);
+            var workDays = pickNumber(['work_days', 'workDays', 'usage_days', 'usageDays', 'days', 'day'], 0);
+            var jiafangCount = pickNumber(['jiafang_count', 'jiafangCount', 'no'], 0);
+            var ketaoCount = pickNumber(['ketao_count', 'ketaoCount', 'please'], 0);
+            var avgMessageLength = pickNumber(['avg_message_length', 'avg_user_message_length', 'avgMessageLength', 'avgUserMessageLength', 'avgPerScan', 'avg_per_scan', 'word'], 0);
+
+            out.total_messages = totalMessages;
+            out.totalMessages = totalMessages;
+            out.msg_count = pickNumber(['msg_count', 'total_messages', 'totalMessages'], totalMessages);
+            out.question_message_count = pickNumber(['question_message_count', 'questionMessageCount', 'total_messages', 'totalMessages'], totalMessages);
+            out.questionMessageCount = out.question_message_count;
+            out.totalAnalysis = totalAnalysis;
+            out.total_analysis = totalAnalysis;
+            out.totalanalysis = totalAnalysis;
+            out.total_chars = totalChars;
+            out.totalChars = totalChars;
+            out.totalchars = totalChars;
+            out.totalCharsSum = totalChars;
+            out.total_chars_sum = totalChars;
+            out.total_user_chars = pickNumber(['total_user_chars', 'totalUserChars', 'total_chars', 'totalChars', 'totalchars'], totalChars);
+            out.totalUserChars = out.total_user_chars;
+            out.total_tokens = totalTokens;
+            out.totalTokens = totalTokens;
+            out.work_days = workDays;
+            out.workDays = workDays;
+            out.usage_days = workDays;
+            out.usageDays = workDays;
+            out.day = workDays;
+            out.jiafang_count = jiafangCount;
+            out.jiafangCount = jiafangCount;
+            out.no = jiafangCount;
+            out.ketao_count = ketaoCount;
+            out.ketaoCount = ketaoCount;
+            out.please = ketaoCount;
+            out.avg_message_length = avgMessageLength;
+            out.avg_user_message_length = avgMessageLength;
+            out.avgMessageLength = avgMessageLength;
+            out.avgUserMessageLength = avgMessageLength;
+            out.avgPerScan = avgMessageLength;
+            out.avg_per_scan = avgMessageLength;
+            out.word = avgMessageLength;
+            return out;
+        }
+
+        /**
+         * 将全局接口数据裁成独立的 global payload，严禁继承国家 summary 的 countryTotals。
+         * @param {object} raw
+         * @returns {object}
+         */
+        function buildGlobalDrawerPayload(raw) {
+            var merged = normalizeCoreStatsPayload(raw || {});
+            if (!merged || typeof merged !== 'object') return {};
+            merged = Object.assign({}, merged);
+            delete merged.countryTotalsRanks;
+            delete merged.myCountryRanks;
+            delete merged.country_user_ranks;
+            delete merged.myCountry;
+            delete merged.myCountryValues;
+            delete merged.countryDataByCode;
+            delete merged.countryStats;
+            delete merged.countryTotals;
+
+            var gAi = Number(merged.totalAnalysis ?? merged.totalanalysis ?? merged.total_analysis ?? merged.msg_count ?? 0) || 0;
+            var gSay = Number(merged.totalChars ?? merged.totalchars ?? merged.total_chars ?? merged.totalCharsSum ?? merged.total_chars_sum ?? 0) || 0;
+            var gDay = Number(merged.work_days ?? merged.totaldays ?? merged.systemDays ?? 0) || 0;
+            var gNo = Number(merged.jiafang_count ?? merged.totalno ?? 0) || 0;
+            var gPlease = Number(merged.ketao_count ?? merged.totalplease ?? 0) || 0;
+            var gWord = Number(merged.avgPerScan ?? merged.avg_per_scan ?? merged.avg_user_message_length ?? 0) || 0;
+            merged.countryTotals = {
+                ai: gAi,
+                say: gSay,
+                day: gDay,
+                no: gNo,
+                please: gPlease,
+                word: gWord,
+                total_messages: gAi,
+                total_chars: gSay,
+                work_days: gDay,
+                jiafang_count: gNo,
+                ketao_count: gPlease,
+                avg_message_length: gWord,
+                totalUsers: Number(merged.totalUsers ?? merged.total_users ?? merged.user_count ?? 0) || 0
+            };
+            return merged;
+        }
+
+        /**
+         * 统一数据源：global 视图只认独立 global snapshot，不再与国家 summary 混写。
+         * @returns {object} 用于全球视图渲染的根数据
          */
         function getLatestGlobalData() {
-            // 有 lastData 即用（不再要求 totalAnalysis>100），保证 Global 视图有数据可展示
-            if (window.lastData && typeof window.lastData === 'object') return window.lastData;
-            return (window.cachedSummary || {});
+            var lastGlobalData = (window.lastGlobalData && typeof window.lastGlobalData === 'object') ? window.lastGlobalData : {};
+            var cachedGlobalSummary = (window.cachedGlobalSummary && typeof window.cachedGlobalSummary === 'object') ? window.cachedGlobalSummary : {};
+            var lastData = (window.lastData && typeof window.lastData === 'object') ? window.lastData : {};
+            var merged = typeof mergeDeep === 'function'
+                ? mergeDeep(cachedGlobalSummary, lastGlobalData)
+                : Object.assign({}, cachedGlobalSummary, lastGlobalData);
+            if ((!merged || typeof merged !== 'object' || Object.keys(merged).length === 0) && lastData && typeof lastData === 'object') {
+                var looksCountryBound = !!(
+                    lastData.countryTotals ||
+                    lastData.countryTotalsRanks ||
+                    lastData.myCountry ||
+                    lastData.myCountryRanks ||
+                    lastData.target_country ||
+                    lastData.countryDataByCode
+                );
+                if (!looksCountryBound) {
+                    merged = lastData;
+                }
+            }
+            return buildGlobalDrawerPayload(merged || {});
         }
 
         /**
@@ -7816,6 +7962,8 @@
         function safeMaxMergeUserData(existing, incoming) {
             if (!existing || typeof existing !== 'object') return incoming || {};
             if (!incoming || typeof incoming !== 'object') return existing;
+            existing = normalizeCoreStatsPayload(existing);
+            incoming = normalizeCoreStatsPayload(incoming);
 
             // 需要"取较大值"保护的核心数值字段
             const maxProtectedFields = [
@@ -7945,13 +8093,14 @@
                 }
             });
 
+            const normalizedMerged = normalizeCoreStatsPayload(merged);
             console.log('[SafeMerge] 数据保护合并完成', {
-                existingMsgs: existing.total_messages,
-                incomingMsgs: incoming.total_messages,
-                mergedMsgs: merged.total_messages
+                existingMsgs: existing.total_messages ?? 0,
+                incomingMsgs: incoming.total_messages ?? 0,
+                mergedMsgs: normalizedMerged.total_messages ?? 0
             });
 
-            return merged;
+            return normalizedMerged;
         }
 
         // 暴露到全局，供其他模块使用
@@ -8476,6 +8625,52 @@
         }
 
         function showDrawersWithCountryData(countryCode, countryName, overrideRightData, options) {
+            const isGlobalDrawerView = typeof currentViewState === 'string' && currentViewState === 'GLOBAL';
+            if (isGlobalDrawerView && typeof getLatestGlobalData === 'function') {
+                try {
+                    var scoreGlobalPayload = function(payload) {
+                        if (!payload || typeof payload !== 'object') return -1;
+                        var normalized = typeof normalizeStats === 'function' ? normalizeStats(payload) : payload;
+                        var ct = normalized && normalized.countryTotals ? normalized.countryTotals : {};
+                        var totalUsers = Number(
+                            normalized.totalUsers ??
+                            normalized.total_users ??
+                            payload.totalUsers ??
+                            payload.total_users ??
+                            payload.user_count ??
+                            0
+                        ) || 0;
+                        var totalAnalysis = Number(
+                            normalized.totalAnalysis ??
+                            normalized.total_analysis ??
+                            payload.totalAnalysis ??
+                            payload.total_analysis ??
+                            payload.totalanalysis ??
+                            payload.msg_count ??
+                            ct.total_messages ??
+                            ct.ai ??
+                            0
+                        ) || 0;
+                        var totalChars = Number(
+                            normalized.totalChars ??
+                            normalized.total_chars ??
+                            payload.totalChars ??
+                            payload.total_chars ??
+                            payload.totalchars ??
+                            ct.total_chars ??
+                            ct.say ??
+                            0
+                        ) || 0;
+                        return (totalUsers > 0 ? 1 : 0) + totalAnalysis * 1000 + totalChars;
+                    };
+                    var latestGlobalData = getLatestGlobalData();
+                    if (scoreGlobalPayload(latestGlobalData) > scoreGlobalPayload(overrideRightData)) {
+                        overrideRightData = latestGlobalData;
+                    }
+                } catch (e) {
+                    console.warn('[GlobalCards] overrideRightData heal failed:', e);
+                }
+            }
             // 统一入口：有传入数据时先归一化并写入全局，供后续卡片与 renderCardsStaggered 使用
             if (overrideRightData != null && typeof overrideRightData === 'object') {
                 var normalizedData = normalizeStats(overrideRightData);
@@ -8484,22 +8679,29 @@
                 window.rightDrawerData.countryTotals = normalizedData.countryTotals;
                 console.log('[Data Sync] 数据已对齐:', window.rightDrawerData.countryTotals);
             }
-            // 【彻底解决卡片重复】先使旧渲染代次失效，再清空容器，避免旧 setTimeout 继续 append
-            try {
-                const globalCardsContainer = document.getElementById('global-cards-container') || document.getElementById('panel-global-content');
-                if (globalCardsContainer) {
-                    globalCardsContainer.dataset.drawerRenderGen = String(Date.now());
-                    globalCardsContainer.innerHTML = '';
-                }
-            } catch (e) {
-                console.warn('[Drawer] 清空容器失败:', e);
-            }
-            
             const opts = (options && typeof options === 'object') ? options : {};
             const summaryOnly = !!(opts.summaryOnly && overrideRightData != null);
             if (!summaryOnly && (countryCode == null || countryCode === '')) return;
             const ccUpper = String(countryCode || '').trim().toUpperCase();
             if (!ccUpper && !summaryOnly) return;
+            const useGlobalPkBoard =
+                ccUpper === 'GLOBAL' ||
+                (typeof currentViewState === 'string' && currentViewState === 'GLOBAL');
+
+            // 【彻底解决卡片重复】先使旧渲染代次失效，再清空容器，避免旧 setTimeout 继续 append
+            try {
+                const globalCardsContainer = document.getElementById('global-cards-container') || document.getElementById('panel-global-content');
+                if (globalCardsContainer) {
+                    globalCardsContainer.dataset.drawerRenderGen = String(Date.now());
+                    if (!useGlobalPkBoard) {
+                        globalCardsContainer.innerHTML = '';
+                    } else if (typeof window.ensureGlobalCountryPkScaffold === 'function') {
+                        window.ensureGlobalCountryPkScaffold();
+                    }
+                }
+            } catch (e) {
+                console.warn('[Drawer] 清空容器失败:', e);
+            }
             
             try {
             // 请求去重：如果已有相同国家的请求在进行中，且不是 summaryOnly 模式，则跳过
@@ -8658,8 +8860,15 @@
                 }
                 if (rightBody) {
                     const contentContainer = document.getElementById('panel-global-content') || rightBody;
-                    contentContainer.innerHTML = skeletonHTML + skeletonHTML;
-                    contentContainer.classList.add('drawer-loading');
+                    if (!useGlobalPkBoard) {
+                        contentContainer.innerHTML = skeletonHTML + skeletonHTML;
+                        contentContainer.classList.add('drawer-loading');
+                    } else {
+                        if (typeof window.ensureGlobalCountryPkScaffold === 'function') {
+                            window.ensureGlobalCountryPkScaffold();
+                        }
+                        contentContainer.classList.remove('drawer-loading');
+                    }
                 }
             }
 
@@ -8842,10 +9051,11 @@
                 // 【修复】在 global 视图时，必须获取国家数据，确保卡片显示的是国家总数而不是全球总数
                 const shouldFetchSummary =
                     !summaryOnly &&
+                    !isGlobalView &&
                     overrideRightData == null &&
                     cc.length === 2 &&
                     typeof fetchCountrySummaryV3 === 'function' &&
-                    (isGlobalView || cachedSummary == null); // global 视图或没有缓存时都要获取
+                    cachedSummary == null;
                 if (shouldFetchSummary) {
                     // 标记请求进行中
                     window.__drawerFetchInProgress.set(cc, true);
@@ -9523,7 +9733,24 @@
             // 升级渲染引擎：在所有 UI 渲染和排名计算之前归一化字段（total_messages_sum/totalAnalysis/ai -> ai 等）
             const normalizedData = normalizeStats(rightDrawerData);
             
-            if (rightBody) {
+            if (rightBody && useGlobalPkBoard) {
+                try {
+                    if (typeof window.ensureGlobalCountryPkScaffold === 'function') {
+                        window.ensureGlobalCountryPkScaffold();
+                    }
+                    if (typeof window.initCountryPkBoard === 'function') {
+                        window.initCountryPkBoard();
+                    }
+                    if (typeof window.refreshCountryPkBoard === 'function') {
+                        window.refreshCountryPkBoard(false);
+                    }
+                } catch (e) {
+                    console.warn('[GlobalPK] 渲染国家榜失败:', e);
+                }
+                try { setRightDrawerLoading(false); } catch { /* ignore */ }
+            }
+
+            if (rightBody && !useGlobalPkBoard) {
                 // 先添加维度卡片（即使没有 RANK_RESOURCES 也要显示）
                 // 【修复】在 global 视图时，维度卡片应显示国家累加值，而不是个人数据
                 const isGlobalViewForCards = typeof currentViewState === 'string' && currentViewState === 'GLOBAL';
@@ -10190,25 +10417,29 @@
                 return;
             }
             if (view === 'GLOBAL') {
-                var globalCode = (currentDrawerCountry && currentDrawerCountry.code) ? String(currentDrawerCountry.code).trim().toUpperCase() : null;
-                var globalName = (currentDrawerCountry && currentDrawerCountry.name) || null;
-                if (!globalCode) {
-                    var userCountry = window.currentUserCountry || (window.currentUser && (window.currentUser.country_code || window.currentUser.ip_location)) || (window.currentUserData && (window.currentUserData.country_code || window.currentUserData.ip_location)) || 'US';
-                    if (userCountry && /^[A-Z]{2}$/.test(String(userCountry).trim().toUpperCase())) {
-                        globalCode = String(userCountry).trim().toUpperCase();
-                        globalName = countryNameMap && countryNameMap[globalCode] ? (currentLang === 'zh' ? countryNameMap[globalCode].zh : countryNameMap[globalCode].en) : globalCode;
+                var globalCode = 'GLOBAL';
+                var globalName = currentLang === 'en' ? 'Global' : '全球';
+                try {
+                    currentDrawerCountry.code = globalCode;
+                    currentDrawerCountry.name = globalName;
+                    var leftTitle = document.getElementById('left-drawer-title');
+                    var rightTitle = document.getElementById('right-drawer-title');
+                    if (leftTitle) leftTitle.textContent = globalName;
+                    if (rightTitle) rightTitle.textContent = globalName;
+                } catch (e) { /* ignore */ }
+                try {
+                    if (typeof window.ensureGlobalCountryPkScaffold === 'function') {
+                        window.ensureGlobalCountryPkScaffold();
                     }
-                }
-                if (globalCode && globalName && typeof fetchCountrySummaryV3 === 'function') {
-                    fetchCountrySummaryV3(globalCode).then(function(summary) {
-                        if (summary && (summary.countryTotals || (summary.data && summary.data.countryTotals)) && typeof showDrawersWithCountryData === 'function') {
-                            showDrawersWithCountryData(globalCode, globalName, summary, { summaryOnly: true });
-                        }
-                        done();
-                    }).catch(function() { done(); });
-                } else {
-                    done();
-                }
+                    if (typeof window.initCountryPkBoard === 'function') {
+                        window.initCountryPkBoard();
+                    }
+                } catch (e) { /* ignore */ }
+                Promise.resolve(
+                    (typeof window.refreshCountryPkBoard === 'function')
+                        ? window.refreshCountryPkBoard(true)
+                        : null
+                ).finally(function() { done(); });
                 return;
             }
             if (view === 'OPENCLAW') {
@@ -10232,9 +10463,9 @@
             console.log('[switchView] 切换到视图:', view);
             var targetView = (view || '').toUpperCase();
             var sourceByView = {
-                global: 'all',
-                country: 'all',
-                ranking: 'all',
+                global: 'cursor',
+                country: 'cursor',
+                ranking: 'cursor',
                 leaderboard: 'github',
                 openclaw: 'openclaw'
             };
@@ -10305,34 +10536,44 @@
             // 根据视图类型执行对应逻辑
             switch(view) {
                 case 'global':
-                    // 全球视图：用已对齐的 cachedSummary 触发 renderCardsStaggered，确保字段 fallback 与 Number() 已生效
-                    let globalCode = currentDrawerCountry && currentDrawerCountry.code ? currentDrawerCountry.code : null;
-                    let globalName = currentDrawerCountry && currentDrawerCountry.name ? currentDrawerCountry.name : null;
-                    if (!globalCode) {
-                        const userCountry = window.currentUserCountry ||
-                            (window.currentUser && (window.currentUser.country_code || window.currentUser.ip_location)) ||
-                            (window.currentUserData && (window.currentUserData.country_code || window.currentUserData.ip_location)) ||
-                            'US';
-                        if (userCountry && /^[A-Z]{2}$/.test(String(userCountry).trim().toUpperCase())) {
-                            globalCode = String(userCountry).trim().toUpperCase();
-                            const countryInfo = countryNameMap[globalCode];
-                            globalName = countryInfo ? (currentLang === 'zh' ? countryInfo.zh : countryInfo.en) : globalCode;
-                        }
+                    // 全球视图：直接使用全局数据源（/api/global-average -> lastData），避免误用 country-summary 覆盖全局卡片
+                    let globalCode = 'GLOBAL';
+                    let globalName = currentLang === 'en' ? 'Global' : '全球';
+                    if (currentDrawerCountry && typeof currentDrawerCountry === 'object') {
+                        currentDrawerCountry.code = globalCode;
+                        currentDrawerCountry.name = globalName;
                     }
-                    if (globalCode && globalName) {
-                        // Global 视图应显示「该国」口径：调戏AI次数=该国用户与AI对话总次数，平均长度=该国人均每次对话字符数，平均篇幅=该国人均/单次字符数
-                        if (typeof fetchCountrySummaryV3 === 'function') {
-                            fetchCountrySummaryV3(globalCode).then(function (summary) {
-                                if (summary && (summary.countryTotals || (summary.data && summary.data.countryTotals))) {
-                                    showDrawersWithCountryData(globalCode, globalName, summary, { summaryOnly: true });
-                                } else {
-                                    showDrawersWithCountryData(globalCode, globalName, getLatestGlobalData(), { summaryOnly: true });
-                                }
-                            }).catch(function () {
-                                showDrawersWithCountryData(globalCode, globalName, getLatestGlobalData(), { summaryOnly: true });
-                            });
-                        } else {
-                            showDrawersWithCountryData(globalCode, globalName, getLatestGlobalData(), { summaryOnly: true });
+                    if (globalCode && globalName && typeof showDrawersWithCountryData === 'function') {
+                        var globalData = getLatestGlobalData();
+                        // 【修复】全球 tab 无数据：无 lastData 或无任何统计字段时强制拉取 global-average，避免一直空白
+                        var hasGlobalData = globalData && typeof globalData === 'object' && (
+                            (globalData.totalUsers != null && Number(globalData.totalUsers) > 0) ||
+                            (globalData.totalAnalysis != null && Number(globalData.totalAnalysis) > 0) ||
+                            (globalData.countryTotals && typeof globalData.countryTotals === 'object' && (
+                                Number(globalData.countryTotals.ai) > 0 || Number(globalData.countryTotals.say) > 0
+                            ))
+                        );
+                        var globalOpts = hasGlobalData ? { preferCache: true, silent: true } : { preferCache: false, silent: true, forceRefresh: true };
+                        try {
+                            var leftTitle = document.getElementById('left-drawer-title');
+                            var rightTitle = document.getElementById('right-drawer-title');
+                            if (leftTitle) leftTitle.textContent = globalName;
+                            if (rightTitle) rightTitle.textContent = globalName;
+                        } catch (e) { /* ignore */ }
+                        try {
+                            if (typeof window.ensureGlobalCountryPkScaffold === 'function') {
+                                window.ensureGlobalCountryPkScaffold();
+                            }
+                            if (typeof window.initCountryPkBoard === 'function') {
+                                window.initCountryPkBoard();
+                            }
+                            if (typeof window.refreshCountryPkBoard === 'function') {
+                                window.refreshCountryPkBoard(!hasGlobalData);
+                            }
+                        } catch (e) { /* ignore */ }
+                        if (typeof updateCountryDashboard === 'function') {
+                            Promise.resolve(updateCountryDashboard('GLOBAL', null, globalOpts))
+                                .catch(function () { /* ignore */ });
                         }
                     }
                     
@@ -10344,6 +10585,8 @@
                             });
                         }, 500);
                     }
+                    // 【新增】国家 PK 榜：global 视图时初始化（幂等）
+                    try { if (typeof window.initCountryPkBoard === 'function') window.initCountryPkBoard(); } catch (_) {}
                     break;
                     
                 case 'country':
@@ -16977,8 +17220,12 @@
             let totalAnalysis =
                 data.totalAnalysis ??
                 data.total_analysis ??
+                data.totalanalysis ??
+                data.msg_count ??
                 data.data?.totalAnalysis ??
                 data.data?.total_analysis ??
+                data.data?.totalanalysis ??
+                data.data?.msg_count ??
                 undefined;
             if (totalAnalysis === undefined || totalAnalysis === null) {
                 const recentVictims = data.recentVictims || data.latestRecords || data.latest_records || [];
@@ -16991,8 +17238,12 @@
             const totalUsersRaw =
                 data.totalUsers ??
                 data.total_users ??
+                data.user_count ??
+                data.users_count ??
                 data.data?.totalUsers ??
                 data.data?.total_users ??
+                data.data?.user_count ??
+                data.data?.users_count ??
                 data.us_stats?.totalUsers ??
                 data.us_stats?.total_users ??
                 undefined;
@@ -17003,10 +17254,12 @@
             let totalRoastWords =
                 data.totalChars ??
                 data.total_chars ??
+                data.totalchars ??
                 data.totalCharsSum ??
                 data.total_chars_sum ??
                 data.totalCharsTotal ??
                 data.total_chars_total ??
+                data.data?.totalchars ??
                 undefined;
             if (totalRoastWords === undefined || totalRoastWords === null || totalRoastWords === 0) {
                 // 尝试从 latestRecords 中获取
@@ -17039,6 +17292,7 @@
             const totalCharsRaw =
                 data.totalChars ??
                 data.total_chars ??
+                data.totalchars ??
                 data.totalCharsSum ??
                 data.total_chars_sum ??
                 totalRoastWords;
@@ -28644,6 +28898,561 @@
     
     console.log('[IIFE] 全局函数暴露完成');
     
+})();
+
+// ==================== 全球Tab：国家PK榜（四榜切换 + 卡片渲染 + 雷达联动） ====================
+(function () {
+    const PK_CACHE_TTL_MS = 10 * 60 * 1000;
+    const DEFAULT_RANK_TYPE = 'efficiency'; // efficiency | lobster | model | github
+
+    function getApiBase() {
+        const baseEndpoint = window.API_ENDPOINT_MANAGER ? window.API_ENDPOINT_MANAGER.getCurrent() : (document.querySelector('meta[name="api-endpoint"]')?.content || '');
+        const base = baseEndpoint.endsWith('/') ? baseEndpoint.slice(0, -1) : baseEndpoint;
+        return base || '';
+    }
+
+    function safeNum(v) {
+        const n = Number(v ?? 0);
+        return Number.isFinite(n) ? n : 0;
+    }
+
+    function clamp(n, min, max) {
+        const x = Number(n);
+        if (!Number.isFinite(x)) return min;
+        return Math.max(min, Math.min(max, x));
+    }
+
+    function formatInt(n) {
+        const x = Math.round(safeNum(n));
+        try { return x.toLocaleString(); } catch { return String(x); }
+    }
+
+    function formatFloat2(n) {
+        const x = safeNum(n);
+        try { return x.toLocaleString(undefined, { maximumFractionDigits: 2 }); } catch { return String(Math.round(x * 100) / 100); }
+    }
+
+    function ensureGlobalCountryPkScaffold() {
+        const panel = document.getElementById('panel-global-content');
+        if (!panel) return null;
+        try {
+            if (!window.__globalCountryPkMarkup && panel.querySelector('#global-country-pk-leaderboard')) {
+                window.__globalCountryPkMarkup = panel.innerHTML;
+            }
+            if (!panel.querySelector('#global-country-pk-leaderboard') && window.__globalCountryPkMarkup) {
+                panel.innerHTML = window.__globalCountryPkMarkup;
+            }
+        } catch (_) {
+            // ignore
+        }
+        return panel;
+    }
+
+    async function refreshCountryPkBoard(forceRefresh) {
+        const panel = ensureGlobalCountryPkScaffold();
+        if (!panel) return null;
+        const skeleton = document.getElementById('global-pk-skeleton');
+        try {
+            if (forceRefresh) {
+                window.__pkSnapshot = null;
+                window.__pkSnapshotTs = 0;
+                window.__pkSnapshotPromise = null;
+            }
+            if (skeleton) skeleton.style.display = '';
+            const payload = await fetchCountryPkSnapshot();
+            if (payload) {
+                const currentRankType = String(window.__pkRankType || DEFAULT_RANK_TYPE).trim().toLowerCase() || DEFAULT_RANK_TYPE;
+                renderCountryRankings(payload, currentRankType);
+            }
+            return payload;
+        } catch (_) {
+            return null;
+        } finally {
+            try { if (skeleton) skeleton.style.display = 'none'; } catch (_) {}
+        }
+    }
+
+    async function fetchCountryPkSnapshot() {
+        try {
+            const now = Date.now();
+            if (window.__pkSnapshot && window.__pkSnapshotTs && (now - window.__pkSnapshotTs) < PK_CACHE_TTL_MS) {
+                return window.__pkSnapshot;
+            }
+            if (window.__pkSnapshotPromise) return await window.__pkSnapshotPromise;
+
+            const base = getApiBase();
+            const url = `${base}/api/global-aggregate?view=global&_t=${now}`;
+            window.__pkSnapshotPromise = fetch(url, { headers: { 'Accept': 'application/json' }, mode: 'cors', credentials: 'omit' })
+                .then(res => res.ok ? res.json() : null)
+                .then(payload => {
+                    if (!payload || payload.success !== true) return null;
+                    const snapshot = payload.snapshot && typeof payload.snapshot === 'object' ? payload.snapshot : {};
+                    const out = { snapshot, updated_at: payload.updated_at || null, updated_at_sec: payload.updated_at_sec || null };
+                    window.__pkSnapshot = out;
+                    window.__pkSnapshotTs = Date.now();
+                    return out;
+                })
+                .catch(() => null)
+                .finally(() => { window.__pkSnapshotPromise = null; });
+
+            return await window.__pkSnapshotPromise;
+        } catch (e) {
+            try { window.__pkSnapshotPromise = null; } catch (_) {}
+            return null;
+        }
+    }
+
+    function computeGlobalBaseline(snapshot) {
+        let sumUsers = 0;
+        let sumAvgCharsWeighted = 0;
+        let sumTokens = 0;
+        let sumGithubWeighted = 0;
+        let sumTokensPerUserWeighted = 0;
+
+        try {
+            for (const [, raw] of Object.entries(snapshot || {})) {
+                if (!raw || typeof raw !== 'object') continue;
+                const userCount = safeNum(raw.userCount);
+                const avgChars = safeNum(raw.avgChars);
+                const totalTokens = safeNum(raw.totalTokens);
+                const githubScore = safeNum(raw.githubScore);
+                const tokensPerUser = userCount > 0 ? (totalTokens / userCount) : 0;
+
+                if (userCount > 0) {
+                    sumUsers += userCount;
+                    sumAvgCharsWeighted += avgChars * userCount;
+                    sumGithubWeighted += githubScore * userCount;
+                    sumTokensPerUserWeighted += tokensPerUser * userCount;
+                }
+                sumTokens += totalTokens;
+            }
+        } catch (_) {}
+
+        const avgChars = sumUsers > 0 ? (sumAvgCharsWeighted / sumUsers) : 0;
+        const githubScore = sumUsers > 0 ? (sumGithubWeighted / sumUsers) : 0;
+        const tokensPerUser = sumUsers > 0 ? (sumTokensPerUserWeighted / sumUsers) : 0;
+        return {
+            sumUsers,
+            avgChars,
+            sumTokens,
+            githubScore,
+            tokensPerUser,
+        };
+    }
+
+    function ensureRadarComparison(countryCode, countryName, countryMetrics, globalBase) {
+        try {
+            const dom = document.getElementById('rtRadar');
+            if (!dom || typeof echarts === 'undefined') return;
+            dom.innerHTML = '';
+            try {
+                if (window.__countryRadarChart && typeof window.__countryRadarChart.dispose === 'function') {
+                    window.__countryRadarChart.dispose();
+                }
+            } catch (_) {}
+            window.__countryRadarChart = echarts.init(dom, null, { renderer: 'canvas' });
+
+            // 全局基线：固定 50；国家：相对全局的比例 * 50，限制 0..100
+            const base = globalBase || { avgChars: 0, tokensPerUser: 0, sumUsers: 0, sumTokens: 0, githubScore: 0 };
+            const ratio = (v, g) => (g > 0 ? (v / g) : 0);
+            const logRatio = (v, g) => {
+                const lv = Math.log1p(Math.max(0, v));
+                const lg = Math.log1p(Math.max(0, g));
+                return lg > 0 ? (lv / lg) : 0;
+            };
+
+            const l = clamp(50 * ratio(countryMetrics.avgChars, base.avgChars), 0, 100);
+            const p = clamp(50 * ratio(countryMetrics.tokensPerUser, base.tokensPerUser), 0, 100);
+            const d = clamp(50 * ratio(countryMetrics.userCount, base.sumUsers > 0 ? (base.sumUsers / 10) : 0), 0, 100); // 粗略：用全球用户数/10 做标尺
+            const e = clamp(50 * logRatio(countryMetrics.totalTokens, base.sumTokens), 0, 100);
+            const f = clamp(50 * ratio(countryMetrics.githubScore, base.githubScore), 0, 100);
+
+            const option = {
+                backgroundColor: 'transparent',
+                radar: {
+                    indicator: [
+                        { name: 'L', max: 100 },
+                        { name: 'P', max: 100 },
+                        { name: 'D', max: 100 },
+                        { name: 'E', max: 100 },
+                        { name: 'F', max: 100 },
+                    ],
+                    axisName: { color: '#e5e7eb', fontFamily: 'JetBrains Mono', fontSize: 11 },
+                    splitLine: { lineStyle: { color: 'rgba(0,255,65,0.18)' } },
+                    splitArea: { areaStyle: { color: ['rgba(0,255,65,0.02)', 'rgba(0,255,65,0.01)'] } },
+                    axisLine: { lineStyle: { color: 'rgba(0,255,65,0.22)' } },
+                },
+                series: [
+                    {
+                        type: 'radar',
+                        data: [
+                            {
+                                value: [50, 50, 50, 50, 50],
+                                name: 'GLOBAL_AVG',
+                                areaStyle: { color: 'rgba(0,255,65,0.06)' },
+                                lineStyle: { color: 'rgba(0,255,65,0.35)', width: 2 },
+                                itemStyle: { color: 'rgba(0,255,65,0.55)' },
+                            },
+                            {
+                                value: [l, p, d, e, f],
+                                name: `${String(countryCode || '').toUpperCase()}_PK`,
+                                areaStyle: { color: 'rgba(0,255,65,0.16)' },
+                                lineStyle: { color: '#00ff41', width: 2 },
+                                itemStyle: { color: '#00ff41' },
+                            },
+                        ],
+                    },
+                ],
+                tooltip: { show: true },
+            };
+            window.__countryRadarChart.setOption(option, true);
+            try { window.__countryRadarChart.resize(); } catch (_) {}
+
+            // 轻量联动：同步右抽屉标题（不触发 country-summary 拉取）
+            try {
+                if (typeof showDrawersWithCountryData === 'function' && typeof currentViewState === 'string' && currentViewState === 'GLOBAL') {
+                    showDrawersWithCountryData('GLOBAL', (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Global' : '全球', getLatestGlobalData(), { summaryOnly: true });
+                }
+            } catch (_) {}
+        } catch (_) {
+            // ignore
+        }
+    }
+
+    function renderCountryRankings(pkPayload, rankType) {
+        const panel = document.getElementById('panel-global-view');
+        const container = document.getElementById('global-country-pk-leaderboard')
+            || (panel ? panel.querySelector('.vibe-index-leaderboard') : null);
+        const tpl = document.getElementById('global-pk-card-tpl');
+        const skeleton = document.getElementById('global-pk-skeleton');
+        const updatedAtEl = document.getElementById('global-pk-updated-at');
+        if (!container || !tpl || !tpl.content) return;
+
+        const snapshot = (pkPayload && pkPayload.snapshot && typeof pkPayload.snapshot === 'object') ? pkPayload.snapshot : {};
+        const globalBase = computeGlobalBaseline(snapshot);
+
+        // 更新时间
+        try {
+            if (updatedAtEl) {
+                const t = pkPayload && pkPayload.updated_at ? String(pkPayload.updated_at) : '';
+                updatedAtEl.textContent = t ? `更新: ${t}` : '';
+            }
+        } catch (_) {}
+
+        // 组装条目
+        const entries = [];
+        try {
+            for (const [ccRaw, raw] of Object.entries(snapshot || {})) {
+                const cc = String(ccRaw || '').trim().toUpperCase();
+                if (!/^[A-Z]{2}$/.test(cc)) continue;
+                const avgChars = safeNum(raw?.avgChars);
+                const totalTokens = safeNum(raw?.totalTokens);
+                const userCount = safeNum(raw?.userCount);
+                const topModel = (raw?.topModel != null ? String(raw.topModel) : '').trim();
+                const githubScore = safeNum(raw?.githubScore);
+                const tokensPerUser = userCount > 0 ? (totalTokens / userCount) : 0;
+                entries.push({
+                    cc,
+                    avgChars,
+                    totalTokens,
+                    userCount,
+                    topModel,
+                    githubScore,
+                    tokensPerUser,
+                });
+            }
+        } catch (_) {}
+
+        const rt = String(rankType || DEFAULT_RANK_TYPE).trim().toLowerCase();
+        const topLimit = 8;
+
+        const buildMetricGroups = (rt2) => {
+            switch (rt2) {
+                case 'lobster':
+                    return [
+                        {
+                            id: 'totalTokens',
+                            title: '养虾总量榜',
+                            subtitle: '看国家总消耗，谁在高频高成本地和 AI 长时间磨合',
+                            label: '总 Tokens',
+                            metric: (item) => item.totalTokens,
+                            format: (item) => `${formatInt(item.totalTokens)} Tokens`,
+                            compare: (a, b) => (b.totalTokens - a.totalTokens) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
+                        },
+                        {
+                            id: 'tokensPerUser',
+                            title: '重度养虾榜',
+                            subtitle: '看单个用户的平均投入密度，谁更容易把模型“养熟”',
+                            label: '人均 Tokens',
+                            metric: (item) => item.tokensPerUser,
+                            format: (item) => `${formatInt(item.tokensPerUser)} Tokens`,
+                            compare: (a, b) => (b.tokensPerUser - a.tokensPerUser) || (b.totalTokens - a.totalTokens) || a.cc.localeCompare(b.cc),
+                        },
+                        {
+                            id: 'avgChars',
+                            title: '长指令投喂榜',
+                            subtitle: '看每人平均输出长度，谁更擅长用长上下文喂模型',
+                            label: '人均字符',
+                            metric: (item) => item.avgChars,
+                            format: (item) => `${formatInt(item.avgChars)} 字符`,
+                            compare: (a, b) => (b.avgChars - a.avgChars) || (b.tokensPerUser - a.tokensPerUser) || a.cc.localeCompare(b.cc),
+                        },
+                    ];
+                case 'model':
+                    return [
+                        {
+                            id: 'topModel',
+                            title: '信仰阵营榜',
+                            subtitle: '看各国当前主力模型阵营，按用户覆盖规模排序',
+                            label: '主力模型',
+                            metric: (item) => item.userCount,
+                            format: (item) => item.topModel ? item.topModel : '—',
+                            badge: (item) => `${formatInt(item.userCount)} 人`,
+                            compare: (a, b) => (b.userCount - a.userCount) || (b.totalTokens - a.totalTokens) || a.cc.localeCompare(b.cc),
+                        },
+                        {
+                            id: 'modelHeat',
+                            title: '模型投入榜',
+                            subtitle: '看各国围绕主力模型投入了多少 Tokens',
+                            label: '总投入',
+                            metric: (item) => item.totalTokens,
+                            format: (item) => `${formatInt(item.totalTokens)} Tokens`,
+                            badge: (item) => item.topModel ? item.topModel : '',
+                            compare: (a, b) => (b.totalTokens - a.totalTokens) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
+                        },
+                        {
+                            id: 'modelDepth',
+                            title: '模型沉浸榜',
+                            subtitle: '看各国对主力模型的人均投入深度',
+                            label: '人均投入',
+                            metric: (item) => item.tokensPerUser,
+                            format: (item) => `${formatInt(item.tokensPerUser)} Tokens`,
+                            badge: (item) => item.topModel ? item.topModel : '',
+                            compare: (a, b) => (b.tokensPerUser - a.tokensPerUser) || (b.totalTokens - a.totalTokens) || a.cc.localeCompare(b.cc),
+                        },
+                    ];
+                case 'github':
+                    return [
+                        {
+                            id: 'githubScore',
+                            title: '硬核战力榜',
+                            subtitle: '看国家层面的平均开源战力，谁的开发者更硬核',
+                            label: '平均战力',
+                            metric: (item) => item.githubScore,
+                            format: (item) => formatFloat2(item.githubScore),
+                            compare: (a, b) => (b.githubScore - a.githubScore) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
+                        },
+                        {
+                            id: 'githubImpact',
+                            title: '开源影响力榜',
+                            subtitle: '看国家总战力体量，兼顾战力与参与规模',
+                            label: '总战力',
+                            metric: (item) => item.githubScore * item.userCount,
+                            format: (item) => formatFloat2(item.githubScore * item.userCount),
+                            compare: (a, b) => ((b.githubScore * b.userCount) - (a.githubScore * a.userCount)) || (b.githubScore - a.githubScore) || a.cc.localeCompare(b.cc),
+                        },
+                        {
+                            id: 'githubDensity',
+                            title: '硬核密度榜',
+                            subtitle: '看高战力开发者在人均高投入国家中的集中度',
+                            label: '战力 x 投入',
+                            metric: (item) => item.githubScore * Math.max(item.tokensPerUser, 1),
+                            format: (item) => formatFloat2(item.githubScore * Math.max(item.tokensPerUser, 1)),
+                            compare: (a, b) => ((b.githubScore * Math.max(b.tokensPerUser, 1)) - (a.githubScore * Math.max(a.tokensPerUser, 1))) || (b.githubScore - a.githubScore) || a.cc.localeCompare(b.cc),
+                        },
+                    ];
+                case 'efficiency':
+                default:
+                    return [
+                        {
+                            id: 'avgChars',
+                            title: '生产力榜',
+                            subtitle: '看国家的人均输出能力，谁在单位用户维度上产出更高',
+                            label: '人均字符',
+                            metric: (item) => item.avgChars,
+                            format: (item) => `${formatInt(item.avgChars)} 字符`,
+                            compare: (a, b) => (b.avgChars - a.avgChars) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
+                        },
+                        {
+                            id: 'tokensPerUser',
+                            title: '投入效率榜',
+                            subtitle: '看国家的人均 Tokens 投入强度，衡量高强度工作节奏',
+                            label: '人均 Tokens',
+                            metric: (item) => item.tokensPerUser,
+                            format: (item) => `${formatInt(item.tokensPerUser)} Tokens`,
+                            compare: (a, b) => (b.tokensPerUser - a.tokensPerUser) || (b.avgChars - a.avgChars) || a.cc.localeCompare(b.cc),
+                        },
+                        {
+                            id: 'userCount',
+                            title: '活跃规模榜',
+                            subtitle: '看国家参与排名的活跃开发者规模',
+                            label: '活跃人数',
+                            metric: (item) => item.userCount,
+                            format: (item) => `${formatInt(item.userCount)} 人`,
+                            compare: (a, b) => (b.userCount - a.userCount) || (b.totalTokens - a.totalTokens) || a.cc.localeCompare(b.cc),
+                        },
+                    ];
+            }
+        };
+
+        const metricGroups = buildMetricGroups(rt);
+
+        try { container.innerHTML = ''; } catch (_) {}
+        if (skeleton) skeleton.style.display = 'none';
+
+        const frag = document.createDocumentFragment();
+        const getCountryName = (cc) => {
+            try {
+                if (typeof countryNameMap !== 'undefined' && countryNameMap && countryNameMap[cc]) {
+                    return (typeof currentLang !== 'undefined' && currentLang === 'zh')
+                        ? (countryNameMap[cc].zh || cc)
+                        : (countryNameMap[cc].en || cc);
+                }
+            } catch (_) {}
+            return cc;
+        };
+
+        const getFlag = (cc) => {
+            try {
+                if (typeof getFlagEmoji === 'function') return getFlagEmoji(cc);
+                if (typeof countryCodeToFlagEmoji === 'function') return countryCodeToFlagEmoji(cc) || '🏳️';
+            } catch (_) {}
+            return '🏳️';
+        };
+
+        const createRankNode = (item, idx, group) => {
+            const node = tpl.content.firstElementChild ? tpl.content.firstElementChild.cloneNode(true) : null;
+            if (!node) return null;
+            node.dataset.rank = String(idx + 1);
+            node.dataset.countryCode = item.cc;
+            node.style.marginBottom = '0.75rem';
+
+            const rankEl = node.querySelector('.pk-rank');
+            const flagEl = node.querySelector('.pk-flag');
+            const codeEl = node.querySelector('.pk-code');
+            const nameEl = node.querySelector('.pk-name');
+            const valueEl = node.querySelector('.pk-value');
+            const valueLabelEl = node.querySelector('.pk-value-label');
+            const badgeEl = node.querySelector('.pk-model-badge');
+
+            if (rankEl) rankEl.textContent = String(idx + 1);
+            if (flagEl) flagEl.textContent = getFlag(item.cc);
+            if (codeEl) codeEl.textContent = item.cc;
+            if (nameEl) nameEl.textContent = getCountryName(item.cc);
+            if (valueEl) valueEl.textContent = typeof group.format === 'function' ? group.format(item) : '--';
+            if (valueLabelEl) valueLabelEl.textContent = group.label || '';
+
+            const badgeText = typeof group.badge === 'function'
+                ? group.badge(item)
+                : (item.topModel ? item.topModel : '');
+            if (badgeEl) badgeEl.textContent = badgeText || '';
+
+            node.addEventListener('click', () => {
+                const name = getCountryName(item.cc);
+                ensureRadarComparison(item.cc, name, {
+                    avgChars: item.avgChars,
+                    totalTokens: item.totalTokens,
+                    userCount: item.userCount,
+                    githubScore: item.githubScore,
+                    tokensPerUser: item.tokensPerUser,
+                }, globalBase);
+            });
+            return node;
+        };
+
+        metricGroups.forEach((group) => {
+            const section = document.createElement('section');
+            section.className = 'border border-[#00ff41]/20 bg-[rgba(0,12,4,0.55)] rounded-xl p-3 md:p-4';
+
+            const header = document.createElement('div');
+            header.className = 'flex items-start justify-between gap-3 mb-3';
+            header.innerHTML = `
+                <div>
+                    <div class="text-[#00ff41] text-xs font-mono uppercase tracking-[0.2em]">${group.title}</div>
+                    <div class="text-zinc-500 text-[11px] leading-5 mt-1">${group.subtitle || ''}</div>
+                </div>
+                <div class="text-[10px] text-zinc-600 font-mono">${group.label || ''}</div>
+            `;
+            section.appendChild(header);
+
+            const list = document.createElement('div');
+            list.className = 'flex flex-col';
+
+            const ranked = entries
+                .slice()
+                .sort(group.compare)
+                .filter((item) => (typeof group.metric === 'function' ? Number(group.metric(item)) : 0) > 0)
+                .slice(0, topLimit);
+
+            if (!ranked.length) {
+                const empty = document.createElement('div');
+                empty.className = 'text-zinc-500 text-xs py-4 text-center';
+                empty.textContent = '暂无可用国家数据';
+                list.appendChild(empty);
+            } else {
+                ranked.forEach((item, idx) => {
+                    const node = createRankNode(item, idx, group);
+                    if (node) list.appendChild(node);
+                });
+            }
+
+            section.appendChild(list);
+            frag.appendChild(section);
+        });
+
+        container.appendChild(frag);
+    }
+
+    function initCountryPkBoard() {
+        const panel = document.getElementById('panel-global-view');
+        if (!panel) return;
+        if (panel.dataset.pkBound === '1') return;
+        panel.dataset.pkBound = '1';
+
+        let currentRankType = (window.__pkRankType && typeof window.__pkRankType === 'string') ? window.__pkRankType : DEFAULT_RANK_TYPE;
+        currentRankType = String(currentRankType).trim().toLowerCase() || DEFAULT_RANK_TYPE;
+
+        const buttons = Array.from(panel.querySelectorAll('.rank-tab-btn'));
+        const skeleton = document.getElementById('global-pk-skeleton');
+
+        const setActive = (rt) => {
+            buttons.forEach(btn => {
+                const t = String(btn.getAttribute('data-rank-type') || '').trim().toLowerCase();
+                if (t === rt) btn.classList.add('active');
+                else btn.classList.remove('active');
+            });
+        };
+
+        buttons.forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const rt = String(btn.getAttribute('data-rank-type') || '').trim().toLowerCase() || DEFAULT_RANK_TYPE;
+                currentRankType = rt;
+                window.__pkRankType = rt;
+                setActive(rt);
+                const payload = await fetchCountryPkSnapshot();
+                if (payload) renderCountryRankings(payload, currentRankType);
+            });
+        });
+
+        // 首次加载
+        (async () => {
+            try {
+                setActive(currentRankType);
+                await refreshCountryPkBoard(false);
+            } catch (_) {
+                // ignore
+            } finally {
+                try { if (skeleton) skeleton.style.display = 'none'; } catch (_) {}
+            }
+        })();
+    }
+
+    // 暴露给 switchView('global') 调用
+    window.fetchCountryPkSnapshot = fetchCountryPkSnapshot;
+    window.renderCountryRankings = renderCountryRankings;
+    window.initCountryPkBoard = initCountryPkBoard;
+    window.ensureGlobalCountryPkScaffold = ensureGlobalCountryPkScaffold;
+    window.refreshCountryPkBoard = refreshCountryPkBoard;
 })();
 
 // ==================== 用户灵魂词云功能 ====================
