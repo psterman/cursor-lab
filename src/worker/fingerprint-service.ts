@@ -243,9 +243,9 @@ export async function bindFingerprintToUser(
     // 准备更新/插入的数据
     const payload: any = {
       user_name: normalizedUsername,
-      github_username: normalizedUsername,
-      github_id: normalizedUsername,
       fingerprint: fingerprint,
+      github_login: normalizedUsername,
+      user_identity: 'github',
       updated_at: new Date().toISOString(),
     };
 
@@ -265,6 +265,28 @@ export async function bindFingerprintToUser(
 
       if (!updateResponse.ok) {
         const errorText = await updateResponse.text();
+        // 当 github_login 发生唯一键冲突时，改用 github_login 的 upsert 更新目标行
+        if (/unique_github_login|github_login/i.test(String(errorText))) {
+          try {
+            const upsertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=github_login`;
+            const retryRes = await fetch(upsertUrl, {
+              method: 'POST',
+              headers: {
+                'apikey': env.SUPABASE_KEY,
+                'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=representation,resolution=merge-duplicates',
+              },
+              body: JSON.stringify([payload]),
+            });
+            if (retryRes.ok) {
+              const retryData = await retryRes.json();
+              return Array.isArray(retryData) ? retryData[0] : retryData;
+            }
+          } catch {
+            // ignore
+          }
+        }
         console.error('[Fingerprint] ❌ 更新用户失败(按 fingerprint):', {
           status: updateResponse.status,
           error: errorText,
@@ -294,6 +316,28 @@ export async function bindFingerprintToUser(
 
       if (!updateResponse.ok) {
         const errorText = await updateResponse.text();
+        // 当 github_login 发生唯一键冲突时，改用 github_login 的 upsert 更新目标行
+        if (/unique_github_login|github_login/i.test(String(errorText))) {
+          try {
+            const upsertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=github_login`;
+            const retryRes = await fetch(upsertUrl, {
+              method: 'POST',
+              headers: {
+                'apikey': env.SUPABASE_KEY,
+                'Authorization': `Bearer ${env.SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=representation,resolution=merge-duplicates',
+              },
+              body: JSON.stringify([payload]),
+            });
+            if (retryRes.ok) {
+              const retryData = await retryRes.json();
+              return Array.isArray(retryData) ? retryData[0] : retryData;
+            }
+          } catch {
+            // ignore
+          }
+        }
         console.error('[Fingerprint] ❌ 更新用户失败:', {
           status: updateResponse.status,
           error: errorText,

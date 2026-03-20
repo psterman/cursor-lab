@@ -554,11 +554,31 @@
                     if (!node || node.parentNode !== leftBody) return;
                     leftBody.appendChild(node);
                 });
+                ensureLeftDrawerSourceBadges();
             } catch (e) {
                 console.warn('[LeftDrawer] normalizeLeftDrawerCardOrder failed:', e);
             }
         }
         window.normalizeLeftDrawerCardOrder = normalizeLeftDrawerCardOrder;
+        function ensureLeftDrawerSourceBadges() {
+            try {
+                var leftBody = document.getElementById('left-drawer-body');
+                if (!leftBody) return;
+                var addBadge = function(card, text) {
+                    if (!card) return;
+                    var host = card.querySelector('.drawer-source-badge-host') || card;
+                    if (!host || host.querySelector('[data-source-badge="' + text + '"]')) return;
+                    var badge = document.createElement('span');
+                    badge.setAttribute('data-source-badge', text);
+                    badge.className = 'drawer-source-badge';
+                    badge.style.cssText = 'display:inline-block;margin-left:6px;padding:1px 6px;border:1px solid rgba(0,255,65,0.35);border-radius:999px;font-size:10px;line-height:1.4;color:#8dffb2;background:rgba(0,255,65,0.08);';
+                    badge.textContent = text;
+                    host.insertBefore(badge, host.firstChild || null);
+                };
+                addBadge(leftBody.querySelector('.drawer-item.dashboard-card.backdrop-blur.clinic-card') || leftBody.querySelector('.drawer-item[data-card="cursor-inactive-placeholder"]'), 'Cursor');
+                addBadge(document.getElementById('openclaw-monitor-card'), 'OpenClaw');
+            } catch (_) {}
+        }
         function renderGuestModeDrawerCard() {
             var leftBody = document.getElementById('left-drawer-body');
             if (!leftBody) return;
@@ -1829,8 +1849,29 @@
             if (typeof _resolveUserMeta !== 'function') {
                 _resolveUserMeta = function (r) {
                     var u = (r && (r.user_name || r.userName || r.username || r.user)) ? String(r.user_name || r.userName || r.username || r.user).trim() : '';
-                    var gh = (r && (r.github_username || r.githubUsername || r.gh || r.github)) ? String(r.github_username || r.githubUsername || r.gh || r.github).trim() : '';
-                    var display = (gh || u) ? '@' + (gh || u) : (typeof currentLang !== 'undefined' && currentLang === 'en' ? 'unknown' : '未知');
+                    // github_username 优先，其次 github_login（部分入库分支只写 github_login）
+                    var gh = (r && (r.github_username || r.githubUsername || r.github_login || r.githubLogin || r.gh || r.github)) ? String(r.github_username || r.githubUsername || r.github_login || r.githubLogin || r.gh || r.github).trim() : '';
+                    var fingerprint = (r && r.fingerprint != null) ? String(r.fingerprint).trim() : '';
+                    var id = (r && r.id != null) ? String(r.id).trim() : '';
+
+                    var cleanHandle = function (s) {
+                        var x = String(s || '').trim();
+                        // 部分旧数据会出现问号占位，清理后用于回退
+                        x = x.replace(/\?/g, '');
+                        return x;
+                    };
+                    u = cleanHandle(u);
+                    gh = cleanHandle(gh);
+
+                    var handle = gh || u;
+                    handle = handle ? handle.replace(/^@/, '') : '';
+                    // 兜底：没有可用 handle 时，退回 fingerprint/id 前缀，避免显示一串问号
+                    if (!handle) {
+                        var fallbackId = (id || fingerprint || '').trim();
+                        if (fallbackId) handle = 'user_' + fallbackId.slice(0, 6);
+                    }
+
+                    var display = handle ? '@' + handle : '—';
                     var avatar = gh ? 'https://github.com/' + encodeURIComponent(gh) + '.png?size=64' : (typeof DEFAULT_AVATAR !== 'undefined' ? DEFAULT_AVATAR : '');
                     var profileUrl = gh ? 'https://github.com/' + encodeURIComponent(gh) : '';
                     return { display: display, avatar: avatar || '', profileUrl: profileUrl };
@@ -1901,9 +1942,9 @@
             }
             // Global tab 仅保留国家榜容器，禁止 LPDEF/高分图谱插入
             try {
-                var isInGlobalPanel = !!(container.closest && (container.closest('#panel-global-view') || container.closest('#panel-global-content')));
                 var isGlobalPkBoard = container.id === 'global-country-pk-leaderboard';
-                if (isInGlobalPanel || isGlobalPkBoard || (typeof currentViewState === 'string' && currentViewState === 'GLOBAL')) {
+                // 只依据当前视图状态判断是否禁止渲染，避免容器 DOM 仍嵌在 Global 但实际处于 Country/Ranking 时被误判 return。
+                if (isGlobalPkBoard || (typeof currentViewState === 'string' && currentViewState === 'GLOBAL')) {
                     return;
                 }
             } catch (_) { /* ignore */ }
@@ -1916,6 +1957,16 @@
                 { key: 'ketao_count', labelZh: '磕头', labelEn: 'Ketao' },
                 { key: 'work_days', labelZh: '上岗天数', labelEn: 'Work Days' }
             ];
+            var metricLabelMap = {};
+            metricLabels.forEach(function (item) {
+                if (item && item.key) metricLabelMap[String(item.key)] = item;
+            });
+            var resolveMetricMeta = function (key) {
+                var normalized = String(key || '').trim();
+                if (normalized === 'total_chars') normalized = 'total_user_chars';
+                if (normalized === 'day') normalized = 'work_days';
+                return metricLabelMap[normalized] || { key: normalized, labelZh: normalized || '--', labelEn: normalized || '--' };
+            };
             var allowed5 = { total_user_chars: 1, total_messages: 1, jiafang_count: 1, ketao_count: 1, work_days: 1 };
             var raw = Array.isArray(topBy) ? topBy : [];
             var filtered = raw.filter(function (it) {
@@ -1925,16 +1976,17 @@
                 return allowed5[k];
             }).map(function (it) {
                 var k = String((it && it.key) || '');
-                if (k === 'total_chars') return Object.assign({}, it, { key: 'total_user_chars' });
-                if (k === 'day') return Object.assign({}, it, { key: 'work_days' }); // 打工榜：day -> work_days
-                return it;
+                if (k === 'total_chars') k = 'total_user_chars';
+                if (k === 'day') k = 'work_days'; // source alias: day -> work_days
+                var meta = resolveMetricMeta(k);
+                return Object.assign({}, it, { key: k, labelZh: meta.labelZh, labelEn: meta.labelEn });
             });
             var sorted = filtered.slice().sort(function (a, b) { return metricOrder.indexOf(String((a && a.key) || '')) - metricOrder.indexOf(String((b && b.key) || '')); });
             var existingKeys = {};
             sorted.forEach(function (it) { existingKeys[String((it && it.key) || '')] = true; });
             metricOrder.forEach(function (key) {
                 if (!existingKeys[key]) {
-                    var ml = metricLabels.filter(function (m) { return m.key === key; })[0];
+                    var ml = resolveMetricMeta(key);
                     sorted.push({ key: key, leaders: [], labelZh: ml ? ml.labelZh : key, labelEn: ml ? ml.labelEn : key });
                 }
             });
@@ -1970,7 +2022,11 @@
                 return new Intl.NumberFormat(typeof currentLang !== 'undefined' && currentLang === 'en' ? 'en-US' : 'zh-CN').format(Math.round(n));
             };
             var labelForMetric = function (it) {
-                return (typeof currentLang !== 'undefined' && currentLang === 'en') ? (it && (it.labelEn || it.key)) || '--' : (it && (it.labelZh || it.key)) || '--';
+                var meta = resolveMetricMeta(it && (it.key || it.col));
+                if (typeof currentLang !== 'undefined' && currentLang === 'en') {
+                    return (meta && meta.labelEn) || (it && (it.labelEn || it.key)) || '--';
+                }
+                return (meta && meta.labelZh) || (it && (it.labelZh || it.key)) || '--';
             };
             var _resolveDailyDelta = function (row) {
                 try {
@@ -2026,13 +2082,22 @@
                     }
                     return Object.assign({}, row, { personality: pData, user: Object.assign({}, row.user || {}, { personality: pData }) });
                 });
+                leaders = leaders.filter(function (row) {
+                    var score = Number(row && (row.score ?? row.vibe_index_num ?? row.vibe_index));
+                    return Number.isFinite(score);
+                });
+                if (!leaders.length) {
+                    var emptyPanelClass = 'lpdef-tab-panel' + (idx === 0 ? ' active' : '');
+                    return '<div class="' + emptyPanelClass + '" data-tab-index="' + idx + '" role="tabpanel"><div class="lpdef-metric-card"><div class="lpdef-metric-title">' + esc(label) + '</div><div class="lpdef-rank-list"><div class="text-zinc-500 text-xs text-center py-3">' + esc(noData) + '</div></div></div></div>';
+                }
                 leaders.sort(function (a, b) {
-                    var scoreA = Number((a && (a.vibe_index_num ?? a.vibe_index)) != null ? (a.vibe_index_num ?? a.vibe_index) : 0);
-                    var scoreB = Number((b && (b.vibe_index_num ?? b.vibe_index)) != null ? (b.vibe_index_num ?? b.vibe_index) : 0);
+                    var scoreA = Number((a && (a.score ?? a.vibe_index_num ?? a.vibe_index)) != null ? (a.score ?? a.vibe_index_num ?? a.vibe_index) : 0);
+                    var scoreB = Number((b && (b.score ?? b.vibe_index_num ?? b.vibe_index)) != null ? (b.score ?? b.vibe_index_num ?? b.vibe_index) : 0);
                     return scoreB - scoreA;
                 });
                 var metricKey = String((it && it.key) || (it && it.col) || '').trim();
-                var rows = leaders.slice(0, 10).map(function (row) {
+                    var topRows = leaders.slice(0, 10);
+                    var rows = topRows.map(function (row) {
                     var user = row && row.user ? row.user : {};
                     var meta = _resolveUserMeta(user);
                     var scoreText = formatMetricValue(row && (row.score ?? row.vibe_index_num ?? row.vibe_index), metricKey);
@@ -2045,7 +2110,7 @@
                     } else if (row.personality && typeof row.personality === 'object') {
                         pData = row.personality;
                     }
-                    var badgeTitle = (pData && pData.answer_book && pData.answer_book.title) ? String(pData.answer_book.title) : '赛博打工人';
+                    var badgeTitle = (pData && pData.answer_book && pData.answer_book.title) ? String(pData.answer_book.title) : '';
                     var personaTag = '';
                     try {
                         if (lpdefText && typeof lpdefToVibeIndex === 'function') {
@@ -2454,6 +2519,154 @@
                     localStorage.getItem(VIBE_CURSOR_CACHE) ||
                     '';
             } catch (_) { return ''; }
+        }
+        var VIBE_OPENCLAW_CACHE = 'vibe_openclaw_analysis_cache';
+        function getOpenclawAnalysisCacheRaw() {
+            try {
+                if (typeof localStorage === 'undefined') return '';
+                return localStorage.getItem(VIBE_OPENCLAW_CACHE) || '';
+            } catch (_) {
+                return '';
+            }
+        }
+
+        function safeParseJson(v) {
+            try {
+                if (!v || typeof v !== 'string') return null;
+                return JSON.parse(v);
+            } catch (_) {
+                return null;
+            }
+        }
+
+        function pickPosFiniteNumber(v) {
+            var n = Number(v);
+            return Number.isFinite(n) && n > 0 ? n : undefined;
+        }
+
+        function normalizeStatsForDrawerMeVals(stRaw) {
+            var out = {};
+            if (!stRaw || typeof stRaw !== 'object') return out;
+
+            var totalMessages = pickPosFiniteNumber(
+                stRaw.totalMessages ?? stRaw.total_messages ?? stRaw.userMessages ?? stRaw.user_messages ??
+                stRaw.messageCount ?? stRaw.total_messages_sum ?? stRaw.ai ?? stRaw.recordsTotal ?? stRaw.records_total
+            );
+            if (typeof totalMessages === 'number') out.totalMessages = totalMessages;
+
+            var totalChars = pickPosFiniteNumber(
+                stRaw.total_chars ?? stRaw.totalChars ?? stRaw.totalUserChars ?? stRaw.total_user_chars ??
+                stRaw.say ?? stRaw.totalCharsSum ?? stRaw.total_chars_sum
+            );
+            if (typeof totalChars === 'number') {
+                out.total_chars = totalChars;
+                out.totalUserChars = totalChars;
+            }
+
+            var workDays = pickPosFiniteNumber(
+                stRaw.work_days ?? stRaw.usage_days ?? stRaw.day ?? stRaw.workDays ?? stRaw.usageDays
+            );
+            if (typeof workDays === 'number') {
+                out.work_days = workDays;
+                out.usage_days = workDays;
+                out.day = workDays;
+            }
+
+            var jiafang = pickPosFiniteNumber(
+                stRaw.jiafang_count ?? stRaw.no ?? stRaw.buCount ?? stRaw.bu_count ?? stRaw.jiafangCount
+            );
+            if (typeof jiafang === 'number') out.jiafang_count = jiafang;
+
+            var ketao = pickPosFiniteNumber(
+                stRaw.ketao_count ?? stRaw.please ?? stRaw.qingCount ?? stRaw.qing_count ?? stRaw.ketaoCount
+            );
+            if (typeof ketao === 'number') out.ketao_count = ketao;
+
+            return out;
+        }
+
+        function getLocalStatsPayloadForSource(sourceType) {
+            var src = String(sourceType || 'all').toLowerCase();
+            if (src !== 'cursor' && src !== 'openclaw' && src !== 'all') src = 'all';
+
+            // “全部”不做单侧本地覆盖，避免 Cursor/OpenClaw 互相污染
+            if (src === 'all') return null;
+
+            // 1) 读取 BroadcastChannel 写入的分引擎槽位（按 TTL 300s 生效）
+            var byEngine = window.last_local_stats_by_engine || {};
+            var entry = byEngine[src];
+            if (entry && entry.payload && (Date.now() - (entry.ts || 0)) < 300000) {
+                var st = entry.payload?.stats ?? entry.payload?.statistics ?? entry.payload?.data?.stats ?? entry.payload?.data?.statistics ?? null;
+                var normalized = normalizeStatsForDrawerMeVals(st);
+                return normalized && Object.keys(normalized).length > 0 ? normalized : null;
+            }
+
+            // 2) fallback：Cursor 从 last_analysis_data / vibe_cursor_analysis_cache 读取
+            if (src === 'cursor') {
+                var raw = getCursorAnalysisCache();
+                if (raw) {
+                    var parsed = safeParseJson(raw);
+                    var st0 =
+                        (parsed && parsed.stats) ? parsed.stats :
+                        (parsed && parsed.statistics) ? parsed.statistics :
+                        (parsed && parsed.analysis && parsed.analysis.stats) ? parsed.analysis.stats :
+                        (parsed && parsed.analysis && parsed.analysis.statistics) ? parsed.analysis.statistics :
+                        (parsed && parsed.analysisData && parsed.analysisData.stats) ? parsed.analysisData.stats :
+                        (parsed && parsed.analysisData && parsed.analysisData.vibeResult && parsed.analysisData.vibeResult.stats) ? parsed.analysisData.vibeResult.stats :
+                        null;
+                    var normalized0 = normalizeStatsForDrawerMeVals(st0);
+                    return normalized0 && Object.keys(normalized0).length > 0 ? normalized0 : null;
+                }
+            }
+
+            // 3) fallback：OpenClaw 从 vibe_openclaw_analysis_cache 读取（仅在能推导出关键字段时覆盖）
+            if (src === 'openclaw') {
+                var openclawRaw = getOpenclawAnalysisCacheRaw();
+                if (openclawRaw) {
+                    var openclawParsed = safeParseJson(openclawRaw);
+                    var stats = (openclawParsed && openclawParsed.stats && typeof openclawParsed.stats === 'object') ? openclawParsed.stats : {};
+                    var usage = stats.usage && typeof stats.usage === 'object' ? stats.usage : {};
+                    var totalTokens = pickPosFiniteNumber(usage.totalTokens ?? usage.total_tokens);
+                    var totalChars = typeof totalTokens === 'number' ? Math.round(totalTokens * 4) : undefined;
+
+                    var earliestFileTime = stats.earliestFileTime ?? stats.earliest_file_time ?? null;
+                    var workDaysFromEarliest = (() => {
+                        if (earliestFileTime == null) return undefined;
+                        var t = Number(earliestFileTime);
+                        if (!Number.isFinite(t)) return undefined;
+                        var days = Math.max(1, Math.floor((Date.now() - t) / 86400000));
+                        return Number.isFinite(days) && days > 0 ? days : undefined;
+                    })();
+
+                    var lifeDays = pickPosFiniteNumber(
+                        openclawParsed?.openclawPortrait?.lifeDays ??
+                        openclawParsed?.openclawPortrait?.life_days
+                    );
+                    var workDays = lifeDays ?? workDaysFromEarliest;
+
+                    var totalMessages = pickPosFiniteNumber(
+                        stats.totalMessages ?? stats.recordsTotal ?? stats.records_total ??
+                        openclawParsed?.openclawSessionsSummary?.records_total ??
+                        openclawParsed?.openclawSessionsSummary?.recordsTotal
+                    );
+
+                    var out = {};
+                    if (typeof totalMessages === 'number') out.totalMessages = totalMessages;
+                    if (typeof totalChars === 'number' && totalChars > 0) {
+                        out.total_chars = totalChars;
+                        out.totalUserChars = totalChars;
+                    }
+                    if (typeof workDays === 'number' && workDays > 0) {
+                        out.work_days = workDays;
+                        out.usage_days = workDays;
+                        out.day = workDays;
+                    }
+
+                    return out && Object.keys(out).length > 0 ? out : null;
+                }
+            }
+
+            return null;
         }
         var PERSONAL_CLOUD_HARDCODED_DEMO = {
             Novice: [
@@ -2937,6 +3150,9 @@
             })();
             // 准入检查：同一国家且非强制刷新则直接 return（lastFetchedCountry 与 lastRequestCountry 双轨）
             const forceRefresh = opts.force === true || opts.forceRefresh === true;
+            const statsSourceForGuard = (typeof window.__statsSourceType === 'string' && window.__statsSourceType)
+                ? window.__statsSourceType
+                : 'all';
             if (!effectiveIsGlobal && countryCode && !forceRefresh && !opts.__debounceRun) {
                 var d = __countryDashboardDebounce;
                 d.pending = [countryNameOrCode, maybeData, opts];
@@ -2952,8 +3168,15 @@
                 return;
             }
             const sameCountry = !effectiveIsGlobal && countryCode && (
-                String(countryCode).toUpperCase() === String(state.lastFetchedCountry || '').toUpperCase() ||
-                String(countryCode).toUpperCase() === String(state.lastRequestCountry || '').toUpperCase()
+                (
+                    String(countryCode).toUpperCase() === String(state.lastFetchedCountry || '').toUpperCase()
+                    && String(statsSourceForGuard) === String(state.lastFetchedStatsSourceType || 'all')
+                )
+                ||
+                (
+                    String(countryCode).toUpperCase() === String(state.lastRequestCountry || '').toUpperCase()
+                    && String(statsSourceForGuard) === String(state.lastRequestStatsSourceType || 'all')
+                )
             );
             if (sameCountry && !forceRefresh) return;
             if (state.isProcessingUpdate && !forceRefresh) return;
@@ -3091,24 +3314,21 @@
                 const cursorChars = pickFirstNumber([
                     cursorMetrics.total_chars,
                     cursorStats.total_chars,
-                    root.total_chars,
-                    root.totalChars,
-                    ctRaw.total_chars,
-                    ctRaw.say
+                    cursorStats.totalChars,
+                    0
                 ], 0);
                 const cursorMessages = pickFirstNumber([
                     cursorMetrics.messages,
+                    cursorMetrics.total_messages,
                     cursorStats.total_messages,
-                    root.total_messages,
-                    root.totalMessages,
-                    ctRaw.total_messages,
-                    ctRaw.ai
+                    cursorStats.records_total,
+                    0
                 ], 0);
                 const cursorWorkDays = pickFirstNumber([
                     cursorMetrics.work_days,
                     cursorStats.work_days,
-                    root.work_days,
-                    root.totaldays
+                    cursorStats.totaldays,
+                    0
                 ], 0);
 
                 const lobsterChars = pickFirstNumber([
@@ -3656,6 +3876,8 @@
                 if (!effectiveIsGlobal && countryCode) {
                     state.lastRequestCountry = String(countryCode).toUpperCase();
                     state.lastFetchedCountry = state.lastRequestCountry;
+                    state.lastRequestStatsSourceType = statsSource;
+                    state.lastFetchedStatsSourceType = state.lastRequestStatsSourceType;
                     lastRequestCountry = state.lastRequestCountry; // 向后兼容
                     try { if (window.__drawerLastFailCc === String(countryCode).toUpperCase()) { window.__drawerLastFailCc = null; window.__drawerLastFailTs = null; } } catch (_) {}
                     lastFetchedCountry = state.lastFetchedCountry; // 向后兼容
@@ -4578,8 +4800,8 @@
 
                         const userCountry = String(countryCode || '').trim().toUpperCase();
                         console.log('[Stats2] 国家累计 API 全量数据:', { payload: payload2, userCountry });
-                        const totals = payload2.countryTotals || payload2.data?.countryTotals || null;
-                        const norm2 = normalizeCountryTotalsPayload(payload2);
+                        let totals = payload2.countryTotals || payload2.data?.countryTotals || null;
+                        let norm2 = normalizeCountryTotalsPayload(payload2);
                         var totalsRanks = payload2.countryTotalsRanks || payload2.data?.countryTotalsRanks || null;
                         var totalCountriesFromData = payload2.total_countries ?? payload2._meta?.totalCountries ?? payload2._meta?.total_countries ?? (payload2.countryTotalsRanks?._meta?.totalCountries ?? payload2.countryTotalsRanks?._meta?.total_countries) ?? 195;
                         if (!totalsRanks && totalCountriesFromData <= 1) {
@@ -4606,15 +4828,79 @@
                                 rank_h: totalsRanks?.work_days
                             });
                         }
-                        // 【修复】如果 totals 是空对象或所有关键字段都为0/null，视为无数据
-                        const hasValidTotals = totals && (
-                            norm2.totals.total_messages > 0 || 
-                            norm2.totals.total_chars > 0 || 
-                            norm2.totals.work_days > 0 || 
-                            totals.work_days_sum > 0 ||
-                            norm2.totals.jiafang_count > 0 ||
-                            norm2.totals.ketao_count > 0
+                        // Source-aware 有效性判断：避免 openclaw/cursor 被误判为空后回退成 all，导致“切标签没变化”。
+                        const hasCursorTotals = (
+                            (Number(norm2.cursor.messages) || 0) > 0 ||
+                            (Number(norm2.cursor.total_chars) || 0) > 0 ||
+                            (Number(norm2.cursor.work_days) || 0) > 0
                         );
+                        const hasOpenclawTotals = (
+                            (Number(norm2.openclaw.messages) || 0) > 0 ||
+                            (Number(norm2.openclaw.total_chars) || 0) > 0 ||
+                            (Number(norm2.openclaw.work_days) || 0) > 0 ||
+                            (Number(norm2.openclaw.tool_calls) || 0) > 0
+                        );
+                        const hasAllTotals = totals && (
+                            (Number(norm2.totals.total_messages) || 0) > 0 ||
+                            (Number(norm2.totals.total_chars) || 0) > 0 ||
+                            (Number(norm2.totals.work_days) || 0) > 0 ||
+                            (Number(totals.work_days_sum) || 0) > 0 ||
+                            (Number(norm2.totals.jiafang_count) || 0) > 0 ||
+                            (Number(norm2.totals.ketao_count) || 0) > 0
+                        );
+                        let hasValidTotals = (statsSource === 'cursor')
+                            ? hasCursorTotals
+                            : (statsSource === 'openclaw')
+                                ? hasOpenclawTotals
+                                : hasAllTotals;
+
+                        // 默认不自动回退 all，保持 source 切换可见性；仅显式允许时才回退。
+                        const allowSourceFallbackToAll = !!(opts && opts.allowSourceFallbackToAll === true);
+                        if (allowSourceFallbackToAll && statsSource !== 'all' && !hasValidTotals && totalsBox && typeof fetch === 'function') {
+                            try {
+                                const ccAll = String(target_country || countryCode || '').toUpperCase();
+                                const urlAll = `${API_ENDPOINT}api/country-summary?country=${encodeURIComponent(ccAll)}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${uid ? `&user_id=${encodeURIComponent(uid)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}&_ts=${Date.now()}`;
+                                const controller = new AbortController();
+                                const timeoutId2 = setTimeout(() => controller.abort(), 8000);
+                                try {
+                                    const respAll = await fetch(urlAll + (urlAll.indexOf('?') >= 0 ? '&' : '?') + '_t=' + Date.now(), { signal: controller.signal });
+                                    clearTimeout(timeoutId2);
+                                    if (respAll && respAll.ok) {
+                                        const payloadAll = await respAll.json().catch(() => null);
+                                        if (payloadAll && typeof payloadAll === 'object') {
+                                            payload2 = payloadAll;
+                                            totals = payloadAll.countryTotals || payloadAll.data?.countryTotals || null;
+                                            norm2 = normalizeCountryTotalsPayload(payloadAll);
+                                            totalsRanks = payloadAll.countryTotalsRanks || payloadAll.data?.countryTotalsRanks || null;
+                                            totalCountriesFromData = payloadAll.total_countries ?? payloadAll._meta?.totalCountries ?? payloadAll._meta?.total_countries ?? (payloadAll.countryTotalsRanks?._meta?.totalCountries ?? payloadAll.countryTotalsRanks?._meta?.total_countries) ?? 195;
+                                            if (!totalsRanks && totalCountriesFromData <= 1) {
+                                                var oneOne2 = { rank: 1, total: 1 };
+                                                totalsRanks = {
+                                                    total_messages: oneOne2, total_chars: oneOne2, jiafang_count: oneOne2,
+                                                    ketao_count: oneOne2, avg_user_message_length: oneOne2, work_days: oneOne2,
+                                                    _meta: { totalCountries: 1 }
+                                                };
+                                            }
+                                            if (totals && !totals.avg_message_length && !totals.avg_user_message_length && !totals.word) {
+                                                const tc2 = Number(totals.total_chars ?? totals.say ?? 0);
+                                                const tm2 = Number(totals.total_messages ?? totals.ai ?? 0);
+                                                if (tm2 > 0) totals.avg_message_length = tc2 / tm2;
+                                            }
+                                            hasValidTotals = totals && (
+                                                (Number(norm2.totals.total_messages) || 0) > 0 ||
+                                                (Number(norm2.totals.total_chars) || 0) > 0 ||
+                                                (Number(norm2.totals.work_days) || 0) > 0 ||
+                                                (Number(totals.work_days_sum) || 0) > 0 ||
+                                                (Number(norm2.totals.jiafang_count) || 0) > 0 ||
+                                                (Number(norm2.totals.ketao_count) || 0) > 0
+                                            );
+                                        }
+                                    }
+                                } finally {
+                                    clearTimeout(timeoutId2);
+                                }
+                            } catch { /* ignore */ }
+                        }
                         const countryDataByCode = payload2.countryDataByCode || payload2.data?.countryDataByCode || {};
                         const ranks = payload2.myCountryRanks || payload2.data?.myCountryRanks || null;
                         var remoteVals = payload2.myCountryValues || payload2.data?.myCountryValues || {};
@@ -4670,8 +4956,8 @@
                         } else if (window.currentUserData && latestCC != null && String(latestCC).trim() !== '') {
                             window.currentUserData.current_location = latestCC;
                         }
-                        var localStats = window.last_local_stats;
-                        var st = (localStats && localStats.payload && (Date.now() - (localStats.ts || 0)) < 300000) ? (localStats.payload.stats || {}) : null;
+                        // “我的排名”只对当前 Tab（Cursor/OpenClaw）使用对应引擎本地槽位覆盖
+                        var st = getLocalStatsPayloadForSource(window.__statsSourceType);
                         var meVals = {
                             total_messages: (st?.totalMessages ?? remoteVals?.total_messages ?? merged.total_messages ?? merged.ai ?? 0),
                             total_chars: (st?.total_chars ?? st?.totalUserChars ?? remoteVals?.total_chars ?? remoteVals?.['total_user_chars'] ?? merged.total_chars ?? merged.say ?? 0),
@@ -4697,6 +4983,22 @@
                             ketao_count: (st?.ketao_count ?? st?.please ?? remoteVals?.ketao_count ?? merged.ketao_count ?? merged.please ?? 0),
                             work_days: (st?.work_days ?? st?.usage_days ?? remoteVals?.work_days ?? remoteVals?.usage_days ?? merged.work_days ?? merged.usage_days ?? merged.day ?? norm2.totals.work_days ?? Math.max(norm2.cursor.work_days || 0, norm2.openclaw.work_days || 0) ?? 0)
                         };
+                        if (statsSource === 'cursor' || statsSource === 'openclaw') {
+                            var strictMyMessages = st?.totalMessages ?? remoteVals?.total_messages ?? null;
+                            var strictMyChars = st?.total_chars ?? st?.totalUserChars ?? remoteVals?.total_chars ?? remoteVals?.['total_user_chars'] ?? null;
+                            var strictMyWorkDays = st?.work_days ?? st?.usage_days ?? remoteVals?.work_days ?? remoteVals?.usage_days ?? null;
+                            var strictMyAvg = remoteVals?.avg_message_length ?? remoteVals?.['avg_user_message_length'] ?? null;
+                            if ((strictMyAvg === null || strictMyAvg === undefined) && strictMyMessages > 0 && strictMyChars != null) {
+                                strictMyAvg = Number(strictMyChars) / Number(strictMyMessages);
+                            }
+                            meVals.total_messages = strictMyMessages;
+                            meVals.total_chars = strictMyChars;
+                            meVals.total_user_chars = strictMyChars;
+                            meVals.avg_message_length = strictMyAvg;
+                            meVals.jiafang_count = null;
+                            meVals.ketao_count = null;
+                            meVals.work_days = strictMyWorkDays;
+                        }
                         // 关键：高分图谱的数据源来自 country-summary，而不是 global-average
                         try {
                             data.topByMetrics = payload2.topByMetrics || payload2.data?.topByMetrics || [];
@@ -4736,19 +5038,46 @@
                             let displayVal;
                             if (dimKey === 'work_days') {
                                 // 上岗天数特殊处理：确保显示数字，即使为0
-                                const workDaysVal = Number(totalVal ?? 0);
-                                displayVal = Number.isNaN(workDaysVal) ? '0' : String(workDaysVal);
+                                const workDaysVal = Number(totalVal);
+                                displayVal = Number.isFinite(workDaysVal) ? String(workDaysVal) : '--';
                             } else {
-                                displayVal = (totalVal === undefined || totalVal === null) ? '...' : fmt(totalVal);
+                                displayVal = (totalVal === undefined || totalVal === null) ? '--' : fmt(totalVal);
                             }
                             // 【country-work-days 元素绑定】为上岗天数添加特殊 ID
                             const workDaysIdAttr = dimKey === 'work_days' ? ' id="country-work-days"' : '';
-                            const contributionHint = (dimKey === 'total_chars')
-                                ? `Cursor ${fmt(norm2.cursor.total_chars || 0)} / OpenClaw ${fmt(norm2.openclaw.total_chars || 0)}`
-                                : '';
+                            // 行内拆分提示：让“排名分类”更明细（Cursor vs OpenClaw），避免仅显示合计而不告诉来源
+                            const contributionHint = (() => {
+                                try {
+                                    if (!norm2 || !norm2.cursor || !norm2.openclaw) return '';
+                                    if (dimKey === 'total_messages') {
+                                        return `Cursor ${fmt(norm2.cursor.messages || 0)} / OpenClaw ${fmt(norm2.openclaw.messages || 0)}`;
+                                    }
+                                    if (dimKey === 'total_chars') {
+                                        return `Cursor ${fmt(norm2.cursor.total_chars || 0)} / OpenClaw ${fmt(norm2.openclaw.total_chars || 0)}`;
+                                    }
+                                    if (dimKey === 'avg_message_length') {
+                                        const cMsg = Number(norm2.cursor.messages || 0);
+                                        const cChars = Number(norm2.cursor.total_chars || 0);
+                                        const oMsg = Number(norm2.openclaw.messages || 0);
+                                        const oChars = Number(norm2.openclaw.total_chars || 0);
+                                        const cAvg = cMsg > 0 ? cChars / cMsg : 0;
+                                        const oAvg = oMsg > 0 ? oChars / oMsg : 0;
+                                        return `Cursor ${fmt(cAvg)} / OpenClaw ${fmt(oAvg)}`;
+                                    }
+                                    if (dimKey === 'work_days') {
+                                        return `Cursor ${fmt(norm2.cursor.work_days || 0)} / OpenClaw ${fmt(norm2.openclaw.work_days || 0)}`;
+                                    }
+                                    return '';
+                                } catch {
+                                    return '';
+                                }
+                            })();
+                            const sourceTag = contributionHint
+                                ? (currentLang === 'en' ? '[Cursor/OpenClaw]' : '[Cursor/OpenClaw]')
+                                : (currentLang === 'en' ? '[Cursor/OpenClaw/Total]' : '[Cursor/OpenClaw/合计]');
                             const labelHtml = contributionHint
-                                ? `${label} <span class="text-[9px] text-zinc-500" title="${escapeHtml(contributionHint)}">[来源]</span>`
-                                : label;
+                                ? `${label} <span class="text-[9px] text-zinc-500" title="${escapeHtml(contributionHint)}">${sourceTag}</span>`
+                                : `${label} <span class="text-[9px] text-zinc-500">${sourceTag}</span>`;
                             return `
                                 <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2"${workDaysIdAttr}>
                                     <div class="text-zinc-200">${labelHtml}</div>
@@ -4759,7 +5088,7 @@
                                 </div>
                             `;
                         };
-                        const fmtMe = (v) => (v === undefined || v === null || Number.isNaN(Number(v))) ? '0' : fmt(v);
+                        const fmtMe = (v) => (v === undefined || v === null || Number.isNaN(Number(v))) ? '--' : fmt(v);
                         const pioneerLabel = currentLang === 'en' ? 'Pioneer' : '该国先锋';
                         const DIM_KEYS = ['total_messages','total_chars','avg_message_length','jiafang_count','ketao_count','work_days'];
                         // 【修复】扩展 global_user_ranks 的数据源
@@ -4840,9 +5169,10 @@
                                     displayValMe = fmtMe(myVal);
                                 }
                             }
+                            const sourceTag = currentLang === 'en' ? '[Cursor/OpenClaw/Total]' : '[Cursor/OpenClaw/合计]';
                             return `
                                 <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
-                                    <div class="text-zinc-200">${label}</div>
+                                    <div class="text-zinc-200">${label} <span class="text-[9px] text-zinc-500">${sourceTag}</span></div>
                                     <div class="flex flex-col items-end gap-0.5 min-w-0">
                                         <span class="text-[10px] text-zinc-400">${displayValMe}${workDaysLabel}</span>
                                         <span class="text-[10px] text-[var(--accent-terminal)] font-bold tabular-nums">${countryText}${medal}${pioneerBadge} | ${globalText}</span>
@@ -4853,32 +5183,276 @@
 
                         // 国家累计：右侧抽屉所有数值（ai, say, day, no, please）严格从 payload.countryTotals 读取
                         // 注意：后端 countryTotalsRanks 键名是 avg_user_message_length，需要兼容
+                        const activeSourceKind = statsSource === 'cursor' ? 'cursor' : (statsSource === 'openclaw' ? 'openclaw' : 'all');
+                        const chosenMessages = activeSourceKind === 'cursor'
+                            ? (norm2.cursor.messages || 0)
+                            : (activeSourceKind === 'openclaw' ? (norm2.openclaw.messages || 0) : (norm2.totals.total_messages || 0));
+                        const chosenChars = activeSourceKind === 'cursor'
+                            ? (norm2.cursor.total_chars || 0)
+                            : (activeSourceKind === 'openclaw' ? (norm2.openclaw.total_chars || 0) : (norm2.totals.total_chars || 0));
+                        const chosenWorkDays = activeSourceKind === 'cursor'
+                            ? (norm2.cursor.work_days || 0)
+                            : (activeSourceKind === 'openclaw' ? (norm2.openclaw.work_days || 0) : (norm2.totals.work_days || 0));
+                        const chosenAvgLen = (chosenMessages > 0 && chosenChars > 0) ? (chosenChars / chosenMessages) : 0;
+                        const sourceHasValidTotals = activeSourceKind === 'all'
+                            ? hasValidTotals
+                            : (chosenMessages > 0 || chosenChars > 0 || chosenWorkDays > 0);
                         // 【修复】使用 hasValidTotals 确保数据真正有效，而非仅判断对象存在
-                        const totalsHtml = hasValidTotals
+                        const totalsHtml = sourceHasValidTotals
                             ? [
-                                rowTotals(getI18nText('countryTotals.messages') || 'Messages', norm2.totals.total_messages ?? totals.total_messages ?? totals.ai ?? 0, totalsRanks?.total_messages, 'total_messages'),
-                                rowTotals(getI18nText('countryTotals.totalChars') || 'Total Chars', norm2.totals.total_chars ?? totals.total_chars ?? totals.say ?? 0, totalsRanks?.total_chars, 'total_chars'),
-                                rowTotals(getI18nText('countryTotals.avgLen') || 'Avg Len', Math.round(Number(totals.avg_message_length ?? totals['avg_user_message_length'] ?? totals.word ?? 0) || 0), totalsRanks?.avg_user_message_length ?? totalsRanks?.avg_message_length, 'avg_message_length'),
-                                rowTotals(getI18nText('countryTotals.jiafang') || 'Jiafang', norm2.totals.jiafang_count ?? totals.jiafang_count ?? totals.no ?? 0, totalsRanks?.jiafang_count, 'jiafang_count'),
-                                rowTotals(getI18nText('countryTotals.ketao') || 'Ketao', norm2.totals.ketao_count ?? totals.ketao_count ?? totals.please ?? 0, totalsRanks?.ketao_count, 'ketao_count'),
-                                rowTotals(getI18nText('countryTotals.workDays') || '上岗天数', norm2.totals.work_days ?? totals.work_days ?? totals.work_days_sum ?? totals.day ?? 0, totalsRanks?.work_days, 'work_days'),
+                                rowTotals(getI18nText('countryTotals.messages') || 'Messages', chosenMessages, totalsRanks?.total_messages, 'total_messages'),
+                                rowTotals(getI18nText('countryTotals.totalChars') || 'Total Chars', chosenChars, totalsRanks?.total_chars, 'total_chars'),
+                                rowTotals(getI18nText('countryTotals.avgLen') || 'Avg Len', Math.round(Number(chosenAvgLen) || 0), totalsRanks?.avg_user_message_length ?? totalsRanks?.avg_message_length, 'avg_message_length'),
+                                rowTotals(getI18nText('countryTotals.jiafang') || 'Jiafang', activeSourceKind === 'all' ? (norm2.totals.jiafang_count ?? totals.jiafang_count ?? totals.no ?? 0) : null, totalsRanks?.jiafang_count, 'jiafang_count'),
+                                rowTotals(getI18nText('countryTotals.ketao') || 'Ketao', activeSourceKind === 'all' ? (norm2.totals.ketao_count ?? totals.ketao_count ?? totals.please ?? 0) : null, totalsRanks?.ketao_count, 'ketao_count'),
+                                rowTotals(getI18nText('countryTotals.workDays') || '上岗天数', chosenWorkDays, totalsRanks?.work_days, 'work_days'),
                               ].join('')
                             : `<div class="text-zinc-500 text-xs">${currentLang === 'en' ? 'No data' : '暂无数据'}</div>`;
 
-                        const ranksHtml = hasValidTotals
+                        const ranksHtml = sourceHasValidTotals
                             ? [
                                 rowRanks(getI18nText('countryTotals.messages') || 'Messages', meVals?.total_messages, 'total_messages'),
                                 rowRanks(getI18nText('countryTotals.totalChars') || 'Total Chars', meVals?.total_chars, 'total_chars'),
                                 rowRanks(getI18nText('countryTotals.avgLen') || 'Avg Len', Math.round(Number(meVals?.avg_message_length ?? meVals?.['avg_user_message_length']) || 0), 'avg_message_length'),
-                                rowRanks(getI18nText('countryTotals.jiafang') || 'Jiafang', meVals?.jiafang_count, 'jiafang_count'),
-                                rowRanks(getI18nText('countryTotals.ketao') || 'Ketao', meVals?.ketao_count, 'ketao_count'),
+                                rowRanks(getI18nText('countryTotals.jiafang') || 'Jiafang', activeSourceKind === 'all' ? meVals?.jiafang_count : null, 'jiafang_count'),
+                                rowRanks(getI18nText('countryTotals.ketao') || 'Ketao', activeSourceKind === 'all' ? meVals?.ketao_count : null, 'ketao_count'),
                                 rowRanks(getI18nText('countryTotals.workDays') || '上岗天数', meVals?.work_days ?? meVals?.usage_days ?? 0, 'work_days'),
                               ].join('')
                             : `<div class="text-zinc-500 text-xs">${currentLang === 'en' ? 'No data' : '暂无数据'}</div>`;
 
-                        if (totalsBox) totalsBox.innerHTML = totalsHtml;
-                        if (ranksBox) ranksBox.innerHTML = ranksHtml;
-                        try { window.__countryTotalsCache.set(cacheKey2, { totalsHtml, ranksHtml, ts: Date.now() }); } catch { /* ignore */ }
+                        // ==============================
+                        // Cursor / OpenClaw 分来源排名
+                        // 不再使用合计口径（避免“分类不够明细”的观感）
+                        // ==============================
+                        const fetchCountrySummaryForSource = async (sourceType) => {
+                            try {
+                                const countryParam = encodeURIComponent(String(target_country || countryCode || '').toUpperCase());
+                                const cNameParam = cName ? `&country_name=${encodeURIComponent(cName)}` : '';
+                                const uidParam = uid ? `&user_id=${encodeURIComponent(uid)}` : '';
+                                const fpParam = fp ? `&fingerprint=${encodeURIComponent(fp)}` : '';
+                                const url = `${API_ENDPOINT}api/country-summary?country=${countryParam}${cNameParam}${uidParam}${fpParam}&source_type=${encodeURIComponent(sourceType)}&_ts=${Date.now()}`;
+                                const controller = new AbortController();
+                                const timeoutId = setTimeout(() => controller.abort(), 10000);
+                                const resp = await fetch(url, { signal: controller.signal });
+                                clearTimeout(timeoutId);
+                                if (!resp.ok) return null;
+                                return await resp.json().catch(() => null);
+                            } catch {
+                                return null;
+                            }
+                        };
+
+                        const renderTotalsForSource = (payloadX, sourceLabel) => {
+                            const totalsX = payloadX?.countryTotals || payloadX?.data?.countryTotals || null;
+                            const totalsRanksX = payloadX?.countryTotalsRanks || payloadX?.data?.countryTotalsRanks || null;
+                            const normX = payloadX ? normalizeCountryTotalsPayload(payloadX) : null;
+                            const totalCountriesFromDataX =
+                                payloadX?.total_countries ??
+                                payloadX?._meta?.totalCountries ??
+                                payloadX?._meta?.total_countries ??
+                                (payloadX?.countryTotalsRanks?._meta?.totalCountries) ??
+                                (payloadX?.countryTotalsRanks?._meta?.total_countries) ??
+                                195;
+
+                            const hasValidTotalsX = totalsX && normX && (
+                                normX.totals.total_messages > 0 ||
+                                normX.totals.total_chars > 0 ||
+                                normX.totals.work_days > 0 ||
+                                totalsX.work_days_sum > 0 ||
+                                normX.totals.jiafang_count > 0 ||
+                                normX.totals.ketao_count > 0
+                            );
+
+                            const rowTotalsSimple = (label, totalVal, r, dimKey) => {
+                                const denom = (r && (r.total != null && Number.isFinite(Number(r.total)))) ? Number(r.total) : totalCountriesFromDataX;
+                                const rankNum = (r && (r.rank ?? r._rank) != null && Number.isFinite(Number(r.rank ?? r._rank))) ? Number(r.rank ?? r._rank) : null;
+                                const hasRank = rankNum != null && rankNum > 0;
+                                let rankText;
+                                if (hasRank) rankText = '#' + rankNum + ' / ' + denom;
+                                else if (denom === 1 || denom === '1') rankText = '#1 / 1';
+                                else if (r && typeof r === 'object' && (r.rank != null || r.total != null)) rankText = '#-- / ' + (denom || '--');
+                                else rankText = 'N/A';
+                                const medal = rankNum != null && MEDALS[rankNum] ? ' ' + MEDALS[rankNum] : '';
+                                const ice = (rankNum != null && denom > 0 && rankNum >= Math.ceil(denom * 0.9)) ? ' 🧊' : '';
+                                let displayVal;
+                                if (dimKey === 'work_days') {
+                                    const workDaysVal = Number(totalVal ?? 0);
+                                    displayVal = Number.isNaN(workDaysVal) ? '0' : String(workDaysVal);
+                                } else {
+                                    displayVal = (totalVal === undefined || totalVal === null) ? '...' : fmt(totalVal);
+                                }
+                                return `
+                                    <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
+                                        <div class="text-zinc-200">${escapeHtml(label)}</div>
+                                        <div class="flex items-center gap-3 min-w-0">
+                                            <span class="text-[10px] text-zinc-500">${displayVal}</span>
+                                            <span class="text-[10px] text-[var(--accent-terminal)] font-bold tabular-nums">${rankText}${medal}${ice}</span>
+                                        </div>
+                                    </div>
+                                `;
+                            };
+
+                            const noDataHtml = `<div class="text-zinc-500 text-xs">${currentLang === 'en' ? 'No data' : '暂无数据'}</div>`;
+                            const header = `<div class="text-[11px] text-zinc-500 mb-1">${escapeHtml(sourceLabel)}</div>`;
+
+                            if (!hasValidTotalsX || !totalsX || !normX) {
+                                return `<div>${header}${noDataHtml}</div>`;
+                            }
+
+                            return `<div>${header}${
+                                [
+                                    rowTotalsSimple(getI18nText('countryTotals.messages') || 'Messages', normX.totals.total_messages ?? totalsX.total_messages ?? totalsX.ai ?? 0, totalsRanksX?.total_messages, 'total_messages'),
+                                    rowTotalsSimple(getI18nText('countryTotals.totalChars') || 'Total Chars', normX.totals.total_chars ?? totalsX.total_chars ?? totalsX.say ?? 0, totalsRanksX?.total_chars, 'total_chars'),
+                                    rowTotalsSimple(getI18nText('countryTotals.avgLen') || 'Avg Len', Math.round(Number(totalsX.avg_message_length ?? totalsX['avg_user_message_length'] ?? totalsX.word ?? 0) || 0), totalsRanksX?.avg_user_message_length ?? totalsRanksX?.avg_message_length, 'avg_message_length'),
+                                    rowTotalsSimple(getI18nText('countryTotals.jiafang') || 'Jiafang', normX.totals.jiafang_count ?? totalsX.jiafang_count ?? totalsX.no ?? 0, totalsRanksX?.jiafang_count, 'jiafang_count'),
+                                    rowTotalsSimple(getI18nText('countryTotals.ketao') || 'Ketao', normX.totals.ketao_count ?? totalsX.ketao_count ?? totalsX.please ?? 0, totalsRanksX?.ketao_count, 'ketao_count'),
+                                    rowTotalsSimple(getI18nText('countryTotals.workDays') || '上岗天数', normX.totals.work_days ?? totalsX.work_days ?? totalsX.work_days_sum ?? totalsX.day ?? 0, totalsRanksX?.work_days, 'work_days'),
+                                ].join('')
+                            }</div>`;
+                        };
+
+                        const renderMyRanksForSource = (payloadX, sourceLabel) => {
+                            const myRanksX = payloadX?.myCountryRanks || payloadX?.data?.myCountryRanks || null;
+                            const gRanksX =
+                                payloadX?.global_user_ranks || payloadX?.data?.global_user_ranks ||
+                                payloadX?.personalRanks || payloadX?.data?.personalRanks ||
+                                null;
+                            const cRanksX = payloadX?.country_user_ranks || payloadX?.data?.country_user_ranks || myRanksX || {};
+                            const myValuesX = payloadX?.myCountryValues || payloadX?.data?.myCountryValues || {};
+                            const personalRanksX = payloadX?.personalRanks || payloadX?.data?.personalRanks || null;
+
+                            const userData = window.currentUserData || window.currentUser || {};
+                            const vibeRank = Number(userData?.vibe_rank ?? userData?.vibeRank ?? NaN);
+                            const totalUsersFallback = effectiveIsGlobal
+                                ? globalTotalUsers
+                                : (window.__globalTotalUsers || (window.lastData && window.lastData.totalUsers != null ? Number(window.lastData.totalUsers) : 0) || globalTotalUsers);
+
+                            const rankDimMap = { total_messages: 'rank_messages', total_chars: 'rank_chars', work_days: 'rank_days', jiafang_count: 'rank_jiafang', ketao_count: 'rank_ketao', avg_message_length: 'rank_avg_len' };
+                            const dimKeyList = ['total_messages', 'total_chars', 'avg_message_length', 'jiafang_count', 'ketao_count', 'work_days'];
+
+                            const fmtMe = (v) => (v === undefined || v === null || Number.isNaN(Number(v))) ? '0' : fmt(v);
+                            const pioneerLabel = currentLang === 'en' ? 'Pioneer' : '该国先锋';
+
+                            const getMyVal = (dimKey) => {
+                                if (dimKey === 'total_messages') return Number(myValuesX?.total_messages ?? myValuesX?.totalMessages ?? myValuesX?.ai ?? 0) || 0;
+                                if (dimKey === 'total_chars') return Number(myValuesX?.total_chars ?? myValuesX?.totalChars ?? myValuesX?.say ?? 0) || 0;
+                                if (dimKey === 'avg_message_length') {
+                                    const v = myValuesX?.avg_message_length ?? myValuesX?.avg_user_message_length ?? myValuesX?.word ?? null;
+                                    const valNum = Number(v);
+                                    if (Number.isFinite(valNum) && valNum > 0) return valNum;
+                                    const tm = Number(myValuesX?.total_messages ?? myValuesX?.totalMessages ?? myValuesX?.ai ?? 0) || 0;
+                                    const tc = Number(myValuesX?.total_chars ?? myValuesX?.totalChars ?? myValuesX?.say ?? 0) || 0;
+                                    return tm > 0 ? Math.round(tc / tm) : 0;
+                                }
+                                if (dimKey === 'jiafang_count') return Number(myValuesX?.jiafang_count ?? myValuesX?.no ?? 0) || 0;
+                                if (dimKey === 'ketao_count') return Number(myValuesX?.ketao_count ?? myValuesX?.please ?? 0) || 0;
+                                if (dimKey === 'work_days') return Number(myValuesX?.work_days ?? myValuesX?.usage_days ?? myValuesX?.day ?? 0) || 0;
+                                return 0;
+                            };
+
+                            const rowRanksSimple = (label, myVal, dimKey) => {
+                                const dimKeyAlt = dimKey === 'avg_message_length' ? 'avg_user_message_length' : dimKey;
+                                const rankKey = rankDimMap[dimKey] || rankDimMap[dimKeyAlt];
+
+                                const cr = myRanksX?.[dimKey] ?? (rankKey ? myRanksX?.[rankKey] : null) ?? cRanksX?.[dimKey] ?? myRanksX?.[dimKeyAlt] ?? cRanksX?.[dimKeyAlt] ?? null;
+                                const gr = (gRanksX && (gRanksX?.[dimKey] ?? gRanksX?.[dimKeyAlt] ?? (dimKey === 'avg_message_length' ? gRanksX?.avg_user_message_length : null))) || null;
+
+                                let rankCountry = cr && (cr.rank ?? cr._rank) != null && Number.isFinite(Number(cr.rank ?? cr._rank)) ? Number(cr.rank ?? cr._rank) : null;
+                                let totalCountry = cr && cr.total != null ? Number(cr.total) : 0;
+
+                                let rankGlobal = gr && (gr.rank ?? gr._rank) != null ? Number(gr.rank ?? gr._rank) : null;
+                                let totalGlobal = gr && gr.total != null ? Number(gr.total) : 0;
+
+                                if ((rankGlobal == null || totalGlobal <= 0) && personalRanksX) {
+                                    // 兜底：用 personalRanks 的原始字段映射
+                                    const pr = personalRanksX;
+                                    if (dimKey === 'total_messages' && pr.ai != null) rankGlobal = Number(pr.ai);
+                                    if (dimKey === 'total_chars' && (pr.say != null || pr.total_chars != null)) rankGlobal = Number(pr.say ?? pr.total_chars);
+                                    if (dimKey === 'avg_message_length' && pr.word != null) rankGlobal = Number(pr.word);
+                                    if (dimKey === 'jiafang_count' && pr.no != null) rankGlobal = Number(pr.no);
+                                    if (dimKey === 'ketao_count' && pr.please != null) rankGlobal = Number(pr.please);
+                                    if (dimKey === 'work_days' && pr.day != null) rankGlobal = Number(pr.day);
+                                    if (rankGlobal != null) totalGlobal = totalUsersFallback;
+                                }
+                                if ((rankGlobal == null || totalGlobal <= 0) && Number.isFinite(vibeRank) && vibeRank > 0 && totalUsersFallback > 0) {
+                                    rankGlobal = Math.min(totalUsersFallback, Math.max(1, Math.round(vibeRank)));
+                                    totalGlobal = totalUsersFallback;
+                                }
+
+                                let countryText;
+                                if (rankCountry != null && totalCountry != null && totalCountry > 0) {
+                                    if (typeof currentViewState === 'string' && currentViewState === 'COUNTRY') {
+                                        countryText = currentLang === 'en' ? `#${rankCountry} in country` : `该国第 ${rankCountry} 名`;
+                                        if (totalCountry > 1) countryText += (currentLang === 'en' ? ` / ${totalCountry}` : ` / 共 ${totalCountry} 人`);
+                                    } else {
+                                        countryText = `本国：#${rankCountry}/${totalCountry}`;
+                                    }
+                                } else {
+                                    countryText = currentLang === 'en' ? '(country): --' : '该国：--';
+                                }
+
+                                const globalText = (rankGlobal != null && totalGlobal != null && totalGlobal > 0)
+                                    ? (currentLang === 'en' ? `Global: #${rankGlobal}/${totalGlobal}` : `全球：#${rankGlobal}/${totalGlobal}`)
+                                    : (currentLang === 'en' ? 'Global: --' : '全球：--');
+
+                                const medal = rankCountry != null && MEDALS[rankCountry] ? ' ' + MEDALS[rankCountry] : '';
+                                const isPioneer = rankCountry === 1 && totalCountry != null && totalCountry <= 5;
+                                const pioneerBadge = isPioneer ? ` <span class="text-[9px] text-amber-400" title="${escapeHtml(pioneerLabel)}">🏅</span>` : '';
+
+                                return `
+                                    <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
+                                        <div class="text-zinc-200">${escapeHtml(label)}</div>
+                                        <div class="flex flex-col items-end gap-0.5 min-w-0">
+                                            <span class="text-[10px] text-zinc-400">${fmtMe(myVal)}</span>
+                                            <span class="text-[10px] text-[var(--accent-terminal)] font-bold tabular-nums">${countryText}${medal}${pioneerBadge} | ${globalText}</span>
+                                        </div>
+                                    </div>
+                                `;
+                            };
+
+                            const noDataHtml = `<div class="text-zinc-500 text-xs">${currentLang === 'en' ? 'No data' : '暂无数据'}</div>`;
+                            const header = `<div class="text-[11px] text-zinc-500 mb-1">${escapeHtml(sourceLabel)}</div>`;
+                            if (!myRanksX || typeof myRanksX !== 'object') {
+                                return `<div>${header}${noDataHtml}</div>`;
+                            }
+
+                            const html = [
+                                rowRanksSimple(getI18nText('countryTotals.messages') || 'Messages', getMyVal('total_messages'), 'total_messages'),
+                                rowRanksSimple(getI18nText('countryTotals.totalChars') || 'Total Chars', getMyVal('total_chars'), 'total_chars'),
+                                rowRanksSimple(getI18nText('countryTotals.avgLen') || 'Avg Len', getMyVal('avg_message_length'), 'avg_message_length'),
+                                rowRanksSimple(getI18nText('countryTotals.jiafang') || 'Jiafang', getMyVal('jiafang_count'), 'jiafang_count'),
+                                rowRanksSimple(getI18nText('countryTotals.ketao') || 'Ketao', getMyVal('ketao_count'), 'ketao_count'),
+                                rowRanksSimple(getI18nText('countryTotals.workDays') || '上岗天数', getMyVal('work_days'), 'work_days'),
+                            ].join('');
+                            return `<div>${header}${html}</div>`;
+                        };
+
+                        let payloadCursor = payload2;
+                        let payloadOpenclaw = payload2;
+                        if (false && !effectiveIsGlobal) {
+                            try {
+                                const [pc, po] = await Promise.all([
+                                    fetchCountrySummaryForSource('cursor'),
+                                    fetchCountrySummaryForSource('openclaw'),
+                                ]);
+                                if (pc && typeof pc === 'object') payloadCursor = pc;
+                                if (po && typeof po === 'object') payloadOpenclaw = po;
+                            } catch { /* ignore */ }
+                        }
+
+                        const totalsHtmlBoth = totalsHtml;
+                        const ranksHtmlBoth = ranksHtml;
+
+                        // 竞态保护：旧请求晚返回时，不要覆盖新 UI（否则会出现“数据清空/不渲染”）
+                        if (!isStaleRequest()) {
+                            const totalsHtmlBothSafe = (totalsHtmlBoth && String(totalsHtmlBoth).trim()) ? totalsHtmlBoth : totalsHtml;
+                            const ranksHtmlBothSafe = (ranksHtmlBoth && String(ranksHtmlBoth).trim()) ? ranksHtmlBoth : ranksHtml;
+
+                            if (totalsBox) totalsBox.innerHTML = totalsHtmlBothSafe;
+                            if (ranksBox) ranksBox.innerHTML = ranksHtmlBothSafe;
+
+                            try { window.__countryTotalsCache.set(cacheKey2, { totalsHtml: totalsHtmlBothSafe, ranksHtml: ranksHtmlBothSafe, ts: Date.now() }); } catch { /* ignore */ }
+                        }
                         // 有 countryTotals 即更新排名 UI（含该国全 0 的首人情况），移除 animate-pulse，严禁回退全球数据
                         if (payload2.countryTotals && typeof updateCountryRankUI === 'function') updateCountryRankUI(payload2);
                         // 国家视图成功后：仅定向调用 renderUserStatsCards/排名更新。严禁调用 refreshUserStats，否则会重新拉取并覆盖已同步的 allData 缓存。
@@ -5460,13 +6034,33 @@
                 vibeSyncChannel.onmessage = function (e) {
                     const msg = e && e.data;
                     if (msg && msg.type === 'local_analysis_complete' && msg.payload) {
-                        window.last_local_stats = { ts: msg.ts || Date.now(), payload: msg.payload };
-                        console.log('[Stats2] ✅ 收到 index 本地分析完成广播，已设置 last_local_stats');
-                        var lb = document.getElementById('left-drawer-body');
-                        if (lb && window.currentUser && typeof renderUserStatsCards === 'function') {
-                            renderUserStatsCards(lb, getBestUserRecordForStats(window.currentUser));
+                        const sourceEngineRaw = String(msg.sourceEngine || '').toLowerCase();
+                        const sourceEngine = (sourceEngineRaw === 'cursor' || sourceEngineRaw === 'openclaw') ? sourceEngineRaw : '';
+                        if (!sourceEngine) return;
+                        window.last_local_stats_by_engine = window.last_local_stats_by_engine || {};
+                        window.last_local_stats_by_engine[sourceEngine] = { ts: msg.ts || Date.now(), payload: msg.payload };
+
+                        // 左侧人格/统计卡片只使用 Cursor 本地槽位，避免 OpenClaw 覆盖后数据口径串台
+                        if (sourceEngine === 'cursor') {
+                            window.last_local_stats = { ts: msg.ts || Date.now(), payload: msg.payload };
+                            console.log('[Stats2] ✅ 收到 Cursor 本地分析完成广播，已设置 last_local_stats');
+                            var lb = document.getElementById('left-drawer-body');
+                            if (lb && window.currentUser && typeof renderUserStatsCards === 'function') {
+                                renderUserStatsCards(lb, getBestUserRecordForStats(window.currentUser));
+                            }
                         }
-                        if (typeof window.refreshOpenClawMonitor === 'function') window.refreshOpenClawMonitor();
+
+                        // OpenClaw 左侧监视器仅响应 OpenClaw 槽位，避免 Cursor 广播触发串台
+                        if (sourceEngine === 'openclaw' && typeof window.refreshOpenClawMonitor === 'function') {
+                            window.refreshOpenClawMonitor();
+                        }
+
+                        // 若右抽屉当前正在“国家”视图，也可尝试刷新展示（避免用户手动切 tab）
+                        try {
+                            if (typeof window.refreshRightDrawerContent === 'function' && currentViewState === 'COUNTRY') {
+                                window.refreshRightDrawerContent();
+                            }
+                        } catch (_) {}
                     }
                 };
             }
@@ -6579,6 +7173,8 @@
             lastRequestCountry: null,
             isProcessingUpdate: false, // 调度中心：防止 updateCountryDashboard 并发与死循环
             lastFetchedCountry: null,
+            lastRequestStatsSourceType: null,
+            lastFetchedStatsSourceType: null,
             isInitialLayoutPending: true, // 初始化保护锁：在 window.onload 完成最终 switchView 之前，拦截 storage/resize 等触发的重复刷新
             selectedCountry: null, // 当前选中的国家
             isGlobalTopMode: false, // 全球最强模式，容错用全局兜底
@@ -10501,7 +11097,14 @@
                             var src = btn.getAttribute('data-source') || 'all';
                             window.__statsSourceType = src;
                             syncSwitcherState(src);
-                            if (typeof updateCountryDashboard === 'function') updateCountryDashboard(cc, name, { preferCache: false });
+                            // Source tab switch should feel instant: bypass country debounce, keep current UI while refreshing.
+                            if (typeof updateCountryDashboard === 'function') {
+                                updateCountryDashboard(cc, name, {
+                                    preferCache: true,
+                                    silent: true,
+                                    force: true
+                                });
+                            }
                         };
                     });
                 }
@@ -19882,9 +20485,10 @@
                                               'https://cursor-clinical-analysis.psterman.workers.dev/';
                             var _mfp = '';
                             try { _mfp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
-                            const migrateUrl = `${apiEndpoint}api/fingerprint/migrate?fingerprint=${encodeURIComponent(_mfp)}&_t=${Date.now()}`;
+                            // 绑定：把匿名 fingerprint 关联到 github_login，避免登录/分析写入两条 user_analysis 记录
+                            const bindUrl = `${apiEndpoint}api/fingerprint/bind`;
                             
-                            console.log('[Auth] 📡 使用 API 地址:', migrateUrl);
+                            console.log('[Auth] 📡 使用 API 地址:', bindUrl);
                             
                             // 【修复 AbortError】添加 AbortController 和超时处理
                             const abortController = new AbortController();
@@ -19894,22 +20498,19 @@
                             
                             let migrateResponse;
                             try {
-                                // 调用后端接口迁移数据
-                                // Body：userId 必选；claimToken 优先，无则用 fingerprint 作为备选认领
-                                const userId = localStorage.getItem('github_username') || 'anonymous';
+                                // Body：把 currentFp 绑定到当前 GitHub 用户（github_login）
+                                const githubAccessToken =
+                                    localStorage.getItem('vibe_github_access_token') ||
+                                    window.__githubAccessToken ||
+                                    localStorage.getItem('github_token') ||
+                                    '';
                                 const migrateBody = {
-                                    userId: githubUserId || userId
+                                    githubUsername: githubUsername,
+                                    fingerprint: currentFp,
+                                    githubAccessToken: githubAccessToken,
                                 };
-                                if (claimToken) {
-                                    migrateBody.claimToken = claimToken;
-                                    console.log('[Auth] 🔑 使用 vibe_claim_token 认领:', claimToken.substring(0, 8) + '...');
-                                } else {
-                                    migrateBody.fingerprint = currentFp;
-                                    migrateBody.sourceFp = currentFp;
-                                    console.log('[Auth] 🔑 无 claimToken，使用本地 fingerprint 认领:', currentFp.substring(0, 8) + '...');
-                                }
 
-                                migrateResponse = await fetch(migrateUrl, {
+                                migrateResponse = await fetch(bindUrl, {
                                     method: 'POST',
                                     headers: {
                                         'Content-Type': 'application/json',
@@ -29011,13 +29612,25 @@
         // 监听 storage 事件，当其他页面更新 localStorage 时自动刷新
         window.addEventListener('storage', (e) => {
             if (isInitialLayoutPending) return;
-            if (e.key === (typeof VIBE_CURSOR_CACHE !== 'undefined' ? VIBE_CURSOR_CACHE : 'vibe_cursor_analysis_cache') || e.key === 'last_analysis_data' || e.key === 'cursor_clinical_history') {
+            var isCursorStorageKey = e.key === (typeof VIBE_CURSOR_CACHE !== 'undefined' ? VIBE_CURSOR_CACHE : 'vibe_cursor_analysis_cache')
+                || e.key === 'last_analysis_data'
+                || e.key === 'cursor_clinical_history';
+            if (isCursorStorageKey) {
                 try { window.__personalIdentityLevelCloudCache = null; } catch (_) {}
                 try {
                     var left = document.getElementById('left-drawer');
                     if (left && left.classList && left.classList.contains('active')) {
                         var render = window._renderPersonalIdentityCloud || (typeof _renderPersonalIdentityCloud === 'function' ? _renderPersonalIdentityCloud : null);
                         if (render) render(window.__currentPersonalIdentityLevel || 'Novice');
+                    }
+                } catch (_) {}
+            }
+            var isOpenclawStorageKey = e.key === (typeof VIBE_OPENCLAW_CACHE !== 'undefined' ? VIBE_OPENCLAW_CACHE : 'vibe_openclaw_analysis_cache')
+                || e.key === 'openclaw_analysis_data';
+            if (isOpenclawStorageKey) {
+                try {
+                    if (window.__statsSourceType === 'openclaw' && typeof window.refreshUserStats === 'function') {
+                        setTimeout(() => window.refreshUserStats(), 200);
                     }
                 } catch (_) {}
             }

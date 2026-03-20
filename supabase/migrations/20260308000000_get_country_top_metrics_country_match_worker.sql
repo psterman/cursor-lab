@@ -18,7 +18,10 @@ base AS (
     u.fingerprint,
     u.user_identity,
     ua.lpdef,
-    NULL::text AS github_username,
+    COALESCE(
+      NULLIF(ua.github_login, ''),
+      NULLIF(u.user_name, '')
+    ) AS github_username,
     u.total_messages,
     u.total_chars,
     u.total_chars AS total_user_chars,

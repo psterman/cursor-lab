@@ -3340,6 +3340,58 @@ export class VibeCodingerAnalyzer {
           }
           const result = await response.json().catch(() => ({}));
           console.log('[VibeAnalyzer] OpenClaw 同步成功', result);
+          // 【与 stats2 同步】补齐 OpenClaw 本地分析槽位（右抽屉“我的排名”按 Tab 分引擎覆盖）
+          try {
+            if (typeof BroadcastChannel !== 'undefined') {
+              const toFinitePos = (v) => {
+                const n = Number(v);
+                return Number.isFinite(n) && n > 0 ? n : undefined;
+              };
+
+              // meVals 需要的字段（totalMessages / total_chars / work_days等）
+              const earliestFileTime = stats.earliestFileTime ?? stats.earliest_file_time ?? null;
+              const lifeDaysFromPortrait = portrait?.lifeDays ?? portrait?.life_days ?? null;
+              const workDaysFromEarliest = (() => {
+                if (earliestFileTime == null) return undefined;
+                const t = Number(earliestFileTime);
+                if (!Number.isFinite(t)) return undefined;
+                const days = Math.max(1, Math.floor((Date.now() - t) / 86400000));
+                return Number.isFinite(days) ? days : undefined;
+              })();
+              const workDays = toFinitePos(lifeDaysFromPortrait) ?? toFinitePos(workDaysFromEarliest);
+
+              const totalTokens =
+                toFinitePos(openclawPayload.total_tokens) ??
+                toFinitePos(stats.usage?.totalTokens ?? stats.usage?.total_tokens);
+              const totalChars = totalTokens ? Math.round(totalTokens * 4) : undefined;
+
+              // totalMessages 若未知则留空，避免把远端 remoteVals 覆盖成 0
+              const totalMessages =
+                toFinitePos(
+                  stats.totalMessages ??
+                  stats.recordsTotal ??
+                  stats.records_total ??
+                  stats.total_messages ??
+                  stats.userMessages
+                );
+
+              const openclawStatsForDrawer = {
+                ...(typeof totalMessages === 'number' ? { totalMessages: totalMessages } : null),
+                ...(typeof totalChars === 'number' ? { total_chars: totalChars, totalUserChars: totalChars } : null),
+                ...(typeof workDays === 'number' ? { work_days: workDays, usage_days: workDays, day: workDays } : null),
+              };
+
+              const ch = new BroadcastChannel('vibe-stats-sync');
+              ch.postMessage({
+                type: 'local_analysis_complete',
+                ts: Date.now(),
+                payload: { stats: openclawStatsForDrawer },
+                sourceEngine: 'openclaw',
+              });
+              ch.close();
+            }
+          } catch (_) { /* ignore */ }
+
           return result;
         } catch (err) {
           console.warn('[VibeAnalyzer] OpenClaw 同步失败', err);
@@ -3892,7 +3944,7 @@ export class VibeCodingerAnalyzer {
         try {
           if (typeof BroadcastChannel !== 'undefined') {
             const ch = new BroadcastChannel('vibe-stats-sync');
-            ch.postMessage({ type: 'local_analysis_complete', ts: Date.now(), payload: result });
+            ch.postMessage({ type: 'local_analysis_complete', ts: Date.now(), payload: result, sourceEngine: sourceEngine || 'cursor' });
             ch.close();
           }
         } catch (_) { /* ignore */ }

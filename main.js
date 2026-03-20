@@ -50,6 +50,7 @@ const VIBE_OPENCLAW_CACHE = 'vibe_openclaw_analysis_cache';
           const meta = data.user_metadata || {};
           const avatar = meta.avatar_url || meta.avatar || meta.picture || '';
           const name = meta.user_name || meta.full_name || meta.name || meta.preferred_username || meta.login || data.email || '';
+          const githubLogin = (meta.login || meta.user_name || meta.preferred_username || meta.full_name || data.email || '').trim();
           if (avatar || name) {
             const cache = { avatar: avatar, name: name, at: Date.now() };
             try {
@@ -58,7 +59,7 @@ const VIBE_OPENCLAW_CACHE = 'vibe_openclaw_analysis_cache';
             if (typeof window !== 'undefined') window.__vibeGitHubUser = cache;
           }
           
-          // 【认领机制】在捕获到 access_token 的第一时间，向后端发送 migrate 请求
+          // 【认领/绑定机制】在捕获到 access_token 的第一时间，把本地 fingerprint 绑定到 github_login
           const userId = data.sub || null;
           if (userId) {
             try {
@@ -70,31 +71,31 @@ const VIBE_OPENCLAW_CACHE = 'vibe_openclaw_analysis_cache';
                 });
                 
                 // 异步发送 migrate 请求（不阻塞页面加载）
-                fetch('/api/fingerprint/migrate', {
+                fetch('/api/fingerprint/bind', {
                   method: 'POST',
                   headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`,
                   },
                   body: JSON.stringify({
+                    githubUsername: githubLogin,
                     fingerprint: userFingerprint,
-                    userId: userId,
-                    username: name || '',
+                    githubAccessToken: token,
                   }),
                 }).then(res => {
                   if (res.ok) {
-                    console.log('[Auth] ✅ Fingerprint 迁移请求已发送');
+                    console.log('[Auth] ✅ Fingerprint 绑定请求已发送');
                   } else {
-                    console.warn('[Auth] ⚠️ Fingerprint 迁移请求失败:', res.status);
+                    console.warn('[Auth] ⚠️ Fingerprint 绑定请求失败:', res.status);
                   }
                 }).catch(err => {
-                  console.warn('[Auth] ⚠️ Fingerprint 迁移请求出错:', err);
+                  console.warn('[Auth] ⚠️ Fingerprint 绑定请求出错:', err);
                 });
               } else {
-                console.log('[Auth] ℹ️ 未找到 user_fingerprint，跳过迁移');
+                console.log('[Auth] ℹ️ 未找到 user_fingerprint，跳过绑定');
               }
             } catch (e) {
-              console.warn('[Auth] ⚠️ 迁移 fingerprint 时出错:', e);
+              console.warn('[Auth] ⚠️ 绑定 fingerprint 时出错:', e);
             }
           }
         }
@@ -683,6 +684,15 @@ class VibeCodingApp {
         </span>
       `);
     }
+    const sourceEngine = String(stats.sourceEngine || stats.source_engine || stats.__source_engine || '').toLowerCase();
+    if (sourceEngine === 'cursor' || sourceEngine === 'openclaw') {
+      const sourceText = sourceEngine === 'cursor' ? 'Cursor' : 'OpenClaw';
+      tags.push(`
+        <span class="vibe-tag" data-v6-key="source_engine" style="border:1px solid rgba(0,255,65,0.45);color:#8dffb2;background:rgba(0,255,65,0.12);">
+          Source: ${escapeHtml(sourceText)}
+        </span>
+      `);
+    }
 
     container.innerHTML = tags.length > 0 
       ? tags.join('')
@@ -1019,6 +1029,8 @@ class VibeCodingApp {
     // 会让用户误以为上传卡死。这里默认 deferGlobalSync=true。
     // ==========================================================
     const deferGlobalSync = options?.deferGlobalSync !== false; // 默认 true
+    // 数据隔离：OpenClaw 上传不得覆盖 Cursor workspaceStorage 的回填口径
+    const sourceEngine = normalizeSourceEngine(options?.sourceEngine);
 
     const doGlobalSync = async () => {
       if (!result || !result.statistics) return;
@@ -1047,6 +1059,23 @@ class VibeCodingApp {
         }
         // 步骤3: 调用 uploadToSupabase 联网获取真实排名（后台执行时不阻塞 UI）
         // 传递完整的 result 对象和 chatData；personality.vibe_lexicon 在 analyzer 内从 result.cloud50 构建
+        // 在上传前兜底校验 v6 维度得分（避免后端落库 NaN/undefined -> 0）
+        try {
+          if (!result || typeof result !== 'object') {} else {
+            const dims = result.dimensions && typeof result.dimensions === 'object' ? result.dimensions : null;
+            const base = { L: 50, P: 50, D: 50, E: 50, F: 50 };
+            const norm = (val, def) => {
+              const n = (typeof val === 'number' && Number.isFinite(val)) ? val : def;
+              return Math.max(0, Math.min(100, Math.round(n)));
+            };
+            const d = dims || (result.dimensions = {});
+            d.L = norm(d.L, base.L);
+            d.P = norm(d.P, base.P);
+            d.D = norm(d.D, base.D);
+            d.E = norm(d.E, base.E);
+            d.F = norm(d.F, base.F);
+          }
+        } catch (_) {}
         const liveRank = await this.analyzer.uploadToSupabase(result, chatData, onProgress);
         
         // 【关键修复】统一保存 claim_token，确保后续 GitHub 登录可认领匿名数据
@@ -1263,98 +1292,100 @@ class VibeCodingApp {
     // 保存结果
     this.vibeResult = result;
 
-    // 【关键修复】缓存最后一次分析数据（供 stats2.html 登录后“静默同步/回填”使用）
-    // 说明：stats2.html 会在检测到 GitHub 账号为默认空记录(50分)时尝试读取 last_analysis_data 进行补齐。
-    // 这里尽量缓存 /api/v2/analyze 需要的最小字段；若 localStorage 容量不足则退化为仅缓存非 chatData 字段。
-    try {
-      const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
-      const safeFp = (context && context.fingerprint) ? String(context.fingerprint) : (localStorage.getItem('user_fingerprint') || null);
-      // 【修复】计算 usageDays 和 earliestFileTime，供 stats2.html 使用（含 Cloudflare/多环境兜底）
-      let usageDays = null;
-      let earliestFileTime = null;
-      if (globalStats && globalStats.earliestFileTime) {
-        earliestFileTime = globalStats.earliestFileTime;
-        const now = Date.now();
-        const diffMs = now - earliestFileTime;
-        usageDays = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
-      }
-      // 云端/Cloudflare 可能无 earliestFileTime，用后端返回的 work_days 兜底，避免 stats2 显示 N/A
-      const fromResult = result?.stats || result?.statistics || {};
-      if (usageDays == null) {
-        usageDays = fromResult.work_days ?? fromResult.usageDays ?? fromResult.usage_days ?? fromResult.days ?? null;
-        if (usageDays != null) usageDays = Math.max(1, Number(usageDays));
-      }
-      if (earliestFileTime == null && (fromResult.earliestFileTime ?? fromResult.earliest_file_time ?? fromResult.first_chat_at)) {
-        const ts = Number(fromResult.earliestFileTime ?? fromResult.earliest_file_time ?? fromResult.first_chat_at);
-        if (Number.isFinite(ts) && ts > 0) earliestFileTime = ts;
-      }
-
-      const payloadForStats2 = {
-        // stats2 会检查 chatData 是否存在；尽量提供，但允许在容量不足时降级
-        chatData: chatData,
-        lang: safeLang,
-        fingerprint: safeFp,
-        dimensions: result?.dimensions || null,
-        stats: {
-          ...(fromResult),
-          earliestFileTime: earliestFileTime,
-          usageDays: usageDays,
-          work_days: usageDays ?? fromResult.work_days ?? null,
-          // 供 stats2 右抽屉本国词云兜底：identityLevelCloud 按 Novice/Professional/Architect 分桶
-          identityLevelCloud: result.identityLevelCloud || result.statistics?.identityLevelCloud || fromResult.identityLevelCloud || null,
-        },
-        meta: context || null,
-        vibeIndex: result?.vibeIndex || result?.vibe_index || null,
-        personalityType: result?.personalityType || result?.personality_type || null,
-        // 【新增】保存真实评价所需字段
-        personalityName: result?.personalityName || result?.personality_name || null,
-        personalityNameZh: result?.personalityNameZh || result?.personality_name_zh || null,
-        personalityNameEn: result?.personalityNameEn || result?.personality_name_en || null,
-        roastText: result?.roastText || result?.roast_text || null,
-        roastTextZh: result?.roastTextZh || result?.roast_text_zh || null,
-        roastTextEn: result?.roastTextEn || result?.roast_text_en || null,
-        analysis: result?.analysis || null,
-      };
-      localStorage.setItem(VIBE_CURSOR_CACHE, JSON.stringify(payloadForStats2));
-    } catch (e) {
+    if (sourceEngine === 'cursor') {
+      // 【关键修复】缓存最后一次分析数据（供 stats2.html 登录后“静默同步/回填”使用）
+      // 说明：stats2.html 会在检测到 GitHub 账号为默认空记录(50分)时尝试读取 last_analysis_data 进行补齐。
+      // 这里尽量缓存 /api/v2/analyze 需要的最小字段；若 localStorage 容量不足则退化为仅缓存非 chatData 字段。
       try {
-        // 降级：避免存不下导致完全没有 Cursor 缓存
         const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
         const safeFp = (context && context.fingerprint) ? String(context.fingerprint) : (localStorage.getItem('user_fingerprint') || null);
-        // 【修复】降级模式下也保存 earliestFileTime 和 usageDays（含云端 work_days 兜底）
-        let usageDaysLite = null;
-        let earliestFileTimeLite = null;
+        // 【修复】计算 usageDays 和 earliestFileTime，供 stats2.html 使用（含 Cloudflare/多环境兜底）
+        let usageDays = null;
+        let earliestFileTime = null;
         if (globalStats && globalStats.earliestFileTime) {
-          earliestFileTimeLite = globalStats.earliestFileTime;
+          earliestFileTime = globalStats.earliestFileTime;
           const now = Date.now();
-          const diffMs = now - earliestFileTimeLite;
-          usageDaysLite = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+          const diffMs = now - earliestFileTime;
+          usageDays = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
         }
-        const fromResultLite = result?.stats || result?.statistics || {};
-        const ilcLite = result?.identityLevelCloud || result?.statistics?.identityLevelCloud || result?.stats?.identityLevelCloud || fromResultLite.identityLevelCloud || null;
-        if (usageDaysLite == null)
-          usageDaysLite = fromResultLite.work_days ?? fromResultLite.usageDays ?? fromResultLite.usage_days ?? fromResultLite.days ?? null;
-        if (usageDaysLite != null) usageDaysLite = Math.max(1, Number(usageDaysLite));
+        // 云端/Cloudflare 可能无 earliestFileTime，用后端返回的 work_days 兜底，避免 stats2 显示 N/A
+        const fromResult = result?.stats || result?.statistics || {};
+        if (usageDays == null) {
+          usageDays = fromResult.work_days ?? fromResult.usageDays ?? fromResult.usage_days ?? fromResult.days ?? null;
+          if (usageDays != null) usageDays = Math.max(1, Number(usageDays));
+        }
+        if (earliestFileTime == null && (fromResult.earliestFileTime ?? fromResult.earliest_file_time ?? fromResult.first_chat_at)) {
+          const ts = Number(fromResult.earliestFileTime ?? fromResult.earliest_file_time ?? fromResult.first_chat_at);
+          if (Number.isFinite(ts) && ts > 0) earliestFileTime = ts;
+        }
 
-        const payloadLite = {
-          chatData: null,
+        const payloadForStats2 = {
+          // stats2 会检查 chatData 是否存在；尽量提供，但允许在容量不足时降级
+          chatData: chatData,
           lang: safeLang,
           fingerprint: safeFp,
           dimensions: result?.dimensions || null,
           stats: {
-            ...(fromResultLite),
-            earliestFileTime: earliestFileTimeLite,
-            usageDays: usageDaysLite,
-            work_days: usageDaysLite ?? fromResultLite.work_days ?? null,
-            identityLevelCloud: ilcLite,
+            ...(fromResult),
+            earliestFileTime: earliestFileTime,
+            usageDays: usageDays,
+            work_days: usageDays ?? fromResult.work_days ?? null,
+            // 供 stats2 右抽屉本国词云兜底：identityLevelCloud 按 Novice/Professional/Architect 分桶
+            identityLevelCloud: result.identityLevelCloud || result.statistics?.identityLevelCloud || fromResult.identityLevelCloud || null,
           },
           meta: context || null,
           vibeIndex: result?.vibeIndex || result?.vibe_index || null,
           personalityType: result?.personalityType || result?.personality_type || null,
-          note: 'localStorage_limit_exceeded',
+          // 【新增】保存真实评价所需字段
+          personalityName: result?.personalityName || result?.personality_name || null,
+          personalityNameZh: result?.personalityNameZh || result?.personality_name_zh || null,
+          personalityNameEn: result?.personalityNameEn || result?.personality_name_en || null,
+          roastText: result?.roastText || result?.roast_text || null,
+          roastTextZh: result?.roastTextZh || result?.roast_text_zh || null,
+          roastTextEn: result?.roastTextEn || result?.roast_text_en || null,
+          analysis: result?.analysis || null,
         };
-        localStorage.setItem(VIBE_CURSOR_CACHE, JSON.stringify(payloadLite));
-      } catch { /* ignore */ }
+        localStorage.setItem(VIBE_CURSOR_CACHE, JSON.stringify(payloadForStats2));
+      } catch (e) {
+        try {
+          // 降级：避免存不下导致完全没有 Cursor 缓存
+          const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
+          const safeFp = (context && context.fingerprint) ? String(context.fingerprint) : (localStorage.getItem('user_fingerprint') || null);
+          // 【修复】降级模式下也保存 earliestFileTime 和 usageDays（含云端 work_days 兜底）
+          let usageDaysLite = null;
+          let earliestFileTimeLite = null;
+          if (globalStats && globalStats.earliestFileTime) {
+            earliestFileTimeLite = globalStats.earliestFileTime;
+            const now = Date.now();
+            const diffMs = now - earliestFileTimeLite;
+            usageDaysLite = Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+          }
+          const fromResultLite = result?.stats || result?.statistics || {};
+          const ilcLite = result?.identityLevelCloud || result?.statistics?.identityLevelCloud || result?.stats?.identityLevelCloud || fromResultLite.identityLevelCloud || null;
+          if (usageDaysLite == null)
+            usageDaysLite = fromResultLite.work_days ?? fromResultLite.usageDays ?? fromResultLite.usage_days ?? fromResultLite.days ?? null;
+          if (usageDaysLite != null) usageDaysLite = Math.max(1, Number(usageDaysLite));
+
+          const payloadLite = {
+            chatData: null,
+            lang: safeLang,
+            fingerprint: safeFp,
+            dimensions: result?.dimensions || null,
+            stats: {
+              ...(fromResultLite),
+              earliestFileTime: earliestFileTimeLite,
+              usageDays: usageDaysLite,
+              work_days: usageDaysLite ?? fromResultLite.work_days ?? null,
+              identityLevelCloud: ilcLite,
+            },
+            meta: context || null,
+            vibeIndex: result?.vibeIndex || result?.vibe_index || null,
+            personalityType: result?.personalityType || result?.personality_type || null,
+            note: 'localStorage_limit_exceeded',
+          };
+          localStorage.setItem(VIBE_CURSOR_CACHE, JSON.stringify(payloadLite));
+        } catch { /* ignore */ }
+      }
     }
     
     // 步骤5: 最后执行 renderReport
@@ -1485,6 +1516,8 @@ class VibeCodingApp {
     // 【性能优化】默认改为“先出本地报告，后后台同步全球排名”
     // ==========================================================
     const deferGlobalSync = options?.deferGlobalSync !== false; // 默认 true
+    // 数据隔离：OpenClaw 上传不得覆盖 Cursor workspaceStorage 的回填口径
+    const sourceEngine = normalizeSourceEngine(options?.sourceEngine);
 
     const doGlobalSync = async () => {
       if (!result || !result.statistics) return;
@@ -1528,6 +1561,23 @@ class VibeCodingApp {
         }
         // 步骤3: 调用 uploadToSupabase 联网获取真实排名（后台执行时不阻塞 UI）
         // 传递完整的 result 对象和 chatData；personality.vibe_lexicon 在 analyzer 内从 result.cloud50 构建
+        // 在上传前兜底校验 v6 维度得分（避免后端落库 NaN/undefined -> 0）
+        try {
+          if (!result || typeof result !== 'object') {} else {
+            const dims = result.dimensions && typeof result.dimensions === 'object' ? result.dimensions : null;
+            const base = { L: 50, P: 50, D: 50, E: 50, F: 50 };
+            const norm = (val, def) => {
+              const n = (typeof val === 'number' && Number.isFinite(val)) ? val : def;
+              return Math.max(0, Math.min(100, Math.round(n)));
+            };
+            const d = dims || (result.dimensions = {});
+            d.L = norm(d.L, base.L);
+            d.P = norm(d.P, base.P);
+            d.D = norm(d.D, base.D);
+            d.E = norm(d.E, base.E);
+            d.F = norm(d.F, base.F);
+          }
+        } catch (_) {}
         const liveRank = await this.analyzer.uploadToSupabase(result, chatData, onProgress);
         
         // 【关键修复】统一保存 claim_token，确保后续 GitHub 登录可认领匿名数据
@@ -1666,56 +1716,58 @@ class VibeCodingApp {
     // 保存结果
     this.vibeResult = result;
 
-    // 【数据隔离】缓存 Cursor 分析结果到 VIBE_CURSOR_CACHE（同步方法同样写入，供 stats2 回填）
-    try {
-      const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
-      const safeFp = (context && context.fingerprint) ? String(context.fingerprint) : (localStorage.getItem('user_fingerprint') || null);
-      const st = result?.stats || result?.statistics || {};
-      const ilcSync = result && (result.identityLevelCloud || result.statistics?.identityLevelCloud || result.stats?.identityLevelCloud || st.identityLevelCloud);
-      const usageDaysSync = st.work_days ?? st.usageDays ?? st.usage_days ?? st.days ?? null;
-      const payloadForStats2 = {
-        chatData: chatData,
-        lang: safeLang,
-        fingerprint: safeFp,
-        dimensions: result?.dimensions || null,
-        stats: {
-          ...(st),
-          usageDays: usageDaysSync != null ? Math.max(1, Number(usageDaysSync)) : null,
-          work_days: usageDaysSync != null ? Math.max(1, Number(usageDaysSync)) : (st.work_days ?? null),
-          // 供 stats2.html 左侧本人词云读取：按 Novice/Professional/Architect 分桶
-          identityLevelCloud: ilcSync || null,
-        },
-        meta: context || null,
-        vibeIndex: result?.vibeIndex || result?.vibe_index || null,
-        personalityType: result?.personalityType || result?.personality_type || null,
-      };
-      localStorage.setItem(VIBE_CURSOR_CACHE, JSON.stringify(payloadForStats2));
-    } catch (e) {
+    if (sourceEngine === 'cursor') {
+      // 【数据隔离】缓存 Cursor 分析结果到 VIBE_CURSOR_CACHE（同步方法同样写入，供 stats2 回填）
       try {
         const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
         const safeFp = (context && context.fingerprint) ? String(context.fingerprint) : (localStorage.getItem('user_fingerprint') || null);
-        const fromResultLite2 = result?.stats || result?.statistics || {};
-        const ilcLite2 = result && (result.identityLevelCloud || result.statistics?.identityLevelCloud || result.stats?.identityLevelCloud || fromResultLite2.identityLevelCloud);
-        let usageDaysLite2 = fromResultLite2.work_days ?? fromResultLite2.usageDays ?? fromResultLite2.usage_days ?? fromResultLite2.days ?? null;
-        if (usageDaysLite2 != null) usageDaysLite2 = Math.max(1, Number(usageDaysLite2));
-        const payloadLite = {
-          chatData: null,
+        const st = result?.stats || result?.statistics || {};
+        const ilcSync = result && (result.identityLevelCloud || result.statistics?.identityLevelCloud || result.stats?.identityLevelCloud || st.identityLevelCloud);
+        const usageDaysSync = st.work_days ?? st.usageDays ?? st.usage_days ?? st.days ?? null;
+        const payloadForStats2 = {
+          chatData: chatData,
           lang: safeLang,
           fingerprint: safeFp,
           dimensions: result?.dimensions || null,
           stats: {
-            ...(fromResultLite2),
-            usageDays: usageDaysLite2,
-            work_days: usageDaysLite2 ?? fromResultLite2.work_days ?? null,
-            identityLevelCloud: ilcLite2 || null,
+            ...(st),
+            usageDays: usageDaysSync != null ? Math.max(1, Number(usageDaysSync)) : null,
+            work_days: usageDaysSync != null ? Math.max(1, Number(usageDaysSync)) : (st.work_days ?? null),
+            // 供 stats2.html 左侧本人词云读取：按 Novice/Professional/Architect 分桶
+            identityLevelCloud: ilcSync || null,
           },
           meta: context || null,
           vibeIndex: result?.vibeIndex || result?.vibe_index || null,
           personalityType: result?.personalityType || result?.personality_type || null,
-          note: 'localStorage_limit_exceeded',
         };
-        localStorage.setItem(VIBE_CURSOR_CACHE, JSON.stringify(payloadLite));
-      } catch { /* ignore */ }
+        localStorage.setItem(VIBE_CURSOR_CACHE, JSON.stringify(payloadForStats2));
+      } catch (e) {
+        try {
+          const safeLang = (context && context.lang) ? String(context.lang) : getCurrentLang();
+          const safeFp = (context && context.fingerprint) ? String(context.fingerprint) : (localStorage.getItem('user_fingerprint') || null);
+          const fromResultLite2 = result?.stats || result?.statistics || {};
+          const ilcLite2 = result && (result.identityLevelCloud || result.statistics?.identityLevelCloud || result.stats?.identityLevelCloud || fromResultLite2.identityLevelCloud);
+          let usageDaysLite2 = fromResultLite2.work_days ?? fromResultLite2.usageDays ?? fromResultLite2.usage_days ?? fromResultLite2.days ?? null;
+          if (usageDaysLite2 != null) usageDaysLite2 = Math.max(1, Number(usageDaysLite2));
+          const payloadLite = {
+            chatData: null,
+            lang: safeLang,
+            fingerprint: safeFp,
+            dimensions: result?.dimensions || null,
+            stats: {
+              ...(fromResultLite2),
+              usageDays: usageDaysLite2,
+              work_days: usageDaysLite2 ?? fromResultLite2.work_days ?? null,
+              identityLevelCloud: ilcLite2 || null,
+            },
+            meta: context || null,
+            vibeIndex: result?.vibeIndex || result?.vibe_index || null,
+            personalityType: result?.personalityType || result?.personality_type || null,
+            note: 'localStorage_limit_exceeded',
+          };
+          localStorage.setItem(VIBE_CURSOR_CACHE, JSON.stringify(payloadLite));
+        } catch { /* ignore */ }
+      }
     }
     
     // 步骤5: 最后执行 renderReport
@@ -2024,6 +2076,23 @@ export const reanalyzeWithLanguage = async (lang) => {
           vibeAnalyzer.forceCnIdentity = true;
         }
         // 传递完整的 vibeResult 对象和 allChatData；personality.vibe_lexicon 在 analyzer 内从 result.cloud50 构建
+        // 在上传前兜底校验 v6 维度得分（避免后端落库 NaN/undefined -> 0）
+        try {
+          if (vibeResult && typeof vibeResult === 'object') {
+            const dims = vibeResult.dimensions && typeof vibeResult.dimensions === 'object' ? vibeResult.dimensions : null;
+            const base = { L: 50, P: 50, D: 50, E: 50, F: 50 };
+            const norm = (val, def) => {
+              const n = (typeof val === 'number' && Number.isFinite(val)) ? val : def;
+              return Math.max(0, Math.min(100, Math.round(n)));
+            };
+            const d = dims || (vibeResult.dimensions = {});
+            d.L = norm(d.L, base.L);
+            d.P = norm(d.P, base.P);
+            d.D = norm(d.D, base.D);
+            d.E = norm(d.E, base.E);
+            d.F = norm(d.F, base.F);
+          }
+        } catch (_) {}
         const liveRank = await vibeAnalyzer.uploadToSupabase(vibeResult, allChatData);
         
         // 【关键修复】保存 claim_token，避免“本地数据无法与 GitHub 认领匹配”
@@ -2180,6 +2249,23 @@ export const reanalyzeWithLanguage = async (lang) => {
           vibeAnalyzer.forceCnIdentity = true;
         }
         // 传递完整的 vibeResult 对象和 allChatData；personality.vibe_lexicon 在 analyzer 内从 result.cloud50 构建
+        // 在上传前兜底校验 v6 维度得分（避免后端落库 NaN/undefined -> 0）
+        try {
+          if (vibeResult && typeof vibeResult === 'object') {
+            const dims = vibeResult.dimensions && typeof vibeResult.dimensions === 'object' ? vibeResult.dimensions : null;
+            const base = { L: 50, P: 50, D: 50, E: 50, F: 50 };
+            const norm = (val, def) => {
+              const n = (typeof val === 'number' && Number.isFinite(val)) ? val : def;
+              return Math.max(0, Math.min(100, Math.round(n)));
+            };
+            const d = dims || (vibeResult.dimensions = {});
+            d.L = norm(d.L, base.L);
+            d.P = norm(d.P, base.P);
+            d.D = norm(d.D, base.D);
+            d.E = norm(d.E, base.E);
+            d.F = norm(d.F, base.F);
+          }
+        } catch (_) {}
         const liveRank = await vibeAnalyzer.uploadToSupabase(vibeResult, allChatData);
         
         // 【关键修复】保存 claim_token，避免“本地数据无法与 GitHub 认领匹配”
@@ -3863,7 +3949,7 @@ async function handleFileUpload(event, type, callbacks = {}) {
 
         // 使用 VibeCodingApp 的 analyzeFile 方法
         // 上传流程必须等待 rankData 再回调，否则预览/横向排名无数据（deferGlobalSync 默认会先返回再后台同步）
-        vibeResult = await vibeCodingApp.analyzeFile(allChatData, extraStats, onProgress, { deferGlobalSync: false });
+        vibeResult = await vibeCodingApp.analyzeFile(allChatData, extraStats, onProgress, { deferGlobalSync: false, sourceEngine: sourceEngine });
         console.log('[Main] Vibe Codinger 分析完成（使用 VibeCodingApp）:', vibeResult);
         
         // 重置处理状态
@@ -3934,7 +4020,7 @@ async function handleFileUpload(event, type, callbacks = {}) {
           };
           
           // 使用 VibeCodingApp 的 analyzeFileSync 方法（同步方法）
-          vibeResult = await vibeCodingApp.analyzeFileSync(allChatData, extraStats, onProgress, { deferGlobalSync: false });
+          vibeResult = await vibeCodingApp.analyzeFileSync(allChatData, extraStats, onProgress, { deferGlobalSync: false, sourceEngine: sourceEngine });
           console.log('[Main] Vibe Codinger 分析完成（使用 VibeCodingApp 同步方法）:', vibeResult);
           
           // 重置处理状态

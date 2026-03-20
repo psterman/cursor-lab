@@ -17,12 +17,19 @@ base AS (
     u.user_name,
     u.fingerprint,
     u.user_identity,
-    u.lpdef,
-    NULLIF(ua.github_username, '') AS github_username,
+    ua.lpdef,
+    COALESCE(
+      NULLIF(ua.github_login, ''),
+      NULLIF(u.user_name, '')
+    ) AS github_username,
     u.total_messages,
     u.total_chars,
-    u.total_user_chars,
-    u.avg_user_message_length,
+    u.total_chars AS total_user_chars,
+    (CASE
+      WHEN COALESCE(u.total_messages, 0) > 0
+      THEN ROUND((u.total_chars::numeric / NULLIF(u.total_messages, 0))::numeric, 2)
+      ELSE NULL
+    END) AS avg_user_message_length,
     u.jiafang_count,
     u.ketao_count
   FROM public.v_unified_analysis_v2 u

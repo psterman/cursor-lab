@@ -88,6 +88,68 @@
         return cur;
     }
 
+    /** 解析 JSON 字符串或对象，用于判定是否含真实 OpenClaw 载荷（非 Cursor 体检通用字段） */
+    function asObjectLoose(value) {
+        if (!value) return {};
+        if (typeof value === 'string') {
+            try { return JSON.parse(value); } catch (_) { return {}; }
+        }
+        return (typeof value === 'object' && !Array.isArray(value)) ? value : {};
+    }
+    function jsonObjectKeyCount(o) {
+        if (!o || typeof o !== 'object' || Array.isArray(o)) return 0;
+        return Object.keys(o).length;
+    }
+    /** OpenClaw 统计块是否含可展示实质（排除仅 total_tokens / primary_model 等单列） */
+    function openclawStatsBlobHasSubstance(blob) {
+        var b = asObjectLoose(blob);
+        if (jsonObjectKeyCount(b.model_usage) > 0) return true;
+        if (jsonObjectKeyCount(b.skills_stats) > 0) return true;
+        if (jsonObjectKeyCount(b.tool_usage) > 0) return true;
+        if (jsonObjectKeyCount(asObjectLoose(b.raw_summary)) > 0) return true;
+        if (jsonObjectKeyCount(asObjectLoose(b.portrait)) > 0) return true;
+        return false;
+    }
+    /** user_analysis / v_openclaw 原始行是否应视为 OpenClaw 来源 */
+    function rawRecordHasOpenClawEvidence(record) {
+        if (!record || typeof record !== 'object') return false;
+        if (record.stat_id != null && record.stat_id !== '') return true;
+        if (jsonObjectKeyCount(asObjectLoose(record.model_usage)) > 0) return true;
+        if (jsonObjectKeyCount(asObjectLoose(record.skills_stats)) > 0) return true;
+        if (jsonObjectKeyCount(asObjectLoose(record.tool_usage)) > 0) return true;
+        if (jsonObjectKeyCount(asObjectLoose(record.raw_summary)) > 0) return true;
+        var statsRoot = asObjectLoose(record.stats);
+        var openclawRoot = asObjectLoose(statsRoot.openclaw);
+        var openclawStats = asObjectLoose(openclawRoot.stats || statsRoot.openclaw_stats);
+        if (openclawStatsBlobHasSubstance(openclawStats)) return true;
+        if (openclawRoot.portrait || openclawRoot.sessionsSummary) return true;
+        return false;
+    }
+    /** 当前登录用户 stats JSON 中是否嵌有 OpenClaw 块 */
+    function statsRootHasOpenClawEvidence(statsRoot) {
+        var s = asObjectLoose(statsRoot);
+        var openclawRoot = asObjectLoose(s.openclaw);
+        var openclawStats = asObjectLoose(openclawRoot.stats || s.openclaw_stats);
+        if (openclawStatsBlobHasSubstance(openclawStats)) return true;
+        if (openclawRoot.portrait || openclawRoot.sessionsSummary) return true;
+        return false;
+    }
+    /**
+     * 本地合并后的对象是否像真实 OpenClaw 采集（Cursor 体检里也有 skills/model，不得单独作为依据）
+     */
+    function localMergedHasOpenClawEvidence(merged) {
+        if (!merged || typeof merged !== 'object') return false;
+        if (merged.source === 'openclaw') return true;
+        if (merged.openclawPortrait || merged.openclawSessionsSummary) return true;
+        var st = merged.stats || {};
+        if (st.source === 'openclaw') return true;
+        var oc = asObjectLoose(st.openclaw);
+        if (oc.portrait || oc.sessionsSummary) return true;
+        if (openclawStatsBlobHasSubstance(st.openclaw_stats)) return true;
+        if (openclawStatsBlobHasSubstance(oc.stats)) return true;
+        return false;
+    }
+
     function addSkillNamesFromArray(set, arr) {
         if (!Array.isArray(arr)) return;
         arr.forEach(function(item) {
@@ -596,12 +658,17 @@
             var rawLast = typeof localStorage !== 'undefined' && localStorage.getItem('last_analysis_data');
             if (rawLast) {
                 try { 
-                    var tempLast = JSON.parse(rawLast); 
+                    var tempLast = JSON.parse(rawLast);
+                    // 勿用 skillsByName/skillsUsage：Cursor 体检同样具备，会误判为 OpenClaw
+                    var stLast = tempLast && tempLast.stats;
+                    var ocNested = stLast && stLast.openclaw;
                     var isOC = tempLast && (
                         tempLast.source === 'openclaw' ||
                         tempLast.openclawPortrait ||
                         tempLast.openclawSessionsSummary ||
-                        (tempLast.stats && (tempLast.stats.source === 'openclaw' || tempLast.stats.openclaw_stats || tempLast.stats.skillsByName || tempLast.stats.skillsUsage || tempLast.stats.skills_stats))
+                        (stLast && stLast.source === 'openclaw') ||
+                        (stLast && openclawStatsBlobHasSubstance(stLast.openclaw_stats)) ||
+                        (ocNested && typeof ocNested === 'object' && (ocNested.portrait || ocNested.sessionsSummary || openclawStatsBlobHasSubstance(ocNested.stats)))
                     );
                     if (isOC) {
                         parsedLast = tempLast;
@@ -661,6 +728,7 @@
             if (!merged.openclawSessionsSummary && parsedLast.openclawSessionsSummary) merged.openclawSessionsSummary = parsedLast.openclawSessionsSummary;
             if (!merged.openclawSessionsSummary && parsedSession.openclawSessionsSummary) merged.openclawSessionsSummary = parsedSession.openclawSessionsSummary;
             
+            if (!localMergedHasOpenClawEvidence(merged)) return null;
             return merged;
         } catch (e) {
             return null;
@@ -686,17 +754,7 @@
         var modelUsage = record.model_usage || openclawStats.model_usage || openclawRoot.modelUsage || {};
         var skillsStats = record.skills_stats || openclawStats.skills_stats || {};
         var rawSummary = record.raw_summary || openclawStats.raw_summary || {};
-        var hasOpenClawPayload = !!(
-            Object.keys(openclawStats).length ||
-            Object.keys(openclawRoot).length ||
-            record.model_usage ||
-            record.raw_summary ||
-            record.skills_stats ||
-            record.total_tokens != null ||
-            record.top_model_id ||
-            record.primary_model
-        );
-        if (!hasOpenClawPayload) return null;
+        if (!rawRecordHasOpenClawEvidence(record)) return null;
         return Object.assign({}, openclawStats, record, {
             user_id: record.user_id || openclawStats.user_id || record.id || null,
             total_tokens: record.total_tokens != null ? record.total_tokens : openclawStats.total_tokens,
@@ -1034,6 +1092,18 @@
             bySkillsInference
         );
 
+        var openclawMonitorActive = false;
+        if (localMergedHasOpenClawEvidence(local)) {
+            openclawMonitorActive = true;
+        }
+        // 只认远程 OpenClaw 快照行（stat_id）。不要再尝试从 user_analysis 的通用字段“推断” OpenClaw。
+        if (!openclawMonitorActive) {
+            if (remote && typeof remote === 'object' && remote.stat_id != null && remote.stat_id !== '') {
+                openclawMonitorActive = true;
+            }
+        }
+        merged.openclaw_monitor_active = openclawMonitorActive;
+
         return merged;
     }
 
@@ -1047,16 +1117,25 @@
     }
 
     /**
-     * 渲染 OpenClaw 未激活占位内容（本地缓存为空时）
+     * 渲染 OpenClaw 未激活占位（无本地采集且远程/用户 stats 中无 OpenClaw 实质载荷时）
      */
     function renderOpenClawInactivePlaceholder(card) {
         if (!card) return;
         var body = card.querySelector('.openclaw-monitor-body');
         if (!body) return;
         card.classList.add('stats2-inactive-placeholder');
+        var hasAuthenticatedSession = !(typeof window.hasAuthenticatedDrawerAccess === 'function') || window.hasAuthenticatedDrawerAccess();
+        var desc = hasAuthenticatedSession
+            ? '当前还没有可用的 OpenClaw 数据。请返回体检首页上传一次 OpenClaw 数据文件，随后这里才会显示真实指标。'
+            : '当前还没有可用的 OpenClaw 数据。请先使用 GitHub 登录，再回到体检首页上传 OpenClaw 数据文件，以获取真实指标。';
         body.innerHTML = '<div class="stats2-inactive-placeholder-title">OpenClaw 监视器未激活</div>' +
-            '<div class="stats2-inactive-placeholder-desc">当前还没有检测到 OpenClaw 本地数据，请返回体检首页完成一次 OpenClaw 采集。</div>' +
-            '<button type="button" class="stats2-inactive-placeholder-btn" onclick="typeof window.navigateToIndexPage === \'function\' && window.navigateToIndexPage()" aria-label="返回体检首页补全 OpenClaw 数据">返回体检首页</button>';
+            '<div class="stats2-inactive-placeholder-desc">' + desc + '</div>' +
+            '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+            (!hasAuthenticatedSession
+                ? '<button type="button" class="stats2-inactive-placeholder-btn" data-action="github-login" aria-label="GitHub 登录后查看 OpenClaw 完整数据">GitHub 登录</button>'
+                : '') +
+            '<button type="button" class="stats2-inactive-placeholder-btn" onclick="typeof window.navigateToIndexPage === \'function\' && window.navigateToIndexPage()" aria-label="返回体检首页补全 OpenClaw 数据">返回体检首页</button>' +
+            '</div>';
     }
 
     /**
@@ -1068,6 +1147,12 @@
         var mount = ensured && ensured.mount ? ensured.mount : document.getElementById('openclaw-monitor-mount');
         var card = ensured && ensured.card ? ensured.card : (document.getElementById('openclaw-monitor-card') || (mount && mount.querySelector('#openclaw-monitor-card')));
         if (!card) return;
+        var hasAuthenticatedSession = !(typeof window.hasAuthenticatedDrawerAccess === 'function') || window.hasAuthenticatedDrawerAccess();
+        // 未登录时强制占位，避免刷新后异步加载把“Cursor 体检通用字段”误当 OpenClaw 点亮
+        if (!hasAuthenticatedSession) {
+            renderOpenClawInactivePlaceholder(card);
+            return;
+        }
         var longevityEl = document.getElementById('oc-longevity');
         var genomeEl = document.getElementById('oc-genome');
         var tokensEl = document.getElementById('oc-tokens');
@@ -1094,26 +1179,8 @@
             if (!longevityEl || !genomeEl || !tokensEl || !skillsEl || !syncEl) return;
         }
 
-        var hasMeaningfulData = merged && (
-            merged.total_tokens > 0 ||
-            merged.longevity ||
-            merged.primary_model ||
-            (merged.active_channels && merged.active_channels.length > 0) ||
-            (merged.skills_tags && merged.skills_tags.length > 0) ||
-            (merged.installed_skills && merged.installed_skills.length > 0)
-        );
-        if (!hasMeaningfulData) {
-            var localData = getOpenClawLocalData();
-            if (!localData) {
-                renderOpenClawInactivePlaceholder(card);
-                return;
-            }
-            longevityEl.textContent = '--';
-            genomeEl.textContent = '--';
-            tokensEl.textContent = '--';
-            if (channelsEl) channelsEl.textContent = '--';
-            skillsEl.textContent = '--';
-            syncEl.textContent = '--';
+        if (!merged || merged.openclaw_monitor_active !== true) {
+            renderOpenClawInactivePlaceholder(card);
             return;
         }
 
@@ -1465,7 +1532,7 @@
 
     if (typeof window.addEventListener === 'function') {
         window.addEventListener('storage', function(e) {
-            if (e.key === VIBE_OPENCLAW_CACHE || e.key === 'cursor_clinical_history') {
+            if (e.key === VIBE_OPENCLAW_CACHE || e.key === 'openclaw_analysis_data') {
                 refreshOpenClawMonitor();
             }
         });

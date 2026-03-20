@@ -2774,12 +2774,14 @@ app.post('/api/v2/analyze', async (c) => {
           const vibeUserId = (vibeUserIdHeader && vibeUserIdHeader.trim()) || vibeUserIdBody || null;
           let authenticatedUserId: string | null = null;
           let useUserIdForUpsert = false;
+          let githubLoginForUpsert: string | null = null;
 
           if (vibeUserId) {
             const existingByVibeId = await identifyUserByUserId(vibeUserId, env);
             if (existingByVibeId) {
               useUserIdForUpsert = true;
               authenticatedUserId = vibeUserId;
+              githubLoginForUpsert = (existingByVibeId as any)?.github_login || (existingByVibeId as any)?.user_name || null;
               console.log('[Worker] ? ???? vibe_user_id ?????????????:', vibeUserId.substring(0, 8) + '...');
             } else {
               useUserIdForUpsert = true;
@@ -2809,6 +2811,7 @@ app.post('/api/v2/analyze', async (c) => {
                   const existingUser = await identifyUserByUserId(authenticatedUserId, env);
                   if (existingUser) {
                     useUserIdForUpsert = true;
+                    githubLoginForUpsert = (existingUser as any)?.github_login || (existingUser as any)?.user_name || null;
                     console.log('[Worker] ? ??????????? user_id ?? Upsert');
                   } else {
                     console.log('[Worker] ?? ???????? user_analysis ?????????');
@@ -2830,6 +2833,7 @@ app.post('/api/v2/analyze', async (c) => {
                 if (existingByFp && (existingByFp as any).user_identity === 'github') {
                   useUserIdForUpsert = true;
                   authenticatedUserId = (existingByFp as any).id ?? null;
+                  githubLoginForUpsert = (existingByFp as any)?.github_login || (existingByFp as any)?.user_name || null;
                   if (authenticatedUserId) {
                     console.log('[Worker] ? ????? fingerprint ??? GitHub ???????????????????:', authenticatedUserId.substring(0, 8) + '...');
                   }
@@ -2838,6 +2842,10 @@ app.post('/api/v2/analyze', async (c) => {
             }
           }
           
+          const reportedFingerprint = (body.fingerprint != null && String(body.fingerprint).trim() !== '')
+            ? String(body.fingerprint).trim()
+            : '';
+
           // ??? Upsert????? userId + ?? userId ??? fingerprint
           // ???? 10 ??????????????????????????????
           // ???????????????????total_chars, total_messages?
@@ -2856,12 +2864,31 @@ app.post('/api/v2/analyze', async (c) => {
           
           // ???????? user_id????? fingerprint ?? userId
           const userId = useUserIdForUpsert ? authenticatedUserId! : stableFingerprint;
-          const fingerprint = useUserIdForUpsert ? authenticatedUserId! : await generateFingerprint(userId, totalChars);
+          const generatedFingerprint = await generateFingerprint(userId, totalChars);
+          const fingerprint = reportedFingerprint || generatedFingerprint;
+
+          // ??????? id / fingerprint ???????????????????????
+          if (useUserIdForUpsert && authenticatedUserId && reportedFingerprint) {
+            try {
+              const existingByReportedFp = await identifyUserByFingerprint(reportedFingerprint, env);
+              if (existingByReportedFp && existingByReportedFp.id && existingByReportedFp.id !== authenticatedUserId) {
+                console.warn('[Worker] ?? ????? id/fingerprint ???????????????????:', {
+                  authUserId: authenticatedUserId.substring(0, 8) + '...',
+                  rowIdByFingerprint: String(existingByReportedFp.id).substring(0, 8) + '...',
+                  fingerprint: reportedFingerprint.substring(0, 8) + '...',
+                });
+                await migrateFingerprintToUserId(reportedFingerprint, authenticatedUserId, undefined, env);
+              }
+            } catch (e: any) {
+              console.warn('[Worker] ?? id/fingerprint ????????????:', e?.message || String(e));
+            }
+          }
           
           console.log('[Worker] ?? ??????:', {
             method: useUserIdForUpsert ? 'GitHub OAuth (user_id)' : 'Fingerprint',
             userId: userId.substring(0, 8) + '...',
             fingerprint: fingerprint.substring(0, 8) + '...',
+            fingerprintSource: reportedFingerprint ? 'client_reported' : 'generated',
             messagesUsed: stableMessages.length,
             contentLength: stableContent.length,
             fallbackUsed: !stableContent,
@@ -2879,10 +2906,14 @@ app.post('/api/v2/analyze', async (c) => {
           let existingTotalChars: number | null = null;
           let existingUserName: string | null = null;
           let existingStats: any = null;
+          let existingStatsByFingerprint: any = null;
           if (env.SUPABASE_URL && env.SUPABASE_KEY && fingerprint) {
             try {
-              // ?? fingerprint ???????? identity_cloud?total_messages?total_chars?user_name?stats ?????????
-              const existingUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?select=id,work_days,created_at,stats,identity_cloud,total_messages,total_chars,user_name&fingerprint=eq.${encodeURIComponent(fingerprint)}&order=created_at.asc&limit=1`;
+              // 统一：existing 行优先使用 github_login（若可解析），否则使用 fingerprint
+              const existingLookup = githubLoginForUpsert
+                ? `github_login=eq.${encodeURIComponent(githubLoginForUpsert)}`
+                : `fingerprint=eq.${encodeURIComponent(fingerprint)}`;
+              const existingUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?select=id,work_days,created_at,stats,identity_cloud,total_messages,total_chars,user_name&${existingLookup}&order=created_at.asc&limit=1`;
               const existingRows = await fetchSupabaseJson<any[]>(env, existingUrl, { headers: buildSupabaseHeaders(env) }, 5000);
               const arr = Array.isArray(existingRows) ? existingRows : (existingRows ? [existingRows] : []);
               const row = arr[0];
@@ -2926,6 +2957,19 @@ app.post('/api/v2/analyze', async (c) => {
                     basicAnalysis.day = workDays;
                     console.log('[Worker] ? work_days ??: ???????', { earliest: existingCreatedAt, days, workDays });
                   }
+                }
+              }
+
+              // 当冲突键选择 github_login 时，仍需要从 fingerprint 分支里补齐 openclaw 等历史数据
+              if (githubLoginForUpsert) {
+                try {
+                  const fpLookup = `fingerprint=eq.${encodeURIComponent(fingerprint)}`;
+                  const fpUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?select=stats&${fpLookup}&order=created_at.asc&limit=1`;
+                  const fpRows = await fetchSupabaseJson<any[]>(env, fpUrl, { headers: buildSupabaseHeaders(env) }, 5000);
+                  const fpRow = Array.isArray(fpRows) ? fpRows[0] : null;
+                  if (fpRow?.stats && typeof fpRow.stats === 'object') existingStatsByFingerprint = fpRow.stats;
+                } catch {
+                  // ignore
                 }
               }
             } catch (e) {
@@ -3014,7 +3058,20 @@ app.post('/api/v2/analyze', async (c) => {
           // ????????????????? analysis_events???
           v6StatsForStorage.identityLevelCloud = mergedIdentityCloud;
           // ??? DB ??? stats ??? identityLevelCloud???????? stats ????????????? identity_cloud ?
-          const statsForDb = { ...v6StatsForStorage };
+          const statsForDb = { ...v6StatsForStorage } as Record<string, any>;
+          // 保留既有 OpenClaw 分支，避免 Cursor 上报覆盖 user_analysis.stats.openclaw
+          const statsSources: any[] = [];
+          if (existingStats && typeof existingStats === 'object') statsSources.push(existingStats);
+          if (existingStatsByFingerprint && typeof existingStatsByFingerprint === 'object') statsSources.push(existingStatsByFingerprint);
+          for (const src of statsSources) {
+            const s = src as Record<string, any>;
+            const existingOpenclaw = s.openclaw;
+            if (existingOpenclaw && typeof existingOpenclaw === 'object' && !statsForDb.openclaw) statsForDb.openclaw = existingOpenclaw;
+            const existingOpenclawStats = s.openclaw_stats;
+            if (existingOpenclawStats && typeof existingOpenclawStats === 'object' && !statsForDb.openclaw_stats) statsForDb.openclaw_stats = existingOpenclawStats;
+            const existingOpenclawPortrait = s.openclaw_portrait;
+            if (existingOpenclawPortrait && typeof existingOpenclawPortrait === 'object' && !statsForDb.openclaw_portrait) statsForDb.openclaw_portrait = existingOpenclawPortrait;
+          }
           delete statsForDb.identityLevelCloud;
           // ???/??/?? ???????? stats ? personality_data / ??? key ??
           if (body.representativeWords && typeof body.representativeWords === 'object') {
@@ -3046,33 +3103,35 @@ app.post('/api/v2/analyze', async (c) => {
           }
           
           const incomingTotalMessages = Number(v6StatsForStorage?.totalMessages ?? basicAnalysis?.totalMessages ?? 0) || 0;
+          const safeDimScore = (v: any, def = 50) => {
+            const n = (typeof v === 'number' && Number.isFinite(v)) ? v : def;
+            return Math.max(0, Math.min(100, Math.round(n)));
+          };
           const payload: any = {
             // ???????fingerprint ??????????????fingerprint ???????????
             // ?????????? fingerprint ?????????????????
             // ??????????????? user_id??? fingerprint ??????
-            ...(useUserIdForUpsert && authenticatedUserId ? { id: authenticatedUserId } : {}),
-            // ???????? id????? id????????
-            ...(existingId && !useUserIdForUpsert ? { id: existingId } : {}),
-            fingerprint: v6Dimensions ? (body.fingerprint || fingerprint) : fingerprint,
+            fingerprint,
             user_name: body.userName || '?????',
             user_identity: useUserIdForUpsert ? 'github' : 'fingerprint',
+            ...(githubLoginForUpsert ? { github_login: githubLoginForUpsert } : {}),
             personality_type: personalityType,
             // ??? A?????????? claim_token ????
             ...(claimToken ? { claim_token: claimToken } : {}),
             
             // ????????????????l_score, p_score, d_score, e_score, f_score
-            l_score: Math.max(0, Math.min(100, Math.round(dimensions.L))),
-            p_score: Math.max(0, Math.min(100, Math.round(dimensions.P))),
-            d_score: Math.max(0, Math.min(100, Math.round(dimensions.D))),
-            e_score: Math.max(0, Math.min(100, Math.round(dimensions.E))),
-            f_score: Math.max(0, Math.min(100, Math.round(dimensions.F))),
+            l_score: safeDimScore(dimensions.L),
+            p_score: safeDimScore(dimensions.P),
+            d_score: safeDimScore(dimensions.D),
+            e_score: safeDimScore(dimensions.E),
+            f_score: safeDimScore(dimensions.F),
             
             // ?????????????????????
-            l: Math.max(0, Math.min(100, Math.round(dimensions.L))),
-            p: Math.max(0, Math.min(100, Math.round(dimensions.P))),
-            d: Math.max(0, Math.min(100, Math.round(dimensions.D))),
-            e: Math.max(0, Math.min(100, Math.round(dimensions.E))),
-            f: Math.max(0, Math.min(100, Math.round(dimensions.F))),
+            l: safeDimScore(dimensions.L),
+            p: safeDimScore(dimensions.P),
+            d: safeDimScore(dimensions.D),
+            e: safeDimScore(dimensions.E),
+            f: safeDimScore(dimensions.F),
             
             // ?V6 ?????????? finalStats ??
             // ???????work_days ????? JSONB stats.work_days ??????
@@ -3288,8 +3347,8 @@ app.post('/api/v2/analyze', async (c) => {
           });
 
           // ???????? await ??????????????
-          // ????? Upsert???? GitHub ? id?github_id???????????? fingerprint ??????
-          const conflictKey = useUserIdForUpsert && authenticatedUserId ? 'id' : 'fingerprint';
+          // Upsert：优先按 github_login（已绑定 GitHub 身份）更新；否则按 fingerprint 更新
+          const conflictKey = githubLoginForUpsert ? 'github_login' : 'fingerprint';
           const supabaseUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=${conflictKey}`;
           
           try {
@@ -3659,6 +3718,17 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
     }
     if (!user_id && !fingerprint && !normalizedGitHubLogin) {
       return c.json({ success: false, error: 'fingerprint, github_login or auth user_id is required' }, 400);
+    }
+    // 已登录用户优先绑定到主记录：若 fingerprint 命中到其他 id，先迁移再写入，避免 Cursor/OpenClaw 分叉。
+    if (user_id && fingerprint) {
+      try {
+        const rowByFingerprint = await identifyUserByFingerprint(fingerprint, env);
+        if (rowByFingerprint?.id && rowByFingerprint.id !== user_id) {
+          await migrateFingerprintToUserId(fingerprint, user_id, undefined, env);
+        }
+      } catch (e: any) {
+        console.warn('[Worker] openclaw pre-merge failed:', e?.message || String(e));
+      }
     }
     if (!user_id) {
       const insertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis`;
@@ -5407,6 +5477,124 @@ app.post('/api/fingerprint/migrate', async (c) => {
       error: errorMessage,
       errorCode: 'INTERNAL_ERROR',
       details: errorStack,
+    }, 500);
+  }
+});
+
+/**
+ * 扫描/执行历史重复数据合并（先 dry-run，再可选 execute）
+ * POST /api/fingerprint/dedup
+ * body: { execute?: boolean, limit?: number }
+ */
+app.post('/api/fingerprint/dedup', async (c) => {
+  try {
+    const env = c.env;
+    if (!env.SUPABASE_URL || !env.SUPABASE_KEY) {
+      return c.json({ status: 'error', error: 'Supabase not configured' }, 500);
+    }
+
+    const body = await c.req.json().catch(() => ({})) as Record<string, any>;
+    const execute = body?.execute === true;
+    const limit = Math.max(100, Math.min(5000, Number(body?.limit) || 2000));
+
+    const queryUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?select=id,fingerprint,user_name,github_login,user_identity,total_messages,total_chars,updated_at&order=updated_at.desc&limit=${limit}`;
+    const rows = await fetchSupabaseJson<any[]>(env, queryUrl, { headers: buildSupabaseHeaders(env) }, 10000).catch(() => []);
+    const list = Array.isArray(rows) ? rows : [];
+
+    type GroupItem = {
+      id: string;
+      fingerprint: string;
+      user_name: string;
+      github_login: string;
+      user_identity: string;
+      total_messages: number;
+      total_chars: number;
+    };
+
+    const groups = new Map<string, GroupItem[]>();
+    for (const row of list) {
+      const id = String(row?.id || '').trim();
+      if (!id) continue;
+      const userName = String(row?.user_name || '').trim().toLowerCase();
+      const githubLogin = String(row?.github_login || '').trim().toLowerCase();
+      const groupKey = githubLogin ? `gh:${githubLogin}` : (userName ? `un:${userName}` : '');
+      if (!groupKey) continue;
+      const arr = groups.get(groupKey) || [];
+      arr.push({
+        id,
+        fingerprint: String(row?.fingerprint || '').trim(),
+        user_name: String(row?.user_name || '').trim(),
+        github_login: String(row?.github_login || '').trim(),
+        user_identity: String(row?.user_identity || '').trim(),
+        total_messages: Number(row?.total_messages || 0) || 0,
+        total_chars: Number(row?.total_chars || 0) || 0,
+      });
+      groups.set(groupKey, arr);
+    }
+
+    const duplicateGroups = Array.from(groups.entries())
+      .map(([key, items]) => ({ key, items }))
+      .filter((g) => g.items.length > 1);
+
+    const plan = duplicateGroups.map((g) => {
+      const sorted = [...g.items].sort((a, b) => {
+        const aScore = (a.user_identity === 'github' ? 1_000_000_000 : 0) + a.total_messages * 1000 + a.total_chars;
+        const bScore = (b.user_identity === 'github' ? 1_000_000_000 : 0) + b.total_messages * 1000 + b.total_chars;
+        return bScore - aScore;
+      });
+      const target = sorted[0];
+      const sources = sorted.slice(1).filter((x) => x.fingerprint);
+      return { key: g.key, target, sources };
+    }).filter((x) => x.sources.length > 0);
+
+    if (!execute) {
+      return c.json({
+        status: 'dry_run',
+        scanned: list.length,
+        duplicate_groups: duplicateGroups.length,
+        executable_groups: plan.length,
+        planned_merges: plan.reduce((acc, p) => acc + p.sources.length, 0),
+        groups: plan.slice(0, 30),
+      });
+    }
+
+    const merged: Array<{ key: string; target_id: string; source_fingerprint: string; ok: boolean; error?: string }> = [];
+    for (const item of plan) {
+      for (const source of item.sources) {
+        try {
+          const res = await migrateFingerprintToUserId(source.fingerprint, item.target.id, undefined, env);
+          merged.push({
+            key: item.key,
+            target_id: item.target.id,
+            source_fingerprint: source.fingerprint.slice(0, 12),
+            ok: !!res,
+            error: res ? undefined : 'no_action',
+          });
+        } catch (e: any) {
+          merged.push({
+            key: item.key,
+            target_id: item.target.id,
+            source_fingerprint: source.fingerprint.slice(0, 12),
+            ok: false,
+            error: e?.message || String(e),
+          });
+        }
+      }
+    }
+
+    return c.json({
+      status: 'executed',
+      scanned: list.length,
+      duplicate_groups: duplicateGroups.length,
+      executable_groups: plan.length,
+      merged_total: merged.filter((x) => x.ok).length,
+      merged_failed: merged.filter((x) => !x.ok).length,
+      merges: merged,
+    });
+  } catch (error: any) {
+    return c.json({
+      status: 'error',
+      error: error?.message || 'dedup failed',
     }, 500);
   }
 });
@@ -9289,10 +9477,11 @@ app.get('/api/country-summary', async (c) => {
             const hasWorkDays = topByMetrics.some((x: any) => String(x?.key) === 'work_days');
             if (!hasWorkDays) {
               const wdUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
-              wdUrl.searchParams.set('select', 'id,user_name,github_username,fingerprint,user_identity,work_days');
+              wdUrl.searchParams.set('select', 'id,user_name,github_username,github_login,fingerprint,user_identity,work_days');
               wdUrl.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc},manual_location.eq.${cc},current_location.eq.${cc})`);
               applySourceTypeFilter(wdUrl);
-              wdUrl.searchParams.set('work_days', 'gt.0');
+                // 放宽到 gte.0：避免因部分列未回填导致 leaders 数量过少（UI 观感“缺少部分数据”）
+                wdUrl.searchParams.set('work_days', 'gte.0');
               wdUrl.searchParams.set('order', 'work_days.desc');
               wdUrl.searchParams.set('limit', String(topN));
               const wdRows = await fetchSupabaseJson<any[]>(env, wdUrl.toString(), { headers: buildSupabaseHeaders(env) }).catch(() => []);
@@ -9300,14 +9489,14 @@ app.get('/api/country-summary', async (c) => {
               const wdLeaders = wdList
                 .map((row: any, idx: number) => {
                   const score = Number(row?.work_days);
-                  if (!Number.isFinite(score) || score <= 0) return null;
+                    if (!Number.isFinite(score) || score < 0) return null; // 允许 0，避免榜单“只剩一条”
                   return {
                     rank: idx + 1,
                     score,
                     user: {
                       id: row?.id ?? null,
-                      user_name: row?.user_name ?? '',
-                      github_username: row?.github_username ?? '',
+                      user_name: row?.user_name ?? row?.github_login ?? '',
+                      github_username: row?.github_username ?? row?.github_login ?? '',
                       fingerprint: row?.fingerprint ?? null,
                       user_identity: row?.user_identity ?? null,
                       lpdef: row?.lpdef ?? null,
@@ -9346,6 +9535,7 @@ app.get('/api/country-summary', async (c) => {
           'id',
           'user_name',
           'github_username',
+          'github_login',
           'fingerprint',
           'user_identity',
           'country_code',
@@ -9364,7 +9554,8 @@ app.get('/api/country-summary', async (c) => {
                 url.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc},manual_location.eq.${cc},current_location.eq.${cc})`);
                 applySourceTypeFilter(url);
                 // ?? 0 / null
-                url.searchParams.set(m.col, 'gt.0');
+                  // 放宽到 gte.0：避免“只有极少数用户 >0”导致榜单 leaders 显示不全
+                  url.searchParams.set(m.col, 'gte.0');
                 url.searchParams.set('order', `${m.col}.desc`);
                 url.searchParams.set('limit', String(topN));
                 return url.toString();
@@ -9399,14 +9590,14 @@ app.get('/api/country-summary', async (c) => {
               const leaders = list
                 .map((row: any, idx: number) => {
                   const score = Number(row?.[m.col]);
-                  if (!Number.isFinite(score) || score <= 0) return null;
+                  if (!Number.isFinite(score) || score < 0) return null; // 允许 0，让 leaders 更“满”
                   return {
                     rank: idx + 1,
                     score,
                     user: {
                       id: row?.id ?? null,
-                      user_name: row?.user_name ?? '',
-                      github_username: row?.github_username ?? '',
+                      user_name: row?.user_name ?? row?.github_login ?? '',
+                      github_username: row?.github_username ?? row?.github_login ?? '',
                       fingerprint: row?.fingerprint ?? null,
                       user_identity: row?.user_identity ?? null,
                       lpdef: row?.lpdef ?? null,
