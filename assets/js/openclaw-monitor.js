@@ -582,61 +582,62 @@
         } catch (_) {}
         return { mount: mount, card: card };
     }
-
-    /**
-     * 从 localStorage 读取 OpenClaw 相关数据
-     */
     function getOpenClawLocalData() {
         try {
             var parsed = null;
             var parsedLast = null;
             var parsedSession = null;
-            var parsedHistory = null;
+            
             var raw = typeof localStorage !== 'undefined' && localStorage.getItem(VIBE_OPENCLAW_CACHE);
             if (raw) {
                 try { parsed = JSON.parse(raw); } catch (_) {}
             }
-            var rawLast = typeof localStorage !== 'undefined' && (
-                localStorage.getItem('last_analysis_data') ||
-                localStorage.getItem('vibe_cursor_analysis_cache')
-            );
+            
+            var rawLast = typeof localStorage !== 'undefined' && localStorage.getItem('last_analysis_data');
             if (rawLast) {
-                try { parsedLast = JSON.parse(rawLast); } catch (_) {}
+                try { 
+                    var tempLast = JSON.parse(rawLast); 
+                    var isOC = tempLast && (
+                        tempLast.source === 'openclaw' ||
+                        tempLast.openclawPortrait ||
+                        tempLast.openclawSessionsSummary ||
+                        (tempLast.stats && (tempLast.stats.source === 'openclaw' || tempLast.stats.openclaw_stats || tempLast.stats.skillsByName || tempLast.stats.skillsUsage || tempLast.stats.skills_stats))
+                    );
+                    if (isOC) {
+                        parsedLast = tempLast;
+                    }
+                } catch (_) {}
             }
+            
             var rawSession = typeof sessionStorage !== 'undefined' && sessionStorage.getItem('openclaw_analysis_data');
             if (rawSession) {
                 try { parsedSession = JSON.parse(rawSession); } catch (_) {}
             }
-            var rawHistory = typeof localStorage !== 'undefined' && localStorage.getItem('cursor_clinical_history');
-            if (rawHistory) {
-                try {
-                    var historyObj = JSON.parse(rawHistory);
-                    parsedHistory = (historyObj && historyObj.analysisData) ? historyObj.analysisData : historyObj;
-                } catch (_) {}
-            }
-            if (
-                (!parsed || typeof parsed !== 'object') &&
-                (!parsedLast || typeof parsedLast !== 'object') &&
-                (!parsedSession || typeof parsedSession !== 'object') &&
-                (!parsedHistory || typeof parsedHistory !== 'object')
-            ) return null;
+            
+            var hasDataFromAnySource = !!(
+                (parsed && Object.keys(parsed).length > 0) ||
+                (parsedLast && Object.keys(parsedLast).length > 0) ||
+                (parsedSession && Object.keys(parsedSession).length > 0)
+            );
+            
+            if (!hasDataFromAnySource) return null;
+            
             if (!parsed || typeof parsed !== 'object') parsed = {};
             if (!parsedLast || typeof parsedLast !== 'object') parsedLast = {};
             if (!parsedSession || typeof parsedSession !== 'object') parsedSession = {};
-            if (!parsedHistory || typeof parsedHistory !== 'object') parsedHistory = {};
+            
             var merged = {
-                ...parsedHistory,
                 ...parsedLast,
                 ...parsedSession,
                 ...parsed,
                 stats: {
-                    ...(parsedHistory.stats || {}),
                     ...(parsedLast.stats || {}),
                     ...(parsedSession.stats || {}),
                     ...(parsed.stats || {})
                 }
             };
-            var nestedSources = [parsedHistory, parsedLast, parsedSession, parsed];
+            
+            var nestedSources = [parsedLast, parsedSession, parsed];
             nestedSources.forEach(function(source) {
                 if (!source || typeof source !== 'object') return;
                 var nestedOpenclaw = source.stats && source.stats.openclaw;
@@ -654,27 +655,13 @@
                     merged.stats = Object.assign({}, nestedOpenclawStats, merged.stats || {});
                 }
             });
-            if (!merged.openclawPortrait && parsedHistory.openclawPortrait) merged.openclawPortrait = parsedHistory.openclawPortrait;
+            
             if (!merged.openclawPortrait && parsedLast.openclawPortrait) merged.openclawPortrait = parsedLast.openclawPortrait;
             if (!merged.openclawPortrait && parsedSession.openclawPortrait) merged.openclawPortrait = parsedSession.openclawPortrait;
-            if (!merged.openclawSessionsSummary && parsedHistory.openclawSessionsSummary) merged.openclawSessionsSummary = parsedHistory.openclawSessionsSummary;
             if (!merged.openclawSessionsSummary && parsedLast.openclawSessionsSummary) merged.openclawSessionsSummary = parsedLast.openclawSessionsSummary;
             if (!merged.openclawSessionsSummary && parsedSession.openclawSessionsSummary) merged.openclawSessionsSummary = parsedSession.openclawSessionsSummary;
-            var hasOpenClaw = !!(
-                merged.openclawPortrait ||
-                merged.openclawSessionsSummary ||
-                (merged.stats && (
-                    merged.stats.modelUsage ||
-                    merged.stats.model_usage ||
-                    merged.stats.usage ||
-                    merged.stats.raw_summary ||
-                    merged.stats.tool_usage ||
-                    merged.stats.skillsByName ||
-                    merged.stats.skillsUsage ||
-                    merged.stats.skills_stats
-                ))
-            );
-            return hasOpenClaw ? merged : null;
+            
+            return merged;
         } catch (e) {
             return null;
         }

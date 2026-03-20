@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- CSP：地理由后端 CF 接管，无需 ipapi.co/ip-api.com -->
      <script data-cfasync="false" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://html2canvas.hertzen.com https://cdn.tailwindcss.com https://static.cloudflareinsights.com; connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://static.cloudflareinsights.com https://cloudflareinsights.com https://cursor-clinical-analysis.psterman.workers.dev https://*.workers.dev https://psterman.supabase.co https://dtcplfhcgnxdzpigmotb.supabase.co wss://dtcplfhcgnxdzpigmotb.supabase.co https://raw.githubusercontent.com https://api.github.com https://www.google.com wss://*.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com https://r2cdn.perplexity.ai;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://html2canvas.hertzen.com https://cdn.tailwindcss.com https://static.cloudflareinsights.com; connect-src 'self' http://127.0.0.1:18789 ws://127.0.0.1:18789 https://cdn.jsdelivr.net https://unpkg.com https://static.cloudflareinsights.com https://cloudflareinsights.com https://cursor-clinical-analysis.psterman.workers.dev https://*.workers.dev https://psterman.supabase.co https://dtcplfhcgnxdzpigmotb.supabase.co wss://dtcplfhcgnxdzpigmotb.supabase.co https://raw.githubusercontent.com https://api.github.com https://www.google.com wss://*.supabase.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com https://r2cdn.perplexity.ai;">
     <title>Global Statistics Dashboard - Vibe Coding</title>
     <!-- 
     ============================================
@@ -360,7 +360,7 @@
                     <span class="tab-icon">🏰</span>
                     <span class="tab-text" data-t="tab.country" data-i18n="tab.country">国家</span>
                 </button>
-                <button type="button" class="drawer-tab" data-tab="openclaw" onclick="(function(){ window.__statsSourceType='openclaw'; if (typeof switchView==='function') switchView('openclaw'); })()">
+                <button type="button" class="drawer-tab" data-tab="openclaw" onclick="switchView('openclaw')">
                     <span class="tab-icon">🦞</span>
                     <span class="tab-text" data-t="tab.openclaw" data-i18n="tab.openclaw">龙虾榜</span>
                 </button>
@@ -369,9 +369,48 @@
             <div class="drawer-body" id="right-drawer-body">
                 <!-- 【重构】全球视图 -->
                 <div id="panel-global-view" class="right-drawer-panel flex flex-col h-full overflow-y-auto">
+                    <!-- 国家 PK 榜切换 Tabs -->
+                    <div class="rank-tab-bar flex gap-2 px-4 pt-3 pb-0 overflow-x-auto scrollbar-hide flex-shrink-0">
+                        <button type="button" data-rank-type="efficiency" class="rank-tab-btn active">⚡ 生产力榜</button>
+                        <button type="button" data-rank-type="lobster" class="rank-tab-btn">🦞 养虾榜</button>
+                        <button type="button" data-rank-type="model" class="rank-tab-btn">🤖 信仰榜</button>
+                        <button type="button" data-rank-type="github" class="rank-tab-btn">⚔ 硬核榜</button>
+                    </div>
                     <div id="panel-global-content" class="flex-1 flex flex-col gap-4 min-h-0 p-4">
-                        <!-- 全球视图内容将通过 JavaScript 动态填充 -->
-                        <div class="text-zinc-500 text-xs text-center py-8">加载中...</div>
+                        <!-- 国家 PK 榜头部：更新时间 + 刷新按钮 -->
+                        <div class="flex items-center justify-between flex-shrink-0">
+                            <span class="text-[10px] text-zinc-500 font-mono uppercase tracking-widest">Country PK // Global Rank</span>
+                            <span id="global-pk-updated-at" class="text-[9px] text-zinc-600 font-mono"></span>
+                        </div>
+                        <!-- 国家 PK 卡片列表（JS 渲染挂载点） -->
+                        <div class="vibe-index-leaderboard" id="global-country-pk-leaderboard">
+                            <!-- 骨架屏：加载前占位，JS 渲染后由 JS 清空并填充真实卡片 -->
+                            <div class="stats2-cyber-skeleton" id="global-pk-skeleton" aria-hidden="true">
+                                <div class="stats2-skeleton-bars"></div>
+                                <div class="stats2-skeleton-line"></div>
+                                <div class="stats2-skeleton-line short"></div>
+                            </div>
+                        </div>
+                        <!-- 国家 PK 卡片 HTML 模板（隐藏，供 JS cloneNode 使用） -->
+                        <template id="global-pk-card-tpl">
+                            <div class="global-pk-card">
+                                <div class="pk-rank-badge">
+                                    <span class="pk-rank">1</span>
+                                </div>
+                                <div class="pk-flag-wrap">
+                                    <span class="pk-flag" aria-hidden="true">🏳️</span>
+                                    <span class="pk-code">XX</span>
+                                </div>
+                                <div class="pk-info">
+                                    <span class="pk-name">Unknown</span>
+                                    <span class="pk-model-badge"></span>
+                                </div>
+                                <div class="pk-value-wrap">
+                                    <span class="pk-value">--</span>
+                                    <span class="pk-value-label"></span>
+                                </div>
+                            </div>
+                        </template>
                     </div>
                 </div>
                 
@@ -522,8 +561,8 @@
                             <span class="card-title" data-t="panel.country_totals" data-i18n="panel.country_totals">国家累计</span>
                         </div>
                         <div class="stats-source-switcher flex gap-1" id="statsSourceSwitcher">
-                            <button type="button" class="source-btn active text-[10px] px-2 py-0.5 rounded border border-[var(--accent-terminal)]/40" data-source="all">全部</button>
-                            <button type="button" class="source-btn text-[10px] px-2 py-0.5 rounded border border-transparent text-zinc-500" data-source="cursor">Cursor</button>
+                            <button type="button" class="source-btn text-[10px] px-2 py-0.5 rounded border border-transparent text-zinc-500" data-source="all">全部</button>
+                            <button type="button" class="source-btn active text-[10px] px-2 py-0.5 rounded border border-[var(--accent-terminal)]/40" data-source="cursor">Cursor</button>
                             <button type="button" class="source-btn text-[10px] px-2 py-0.5 rounded border border-transparent text-zinc-500" data-source="openclaw">OpenClaw</button>
                         </div>
                     </div>

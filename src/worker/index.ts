@@ -3743,8 +3743,10 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
       source: 'openclaw_jsonl',
     };
     const incomingLastActiveAt = (body.last_active_at && new Date(body.last_active_at).toISOString()) || new Date().toISOString();
-    const existingLastActiveAt = existingUserRow?.last_active_at ? new Date(existingUserRow.last_active_at).toISOString() : null;
-    const finalLastActiveAt = existingLastActiveAt && existingLastActiveAt > incomingLastActiveAt ? existingLastActiveAt : incomingLastActiveAt;
+    const incomingCountryCode = (body.country_code && /^[A-Za-z]{2}$/.test(String(body.country_code).trim()))
+      ? String(body.country_code).trim().toUpperCase()
+      : null;
+    const updatedAtNow = new Date().toISOString();
     const incomingTotalTokens = Math.max(0, toNum(body.total_tokens, 0));
     const existingTotalTokens = Math.max(0, toNum(existingUserRow?.total_tokens, 0));
 
@@ -3758,38 +3760,74 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
     const existingWorkDays = Math.max(0, toNum(existingUserRow?.work_days, 0));
     const incomingTotalChars = Math.max(0, Math.round(incomingTotalTokens * 4));
     const existingTotalChars = Math.max(0, toNum(existingUserRow?.total_chars, 0));
-    const patchPayload: Record<string, unknown> = {
+    const basePayload: Record<string, unknown> = {
       total_tokens: Math.max(existingTotalTokens, incomingTotalTokens),
       total_messages: Math.max(existingTotalMessages, incomingTotalMessages),
       work_days: Math.max(existingWorkDays, incomingWorkDays),
       total_chars: Math.max(existingTotalChars, incomingTotalChars),
       primary_model: (body.primary_model || body.top_model_id || existingUserRow?.primary_model || '').toString().trim() || null,
       skills_tags: mergedSkillsTags,
-      last_active_at: finalLastActiveAt,
-      stats: {
-        ...existingStats,
-        openclaw: openclawState,
-      },
-      updated_at: new Date().toISOString(),
+      last_active_at: incomingLastActiveAt,
+      country_code: incomingCountryCode,
+      updated_at: updatedAtNow,
     };
     if (normalizedGitHubLogin) {
-      patchPayload.github_login = normalizedGitHubLogin;
+      basePayload.github_login = normalizedGitHubLogin;
       if (!existingUserRow?.user_name || existingUserRow.user_name === 'OpenClaw ??') {
-        patchPayload.user_name = normalizedGitHubLogin;
+        basePayload.user_name = normalizedGitHubLogin;
       }
       if (existingUserRow?.user_identity !== 'github') {
-        patchPayload.user_identity = 'github';
+        basePayload.user_identity = 'github';
       }
     }
-    const uaPatchUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(user_id)}`;
-    const patchRes = await fetch(uaPatchUrl, {
-      method: 'PATCH',
-      headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
-      body: JSON.stringify(patchPayload),
-    });
-    if (!patchRes.ok) {
-      const patchText = await patchRes.text().catch(() => '');
-      throw new Error(`user_analysis patch failed: ${patchRes.status} ${patchText}`);
+    if (fingerprint) {
+      const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/upsert_user_analysis_openclaw`;
+      const rpcBody = {
+        p_fingerprint: fingerprint,
+        p_user_name: (basePayload.user_name ?? existingUserRow?.user_name ?? null),
+        p_github_login: (basePayload.github_login ?? existingUserRow?.github_login ?? null),
+        p_user_identity: (basePayload.user_identity ?? existingUserRow?.user_identity ?? (normalizedGitHubLogin ? 'github' : 'fingerprint')),
+        p_country_code: incomingCountryCode,
+        p_total_tokens: basePayload.total_tokens,
+        p_primary_model: basePayload.primary_model,
+        p_skills_tags: basePayload.skills_tags,
+        p_total_messages: basePayload.total_messages,
+        p_work_days: basePayload.work_days,
+        p_total_chars: basePayload.total_chars,
+        p_last_active_at: incomingLastActiveAt,
+        p_stats: {
+          openclaw: openclawState,
+        },
+        p_updated_at: updatedAtNow,
+      };
+      const rpcRes = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
+        body: JSON.stringify(rpcBody),
+      });
+      if (!rpcRes.ok) {
+        const rpcText = await rpcRes.text().catch(() => '');
+        throw new Error(`user_analysis openclaw rpc upsert failed: ${rpcRes.status} ${rpcText}`);
+      }
+    } else {
+      const patchPayload: Record<string, unknown> = {
+        ...basePayload,
+        // fallback path without fingerprint: keep existing in-memory merge to avoid dropping cursor branch
+        stats: {
+          ...existingStats,
+          openclaw: openclawState,
+        },
+      };
+      const uaPatchUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(user_id)}`;
+      const patchRes = await fetch(uaPatchUrl, {
+        method: 'PATCH',
+        headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
+        body: JSON.stringify(patchPayload),
+      });
+      if (!patchRes.ok) {
+        const patchText = await patchRes.text().catch(() => '');
+        throw new Error(`user_analysis patch failed: ${patchRes.status} ${patchText}`);
+      }
     }
 
     return c.json({ success: true, user_id, persisted_to: 'user_analysis' });
@@ -8356,6 +8394,13 @@ app.get('/api/country-summary', async (c) => {
     const sourceType = sourceTypeRaw === 'cursor' || sourceTypeRaw === 'openclaw' ? sourceTypeRaw : 'all';
     const cc = countryCode;
     const country = cc;
+    const applySourceTypeFilter = (url: URL) => {
+      if (sourceType === 'cursor') {
+        url.searchParams.set('cursor_metadata', 'not.is.null');
+      } else if (sourceType === 'openclaw') {
+        url.searchParams.set('openclaw_metadata', 'not.is.null');
+      }
+    };
 
     const n = (v: any) => {
       const x = Number(v ?? 0);
@@ -8776,6 +8821,7 @@ app.get('/api/country-summary', async (c) => {
         // PostgREST ???????????? avg() ??????????????
         countryAvgUrl.searchParams.set('select', 'l_score,p_score,d_score,e_score,f_score');
         countryAvgUrl.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc},manual_location.eq.${cc},current_location.eq.${cc})`);
+        applySourceTypeFilter(countryAvgUrl);
         countryAvgUrl.searchParams.set('limit', '5000');
         const countryRows = await fetchSupabaseJson<any[]>(env, countryAvgUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
         
@@ -8843,7 +8889,7 @@ app.get('/api/country-summary', async (c) => {
           getUserRanks6d(env, fingerprint || null, userId || null),
           (async () => {
             const fetchMe = async (selectCols: string) => {
-              const meUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
+              const meUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
               meUrl.searchParams.set('select', selectCols);
               if (userId && fingerprint) {
                 meUrl.searchParams.set('or', `(id.eq.${encodeURIComponent(userId)},fingerprint.eq.${encodeURIComponent(fingerprint)})`);
@@ -8852,6 +8898,7 @@ app.get('/api/country-summary', async (c) => {
               } else {
                 meUrl.searchParams.set('fingerprint', `eq.${encodeURIComponent(fingerprint)}`);
               }
+              applySourceTypeFilter(meUrl);
               meUrl.searchParams.set('limit', '1');
               return await fetchSupabaseJson<any[]>(env, meUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS);
             };
@@ -9099,6 +9146,7 @@ app.get('/api/country-summary', async (c) => {
       const lrUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
       lrUrl.searchParams.set('select', 'user_name,github_username,user_identity,personality_type,ip_location,manual_location,updated_at,created_at,work_days,roast_text,country_code');
       lrUrl.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc},manual_location.eq.${cc},current_location.eq.${cc})`);
+      applySourceTypeFilter(lrUrl);
       lrUrl.searchParams.set('order', 'updated_at.desc');
       lrUrl.searchParams.set('limit', '8');
       const lr = await fetchSupabaseJson<any[]>(env, lrUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS).catch(() => []);
@@ -9219,6 +9267,8 @@ app.get('/api/country-summary', async (c) => {
 
       if (/^[A-Z]{2}$/.test(cc)) {
         try {
+          // source_type=cursor/openclaw 无法通过 RPC 过滤时，直接走 user_analysis fallback 聚合，避免混合数据
+          if (sourceType !== 'all') throw new Error('skip_rpc_for_source_type');
           const rpcTopUrl = `${env.SUPABASE_URL}/rest/v1/rpc/get_country_top_metrics_v1`;
           const rpcTop = await fetchSupabaseJson<any>(
             env,
@@ -9241,6 +9291,7 @@ app.get('/api/country-summary', async (c) => {
               const wdUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
               wdUrl.searchParams.set('select', 'id,user_name,github_username,fingerprint,user_identity,work_days');
               wdUrl.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc},manual_location.eq.${cc},current_location.eq.${cc})`);
+              applySourceTypeFilter(wdUrl);
               wdUrl.searchParams.set('work_days', 'gt.0');
               wdUrl.searchParams.set('order', 'work_days.desc');
               wdUrl.searchParams.set('limit', String(topN));
@@ -9311,6 +9362,7 @@ app.get('/api/country-summary', async (c) => {
                 const url = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
                 url.searchParams.set('select', selectCols);
                 url.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc},manual_location.eq.${cc},current_location.eq.${cc})`);
+                applySourceTypeFilter(url);
                 // ?? 0 / null
                 url.searchParams.set(m.col, 'gt.0');
                 url.searchParams.set('order', `${m.col}.desc`);
@@ -9394,8 +9446,9 @@ app.get('/api/country-summary', async (c) => {
     let globalTotalUsers = 0;
     let globalTotalAnalysis = 0;
     try {
-      const countAllUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
+      const countAllUrl = new URL(`${env.SUPABASE_URL}/rest/v1/${sourceType === 'all' ? 'v_unified_analysis_v2' : 'user_analysis'}`);
       countAllUrl.searchParams.set('select', 'id');
+      applySourceTypeFilter(countAllUrl);
       const res = await fetch(countAllUrl.toString(), {
         headers: {
           ...buildSupabaseHeaders(env),
@@ -9415,9 +9468,10 @@ app.get('/api/country-summary', async (c) => {
       globalTotalAnalysis = 0;
     }
     try {
-      const countFpUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_unified_analysis_v2`);
+      const countFpUrl = new URL(`${env.SUPABASE_URL}/rest/v1/${sourceType === 'all' ? 'v_unified_analysis_v2' : 'user_analysis'}`);
       countFpUrl.searchParams.set('select', 'fingerprint');
       countFpUrl.searchParams.set('fingerprint', 'not.is.null');
+      applySourceTypeFilter(countFpUrl);
       const res2 = await fetch(countFpUrl.toString(), {
         headers: {
           ...buildSupabaseHeaders(env),
@@ -9469,6 +9523,29 @@ app.get('/api/country-summary', async (c) => {
           finalCountryTotalUsers = 1;
         }
         
+        const normalizeMetrics = (raw: any): Record<string, number> | undefined => {
+          if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+          const out: Record<string, number> = {};
+          for (const [k, v] of Object.entries(raw)) {
+            const n = Number(v);
+            if (Number.isFinite(n)) out[k] = n;
+          }
+          return Object.keys(out).length ? out : undefined;
+        };
+        const cursorMetrics =
+          normalizeMetrics(data.cursor_metrics) ??
+          normalizeMetrics((totals as any)?.cursor_metrics) ??
+          undefined;
+        const lobsterMetrics =
+          normalizeMetrics(data.lobster_metrics) ??
+          normalizeMetrics((totals as any)?.lobster_metrics) ??
+          undefined;
+        const rankScore = Number(
+          data.rank_score ??
+          (totals as any)?.rank_score ??
+          (cursorMetrics?.messages ?? 0) * 0.7 + (lobsterMetrics?.tool_calls ?? 0) * 0.3
+        ) || 0;
+
         // ?????????? Number() ????????????????tm, tc, wd, jc, kc?
         // ??????????tm/total_messages/total_messages_sum
         const tm = Number(
@@ -9541,6 +9618,9 @@ app.get('/api/country-summary', async (c) => {
           no: jc,      // jc (???) ??? no??? jiafang_count ??
           please: kc,  // kc (???) ??? please??? ketao_count ??
           word: word,   // ?? tc??????????????????
+          cursor_metrics: cursorMetrics,
+          lobster_metrics: lobsterMetrics,
+          rank_score: rankScore,
         };
     })();
 
@@ -9579,6 +9659,9 @@ app.get('/api/country-summary', async (c) => {
           no: Number(totals.jiafang_count_sum ?? 0) || 0,
           please: Number(totals.ketao_count_sum ?? 0) || 0,
           word: totals.total_messages_sum > 0 ? Number(((totals.total_chars_sum ?? 0) / (totals.total_messages_sum ?? 1)).toFixed(1)) : 0,
+          cursor_metrics: computedCountryTotals.cursor_metrics,
+          lobster_metrics: computedCountryTotals.lobster_metrics,
+          rank_score: Number(computedCountryTotals.rank_score ?? 0) || 0,
         }
       : {
           country: computedCountryTotals.country,
@@ -9597,6 +9680,9 @@ app.get('/api/country-summary', async (c) => {
           no: totalno,
           please: totalplease,
           word: computedCountryTotals.word,
+          cursor_metrics: computedCountryTotals.cursor_metrics,
+          lobster_metrics: computedCountryTotals.lobster_metrics,
+          rank_score: Number(computedCountryTotals.rank_score ?? 0) || 0,
         };
 
     // ???????? current_location GROUP BY??? RPC ??
@@ -9657,6 +9743,9 @@ app.get('/api/country-summary', async (c) => {
       latestRecords,
       topByMetrics,
       countryTotals: countryTotalsForResponse,
+      cursor_metrics: countryTotalsForResponse?.cursor_metrics,
+      lobster_metrics: countryTotalsForResponse?.lobster_metrics,
+      rank_score: Number(countryTotalsForResponse?.rank_score ?? 0) || 0,
       countryTotalsRanks,
       myCountry: myOut,
       myCountryValues: myValues,

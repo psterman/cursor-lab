@@ -3057,6 +3057,111 @@
                 });
             };
 
+            const toFiniteNumber = (v, fallback = null) => {
+                const n = Number(v);
+                return Number.isFinite(n) ? n : fallback;
+            };
+            const pickFirstNumber = (arr, fallback = null) => {
+                for (var i = 0; i < (arr || []).length; i++) {
+                    const n = toFiniteNumber(arr[i], null);
+                    if (n !== null) return n;
+                }
+                return fallback;
+            };
+            const normalizeCountryTotalsPayload = (payload) => {
+                const root = (payload && typeof payload === 'object') ? payload : {};
+                const ctRaw = (root.countryTotals && typeof root.countryTotals === 'object') ? root.countryTotals : {};
+                const firstRecord = Array.isArray(root.latest_records) && root.latest_records[0] ? root.latest_records[0] : null;
+                const statsRoot = (root.statistics && typeof root.statistics === 'object')
+                    ? root.statistics
+                    : (root.stats && typeof root.stats === 'object')
+                        ? root.stats
+                        : ((firstRecord && (firstRecord.statistics || firstRecord.stats) && typeof (firstRecord.statistics || firstRecord.stats) === 'object')
+                            ? (firstRecord.statistics || firstRecord.stats)
+                            : {});
+                const cursorStats = (statsRoot.cursor && typeof statsRoot.cursor === 'object') ? statsRoot.cursor : {};
+                const openclawRoot = (statsRoot.openclaw && typeof statsRoot.openclaw === 'object') ? statsRoot.openclaw : {};
+                const openclawStats = (openclawRoot.stats && typeof openclawRoot.stats === 'object')
+                    ? openclawRoot.stats
+                    : ((statsRoot.openclaw_stats && typeof statsRoot.openclaw_stats === 'object') ? statsRoot.openclaw_stats : {});
+
+                // 防御性降级：stats.cursor 缺失时，回退一级字段
+                const cursorMetrics = (ctRaw.cursor_metrics && typeof ctRaw.cursor_metrics === 'object') ? ctRaw.cursor_metrics : {};
+                const lobsterMetrics = (ctRaw.lobster_metrics && typeof ctRaw.lobster_metrics === 'object') ? ctRaw.lobster_metrics : {};
+                const cursorChars = pickFirstNumber([
+                    cursorMetrics.total_chars,
+                    cursorStats.total_chars,
+                    root.total_chars,
+                    root.totalChars,
+                    ctRaw.total_chars,
+                    ctRaw.say
+                ], 0);
+                const cursorMessages = pickFirstNumber([
+                    cursorMetrics.messages,
+                    cursorStats.total_messages,
+                    root.total_messages,
+                    root.totalMessages,
+                    ctRaw.total_messages,
+                    ctRaw.ai
+                ], 0);
+                const cursorWorkDays = pickFirstNumber([
+                    cursorMetrics.work_days,
+                    cursorStats.work_days,
+                    root.work_days,
+                    root.totaldays
+                ], 0);
+
+                const lobsterChars = pickFirstNumber([
+                    lobsterMetrics.total_chars,
+                    openclawStats.total_chars,
+                    0
+                ], 0);
+                const lobsterMessages = pickFirstNumber([
+                    lobsterMetrics.messages,
+                    openclawStats.records_total,
+                    0
+                ], 0);
+                const lobsterToolCalls = pickFirstNumber([
+                    lobsterMetrics.tool_calls,
+                    openclawStats.tool_calls_total,
+                    0
+                ], 0);
+                const lobsterWorkDays = pickFirstNumber([
+                    lobsterMetrics.work_days,
+                    openclawStats.work_days,
+                    0
+                ], 0);
+
+                const workDaysCombined = pickFirstNumber([
+                    ctRaw.work_days,
+                    ctRaw.work_days_sum,
+                    ctRaw.day,
+                    Math.max(cursorWorkDays || 0, lobsterWorkDays || 0)
+                ], 0);
+
+                return {
+                    countryTotals: ctRaw,
+                    cursor: {
+                        messages: Math.max(0, Number(cursorMessages) || 0),
+                        total_chars: Math.max(0, Number(cursorChars) || 0),
+                        work_days: Math.max(0, Number(cursorWorkDays) || 0)
+                    },
+                    openclaw: {
+                        messages: Math.max(0, Number(lobsterMessages) || 0),
+                        total_chars: Math.max(0, Number(lobsterChars) || 0),
+                        tool_calls: Math.max(0, Number(lobsterToolCalls) || 0),
+                        work_days: Math.max(0, Number(lobsterWorkDays) || 0)
+                    },
+                    totals: {
+                        total_messages: pickFirstNumber([ctRaw.total_messages, ctRaw.ai, cursorMessages + lobsterMessages], 0),
+                        total_chars: pickFirstNumber([ctRaw.total_chars, ctRaw.say, cursorChars + lobsterChars], 0),
+                        work_days: Math.max(0, Number(workDaysCombined) || 0),
+                        jiafang_count: pickFirstNumber([ctRaw.jiafang_count, ctRaw.no, root.jiafang_count], 0),
+                        ketao_count: pickFirstNumber([ctRaw.ketao_count, ctRaw.please, root.ketao_count], 0)
+                    }
+                };
+            };
+
             /** 国家视图下：有 countryTotals 即执行（含 ai=0 的首人国家）——移除 .animate-pulse，将数值替换为该国真实统计。严禁回退全球数据。 */
             function updateCountryRankUI(payload) {
                 if (!payload || !payload.countryTotals) return;
@@ -3067,9 +3172,10 @@
                     var ranksBox = document.getElementById('rtMyCountryRanks');
                     if (totalsBox && totalsBox.closest && totalsBox.closest('.clinic-card')) totalsBox.closest('.clinic-card').classList.remove('animate-pulse');
                     if (ranksBox && ranksBox.closest && ranksBox.closest('.clinic-card')) ranksBox.closest('.clinic-card').classList.remove('animate-pulse');
-                    var ct = payload.countryTotals;
+                    var norm = normalizeCountryTotalsPayload(payload);
+                    var ct = norm.countryTotals || {};
                     setValueOrNA(usersValEl, Number(ct.totalUsers ?? ct.total_users ?? 0) || null);
-                    setValueOrNA(analysisValEl, Number(ct.ai ?? ct.total_messages ?? 0) || null);
+                    setValueOrNA(analysisValEl, Number(norm.totals.total_messages ?? ct.ai ?? ct.total_messages ?? 0) || null);
                 } catch (e) { /* ignore */ }
             }
 
@@ -4223,29 +4329,36 @@
                 }
 
                 // 国家视图：仅从 countryTotals 读取（say/total_chars）
+                const normForDrawer = normalizeCountryTotalsPayload(data);
                 const totalCharsSumRaw = effectiveIsGlobal
-                    ? (data.countryTotals?.say ?? data.countryTotals?.total_chars ?? data.say ?? data.total_chars ?? data.totalCharsSum ?? data.total_chars_sum ?? data.totalChars ?? data.total_chars ?? null)
-                    : (data.countryTotals?.say ?? data.countryTotals?.total_chars ?? data.total_chars ?? data.totalCharsSum ?? data.total_chars_sum ?? data.totalChars ?? data.total_chars ?? null);
+                    ? (normForDrawer.totals.total_chars ?? data.say ?? data.total_chars ?? data.totalCharsSum ?? data.total_chars_sum ?? data.totalChars ?? data.total_chars ?? null)
+                    : (normForDrawer.totals.total_chars ?? data.total_chars ?? data.totalCharsSum ?? data.total_chars_sum ?? data.totalChars ?? data.total_chars ?? null);
                 const totalCharsSum = Number(totalCharsSumRaw);
                 if (meritEl) {
                     // 0 也应显示（否则看起来像“未加载”）
                     if (Number.isFinite(totalCharsSum) && totalCharsSum >= 0) {
-                        meritEl.textContent =
-                            currentLang === 'en'
+                        const cursorChars = Number(normForDrawer.cursor.total_chars || 0);
+                        const lobsterChars = Number(normForDrawer.openclaw.total_chars || 0);
+                        const tip = `Cursor ${new Intl.NumberFormat('zh-CN').format(cursorChars)} / OpenClaw ${new Intl.NumberFormat('zh-CN').format(lobsterChars)}`;
+                        meritEl.innerHTML =
+                            (currentLang === 'en'
                                 ? `Analyzed ${(totalCharsSum / 10000).toFixed(1)} ×10k chars`
-                                : `已累计分析 ${(totalCharsSum / 10000).toFixed(1)} 万字`;
+                                : `已累计分析 ${(totalCharsSum / 10000).toFixed(1)} 万字`) +
+                            ` <span class="text-[10px] text-zinc-400" title="${escapeHtml(tip)}">[Cursor/OpenClaw]</span>`;
                     } else {
                         meritEl.textContent = currentLang === 'en' ? 'Analyzed -- ×10k chars' : '已累计分析 -- 万字';
                     }
                 }
 
                 // 国家视图：ai/say/day/no/please 均从 countryTotals 读取
-                const ctForDrawer = data.countryTotals || {};
+                const ctForDrawer = normForDrawer.countryTotals || {};
                 const firstRecord = Array.isArray(data.latest_records) && data.latest_records[0] ? data.latest_records[0] : null;
                 const stats = data.statistics || data.stats || (firstRecord && (firstRecord.statistics || firstRecord.stats)) || {};
                 const jiafangVal = effectiveIsGlobal ? (data.jiafang_count ?? data.totalno ?? ctForDrawer.no ?? ctForDrawer.jiafang_count ?? stats.jiafang_count ?? firstRecord?.jiafang_count ?? null) : (ctForDrawer.no ?? ctForDrawer.jiafang_count ?? data.jiafang_count ?? stats.jiafang_count ?? firstRecord?.jiafang_count ?? null);
                 const ketaoVal = effectiveIsGlobal ? (data.ketao_count ?? data.totalplease ?? ctForDrawer.please ?? ctForDrawer.ketao_count ?? stats.ketao_count ?? firstRecord?.ketao_count ?? null) : (ctForDrawer.please ?? ctForDrawer.ketao_count ?? data.ketao_count ?? stats.ketao_count ?? firstRecord?.ketao_count ?? null);
-                const workDaysVal = effectiveIsGlobal ? (data.work_days ?? data.totaldays ?? ctForDrawer.day ?? ctForDrawer.work_days ?? stats.work_days ?? firstRecord?.work_days ?? null) : (ctForDrawer.day ?? ctForDrawer.work_days ?? data.work_days ?? stats.work_days ?? firstRecord?.work_days ?? null);
+                const workDaysVal = effectiveIsGlobal
+                    ? (normForDrawer.totals.work_days ?? data.work_days ?? data.totaldays ?? ctForDrawer.day ?? ctForDrawer.work_days ?? stats.work_days ?? firstRecord?.work_days ?? null)
+                    : (normForDrawer.totals.work_days ?? ctForDrawer.day ?? ctForDrawer.work_days ?? data.work_days ?? stats.work_days ?? firstRecord?.work_days ?? null);
                 const rtJiafang = document.getElementById('rtJiafangCount');
                 const rtKetao = document.getElementById('rtKetaoCount');
                 const rtWorkDays = document.getElementById('rtWorkDays');
@@ -4466,6 +4579,7 @@
                         const userCountry = String(countryCode || '').trim().toUpperCase();
                         console.log('[Stats2] 国家累计 API 全量数据:', { payload: payload2, userCountry });
                         const totals = payload2.countryTotals || payload2.data?.countryTotals || null;
+                        const norm2 = normalizeCountryTotalsPayload(payload2);
                         var totalsRanks = payload2.countryTotalsRanks || payload2.data?.countryTotalsRanks || null;
                         var totalCountriesFromData = payload2.total_countries ?? payload2._meta?.totalCountries ?? payload2._meta?.total_countries ?? (payload2.countryTotalsRanks?._meta?.totalCountries ?? payload2.countryTotalsRanks?._meta?.total_countries) ?? 195;
                         if (!totalsRanks && totalCountriesFromData <= 1) {
@@ -4494,12 +4608,12 @@
                         }
                         // 【修复】如果 totals 是空对象或所有关键字段都为0/null，视为无数据
                         const hasValidTotals = totals && (
-                            totals.total_messages > 0 || 
-                            totals.total_chars > 0 || 
-                            totals.work_days > 0 || 
+                            norm2.totals.total_messages > 0 || 
+                            norm2.totals.total_chars > 0 || 
+                            norm2.totals.work_days > 0 || 
                             totals.work_days_sum > 0 ||
-                            totals.jiafang_count > 0 ||
-                            totals.ketao_count > 0
+                            norm2.totals.jiafang_count > 0 ||
+                            norm2.totals.ketao_count > 0
                         );
                         const countryDataByCode = payload2.countryDataByCode || payload2.data?.countryDataByCode || {};
                         const ranks = payload2.myCountryRanks || payload2.data?.myCountryRanks || null;
@@ -4581,7 +4695,7 @@
                             })(),
                             jiafang_count: (st?.jiafang_count ?? st?.no ?? remoteVals?.jiafang_count ?? merged.jiafang_count ?? merged.no ?? 0),
                             ketao_count: (st?.ketao_count ?? st?.please ?? remoteVals?.ketao_count ?? merged.ketao_count ?? merged.please ?? 0),
-                            work_days: (st?.work_days ?? st?.usage_days ?? remoteVals?.work_days ?? remoteVals?.usage_days ?? merged.work_days ?? merged.usage_days ?? merged.day ?? 0)
+                            work_days: (st?.work_days ?? st?.usage_days ?? remoteVals?.work_days ?? remoteVals?.usage_days ?? merged.work_days ?? merged.usage_days ?? merged.day ?? norm2.totals.work_days ?? Math.max(norm2.cursor.work_days || 0, norm2.openclaw.work_days || 0) ?? 0)
                         };
                         // 关键：高分图谱的数据源来自 country-summary，而不是 global-average
                         try {
@@ -4629,9 +4743,15 @@
                             }
                             // 【country-work-days 元素绑定】为上岗天数添加特殊 ID
                             const workDaysIdAttr = dimKey === 'work_days' ? ' id="country-work-days"' : '';
+                            const contributionHint = (dimKey === 'total_chars')
+                                ? `Cursor ${fmt(norm2.cursor.total_chars || 0)} / OpenClaw ${fmt(norm2.openclaw.total_chars || 0)}`
+                                : '';
+                            const labelHtml = contributionHint
+                                ? `${label} <span class="text-[9px] text-zinc-500" title="${escapeHtml(contributionHint)}">[来源]</span>`
+                                : label;
                             return `
                                 <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2"${workDaysIdAttr}>
-                                    <div class="text-zinc-200">${label}</div>
+                                    <div class="text-zinc-200">${labelHtml}</div>
                                     <div class="flex items-center gap-3 min-w-0">
                                         <span class="text-[10px] text-zinc-500">Σ ${displayVal}</span>
                                         <span class="text-[10px] text-[var(--accent-terminal)] font-bold tabular-nums">${rankText}${medal}${ice}</span>
@@ -4736,12 +4856,12 @@
                         // 【修复】使用 hasValidTotals 确保数据真正有效，而非仅判断对象存在
                         const totalsHtml = hasValidTotals
                             ? [
-                                rowTotals(getI18nText('countryTotals.messages') || 'Messages', totals.total_messages ?? totals.ai ?? 0, totalsRanks?.total_messages, 'total_messages'),
-                                rowTotals(getI18nText('countryTotals.totalChars') || 'Total Chars', totals.total_chars ?? totals.say ?? 0, totalsRanks?.total_chars, 'total_chars'),
+                                rowTotals(getI18nText('countryTotals.messages') || 'Messages', norm2.totals.total_messages ?? totals.total_messages ?? totals.ai ?? 0, totalsRanks?.total_messages, 'total_messages'),
+                                rowTotals(getI18nText('countryTotals.totalChars') || 'Total Chars', norm2.totals.total_chars ?? totals.total_chars ?? totals.say ?? 0, totalsRanks?.total_chars, 'total_chars'),
                                 rowTotals(getI18nText('countryTotals.avgLen') || 'Avg Len', Math.round(Number(totals.avg_message_length ?? totals['avg_user_message_length'] ?? totals.word ?? 0) || 0), totalsRanks?.avg_user_message_length ?? totalsRanks?.avg_message_length, 'avg_message_length'),
-                                rowTotals(getI18nText('countryTotals.jiafang') || 'Jiafang', totals.jiafang_count ?? totals.no ?? 0, totalsRanks?.jiafang_count, 'jiafang_count'),
-                                rowTotals(getI18nText('countryTotals.ketao') || 'Ketao', totals.ketao_count ?? totals.please ?? 0, totalsRanks?.ketao_count, 'ketao_count'),
-                                rowTotals(getI18nText('countryTotals.workDays') || '上岗天数', totals.work_days ?? totals.work_days_sum ?? totals.day ?? 0, totalsRanks?.work_days, 'work_days'),
+                                rowTotals(getI18nText('countryTotals.jiafang') || 'Jiafang', norm2.totals.jiafang_count ?? totals.jiafang_count ?? totals.no ?? 0, totalsRanks?.jiafang_count, 'jiafang_count'),
+                                rowTotals(getI18nText('countryTotals.ketao') || 'Ketao', norm2.totals.ketao_count ?? totals.ketao_count ?? totals.please ?? 0, totalsRanks?.ketao_count, 'ketao_count'),
+                                rowTotals(getI18nText('countryTotals.workDays') || '上岗天数', norm2.totals.work_days ?? totals.work_days ?? totals.work_days_sum ?? totals.day ?? 0, totalsRanks?.work_days, 'work_days'),
                               ].join('')
                             : `<div class="text-zinc-500 text-xs">${currentLang === 'en' ? 'No data' : '暂无数据'}</div>`;
 

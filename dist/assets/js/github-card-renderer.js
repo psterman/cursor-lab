@@ -429,34 +429,49 @@
             o = o.github_stats != null ? (typeof o.github_stats === 'string' ? (function() { try { return JSON.parse(o.github_stats); } catch (e) { return {}; } })() : o.github_stats) : (o.stats && (typeof o.stats.github_stats === 'string' ? (function() { try { return JSON.parse(o.stats.github_stats); } catch (e) { return {}; } })() : o.stats.github_stats));
         }
         o = o && typeof o === 'object' ? o : {};
+        var num = function() {
+            for (var i = 0; i < arguments.length; i++) {
+                var v = arguments[i];
+                var n = Number(v);
+                if (!Number.isNaN(n) && n > 0) return n;
+            }
+            return 0;
+        };
+        var str = function() {
+            for (var i = 0; i < arguments.length; i++) {
+                var v = arguments[i];
+                if (v != null && String(v).trim() !== '') return String(v);
+            }
+            return '';
+        };
         return {
-            login: o.login != null ? String(o.login) : '--',
-            avatarUrl: o.avatarUrl != null ? String(o.avatarUrl) : '',
-            globalRanking: o.globalRanking != null ? String(o.globalRanking) : '--',
-            accountAge: Number(o.accountAge) || 0,
-            syncedAt: o.syncedAt != null ? String(o.syncedAt) : '',
+            login: str(o.login, o.github_login, raw && raw.github_login, raw && raw.github_username, raw && raw.user_name) || '--',
+            avatarUrl: str(o.avatarUrl, o.avatar_url, raw && raw.avatar_url, raw && raw.avatarUrl),
+            globalRanking: str(o.globalRanking, o.global_ranking, raw && raw.github_score, raw && raw.global_rank) || '--',
+            accountAge: num(o.accountAge, o.account_age),
+            syncedAt: str(o.syncedAt, o.synced_at, raw && raw.github_synced_at, raw && raw.last_sync_at),
             organizations: Array.isArray(o.organizations) ? o.organizations : [],
-            mergedPRs: Number(o.mergedPRs) || 0,
-            totalRepoStars: Number(o.totalRepoStars) || 0,
-            commitVelocity: Number(o.commitVelocity) || 0,
-            prReviews: Number(o.prReviews) || 0,
-            activeDays: Number(o.activeDays) || 0,
-            publicRepos: Number(o.publicRepos) || 0,
-            privateRepos: Number(o.privateRepos) || 0,
+            mergedPRs: num(o.mergedPRs, o.merged_prs),
+            totalRepoStars: num(o.totalRepoStars, o.total_repo_stars, o.totalStars, o.total_stars, raw && raw.github_stars),
+            commitVelocity: num(o.commitVelocity, o.commit_velocity),
+            prReviews: num(o.prReviews, o.pr_reviews),
+            activeDays: num(o.activeDays, o.active_days),
+            publicRepos: num(o.publicRepos, o.public_repos),
+            privateRepos: num(o.privateRepos, o.private_repos),
             languageDistribution: Array.isArray(o.languageDistribution) ? o.languageDistribution : [],
-            followers: Number(o.followers) || 0,
-            following: Number(o.following) || 0,
-            totalStars: Number(o.totalStars) || 0,
-            totalCommits: Number(o.totalCommits) || 0,
-            sponsorships: Number(o.sponsorships) || 0,
-            restrictedContributions: Number(o.restrictedContributions) || 0,
-            totalForks: Number(o.totalForks) || 0,
-            totalWatchers: Number(o.totalWatchers) || 0,
-            totalCodeSize: Number(o.totalCodeSize) || 0,
-            primaryLanguage: o.primaryLanguage != null ? String(o.primaryLanguage) : (o.mainLanguage != null ? String(o.mainLanguage) : null),
-            newestLanguage: o.newestLanguage != null ? String(o.newestLanguage) : null,
-            closedIssues: Number(o.closedIssues) || 0,
-            latest_repo_updated_at: o.latest_repo_updated_at != null ? String(o.latest_repo_updated_at) : ''
+            followers: num(o.followers, raw && raw.github_followers),
+            following: num(o.following),
+            totalStars: num(o.totalStars, o.total_stars, o.totalRepoStars, raw && raw.github_stars),
+            totalCommits: num(o.totalCommits, o.total_commits),
+            sponsorships: num(o.sponsorships),
+            restrictedContributions: num(o.restrictedContributions, o.restricted_contributions),
+            totalForks: num(o.totalForks, o.total_forks, raw && raw.github_forks),
+            totalWatchers: num(o.totalWatchers, o.total_watchers, raw && raw.github_watchers),
+            totalCodeSize: num(o.totalCodeSize, o.total_code_size),
+            primaryLanguage: str(o.primaryLanguage, o.primary_language, o.mainLanguage, o.main_language) || null,
+            newestLanguage: str(o.newestLanguage, o.newest_language) || null,
+            closedIssues: num(o.closedIssues, o.closed_issues),
+            latest_repo_updated_at: str(o.latest_repo_updated_at, o.latestRepoUpdatedAt)
         };
     }
 

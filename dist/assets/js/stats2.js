@@ -362,7 +362,29 @@
             });
         } catch (e) { /* ignore */ }
     };
-    
+
+    /**
+     * 统一跳转到体检首页（index.html），用于占位卡「返回体检首页」按钮。
+     * 优先使用前端路由（若存在），否则回退到 location 跳转。
+     */
+    window.navigateToIndexPage = function() {
+        try {
+            if (typeof window.appRouter !== 'undefined' && window.appRouter && typeof window.appRouter.navigate === 'function') {
+                window.appRouter.navigate('/');
+                return;
+            }
+            if (typeof window.router !== 'undefined' && window.router && typeof window.router.push === 'function') {
+                window.router.push('/');
+                return;
+            }
+            var path = (typeof _loc !== 'undefined' && _loc && _loc.pathname) ? _loc.pathname : '';
+            var indexUrl = (path && /\/stats2(\.html)?$/i.test(path)) ? path.replace(/\/stats2(\.html)?$/i, '/index.html') : 'index.html';
+            var base = (typeof _loc !== 'undefined' && _loc && _loc.origin) ? _loc.origin : '';
+            window.location.href = base ? (base + (indexUrl.indexOf('/') === 0 ? indexUrl : '/' + indexUrl.replace(/^\//, ''))) : indexUrl;
+        } catch (e) {
+            try { window.location.href = 'index.html'; } catch (_) {}
+        }
+    };
 
     // --- Script Block ---
 
@@ -523,7 +545,7 @@
 
                 var identityCard = leftBody.querySelector('.drawer-item[data-card="identity-config"]');
                 var openclawCard = document.getElementById('openclaw-monitor-card');
-                var statsCard = leftBody.querySelector('.drawer-item.dashboard-card.backdrop-blur.clinic-card');
+                var statsCard = leftBody.querySelector('.drawer-item.dashboard-card.backdrop-blur.clinic-card') || leftBody.querySelector('.drawer-item[data-card="cursor-inactive-placeholder"]');
                 var githubCard = leftBody.querySelector('.drawer-item.github-combat-card');
                 var wordcloudCard = document.getElementById('left-drawer-wordcloud-wrap');
                 var ordered = [identityCard, openclawCard, statsCard, githubCard, wordcloudCard];
@@ -1877,6 +1899,14 @@
                 console.warn('[drawHighScores] ❌ 找不到容器，无法渲染高分图谱');
                 return;
             }
+            // Global tab 仅保留国家榜容器，禁止 LPDEF/高分图谱插入
+            try {
+                var isInGlobalPanel = !!(container.closest && (container.closest('#panel-global-view') || container.closest('#panel-global-content')));
+                var isGlobalPkBoard = container.id === 'global-country-pk-leaderboard';
+                if (isInGlobalPanel || isGlobalPkBoard || (typeof currentViewState === 'string' && currentViewState === 'GLOBAL')) {
+                    return;
+                }
+            } catch (_) { /* ignore */ }
             console.log('[drawHighScores] ✅ 找到容器:', container);
             var metricOrder = ['total_user_chars', 'total_messages', 'jiafang_count', 'ketao_count', 'work_days'];
             var metricLabels = [
@@ -1891,10 +1921,12 @@
             var filtered = raw.filter(function (it) {
                 var k = String((it && it.key) || '');
                 if (k === 'total_chars') return true;
+                if (k === 'day') return true; // 打工榜：接口可能返回 day，需映射为 work_days
                 return allowed5[k];
             }).map(function (it) {
                 var k = String((it && it.key) || '');
                 if (k === 'total_chars') return Object.assign({}, it, { key: 'total_user_chars' });
+                if (k === 'day') return Object.assign({}, it, { key: 'work_days' }); // 打工榜：day -> work_days
                 return it;
             });
             var sorted = filtered.slice().sort(function (a, b) { return metricOrder.indexOf(String((a && a.key) || '')) - metricOrder.indexOf(String((b && b.key) || '')); });
@@ -2416,7 +2448,11 @@
         var VIBE_CURSOR_CACHE = 'vibe_cursor_analysis_cache';
         function getCursorAnalysisCache() {
             try {
-                return localStorage.getItem(VIBE_CURSOR_CACHE) || getCursorAnalysisCache() || '';
+                if (typeof localStorage === 'undefined') return '';
+                // 优先读取 last_analysis_data；该键由 index/main.js 作为稳定源持续写入。
+                return localStorage.getItem('last_analysis_data') ||
+                    localStorage.getItem(VIBE_CURSOR_CACHE) ||
+                    '';
             } catch (_) { return ''; }
         }
         var PERSONAL_CLOUD_HARDCODED_DEMO = {
@@ -2487,11 +2523,135 @@
                 Architect: dataAdapter(raw.Architect || raw.architect || [])
             };
         }
+        function parseStats2ObjectLoose(value) {
+            if (!value) return {};
+            if (typeof value === 'string') {
+                try {
+                    var parsed = JSON.parse(value);
+                    return (parsed && typeof parsed === 'object') ? parsed : {};
+                } catch (_) {
+                    return {};
+                }
+            }
+            return (typeof value === 'object') ? value : {};
+        }
+        function getStats2NestedValue(root, path) {
+            var cur = root;
+            var parts = String(path || '').split('.');
+            for (var i = 0; i < parts.length; i += 1) {
+                if (!cur || typeof cur !== 'object') return null;
+                cur = cur[parts[i]];
+            }
+            return cur == null ? null : cur;
+        }
+        function buildOpenClawCloudItemsFromArray(list, options) {
+            var opts = options || {};
+            var nameKeys = Array.isArray(opts.nameKeys) ? opts.nameKeys : ['name', 'label', 'word', 'phrase'];
+            var valueKeys = Array.isArray(opts.valueKeys) ? opts.valueKeys : ['count', 'heat', 'value', 'weight', 'ratio'];
+            var out = [];
+            var seen = new Set();
+            (Array.isArray(list) ? list : []).forEach(function(item, idx) {
+                if (!item) return;
+                var phrase = '';
+                if (typeof item === 'string') {
+                    phrase = item;
+                } else {
+                    for (var i = 0; i < nameKeys.length; i += 1) {
+                        if (item[nameKeys[i]] != null) {
+                            phrase = item[nameKeys[i]];
+                            break;
+                        }
+                    }
+                }
+                phrase = String(phrase || '').replace(/[_]+/g, ' ').trim();
+                if (!phrase || seen.has(phrase)) return;
+                var weight = 0;
+                if (typeof item === 'string') {
+                    weight = Math.max(8, 30 - idx);
+                } else {
+                    for (var j = 0; j < valueKeys.length; j += 1) {
+                        if (item[valueKeys[j]] != null) {
+                            weight = Number(item[valueKeys[j]]) || 0;
+                            break;
+                        }
+                    }
+                }
+                out.push({ phrase: phrase, weight: weight > 0 ? weight : Math.max(8, 30 - idx) });
+                seen.add(phrase);
+            });
+            out.sort(function(a, b) { return (b.weight || 0) - (a.weight || 0); });
+            return out.slice(0, Number(opts.limit) || 12);
+        }
+        function buildOpenClawCloudItemsFromObject(raw, limit) {
+            var source = parseStats2ObjectLoose(raw);
+            var out = [];
+            Object.keys(source).forEach(function(key) {
+                var item = source[key];
+                var phrase = String(key || '').replace(/[_]+/g, ' ').trim();
+                if (!phrase) return;
+                var weight = 0;
+                if (item && typeof item === 'object') {
+                    weight = Number(item.count != null ? item.count : (item.heat != null ? item.heat : (item.value != null ? item.value : item.weight))) || 0;
+                } else {
+                    weight = Number(item) || 0;
+                }
+                out.push({ phrase: phrase, weight: weight > 0 ? weight : 8 });
+            });
+            out.sort(function(a, b) { return (b.weight || 0) - (a.weight || 0); });
+            return out.slice(0, limit || 12);
+        }
+        function buildIdentityCloudFromOpenClaw(raw) {
+            var root = parseStats2ObjectLoose(raw);
+            if (!root || typeof root !== 'object') return null;
+            var statsRoot = parseStats2ObjectLoose(root.stats);
+            var openclawRoot = parseStats2ObjectLoose(statsRoot.openclaw || root.openclaw);
+            var openclawStats = parseStats2ObjectLoose(openclawRoot.stats || statsRoot.openclaw_stats || root.openclaw_stats);
+            if (!Object.keys(openclawStats).length && !Object.keys(openclawRoot).length) return null;
+            var novice = buildOpenClawCloudItemsFromArray(
+                getStats2NestedValue(openclawStats, 'raw_summary.dimensions.toolSkillHeat.topTools') ||
+                getStats2NestedValue(openclawStats, 'raw_summary.dimensions.toolSkillHeat.toolHeat'),
+                { nameKeys: ['toolName', 'name', 'label'], valueKeys: ['count', 'heat', 'value', 'weight'], limit: 12 }
+            );
+            if (novice.length === 0) {
+                novice = buildOpenClawCloudItemsFromObject(openclawStats.tool_usage, 12);
+            }
+            var professional = buildOpenClawCloudItemsFromArray(
+                getStats2NestedValue(openclawStats, 'raw_summary.dimensions.toolSkillHeat.skillHeat'),
+                { nameKeys: ['skillName', 'name', 'label'], valueKeys: ['count', 'heat', 'value', 'weight'], limit: 12 }
+            );
+            if (professional.length === 0) {
+                professional = buildOpenClawCloudItemsFromObject(openclawStats.skills_stats || root.skills_stats, 12);
+            }
+            if (professional.length === 0) {
+                professional = buildOpenClawCloudItemsFromArray(openclawStats.skills_tags || root.skills_tags, { limit: 12 });
+            }
+            var architect = buildOpenClawCloudItemsFromArray(
+                getStats2NestedValue(openclawStats, 'raw_summary.dimensions.modelPreference.distribution'),
+                { nameKeys: ['modelId', 'name', 'label'], valueKeys: ['count', 'ratio', 'weight', 'value'], limit: 12 }
+            );
+            if (architect.length === 0) {
+                architect = buildOpenClawCloudItemsFromObject(openclawStats.model_usage || openclawRoot.modelUsage || root.model_usage, 12);
+            }
+            if (architect.length === 0 && openclawStats.primary_model) {
+                architect = [{ phrase: String(openclawStats.primary_model).trim(), weight: 24 }];
+            }
+            var pool = novice.concat(professional).concat(architect).sort(function(a, b) { return (b.weight || 0) - (a.weight || 0); });
+            if (novice.length === 0 && pool.length) novice = pool.slice(0, 10);
+            if (professional.length === 0 && pool.length) professional = pool.slice(0, 10);
+            if (architect.length === 0 && pool.length) architect = pool.slice(0, 10);
+            if (novice.length === 0 && professional.length === 0 && architect.length === 0) return null;
+            return {
+                Novice: novice,
+                Professional: professional,
+                Architect: architect
+            };
+        }
         function readPersonalCloudFromBroadcast() {
             try {
                 var payload = window.last_local_stats && window.last_local_stats.payload;
                 if (!payload || typeof payload !== 'object') return null;
                 return pickIdentityLevelCloud(payload) ||
+                    buildIdentityCloudFromOpenClaw(payload) ||
                     (payload.stats && payload.stats.identityLevelCloud) ||
                     payload.identityLevelCloud ||
                     null;
@@ -2517,8 +2677,9 @@
             try {
                 var cu = window.currentUser || window.currentUserData || null;
                 if (!cu || typeof cu !== 'object') return null;
+                var statsObj = parseStats2ObjectLoose(cu.stats);
                 var ilc = (
-                    (cu.stats && cu.stats.identityLevelCloud) ||
+                    (statsObj && statsObj.identityLevelCloud) ||
                     cu.identityLevelCloud ||
                     (cu.analysis && cu.analysis.stats && cu.analysis.stats.identityLevelCloud) ||
                     (cu.personality && cu.personality.identityLevelCloud) ||
@@ -2534,6 +2695,7 @@
                         }
                     } catch (_) {}
                 }
+                if (!ilc) ilc = buildIdentityCloudFromOpenClaw(cu);
                 return normalizeIdentityCloudBuckets(ilc);
             } catch (_) {
                 return null;
@@ -2587,6 +2749,11 @@
                     window.__personalIdentityLevelCloudCache = { v: exactLocalIlc, raw: rawPayload, ts: Date.now() };
                     return exactLocalIlc;
                 }
+                var openclawLocalIlc = normalizeIdentityCloudBuckets(buildIdentityCloudFromOpenClaw(parsed));
+                if (openclawLocalIlc && (openclawLocalIlc.Novice.length || openclawLocalIlc.Professional.length || openclawLocalIlc.Architect.length)) {
+                    window.__personalIdentityLevelCloudCache = { v: openclawLocalIlc, raw: rawPayload, ts: Date.now() };
+                    return openclawLocalIlc;
+                }
             }
             try {
                 var exactVibeResults = window.vibeResults && typeof window.vibeResults === 'object'
@@ -2612,7 +2779,7 @@
             if (cache && cache.v && typeof cache.v === 'object' && cache.raw === rawPayload) return cache.v;
 
             // 只读本地：localStorage.last_analysis_data
-            var ilc = pickIdentityLevelCloud(parsed);
+            var ilc = pickIdentityLevelCloud(parsed) || buildIdentityCloudFromOpenClaw(parsed);
             var out = { Novice: [], Professional: [], Architect: [] };
             if (ilc && typeof ilc === 'object') {
                 out = normalizeIdentityCloudBuckets(ilc) || out;
@@ -2818,9 +2985,14 @@
             })();
             const cName = (typeof currentDrawerCountry !== 'undefined' && currentDrawerCountry && currentDrawerCountry.name) ? currentDrawerCountry.name : '';
             const refreshLexicon = !!(opts && opts.refreshLexicon);
-            const statsSource = (typeof window.__statsSourceType === 'string' && window.__statsSourceType) ? window.__statsSourceType : 'cursor';
+            const statsSource = (typeof window.__statsSourceType === 'string' && window.__statsSourceType) ? window.__statsSourceType : 'all';
             const url = effectiveIsGlobal
-                ? `${API_ENDPOINT}api/global-average?${[fp ? `fingerprint=${encodeURIComponent(fp)}` : '', uid ? `user_id=${encodeURIComponent(uid)}` : '', statsSource !== 'all' ? `source_type=${encodeURIComponent(statsSource)}` : '', `_ts=${Date.now()}`].filter(Boolean).join('&')}`
+                ? `${API_ENDPOINT}api/global-average?${[
+                    fp ? `fingerprint=${encodeURIComponent(fp)}` : '',
+                    uid ? `user_id=${encodeURIComponent(uid)}` : '',
+                    statsSource !== 'all' ? `source_type=${encodeURIComponent(statsSource)}` : '',
+                    `_ts=${Date.now()}`
+                ].filter(Boolean).join('&')}`
                 : `${API_ENDPOINT}api/country-summary?country=${encodeURIComponent(target_country)}${cName ? `&country_name=${encodeURIComponent(cName)}` : ''}${uid ? `&user_id=${encodeURIComponent(uid)}` : ''}${fp ? `&fingerprint=${encodeURIComponent(fp)}` : ''}${statsSource !== 'all' ? `&source_type=${encodeURIComponent(statsSource)}` : ''}${refreshLexicon ? '&refresh=true' : ''}&_ts=${Date.now()}`;
 
             // DOM 绑定点
@@ -2885,6 +3057,111 @@
                 });
             };
 
+            const toFiniteNumber = (v, fallback = null) => {
+                const n = Number(v);
+                return Number.isFinite(n) ? n : fallback;
+            };
+            const pickFirstNumber = (arr, fallback = null) => {
+                for (var i = 0; i < (arr || []).length; i++) {
+                    const n = toFiniteNumber(arr[i], null);
+                    if (n !== null) return n;
+                }
+                return fallback;
+            };
+            const normalizeCountryTotalsPayload = (payload) => {
+                const root = (payload && typeof payload === 'object') ? payload : {};
+                const ctRaw = (root.countryTotals && typeof root.countryTotals === 'object') ? root.countryTotals : {};
+                const firstRecord = Array.isArray(root.latest_records) && root.latest_records[0] ? root.latest_records[0] : null;
+                const statsRoot = (root.statistics && typeof root.statistics === 'object')
+                    ? root.statistics
+                    : (root.stats && typeof root.stats === 'object')
+                        ? root.stats
+                        : ((firstRecord && (firstRecord.statistics || firstRecord.stats) && typeof (firstRecord.statistics || firstRecord.stats) === 'object')
+                            ? (firstRecord.statistics || firstRecord.stats)
+                            : {});
+                const cursorStats = (statsRoot.cursor && typeof statsRoot.cursor === 'object') ? statsRoot.cursor : {};
+                const openclawRoot = (statsRoot.openclaw && typeof statsRoot.openclaw === 'object') ? statsRoot.openclaw : {};
+                const openclawStats = (openclawRoot.stats && typeof openclawRoot.stats === 'object')
+                    ? openclawRoot.stats
+                    : ((statsRoot.openclaw_stats && typeof statsRoot.openclaw_stats === 'object') ? statsRoot.openclaw_stats : {});
+
+                // 防御性降级：stats.cursor 缺失时，回退一级字段
+                const cursorMetrics = (ctRaw.cursor_metrics && typeof ctRaw.cursor_metrics === 'object') ? ctRaw.cursor_metrics : {};
+                const lobsterMetrics = (ctRaw.lobster_metrics && typeof ctRaw.lobster_metrics === 'object') ? ctRaw.lobster_metrics : {};
+                const cursorChars = pickFirstNumber([
+                    cursorMetrics.total_chars,
+                    cursorStats.total_chars,
+                    root.total_chars,
+                    root.totalChars,
+                    ctRaw.total_chars,
+                    ctRaw.say
+                ], 0);
+                const cursorMessages = pickFirstNumber([
+                    cursorMetrics.messages,
+                    cursorStats.total_messages,
+                    root.total_messages,
+                    root.totalMessages,
+                    ctRaw.total_messages,
+                    ctRaw.ai
+                ], 0);
+                const cursorWorkDays = pickFirstNumber([
+                    cursorMetrics.work_days,
+                    cursorStats.work_days,
+                    root.work_days,
+                    root.totaldays
+                ], 0);
+
+                const lobsterChars = pickFirstNumber([
+                    lobsterMetrics.total_chars,
+                    openclawStats.total_chars,
+                    0
+                ], 0);
+                const lobsterMessages = pickFirstNumber([
+                    lobsterMetrics.messages,
+                    openclawStats.records_total,
+                    0
+                ], 0);
+                const lobsterToolCalls = pickFirstNumber([
+                    lobsterMetrics.tool_calls,
+                    openclawStats.tool_calls_total,
+                    0
+                ], 0);
+                const lobsterWorkDays = pickFirstNumber([
+                    lobsterMetrics.work_days,
+                    openclawStats.work_days,
+                    0
+                ], 0);
+
+                const workDaysCombined = pickFirstNumber([
+                    ctRaw.work_days,
+                    ctRaw.work_days_sum,
+                    ctRaw.day,
+                    Math.max(cursorWorkDays || 0, lobsterWorkDays || 0)
+                ], 0);
+
+                return {
+                    countryTotals: ctRaw,
+                    cursor: {
+                        messages: Math.max(0, Number(cursorMessages) || 0),
+                        total_chars: Math.max(0, Number(cursorChars) || 0),
+                        work_days: Math.max(0, Number(cursorWorkDays) || 0)
+                    },
+                    openclaw: {
+                        messages: Math.max(0, Number(lobsterMessages) || 0),
+                        total_chars: Math.max(0, Number(lobsterChars) || 0),
+                        tool_calls: Math.max(0, Number(lobsterToolCalls) || 0),
+                        work_days: Math.max(0, Number(lobsterWorkDays) || 0)
+                    },
+                    totals: {
+                        total_messages: pickFirstNumber([ctRaw.total_messages, ctRaw.ai, cursorMessages + lobsterMessages], 0),
+                        total_chars: pickFirstNumber([ctRaw.total_chars, ctRaw.say, cursorChars + lobsterChars], 0),
+                        work_days: Math.max(0, Number(workDaysCombined) || 0),
+                        jiafang_count: pickFirstNumber([ctRaw.jiafang_count, ctRaw.no, root.jiafang_count], 0),
+                        ketao_count: pickFirstNumber([ctRaw.ketao_count, ctRaw.please, root.ketao_count], 0)
+                    }
+                };
+            };
+
             /** 国家视图下：有 countryTotals 即执行（含 ai=0 的首人国家）——移除 .animate-pulse，将数值替换为该国真实统计。严禁回退全球数据。 */
             function updateCountryRankUI(payload) {
                 if (!payload || !payload.countryTotals) return;
@@ -2895,9 +3172,10 @@
                     var ranksBox = document.getElementById('rtMyCountryRanks');
                     if (totalsBox && totalsBox.closest && totalsBox.closest('.clinic-card')) totalsBox.closest('.clinic-card').classList.remove('animate-pulse');
                     if (ranksBox && ranksBox.closest && ranksBox.closest('.clinic-card')) ranksBox.closest('.clinic-card').classList.remove('animate-pulse');
-                    var ct = payload.countryTotals;
+                    var norm = normalizeCountryTotalsPayload(payload);
+                    var ct = norm.countryTotals || {};
                     setValueOrNA(usersValEl, Number(ct.totalUsers ?? ct.total_users ?? 0) || null);
-                    setValueOrNA(analysisValEl, Number(ct.ai ?? ct.total_messages ?? 0) || null);
+                    setValueOrNA(analysisValEl, Number(norm.totals.total_messages ?? ct.ai ?? ct.total_messages ?? 0) || null);
                 } catch (e) { /* ignore */ }
             }
 
@@ -3313,7 +3591,17 @@
                 // 后端返回可能是“顶层完整字段 + data(兼容包装)”的结构。
                 const root = (payload && typeof payload === 'object') ? payload : {};
                 const nested = (root && typeof root.data === 'object' && root.data) ? root.data : {};
-                const data = { ...root, ...nested };
+                let data = { ...root, ...nested };
+                if (effectiveIsGlobal && typeof normalizeData === 'function') {
+                    try {
+                        const normalizedGlobal = normalizeData(data);
+                        if (normalizedGlobal && typeof normalizedGlobal === 'object') {
+                            data = Object.assign({}, data, normalizedGlobal);
+                        }
+                    } catch (normalizeErr) {
+                        console.warn('[updateCountryDashboard] GLOBAL normalizeData failed:', normalizeErr);
+                    }
+                }
                 // 请求校验：返回的 country_code 与当前选中国家不一致则丢弃，防止网络延迟导致错误数据写入
                 var countryCodeMismatch = false;
                 if (!effectiveIsGlobal && countryCode && data && data.country_code != null) {
@@ -3388,26 +3676,34 @@
                     if (!window.__countryDashboardCache) window.__countryDashboardCache = new Map();
                     window.__countryDashboardCache.set(cacheKey, { data, ts: Date.now() });
                 } catch { /* ignore */ }
-                // 修复缓存污染：禁止直接覆盖，用深度合并保留 countryStats、_sum 等字段
+                var globalSnapshot = effectiveIsGlobal ? buildGlobalDrawerPayload(data) : null;
+                // 修复缓存污染：global 与 country 分开存，不再把国家 summary 混进 global 快照
                 try {
-                    window.cachedSummary = typeof mergeDeep === 'function'
-                        ? mergeDeep(window.cachedSummary || {}, data)
-                        : Object.assign({}, window.cachedSummary || {}, data);
+                    if (effectiveIsGlobal) {
+                        window.cachedGlobalSummary = globalSnapshot;
+                    } else {
+                        window.cachedSummary = typeof mergeDeep === 'function'
+                            ? mergeDeep(window.cachedSummary || {}, data)
+                            : Object.assign({}, window.cachedSummary || {}, data);
+                    }
                 } catch (e) { /* ignore */ }
-                // 写入 lastData，供天梯榜 Tab 等读取 topByMetrics
+                // 写入 lastData，供全球/排行榜读取
                 try {
-                    // 【修复】确保topByMetrics被正确保存到window.lastData
                     if (data.topByMetrics && Array.isArray(data.topByMetrics) && data.topByMetrics.length > 0) {
                         console.log('[updateCountryDashboard] ✅ 保存topByMetrics到lastData:', data.topByMetrics.length, '个维度');
                     }
-                    window.lastData = typeof mergeDeep === 'function'
-                        ? mergeDeep(window.lastData || {}, data)
-                        : Object.assign({}, window.lastData || {}, data);
-                    // 【修复】确保topByMetrics被正确保存
+                    window.lastData = effectiveIsGlobal
+                        ? globalSnapshot
+                        : (typeof mergeDeep === 'function'
+                            ? mergeDeep(window.lastData || {}, data)
+                            : Object.assign({}, window.lastData || {}, data));
+                    if (effectiveIsGlobal) {
+                        window.lastGlobalData = globalSnapshot;
+                    }
                     if (window.lastData && !window.lastData.topByMetrics && data.topByMetrics) {
                         window.lastData.topByMetrics = data.topByMetrics;
                     }
-                } catch (e) { 
+                } catch (e) {
                     console.warn('[updateCountryDashboard] ⚠️ 保存lastData失败:', e);
                 }
 
@@ -3751,7 +4047,8 @@
                                             tried[ccForRetry] = true;
                                             window.__countryCloudRefreshTried = tried;
                                             setTimeout(function() {
-                                                updateCountryDashboard(ccForRetry, (currentDrawerCountry && currentDrawerCountry.name) || ccForRetry, null, { forceRefresh: true, refreshLexicon: true });
+                                                // 修复：updateCountryDashboard 仅支持 3 个参数（第三参为 options）
+                                                updateCountryDashboard(ccForRetry, null, { forceRefresh: true, refreshLexicon: true });
                                             }, 300);
                                         }
                                     } catch (e) { /* ignore */ }
@@ -3995,8 +4292,8 @@
                     null;
                 // 国家视图：仅从 countryTotals 读取，不落回全局根节点
                 const globalTotalAnalysisRaw = effectiveIsGlobal
-                    ? (data.countryTotals?.ai ?? data.ai ?? data.totalAnalysis ?? data.total_analysis ?? data.totalanalysis ?? null)
-                    : (data.countryTotals?.ai ?? data.total_messages ?? data.totalAnalysis ?? data.total_analysis ?? data.totalanalysis ?? null);
+                    ? (data.countryTotals?.ai ?? data.countryTotals?.total_messages ?? data.ai ?? data.total_messages ?? data.totalAnalysis ?? data.total_analysis ?? data.totalanalysis ?? null)
+                    : (data.countryTotals?.ai ?? data.countryTotals?.total_messages ?? data.total_messages ?? data.totalAnalysis ?? data.total_analysis ?? data.totalanalysis ?? null);
 
                 // 雷达图数据：优先 RPC record（has_valid_data 时）强制 parseFloat，否则 country-summary 的 avg_/globalAverage，仅无有效数据时用 50 占位
                 const toRadarVal = (v) => {
@@ -4032,29 +4329,36 @@
                 }
 
                 // 国家视图：仅从 countryTotals 读取（say/total_chars）
+                const normForDrawer = normalizeCountryTotalsPayload(data);
                 const totalCharsSumRaw = effectiveIsGlobal
-                    ? (data.countryTotals?.say ?? data.say ?? data.totalCharsSum ?? data.total_chars_sum ?? data.totalChars ?? data.total_chars ?? null)
-                    : (data.countryTotals?.say ?? data.total_chars ?? data.totalCharsSum ?? data.total_chars_sum ?? data.totalChars ?? data.total_chars ?? null);
+                    ? (normForDrawer.totals.total_chars ?? data.say ?? data.total_chars ?? data.totalCharsSum ?? data.total_chars_sum ?? data.totalChars ?? data.total_chars ?? null)
+                    : (normForDrawer.totals.total_chars ?? data.total_chars ?? data.totalCharsSum ?? data.total_chars_sum ?? data.totalChars ?? data.total_chars ?? null);
                 const totalCharsSum = Number(totalCharsSumRaw);
                 if (meritEl) {
                     // 0 也应显示（否则看起来像“未加载”）
                     if (Number.isFinite(totalCharsSum) && totalCharsSum >= 0) {
-                        meritEl.textContent =
-                            currentLang === 'en'
+                        const cursorChars = Number(normForDrawer.cursor.total_chars || 0);
+                        const lobsterChars = Number(normForDrawer.openclaw.total_chars || 0);
+                        const tip = `Cursor ${new Intl.NumberFormat('zh-CN').format(cursorChars)} / OpenClaw ${new Intl.NumberFormat('zh-CN').format(lobsterChars)}`;
+                        meritEl.innerHTML =
+                            (currentLang === 'en'
                                 ? `Analyzed ${(totalCharsSum / 10000).toFixed(1)} ×10k chars`
-                                : `已累计分析 ${(totalCharsSum / 10000).toFixed(1)} 万字`;
+                                : `已累计分析 ${(totalCharsSum / 10000).toFixed(1)} 万字`) +
+                            ` <span class="text-[10px] text-zinc-400" title="${escapeHtml(tip)}">[Cursor/OpenClaw]</span>`;
                     } else {
                         meritEl.textContent = currentLang === 'en' ? 'Analyzed -- ×10k chars' : '已累计分析 -- 万字';
                     }
                 }
 
                 // 国家视图：ai/say/day/no/please 均从 countryTotals 读取
-                const ctForDrawer = data.countryTotals || {};
+                const ctForDrawer = normForDrawer.countryTotals || {};
                 const firstRecord = Array.isArray(data.latest_records) && data.latest_records[0] ? data.latest_records[0] : null;
                 const stats = data.statistics || data.stats || (firstRecord && (firstRecord.statistics || firstRecord.stats)) || {};
                 const jiafangVal = effectiveIsGlobal ? (data.jiafang_count ?? data.totalno ?? ctForDrawer.no ?? ctForDrawer.jiafang_count ?? stats.jiafang_count ?? firstRecord?.jiafang_count ?? null) : (ctForDrawer.no ?? ctForDrawer.jiafang_count ?? data.jiafang_count ?? stats.jiafang_count ?? firstRecord?.jiafang_count ?? null);
                 const ketaoVal = effectiveIsGlobal ? (data.ketao_count ?? data.totalplease ?? ctForDrawer.please ?? ctForDrawer.ketao_count ?? stats.ketao_count ?? firstRecord?.ketao_count ?? null) : (ctForDrawer.please ?? ctForDrawer.ketao_count ?? data.ketao_count ?? stats.ketao_count ?? firstRecord?.ketao_count ?? null);
-                const workDaysVal = effectiveIsGlobal ? (data.work_days ?? data.totaldays ?? ctForDrawer.day ?? ctForDrawer.work_days ?? stats.work_days ?? firstRecord?.work_days ?? null) : (ctForDrawer.day ?? ctForDrawer.work_days ?? data.work_days ?? stats.work_days ?? firstRecord?.work_days ?? null);
+                const workDaysVal = effectiveIsGlobal
+                    ? (normForDrawer.totals.work_days ?? data.work_days ?? data.totaldays ?? ctForDrawer.day ?? ctForDrawer.work_days ?? stats.work_days ?? firstRecord?.work_days ?? null)
+                    : (normForDrawer.totals.work_days ?? ctForDrawer.day ?? ctForDrawer.work_days ?? data.work_days ?? stats.work_days ?? firstRecord?.work_days ?? null);
                 const rtJiafang = document.getElementById('rtJiafangCount');
                 const rtKetao = document.getElementById('rtKetaoCount');
                 const rtWorkDays = document.getElementById('rtWorkDays');
@@ -4275,6 +4579,7 @@
                         const userCountry = String(countryCode || '').trim().toUpperCase();
                         console.log('[Stats2] 国家累计 API 全量数据:', { payload: payload2, userCountry });
                         const totals = payload2.countryTotals || payload2.data?.countryTotals || null;
+                        const norm2 = normalizeCountryTotalsPayload(payload2);
                         var totalsRanks = payload2.countryTotalsRanks || payload2.data?.countryTotalsRanks || null;
                         var totalCountriesFromData = payload2.total_countries ?? payload2._meta?.totalCountries ?? payload2._meta?.total_countries ?? (payload2.countryTotalsRanks?._meta?.totalCountries ?? payload2.countryTotalsRanks?._meta?.total_countries) ?? 195;
                         if (!totalsRanks && totalCountriesFromData <= 1) {
@@ -4303,12 +4608,12 @@
                         }
                         // 【修复】如果 totals 是空对象或所有关键字段都为0/null，视为无数据
                         const hasValidTotals = totals && (
-                            totals.total_messages > 0 || 
-                            totals.total_chars > 0 || 
-                            totals.work_days > 0 || 
+                            norm2.totals.total_messages > 0 || 
+                            norm2.totals.total_chars > 0 || 
+                            norm2.totals.work_days > 0 || 
                             totals.work_days_sum > 0 ||
-                            totals.jiafang_count > 0 ||
-                            totals.ketao_count > 0
+                            norm2.totals.jiafang_count > 0 ||
+                            norm2.totals.ketao_count > 0
                         );
                         const countryDataByCode = payload2.countryDataByCode || payload2.data?.countryDataByCode || {};
                         const ranks = payload2.myCountryRanks || payload2.data?.myCountryRanks || null;
@@ -4350,6 +4655,7 @@
                                 (u.id && window.currentUserData.id && String(u.id) === String(window.currentUserData.id)) ||
                                 (u.fingerprint && u.fingerprint === window.currentUserData.fingerprint) ||
                                 (u.github_username && u.github_username === window.currentUserData.github_username) ||
+                                (u.github_login && u.github_login === window.currentUserData.github_login) ||
                                 (u.user_name && window.currentUserData.user_name && String(u.user_name).toLowerCase() === String(window.currentUserData.user_name).toLowerCase())
                             );
                             if (myIndex !== -1) {
@@ -4389,7 +4695,7 @@
                             })(),
                             jiafang_count: (st?.jiafang_count ?? st?.no ?? remoteVals?.jiafang_count ?? merged.jiafang_count ?? merged.no ?? 0),
                             ketao_count: (st?.ketao_count ?? st?.please ?? remoteVals?.ketao_count ?? merged.ketao_count ?? merged.please ?? 0),
-                            work_days: (st?.work_days ?? st?.usage_days ?? remoteVals?.work_days ?? remoteVals?.usage_days ?? merged.work_days ?? merged.usage_days ?? merged.day ?? 0)
+                            work_days: (st?.work_days ?? st?.usage_days ?? remoteVals?.work_days ?? remoteVals?.usage_days ?? merged.work_days ?? merged.usage_days ?? merged.day ?? norm2.totals.work_days ?? Math.max(norm2.cursor.work_days || 0, norm2.openclaw.work_days || 0) ?? 0)
                         };
                         // 关键：高分图谱的数据源来自 country-summary，而不是 global-average
                         try {
@@ -4437,9 +4743,15 @@
                             }
                             // 【country-work-days 元素绑定】为上岗天数添加特殊 ID
                             const workDaysIdAttr = dimKey === 'work_days' ? ' id="country-work-days"' : '';
+                            const contributionHint = (dimKey === 'total_chars')
+                                ? `Cursor ${fmt(norm2.cursor.total_chars || 0)} / OpenClaw ${fmt(norm2.openclaw.total_chars || 0)}`
+                                : '';
+                            const labelHtml = contributionHint
+                                ? `${label} <span class="text-[9px] text-zinc-500" title="${escapeHtml(contributionHint)}">[来源]</span>`
+                                : label;
                             return `
                                 <div class="flex items-center justify-between gap-3 border-b border-white/10 pb-2"${workDaysIdAttr}>
-                                    <div class="text-zinc-200">${label}</div>
+                                    <div class="text-zinc-200">${labelHtml}</div>
                                     <div class="flex items-center gap-3 min-w-0">
                                         <span class="text-[10px] text-zinc-500">Σ ${displayVal}</span>
                                         <span class="text-[10px] text-[var(--accent-terminal)] font-bold tabular-nums">${rankText}${medal}${ice}</span>
@@ -4544,12 +4856,12 @@
                         // 【修复】使用 hasValidTotals 确保数据真正有效，而非仅判断对象存在
                         const totalsHtml = hasValidTotals
                             ? [
-                                rowTotals(getI18nText('countryTotals.messages') || 'Messages', totals.total_messages ?? totals.ai ?? 0, totalsRanks?.total_messages, 'total_messages'),
-                                rowTotals(getI18nText('countryTotals.totalChars') || 'Total Chars', totals.total_chars ?? totals.say ?? 0, totalsRanks?.total_chars, 'total_chars'),
+                                rowTotals(getI18nText('countryTotals.messages') || 'Messages', norm2.totals.total_messages ?? totals.total_messages ?? totals.ai ?? 0, totalsRanks?.total_messages, 'total_messages'),
+                                rowTotals(getI18nText('countryTotals.totalChars') || 'Total Chars', norm2.totals.total_chars ?? totals.total_chars ?? totals.say ?? 0, totalsRanks?.total_chars, 'total_chars'),
                                 rowTotals(getI18nText('countryTotals.avgLen') || 'Avg Len', Math.round(Number(totals.avg_message_length ?? totals['avg_user_message_length'] ?? totals.word ?? 0) || 0), totalsRanks?.avg_user_message_length ?? totalsRanks?.avg_message_length, 'avg_message_length'),
-                                rowTotals(getI18nText('countryTotals.jiafang') || 'Jiafang', totals.jiafang_count ?? totals.no ?? 0, totalsRanks?.jiafang_count, 'jiafang_count'),
-                                rowTotals(getI18nText('countryTotals.ketao') || 'Ketao', totals.ketao_count ?? totals.please ?? 0, totalsRanks?.ketao_count, 'ketao_count'),
-                                rowTotals(getI18nText('countryTotals.workDays') || '上岗天数', totals.work_days ?? totals.work_days_sum ?? totals.day ?? 0, totalsRanks?.work_days, 'work_days'),
+                                rowTotals(getI18nText('countryTotals.jiafang') || 'Jiafang', norm2.totals.jiafang_count ?? totals.jiafang_count ?? totals.no ?? 0, totalsRanks?.jiafang_count, 'jiafang_count'),
+                                rowTotals(getI18nText('countryTotals.ketao') || 'Ketao', norm2.totals.ketao_count ?? totals.ketao_count ?? totals.please ?? 0, totalsRanks?.ketao_count, 'ketao_count'),
+                                rowTotals(getI18nText('countryTotals.workDays') || '上岗天数', norm2.totals.work_days ?? totals.work_days ?? totals.work_days_sum ?? totals.day ?? 0, totalsRanks?.work_days, 'work_days'),
                               ].join('')
                             : `<div class="text-zinc-500 text-xs">${currentLang === 'en' ? 'No data' : '暂无数据'}</div>`;
 
@@ -4900,6 +5212,31 @@
                 (async function renderPersonalityDistributionForDrawer() {
                     const box = document.getElementById('rtRealtimeList');
                     if (!box) return;
+                    const renderDistribution = (rows) => {
+                        if (!Array.isArray(rows) || rows.length === 0) return false;
+                        const distribution = rows.map((row) => ({
+                            type: String(row.personality_type ?? row.type ?? row.personality_type_code ?? 'UNKNOWN').toUpperCase(),
+                            count: Number(row.count ?? row.cnt ?? row.total ?? 0) || 0
+                        })).filter((it) => it.count > 0).sort((a, b) => b.count - a.count);
+                        if (distribution.length === 0) return false;
+                        const total = distribution.reduce((s, it) => s + it.count, 0);
+                        const maxPct = total > 0 ? Math.max(...distribution.map((it) => (it.count / total) * 100)) : 0;
+                        box.className = 'personality-vbar-chart';
+                        box.innerHTML = distribution.map((item) => {
+                            const pctVal = total > 0 ? (item.count / total) * 100 : 0;
+                            const pct = pctVal.toFixed(1);
+                            const heightPct = maxPct > 0 ? Math.max(4, (pctVal / maxPct) * 100) : 0;
+                            const title = typeof getPersonalityTitle === 'function' ? getPersonalityTitle(item, currentLang) : (item.type || '');
+                            return `<div class="personality-vbar-col"><div class="personality-vbar-bar-wrap"><div class="personality-vbar-fill" style="height: ${heightPct}%;"></div></div><span class="personality-vbar-name" title="${escapeHtml(title)}">${escapeHtml(title)}</span><span class="personality-vbar-pct">${pct}%</span></div>`;
+                        }).join('');
+                        return true;
+                    };
+
+                    // 优先使用 country-summary 已返回的人格分布，避免再次 RPC 失败时退化成 latest_records 的“近样本估计”。
+                    if (renderDistribution((Array.isArray(data.personalityDistribution) && data.personalityDistribution.length > 0) ? data.personalityDistribution : data.personalityRank)) {
+                        return;
+                    }
+
                     if (!effectiveIsGlobal && target_country && (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.rpc === 'function')) {
                         try {
                             var distData = null;
@@ -4911,21 +5248,7 @@
                                 var distRes = await supabaseClient.rpc('get_country_personality_distribution', { target_country_code: target_country });
                                 distData = distRes && !distRes.error ? distRes.data : null;
                             }
-                            if (Array.isArray(distData) && distData.length > 0) {
-                                const distribution = distData.map((row) => ({
-                                    type: String(row.personality_type ?? row.type ?? row.personality_type_code ?? 'UNKNOWN').toUpperCase(),
-                                    count: Number(row.count ?? row.cnt ?? row.total ?? 0) || 0
-                                })).filter((it) => it.count > 0).sort((a, b) => b.count - a.count);
-                                const total = distribution.reduce((s, it) => s + it.count, 0);
-                                const maxPct = total > 0 ? Math.max(...distribution.map((it) => (it.count / total) * 100)) : 0;
-                                box.className = 'personality-vbar-chart';
-                                box.innerHTML = distribution.map((item) => {
-                                    const pctVal = total > 0 ? (item.count / total) * 100 : 0;
-                                    const pct = pctVal.toFixed(1);
-                                    const heightPct = maxPct > 0 ? Math.max(4, (pctVal / maxPct) * 100) : 0;
-                                    const title = typeof getPersonalityTitle === 'function' ? getPersonalityTitle(item, currentLang) : (item.type || '');
-                                    return `<div class="personality-vbar-col"><div class="personality-vbar-bar-wrap"><div class="personality-vbar-fill" style="height: ${heightPct}%;"></div></div><span class="personality-vbar-name" title="${escapeHtml(title)}">${escapeHtml(title)}</span><span class="personality-vbar-pct">${pct}%</span></div>`;
-                                }).join('');
+                            if (renderDistribution(distData)) {
                                 return;
                             }
                         } catch (e) { console.warn('[updateCountryDashboard] get_country_personality_distribution 失败，回退 latest_records:', e); }
@@ -7614,49 +7937,136 @@
         if (!window.__drawerFetchInProgress) window.__drawerFetchInProgress = new Map();
 
         /**
-         * 统一数据源：lastData 足够完整时用 lastData，否则用缓存摘要（避免视图切换时数据源不一致）
-         * @returns {object} 用于全球/国家视图渲染的根数据
+         * 将任意统计 payload 归一化为核心字段，避免 undefined 进入合并/渲染链路。
+         * @param {object} raw
+         * @returns {object}
          */
-        function getLatestGlobalData() {
-            // 有 lastData 即用（不再要求 totalAnalysis>100），保证 Global 视图有数据可展示
-            var base = (window.lastData && typeof window.lastData === 'object') ? window.lastData : (window.cachedSummary || {});
-            if (!base || typeof base !== 'object') return {};
-            var merged = Object.assign({}, base);
-            // 全球视图：清除国家级排名字段，防止国家 summary 残留数据污染全球卡片
+        function normalizeCoreStatsPayload(raw) {
+            if (!raw || typeof raw !== 'object') return {};
+            var out = Object.assign({}, raw);
+            var pickNumber = function(keys, fallback) {
+                for (var i = 0; i < keys.length; i++) {
+                    var v = out[keys[i]];
+                    if (v === null || v === undefined || v === '') continue;
+                    var n = Number(v);
+                    if (Number.isFinite(n)) return n;
+                }
+                return Number(fallback) || 0;
+            };
+            var totalMessages = pickNumber(['total_messages', 'totalMessages', 'msg_count', 'question_message_count', 'questionMessageCount'], 0);
+            var totalAnalysis = pickNumber(['totalAnalysis', 'total_analysis', 'totalanalysis', 'msg_count', 'total_messages', 'totalMessages'], totalMessages);
+            var totalChars = pickNumber(['total_chars', 'totalChars', 'totalchars', 'totalCharsSum', 'total_chars_sum', 'total_user_chars', 'totalUserChars', 'say', 'totalRoastWords', 'total_roast_words'], 0);
+            var totalTokens = pickNumber(['total_tokens', 'totalTokens'], 0);
+            var workDays = pickNumber(['work_days', 'workDays', 'usage_days', 'usageDays', 'days', 'day'], 0);
+            var jiafangCount = pickNumber(['jiafang_count', 'jiafangCount', 'no'], 0);
+            var ketaoCount = pickNumber(['ketao_count', 'ketaoCount', 'please'], 0);
+            var avgMessageLength = pickNumber(['avg_message_length', 'avg_user_message_length', 'avgMessageLength', 'avgUserMessageLength', 'avgPerScan', 'avg_per_scan', 'word'], 0);
+
+            out.total_messages = totalMessages;
+            out.totalMessages = totalMessages;
+            out.msg_count = pickNumber(['msg_count', 'total_messages', 'totalMessages'], totalMessages);
+            out.question_message_count = pickNumber(['question_message_count', 'questionMessageCount', 'total_messages', 'totalMessages'], totalMessages);
+            out.questionMessageCount = out.question_message_count;
+            out.totalAnalysis = totalAnalysis;
+            out.total_analysis = totalAnalysis;
+            out.totalanalysis = totalAnalysis;
+            out.total_chars = totalChars;
+            out.totalChars = totalChars;
+            out.totalchars = totalChars;
+            out.totalCharsSum = totalChars;
+            out.total_chars_sum = totalChars;
+            out.total_user_chars = pickNumber(['total_user_chars', 'totalUserChars', 'total_chars', 'totalChars', 'totalchars'], totalChars);
+            out.totalUserChars = out.total_user_chars;
+            out.total_tokens = totalTokens;
+            out.totalTokens = totalTokens;
+            out.work_days = workDays;
+            out.workDays = workDays;
+            out.usage_days = workDays;
+            out.usageDays = workDays;
+            out.day = workDays;
+            out.jiafang_count = jiafangCount;
+            out.jiafangCount = jiafangCount;
+            out.no = jiafangCount;
+            out.ketao_count = ketaoCount;
+            out.ketaoCount = ketaoCount;
+            out.please = ketaoCount;
+            out.avg_message_length = avgMessageLength;
+            out.avg_user_message_length = avgMessageLength;
+            out.avgMessageLength = avgMessageLength;
+            out.avgUserMessageLength = avgMessageLength;
+            out.avgPerScan = avgMessageLength;
+            out.avg_per_scan = avgMessageLength;
+            out.word = avgMessageLength;
+            return out;
+        }
+
+        /**
+         * 将全局接口数据裁成独立的 global payload，严禁继承国家 summary 的 countryTotals。
+         * @param {object} raw
+         * @returns {object}
+         */
+        function buildGlobalDrawerPayload(raw) {
+            var merged = normalizeCoreStatsPayload(raw || {});
+            if (!merged || typeof merged !== 'object') return {};
+            merged = Object.assign({}, merged);
             delete merged.countryTotalsRanks;
             delete merged.myCountryRanks;
             delete merged.country_user_ranks;
-            if (merged.totalUsers == null) merged.totalUsers = merged.total_users ?? merged.user_count;
-            if (merged.totalAnalysis == null) merged.totalAnalysis = merged.totalanalysis ?? merged.total_analysis ?? merged.msg_count;
-            if (merged.totalChars == null) merged.totalChars = merged.totalchars ?? merged.total_chars ?? merged.totalRoastWords;
-            if (merged.avgPerScan == null) merged.avgPerScan = merged.avg_per_scan ?? merged.avg_user_message_length;
-            // 用全局统计构建全球口径的 countryTotals，供六维数据卡片（调戏AI次数/平均长度/上岗天数等）渲染
+            delete merged.myCountry;
+            delete merged.myCountryValues;
+            delete merged.countryDataByCode;
+            delete merged.countryStats;
+            delete merged.countryTotals;
+
             var gAi = Number(merged.totalAnalysis ?? merged.totalanalysis ?? merged.total_analysis ?? merged.msg_count ?? 0) || 0;
-            var gSay = Number(merged.totalChars ?? merged.totalchars ?? merged.total_chars ?? merged.totalRoastWords ?? 0) || 0;
+            var gSay = Number(merged.totalChars ?? merged.totalchars ?? merged.total_chars ?? merged.totalCharsSum ?? merged.total_chars_sum ?? 0) || 0;
             var gDay = Number(merged.work_days ?? merged.totaldays ?? merged.systemDays ?? 0) || 0;
             var gNo = Number(merged.jiafang_count ?? merged.totalno ?? 0) || 0;
             var gPlease = Number(merged.ketao_count ?? merged.totalplease ?? 0) || 0;
             var gWord = Number(merged.avgPerScan ?? merged.avg_per_scan ?? merged.avg_user_message_length ?? 0) || 0;
-            var eCt = merged.countryTotals;
-            var eCtValid = eCt && typeof eCt === 'object' && (
-                Number(eCt.ai) > 0 || Number(eCt.say) > 0 || Number(eCt.no) > 0 || Number(eCt.please) > 0
-            );
-            if (eCtValid) {
-                merged.countryTotals = {
-                    ai: Number(eCt.ai ?? 0) || 0,
-                    say: Number(eCt.say ?? 0) || 0,
-                    day: Number(eCt.day ?? 0) || 0,
-                    no: Number(eCt.no ?? 0) || 0,
-                    please: Number(eCt.please ?? 0) || 0,
-                    word: Number(eCt.word ?? 0) || 0
-                };
-            } else if (gAi > 0 || gSay > 0 || gNo > 0 || gPlease > 0) {
-                merged.countryTotals = {
-                    ai: gAi, say: gSay, day: gDay,
-                    no: gNo, please: gPlease, word: gWord
-                };
-            }
+            merged.countryTotals = {
+                ai: gAi,
+                say: gSay,
+                day: gDay,
+                no: gNo,
+                please: gPlease,
+                word: gWord,
+                total_messages: gAi,
+                total_chars: gSay,
+                work_days: gDay,
+                jiafang_count: gNo,
+                ketao_count: gPlease,
+                avg_message_length: gWord,
+                totalUsers: Number(merged.totalUsers ?? merged.total_users ?? merged.user_count ?? 0) || 0
+            };
             return merged;
+        }
+
+        /**
+         * 统一数据源：global 视图只认独立 global snapshot，不再与国家 summary 混写。
+         * @returns {object} 用于全球视图渲染的根数据
+         */
+        function getLatestGlobalData() {
+            var lastGlobalData = (window.lastGlobalData && typeof window.lastGlobalData === 'object') ? window.lastGlobalData : {};
+            var cachedGlobalSummary = (window.cachedGlobalSummary && typeof window.cachedGlobalSummary === 'object') ? window.cachedGlobalSummary : {};
+            var lastData = (window.lastData && typeof window.lastData === 'object') ? window.lastData : {};
+            var merged = typeof mergeDeep === 'function'
+                ? mergeDeep(cachedGlobalSummary, lastGlobalData)
+                : Object.assign({}, cachedGlobalSummary, lastGlobalData);
+            if ((!merged || typeof merged !== 'object' || Object.keys(merged).length === 0) && lastData && typeof lastData === 'object') {
+                var looksCountryBound = !!(
+                    lastData.countryTotals ||
+                    lastData.countryTotalsRanks ||
+                    lastData.myCountry ||
+                    lastData.myCountryRanks ||
+                    lastData.target_country ||
+                    lastData.countryDataByCode
+                );
+                if (!looksCountryBound) {
+                    merged = lastData;
+                }
+            }
+            return buildGlobalDrawerPayload(merged || {});
         }
 
         /**
@@ -7692,6 +8102,8 @@
         function safeMaxMergeUserData(existing, incoming) {
             if (!existing || typeof existing !== 'object') return incoming || {};
             if (!incoming || typeof incoming !== 'object') return existing;
+            existing = normalizeCoreStatsPayload(existing);
+            incoming = normalizeCoreStatsPayload(incoming);
 
             // 需要"取较大值"保护的核心数值字段
             const maxProtectedFields = [
@@ -7764,7 +8176,7 @@
                 'personality_name', 'personalityName',
                 'personality_type', 'personalityType',
                 'lpdef', 'vibe_index_str', 'vibeIndexStr',
-                'user_name', 'userName', 'github_username'
+                'user_name', 'userName', 'github_username', 'github_login'
             ];
             nonEmptyProtectedFields.forEach(function(field) {
                 const existingVal = existing[field];
@@ -7774,6 +8186,36 @@
 
                 if (existingHas && !incomingHas) {
                     // 已有值有效但新值为空，保留已有值
+                    merged[field] = existingVal;
+                }
+            });
+
+            // 保护 GitHub 战力对象与核心字段，避免上传 Cursor 分析后被空对象/空字段覆盖
+            const parseGithubStatsSafe = function(raw) {
+                if (!raw) return null;
+                if (typeof raw === 'string') {
+                    try { raw = JSON.parse(raw); } catch (_) { return null; }
+                }
+                return raw && typeof raw === 'object' ? raw : null;
+            };
+            const hasUsableGithubStats = function(raw) {
+                var obj = parseGithubStatsSafe(raw);
+                return !!(obj && (
+                    (obj.login && String(obj.login).trim()) ||
+                    Number(obj.totalRepoStars) > 0 ||
+                    Number(obj.totalStars) > 0 ||
+                    Number(obj.totalCommits) > 0
+                ));
+            };
+            if (hasUsableGithubStats(existing.github_stats) && !hasUsableGithubStats(incoming.github_stats)) {
+                merged.github_stats = existing.github_stats;
+            }
+            ['github_stars', 'github_score'].forEach(function(field) {
+                const existingVal = Number(existing[field]);
+                const incomingVal = Number(incoming[field]);
+                const existingValid = Number.isFinite(existingVal) && existingVal > 0;
+                const incomingValid = Number.isFinite(incomingVal) && incomingVal > 0;
+                if (existingValid && !incomingValid) {
                     merged[field] = existingVal;
                 }
             });
@@ -7791,13 +8233,14 @@
                 }
             });
 
+            const normalizedMerged = normalizeCoreStatsPayload(merged);
             console.log('[SafeMerge] 数据保护合并完成', {
-                existingMsgs: existing.total_messages,
-                incomingMsgs: incoming.total_messages,
-                mergedMsgs: merged.total_messages
+                existingMsgs: existing.total_messages ?? 0,
+                incomingMsgs: incoming.total_messages ?? 0,
+                mergedMsgs: normalizedMerged.total_messages ?? 0
             });
 
-            return merged;
+            return normalizedMerged;
         }
 
         // 暴露到全局，供其他模块使用
@@ -7821,6 +8264,366 @@
                 please: country.please ?? sub.ketao_count_sum ?? sub.ketao_count ?? sub.please ?? root.ketao_count ?? root.ketao_count_sum ?? 0,
                 word: country.word ?? root.avgPerScan ?? root.avg_per_scan ?? sub.avg_user_message_length_sum ?? sub.avg_user_message_length ?? sub.avg_len ?? root.avg_user_message_length ?? 0
             };
+        }
+
+        /**
+         * 从本地 Cursor 分析缓存（last_analysis_data / cursor_clinical_history）拼出六维汇总，供右侧抽屉在无接口数据时展示
+         * @returns {{ ai: number, say: number, day: number, word: number, no: number, please: number } | null}
+         */
+        function getLocalCursorTotalsForDrawer() {
+            try {
+                var ai = 0, say = 0, day = 0, word = 0, no = 0, please = 0;
+                var raw = typeof getCursorAnalysisCache === 'function' ? getCursorAnalysisCache() : '';
+                if (raw) {
+                    var obj = JSON.parse(raw);
+                    var st = (obj && (obj.stats || obj.statistics)) || (obj && obj.result && (obj.result.stats || obj.result.statistics)) || null;
+                    if (st) {
+                        ai = Number(st.total_messages ?? st.totalMessages ?? st.userMessages ?? st.question_message_count ?? 0) || 0;
+                        say = Number(st.total_chars ?? st.totalChars ?? st.totalUserChars ?? st.total_roast_words ?? 0) || 0;
+                        no = Number(st.jiafang_count ?? st.buCount ?? 0) || 0;
+                        please = Number(st.ketao_count ?? st.qingCount ?? 0) || 0;
+                        day = Number(st.work_days ?? st.usageDays ?? st.usage_days ?? st.days ?? 0) || 0;
+                        word = Number(st.avg_user_message_length ?? st.avg_message_length ?? st.avgMessageLength ?? 0) || 0;
+                        if (word === 0 && ai > 0 && say > 0) word = Math.round(say / ai);
+                    }
+                }
+                if ((no === 0 && please === 0) || (!ai && !say)) {
+                    var histStr = typeof localStorage !== 'undefined' ? localStorage.getItem('cursor_clinical_history') : '';
+                    var hist = histStr ? JSON.parse(histStr) : null;
+                    var vr = hist && hist.analysisData && hist.analysisData.vibeResult ? hist.analysisData.vibeResult : null;
+                    var vrSt = (vr && (vr.statistics || vr.stats)) || null;
+                    if (vrSt) {
+                        if (ai === 0) ai = Number(vrSt.total_messages ?? vrSt.totalMessages ?? 0) || 0;
+                        if (say === 0) say = Number(vrSt.total_chars ?? vrSt.totalChars ?? 0) || 0;
+                        if (no === 0) no = Number(vrSt.jiafang_count ?? vrSt.buCount ?? 0) || 0;
+                        if (please === 0) please = Number(vrSt.ketao_count ?? vrSt.qingCount ?? 0) || 0;
+                        if (day === 0) day = Number(vrSt.work_days ?? vrSt.usageDays ?? 0) || 0;
+                        if (word === 0 && ai > 0 && say > 0) word = Math.round(say / ai);
+                    }
+                }
+                if (ai > 0 || say > 0 || no > 0 || please > 0 || day > 0) {
+                    return { ai: ai, say: say, day: day, word: word, no: no, please: please };
+                }
+                return null;
+            } catch (e) {
+                console.warn('[Drawer] getLocalCursorTotalsForDrawer 失败:', e);
+                return null;
+            }
+        }
+
+        /**
+         * 用本地 Cursor 数据构建排行榜（高分图谱）所需的 topByMetrics 结构，供 lastData.topByMetrics 为空时兜底
+         * 保证右侧抽屉排行榜/打工榜至少显示当前用户一条记录
+         * @returns {Array<{ key: string, labelZh: string, labelEn: string, leaders: Array }>}
+         */
+        function buildTopByFromLocalCursor() {
+            var totals = typeof getLocalCursorTotalsForDrawer === 'function' ? getLocalCursorTotalsForDrawer() : null;
+            if (!totals || (totals.ai === 0 && totals.say === 0 && totals.no === 0 && totals.please === 0 && totals.day === 0)) return [];
+            var cu = window.currentUserData || window.currentUser || {};
+            var displayName = (cu.user_name || cu.name || cu.github_username || cu.github_login || (typeof localStorage !== 'undefined' && localStorage.getItem('github_username')) || '').trim() || (typeof currentLang !== 'undefined' && currentLang === 'en' ? 'Me' : '我');
+            var user = { user_name: displayName, github_username: cu.github_username || cu.github_login || displayName };
+            var baseLeader = { rank: 1, rn: 1, user: user };
+            var metricOrder = ['total_user_chars', 'total_messages', 'jiafang_count', 'ketao_count', 'work_days'];
+            var labels = [
+                { key: 'total_user_chars', labelZh: '废话输出', labelEn: 'User Chars' },
+                { key: 'total_messages', labelZh: '调戏AI次数', labelEn: 'Messages' },
+                { key: 'jiafang_count', labelZh: '甲方上身', labelEn: 'Jiafang' },
+                { key: 'ketao_count', labelZh: '磕头', labelEn: 'Ketao' },
+                { key: 'work_days', labelZh: '上岗天数', labelEn: 'Work Days' }
+            ];
+            var valueByKey = {
+                total_user_chars: totals.say,
+                total_messages: totals.ai,
+                jiafang_count: totals.no,
+                ketao_count: totals.please,
+                work_days: totals.day
+            };
+            return metricOrder.map(function (key) {
+                var val = valueByKey[key];
+                if (val === undefined || val === null) val = 0;
+                var lab = labels.filter(function (m) { return m.key === key; })[0] || { labelZh: key, labelEn: key };
+                return {
+                    key: key,
+                    labelZh: lab.labelZh,
+                    labelEn: lab.labelEn,
+                    leaders: [{ score: Number(val), vibe_index_num: Number(val), user: user, rank: 1, rn: 1 }]
+                };
+            });
+        }
+
+        /**
+         * 用本地 Cursor 数据构建「六榜」结构（与 fetchGlobalRankings 返回格式一致），供排行榜视图在接口无数据时兜底
+         * @returns {Object|null} 同 fetchGlobalRankings 的返回值，无数据时返回 null
+         */
+        function buildGlobalRankingsFromLocalCursor() {
+            var totals = typeof getLocalCursorTotalsForDrawer === 'function' ? getLocalCursorTotalsForDrawer() : null;
+            if (!totals || (totals.ai === 0 && totals.say === 0 && totals.no === 0 && totals.please === 0 && totals.day === 0)) return null;
+            var cu = window.currentUserData || window.currentUser || {};
+            var displayName = (cu.user_name || cu.name || cu.github_username || cu.github_login || (typeof localStorage !== 'undefined' && localStorage.getItem('github_username')) || '').trim() || (typeof currentLang !== 'undefined' && currentLang === 'en' ? 'Me' : '我');
+            var fp = (cu.fingerprint || cu.user_fingerprint || (typeof localStorage !== 'undefined' && localStorage.getItem('user_fingerprint')) || window.fpId || '').trim() || ('fp_' + Math.random().toString(36).slice(2, 8));
+            var identity = (cu.user_identity && String(cu.user_identity).trim()) || (displayName && displayName !== '我' ? 'github' : 'fingerprint');
+            var defAvatar = (typeof DEFAULT_AVATAR !== 'undefined' ? DEFAULT_AVATAR : '') || '';
+            var avatar = (identity === 'github' && displayName) ? ('https://github.com/' + encodeURIComponent(displayName) + '.png?size=64') : defAvatar;
+            var baseRow = {
+                rank: 1,
+                fingerprint: fp,
+                username: displayName ? '@' + displayName : ('user_' + fp.slice(0, 6)),
+                user_name: displayName,
+                user_identity: identity,
+                avatar: avatar,
+                countryCode: 'UN',
+                manual_location: null,
+                country_code: 'UN',
+                personality_title: '--',
+                vibe_index_str: ''
+            };
+            var avgWord = (totals.ai > 0 && totals.say > 0) ? Math.round(totals.say / totals.ai) : 0;
+            var dims = [
+                { key: 'ketao_count', label: '磕头榜', desc: '顶级礼貌大户', value: totals.please },
+                { key: 'jiafang_count', label: '霸总榜', desc: '对 AI 极限否定', value: totals.no },
+                { key: 'work_days', label: '打工榜', desc: '上岗天数', value: totals.day },
+                { key: 'total_messages', label: '话痨榜', desc: '对话回合', value: totals.ai },
+                { key: 'avg_user_message_length', label: '纠结榜', desc: '单次指令厚度', value: avgWord },
+                { key: 'total_chars', label: '社畜榜', desc: 'Token 霸权', value: totals.say }
+            ];
+            var out = {};
+            dims.forEach(function (d) {
+                out[d.key] = {
+                    key: d.key,
+                    label: d.label,
+                    desc: d.desc,
+                    data: [{ value: d.value, ...baseRow }]
+                };
+            });
+            return out;
+        }
+
+        function getCurrentUserForRankingOverlay() {
+            try {
+                var current = window.currentUserData || window.currentUser || null;
+                if (!current || typeof current !== 'object') return null;
+                var merged = current;
+                var localStats = window.last_local_stats;
+                if (localStats && localStats.payload && (Date.now() - (localStats.ts || 0)) < 300000 && typeof buildUserDataFromLocalAnalysis === 'function') {
+                    merged = buildUserDataFromLocalAnalysis(merged, localStats.payload);
+                }
+                if (typeof readLastAnalysisDataForCurrentDevice === 'function' && typeof buildUserDataFromLocalAnalysis === 'function') {
+                    var localStoredAnalysis = readLastAnalysisDataForCurrentDevice(merged);
+                    if (localStoredAnalysis) {
+                        merged = buildUserDataFromLocalAnalysis(merged, localStoredAnalysis);
+                    }
+                }
+                if (typeof readCursorHistoryForCurrentDevice === 'function' &&
+                    typeof normalizeCursorHistoryToAnalysisPayload === 'function' &&
+                    typeof buildUserDataFromLocalAnalysis === 'function') {
+                    var cursorHistory = readCursorHistoryForCurrentDevice(merged);
+                    if (cursorHistory) {
+                        var normalizedHistory = normalizeCursorHistoryToAnalysisPayload(cursorHistory);
+                        if (normalizedHistory) {
+                            merged = buildUserDataFromLocalAnalysis(merged, normalizedHistory);
+                        }
+                    }
+                }
+                if (typeof getBestUserRecordForStats === 'function') {
+                    merged = getBestUserRecordForStats(merged) || merged;
+                }
+                return merged;
+            } catch (e) {
+                console.warn('[RankingOverlay] getCurrentUserForRankingOverlay failed:', e);
+                return window.currentUserData || window.currentUser || null;
+            }
+        }
+
+        function isSameUserForRankingOverlay(row, user) {
+            try {
+                if (!row || !user) return false;
+                var normalize = function(v) { return v == null ? '' : String(v).trim().toLowerCase(); };
+                var rowFp = normalize(row.fingerprint || row.user_fingerprint || row.user?.fingerprint || row.user?.user_fingerprint);
+                var userFp = normalize(user.fingerprint || user.user_fingerprint);
+                if (rowFp && userFp && rowFp === userFp) return true;
+                var rowGitHub = normalize(
+                    row.github_login ||
+                    row.github_username ||
+                    row.user_name ||
+                    row.username ||
+                    row.user?.github_login ||
+                    row.user?.github_username ||
+                    row.user?.user_name ||
+                    row.user?.username
+                );
+                var userGitHub = normalize(user.github_login || user.github_username || user.user_name || user.name);
+                if (rowGitHub && userGitHub && rowGitHub === userGitHub) return true;
+                var rowIdentity = normalize(row.user_identity || row.user?.user_identity);
+                var userIdentity = normalize(user.user_identity);
+                return !!(rowIdentity && userIdentity && rowIdentity === userIdentity);
+            } catch (_) {
+                return false;
+            }
+        }
+
+        function getRankingMetricValueForUser(metricKey, user) {
+            if (!user || typeof extractDimensionValues !== 'function') return 0;
+            var values = extractDimensionValues(user) || {};
+            switch (metricKey) {
+                case 'total_messages':
+                    return Number(values.ai) || 0;
+                case 'total_chars':
+                case 'total_user_chars':
+                    return Number(values.say) || 0;
+                case 'avg_user_message_length':
+                case 'avg_message_length':
+                    return Number(values.word) || 0;
+                case 'work_days':
+                    return Number(values.day) || 0;
+                case 'jiafang_count':
+                    return Number(values.no) || 0;
+                case 'ketao_count':
+                    return Number(values.please) || 0;
+                default:
+                    return Number(user[metricKey]) || 0;
+            }
+        }
+
+        function buildCurrentUserRankingRow(metricKey, user) {
+            if (!user) return null;
+            var value = getRankingMetricValueForUser(metricKey, user);
+            if (!(value > 0)) return null;
+            var displayName = String(user.github_login || user.github_username || user.user_name || user.name || '').trim();
+            var userIdentity = String(user.user_identity || (displayName ? 'github' : 'fingerprint') || '').trim() || 'fingerprint';
+            var vibeIndexStr = String(user.vibe_index_str || user.lpdef || '').trim();
+            if (!vibeIndexStr && typeof scoresToVibeIndexStr === 'function') {
+                vibeIndexStr = String(scoresToVibeIndexStr(user) || '').trim();
+            }
+            var personalityTitle = vibeIndexStr || '--';
+            if (typeof getPersonalityTitle === 'function' && vibeIndexStr) {
+                try {
+                    var titleResult = getPersonalityTitle({ vibe_index_str: vibeIndexStr, user_identity: userIdentity }, currentLang || 'zh');
+                    if (titleResult && String(titleResult).trim()) {
+                        personalityTitle = String(titleResult).trim();
+                    }
+                } catch (_) {}
+            }
+            var manualLoc = String(user.manual_location || '').trim();
+            var rawCountry = String(user.country_code || user.countryCode || '').trim();
+            var countryCode = (manualLoc.length === 2 && /^[A-Za-z]{2}$/.test(manualLoc)) ? manualLoc.toUpperCase() : (rawCountry || 'UN');
+            var avatarName = displayName || String(user.user_name || '').trim();
+            var avatar = (userIdentity === 'github' && avatarName)
+                ? ('https://github.com/' + encodeURIComponent(avatarName) + '.png?size=64')
+                : (typeof DEFAULT_AVATAR !== 'undefined' ? DEFAULT_AVATAR : '');
+            var flagEmoji = typeof getFlagEmoji === 'function' ? getFlagEmoji(countryCode) : '';
+            return {
+                fingerprint: String(user.fingerprint || user.user_fingerprint || '').trim(),
+                username: displayName ? ('@' + displayName) : '',
+                avatar: avatar,
+                github_login: String(user.github_login || '').trim(),
+                github_username: String(user.github_username || user.github_login || '').trim(),
+                user_name: String(user.user_name || displayName || '').trim(),
+                value: value,
+                user_identity: userIdentity,
+                vibe_index_str: vibeIndexStr,
+                personality_title: personalityTitle,
+                countryCode: countryCode,
+                manual_location: manualLoc || null,
+                country_code: countryCode,
+                flagEmoji: flagEmoji
+            };
+        }
+
+        function applyCurrentUserOverlayToGlobalRankings(rankings, topN) {
+            if (!rankings || typeof rankings !== 'object') return rankings;
+            var currentUser = getCurrentUserForRankingOverlay();
+            if (!currentUser) return rankings;
+            var limit = Number(topN) || 10;
+            Object.keys(rankings).forEach(function(metricKey) {
+                var rankingData = rankings[metricKey];
+                if (!rankingData || typeof rankingData !== 'object') return;
+                var overlayRow = buildCurrentUserRankingRow(metricKey, currentUser);
+                if (!overlayRow) return;
+                var rows = Array.isArray(rankingData.data) ? rankingData.data.slice() : [];
+                var hitIndex = rows.findIndex(function(row) { return isSameUserForRankingOverlay(row, currentUser); });
+                if (hitIndex >= 0) {
+                    rows[hitIndex] = Object.assign({}, rows[hitIndex], overlayRow);
+                } else {
+                    rows.push(overlayRow);
+                }
+                rows = rows.filter(function(row) {
+                    return row && Number(row.value) > 0;
+                }).sort(function(a, b) {
+                    return (Number(b && b.value) || 0) - (Number(a && a.value) || 0);
+                }).slice(0, limit).map(function(row, idx) {
+                    return Object.assign({}, row, { rank: idx + 1 });
+                });
+                rankings[metricKey] = Object.assign({}, rankingData, { data: rows });
+            });
+            return rankings;
+        }
+
+        function applyCurrentUserOverlayToTopByMetrics(topBy, topN) {
+            var list = Array.isArray(topBy) ? topBy.slice() : [];
+            var currentUser = getCurrentUserForRankingOverlay();
+            if (!currentUser) return list;
+            var limit = Number(topN) || 10;
+            var metricDefs = [
+                { key: 'total_user_chars', labelZh: '废话输出', labelEn: 'User Chars' },
+                { key: 'total_messages', labelZh: '调戏AI次数', labelEn: 'Messages' },
+                { key: 'jiafang_count', labelZh: '甲方上身', labelEn: 'Jiafang' },
+                { key: 'ketao_count', labelZh: '磕头', labelEn: 'Ketao' },
+                { key: 'work_days', labelZh: '上岗天数', labelEn: 'Work Days' }
+            ];
+            var displayName = String(currentUser.user_name || currentUser.github_login || currentUser.github_username || currentUser.name || '').trim();
+            var githubName = String(currentUser.github_login || currentUser.github_username || displayName || '').trim();
+            var userPayload = {
+                fingerprint: String(currentUser.fingerprint || currentUser.user_fingerprint || '').trim(),
+                user_name: displayName,
+                github_login: String(currentUser.github_login || '').trim(),
+                github_username: githubName,
+                user_identity: String(currentUser.user_identity || (githubName ? 'github' : 'fingerprint') || '').trim() || 'fingerprint',
+                lpdef: String(currentUser.lpdef || '').trim()
+            };
+            metricDefs.forEach(function(metricDef) {
+                var overlayValue = getRankingMetricValueForUser(metricDef.key, currentUser);
+                if (!(overlayValue > 0)) return;
+                var idx = list.findIndex(function(item) {
+                    var itemKey = String(item && item.key || '').trim();
+                    return itemKey === metricDef.key || (metricDef.key === 'total_user_chars' && itemKey === 'total_chars');
+                });
+                var metricItem = idx >= 0 ? Object.assign({}, list[idx]) : {
+                    key: metricDef.key,
+                    labelZh: metricDef.labelZh,
+                    labelEn: metricDef.labelEn,
+                    leaders: []
+                };
+                var leaders = Array.isArray(metricItem.leaders) ? metricItem.leaders.slice() : [];
+                var rowIndex = leaders.findIndex(function(row) {
+                    return isSameUserForRankingOverlay(row && row.user ? row.user : row, currentUser);
+                });
+                var overlayLeader = {
+                    score: Number(overlayValue),
+                    vibe_index_num: Number(overlayValue),
+                    user: Object.assign({}, userPayload)
+                };
+                if (rowIndex >= 0) {
+                    leaders[rowIndex] = Object.assign({}, leaders[rowIndex], overlayLeader, {
+                        user: Object.assign({}, leaders[rowIndex].user || {}, overlayLeader.user)
+                    });
+                } else {
+                    leaders.push(overlayLeader);
+                }
+                leaders = leaders.filter(function(row) {
+                    return row && Number(row.score ?? row.vibe_index_num ?? 0) > 0;
+                }).sort(function(a, b) {
+                    return (Number(b && (b.score ?? b.vibe_index_num)) || 0) - (Number(a && (a.score ?? a.vibe_index_num)) || 0);
+                }).slice(0, limit).map(function(row, rankIndex) {
+                    return Object.assign({}, row, { rank: rankIndex + 1, rn: rankIndex + 1 });
+                });
+                metricItem.key = metricDef.key;
+                metricItem.labelZh = metricItem.labelZh || metricDef.labelZh;
+                metricItem.labelEn = metricItem.labelEn || metricDef.labelEn;
+                metricItem.leaders = leaders;
+                if (idx >= 0) list[idx] = metricItem;
+                else list.push(metricItem);
+            });
+            return list;
         }
 
         /**
@@ -7962,6 +8765,52 @@
         }
 
         function showDrawersWithCountryData(countryCode, countryName, overrideRightData, options) {
+            const isGlobalDrawerView = typeof currentViewState === 'string' && currentViewState === 'GLOBAL';
+            if (isGlobalDrawerView && typeof getLatestGlobalData === 'function') {
+                try {
+                    var scoreGlobalPayload = function(payload) {
+                        if (!payload || typeof payload !== 'object') return -1;
+                        var normalized = typeof normalizeStats === 'function' ? normalizeStats(payload) : payload;
+                        var ct = normalized && normalized.countryTotals ? normalized.countryTotals : {};
+                        var totalUsers = Number(
+                            normalized.totalUsers ??
+                            normalized.total_users ??
+                            payload.totalUsers ??
+                            payload.total_users ??
+                            payload.user_count ??
+                            0
+                        ) || 0;
+                        var totalAnalysis = Number(
+                            normalized.totalAnalysis ??
+                            normalized.total_analysis ??
+                            payload.totalAnalysis ??
+                            payload.total_analysis ??
+                            payload.totalanalysis ??
+                            payload.msg_count ??
+                            ct.total_messages ??
+                            ct.ai ??
+                            0
+                        ) || 0;
+                        var totalChars = Number(
+                            normalized.totalChars ??
+                            normalized.total_chars ??
+                            payload.totalChars ??
+                            payload.total_chars ??
+                            payload.totalchars ??
+                            ct.total_chars ??
+                            ct.say ??
+                            0
+                        ) || 0;
+                        return (totalUsers > 0 ? 1 : 0) + totalAnalysis * 1000 + totalChars;
+                    };
+                    var latestGlobalData = getLatestGlobalData();
+                    if (scoreGlobalPayload(latestGlobalData) > scoreGlobalPayload(overrideRightData)) {
+                        overrideRightData = latestGlobalData;
+                    }
+                } catch (e) {
+                    console.warn('[GlobalCards] overrideRightData heal failed:', e);
+                }
+            }
             // 统一入口：有传入数据时先归一化并写入全局，供后续卡片与 renderCardsStaggered 使用
             if (overrideRightData != null && typeof overrideRightData === 'object') {
                 var normalizedData = normalizeStats(overrideRightData);
@@ -7970,22 +8819,29 @@
                 window.rightDrawerData.countryTotals = normalizedData.countryTotals;
                 console.log('[Data Sync] 数据已对齐:', window.rightDrawerData.countryTotals);
             }
-            // 【彻底解决卡片重复】先使旧渲染代次失效，再清空容器，避免旧 setTimeout 继续 append
-            try {
-                const globalCardsContainer = document.getElementById('global-cards-container') || document.getElementById('panel-global-content');
-                if (globalCardsContainer) {
-                    globalCardsContainer.dataset.drawerRenderGen = String(Date.now());
-                    globalCardsContainer.innerHTML = '';
-                }
-            } catch (e) {
-                console.warn('[Drawer] 清空容器失败:', e);
-            }
-            
             const opts = (options && typeof options === 'object') ? options : {};
             const summaryOnly = !!(opts.summaryOnly && overrideRightData != null);
             if (!summaryOnly && (countryCode == null || countryCode === '')) return;
             const ccUpper = String(countryCode || '').trim().toUpperCase();
             if (!ccUpper && !summaryOnly) return;
+            const useGlobalPkBoard =
+                ccUpper === 'GLOBAL' ||
+                (typeof currentViewState === 'string' && currentViewState === 'GLOBAL');
+
+            // 【彻底解决卡片重复】先使旧渲染代次失效，再清空容器，避免旧 setTimeout 继续 append
+            try {
+                const globalCardsContainer = document.getElementById('global-cards-container') || document.getElementById('panel-global-content');
+                if (globalCardsContainer) {
+                    globalCardsContainer.dataset.drawerRenderGen = String(Date.now());
+                    if (!useGlobalPkBoard) {
+                        globalCardsContainer.innerHTML = '';
+                    } else if (typeof window.ensureGlobalCountryPkScaffold === 'function') {
+                        window.ensureGlobalCountryPkScaffold();
+                    }
+                }
+            } catch (e) {
+                console.warn('[Drawer] 清空容器失败:', e);
+            }
             
             try {
             // 请求去重：如果已有相同国家的请求在进行中，且不是 summaryOnly 模式，则跳过
@@ -8144,8 +9000,15 @@
                 }
                 if (rightBody) {
                     const contentContainer = document.getElementById('panel-global-content') || rightBody;
-                    contentContainer.innerHTML = skeletonHTML + skeletonHTML;
-                    contentContainer.classList.add('drawer-loading');
+                    if (!useGlobalPkBoard) {
+                        contentContainer.innerHTML = skeletonHTML + skeletonHTML;
+                        contentContainer.classList.add('drawer-loading');
+                    } else {
+                        if (typeof window.ensureGlobalCountryPkScaffold === 'function') {
+                            window.ensureGlobalCountryPkScaffold();
+                        }
+                        contentContainer.classList.remove('drawer-loading');
+                    }
                 }
             }
 
@@ -8302,6 +9165,20 @@
             }
             // 统一用归一化结果覆盖 countryTotals，确保后续卡片使用的全是归一化后的六维数据（打通全维度数据链）
             rightDrawerData.countryTotals = normalizeStats(rightDrawerData).countryTotals;
+            // 【右侧抽屉 Cursor 补全】当接口/缓存无数据时，用本地 Cursor 分析缓存填充右侧抽屉，避免一直为 0
+            var ct = rightDrawerData.countryTotals || {};
+            var ctEmpty = !(Number(ct.ai) > 0 || Number(ct.say) > 0 || Number(ct.no) > 0 || Number(ct.please) > 0 || Number(ct.day) > 0);
+            if (ctEmpty && typeof getLocalCursorTotalsForDrawer === 'function') {
+                var localTotals = getLocalCursorTotalsForDrawer();
+                if (localTotals && (localTotals.ai > 0 || localTotals.say > 0 || localTotals.no > 0 || localTotals.please > 0)) {
+                    rightDrawerData.countryTotals = {
+                        ai: localTotals.ai, say: localTotals.say, day: localTotals.day,
+                        word: localTotals.word, no: localTotals.no, please: localTotals.please,
+                        total_messages: localTotals.ai, total_chars: localTotals.say, work_days: localTotals.day,
+                        jiafang_count: localTotals.no, ketao_count: localTotals.please, avg_user_message_length: localTotals.word
+                    };
+                }
+            }
             
             // 【调试】检查 rightDrawerData 结构（在渲染卡片之前）
             // 注意：isGlobalViewForCards 在这里还未定义，需要在后面检查
@@ -8314,10 +9191,11 @@
                 // 【修复】在 global 视图时，必须获取国家数据，确保卡片显示的是国家总数而不是全球总数
                 const shouldFetchSummary =
                     !summaryOnly &&
+                    !isGlobalView &&
                     overrideRightData == null &&
                     cc.length === 2 &&
                     typeof fetchCountrySummaryV3 === 'function' &&
-                    (isGlobalView || cachedSummary == null); // global 视图或没有缓存时都要获取
+                    cachedSummary == null;
                 if (shouldFetchSummary) {
                     // 标记请求进行中
                     window.__drawerFetchInProgress.set(cc, true);
@@ -8460,7 +9338,7 @@
                     currentUser = window.allData.find(item => {
                         const ifp = norm(item.fingerprint || item.user_fingerprint);
                         const iid = norm(item.user_identity);
-                        return (ifp && (ifp === norm(localFp) || iid === norm(localFp))) || (iid && iid === norm(localFp)) || (localGh && norm(String(item.github_username || item.user_name || '')) === norm(localGh));
+                        return (ifp && (ifp === norm(localFp) || iid === norm(localFp))) || (iid && iid === norm(localFp)) || (localGh && norm(String(item.github_login || item.github_username || item.user_name || '')) === norm(localGh));
                     }) || null;
                 }
             } else {
@@ -8548,7 +9426,7 @@
                             const normalizedLocalGitHub = normalizeFingerprint(localGitHubName);
                             const normalizedUrlGitHub = normalizeFingerprint(urlGitHubName);
                             const matchedUser = allData.find(item => {
-                                const itemGitHub = normalizeFingerprint(item.github_username || item.github_id || item.user_name || item.name);
+                                const itemGitHub = normalizeFingerprint(item.github_login || item.github_username || item.github_id || item.user_name || item.name);
                                 return itemGitHub && (itemGitHub === normalizedLocalGitHub || itemGitHub === normalizedUrlGitHub);
                             });
 
@@ -8573,12 +9451,19 @@
                                     supabaseClient
                                         .from('v_user_analysis_extended')
                                         .select('*')
-                                        // GitHub 用户名大小写不敏感：避免 user_name 大小写不一致导致查不到
-                                        .ilike('user_name', String(localGitHubName).trim())
+                                        .ilike('github_login', String(localGitHubName).trim())
                                         .maybeSingle()
                                         .then(({ data: dbUser }) => {
+                                            if (dbUser || isGuestDrawerFlow) return { data: dbUser };
+                                            return supabaseClient
+                                                .from('v_user_analysis_extended')
+                                                .select('*')
+                                                .ilike('user_name', String(localGitHubName).trim())
+                                                .maybeSingle();
+                                        })
+                                        .then(({ data: dbUser }) => {
                                             if (!dbUser || isGuestDrawerFlow) return;
-                                            console.log('[Drawer] ✅ Supabase 兜底找到 GitHub 用户:', dbUser.user_name || dbUser.name);
+                                            console.log('[Drawer] ✅ Supabase 兜底找到 GitHub 用户:', dbUser.github_login || dbUser.user_name || dbUser.name);
                                             // 【核心保护】使用安全合并，防止覆盖已有的高数值
                                             var existingUser = window.currentUser || window.currentUserData || {};
                                             var mergedUser = (typeof safeMaxMergeUserData === 'function')
@@ -8637,7 +9522,7 @@
                         const normalizedUrlGitHub = normalizeFingerprint(urlGitHubName);
                         
                         currentUser = allData.find(item => {
-                            const itemGitHub = normalizeFingerprint(item.github_username || item.user_name || item.name);
+                            const itemGitHub = normalizeFingerprint(item.github_login || item.github_username || item.user_name || item.name);
                             return itemGitHub && (itemGitHub === normalizedLocalGitHub || itemGitHub === normalizedUrlGitHub);
                         });
                         
@@ -8653,12 +9538,19 @@
                                 supabaseClient
                                     .from('v_user_analysis_extended')
                                     .select('*')
-                                    // GitHub 用户名大小写不敏感：避免 user_name 大小写不一致导致查不到
-                                    .ilike('user_name', String(localGitHubName).trim())
+                                    .ilike('github_login', String(localGitHubName).trim())
                                     .maybeSingle()
                                     .then(({ data: dbUser }) => {
+                                        if (dbUser) return { data: dbUser };
+                                        return supabaseClient
+                                            .from('v_user_analysis_extended')
+                                            .select('*')
+                                            .ilike('user_name', String(localGitHubName).trim())
+                                            .maybeSingle();
+                                    })
+                                    .then(({ data: dbUser }) => {
                                         if (!dbUser) return;
-                                        console.log('[Drawer] ✅ Supabase 最终兜底找到 GitHub 用户:', dbUser.user_name || dbUser.name);
+                                        console.log('[Drawer] ✅ Supabase 最终兜底找到 GitHub 用户:', dbUser.github_login || dbUser.user_name || dbUser.name);
                                         // 【核心保护】使用安全合并，防止覆盖已有的高数值
                                         var existingUser = window.currentUser || window.currentUserData || {};
                                         var mergedUser = (typeof safeMaxMergeUserData === 'function')
@@ -8981,7 +9873,24 @@
             // 升级渲染引擎：在所有 UI 渲染和排名计算之前归一化字段（total_messages_sum/totalAnalysis/ai -> ai 等）
             const normalizedData = normalizeStats(rightDrawerData);
             
-            if (rightBody) {
+            if (rightBody && useGlobalPkBoard) {
+                try {
+                    if (typeof window.ensureGlobalCountryPkScaffold === 'function') {
+                        window.ensureGlobalCountryPkScaffold();
+                    }
+                    if (typeof window.initCountryPkBoard === 'function') {
+                        window.initCountryPkBoard();
+                    }
+                    if (typeof window.refreshCountryPkBoard === 'function') {
+                        window.refreshCountryPkBoard(false);
+                    }
+                } catch (e) {
+                    console.warn('[GlobalPK] 渲染国家榜失败:', e);
+                }
+                try { setRightDrawerLoading(false); } catch { /* ignore */ }
+            }
+
+            if (rightBody && !useGlobalPkBoard) {
                 // 先添加维度卡片（即使没有 RANK_RESOURCES 也要显示）
                 // 【修复】在 global 视图时，维度卡片应显示国家累加值，而不是个人数据
                 const isGlobalViewForCards = typeof currentViewState === 'string' && currentViewState === 'GLOBAL';
@@ -9346,6 +10255,9 @@
                         // 【重构】只有在排行榜视图可见时才渲染高分图谱
                         if (typeof drawHighScores === 'function' && currentViewState === 'RANKING') {
                             var topBy = (window.lastData && window.lastData.topByMetrics) ? window.lastData.topByMetrics : [];
+                            if (!Array.isArray(topBy) || !topBy.length) {
+                                if (typeof buildTopByFromLocalCursor === 'function') topBy = buildTopByFromLocalCursor();
+                            }
                             if (Array.isArray(topBy) && topBy.length > 0) {
                                 console.log('[showDrawersWithCountryData] 准备渲染高分图谱到排行榜视图');
                                 drawHighScores(topBy);
@@ -9571,13 +10483,13 @@
 
             // 将“暂无数据”的占位渲染出来，避免空白
             try {
-                if (typeof window.__statsSourceType !== 'string') window.__statsSourceType = 'cursor';
+                if (typeof window.__statsSourceType !== 'string') window.__statsSourceType = 'all';
                 var switcher = mount.querySelector('#statsSourceSwitcher');
                 if (switcher) {
                     var syncSwitcherState = function(src) {
-                        var normalized = (src === 'openclaw' || src === 'all') ? src : 'cursor';
+                        var normalized = (src === 'cursor' || src === 'openclaw' || src === 'all') ? src : 'all';
                         switcher.querySelectorAll('.source-btn').forEach(function(b) {
-                            var active = (b.getAttribute('data-source') || 'cursor') === normalized;
+                            var active = (b.getAttribute('data-source') || 'all') === normalized;
                             b.classList.toggle('active', active);
                             b.classList.toggle('text-zinc-500', !active);
                             b.style.borderColor = active ? 'rgba(0,255,65,0.4)' : 'transparent';
@@ -9645,25 +10557,29 @@
                 return;
             }
             if (view === 'GLOBAL') {
-                var globalCode = (currentDrawerCountry && currentDrawerCountry.code) ? String(currentDrawerCountry.code).trim().toUpperCase() : null;
-                var globalName = (currentDrawerCountry && currentDrawerCountry.name) || null;
-                if (!globalCode) {
-                    var userCountry = window.currentUserCountry || (window.currentUser && (window.currentUser.country_code || window.currentUser.ip_location)) || (window.currentUserData && (window.currentUserData.country_code || window.currentUserData.ip_location)) || 'US';
-                    if (userCountry && /^[A-Z]{2}$/.test(String(userCountry).trim().toUpperCase())) {
-                        globalCode = String(userCountry).trim().toUpperCase();
-                        globalName = countryNameMap && countryNameMap[globalCode] ? (currentLang === 'zh' ? countryNameMap[globalCode].zh : countryNameMap[globalCode].en) : globalCode;
+                var globalCode = 'GLOBAL';
+                var globalName = currentLang === 'en' ? 'Global' : '全球';
+                try {
+                    currentDrawerCountry.code = globalCode;
+                    currentDrawerCountry.name = globalName;
+                    var leftTitle = document.getElementById('left-drawer-title');
+                    var rightTitle = document.getElementById('right-drawer-title');
+                    if (leftTitle) leftTitle.textContent = globalName;
+                    if (rightTitle) rightTitle.textContent = globalName;
+                } catch (e) { /* ignore */ }
+                try {
+                    if (typeof window.ensureGlobalCountryPkScaffold === 'function') {
+                        window.ensureGlobalCountryPkScaffold();
                     }
-                }
-                if (globalCode && globalName && typeof fetchCountrySummaryV3 === 'function') {
-                    fetchCountrySummaryV3(globalCode).then(function(summary) {
-                        if (summary && (summary.countryTotals || (summary.data && summary.data.countryTotals)) && typeof showDrawersWithCountryData === 'function') {
-                            showDrawersWithCountryData(globalCode, globalName, summary, { summaryOnly: true });
-                        }
-                        done();
-                    }).catch(function() { done(); });
-                } else {
-                    done();
-                }
+                    if (typeof window.initCountryPkBoard === 'function') {
+                        window.initCountryPkBoard();
+                    }
+                } catch (e) { /* ignore */ }
+                Promise.resolve(
+                    (typeof window.refreshCountryPkBoard === 'function')
+                        ? window.refreshCountryPkBoard(true)
+                        : null
+                ).finally(function() { done(); });
                 return;
             }
             if (view === 'OPENCLAW') {
@@ -9686,10 +10602,14 @@
             if (state.isGlobalInitializing && !window.__allowInitCall) return;
             console.log('[switchView] 切换到视图:', view);
             var targetView = (view || '').toUpperCase();
+            // 数据源策略：
+            // - global / country / ranking：默认走全量口径（all），避免 source_type 过滤导致国家面板大量字段为 0 或缺失
+            // - leaderboard：GitHub
+            // - openclaw：OpenClaw
             var sourceByView = {
-                global: 'cursor',
-                country: 'cursor',
-                ranking: 'cursor',
+                global: 'all',
+                country: 'all',
+                ranking: 'all',
                 leaderboard: 'github',
                 openclaw: 'openclaw'
             };
@@ -9760,29 +10680,44 @@
             // 根据视图类型执行对应逻辑
             switch(view) {
                 case 'global':
-                    // 全球视图：调用 api/global-average 获取全球总和数据（调戏AI次数/平均长度/上岗天数等全球累计）
+                    // 全球视图：直接使用全局数据源（/api/global-average -> lastData），避免误用 country-summary 覆盖全局卡片
                     let globalCode = 'GLOBAL';
                     let globalName = currentLang === 'en' ? 'Global' : '全球';
-                    {
-                        // 先用已有缓存立即渲染，避免空白等待
-                        var _cachedGlobal = getLatestGlobalData();
-                        var _hasGlobalCache = _cachedGlobal && typeof _cachedGlobal === 'object' && (
-                            Number(_cachedGlobal.totalUsers) > 0 ||
-                            Number(_cachedGlobal.totalAnalysis) > 0 ||
-                            (_cachedGlobal.countryTotals && (Number(_cachedGlobal.countryTotals.ai) > 0 || Number(_cachedGlobal.countryTotals.say) > 0))
+                    if (currentDrawerCountry && typeof currentDrawerCountry === 'object') {
+                        currentDrawerCountry.code = globalCode;
+                        currentDrawerCountry.name = globalName;
+                    }
+                    if (globalCode && globalName && typeof showDrawersWithCountryData === 'function') {
+                        var globalData = getLatestGlobalData();
+                        // 【修复】全球 tab 无数据：无 lastData 或无任何统计字段时强制拉取 global-average，避免一直空白
+                        var hasGlobalData = globalData && typeof globalData === 'object' && (
+                            (globalData.totalUsers != null && Number(globalData.totalUsers) > 0) ||
+                            (globalData.totalAnalysis != null && Number(globalData.totalAnalysis) > 0) ||
+                            (globalData.countryTotals && typeof globalData.countryTotals === 'object' && (
+                                Number(globalData.countryTotals.ai) > 0 || Number(globalData.countryTotals.say) > 0
+                            ))
                         );
-                        if (_hasGlobalCache) {
-                            showDrawersWithCountryData(globalCode, globalName, _cachedGlobal, { summaryOnly: true });
-                        }
-                        // 拉取最新全球数据
+                        var globalOpts = hasGlobalData ? { preferCache: true, silent: true } : { preferCache: false, silent: true, forceRefresh: true };
+                        try {
+                            var leftTitle = document.getElementById('left-drawer-title');
+                            var rightTitle = document.getElementById('right-drawer-title');
+                            if (leftTitle) leftTitle.textContent = globalName;
+                            if (rightTitle) rightTitle.textContent = globalName;
+                        } catch (e) { /* ignore */ }
+                        try {
+                            if (typeof window.ensureGlobalCountryPkScaffold === 'function') {
+                                window.ensureGlobalCountryPkScaffold();
+                            }
+                            if (typeof window.initCountryPkBoard === 'function') {
+                                window.initCountryPkBoard();
+                            }
+                            if (typeof window.refreshCountryPkBoard === 'function') {
+                                window.refreshCountryPkBoard(!hasGlobalData);
+                            }
+                        } catch (e) { /* ignore */ }
                         if (typeof updateCountryDashboard === 'function') {
-                            Promise.resolve(updateCountryDashboard('GLOBAL', null, { preferCache: false, silent: true, forceRefresh: !_hasGlobalCache }))
-                                .then(function () {
-                                    if (typeof currentViewState === 'string' && currentViewState === 'GLOBAL') {
-                                        showDrawersWithCountryData(globalCode, globalName, getLatestGlobalData(), { summaryOnly: true });
-                                    }
-                                })
-                                .catch(function () {});
+                            Promise.resolve(updateCountryDashboard('GLOBAL', null, globalOpts))
+                                .catch(function () { /* ignore */ });
                         }
                     }
                     
@@ -9794,6 +10729,8 @@
                             });
                         }, 500);
                     }
+                    // 【新增】国家 PK 榜：global 视图时初始化（幂等）
+                    try { if (typeof window.initCountryPkBoard === 'function') window.initCountryPkBoard(); } catch (_) {}
                     break;
                     
                 case 'country':
@@ -9824,7 +10761,8 @@
                             switchToCountryView(currentDrawerCountry.code, currentDrawerCountry.name);
                             setTimeout(() => { window.__renderingCountryView = false; }, 100);
                         } else if (countryMount && window.__renderingCountryView !== true) {
-                            updateCountryDashboard(currentDrawerCountry.code, currentDrawerCountry.name, null, { forceRefresh: false });
+                            // 修复：避免 4 参调用导致 options 丢失、命中 sameCountry 缓存而不刷新
+                            updateCountryDashboard(currentDrawerCountry.code, null, { forceRefresh: false });
                         }
                     }
                     // 触发国家视图显示事件，通知词云组件自动加载数据
@@ -9879,9 +10817,14 @@
             console.log('[renderRankingView] 开始渲染排行榜视图');
             
             var gridsEl = document.querySelector('#panel-ranking-view #global-ranking-grids') || document.getElementById('global-ranking-grids');
+            var vibeContainer = document.querySelector('#panel-ranking-view .vibe-index-leaderboard');
             console.log('[renderRankingView] gridsEl:', gridsEl);
             if (gridsEl) {
                 gridsEl.innerHTML = '<div class="col-span-full text-center text-[#00ff41] text-sm py-6">加载中...</div>';
+            }
+            if (vibeContainer) {
+                vibeContainer.innerHTML = '';
+                vibeContainer.style.display = 'none';
             }
             
             // 详细调试信息
@@ -9906,18 +10849,6 @@
                 console.error('[renderRankingView] 未找到排行榜函数！');
                 console.log('[renderRankingView] 请检查 stats2.app.js 是否正确加载');
                 if (gridsEl) gridsEl.innerHTML = '<div class="col-span-full text-center text-zinc-500 text-sm py-4">排行榜脚本未加载，请刷新页面</div>';
-            }
-            
-            var topBy = window.lastData && window.lastData.topByMetrics ? window.lastData.topByMetrics : [];
-            var vibeContainer = document.querySelector('#panel-ranking-view .vibe-index-leaderboard');
-            if (!topBy.length) {
-                if (vibeContainer) {
-                    vibeContainer.innerHTML = '<div class="text-zinc-500 text-xs text-center py-8">暂无高分图谱数据</div>';
-                }
-            } else {
-                if (typeof drawHighScores === 'function') {
-                    drawHighScores(topBy);
-                }
             }
             
             console.log('[renderRankingView] 排行榜渲染完成');
@@ -10287,6 +11218,45 @@
                 console.error('[Leaderboard] fetchAllLeaderboardSnapshots:', e);
                 return null;
             }
+        }
+
+        async function fetchLeaderboardSnapshotsViaRpcFallback() {
+            var sb = (typeof supabaseClient !== 'undefined' && supabaseClient) ? supabaseClient : (window.supabase || null);
+            if (!sb || typeof sb.rpc !== 'function') return null;
+            try {
+                var grouped = await getCachedOrFetch('vibe_leaderboard_snapshots_rpc_fallback', 30 * 60 * 1000, async function() {
+                    var out = {};
+                    await Promise.all(LEADERBOARD_METRIC_KEYS.map(async function(metricKey) {
+                        out[metricKey] = { daily: {}, all_time: {} };
+                        await Promise.all(['daily', 'all_time'].map(async function(rankingType) {
+                            try {
+                                var rows = await getLeaderboardPageCached(sb, metricKey, rankingType, 0, 10);
+                                out[metricKey][rankingType] = {
+                                    top_data: Array.isArray(rows) ? rows : [],
+                                    updated_at: new Date().toISOString()
+                                };
+                            } catch (err) {
+                                console.warn('[Leaderboard] RPC fallback failed:', metricKey, rankingType, err);
+                                out[metricKey][rankingType] = { top_data: [], updated_at: '' };
+                            }
+                        }));
+                    }));
+                    var hasAnyRows = Object.keys(out).some(function(metricKey) {
+                        var item = out[metricKey] || {};
+                        var dailyRows = item.daily && Array.isArray(item.daily.top_data) ? item.daily.top_data : [];
+                        var allTimeRows = item.all_time && Array.isArray(item.all_time.top_data) ? item.all_time.top_data : [];
+                        return dailyRows.length > 0 || allTimeRows.length > 0;
+                    });
+                    return hasAnyRows ? out : null;
+                });
+                if (grouped && typeof grouped === 'object') {
+                    __leaderboardSnapshots = grouped;
+                    return grouped;
+                }
+            } catch (e) {
+                console.warn('[Leaderboard] fetchLeaderboardSnapshotsViaRpcFallback:', e);
+            }
+            return null;
         }
 
         /**
@@ -10848,6 +11818,9 @@
             }
             gridEl.innerHTML = '<div class="col-span-full text-zinc-500 text-sm py-8 text-center" style="grid-column:1/-1;">加载中...</div>';
             var snap = await fetchAllLeaderboardSnapshots();
+            if (!snap || typeof snap !== 'object' || Object.keys(snap).length === 0) {
+                snap = await fetchLeaderboardSnapshotsViaRpcFallback();
+            }
             gridEl.innerHTML = '';
             if (!snap || typeof snap !== 'object') {
                 gridEl.innerHTML = '<div class="col-span-full text-zinc-500 text-sm py-8 text-center" style="grid-column:1/-1;">未连接数据库或暂无快照</div>';
@@ -11166,9 +12139,7 @@
                     console.log('[GlobalRankings] ✅ 返回缓存数据');
                     return __globalRankingsCache.data;
                 }
-                if (!supabaseClient || typeof supabaseClient.from !== 'function') {
-                    console.warn('[GlobalRankings] ⚠️ Supabase 客户端未初始化, supabaseClient:', typeof supabaseClient);
-                    // 返回空排行榜结构，而不是 null
+                var getEmptyRankings = function() {
                     return {
                         ketao_count: { key: 'ketao_count', data: [], label: '磕头榜', desc: '顶级礼貌大户' },
                         jiafang_count: { key: 'jiafang_count', data: [], label: '霸总榜', desc: '对 AI 极限否定' },
@@ -11177,6 +12148,20 @@
                         avg_user_message_length: { key: 'avg_user_message_length', data: [], label: '纠结榜', desc: '单次指令厚度' },
                         total_chars: { key: 'total_chars', data: [], label: '社畜榜', desc: 'Token 霸权' }
                     };
+                };
+                var getLocalFallbackRankings = function() {
+                    var fallback = typeof buildGlobalRankingsFromLocalCursor === 'function' ? buildGlobalRankingsFromLocalCursor() : null;
+                    if (fallback && Object.keys(fallback).length > 0) {
+                        fallback = typeof applyCurrentUserOverlayToGlobalRankings === 'function'
+                            ? applyCurrentUserOverlayToGlobalRankings(fallback, topN)
+                            : fallback;
+                        return fallback;
+                    }
+                    return getEmptyRankings();
+                };
+                if (!supabaseClient || typeof supabaseClient.from !== 'function') {
+                    console.warn('[GlobalRankings] ⚠️ Supabase 客户端未初始化, supabaseClient:', typeof supabaseClient);
+                    return getLocalFallbackRankings();
                 }
                 console.log('[GlobalRankings] ✅ Supabase 客户端已初始化，开始从 v_unified_analysis_v2 获取排行榜数据');
 
@@ -11240,9 +12225,8 @@
                             return { key: dim.key, data: [], label: dim.label, desc: dim.desc };
                         }
 
-                        // 严格容错处理：如果 data 为空或不是数组，返回空数组
+                        // 严格容错处理：如果 data 为空或不是数组，返回空数组（不逐条 warn，由末尾统一汇总）
                         if (!data || !Array.isArray(data) || data.length === 0) {
-                            console.warn(`[GlobalRankings] ⚠️ ${dim.key} 排行榜数据为空`);
                             return { key: dim.key, data: [], label: dim.label, desc: dim.desc };
                         }
 
@@ -11373,9 +12357,20 @@
                     }
                 });
                 
+                rankings = typeof applyCurrentUserOverlayToGlobalRankings === 'function'
+                    ? applyCurrentUserOverlayToGlobalRankings(rankings, topN)
+                    : rankings;
                 __globalRankingsCache = { data: rankings, ts: Date.now() };
                 var emptyCount = Object.keys(rankings).filter(function(k) { return !rankings[k].data || rankings[k].data.length === 0; }).length;
                 if (emptyCount === dimensions.length) {
+                    var fallback = typeof buildGlobalRankingsFromLocalCursor === 'function' ? buildGlobalRankingsFromLocalCursor() : null;
+                    if (fallback && Object.keys(fallback).length > 0) {
+                        fallback = typeof applyCurrentUserOverlayToGlobalRankings === 'function'
+                            ? applyCurrentUserOverlayToGlobalRankings(fallback, topN)
+                            : fallback;
+                        console.log('[GlobalRankings] 六榜接口无数据，已用本地 Cursor 数据兜底展示');
+                        return fallback;
+                    }
                     console.warn('[GlobalRankings] ⚠️ 六个榜单均无数据，请检查：1) Supabase 视图 v_unified_analysis_v2 是否已创建并包含 jiafang_count/ketao_count 等列；2) user_analysis 表中是否有对应数据；3) RLS 是否允许匿名读取');
                 } else {
                     console.log('[GlobalRankings] ✅ 数据获取成功:', Object.keys(rankings), '空榜数:', emptyCount);
@@ -11387,15 +12382,7 @@
                 } else {
                     console.error('[GlobalRankings] ❌ 获取全局排行榜失败:', error);
                 }
-                // 返回空排行榜结构，而不是 null，确保 UI 能正常渲染
-                return {
-                    ketao_count: { key: 'ketao_count', data: [], label: '磕头榜', desc: '顶级礼貌大户' },
-                    jiafang_count: { key: 'jiafang_count', data: [], label: '霸总榜', desc: '对 AI 极限否定' },
-                    work_days: { key: 'work_days', data: [], label: '打工榜', desc: '上岗天数' },
-                    total_messages: { key: 'total_messages', data: [], label: '话痨榜', desc: '对话回合' },
-                    avg_user_message_length: { key: 'avg_user_message_length', data: [], label: '纠结榜', desc: '单次指令厚度' },
-                    total_chars: { key: 'total_chars', data: [], label: '社畜榜', desc: 'Token 霸权' }
-                };
+                return getLocalFallbackRankings();
             }
         }
 
@@ -11623,16 +12610,26 @@
                 }
 
                 // 从 v_unified_analysis_v2 获取用户数据
-                const { data: userData, error: userError } = await supabaseClient
+                const { data: rawUserData, error: userError } = await supabaseClient
                     .from('v_unified_analysis_v2')
                     .select('fingerprint, user_name, user_identity, country_code, vibe_index_str, ketao_count, jiafang_count, work_days, total_messages, avg_user_message_length, total_chars')
                     .eq('fingerprint', data.fingerprint)
                     .limit(1)
                     .single();
+                let userData = rawUserData;
 
                 if (userError || !userData) {
                     console.error('[UserRankingDetail] ❌ 获取用户数据失败:', userError);
                     return;
+                }
+
+                if (typeof getCurrentUserForRankingOverlay === 'function' && typeof isSameUserForRankingOverlay === 'function') {
+                    var currentOverlayUser = getCurrentUserForRankingOverlay();
+                    if (currentOverlayUser && isSameUserForRankingOverlay(data, currentOverlayUser)) {
+                        userData = typeof safeMaxMergeUserData === 'function'
+                            ? safeMaxMergeUserData(userData, currentOverlayUser)
+                            : Object.assign({}, userData, currentOverlayUser);
+                    }
                 }
 
                 // 获取用户在所有六个维度中的排名
@@ -16368,8 +17365,12 @@
             let totalAnalysis =
                 data.totalAnalysis ??
                 data.total_analysis ??
+                data.totalanalysis ??
+                data.msg_count ??
                 data.data?.totalAnalysis ??
                 data.data?.total_analysis ??
+                data.data?.totalanalysis ??
+                data.data?.msg_count ??
                 undefined;
             if (totalAnalysis === undefined || totalAnalysis === null) {
                 const recentVictims = data.recentVictims || data.latestRecords || data.latest_records || [];
@@ -16382,8 +17383,12 @@
             const totalUsersRaw =
                 data.totalUsers ??
                 data.total_users ??
+                data.user_count ??
+                data.users_count ??
                 data.data?.totalUsers ??
                 data.data?.total_users ??
+                data.data?.user_count ??
+                data.data?.users_count ??
                 data.us_stats?.totalUsers ??
                 data.us_stats?.total_users ??
                 undefined;
@@ -16394,10 +17399,12 @@
             let totalRoastWords =
                 data.totalChars ??
                 data.total_chars ??
+                data.totalchars ??
                 data.totalCharsSum ??
                 data.total_chars_sum ??
                 data.totalCharsTotal ??
                 data.total_chars_total ??
+                data.data?.totalchars ??
                 undefined;
             if (totalRoastWords === undefined || totalRoastWords === null || totalRoastWords === 0) {
                 // 尝试从 latestRecords 中获取
@@ -16430,6 +17437,7 @@
             const totalCharsRaw =
                 data.totalChars ??
                 data.total_chars ??
+                data.totalchars ??
                 data.totalCharsSum ??
                 data.total_chars_sum ??
                 totalRoastWords;
@@ -19284,6 +20292,19 @@
                                             // 兼容：若 last_analysis_data 里没有 lang/fingerprint，这里补齐
                                             const safeLang = (analysisData && analysisData.lang) ? analysisData.lang : (localStorage.getItem('appLanguage') || 'zh-CN');
                                             const safeFp = currentFp || (analysisData && analysisData.fingerprint) || null;
+                                            let safeCountryCode = '';
+                                            try {
+                                                const ccRaw = (localStorage.getItem('manual_location') ||
+                                                    analysisData.current_location ||
+                                                    analysisData.country_code ||
+                                                    updatedUser.current_location ||
+                                                    updatedUser.manual_location ||
+                                                    updatedUser.country_code ||
+                                                    updatedUser.ip_location ||
+                                                    window.currentUserCountry ||
+                                                    '').toString().trim().toUpperCase();
+                                                if (/^[A-Z]{2}$/.test(ccRaw)) safeCountryCode = ccRaw;
+                                            } catch (_) {}
                                             
                                             // 如果没有 chatData（可能因 localStorage 容量限制被降级），则只做本地回填，不发请求
                                             if (!analysisData.chatData || !Array.isArray(analysisData.chatData) || analysisData.chatData.length === 0) {
@@ -19331,7 +20352,12 @@
                                                     // /api/v2/analyze 识别用户名字段为 userName（驼峰）
                                                     userName: normalizedUsername,
                                                     lang: safeLang,
-                                                    fingerprint: safeFp
+                                                    fingerprint: safeFp,
+                                                    ...(safeCountryCode ? {
+                                                        manual_location: safeCountryCode,
+                                                        current_location: safeCountryCode,
+                                                        country_code: safeCountryCode
+                                                    } : {})
                                                 })
                                             });
                                             
@@ -21107,12 +22133,30 @@
                 var lastAnalysis = null;
                 try { var la = getCursorAnalysisCache(); if (la) lastAnalysis = JSON.parse(la); } catch (_) {}
                 var ghUser = (localStorage.getItem('github_username') || '').trim();
+                var safeCountryCodeSWR = '';
+                try {
+                    var ccRawSWR = (
+                        localStorage.getItem('manual_location') ||
+                        (window.currentUser && (window.currentUser.current_location || window.currentUser.manual_location || window.currentUser.country_code || window.currentUser.ip_location)) ||
+                        (window.currentUserData && (window.currentUserData.current_location || window.currentUserData.manual_location || window.currentUserData.country_code || window.currentUserData.ip_location)) ||
+                        (lastAnalysis && (lastAnalysis.current_location || lastAnalysis.country_code)) ||
+                        window.currentUserCountry ||
+                        ''
+                    );
+                    ccRawSWR = String(ccRawSWR || '').trim().toUpperCase();
+                    if (/^[A-Z]{2}$/.test(ccRawSWR)) safeCountryCodeSWR = ccRawSWR;
+                } catch (_) {}
                 var body = {
                     fingerprint: fp,
                     chatData: (lastAnalysis && Array.isArray(lastAnalysis.chatData) && lastAnalysis.chatData.length > 0) ? lastAnalysis.chatData : ['.'],
                     lang: (lastAnalysis && lastAnalysis.lang) ? lastAnalysis.lang : (localStorage.getItem('appLanguage') || 'zh-CN'),
                     dimensions: lastAnalysis && lastAnalysis.dimensions ? lastAnalysis.dimensions : undefined,
-                    stats: lastAnalysis && lastAnalysis.stats ? lastAnalysis.stats : undefined
+                    stats: lastAnalysis && lastAnalysis.stats ? lastAnalysis.stats : undefined,
+                    ...(safeCountryCodeSWR ? {
+                        manual_location: safeCountryCodeSWR,
+                        current_location: safeCountryCodeSWR,
+                        country_code: safeCountryCodeSWR
+                    } : {})
                 };
                 if (ghUser) body.userName = ghUser;
                 if (typeof supabaseClient !== 'undefined' && supabaseClient) {
@@ -21559,6 +22603,19 @@
             if (!user) return null;
             const allData = window.allData || [];
             const normalize = (v) => (v == null ? '' : String(v).trim().toLowerCase());
+            const hasUsableGithubStats = (raw) => {
+                if (!raw) return false;
+                var obj = raw;
+                if (typeof obj === 'string') {
+                    try { obj = JSON.parse(obj); } catch (_) { return false; }
+                }
+                return !!(obj && typeof obj === 'object' && (
+                    (obj.login && String(obj.login).trim()) ||
+                    Number(obj.totalRepoStars) > 0 ||
+                    Number(obj.totalStars) > 0 ||
+                    Number(obj.totalCommits) > 0
+                ));
+            };
             const isSameUser = (item) => {
                 if (!item) return false;
                 if (item.id != null && user.id != null && item.id === user.id) return true;
@@ -21610,8 +22667,7 @@
                 if (u.answer_book || u.answerBook) s += 1;
                 if (u.personality_name || u.personalityName) s += 1;
                 // 【GitHub 战力】有有效 github_stats 的记录优先，确保左侧抽屉能显示 22 项战力卡片
-                var gs = u.github_stats;
-                if (gs && typeof gs === 'object' && (gs.login || gs.totalRepoStars !== undefined)) s += 5;
+                if (hasUsableGithubStats(u.github_stats)) s += 5;
 
                 return s;
             };
@@ -21627,12 +22683,25 @@
                 }
             }
             best = best || user;
+            // 同一用户的 allData / Supabase / 本地缓存会分散在不同记录里，这里先做一次补全合并，
+            // 避免选中了“更高分但字段更少”的记录后把 github/openclaw 数据丢掉。
+            if (typeof safeMaxMergeUserData === 'function') {
+                candidates.forEach(function(cand) {
+                    if (!cand || cand === best) return;
+                    best = safeMaxMergeUserData(best, cand);
+                });
+            } else {
+                candidates.forEach(function(cand) {
+                    if (!cand || cand === best) return;
+                    best = Object.assign({}, best, cand);
+                });
+            }
             // 【合并 github_stats】若 best 没有有效 github_stats，从同人任一条记录中取，避免左侧抽屉战力卡片无数据
             var bestGs = best.github_stats;
-            if (!bestGs || typeof bestGs !== 'object' || !bestGs.login) {
+            if (!hasUsableGithubStats(bestGs)) {
                 for (var gi = 0; gi < candidates.length; gi++) {
                     var cand = candidates[gi];
-                    if (cand && cand.github_stats && typeof cand.github_stats === 'object' && cand.github_stats.login) {
+                    if (cand && hasUsableGithubStats(cand.github_stats)) {
                         best = Object.assign({}, best, { github_stats: cand.github_stats });
                         break;
                     }
@@ -21663,9 +22732,16 @@
             if (!localPayload.stats && !localPayload.dimensions && !localPayload.analysis) return serverUser;
             var d = localPayload.dimensions || {};
             var st = localPayload.stats || {};
+            var totalMessages = st.question_message_count ?? st.total_messages ?? st.totalMessages ?? serverUser.total_messages;
+            var totalChars = st.total_chars ?? st.totalChars ?? st.totalUserChars ?? st.total_user_chars ?? serverUser.total_chars;
+            var avgMessageLength = st.avg_user_message_length ?? st.avg_message_length ?? st.avgMessageLength ?? serverUser.avg_message_length ?? serverUser.avg_user_message_length;
             return Object.assign({}, serverUser, {
-                total_messages: st.totalMessages ?? serverUser.total_messages,
-                total_chars: st.totalChars ?? serverUser.total_chars,
+                total_messages: totalMessages,
+                question_message_count: totalMessages,
+                total_chars: totalChars,
+                total_user_chars: totalChars,
+                avg_message_length: avgMessageLength,
+                avg_user_message_length: avgMessageLength,
                 work_days: st.work_days ?? serverUser.work_days,
                 stats: st,
                 roast_text: localPayload.roastText ?? serverUser.roast_text,
@@ -21683,19 +22759,92 @@
             });
         }
 
+        function getAnalysisFingerprint(payload) {
+            try {
+                return String(
+                    payload?.fingerprint ||
+                    payload?.meta?.fingerprint ||
+                    payload?.analysisData?.fingerprint ||
+                    payload?.analysisData?.meta?.fingerprint ||
+                    ''
+                ).trim().toLowerCase();
+            } catch (_) {
+                return '';
+            }
+        }
+
+        function getCurrentUserFingerprintForAnalysis(user) {
+            try {
+                return String(
+                    user?.fingerprint ||
+                    user?.user_fingerprint ||
+                    localStorage.getItem('user_fingerprint') ||
+                    window.fpId ||
+                    ''
+                ).trim().toLowerCase();
+            } catch (_) {
+                return '';
+            }
+        }
+
         function readLastAnalysisDataForCurrentDevice(user) {
             try {
                 var raw = getCursorAnalysisCache();
                 if (!raw) return null;
                 var payload = JSON.parse(raw);
                 if (!payload || typeof payload !== 'object') return null;
-                var payloadFp = String(payload.fingerprint || payload.meta?.fingerprint || '').trim().toLowerCase();
-                var userFp = String(user?.fingerprint || user?.user_fingerprint || localStorage.getItem('user_fingerprint') || window.fpId || '').trim().toLowerCase();
+                var payloadFp = getAnalysisFingerprint(payload);
+                var userFp = getCurrentUserFingerprintForAnalysis(user);
                 if (payloadFp && userFp && payloadFp !== userFp) return null;
                 return payload;
             } catch (_) {
                 return null;
             }
+        }
+
+        function readCursorHistoryForCurrentDevice(user) {
+            try {
+                if (typeof localStorage === 'undefined') return null;
+                var raw = localStorage.getItem('cursor_clinical_history') || '';
+                if (!raw) return null;
+                var history = JSON.parse(raw);
+                var analysisData = history && history.analysisData;
+                if (!analysisData || typeof analysisData !== 'object') return null;
+                var payloadFp = getAnalysisFingerprint(analysisData);
+                var userFp = getCurrentUserFingerprintForAnalysis(user);
+                if (payloadFp && userFp && payloadFp !== userFp) return null;
+                var hasChatData = Array.isArray(analysisData.chatData) && analysisData.chatData.length > 0;
+                var hasStats = !!(analysisData.stats && typeof analysisData.stats === 'object');
+                var hasVibeResult = !!(analysisData.vibeResult && typeof analysisData.vibeResult === 'object');
+                if (!hasChatData && !hasStats && !hasVibeResult) return null;
+                return analysisData;
+            } catch (_) {
+                return null;
+            }
+        }
+
+        function normalizeCursorHistoryToAnalysisPayload(analysisData) {
+            if (!analysisData || typeof analysisData !== 'object') return null;
+            var vibeResult = analysisData.vibeResult && typeof analysisData.vibeResult === 'object' ? analysisData.vibeResult : {};
+            var stats = analysisData.stats && typeof analysisData.stats === 'object'
+                ? analysisData.stats
+                : ((vibeResult.stats && typeof vibeResult.stats === 'object') ? vibeResult.stats : ((vibeResult.statistics && typeof vibeResult.statistics === 'object') ? vibeResult.statistics : {}));
+            var dimensions = vibeResult.dimensions && typeof vibeResult.dimensions === 'object'
+                ? vibeResult.dimensions
+                : (analysisData.dimensions && typeof analysisData.dimensions === 'object' ? analysisData.dimensions : {});
+            if (!Object.keys(stats).length && !Object.keys(dimensions).length) return null;
+            return {
+                fingerprint: getAnalysisFingerprint(analysisData),
+                stats: stats,
+                dimensions: dimensions,
+                roastText: vibeResult.roastText ?? vibeResult.roast_text,
+                personalityType: vibeResult.personalityType ?? vibeResult.personality_type,
+                personalityName: vibeResult.personalityName ?? vibeResult.personality_name,
+                vibeIndex: vibeResult.vibeIndex ?? vibeResult.vibe_index,
+                lpdef: vibeResult.lpdef,
+                personality: vibeResult.personality || analysisData.personality || null,
+                analysis: vibeResult.analysis || analysisData.analysis || null
+            };
         }
 
         /**
@@ -21712,16 +22861,16 @@
                 console.warn('[UserStats] ⚠️ currentUserData 不存在，跳过渲染');
                 return;
             }
+            try {
+                window.currentUserData = currentUserData;
+                window.currentUser = currentUserData;
+            } catch (_) {}
                 if (typeof isGuestGatePassed === 'function' && isGuestGatePassed()) {
                     console.log('[UserStats] ℹ️ 游客模式，跳过个人统计卡片渲染');
                     if (typeof resetGuestViewerState === 'function') resetGuestViewerState({ renderDrawer: true });
                     return;
                 }
-                if (typeof hasAuthenticatedDrawerAccess === 'function' && !hasAuthenticatedDrawerAccess()) {
-                    console.log('[UserStats] ℹ️ 当前未登录，阻止渲染个人统计卡片');
-                    clearPrivateDrawerCards({ renderGuestCard: false });
-                    return;
-                }
+                // 登录状态的判定在其它认证流中已经处理，这里不再清空抽屉，避免竞态导致数据卡片被误删
             // 【侧边栏拦截】若存在刚完成的本地分析（last_local_stats），优先用本地数据覆盖，忽略服务器可能延迟或累加错误的旧数据
             var localStats = window.last_local_stats;
             if (localStats && localStats.payload && (Date.now() - (localStats.ts || 0)) < 300000) {
@@ -21732,6 +22881,14 @@
             if (localStoredAnalysis) {
                 currentUserData = buildUserDataFromLocalAnalysis(currentUserData, localStoredAnalysis);
                 console.log('[UserStats] ✅ 使用 last_analysis_data 覆盖侧边栏统计口径');
+            }
+            var localHistoryAnalysis = readCursorHistoryForCurrentDevice(currentUserData);
+            if (localHistoryAnalysis) {
+                var normalizedHistoryAnalysis = normalizeCursorHistoryToAnalysisPayload(localHistoryAnalysis);
+                if (normalizedHistoryAnalysis) {
+                    currentUserData = buildUserDataFromLocalAnalysis(currentUserData, normalizedHistoryAnalysis);
+                    console.log('[UserStats] ✅ 使用 cursor_clinical_history 覆盖侧边栏统计口径');
+                }
             }
             console.log('[UserStats] 🚀 开始渲染用户统计卡片，currentUserData:', {
                 hasUserData: !!currentUserData,
@@ -21775,7 +22932,235 @@
                     } catch (e) { return '--'; }
                 };
 
-                const githubStats = currentUserData.github_stats || null;
+                const parseGithubStatsForDrawer = function(raw) {
+                    if (!raw) return null;
+                    if (typeof raw === 'string') {
+                        try { return JSON.parse(raw); } catch (_) { return null; }
+                    }
+                    return typeof raw === 'object' ? raw : null;
+                };
+                const buildGithubStatsSnapshotForDrawer = function(user, authCtx) {
+                    var base = parseGithubStatsForDrawer(user && user.github_stats) || {};
+                    var login = String(
+                        base.login ||
+                        base.github_login ||
+                        user && (user.github_login || user.github_username || user.user_name || user.login) ||
+                        authCtx && authCtx.githubLogin ||
+                        ''
+                    ).trim();
+                    var avatarUrl = String(
+                        base.avatarUrl ||
+                        base.avatar_url ||
+                        user && (user.avatar_url || user.avatarUrl) ||
+                        authCtx && authCtx.avatarUrl ||
+                        ''
+                    ).trim();
+                    return {
+                        login: login || '--',
+                        avatarUrl: avatarUrl,
+                        globalRanking: String(base.globalRanking || base.global_ranking || user && (user.github_score || user.global_rank || user.globalRanking) || '--'),
+                        accountAge: Number(base.accountAge != null ? base.accountAge : base.account_age) || 0,
+                        syncedAt: String(base.syncedAt || base.synced_at || user && (user.github_synced_at || user.last_sync_at) || ''),
+                        latest_repo_updated_at: String(base.latest_repo_updated_at || base.latestRepoUpdatedAt || ''),
+                        organizations: Array.isArray(base.organizations) ? base.organizations : [],
+                        mergedPRs: Number(base.mergedPRs != null ? base.mergedPRs : base.merged_prs) || 0,
+                        totalRepoStars: Number(base.totalRepoStars != null ? base.totalRepoStars : (base.total_repo_stars != null ? base.total_repo_stars : (base.totalStars != null ? base.totalStars : user && user.github_stars))) || 0,
+                        commitVelocity: Number(base.commitVelocity != null ? base.commitVelocity : base.commit_velocity) || 0,
+                        prReviews: Number(base.prReviews != null ? base.prReviews : base.pr_reviews) || 0,
+                        activeDays: Number(base.activeDays != null ? base.activeDays : base.active_days) || 0,
+                        publicRepos: Number(base.publicRepos != null ? base.publicRepos : base.public_repos) || 0,
+                        privateRepos: Number(base.privateRepos != null ? base.privateRepos : base.private_repos) || 0,
+                        languageDistribution: Array.isArray(base.languageDistribution) ? base.languageDistribution : [],
+                        followers: Number(base.followers != null ? base.followers : user && user.github_followers) || 0,
+                        following: Number(base.following) || 0,
+                        totalStars: Number(base.totalStars != null ? base.totalStars : (base.total_stars != null ? base.total_stars : user && user.github_stars)) || 0,
+                        totalCommits: Number(base.totalCommits != null ? base.totalCommits : base.total_commits) || 0,
+                        sponsorships: Number(base.sponsorships) || 0,
+                        restrictedContributions: Number(base.restrictedContributions != null ? base.restrictedContributions : base.restricted_contributions) || 0,
+                        totalForks: Number(base.totalForks != null ? base.totalForks : (base.total_forks != null ? base.total_forks : user && user.github_forks)) || 0,
+                        totalWatchers: Number(base.totalWatchers != null ? base.totalWatchers : (base.total_watchers != null ? base.total_watchers : user && user.github_watchers)) || 0,
+                        totalCodeSize: Number(base.totalCodeSize != null ? base.totalCodeSize : base.total_code_size) || 0,
+                        closedIssues: Number(base.closedIssues != null ? base.closedIssues : base.closed_issues) || 0,
+                        primaryLanguage: base.primaryLanguage || base.primary_language || base.mainLanguage || base.main_language || null,
+                        newestLanguage: base.newestLanguage || base.newest_language || null
+                    };
+                };
+                const hasUsableGithubStatsForDrawer = function(raw, user, authCtx) {
+                    var obj = buildGithubStatsSnapshotForDrawer(user || { github_stats: raw }, authCtx);
+                    return !!(
+                        Number(obj.totalRepoStars) > 0 ||
+                        Number(obj.totalStars) > 0 ||
+                        Number(obj.totalForks) > 0 ||
+                        Number(obj.totalWatchers) > 0 ||
+                        Number(obj.totalCommits) > 0 ||
+                        Number(obj.followers) > 0 ||
+                        Number(obj.publicRepos) > 0 ||
+                        Number(obj.privateRepos) > 0 ||
+                        Number(obj.mergedPRs) > 0 ||
+                        Number(obj.commitVelocity) > 0 ||
+                        Number(obj.prReviews) > 0 ||
+                        Number(obj.activeDays) > 0 ||
+                        Number(obj.accountAge) > 0
+                    );
+                };
+                const getGithubAuthContextForDrawer = async function() {
+                    var ctx = {
+                        authUserId: '',
+                        githubLogin: '',
+                        fingerprint: '',
+                        accessToken: '',
+                        avatarUrl: '',
+                        session: null
+                    };
+                    try {
+                        if (typeof localStorage !== 'undefined') {
+                            ctx.githubLogin = String(localStorage.getItem('github_username') || '').trim();
+                            ctx.fingerprint = String(localStorage.getItem('user_fingerprint') || '').trim();
+                            ctx.accessToken = String(
+                                localStorage.getItem('github_token') ||
+                                localStorage.getItem('vibe_github_access_token') ||
+                                ''
+                            ).trim();
+                            ctx.authUserId = String(
+                                localStorage.getItem('github_user_id') ||
+                                localStorage.getItem('supabase_user_id') ||
+                                localStorage.getItem('auth_user_id') ||
+                                localStorage.getItem('user_id') ||
+                                ''
+                            ).trim();
+                        }
+                    } catch (_) {}
+                    if (!ctx.fingerprint) {
+                        try { ctx.fingerprint = String(window.fpId || '').trim(); } catch (_) {}
+                    }
+                    var sbAuth = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+                    if (sbAuth && sbAuth.auth && typeof sbAuth.auth.getSession === 'function') {
+                        try {
+                            var sessRes = await sbAuth.auth.getSession();
+                            var session = sessRes && sessRes.data && sessRes.data.session;
+                            var user = session && session.user ? session.user : null;
+                            ctx.session = session || null;
+                            if (session && session.provider_token) {
+                                ctx.accessToken = String(session.provider_token || '').trim() || ctx.accessToken;
+                            }
+                            if (user) {
+                                var sessionGithubLogin = user.user_metadata && (
+                                    user.user_metadata.user_name ||
+                                    user.user_metadata.preferred_username ||
+                                    user.user_metadata.login
+                                );
+                                ctx.authUserId = String(user.id || '').trim() || ctx.authUserId;
+                                ctx.githubLogin = String(sessionGithubLogin || user.email && user.email.split('@')[0] || '').trim() || ctx.githubLogin;
+                                ctx.avatarUrl = String(
+                                    user.user_metadata && (
+                                        user.user_metadata.avatar_url ||
+                                        user.user_metadata.picture
+                                    ) || ''
+                                ).trim();
+                            }
+                        } catch (e) {
+                            console.warn('[UserStats] 获取 GitHub session 上下文失败:', e);
+                        }
+                    }
+                    return ctx;
+                };
+                const fetchExistingGithubUserForDrawer = async function(sbClient, githubLogin, authUserId, fingerprint) {
+                    if (!sbClient || typeof sbClient.from !== 'function') return null;
+                    var selectFields = 'id, user_name, fingerprint, github_login, github_stats, github_stars, github_forks, github_watchers, github_followers, github_score, github_synced_at, last_sync_at';
+                    var row = null;
+                    if (githubLogin) {
+                        var byGithubLogin = await sbClient
+                            .from('user_analysis')
+                            .select(selectFields)
+                            .eq('github_login', githubLogin)
+                            .limit(1)
+                            .maybeSingle();
+                        row = byGithubLogin && byGithubLogin.data ? byGithubLogin.data : null;
+                    }
+                    if (!row && authUserId) {
+                        var byId = await sbClient
+                            .from('user_analysis')
+                            .select(selectFields)
+                            .eq('id', authUserId)
+                            .limit(1)
+                            .maybeSingle();
+                        row = byId && byId.data ? byId.data : null;
+                    }
+                    if (!row && githubLogin) {
+                        var byUserName = await sbClient
+                            .from('user_analysis')
+                            .select(selectFields)
+                            .ilike('user_name', githubLogin)
+                            .limit(1)
+                            .maybeSingle();
+                        row = byUserName && byUserName.data ? byUserName.data : null;
+                    }
+                    if (!row && fingerprint) {
+                        var byFp = await sbClient
+                            .from('user_analysis')
+                            .select(selectFields)
+                            .eq('fingerprint', fingerprint)
+                            .limit(1)
+                            .maybeSingle();
+                        row = byFp && byFp.data ? byFp.data : null;
+                    }
+                    return row;
+                };
+                let githubStats = buildGithubStatsSnapshotForDrawer(currentUserData, null);
+                if (githubStats && currentUserData.github_stats !== githubStats) {
+                    currentUserData.github_stats = githubStats;
+                }
+                var hasOpenClawPayload = (function(user) {
+                    if (!user) return false;
+                    if (user.total_tokens != null || user.primary_model || user.last_active_at) return true;
+                    var stats = user.stats;
+                    if (!stats) return false;
+                    if (typeof stats === 'string') return stats.indexOf('"openclaw"') !== -1 || stats.indexOf('"openclaw_stats"') !== -1;
+                    if (typeof stats !== 'object') return false;
+                    return !!(stats.openclaw || stats.openclaw_stats);
+                })(currentUserData);
+                if (!hasOpenClawPayload && !currentUserData.__openclawHydrationAttempted) {
+                    try {
+                        var sbOpenClaw = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+                        var openclawUserId = currentUserData.id || currentUserData.user_id || '';
+                        var openclawFingerprint = currentUserData.fingerprint || currentUserData.user_fingerprint || '';
+                        if (!openclawFingerprint) {
+                            try { openclawFingerprint = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+                        }
+                        var openclawUserName = currentUserData.user_name || currentUserData.github_login || currentUserData.github_username || '';
+                        if (sbOpenClaw && typeof sbOpenClaw.from === 'function' && (openclawUserId || openclawFingerprint || openclawUserName)) {
+                            currentUserData.__openclawHydrationAttempted = true;
+                            var openclawQuery = sbOpenClaw
+                                .from('user_analysis')
+                                .select('id, stats, total_tokens, primary_model, skills_tags, last_active_at, last_sync_at, github_synced_at');
+                            if (openclawUserId) openclawQuery = openclawQuery.eq('id', openclawUserId);
+                            else if (openclawFingerprint) openclawQuery = openclawQuery.eq('fingerprint', openclawFingerprint);
+                            else openclawQuery = openclawQuery.ilike('user_name', String(openclawUserName).trim());
+                            openclawQuery
+                                .limit(1)
+                                .maybeSingle()
+                                .then(function(res) {
+                                    var row = res && res.data ? res.data : null;
+                                    if (!row) return;
+                                    var mergedUser = (typeof safeMaxMergeUserData === 'function')
+                                        ? safeMaxMergeUserData(currentUserData, row)
+                                        : Object.assign({}, currentUserData, row);
+                                    try {
+                                        window.currentUser = mergedUser;
+                                        window.currentUserData = mergedUser;
+                                    } catch (_) {}
+                                    if (typeof window.refreshOpenClawMonitor === 'function') window.refreshOpenClawMonitor();
+                                    var lb = document.getElementById('left-drawer-body');
+                                    if (lb && mergedUser !== currentUserData) renderUserStatsCards(lb, mergedUser);
+                                })
+                                .catch(function(err) {
+                                    console.warn('[UserStats] OpenClaw 字段补全失败:', err);
+                                });
+                        }
+                    } catch (err) {
+                        console.warn('[UserStats] OpenClaw 补全流程启动失败:', err);
+                    }
+                }
 
                 // 【Task 4】检查是否为新用户（维度/统计为空或为默认值）
                 // 修复：统一视图/隐私裁剪可能不返回 l_score..f_score，但仍可能返回其它统计字段（total_messages 等）
@@ -21860,7 +23245,115 @@
                     }
                 }
 
-                // 只有在确定是“完全没有数据的匿名用户/占位记录”时才显示同步中
+                // 【占位卡】只有拿到明确的 Cursor 分析结果时才渲染真实 stats，避免误把 GitHub/OpenClaw/默认值当成 Cursor 聊天数据
+                var hasLocalCursorData = !!(localStoredAnalysis || localHistoryAnalysis || (localStats && localStats.payload));
+                var serverStatsObj = (function(rawStats) {
+                    if (!rawStats) return null;
+                    if (typeof rawStats === 'string') {
+                        try { return JSON.parse(rawStats); } catch (_) { return null; }
+                    }
+                    return typeof rawStats === 'object' ? rawStats : null;
+                })(currentUserData && currentUserData.stats);
+                var explicitServerQuestionCount = Number(
+                    currentUserData.question_message_count ??
+                    serverStatsObj?.question_message_count ??
+                    0
+                ) || 0;
+                var serverQuestionCount = Number(
+                    currentUserData.question_message_count ??
+                    currentUserData.total_messages ??
+                    serverStatsObj?.question_message_count ??
+                    serverStatsObj?.totalMessages ??
+                    serverStatsObj?.total_messages ??
+                    0
+                ) || 0;
+                var serverTotalChars = Number(
+                    currentUserData.total_chars ??
+                    currentUserData.totalUserChars ??
+                    currentUserData['total_user_chars'] ??
+                    serverStatsObj?.totalChars ??
+                    serverStatsObj?.total_chars ??
+                    serverStatsObj?.totalUserChars ??
+                    serverStatsObj?.['total_user_chars'] ??
+                    0
+                ) || 0;
+                var serverAvgMessageLength = Number(
+                    currentUserData.avg_message_length ??
+                    currentUserData.avg_user_message_length ??
+                    currentUserData.avgMessageLength ??
+                    currentUserData.avgUserMessageLength ??
+                    serverStatsObj?.avg_message_length ??
+                    serverStatsObj?.avg_user_message_length ??
+                    serverStatsObj?.avgMessageLength ??
+                    serverStatsObj?.avgUserMessageLength ??
+                    0
+                ) || 0;
+                var serverCursorAnchor =
+                    currentUserData.first_chat_at ||
+                    serverStatsObj?.first_chat_at ||
+                    serverStatsObj?.firstChatAt ||
+                    currentUserData.earliestFileTime ||
+                    currentUserData.earliest_file_time ||
+                    serverStatsObj?.earliestFileTime ||
+                    serverStatsObj?.earliest_file_time ||
+                    '';
+                var hasExplicitServerCursorMarker =
+                    !!String(serverCursorAnchor || '').trim() ||
+                    explicitServerQuestionCount > 0;
+                var hasMeaningfulServerCursorMetrics =
+                    serverQuestionCount > 0 ||
+                    serverTotalChars > 0 ||
+                    serverAvgMessageLength > 0 ||
+                    !!currentUserData.dimensions ||
+                    hasAnyScore;
+                var hasServerCursorData =
+                    hasExplicitServerCursorMarker &&
+                    hasMeaningfulServerCursorMetrics;
+                var hasAuthenticatedSession = !(typeof hasAuthenticatedDrawerAccess === 'function') || hasAuthenticatedDrawerAccess();
+                var shouldShowCursorPlaceholder =
+                    !hasLocalCursorData &&
+                    !hasServerCursorData;
+                if (shouldShowCursorPlaceholder) {
+                    var cursorPlaceholder = document.createElement('div');
+                    cursorPlaceholder.className = 'drawer-item stats2-inactive-placeholder hacker-border';
+                    cursorPlaceholder.setAttribute('data-card', 'cursor-inactive-placeholder');
+                    cursorPlaceholder.innerHTML = '<div class="stats2-inactive-placeholder-title">Cursor 数据未就绪</div>' +
+                        '<div class="stats2-inactive-placeholder-desc">' + (hasAuthenticatedSession
+                            ? '当前还没有可用的 Cursor 聊天分析结果。请返回体检首页上传一次 Cursor 聊天记录，随后这里才会显示真实 stats。'
+                            : '当前还没有可用的 Cursor 聊天分析结果。请先登录，再回到体检首页上传 Cursor 聊天记录，以获取真实 stats。') + '</div>' +
+                        '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+                            (!hasAuthenticatedSession
+                                ? '<button type="button" class="stats2-inactive-placeholder-btn" data-action="github-login" aria-label="GitHub 登录获取真实数据">GitHub 登录</button>'
+                                : '') +
+                            '<button type="button" class="stats2-inactive-placeholder-btn" onclick="typeof window.navigateToIndexPage === \'function\' && window.navigateToIndexPage()" aria-label="返回体检首页补全 Cursor 数据">返回体检首页</button>' +
+                        '</div>';
+                    leftBody.querySelectorAll('.drawer-item').forEach(function(card) {
+                        if (card.getAttribute('data-card') === 'identity-config') return;
+                        if (card.getAttribute('data-card') === 'cursor-inactive-placeholder') {
+                            card.remove();
+                            return;
+                        }
+                        var label = card.querySelector('.drawer-item-label');
+                        if (label && (
+                            label.textContent === '我的数据统计' ||
+                            label.textContent === 'My Stats' ||
+                            label.textContent === '数据同步中' ||
+                            label.textContent === 'Syncing'
+                        )) {
+                            card.remove();
+                        }
+                    });
+                    var openclawMountRef = document.getElementById('openclaw-monitor-mount') || document.getElementById('openclaw-monitor-card');
+                    var insertAfter = openclawMountRef && openclawMountRef.parentNode === leftBody ? openclawMountRef : leftBody.querySelector('.drawer-item[data-card="identity-config"]');
+                    if (insertAfter && insertAfter.nextSibling) leftBody.insertBefore(cursorPlaceholder, insertAfter.nextSibling);
+                    else if (insertAfter) leftBody.appendChild(cursorPlaceholder);
+                    else leftBody.insertBefore(cursorPlaceholder, leftBody.firstChild);
+                    if (typeof normalizeLeftDrawerCardOrder === 'function') normalizeLeftDrawerCardOrder();
+                    // 若有 GitHub 数据需展示，不提前 return，继续执行后续渲染（GitHub 战力卡片等）
+                    var hasGithubToShow = isGitHubUser || (currentUserData.github_stats && typeof hasUsableGithubStatsForDrawer === 'function' && hasUsableGithubStatsForDrawer(currentUserData.github_stats, currentUserData, null));
+                    if (!hasGithubToShow) return;
+                }
+
                 const isNewUser = (!hasDimensions || isDefaultScores) && !currentUserData.id && !isGitHubUser;
                 
                 if (isNewUser) {
@@ -22821,6 +24314,79 @@
                     currentUserData.github_stats
                 ));
                 var allowPrivateCards = hasRenderableUserData || !(typeof hasAuthenticatedDrawerAccess === 'function') || hasAuthenticatedDrawerAccess();
+                if (hasRenderableUserData && typeof setAuthenticatedDrawerAccess === 'function') {
+                    try {
+                        setAuthenticatedDrawerAccess(true, currentUserData && currentUserData.id ? currentUserData : (window.supabaseAuthUser || currentUserData || null));
+                    } catch (_) {}
+                }
+                var authGithubContextSt2 = null;
+                if (allowPrivateCards) {
+                    try {
+                        authGithubContextSt2 = await getGithubAuthContextForDrawer();
+                    } catch (e) {
+                        console.warn('[UserStats] 读取 GitHub 登录态失败:', e);
+                    }
+                }
+                if (authGithubContextSt2) {
+                    if (!currentUserData.github_login && authGithubContextSt2.githubLogin) currentUserData.github_login = authGithubContextSt2.githubLogin;
+                    if (!currentUserData.github_username && authGithubContextSt2.githubLogin) currentUserData.github_username = authGithubContextSt2.githubLogin;
+                    if (!currentUserData.fingerprint && authGithubContextSt2.fingerprint) currentUserData.fingerprint = authGithubContextSt2.fingerprint;
+                }
+                var githubIdentityForDrawer = String(
+                    authGithubContextSt2 && authGithubContextSt2.githubLogin ||
+                    currentUserData.github_login ||
+                    currentUserData.github_username ||
+                    currentUserData.user_name ||
+                    currentUserData.login ||
+                    ''
+                ).trim();
+                githubStats = buildGithubStatsSnapshotForDrawer(currentUserData, authGithubContextSt2);
+                currentUserData.github_stats = githubStats;
+                if (allowPrivateCards && githubIdentityForDrawer && !hasUsableGithubStatsForDrawer(githubStats, currentUserData, authGithubContextSt2) && !currentUserData.__githubHydrationAttempted) {
+                    try {
+                        var sbGithubHydration = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+                        var githubHydrationId = String(
+                            authGithubContextSt2 && authGithubContextSt2.authUserId ||
+                            currentUserData.id ||
+                            currentUserData.user_id ||
+                            ''
+                        ).trim();
+                        var githubHydrationFp = String(
+                            currentUserData.fingerprint ||
+                            currentUserData.user_fingerprint ||
+                            authGithubContextSt2 && authGithubContextSt2.fingerprint ||
+                            ''
+                        ).trim();
+                        currentUserData.__githubHydrationAttempted = true;
+                        if (sbGithubHydration && typeof sbGithubHydration.from === 'function' && (githubHydrationId || githubIdentityForDrawer || githubHydrationFp)) {
+                            var githubHydrationRow = await fetchExistingGithubUserForDrawer(sbGithubHydration, githubIdentityForDrawer, githubHydrationId, githubHydrationFp);
+                            if (githubHydrationRow && (
+                                hasUsableGithubStatsForDrawer(githubHydrationRow.github_stats, githubHydrationRow, authGithubContextSt2) ||
+                                (githubHydrationRow.github_login && String(githubHydrationRow.github_login).trim()) ||
+                                Number(githubHydrationRow.github_stars) > 0 ||
+                                Number(githubHydrationRow.github_forks) > 0 ||
+                                Number(githubHydrationRow.github_watchers) > 0 ||
+                                Number(githubHydrationRow.github_followers) > 0 ||
+                                Number(githubHydrationRow.github_score) > 0
+                            )) {
+                                var mergedGithubUser = (typeof safeMaxMergeUserData === 'function')
+                                    ? safeMaxMergeUserData(currentUserData, githubHydrationRow)
+                                    : Object.assign({}, currentUserData, githubHydrationRow);
+                                mergedGithubUser.github_stats = buildGithubStatsSnapshotForDrawer(mergedGithubUser, authGithubContextSt2);
+                                mergedGithubUser.__githubHydrationAttempted = true;
+                                try {
+                                    window.currentUser = mergedGithubUser;
+                                    window.currentUserData = mergedGithubUser;
+                                } catch (_) {}
+                                console.log('[UserStats] ✅ 已从登录态补全 GitHub 战力数据:', githubIdentityForDrawer || githubHydrationRow.github_login || githubHydrationRow.user_name);
+                                renderUserStatsCards(leftBody, typeof getBestUserRecordForStats === 'function' ? getBestUserRecordForStats(mergedGithubUser) : mergedGithubUser);
+                                return;
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('[UserStats] GitHub 战力补全失败:', e);
+                    }
+                }
                 // 创建用户统计卡片容器（赛博病理风格：border-white/10 bg-[#0a0a0a]/80 backdrop-blur）
                 if (!allowPrivateCards) {
                     console.log('[UserStats] ℹ️ 当前未登录，取消创建统计卡片 DOM');
@@ -22917,6 +24483,7 @@
                         card.remove();
                     }
                 });
+                leftBody.querySelectorAll('.drawer-item[data-card="cursor-inactive-placeholder"]').forEach(function(c) { c.remove(); });
                 leftBody.querySelectorAll('.github-power-card').forEach(function(c) { c.remove(); });
                 
                 // 将统计卡片插入到身份配置卡片之后（优先定位 data-card=identity-config）
@@ -22939,14 +24506,48 @@
                     var apiBase = (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content) || '';
                     apiBase = String(apiBase).trim().replace(/\/$/, '');
                     var defaultAvatarSt2 = (window.STATS_CONSTANTS && window.STATS_CONSTANTS.DEFAULT_AVATAR) || '';
-                    var ghUserSt2 = (typeof localStorage !== 'undefined' && localStorage.getItem('github_username')) || '';
-                    var userIdentitySt2 = (currentUserData && currentUserData.user_identity) || null;
+                    githubStats = buildGithubStatsSnapshotForDrawer(currentUserData, authGithubContextSt2);
+                    currentUserData.github_stats = githubStats;
+                    var githubLoginFromStatsSt2 = (githubStats && (githubStats.login || githubStats.username || githubStats.user_name)) || '';
+                    var githubLoginFromAuthSt2 = (authGithubContextSt2 && authGithubContextSt2.githubLogin) || '';
+                    var ghUserSt2 = (
+                        githubLoginFromAuthSt2 ||
+                        (currentUserData && (
+                            currentUserData.github_login ||
+                            currentUserData.github_username ||
+                            currentUserData.user_name ||
+                            currentUserData.name
+                        )) ||
+                        githubLoginFromStatsSt2 ||
+                        ((typeof localStorage !== 'undefined' && localStorage.getItem('github_username')) || '')
+                    );
+                    ghUserSt2 = String(ghUserSt2 || '').trim();
+                    if (ghUserSt2) {
+                        try {
+                            if (typeof localStorage !== 'undefined') localStorage.setItem('github_username', ghUserSt2);
+                        } catch (_) {}
+                    }
+                    var userIdentitySt2 = (currentUserData && currentUserData.user_identity) || (githubLoginFromAuthSt2 || ghUserSt2 ? 'github' : null);
                     var isFpOnlySt2 = !ghUserSt2 || (typeof isValidGitHubUsername === 'function' && !isValidGitHubUsername(ghUserSt2, userIdentitySt2));
                     var fpSt2 = (typeof localStorage !== 'undefined' && localStorage.getItem('user_fingerprint')) || '';
                     var fpPrefixSt2 = fpSt2 ? fpSt2.substring(0, 6).toUpperCase() : '';
-                    var dispNameSt2 = isFpOnlySt2 && fpSt2 ? ('匿名专家 ' + fpPrefixSt2) : (ghUserSt2 || '未设置');
+                    var displayNameSourceSt2 = (
+                        githubLoginFromAuthSt2 ||
+                        (currentUserData && (
+                            currentUserData.user_name ||
+                            currentUserData.github_login ||
+                            currentUserData.github_username ||
+                            currentUserData.name
+                        )) ||
+                        githubLoginFromStatsSt2 ||
+                        ghUserSt2
+                    );
+                    var dispNameSt2 = isFpOnlySt2 && fpSt2 ? ('匿名专家 ' + fpPrefixSt2) : (displayNameSourceSt2 || '未设置');
                     var dispLabelSt2 = isFpOnlySt2 && fpSt2 ? '设备指纹' : 'GitHub ID';
-                    var avUrlSt2 = isFpOnlySt2 && fpSt2 ? ('https://api.dicebear.com/7.x/identicon/svg?seed=' + encodeURIComponent(fpSt2)) : (ghUserSt2 && typeof getGitHubAvatarUrl === 'function' ? getGitHubAvatarUrl(ghUserSt2) : defaultAvatarSt2);
+                    var avatarSourceSt2 = (authGithubContextSt2 && authGithubContextSt2.avatarUrl) || (githubStats && (githubStats.avatarUrl || githubStats.avatar_url)) || (currentUserData && (currentUserData.avatar_url || currentUserData.avatarUrl)) || '';
+                    var avUrlSt2 = isFpOnlySt2 && fpSt2
+                        ? ('https://api.dicebear.com/7.x/identicon/svg?seed=' + encodeURIComponent(fpSt2))
+                        : (avatarSourceSt2 || (ghUserSt2 && typeof getGitHubAvatarUrl === 'function' ? getGitHubAvatarUrl(ghUserSt2) : defaultAvatarSt2));
                     var totalMsgsSt2 = Number(currentUserData && (currentUserData.total_messages != null ? currentUserData.total_messages : currentUserData.totalMessages)) || 0;
                     var badgeSt2 = totalMsgsSt2 >= 500 ? '<span class="inline-flex items-center ml-1 animate-pulse" style="filter: drop-shadow(0 0 5px rgba(255,0,0,0.6));" title="病入膏肓">🏆</span>' : (totalMsgsSt2 < 10 && totalMsgsSt2 > 0 ? '<span class="inline-flex items-center ml-1 text-[#00ff41]/50" title="病情可控">🌱</span>' : '');
                     var curStatusSt2 = (typeof localStorage !== 'undefined' && localStorage.getItem('user_status')) || 'idle';
@@ -22977,7 +24578,8 @@
                         }
                     } catch (e) {}
                     var handleGithubSync = async function() {
-                        var token = (window.__githubAccessToken || (typeof localStorage !== 'undefined' && localStorage.getItem('github_token')) || (typeof localStorage !== 'undefined' && localStorage.getItem('vibe_github_access_token')) || '').trim();
+                        var sbGithubSync = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
+                        var token = ((authGithubContextSt2 && authGithubContextSt2.accessToken) || window.__githubAccessToken || (typeof localStorage !== 'undefined' && localStorage.getItem('github_token')) || (typeof localStorage !== 'undefined' && localStorage.getItem('vibe_github_access_token')) || '').trim();
                         if (!token && typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.auth.getSession === 'function') {
                             try {
                                 var sess = await supabaseClient.auth.getSession();
@@ -23001,14 +24603,42 @@
                             console.warn('[GitHub Sync] 无 accessToken，跳过战力同步');
                             return { success: false, error: 'accessToken 必填' };
                         }
+                        var syncGithubLoginSt2 = String(
+                            authGithubContextSt2 && authGithubContextSt2.githubLogin ||
+                            currentUserData.github_login ||
+                            currentUserData.github_username ||
+                            currentUserData.user_name ||
+                            currentUserData.login ||
+                            ''
+                        ).trim();
+                        var syncFingerprintSt2 = String(
+                            currentUserData.fingerprint ||
+                            currentUserData.user_fingerprint ||
+                            authGithubContextSt2 && authGithubContextSt2.fingerprint ||
+                            ''
+                        ).trim();
+                        var syncAuthUserIdSt2 = String(
+                            authGithubContextSt2 && authGithubContextSt2.authUserId ||
+                            currentUserData.id ||
+                            currentUserData.user_id ||
+                            ''
+                        ).trim();
+                        var tryRecoverGithubBindingSt2 = async function() {
+                            var existingGithubRow = await fetchExistingGithubUserForDrawer(sbGithubSync, syncGithubLoginSt2, syncAuthUserIdSt2, syncFingerprintSt2);
+                            if (existingGithubRow) {
+                                existingGithubRow.github_stats = buildGithubStatsSnapshotForDrawer(existingGithubRow, authGithubContextSt2);
+                                return { success: true, data: existingGithubRow, recovered: true };
+                            }
+                            return null;
+                        };
                         return fetch(apiBase ? apiBase + '/api/github/sync' : '/api/github/sync', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 accessToken: token,
-                                userId: (currentUserData.user_name || currentUserData.login || currentUserData.github_login || '').trim(),
-                                fingerprint: currentUserData.fingerprint || '',
-                                id: currentUserData.id || ''
+                                userId: syncGithubLoginSt2,
+                                fingerprint: syncFingerprintSt2,
+                                id: syncAuthUserIdSt2
                             })
                         }).then(async function(r) {
                             var text = await r.text();
@@ -23026,6 +24656,15 @@
                                     if (errJson && errJson.error) errMsg = errJson.error;
                                 } catch (e) {}
                                 var isUniqueViolation = errMsg.indexOf('UNIQUE_VIOLATION_FINGERPRINT') !== -1 || /duplicate key|unique constraint|violates unique constraint/i.test(errMsg);
+                                var isGithubLoginConflict = /unique_github_login|github_login/i.test(errMsg);
+                                if (isGithubLoginConflict) {
+                                    try {
+                                        var recoveredRow = await tryRecoverGithubBindingSt2();
+                                        if (recoveredRow && recoveredRow.success) return recoveredRow;
+                                    } catch (recoverErr) {
+                                        console.warn('[GitHub Sync] github_login 冲突恢复失败:', recoverErr);
+                                    }
+                                }
                                 var tip = isUniqueViolation ? '正在合并游客数据，请稍后刷新。' : (errMsg.indexOf('401') !== -1 || errMsg.indexOf('Bad credentials') !== -1) ? 'GitHub 凭证无效（401），请退出后重新用 GitHub 登录一次以刷新授权。' : (errMsg.indexOf('RLS') !== -1 || errMsg.indexOf('permission') !== -1) ? '数据库权限受限（RLS 拦截），请检查服务端配置。' : (errMsg.indexOf('Token') !== -1 || errMsg.indexOf('accessToken') !== -1) ? 'Token 失效或未授权，请重新使用 GitHub 登录。' : errMsg;
                                 console.warn('[GitHub Sync] 战力同步失败:', tip);
                                 return { success: false, status: 'error', error: text || ('HTTP ' + r.status) };
@@ -23037,6 +24676,15 @@
                             }
                             if (parsed && (parsed.success === false || parsed.status === 'error')) {
                                 var errStr = String(parsed.error || '');
+                                var isGithubLoginConflict = /unique_github_login|github_login/i.test(errStr);
+                                if (isGithubLoginConflict) {
+                                    try {
+                                        var recovered = await tryRecoverGithubBindingSt2();
+                                        if (recovered && recovered.success) return recovered;
+                                    } catch (recoverErr) {
+                                        console.warn('[GitHub Sync] github_login 冲突恢复失败:', recoverErr);
+                                    }
+                                }
                                 if (errStr.indexOf('401') !== -1 || errStr.indexOf('Bad credentials') !== -1) {
                                     if (typeof window.__clearGitHubTokenAndResetSyncUI === 'function') window.__clearGitHubTokenAndResetSyncUI();
                                 }
@@ -23049,7 +24697,7 @@
                         });
                     };
                     // githubStats already defined at start of function
-                    var hasValidStats = githubStats && typeof githubStats === 'object' && Object.keys(githubStats).length > 0 && githubStats.login;
+                    var hasValidStats = hasUsableGithubStatsForDrawer(githubStats, currentUserData, authGithubContextSt2);
                     var githubCardEl;
                     var githubCardLang = typeof currentLang !== 'undefined' ? currentLang : 'en';
                     if (typeof window.renderGithubIdentityCard === 'function') {
@@ -23084,9 +24732,22 @@
                             window.renderGithubCard(null, cardOpts);
                         }
                         if (!shouldShowIdentityOnly) {
-                            var userIdForSync = (currentUserData.user_name || currentUserData.login || currentUserData.github_login || '').trim();
-                        var needAutoSync = !(currentUserData.github_login && currentUserData.github_login.trim()) || !hasValidStats;
-                        if (needAutoSync && (userIdForSync || (currentUserData.id && currentUserData.id.trim()))) {
+                            var userIdForSync = String(
+                                githubLoginFromAuthSt2 ||
+                                currentUserData.github_login ||
+                                currentUserData.github_username ||
+                                currentUserData.user_name ||
+                                currentUserData.login ||
+                                ''
+                            ).trim();
+                        var authUserIdForSync = String(
+                                authGithubContextSt2 && authGithubContextSt2.authUserId ||
+                                currentUserData.id ||
+                                currentUserData.user_id ||
+                                ''
+                            ).trim();
+                        var needAutoSync = !userIdForSync || !hasValidStats;
+                        if (needAutoSync && (userIdForSync || authUserIdForSync)) {
                             handleGithubSync().then(function(result) {
                                 if (result && result.success && result.data) {
                                     window.renderGithubCard(result.data, cardOpts);
@@ -23094,7 +24755,7 @@
                                 } else {
                                     var fallbackStars = (typeof resolveDisplayStars === 'function' ? resolveDisplayStars(currentUserData) : null);
                                     var fallback = {
-                                        login: currentUserData.user_name || currentUserData.login || '--',
+                                        login: userIdForSync || currentUserData.user_name || currentUserData.login || '--',
                                         avatarUrl: '',
                                         globalRanking: '--',
                                         totalRepoStars: (fallbackStars != null ? Number(fallbackStars) : 0) || Number(currentUserData.github_stars) || 0,
@@ -23107,7 +24768,7 @@
                             }).catch(function() {
                                 var fs = (typeof resolveDisplayStars === 'function' ? resolveDisplayStars(currentUserData) : null);
                                 var fallback = {
-                                    login: currentUserData.user_name || currentUserData.login || '--',
+                                    login: userIdForSync || currentUserData.user_name || currentUserData.login || '--',
                                     avatarUrl: '', globalRanking: '--',
                                     totalRepoStars: (fs != null ? Number(fs) : 0) || Number(currentUserData.github_stars) || 0,
                                     mergedPRs: 0, commitVelocity: 0, prReviews: 0, activeDays: 0,
@@ -23119,7 +24780,7 @@
                         } else {
                             var fs2 = (typeof resolveDisplayStars === 'function' ? resolveDisplayStars(currentUserData) : null);
                             var fallback = {
-                                login: currentUserData.user_name || currentUserData.login || '--',
+                                login: userIdForSync || currentUserData.user_name || currentUserData.login || '--',
                                 avatarUrl: '', globalRanking: '--',
                                 totalRepoStars: (fs2 != null ? Number(fs2) : 0) || Number(currentUserData.github_stars) || 0,
                                 mergedPRs: 0, commitVelocity: 0, prReviews: 0, activeDays: 0,
@@ -23363,7 +25024,7 @@
             }
             
             // no (甲方上身)：映射 jiafang_count
-            // 字段回退：jiafang_count -> f_score -> f -> F
+            // 字段回退：jiafang_count -> f_score -> f -> F，最后从本地 Cursor 分析缓存补全
             let no = undefined;
             if (userData.jiafang_count !== undefined && userData.jiafang_count !== null) {
                 no = Number(userData.jiafang_count);
@@ -23376,7 +25037,7 @@
             }
             
             // please (赛博磕头)：映射 ketao_count
-            // 字段回退：ketao_count -> e_score -> e -> E
+            // 字段回退：ketao_count -> e_score -> e -> E，最后从本地 Cursor 分析缓存补全
             let please = undefined;
             if (userData.ketao_count !== undefined && userData.ketao_count !== null) {
                 please = Number(userData.ketao_count);
@@ -23386,6 +25047,41 @@
                 please = Number(userData.e);
             } else if (userData.E !== undefined && userData.E !== null) {
                 please = Number(userData.E);
+            }
+            
+            // 【本地 Cursor 记录补全】云端无 jiafang_count/ketao_count 时，从 last_analysis_data / cursor_clinical_history 读取
+            if ((no === undefined || no === null || Number(no) === 0) || (please === undefined || please === null || Number(please) === 0)) {
+                try {
+                    var localRaw = getCursorAnalysisCache();
+                    if (localRaw) {
+                        var localObj = JSON.parse(localRaw);
+                        var localStats = (localObj && (localObj.stats || localObj.statistics)) || (localObj && localObj.result && (localObj.result.stats || localObj.result.statistics)) || null;
+                        if (localStats) {
+                            if ((no === undefined || no === null || Number(no) === 0) && localStats.jiafang_count != null) {
+                                no = Number(localStats.jiafang_count);
+                            }
+                            if ((please === undefined || please === null || Number(please) === 0) && localStats.ketao_count != null) {
+                                please = Number(localStats.ketao_count);
+                            }
+                        }
+                    }
+                    if ((no === undefined || no === null || Number(no) === 0) || (please === undefined || please === null || Number(please) === 0)) {
+                        var histStr = typeof localStorage !== 'undefined' ? localStorage.getItem('cursor_clinical_history') : '';
+                        var hist = histStr ? JSON.parse(histStr) : null;
+                        var vr = hist && hist.analysisData && hist.analysisData.vibeResult ? hist.analysisData.vibeResult : null;
+                        var vrStats = (vr && (vr.statistics || vr.stats)) || null;
+                        if (vrStats) {
+                            if ((no === undefined || no === null || Number(no) === 0) && (vrStats.jiafang_count != null || vrStats.buCount != null)) {
+                                no = Number(vrStats.jiafang_count ?? vrStats.buCount);
+                            }
+                            if ((please === undefined || please === null || Number(please) === 0) && (vrStats.ketao_count != null || vrStats.qingCount != null)) {
+                                please = Number(vrStats.ketao_count ?? vrStats.qingCount);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[extractDimensionValues] 本地 Cursor 记录补全 jiafang/ketao 失败:', e);
+                }
             }
 
             return { 
@@ -23549,8 +25245,8 @@
                                 // 甲方上身：映射 jiafang_count
                                 if (championRecord && championRecord.jiafang_count !== undefined && championRecord.jiafang_count !== null) {
                                     avgValue = Number(championRecord.jiafang_count);
-                                } else if (averages.L !== undefined && averages.L !== null) {
-                                    avgValue = Number(averages.L);
+                                } else if (averages.F !== undefined && averages.F !== null) {
+                                    avgValue = Number(averages.F);
                                 }
                             } else if (dimId === 'say') {
                                 // 总字数：使用 totalChars 或 totalRoastWords
@@ -23563,8 +25259,8 @@
                                 // 赛博磕头：映射 ketao_count
                                 if (championRecord && championRecord.ketao_count !== undefined && championRecord.ketao_count !== null) {
                                     avgValue = Number(championRecord.ketao_count);
-                                } else if (averages.P !== undefined && averages.P !== null) {
-                                    avgValue = Number(averages.P);
+                                } else if (averages.E !== undefined && averages.E !== null) {
+                                    avgValue = Number(averages.E);
                                 }
                             }
                             
@@ -25397,7 +27093,7 @@
                             q.maybeSingle()
                                 .then(function(res) {
                                     var row = res && res.data ? res.data : null;
-                                    var stats = row ? row.stats : null;
+                                    var stats = row ? parseStats2ObjectLoose(row.stats) : null;
                                     var ilc = stats && stats.identityLevelCloud ? stats.identityLevelCloud : null;
                                     if (row && row.personality_data) {
                                         if (typeof row.personality_data === 'string') {
@@ -25411,6 +27107,9 @@
                                     }
                                     if (!ilc && row && row.personality && row.personality.identityLevelCloud) {
                                         ilc = row.personality.identityLevelCloud;
+                                    }
+                                    if (!ilc) {
+                                        ilc = buildIdentityCloudFromOpenClaw(row);
                                     }
                                     var exact = normalizeIdentityCloudBuckets(ilc);
                                     if (exact && typeof exact === 'object' && (exact.Novice.length || exact.Professional.length || exact.Architect.length)) {
@@ -27382,6 +29081,561 @@
     
 })();
 
+// ==================== 全球Tab：国家PK榜（四榜切换 + 卡片渲染 + 雷达联动） ====================
+(function () {
+    const PK_CACHE_TTL_MS = 10 * 60 * 1000;
+    const DEFAULT_RANK_TYPE = 'efficiency'; // efficiency | lobster | model | github
+
+    function getApiBase() {
+        const baseEndpoint = window.API_ENDPOINT_MANAGER ? window.API_ENDPOINT_MANAGER.getCurrent() : (document.querySelector('meta[name="api-endpoint"]')?.content || '');
+        const base = baseEndpoint.endsWith('/') ? baseEndpoint.slice(0, -1) : baseEndpoint;
+        return base || '';
+    }
+
+    function safeNum(v) {
+        const n = Number(v ?? 0);
+        return Number.isFinite(n) ? n : 0;
+    }
+
+    function clamp(n, min, max) {
+        const x = Number(n);
+        if (!Number.isFinite(x)) return min;
+        return Math.max(min, Math.min(max, x));
+    }
+
+    function formatInt(n) {
+        const x = Math.round(safeNum(n));
+        try { return x.toLocaleString(); } catch { return String(x); }
+    }
+
+    function formatFloat2(n) {
+        const x = safeNum(n);
+        try { return x.toLocaleString(undefined, { maximumFractionDigits: 2 }); } catch { return String(Math.round(x * 100) / 100); }
+    }
+
+    function ensureGlobalCountryPkScaffold() {
+        const panel = document.getElementById('panel-global-content');
+        if (!panel) return null;
+        try {
+            if (!window.__globalCountryPkMarkup && panel.querySelector('#global-country-pk-leaderboard')) {
+                window.__globalCountryPkMarkup = panel.innerHTML;
+            }
+            if (!panel.querySelector('#global-country-pk-leaderboard') && window.__globalCountryPkMarkup) {
+                panel.innerHTML = window.__globalCountryPkMarkup;
+            }
+        } catch (_) {
+            // ignore
+        }
+        return panel;
+    }
+
+    async function refreshCountryPkBoard(forceRefresh) {
+        const panel = ensureGlobalCountryPkScaffold();
+        if (!panel) return null;
+        const skeleton = document.getElementById('global-pk-skeleton');
+        try {
+            if (forceRefresh) {
+                window.__pkSnapshot = null;
+                window.__pkSnapshotTs = 0;
+                window.__pkSnapshotPromise = null;
+            }
+            if (skeleton) skeleton.style.display = '';
+            const payload = await fetchCountryPkSnapshot();
+            if (payload) {
+                const currentRankType = String(window.__pkRankType || DEFAULT_RANK_TYPE).trim().toLowerCase() || DEFAULT_RANK_TYPE;
+                renderCountryRankings(payload, currentRankType);
+            }
+            return payload;
+        } catch (_) {
+            return null;
+        } finally {
+            try { if (skeleton) skeleton.style.display = 'none'; } catch (_) {}
+        }
+    }
+
+    async function fetchCountryPkSnapshot() {
+        try {
+            const now = Date.now();
+            if (window.__pkSnapshot && window.__pkSnapshotTs && (now - window.__pkSnapshotTs) < PK_CACHE_TTL_MS) {
+                return window.__pkSnapshot;
+            }
+            if (window.__pkSnapshotPromise) return await window.__pkSnapshotPromise;
+
+            const base = getApiBase();
+            const url = `${base}/api/global-aggregate?view=global&_t=${now}`;
+            window.__pkSnapshotPromise = fetch(url, { headers: { 'Accept': 'application/json' }, mode: 'cors', credentials: 'omit' })
+                .then(res => res.ok ? res.json() : null)
+                .then(payload => {
+                    if (!payload || payload.success !== true) return null;
+                    const snapshot = payload.snapshot && typeof payload.snapshot === 'object' ? payload.snapshot : {};
+                    const out = { snapshot, updated_at: payload.updated_at || null, updated_at_sec: payload.updated_at_sec || null };
+                    window.__pkSnapshot = out;
+                    window.__pkSnapshotTs = Date.now();
+                    return out;
+                })
+                .catch(() => null)
+                .finally(() => { window.__pkSnapshotPromise = null; });
+
+            return await window.__pkSnapshotPromise;
+        } catch (e) {
+            try { window.__pkSnapshotPromise = null; } catch (_) {}
+            return null;
+        }
+    }
+
+    function computeGlobalBaseline(snapshot) {
+        let sumUsers = 0;
+        let sumAvgCharsWeighted = 0;
+        let sumTokens = 0;
+        let sumGithubWeighted = 0;
+        let sumTokensPerUserWeighted = 0;
+
+        try {
+            for (const [, raw] of Object.entries(snapshot || {})) {
+                if (!raw || typeof raw !== 'object') continue;
+                const userCount = safeNum(raw.userCount);
+                const avgChars = safeNum(raw.avgChars);
+                const totalTokens = safeNum(raw.totalTokens);
+                const githubScore = safeNum(raw.githubScore);
+                const tokensPerUser = userCount > 0 ? (totalTokens / userCount) : 0;
+
+                if (userCount > 0) {
+                    sumUsers += userCount;
+                    sumAvgCharsWeighted += avgChars * userCount;
+                    sumGithubWeighted += githubScore * userCount;
+                    sumTokensPerUserWeighted += tokensPerUser * userCount;
+                }
+                sumTokens += totalTokens;
+            }
+        } catch (_) {}
+
+        const avgChars = sumUsers > 0 ? (sumAvgCharsWeighted / sumUsers) : 0;
+        const githubScore = sumUsers > 0 ? (sumGithubWeighted / sumUsers) : 0;
+        const tokensPerUser = sumUsers > 0 ? (sumTokensPerUserWeighted / sumUsers) : 0;
+        return {
+            sumUsers,
+            avgChars,
+            sumTokens,
+            githubScore,
+            tokensPerUser,
+        };
+    }
+
+    function ensureRadarComparison(countryCode, countryName, countryMetrics, globalBase) {
+        try {
+            const dom = document.getElementById('rtRadar');
+            if (!dom || typeof echarts === 'undefined') return;
+            dom.innerHTML = '';
+            try {
+                if (window.__countryRadarChart && typeof window.__countryRadarChart.dispose === 'function') {
+                    window.__countryRadarChart.dispose();
+                }
+            } catch (_) {}
+            window.__countryRadarChart = echarts.init(dom, null, { renderer: 'canvas' });
+
+            // 全局基线：固定 50；国家：相对全局的比例 * 50，限制 0..100
+            const base = globalBase || { avgChars: 0, tokensPerUser: 0, sumUsers: 0, sumTokens: 0, githubScore: 0 };
+            const ratio = (v, g) => (g > 0 ? (v / g) : 0);
+            const logRatio = (v, g) => {
+                const lv = Math.log1p(Math.max(0, v));
+                const lg = Math.log1p(Math.max(0, g));
+                return lg > 0 ? (lv / lg) : 0;
+            };
+
+            const l = clamp(50 * ratio(countryMetrics.avgChars, base.avgChars), 0, 100);
+            const p = clamp(50 * ratio(countryMetrics.tokensPerUser, base.tokensPerUser), 0, 100);
+            const d = clamp(50 * ratio(countryMetrics.userCount, base.sumUsers > 0 ? (base.sumUsers / 10) : 0), 0, 100); // 粗略：用全球用户数/10 做标尺
+            const e = clamp(50 * logRatio(countryMetrics.totalTokens, base.sumTokens), 0, 100);
+            const f = clamp(50 * ratio(countryMetrics.githubScore, base.githubScore), 0, 100);
+
+            const option = {
+                backgroundColor: 'transparent',
+                radar: {
+                    indicator: [
+                        { name: 'L', max: 100 },
+                        { name: 'P', max: 100 },
+                        { name: 'D', max: 100 },
+                        { name: 'E', max: 100 },
+                        { name: 'F', max: 100 },
+                    ],
+                    axisName: { color: '#e5e7eb', fontFamily: 'JetBrains Mono', fontSize: 11 },
+                    splitLine: { lineStyle: { color: 'rgba(0,255,65,0.18)' } },
+                    splitArea: { areaStyle: { color: ['rgba(0,255,65,0.02)', 'rgba(0,255,65,0.01)'] } },
+                    axisLine: { lineStyle: { color: 'rgba(0,255,65,0.22)' } },
+                },
+                series: [
+                    {
+                        type: 'radar',
+                        data: [
+                            {
+                                value: [50, 50, 50, 50, 50],
+                                name: 'GLOBAL_AVG',
+                                areaStyle: { color: 'rgba(0,255,65,0.06)' },
+                                lineStyle: { color: 'rgba(0,255,65,0.35)', width: 2 },
+                                itemStyle: { color: 'rgba(0,255,65,0.55)' },
+                            },
+                            {
+                                value: [l, p, d, e, f],
+                                name: `${String(countryCode || '').toUpperCase()}_PK`,
+                                areaStyle: { color: 'rgba(0,255,65,0.16)' },
+                                lineStyle: { color: '#00ff41', width: 2 },
+                                itemStyle: { color: '#00ff41' },
+                            },
+                        ],
+                    },
+                ],
+                tooltip: { show: true },
+            };
+            window.__countryRadarChart.setOption(option, true);
+            try { window.__countryRadarChart.resize(); } catch (_) {}
+
+            // 轻量联动：同步右抽屉标题（不触发 country-summary 拉取）
+            try {
+                if (typeof showDrawersWithCountryData === 'function' && typeof currentViewState === 'string' && currentViewState === 'GLOBAL') {
+                    showDrawersWithCountryData('GLOBAL', (typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Global' : '全球', getLatestGlobalData(), { summaryOnly: true });
+                }
+            } catch (_) {}
+        } catch (_) {
+            // ignore
+        }
+    }
+
+    function renderCountryRankings(pkPayload, rankType) {
+        const panel = document.getElementById('panel-global-view');
+        const container = document.getElementById('global-country-pk-leaderboard')
+            || (panel ? panel.querySelector('.vibe-index-leaderboard') : null);
+        const tpl = document.getElementById('global-pk-card-tpl');
+        const skeleton = document.getElementById('global-pk-skeleton');
+        const updatedAtEl = document.getElementById('global-pk-updated-at');
+        if (!container || !tpl || !tpl.content) return;
+
+        const snapshot = (pkPayload && pkPayload.snapshot && typeof pkPayload.snapshot === 'object') ? pkPayload.snapshot : {};
+        const globalBase = computeGlobalBaseline(snapshot);
+
+        // 更新时间
+        try {
+            if (updatedAtEl) {
+                const t = pkPayload && pkPayload.updated_at ? String(pkPayload.updated_at) : '';
+                updatedAtEl.textContent = t ? `更新: ${t}` : '';
+            }
+        } catch (_) {}
+
+        // 组装条目
+        const entries = [];
+        try {
+            for (const [ccRaw, raw] of Object.entries(snapshot || {})) {
+                const cc = String(ccRaw || '').trim().toUpperCase();
+                if (!/^[A-Z]{2}$/.test(cc)) continue;
+                const avgChars = safeNum(raw?.avgChars);
+                const totalTokens = safeNum(raw?.totalTokens);
+                const userCount = safeNum(raw?.userCount);
+                const topModel = (raw?.topModel != null ? String(raw.topModel) : '').trim();
+                const githubScore = safeNum(raw?.githubScore);
+                const tokensPerUser = userCount > 0 ? (totalTokens / userCount) : 0;
+                entries.push({
+                    cc,
+                    avgChars,
+                    totalTokens,
+                    userCount,
+                    topModel,
+                    githubScore,
+                    tokensPerUser,
+                });
+            }
+        } catch (_) {}
+
+        const rt = String(rankType || DEFAULT_RANK_TYPE).trim().toLowerCase();
+        const topLimit = 8;
+
+        const buildMetricGroups = (rt2) => {
+            switch (rt2) {
+                case 'lobster':
+                    return [
+                        {
+                            id: 'totalTokens',
+                            title: '养虾总量榜',
+                            subtitle: '看国家总消耗，谁在高频高成本地和 AI 长时间磨合',
+                            label: '总 Tokens',
+                            metric: (item) => item.totalTokens,
+                            format: (item) => `${formatInt(item.totalTokens)} Tokens`,
+                            compare: (a, b) => (b.totalTokens - a.totalTokens) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
+                        },
+                        {
+                            id: 'tokensPerUser',
+                            title: '重度养虾榜',
+                            subtitle: '看单个用户的平均投入密度，谁更容易把模型“养熟”',
+                            label: '人均 Tokens',
+                            metric: (item) => item.tokensPerUser,
+                            format: (item) => `${formatInt(item.tokensPerUser)} Tokens`,
+                            compare: (a, b) => (b.tokensPerUser - a.tokensPerUser) || (b.totalTokens - a.totalTokens) || a.cc.localeCompare(b.cc),
+                        },
+                        {
+                            id: 'avgChars',
+                            title: '长指令投喂榜',
+                            subtitle: '看每人平均输出长度，谁更擅长用长上下文喂模型',
+                            label: '人均字符',
+                            metric: (item) => item.avgChars,
+                            format: (item) => `${formatInt(item.avgChars)} 字符`,
+                            compare: (a, b) => (b.avgChars - a.avgChars) || (b.tokensPerUser - a.tokensPerUser) || a.cc.localeCompare(b.cc),
+                        },
+                    ];
+                case 'model':
+                    return [
+                        {
+                            id: 'topModel',
+                            title: '信仰阵营榜',
+                            subtitle: '看各国当前主力模型阵营，按用户覆盖规模排序',
+                            label: '主力模型',
+                            metric: (item) => item.userCount,
+                            format: (item) => item.topModel ? item.topModel : '—',
+                            badge: (item) => `${formatInt(item.userCount)} 人`,
+                            compare: (a, b) => (b.userCount - a.userCount) || (b.totalTokens - a.totalTokens) || a.cc.localeCompare(b.cc),
+                        },
+                        {
+                            id: 'modelHeat',
+                            title: '模型投入榜',
+                            subtitle: '看各国围绕主力模型投入了多少 Tokens',
+                            label: '总投入',
+                            metric: (item) => item.totalTokens,
+                            format: (item) => `${formatInt(item.totalTokens)} Tokens`,
+                            badge: (item) => item.topModel ? item.topModel : '',
+                            compare: (a, b) => (b.totalTokens - a.totalTokens) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
+                        },
+                        {
+                            id: 'modelDepth',
+                            title: '模型沉浸榜',
+                            subtitle: '看各国对主力模型的人均投入深度',
+                            label: '人均投入',
+                            metric: (item) => item.tokensPerUser,
+                            format: (item) => `${formatInt(item.tokensPerUser)} Tokens`,
+                            badge: (item) => item.topModel ? item.topModel : '',
+                            compare: (a, b) => (b.tokensPerUser - a.tokensPerUser) || (b.totalTokens - a.totalTokens) || a.cc.localeCompare(b.cc),
+                        },
+                    ];
+                case 'github':
+                    return [
+                        {
+                            id: 'githubScore',
+                            title: '硬核战力榜',
+                            subtitle: '看国家层面的平均开源战力，谁的开发者更硬核',
+                            label: '平均战力',
+                            metric: (item) => item.githubScore,
+                            format: (item) => formatFloat2(item.githubScore),
+                            compare: (a, b) => (b.githubScore - a.githubScore) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
+                        },
+                        {
+                            id: 'githubImpact',
+                            title: '开源影响力榜',
+                            subtitle: '看国家总战力体量，兼顾战力与参与规模',
+                            label: '总战力',
+                            metric: (item) => item.githubScore * item.userCount,
+                            format: (item) => formatFloat2(item.githubScore * item.userCount),
+                            compare: (a, b) => ((b.githubScore * b.userCount) - (a.githubScore * a.userCount)) || (b.githubScore - a.githubScore) || a.cc.localeCompare(b.cc),
+                        },
+                        {
+                            id: 'githubDensity',
+                            title: '硬核密度榜',
+                            subtitle: '看高战力开发者在人均高投入国家中的集中度',
+                            label: '战力 x 投入',
+                            metric: (item) => item.githubScore * Math.max(item.tokensPerUser, 1),
+                            format: (item) => formatFloat2(item.githubScore * Math.max(item.tokensPerUser, 1)),
+                            compare: (a, b) => ((b.githubScore * Math.max(b.tokensPerUser, 1)) - (a.githubScore * Math.max(a.tokensPerUser, 1))) || (b.githubScore - a.githubScore) || a.cc.localeCompare(b.cc),
+                        },
+                    ];
+                case 'efficiency':
+                default:
+                    return [
+                        {
+                            id: 'avgChars',
+                            title: '生产力榜',
+                            subtitle: '看国家的人均输出能力，谁在单位用户维度上产出更高',
+                            label: '人均字符',
+                            metric: (item) => item.avgChars,
+                            format: (item) => `${formatInt(item.avgChars)} 字符`,
+                            compare: (a, b) => (b.avgChars - a.avgChars) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
+                        },
+                        {
+                            id: 'tokensPerUser',
+                            title: '投入效率榜',
+                            subtitle: '看国家的人均 Tokens 投入强度，衡量高强度工作节奏',
+                            label: '人均 Tokens',
+                            metric: (item) => item.tokensPerUser,
+                            format: (item) => `${formatInt(item.tokensPerUser)} Tokens`,
+                            compare: (a, b) => (b.tokensPerUser - a.tokensPerUser) || (b.avgChars - a.avgChars) || a.cc.localeCompare(b.cc),
+                        },
+                        {
+                            id: 'userCount',
+                            title: '活跃规模榜',
+                            subtitle: '看国家参与排名的活跃开发者规模',
+                            label: '活跃人数',
+                            metric: (item) => item.userCount,
+                            format: (item) => `${formatInt(item.userCount)} 人`,
+                            compare: (a, b) => (b.userCount - a.userCount) || (b.totalTokens - a.totalTokens) || a.cc.localeCompare(b.cc),
+                        },
+                    ];
+            }
+        };
+
+        const metricGroups = buildMetricGroups(rt);
+
+        try { container.innerHTML = ''; } catch (_) {}
+        if (skeleton) skeleton.style.display = 'none';
+
+        const frag = document.createDocumentFragment();
+        const getCountryName = (cc) => {
+            try {
+                if (typeof countryNameMap !== 'undefined' && countryNameMap && countryNameMap[cc]) {
+                    return (typeof currentLang !== 'undefined' && currentLang === 'zh')
+                        ? (countryNameMap[cc].zh || cc)
+                        : (countryNameMap[cc].en || cc);
+                }
+            } catch (_) {}
+            return cc;
+        };
+
+        const getFlag = (cc) => {
+            try {
+                if (typeof getFlagEmoji === 'function') return getFlagEmoji(cc);
+                if (typeof countryCodeToFlagEmoji === 'function') return countryCodeToFlagEmoji(cc) || '🏳️';
+            } catch (_) {}
+            return '🏳️';
+        };
+
+        const createRankNode = (item, idx, group) => {
+            const node = tpl.content.firstElementChild ? tpl.content.firstElementChild.cloneNode(true) : null;
+            if (!node) return null;
+            node.dataset.rank = String(idx + 1);
+            node.dataset.countryCode = item.cc;
+            node.style.marginBottom = '0.75rem';
+
+            const rankEl = node.querySelector('.pk-rank');
+            const flagEl = node.querySelector('.pk-flag');
+            const codeEl = node.querySelector('.pk-code');
+            const nameEl = node.querySelector('.pk-name');
+            const valueEl = node.querySelector('.pk-value');
+            const valueLabelEl = node.querySelector('.pk-value-label');
+            const badgeEl = node.querySelector('.pk-model-badge');
+
+            if (rankEl) rankEl.textContent = String(idx + 1);
+            if (flagEl) flagEl.textContent = getFlag(item.cc);
+            if (codeEl) codeEl.textContent = item.cc;
+            if (nameEl) nameEl.textContent = getCountryName(item.cc);
+            if (valueEl) valueEl.textContent = typeof group.format === 'function' ? group.format(item) : '--';
+            if (valueLabelEl) valueLabelEl.textContent = group.label || '';
+
+            const badgeText = typeof group.badge === 'function'
+                ? group.badge(item)
+                : (item.topModel ? item.topModel : '');
+            if (badgeEl) badgeEl.textContent = badgeText || '';
+
+            node.addEventListener('click', () => {
+                const name = getCountryName(item.cc);
+                ensureRadarComparison(item.cc, name, {
+                    avgChars: item.avgChars,
+                    totalTokens: item.totalTokens,
+                    userCount: item.userCount,
+                    githubScore: item.githubScore,
+                    tokensPerUser: item.tokensPerUser,
+                }, globalBase);
+            });
+            return node;
+        };
+
+        metricGroups.forEach((group) => {
+            const section = document.createElement('section');
+            section.className = 'border border-[#00ff41]/20 bg-[rgba(0,12,4,0.55)] rounded-xl p-3 md:p-4';
+
+            const header = document.createElement('div');
+            header.className = 'flex items-start justify-between gap-3 mb-3';
+            header.innerHTML = `
+                <div>
+                    <div class="text-[#00ff41] text-xs font-mono uppercase tracking-[0.2em]">${group.title}</div>
+                    <div class="text-zinc-500 text-[11px] leading-5 mt-1">${group.subtitle || ''}</div>
+                </div>
+                <div class="text-[10px] text-zinc-600 font-mono">${group.label || ''}</div>
+            `;
+            section.appendChild(header);
+
+            const list = document.createElement('div');
+            list.className = 'flex flex-col';
+
+            const ranked = entries
+                .slice()
+                .sort(group.compare)
+                .filter((item) => (typeof group.metric === 'function' ? Number(group.metric(item)) : 0) > 0)
+                .slice(0, topLimit);
+
+            if (!ranked.length) {
+                const empty = document.createElement('div');
+                empty.className = 'text-zinc-500 text-xs py-4 text-center';
+                empty.textContent = '暂无可用国家数据';
+                list.appendChild(empty);
+            } else {
+                ranked.forEach((item, idx) => {
+                    const node = createRankNode(item, idx, group);
+                    if (node) list.appendChild(node);
+                });
+            }
+
+            section.appendChild(list);
+            frag.appendChild(section);
+        });
+
+        container.appendChild(frag);
+    }
+
+    function initCountryPkBoard() {
+        const panel = document.getElementById('panel-global-view');
+        if (!panel) return;
+        if (panel.dataset.pkBound === '1') return;
+        panel.dataset.pkBound = '1';
+
+        let currentRankType = (window.__pkRankType && typeof window.__pkRankType === 'string') ? window.__pkRankType : DEFAULT_RANK_TYPE;
+        currentRankType = String(currentRankType).trim().toLowerCase() || DEFAULT_RANK_TYPE;
+
+        const buttons = Array.from(panel.querySelectorAll('.rank-tab-btn'));
+        const skeleton = document.getElementById('global-pk-skeleton');
+
+        const setActive = (rt) => {
+            buttons.forEach(btn => {
+                const t = String(btn.getAttribute('data-rank-type') || '').trim().toLowerCase();
+                if (t === rt) btn.classList.add('active');
+                else btn.classList.remove('active');
+            });
+        };
+
+        buttons.forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const rt = String(btn.getAttribute('data-rank-type') || '').trim().toLowerCase() || DEFAULT_RANK_TYPE;
+                currentRankType = rt;
+                window.__pkRankType = rt;
+                setActive(rt);
+                const payload = await fetchCountryPkSnapshot();
+                if (payload) renderCountryRankings(payload, currentRankType);
+            });
+        });
+
+        // 首次加载
+        (async () => {
+            try {
+                setActive(currentRankType);
+                await refreshCountryPkBoard(false);
+            } catch (_) {
+                // ignore
+            } finally {
+                try { if (skeleton) skeleton.style.display = 'none'; } catch (_) {}
+            }
+        })();
+    }
+
+    // 暴露给 switchView('global') 调用
+    window.fetchCountryPkSnapshot = fetchCountryPkSnapshot;
+    window.renderCountryRankings = renderCountryRankings;
+    window.initCountryPkBoard = initCountryPkBoard;
+    window.ensureGlobalCountryPkScaffold = ensureGlobalCountryPkScaffold;
+    window.refreshCountryPkBoard = refreshCountryPkBoard;
+})();
+
 // ==================== 用户灵魂词云功能 ====================
 (function() {
     /**
@@ -27567,7 +29821,7 @@ document.addEventListener('click', function(e) {
                 var leftBody = document.getElementById('left-drawer-body');
                 var cu = window.currentUser || window.currentUserData;
                 if (leftBody && cu && typeof renderUserStatsCards === 'function') {
-                    supabase.from('user_analysis').select('id, github_login, github_stats, github_stars, github_score, github_synced_at, last_sync_at').eq('id', userId).single().then(async function(r) {
+                    supabase.from('user_analysis').select('id, github_login, github_stats, github_stars, github_score, github_synced_at, last_sync_at, stats, total_tokens, primary_model, skills_tags, last_active_at').eq('id', userId).single().then(async function(r) {
                         if (r.data && cu) {
                             var merged = Object.assign({}, cu, r.data);
                             try { window.currentUser = merged; window.currentUserData = merged; } catch (e) {}
@@ -27616,7 +29870,7 @@ document.addEventListener('click', function(e) {
                                     }
                                 }).then(function(result) {
                                     if (result && result.success && result.data) {
-                                        supabase.from('user_analysis').select('id, github_login, github_stats, github_stars, github_score, github_synced_at, last_sync_at').eq('id', userId).single().then(function(r2) {
+                                        supabase.from('user_analysis').select('id, github_login, github_stats, github_stars, github_score, github_synced_at, last_sync_at, stats, total_tokens, primary_model, skills_tags, last_active_at').eq('id', userId).single().then(function(r2) {
                                             if (r2.data && cu) {
                                                 var m2 = Object.assign({}, cu, r2.data);
                                                 try { window.currentUser = m2; window.currentUserData = m2; } catch (e) {}

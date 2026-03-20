@@ -440,7 +440,8 @@
         }
         
         // 【调试】记录请求的国家，便于排查数据混乱问题
-        console.log('[fetchCountryKeywords] 请求本国词云数据 - 国家:', countryParam || '未指定', '来源:', selectedCountry ? (__selectedCountry ? '__selectedCountry' : (window.currentDrawerCountry ? 'currentDrawerCountry' : 'localStorage')) : '无');
+        // 注意：这里必须使用 window.__selectedCountry，避免 ReferenceError 破坏整条国家词云加载链路
+        console.log('[fetchCountryKeywords] 请求本国词云数据 - 国家:', countryParam || '未指定', '来源:', selectedCountry ? (window.__selectedCountry ? '__selectedCountry' : (window.currentDrawerCountry ? 'currentDrawerCountry' : 'localStorage')) : '无');
         
         var summaryUrl = countryParam ? (apiBase + 'api/country-summary?country=' + encodeURIComponent(countryParam)) : null;
 
