@@ -9474,8 +9474,13 @@ app.get('/api/country-summary', async (c) => {
             topByMetrics = rpcTop
               .filter((x: any) => allowed.has(String(x?.key || '')))
               .sort((a: any, b: any) => (order5.get(String(a?.key || '')) ?? 999) - (order5.get(String(b?.key || '')) ?? 999));
-            const hasWorkDays = topByMetrics.some((x: any) => String(x?.key) === 'work_days');
-            if (!hasWorkDays) {
+            const workDaysEntry = topByMetrics.find((x: any) => String(x?.key) === 'work_days') || null;
+            const hasWorkDaysLeaders = !!(
+              workDaysEntry &&
+              Array.isArray(workDaysEntry?.leaders) &&
+              workDaysEntry.leaders.length > 0
+            );
+            if (!hasWorkDaysLeaders) {
               const wdUrl = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
               wdUrl.searchParams.set('select', 'id,user_name,github_username,github_login,fingerprint,user_identity,work_days');
               wdUrl.searchParams.set('or', `(country_code.eq.${cc},ip_location.eq.${cc},manual_location.eq.${cc},current_location.eq.${cc})`);
@@ -9505,6 +9510,7 @@ app.get('/api/country-summary', async (c) => {
                 })
                 .filter(Boolean);
               const m = metrics5.find((x) => x.key === 'work_days')!;
+              topByMetrics = topByMetrics.filter((x: any) => String(x?.key) !== 'work_days');
               topByMetrics.push({
                 ...emptyEntry(m),
                 score: wdLeaders.length ? (wdLeaders[0] as any).score : null,

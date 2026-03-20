@@ -1161,13 +1161,19 @@
                     var session = (r && r.data && r.data.session) ? r.data.session : null;
                     if (session && session.user) {
                         runGateCheck();
-                        sb.auth.onAuthStateChange(function(event, s) { if (s) runGateCheck(); });
+                        if (!window.__stats2CountryGateAuthBound) {
+                            window.__stats2CountryGateAuthBound = true;
+                            sb.auth.onAuthStateChange(function(event, s) { if (s) runGateCheck(); });
+                        }
                         return;
                     }
                     runGateCheck();
-                    sb.auth.onAuthStateChange(function(event, session) {
-                        if (session) runGateCheck();
-                    });
+                    if (!window.__stats2CountryGateAuthBound) {
+                        window.__stats2CountryGateAuthBound = true;
+                        sb.auth.onAuthStateChange(function(event, session) {
+                            if (session) runGateCheck();
+                        });
+                    }
                     if (isGuestGatePassed()) {
                         try { hideGateOverlay(); } catch (e0) {}
                     } else {
@@ -1530,7 +1536,7 @@
             { label: '粉丝数量', value: gs.followers != null ? String(gs.followers) : '—', rankKeys: ['followers_rank', 'followersRank'], source: 'GitHub' },
             { label: '技术广度', value: String(langBreadth), rankKeys: ['lang_breadth_rank', 'langBreadthRank'], source: 'GitHub' },
             { label: '赛博磕头', value: data.ketao_count != null ? Number(data.ketao_count).toLocaleString() : '—', rankKeys: ['ketao_rank', 'ketaoRank', 'please'], source: '对话统计' },
-            { label: '上岗天数', value: data.work_days != null ? String(data.work_days) : '—', rankKeys: ['work_days_rank', 'work_days', 'workDaysRank', 'day'], source: '对话统计' }
+            { label: '上岗天数', value: data.work_days != null ? String(data.work_days) : '—', rankKeys: ['work_days_rank', 'days_rank', 'daysRank', 'workDaysRank'], source: '对话统计' }
         ];
 
         var answerContent = '';
@@ -5635,6 +5641,11 @@
                     'jiafang_count', 'ketao_count', 'work_days'
                 ];
                 topBy = topBy.slice().sort((a, b) => metricOrder.indexOf(String(a?.key || '')) - metricOrder.indexOf(String(b?.key || '')));
+                try {
+                    if (typeof applyCurrentUserOverlayToTopByMetrics === 'function' && topBy && topBy.length > 0) {
+                        topBy = applyCurrentUserOverlayToTopByMetrics(topBy, 10);
+                    }
+                } catch { /* ignore */ }
                 window.__resolveUserMeta = _resolveUserMeta;
                 if (typeof drawHighScores === 'function') {
                     console.log('[updateCountryDashboard] 🎯 调用drawHighScores，数据量:', topBy.length);
@@ -6081,8 +6092,16 @@
                 clearInterval(initInterval);
                 
                 try {
-                    // 实例化客户端（直接赋值给全局变量）
-                    supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+                    // 复用全局单例，避免多个 client 争抢同一份 auth lock
+                    if (window.__sharedSupabaseClient && typeof window.__sharedSupabaseClient.auth === 'object') {
+                        supabaseClient = window.__sharedSupabaseClient;
+                    } else if (window.supabaseClient && typeof window.supabaseClient.auth === 'object') {
+                        supabaseClient = window.supabaseClient;
+                        window.__sharedSupabaseClient = supabaseClient;
+                    } else {
+                        supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+                        window.__sharedSupabaseClient = supabaseClient;
+                    }
                     window.supabase = supabaseClient;
                     // 挂载到全局 window，供控制台脚本使用
                     window.supabaseClient = supabaseClient;
@@ -9058,8 +9077,8 @@
         }
 
         function getRankingMetricValueForUser(metricKey, user) {
-            if (!user || typeof extractDimensionValues !== 'function') return 0;
-            var values = extractDimensionValues(user) || {};
+            if (!user) return 0;
+            var values = (typeof extractDimensionValues === 'function') ? (extractDimensionValues(user) || {}) : {};
             switch (metricKey) {
                 case 'total_messages':
                     return Number(values.ai) || 0;
@@ -9069,8 +9088,17 @@
                 case 'avg_user_message_length':
                 case 'avg_message_length':
                     return Number(values.word) || 0;
-                case 'work_days':
-                    return Number(values.day) || 0;
+                case 'work_days': {
+                    var d = Number(values.day) || 0;
+                    if (d > 0) return d;
+                    var su = user.stats && typeof user.stats === 'object' ? user.stats : null;
+                    return Number(
+                        user.work_days ??
+                        user.usage_days ??
+                        user.usageDays ??
+                        (su ? (su.work_days ?? su.usage_days ?? su.usageDays ?? su.days) : null)
+                    ) || 0;
+                }
                 case 'jiafang_count':
                     return Number(values.no) || 0;
                 case 'ketao_count':
@@ -9181,7 +9209,11 @@
                 if (!(overlayValue > 0)) return;
                 var idx = list.findIndex(function(item) {
                     var itemKey = String(item && item.key || '').trim();
-                    return itemKey === metricDef.key || (metricDef.key === 'total_user_chars' && itemKey === 'total_chars');
+                    if (itemKey === metricDef.key) return true;
+                    if (metricDef.key === 'total_user_chars' && (itemKey === 'total_chars' || itemKey === 'total_user_chars')) return true;
+                    // RPC/历史数据常用 day 表示上岗天数，须与 work_days 同一槽位合并，否则高分图谱「上岗天数」无法叠当前用户名次
+                    if (metricDef.key === 'work_days' && (itemKey === 'day' || itemKey === 'usage_days')) return true;
+                    return false;
                 });
                 var metricItem = idx >= 0 ? Object.assign({}, list[idx]) : {
                     key: metricDef.key,
@@ -10856,6 +10888,12 @@
                             }
                             if (Array.isArray(topBy) && topBy.length > 0) {
                                 console.log('[showDrawersWithCountryData] 准备渲染高分图谱到排行榜视图');
+                                // 强制叠加当前用户到 topByMetrics（确保“上岗天数”等指标也能拿到用户名次）
+                                try {
+                                    if (typeof applyCurrentUserOverlayToTopByMetrics === 'function') {
+                                        topBy = applyCurrentUserOverlayToTopByMetrics(topBy, 10);
+                                    }
+                                } catch { /* ignore */ }
                                 drawHighScores(topBy);
                             } else {
                                 console.log('[showDrawersWithCountryData] 缺少 topByMetrics 数据');
@@ -10944,8 +10982,15 @@
 
             renderCountryRightPanel(code, displayName);
             // 地图点击时强制刷新；其他入口缓存优先 + 静默更新
-            var dashboardOpts = opts.forceRefresh ? { force: true, silent: false } : { preferCache: true, silent: true };
-            try { updateCountryDashboard(code, null, dashboardOpts); } catch (e) { /* ignore */ }
+            var dashboardOpts = opts.forceRefresh
+                ? { force: true, preferCache: false, silent: false, refreshLexicon: true }
+                : { force: true, preferCache: false, silent: true, refreshLexicon: true };
+            try {
+                if (window.__countryTotalsCache && code) {
+                    window.__countryTotalsCache.delete(`CT:${String(code).toUpperCase()}`);
+                }
+                updateCountryDashboard(code, null, dashboardOpts);
+            } catch (e) { /* ignore */ }
 
             // 【新增】更新顶部视图切换按钮
             updateHeaderViewToggleBtn();
@@ -11099,10 +11144,14 @@
                             syncSwitcherState(src);
                             // Source tab switch should feel instant: bypass country debounce, keep current UI while refreshing.
                             if (typeof updateCountryDashboard === 'function') {
+                                if (window.__countryTotalsCache && cc) {
+                                    window.__countryTotalsCache.delete(`CT:${String(cc).toUpperCase()}`);
+                                }
                                 updateCountryDashboard(cc, name, {
-                                    preferCache: true,
+                                    preferCache: false,
                                     silent: true,
-                                    force: true
+                                    force: true,
+                                    refreshLexicon: true
                                 });
                             }
                         };
@@ -11126,7 +11175,12 @@
             var code = String(currentDrawerCountry.code).trim().toUpperCase();
             var name = currentDrawerCountry.name || (countryNameMap && countryNameMap[code] ? (currentLang === 'zh' ? countryNameMap[code].zh : countryNameMap[code].en) : code);
             renderCountryRightPanel(code, name);
-            try { updateCountryDashboard(code, null, { force: true }); } catch (e) { /* ignore */ }
+            try {
+                if (window.__countryTotalsCache && code) {
+                    window.__countryTotalsCache.delete(`CT:${String(code).toUpperCase()}`);
+                }
+                updateCountryDashboard(code, null, { force: true, preferCache: false, silent: true, refreshLexicon: true });
+            } catch (e) { /* ignore */ }
         }
 
         /**
@@ -11365,7 +11419,10 @@
                             setTimeout(() => { window.__renderingCountryView = false; }, 100);
                         } else if (countryMount && window.__renderingCountryView !== true) {
                             // 修复：避免 4 参调用导致 options 丢失、命中 sameCountry 缓存而不刷新
-                            updateCountryDashboard(currentDrawerCountry.code, null, { forceRefresh: false });
+                            if (window.__countryTotalsCache && currentDrawerCountry.code) {
+                                window.__countryTotalsCache.delete(`CT:${String(currentDrawerCountry.code).toUpperCase()}`);
+                            }
+                            updateCountryDashboard(currentDrawerCountry.code, null, { force: true, preferCache: false, silent: true, refreshLexicon: true });
                         }
                     }
                     // 触发国家视图显示事件，通知词云组件自动加载数据
@@ -22487,6 +22544,12 @@
             try {
                 if (typeof drawHighScores === 'function') {
                     var topBy = Array.isArray(data.topByMetrics) ? data.topByMetrics : [];
+                    // 兜底：初始化/刷新时也叠加当前用户，确保“上岗天数”等指标能显示用户名次
+                    try {
+                        if (typeof applyCurrentUserOverlayToTopByMetrics === 'function' && topBy && topBy.length > 0) {
+                            topBy = applyCurrentUserOverlayToTopByMetrics(topBy, 10);
+                        }
+                    } catch { /* ignore */ }
                     drawHighScores(topBy);
                     if (topBy.length > 0) {
                         console.log('[Dashboard] ✅ 高分图谱渲染完成:', topBy.length, '个维度');
@@ -26406,75 +26469,85 @@
                 }
                 
                 // 监听认证状态变化
-                supabaseClient.auth.onAuthStateChange(async (event, session) => {
-                    console.log('[Auth] 🔔 认证状态变化事件:', event, session ? '有会话' : '无会话');
-                    
-                    if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-                        await handleAuthStateChange(session);
-                        
-                        if (event === 'SIGNED_IN') {
-                            // 【一体化选籍】回调后：若 localStorage 有 selected_country，立即调用 sync 将国家写入当前用户记录（含 fingerprint + github_login，ON CONFLICT 注入）
-                            var pendingCountry = null;
-                            try { pendingCountry = localStorage.getItem('selected_country'); } catch (e) {}
-                            if (session && pendingCountry && String(pendingCountry).trim().length >= 2) {
-                                var apiBase = (document.querySelector('meta[name="api-endpoint"]')?.content || '').trim();
-                                if (apiBase.endsWith('/')) apiBase = apiBase.slice(0, -1);
-                                var token = (session.provider_token || '').trim();
-                                var githubLogin = (session.user?.user_metadata?.user_name || session.user?.user_metadata?.full_name || session.user?.email || '').trim();
-                                if (!githubLogin && session.user?.identities && session.user.identities[0]) githubLogin = (session.user.identities[0].identity_data?.user_name || session.user.identities[0].identity_data?.preferred_username || '').trim();
-                                var fp = (window.fpId || '').trim() || (function(){ try { return localStorage.getItem('user_fingerprint') || ''; } catch(e){ return ''; }})();
-                                if (token && (session.user?.id || githubLogin)) {
+                if (!window.__stats2AuthStateBound) {
+                    window.__stats2AuthStateBound = true;
+                    const stats2AuthStateBinding = supabaseClient.auth.onAuthStateChange((event, session) => {
+                        console.log('[Auth] 🔔 认证状态变化事件:', event, session ? '有会话' : '无会话');
+                        Promise.resolve().then(async function() {
+                            if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+                                await handleAuthStateChange(session);
+                                
+                                if (event === 'SIGNED_IN') {
+                                    // 【一体化选籍】回调后：若 localStorage 有 selected_country，立即调用 sync 将国家写入当前用户记录（含 fingerprint + github_login，ON CONFLICT 注入）
+                                    var pendingCountry = null;
+                                    try { pendingCountry = localStorage.getItem('selected_country'); } catch (e) {}
+                                    if (session && pendingCountry && String(pendingCountry).trim().length >= 2) {
+                                        var apiBase = (document.querySelector('meta[name="api-endpoint"]')?.content || '').trim();
+                                        if (apiBase.endsWith('/')) apiBase = apiBase.slice(0, -1);
+                                        var token = (session.provider_token || '').trim();
+                                        var githubLogin = (session.user?.user_metadata?.user_name || session.user?.user_metadata?.full_name || session.user?.email || '').trim();
+                                        if (!githubLogin && session.user?.identities && session.user.identities[0]) githubLogin = (session.user.identities[0].identity_data?.user_name || session.user.identities[0].identity_data?.preferred_username || '').trim();
+                                        var fp = (window.fpId || '').trim() || (function(){ try { return localStorage.getItem('user_fingerprint') || ''; } catch(e){ return ''; }})();
+                                        if (token && (session.user?.id || githubLogin)) {
+                                            try {
+                                                var syncRes = await fetch(apiBase ? apiBase + '/api/github/sync' : '/api/github/sync', {
+                                                    method: 'POST',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({
+                                                        accessToken: token,
+                                                        userId: githubLogin || '',
+                                                        id: session.user?.id || '',
+                                                        fingerprint: fp,
+                                                        country_code: String(pendingCountry).trim().toUpperCase()
+                                                    })
+                                                });
+                                                if (syncRes.ok) console.log('[Auth] ✅ 选籍+登录回调：国家已同步');
+                                            } catch (e) { console.warn('[Auth] 选籍 sync 请求失败:', e); }
+                                        }
+                                    }
+                                    // 【Task 3】当 event === 'SIGNED_IN' 时，显式调用一次 window.refreshUserStats() 和 fetchAllData()
+                                    console.log('[Auth] 🔄 用户登录成功，触发数据刷新...');
                                     try {
-                                        var syncRes = await fetch(apiBase ? apiBase + '/api/github/sync' : '/api/github/sync', {
-                                            method: 'POST',
-                                            headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify({
-                                                accessToken: token,
-                                                userId: githubLogin || '',
-                                                id: session.user?.id || '',
-                                                fingerprint: fp,
-                                                country_code: String(pendingCountry).trim().toUpperCase()
-                                            })
-                                        });
-                                        if (syncRes.ok) console.log('[Auth] ✅ 选籍+登录回调：国家已同步');
-                                    } catch (e) { console.warn('[Auth] 选籍 sync 请求失败:', e); }
-                                }
-                            }
-                            // 【Task 3】当 event === 'SIGNED_IN' 时，显式调用一次 window.refreshUserStats() 和 fetchAllData()
-                            console.log('[Auth] 🔄 用户登录成功，触发数据刷新...');
-                            try {
-                                if (typeof fetchData === 'function') {
-                                    await fetchData();
-                                    console.log('[Auth] ✅ fetchData 执行完成');
-                                }
-                                if (typeof window.refreshUserStats === 'function') {
-                                    try {
-                                        await window.refreshUserStats();
-                                        console.log('[Auth] ✅ refreshUserStats 执行完成');
+                                        if (typeof fetchData === 'function') {
+                                            await fetchData();
+                                            console.log('[Auth] ✅ fetchData 执行完成');
+                                        }
+                                        if (typeof window.refreshUserStats === 'function') {
+                                            try {
+                                                await window.refreshUserStats();
+                                                console.log('[Auth] ✅ refreshUserStats 执行完成');
+                                            } catch (refreshError) {
+                                                if (refreshError.name === 'AbortError' || refreshError.message?.includes('aborted')) {
+                                                    console.log('[Auth] ℹ️ refreshUserStats 被取消（可能是页面刷新导致）');
+                                                } else {
+                                                    console.error('[Auth] ❌ refreshUserStats 执行失败:', refreshError);
+                                                }
+                                            }
+                                        }
                                     } catch (refreshError) {
                                         if (refreshError.name === 'AbortError' || refreshError.message?.includes('aborted')) {
-                                            console.log('[Auth] ℹ️ refreshUserStats 被取消（可能是页面刷新导致）');
+                                            console.log('[Auth] ℹ️ 数据刷新被取消（可能是页面刷新导致）');
                                         } else {
-                                            console.error('[Auth] ❌ refreshUserStats 执行失败:', refreshError);
+                                            console.error('[Auth] ❌ 数据刷新失败:', refreshError);
                                         }
                                     }
                                 }
-                            } catch (refreshError) {
-                                if (refreshError.name === 'AbortError' || refreshError.message?.includes('aborted')) {
-                                    console.log('[Auth] ℹ️ 数据刷新被取消（可能是页面刷新导致）');
-                                } else {
-                                    console.error('[Auth] ❌ 数据刷新失败:', refreshError);
-                                }
+                            } else if (event === 'SIGNED_OUT') {
+                                try {
+                                    resetGuestViewerState({ renderDrawer: true });
+                                    renderGuestLoginCard();
+                                } catch (e) {}
+                                await handleAuthStateChange(null);
                             }
-                        }
-                    } else if (event === 'SIGNED_OUT') {
-                        try {
-                            resetGuestViewerState({ renderDrawer: true });
-                            renderGuestLoginCard();
-                        } catch (e) {}
-                        await handleAuthStateChange(null);
-                    }
-                });
+                        }).catch(function(authChangeError) {
+                            console.error('[Auth] ❌ 认证状态回调执行失败:', authChangeError);
+                        });
+                    });
+                    window.__stats2AuthStateSubscription =
+                        (stats2AuthStateBinding && stats2AuthStateBinding.data && stats2AuthStateBinding.data.subscription) ||
+                        (stats2AuthStateBinding && stats2AuthStateBinding.subscription) ||
+                        null;
+                }
                 
                 console.log('[Auth] ✅ 认证状态监听已启动');
             } else {

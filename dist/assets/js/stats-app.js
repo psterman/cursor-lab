@@ -2506,8 +2506,16 @@ var _loc = window.location;
                 clearInterval(initInterval);
                 
                 try {
-                    // 实例化客户端（直接赋值给全局变量）
-                    supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+                    // 复用全局单例，避免多个 client 争抢同一份 auth lock
+                    if (window.__sharedSupabaseClient && typeof window.__sharedSupabaseClient.auth === 'object') {
+                        supabaseClient = window.__sharedSupabaseClient;
+                    } else if (window.supabaseClient && typeof window.supabaseClient.auth === 'object') {
+                        supabaseClient = window.supabaseClient;
+                        window.__sharedSupabaseClient = supabaseClient;
+                    } else {
+                        supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+                        window.__sharedSupabaseClient = supabaseClient;
+                    }
                     window.supabase = supabaseClient;
                     // 挂载到全局 window，供控制台脚本使用
                     window.supabaseClient = supabaseClient;
@@ -18520,53 +18528,63 @@ var _loc = window.location;
                 }
 
                 // 监听认证状态变化
-                supabaseClient.auth.onAuthStateChange(async (event, session) => {
-                    console.log('[Auth] 🔔 认证状态变化事件:', event, session ? '有会话' : '无会话');
-                    
-                    if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-                        await handleAuthStateChange(session);
-                        
-                        // 【Task 3】当 event === 'SIGNED_IN' 时，显式调用一次 window.refreshUserStats() 和 fetchAllData()
-                        if (event === 'SIGNED_IN') {
-                            console.log('[Auth] 🔄 用户登录成功，触发数据刷新...');
-                            try {
-                                // 先刷新全局数据
-                                if (typeof fetchData === 'function') {
-                                    await fetchData();
-                                    console.log('[Auth] ✅ fetchData 执行完成');
-                                }
+                if (!window.__statsAppAuthStateBound) {
+                    window.__statsAppAuthStateBound = true;
+                    const statsAppAuthStateBinding = supabaseClient.auth.onAuthStateChange((event, session) => {
+                        console.log('[Auth] 🔔 认证状态变化事件:', event, session ? '有会话' : '无会话');
+                        Promise.resolve().then(async function() {
+                            if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+                                await handleAuthStateChange(session);
                                 
-                                // 再刷新用户统计数据（会设置 currentUser / currentUserData）
-                                if (typeof window.refreshUserStats === 'function') {
+                                // 【Task 3】当 event === 'SIGNED_IN' 时，显式调用一次 window.refreshUserStats() 和 fetchAllData()
+                                if (event === 'SIGNED_IN') {
+                                    console.log('[Auth] 🔄 用户登录成功，触发数据刷新...');
                                     try {
-                                        await window.refreshUserStats();
-                                        console.log('[Auth] ✅ refreshUserStats 执行完成');
+                                        // 先刷新全局数据
+                                        if (typeof fetchData === 'function') {
+                                            await fetchData();
+                                            console.log('[Auth] ✅ fetchData 执行完成');
+                                        }
+                                        
+                                        // 再刷新用户统计数据（会设置 currentUser / currentUserData）
+                                        if (typeof window.refreshUserStats === 'function') {
+                                            try {
+                                                await window.refreshUserStats();
+                                                console.log('[Auth] ✅ refreshUserStats 执行完成');
+                                            } catch (refreshError) {
+                                                // 【修复 AbortError】特殊处理 AbortError
+                                                if (refreshError.name === 'AbortError' || refreshError.message?.includes('aborted')) {
+                                                    console.log('[Auth] ℹ️ refreshUserStats 被取消（可能是页面刷新导致）');
+                                                } else {
+                                                    console.error('[Auth] ❌ refreshUserStats 执行失败:', refreshError);
+                                                }
+                                            }
+                                        }
+
+                                        // 登录完成后，强制刷新一次左抽屉的所有数据卡片 + cursor 统计
+                                        autoRefreshLeftDrawerAfterLogin();
+                                        renderCursorDataAfterLogin();
                                     } catch (refreshError) {
                                         // 【修复 AbortError】特殊处理 AbortError
                                         if (refreshError.name === 'AbortError' || refreshError.message?.includes('aborted')) {
-                                            console.log('[Auth] ℹ️ refreshUserStats 被取消（可能是页面刷新导致）');
+                                            console.log('[Auth] ℹ️ 数据刷新被取消（可能是页面刷新导致）');
                                         } else {
-                                            console.error('[Auth] ❌ refreshUserStats 执行失败:', refreshError);
+                                            console.error('[Auth] ❌ 数据刷新失败:', refreshError);
                                         }
                                     }
                                 }
-
-                                // 登录完成后，强制刷新一次左抽屉的所有数据卡片 + cursor 统计
-                                autoRefreshLeftDrawerAfterLogin();
-                                renderCursorDataAfterLogin();
-                            } catch (refreshError) {
-                                // 【修复 AbortError】特殊处理 AbortError
-                                if (refreshError.name === 'AbortError' || refreshError.message?.includes('aborted')) {
-                                    console.log('[Auth] ℹ️ 数据刷新被取消（可能是页面刷新导致）');
-                                } else {
-                                    console.error('[Auth] ❌ 数据刷新失败:', refreshError);
-                                }
+                            } else if (event === 'SIGNED_OUT') {
+                                await handleAuthStateChange(null);
                             }
-                        }
-                    } else if (event === 'SIGNED_OUT') {
-                        await handleAuthStateChange(null);
-                    }
-                });
+                        }).catch(function(authChangeError) {
+                            console.error('[Auth] ❌ 认证状态回调执行失败:', authChangeError);
+                        });
+                    });
+                    window.__statsAppAuthStateSubscription =
+                        (statsAppAuthStateBinding && statsAppAuthStateBinding.data && statsAppAuthStateBinding.data.subscription) ||
+                        (statsAppAuthStateBinding && statsAppAuthStateBinding.subscription) ||
+                        null;
+                }
                 
                 console.log('[Auth] ✅ 认证状态监听已启动');
             } else {
