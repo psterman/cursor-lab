@@ -132,6 +132,97 @@ function runGatewayRestart() {
   });
 }
 
+/** openclaw2.html workerPayload 依赖同源 /api/openclaw/latest 等；Gateway 路径因版本可能为 /latest 或 /api/openclaw/latest，故在开发服做多路径回源 */
+function openclawGatewayBridgePlugin() {
+  const host = () => process.env.OPENCLAW_GATEWAY_HOST || '127.0.0.1';
+  const port = () => process.env.OPENCLAW_GATEWAY_PORT || '18789';
+  const base = () => `http://${host()}:${port()}`;
+
+  function candidates(pathname) {
+    const p = pathname.split('?')[0];
+    const set = new Set();
+    set.add(p);
+    if (p.startsWith('/api/openclaw')) {
+      const rest = p.replace(/^\/api\/openclaw/, '') || '/';
+      set.add(rest);
+      set.add(`/openclaw${rest === '/' ? '' : rest}`);
+      set.add(`/api${rest === '/' ? '' : rest}`);
+    }
+    if (p.startsWith('/api/analysis')) {
+      set.add(p.replace(/^\/api/, '') || '/');
+    }
+    if (p === '/api/latest_analysis') {
+      set.add('/latest_analysis');
+    }
+    return [...set];
+  }
+
+  return {
+    name: 'openclaw-gateway-bridge',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        const method = req.method || 'GET';
+        if (method !== 'GET' && method !== 'POST') return next();
+        const raw = req.url || '';
+        const pathname = raw.split('?')[0];
+        const allowed =
+          pathname.startsWith('/api/openclaw/') ||
+          pathname === '/api/analysis/latest' ||
+          pathname === '/api/latest_analysis';
+        if (!allowed) return next();
+
+        const qs = raw.includes('?') ? `?${raw.split('?').slice(1).join('?')}` : '';
+        const tryUrls = candidates(pathname).map((c) => `${base()}${c}${qs}`);
+
+        for (const url of tryUrls) {
+          try {
+            const r = await fetch(url, {
+              method,
+              headers: { Accept: 'application/json,*/*' },
+              signal: AbortSignal.timeout(5000),
+            });
+            if (!r.ok) continue;
+            const ct = r.headers.get('content-type') || 'application/json; charset=utf-8';
+            const buf = Buffer.from(await r.arrayBuffer());
+            res.setHeader('Content-Type', ct);
+            res.setHeader('Cache-Control', 'no-store');
+            res.statusCode = 200;
+            res.end(buf);
+            return;
+          } catch (_) {
+            /* try next */
+          }
+        }
+
+        try {
+          const homedir = process.env.HOME || process.env.USERPROFILE || '';
+          const { join } = await import('path');
+          const { existsSync, readFileSync } = await import('fs');
+          const files = [
+            join(homedir, '.openclaw', 'last_analysis_data.json'),
+            join(homedir, '.openclaw', 'openclaw2_payload.json'),
+            join(process.cwd(), '.openclaw', 'last_analysis_data.json'),
+            join(process.cwd(), 'openclaw2_payload.json'),
+          ];
+          for (const fp of files) {
+            if (!existsSync(fp)) continue;
+            const body = readFileSync(fp, 'utf-8');
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+            res.setHeader('Cache-Control', 'no-store');
+            res.statusCode = 200;
+            res.end(body);
+            return;
+          }
+        } catch (_) {
+          /* ignore */
+        }
+
+        next();
+      });
+    },
+  };
+}
+
 const dialogueTokenPlugin = () => {
   return {
     name: 'dialogue-token-api',
@@ -264,17 +355,10 @@ export default defineConfig({
   server: {
     port: 3000,
     open: true,
-    // 代理 OpenClaw 本地 API 和 WebSocket，避免 CORS
-    // openclaw2.html 通过 http://localhost:3000/openclaw2.html 访问时走此代理
+    // /api/openclaw/* 由 openclawGatewayBridgePlugin 多路径回源，勿在此 rewrite 为单一路径以免与 Gateway 实际路由不符
     proxy: {
-      '/api/openclaw': {
-        target: 'http://127.0.0.1:18789',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/openclaw/, ''),
-      },
-      // WebSocket 代理：前端连 ws://localhost:3000/ws 自动转发到 openclaw
       '/ws': {
-        target: 'ws://127.0.0.1:18789',
+        target: `ws://${process.env.OPENCLAW_GATEWAY_HOST || '127.0.0.1'}:${process.env.OPENCLAW_GATEWAY_PORT || '18789'}`,
         ws: true,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/ws/, ''),
@@ -282,8 +366,8 @@ export default defineConfig({
     },
   },
 
-  // 插件配置
-  plugins: [dialogueTokenPlugin(), copyI18nPlugin()],
+  // 插件配置（bridge 需在 dialogue-token 之前，优先命中 OpenClaw 数据回源）
+  plugins: [openclawGatewayBridgePlugin(), dialogueTokenPlugin(), copyI18nPlugin()],
 
   // 构建配置
   build: {

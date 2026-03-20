@@ -9211,6 +9211,7 @@
                     var itemKey = String(item && item.key || '').trim();
                     if (itemKey === metricDef.key) return true;
                     if (metricDef.key === 'total_user_chars' && (itemKey === 'total_chars' || itemKey === 'total_user_chars')) return true;
+                    // RPC/历史数据常用 day 表示上岗天数，须与 work_days 同一槽位合并，否则高分图谱「上岗天数」无法叠当前用户名次
                     if (metricDef.key === 'work_days' && (itemKey === 'day' || itemKey === 'usage_days')) return true;
                     return false;
                 });

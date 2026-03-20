@@ -458,7 +458,7 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.22;ba
       <input type="password" id="token-input" placeholder="粘贴 token 或留空（本地模式）" autocomplete="off" />
       <button type="button" id="btn-token-save">连接</button>
     </div>
-    <div id="token-hint">后台通过<strong>读取本地文件</strong>（如 <code>.openclaw/gateway-token</code>、<code>OPENCLAW_TOKEN_FILE</code>）或<strong>执行 openclaw dashboard --no-open</strong> 解析输出中的 token，组合成带 token 的对话页 URL。点击「获取对话链接」后即可复制或直接打开，实现自动登录。<br>也可手动粘贴 token 到上方输入框后点击连接。</div>
+    <div id="token-hint">后台通过<strong>读取本地文件</strong>（如 <code>.openclaw/gateway-token</code>、<code>OPENCLAW_TOKEN_FILE</code>）或<strong>执行 openclaw dashboard --no-open</strong> 解析输出中的 token，组合成带 token 的对话页 URL。点击「获取对话链接」后即可复制或直接打开，实现自动登录。<br>也可手动粘贴 token 到上方输入框后点击连接。<br><strong>Gateway 端口</strong>会在打开页面时自动探测（并记住上次成功端口）；若网关换了端口，可使用 <code>?gwPort=端口号</code>、<code>?gateway=127.0.0.1:端口</code>、或追加探测列表 <code>?gwProbePorts=19900,19901</code>，也可在控制台执行 <code>OpenClawGateway.setPort(端口);ClawController.reconnect()</code>。</div>
     <div id="token-fetch-row" style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
       <button type="button" id="btn-fetch-dialogue-link">获取对话链接</button>
       <span id="token-fetch-status" class="token-fetch-status"></span>
@@ -522,6 +522,134 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.22;ba
 (()=>{
 const $=id=>document.getElementById(id),orbit=$("orbit"),sub=$("sub"),nav=$("nav"),time=$("time"),ax=$("ax"),ay=$("ay"),cl=$("cl"),pl=$("pupil-l"),pr=$("pupil-r"),oc=$("oc"),reactor=$("reactor"),radar=$("radar"),wc=$("wc"),list=$("list"),boot=$("boot"),status=$("status");
 const state={themes:[],payload:{},metrics:null,idx:0,anim:false,lastWheel:0,dir:1,open:false,lang:(localStorage.getItem("openclaw2_lang")||"zh").replace(/^en$/i,"en").replace(/^zh$/i,"zh")||"zh"};
+/** OpenClaw Gateway 地址：默认 127.0.0.1:18789；端口变化时可通过 ?gwPort= / ?gateway= 指定，或自动探测常见端口并写入 localStorage */
+const OpenClawGateway=(function(){
+  const LS_PORT='openclaw2_gateway_port';
+  const LS_HOST='openclaw2_gateway_host';
+  const DEFAULT_PORT=18789;
+  const DEFAULT_HOST='127.0.0.1';
+  const EXTRA_PORTS=[18790,18889,3000,8080,5173,5174];
+  let cachedPort=null;
+  function parsePortFromLocation(){
+    try{
+      const q=new URLSearchParams(window.location.search||'');
+      const raw=q.get('gwPort')||q.get('gatewayPort')||q.get('openclaw_port')||q.get('openclawPort')||'';
+      if(raw){
+        const n=parseInt(String(raw).replace(/^:/,''),10);
+        if(Number.isFinite(n)&&n>0&&n<65536)return n;
+      }
+      const gw=q.get('gateway')||q.get('gw')||'';
+      if(gw){
+        const s=String(gw).trim();
+        if(/^\d+$/.test(s))return parseInt(s,10);
+        try{
+          const u=s.includes('://')?new URL(s):new URL('http://'+s);
+          if(u.port){const p=parseInt(u.port,10);if(Number.isFinite(p)&&p>0)return p;}
+        }catch(_){}
+      }
+      const h=window.location.hash||'';
+      const m=h.match(/(?:^#|[?&])gw(?:Port)?=(\d{2,5})/);
+      if(m)return parseInt(m[1],10);
+    }catch(_){}
+    return null;
+  }
+  function loadInitialPort(){
+    const fromUrl=parsePortFromLocation();
+    if(fromUrl!=null){
+      try{localStorage.setItem(LS_PORT,String(fromUrl));}catch(_){}
+      return fromUrl;
+    }
+    try{
+      const s=localStorage.getItem(LS_PORT);
+      if(s!=null){
+        const n=parseInt(s,10);
+        if(Number.isFinite(n)&&n>0&&n<65536)return n;
+      }
+    }catch(_){}
+    return DEFAULT_PORT;
+  }
+  function getHost(){
+    try{
+      const h=(localStorage.getItem(LS_HOST)||DEFAULT_HOST).trim();
+      return h||DEFAULT_HOST;
+    }catch(_){return DEFAULT_HOST;}
+  }
+  function getPort(){
+    if(cachedPort==null)cachedPort=loadInitialPort();
+    return cachedPort;
+  }
+  function setPort(p){
+    const n=parseInt(String(p),10);
+    if(!Number.isFinite(n)||n<=0||n>=65536)return;
+    cachedPort=n;
+    try{localStorage.setItem(LS_PORT,String(n));}catch(_){}
+    refreshSubtitle();
+  }
+  function getDisplay(){return getHost()+':'+getPort();}
+  function httpBase(){return 'http://'+getDisplay();}
+  function wsBase(){return 'ws://'+getDisplay();}
+  function refreshSubtitle(){
+    const el=document.getElementById('api-panel-subtitle');
+    if(el)el.textContent=wsBase();
+  }
+  async function probePort(port){
+    const base='http://'+getHost()+':'+port;
+    const tryCors=async(path,opts={})=>{
+      try{
+        const ac=new AbortController();
+        const tid=setTimeout(()=>ac.abort(),700);
+        const r=await fetch(base+path,Object.assign({method:'GET',mode:'cors',signal:ac.signal},opts));
+        clearTimeout(tid);
+        if(r.ok)return 2;
+        if(r.status===401||r.status===403||r.status===404||r.status===405)return 1;
+      }catch(_){}
+      return 0;
+    };
+    let s=await tryCors('/api/channels/status');
+    if(s>0)return true;
+    s=await tryCors('/api/channels');
+    if(s>0)return true;
+    try{
+      const ac=new AbortController();
+      const tid=setTimeout(()=>ac.abort(),700);
+      const r=await fetch(base+'/api/dialogue-token',{method:'POST',headers:{'Content-Type':'application/json'},mode:'cors',signal:ac.signal,body:JSON.stringify({source:'probe'})});
+      clearTimeout(tid);
+      if(r.ok)return true;
+    }catch(_){}
+    try{
+      const ac=new AbortController();
+      const tid=setTimeout(()=>ac.abort(),500);
+      await fetch(base+'/',{method:'GET',mode:'no-cors',signal:ac.signal});
+      clearTimeout(tid);
+      return true;
+    }catch(_){}
+    return false;
+  }
+  async function autoDetectPort(){
+    const preferred=getPort();
+    const list=[];
+    const add=(p)=>{const n=typeof p==='number'?p:parseInt(p,10);if(Number.isFinite(n)&&n>0&&n<65536&&!list.includes(n))list.push(n);};
+    add(preferred);
+    add(DEFAULT_PORT);
+    EXTRA_PORTS.forEach(add);
+    try{
+      const q=new URLSearchParams(window.location.search||'');
+      const probeExtra=q.get('gwProbePorts')||q.get('openclaw_probe_ports')||'';
+      probeExtra.split(/[,;\s]+/).forEach(function(s){const n=parseInt(String(s).trim(),10);add(n);});
+    }catch(_){}
+    for(const p of list){
+      if(await probePort(p)){
+        if(p!==getPort())setPort(p);
+        else refreshSubtitle();
+        return p;
+      }
+    }
+    refreshSubtitle();
+    return getPort();
+  }
+  return{getHost,getPort,setPort,getDisplay,httpBase,wsBase,autoDetectPort,probePort,refreshSubtitle,DEFAULT_PORT,DEFAULT_HOST};
+})();
+try{window.OpenClawGateway=OpenClawGateway;}catch(_){}
 const i18n={
   zh:{
     noData:"暂无数据",
@@ -550,6 +678,7 @@ const i18n={
     partialDataHint:"缺少 exitCode",
     dataSourceTitle:"数据来源",
     dataSourceDesc:"以下指标来自 openclawPortrait 与 sessions.json 的汇总。Token/缓存/模型/渠道/时间/技能/工具/上下文/心跳/状态及 System Prompt 统计在上传 sessions.json 时出自该文件。",
+    dataSourcePayloadHint:"【说明】当前加载到的 OpenClaw 分析载荷不完整（画像 dimensions、composite 与会话汇总 openclawSessionsSummary 多为空），因此大量卡片会显示「暂无数据」或 0——这是缺数据的表现，不是页面渲染故障。处理方式：① 在站内主流程选择 OpenClaw 引擎完成一次分析（会写入 localStorage 键 vibe_openclaw_analysis_cache，含 openclawPortrait 等）；② 保证本机 Gateway 能通过 /api/openclaw/latest 等返回上述结构的 JSON（npm run dev 会多路径回源）；③ 或将合规 JSON 存为 ~/.openclaw/last_analysis_data.json 供开发服读取。按 F12 可在控制台查看 [openclaw2] 载荷诊断日志。",
     cardModalLabels:{source:"数据来源",analysis:"数值分析",calculation:"计算方法",ownerTrait:"主人特点"},
     cardHelp:[
       [{source:"openclawPortrait.dimensions.toolSkillHeat.topTools 与 taskHabit.topSkills、sessions.skills 汇总",analysis:"展示 OpenClaw 最常触发的工具与技能关键词，反映使用偏好与能力侧重。",calculation:"从 topTools/topSkills 取前 3 项，按权重去重后拼接。",ownerTrait:"可以看出你是偏「工具流」还是「技能流」OpenClaw 用户，以及当前阶段最顺手的能力标签。"},{source:"portrait.composite.level 与 composite.score",analysis:"等级由 composite 分数映射为 S/A/B/C/D，对应排行榜段位。",calculation:"level 取自画像；rank 为 L1～L5（按 score≥60/70/80/90 分段）。",ownerTrait:"传说 OpenClaw(S)到新手(D)，一眼看出你在排行榜的段位。"},{source:"portrait.composite.score",analysis:"综合能力分，整合消耗、模型、工具、习惯、健康等维度。",calculation:"0～100 的整数，由画像 composite 直接取整。",ownerTrait:"分数越高说明整体 OpenClaw 能力越均衡、越强。"},{source:"portrait.dimensions 各维度 score：consumptionCost、modelPreference、toolSkillHeat",analysis:"三维能力向量，分别表示算力消耗、模型使用、工具调用上的得分。",calculation:"各 dimension 的 score 字段取整，格式为 消耗/模型/工具。",ownerTrait:"可看出你在「烧 Token」「用模型」「玩工具」上的侧重点。"},{source:"portrait.dimensions.taskHabit.workRhythm",analysis:"工作节奏类型：夜猫子、早起、下午档、夜间档等。",calculation:"habit.workRhythm 原始值，经 workRhythmMap 翻译为中文标签。",ownerTrait:"反映 OpenClaw 的活跃时段偏好，是夜猫子还是早起型。"},{source:"portrait.dimensions.taskHabit.peakHours",analysis:"活跃高峰时段（小时），多用于与 workRhythm 配合理解。",calculation:"habit.peakHours 取前 3 个 hour 拼接。",ownerTrait:"看出你一天中精力最集中的时间点。"},{source:"portrait.dimensions.taskHabit.activeHours",analysis:"统计意义上的活跃小时数。",calculation:"habit.activeHours 直接展示。",ownerTrait:"数值越高说明在时间维度上投入越多。"},{source:"portrait.dimensions.taskHabit.score",analysis:"习惯维度得分，综合节奏、峰值、活跃度等。",calculation:"taskHabit.score 取整。",ownerTrait:"习惯分高说明使用节奏稳定、可预测。"},{source:"portrait.dimensions.stabilityHealth.score",analysis:"健康/稳定性得分，与成功率、异常中断率相关。",calculation:"stabilityHealth.score 取整。",ownerTrait:"健康分高说明会话稳定、异常少，OpenClaw「体质」好。"}],
@@ -596,6 +725,7 @@ const i18n={
     partialDataHint:"Partial data",
     dataSourceTitle:"Data source",
     dataSourceDesc:"Metrics below are from openclawPortrait and sessions.json. Token/cache/model/channel/time/skills/tools/context/heartbeat/status and system prompt stats come from sessions.json when uploaded.",
+    dataSourcePayloadHint:"Note: The payload is incomplete (missing rich openclawPortrait / openclawSessionsSummary), so many cards show “No data” or zero — expected, not a rendering bug. Fix: run OpenClaw analysis from the main app (writes localStorage key vibe_openclaw_analysis_cache), or expose JSON from Gateway (/api/openclaw/latest, etc.), or place data in ~/.openclaw/last_analysis_data.json. Check the console for [openclaw2] diagnostics.",
     cardModalLabels:{source:"Data source",analysis:"Value analysis",calculation:"How it's calculated",ownerTrait:"What it says about you"},
     cardHelp:[
       [{source:"openclawPortrait.dimensions.toolSkillHeat.topTools, taskHabit.topSkills, sessions.skills",analysis:"Top 3 tools/skills by usage; reflects your preference and focus.",calculation:"Merge topTools/topSkills, dedupe by weight, join top 3.",ownerTrait:"Shows whether you're tool-heavy or skill-heavy, and your main capability tags."},{source:"portrait.composite.level and composite.score",analysis:"Level S/A/B/C/D maps to rank tier.",calculation:"level from portrait; rank L1–L5 by score thresholds 60/70/80/90.",ownerTrait:"From Legendary Shrimper to Shrimp Newbie at a glance."},{source:"portrait.composite.score",analysis:"Composite ability score across consumption, model, tool, habit, health.",calculation:"Integer 0–100 from portrait.composite.",ownerTrait:"Higher = more balanced, stronger overall usage."},{source:"portrait.dimensions scores: consumptionCost, modelPreference, toolSkillHeat",analysis:"Three scores: consumption / model / tool.",calculation:"Each dimension score rounded; format cons/model/tool.",ownerTrait:"Shows where you burn tokens, use models, and call tools most."},{source:"portrait.dimensions.taskHabit.workRhythm",analysis:"Work rhythm type: night-owl, morning, afternoon, evening.",calculation:"habit.workRhythm mapped via workRhythmMap.",ownerTrait:"Reveals when you're most active."},{source:"portrait.dimensions.taskHabit.peakHours",analysis:"Peak activity hours.",calculation:"First 3 hour values from habit.peakHours.",ownerTrait:"When your 'shrimp power' peaks."},{source:"portrait.dimensions.taskHabit.activeHours",analysis:"Active hours count.",calculation:"habit.activeHours.",ownerTrait:"Higher = more time invested."},{source:"portrait.dimensions.taskHabit.score",analysis:"Habit dimension score.",calculation:"taskHabit.score rounded.",ownerTrait:"Stable, predictable rhythm."},{source:"portrait.dimensions.stabilityHealth.score",analysis:"Health/stability score.",calculation:"stabilityHealth.score rounded.",ownerTrait:"Higher = fewer crashes, healthier sessions."}],
@@ -625,9 +755,31 @@ const dts=v=>v?String(v).replace("T"," ").slice(0,19):"--";
 function getApiEndpoint(){const e=(window.__API_ENDPOINT__||window.API_ENDPOINT||"").trim();if(e)return e;const m=document.querySelector('meta[name="api-endpoint"]');return m&&m.content?m.content.trim():"https://cursor-clinical-analysis.psterman.workers.dev/";}
 const base=u=>u?u.endsWith("/")?u:u+"/":"";
 async function fetchJson(url,t=9000){const c=new AbortController(),tm=setTimeout(()=>c.abort(),t);try{const r=await fetch(url,{method:"GET",mode:"cors",cache:"no-store",headers:{"Content-Type":"application/json"},signal:c.signal});if(!r.ok)return null;return await r.json();}catch{return null}finally{clearTimeout(tm)}}
-function pickPayload(raw){if(!raw||typeof raw!=="object")return null;if(raw.openclawPortrait||raw.openclawSessionsSummary)return raw;for(const c of [raw.data,raw.payload,raw.result,raw.analysis,raw.latest]){if(c&&typeof c==="object"&&(c.openclawPortrait||c.openclawSessionsSummary))return c;}return null;}
+function pickPayload(raw){
+  if(!raw||typeof raw!=="object")return null;
+  if(raw.openclawPortrait||raw.openclawSessionsSummary)return raw;
+  for(const c of [raw.data,raw.payload,raw.result,raw.analysis,raw.latest]){
+    if(c&&typeof c==="object"&&(c.openclawPortrait||c.openclawSessionsSummary))return c;
+  }
+  const oc=raw.openclaw&&typeof raw.openclaw==="object"?raw.openclaw:null;
+  if(oc){
+    const pp=oc.openclawPortrait||oc.portrait,ss=oc.openclawSessionsSummary||oc.sessionsSummary||oc.sessions_summary;
+    if(pp||ss)return{openclawPortrait:pp||{},openclawSessionsSummary:ss||{}};
+  }
+  if(raw.portrait&&typeof raw.portrait==="object"){
+    const ss=raw.openclawSessionsSummary||raw.sessionsSummary||raw.sessions_summary;
+    return{openclawPortrait:raw.portrait,openclawSessionsSummary:ss&&typeof ss==="object"?ss:{}};
+  }
+  const st=raw.stats&&typeof raw.stats==="object"?raw.stats:null;
+  if(st&&st.openclaw&&typeof st.openclaw==="object"){
+    const o=st.openclaw,pp=o.openclawPortrait||o.portrait,ss=o.openclawSessionsSummary||o.sessionsSummary||st.openclaw_stats;
+    if(pp||ss)return{openclawPortrait:pp||{},openclawSessionsSummary:(ss&&typeof ss==="object")?ss:{}};
+  }
+  return null;
+}
 function localPayload(){
-  for(const [s,k] of [[sessionStorage,"openclaw_analysis_data"],[localStorage,"openclaw_analysis_data"],[localStorage,"last_analysis_data"]]){
+  /** 与 main.js VIBE_OPENCLAW_CACHE 一致：主流程 OpenClaw 分析只写此处，不写入 openclaw_analysis_data。 */
+  for(const [s,k] of [[localStorage,"vibe_openclaw_analysis_cache"],[sessionStorage,"openclaw_analysis_data"],[localStorage,"openclaw_analysis_data"],[localStorage,"last_analysis_data"]]){
     try{const r=s.getItem(k);if(!r)continue;const d=JSON.parse(r),p=pickPayload(d);if(p)return p;if(d&&(d.stats||d.statistics))return {legacyStats:d.stats||d.statistics||{},updatedAt:d.updatedAt||d.createdAt||""};}catch{}
   }
   try{
@@ -638,7 +790,19 @@ function localPayload(){
 }
 async function workerPayload(){
   const paths=["api/openclaw/latest","api/openclaw/latest_analysis","api/analysis/latest","api/latest_analysis","api/openclaw/portrait"];
-  const origins=[base(window.location.origin),base(getApiEndpoint())];
+  /** 仅请求「当前页面源」下的上述路径（如 localhost:3000 由 Vite 桥接到本机 Gateway）。默认 Cloudflare Worker 根地址未实现 /api/openclaw/*，轮询会产生 404，故不再自动请求 getApiEndpoint()。 */
+  const origins=[];
+  const o0=base(window.location.origin);
+  if(o0)origins.push(o0);
+  try{
+    const w=(typeof window!=="undefined"&&window.OPENCLAW_DATA_ENDPOINT&&String(window.OPENCLAW_DATA_ENDPOINT).trim())||"";
+    if(w){const bw=base(w);if(bw&&origins.indexOf(bw)<0)origins.push(bw);}
+  }catch{}
+  try{
+    const m=document.querySelector('meta[name="openclaw-data-endpoint"]');
+    const u=m&&m.content&&String(m.content).trim();
+    if(u){const bw=base(u);if(bw&&origins.indexOf(bw)<0)origins.push(bw);}
+  }catch{}
   for(const b of origins){
     if(!b)continue;
     for(const p of paths){const j=await fetchJson(b+p,7500),d=pickPayload(j);if(d)return d;}
@@ -651,7 +815,7 @@ L=L||state.lang;
 const portrait=payload.openclawPortrait||{},dims=portrait.dimensions||{},comp=portrait.composite||{},sess=payload.openclawSessionsSummary||{},legacy=payload.legacyStats||payload.stats||{};
 const consumption=dims.consumptionCost||{},modelDim=dims.modelPreference||{},toolHeat=dims.toolSkillHeat||{},habit=dims.taskHabit||{},health=dims.stabilityHealth||{};
 const tokenS=sess.token||{},cacheS=sess.cache||{},modelS=sess.model||{},channelS=sess.channel||{},toolsS=sess.tools||{},heartbeatS=sess.heartbeat||{},statusS=sess.status||{};
-const topSkills=Array.isArray(habit.topSkills)?habit.topSkills:[],skillsS=Array.isArray(sess.skills)?sess.skills:(Array.isArray(legacy.skills)?legacy.skills:[]);
+const topSkills=(Array.isArray(habit.topSkills)&&habit.topSkills.length)?habit.topSkills:(Array.isArray(toolHeat.topSkills)?toolHeat.topSkills:[]),skillsS=Array.isArray(sess.skills)?sess.skills:(Array.isArray(legacy.skills)?legacy.skills:[]);
 const usageLegacy=legacy.usage||legacy.tokenUsage||{};
 let inTok=N(tokenS.inputTokensSum,0),outTok=N(tokenS.outputTokensSum,0),sumTok=N(tokenS.totalTokensSum,0);
 if(inTok===0&&outTok===0&&sumTok===0){
@@ -1010,7 +1174,7 @@ const LiveController={
     const container=document.getElementById('live-sessions-list');
     const emptyEl=document.getElementById('live-sessions-empty');
     const L=this._lang();
-    if(emptyEl){emptyEl.style.display='block';emptyEl.textContent=L==='zh'?'未连接 Gateway，请先连接 127.0.0.1:18789':'Gateway not connected. Please connect to 127.0.0.1:18789';}
+    if(emptyEl){const g=typeof OpenClawGateway!=='undefined'?OpenClawGateway.getDisplay():'127.0.0.1:18789';emptyEl.style.display='block';emptyEl.textContent=L==='zh'?('未连接 Gateway，请先连接 '+g):('Gateway not connected. Please connect to '+g);}
     const gwEl=document.getElementById('live-gw-status');
     if(gwEl)gwEl.textContent=L==='zh'?'未连接':'Offline';
     const healthEl=document.getElementById('live-gw-health');
@@ -1083,7 +1247,7 @@ const LiveController={
     /* 1) 尝试网关 HTTP 重启（不依赖 npm run dev；若网关提供 /api/restart 或 /restart 则生效） */
     for(const path of['/api/restart','/restart','/api/gateway-restart']){
       try{
-        const r=await fetch('http://127.0.0.1:18789'+path,{method:'POST',headers:{'Content-Type':'application/json'},mode:'cors'});
+        const r=await fetch(OpenClawGateway.httpBase()+path,{method:'POST',headers:{'Content-Type':'application/json'},mode:'cors'});
         const body=await r.json().catch(()=>({}));
         if(r.ok&&(body&&(body.ok===true||body.success===true))){
           gwRestartBtn.classList.remove('loading');
@@ -1162,7 +1326,7 @@ const LiveController={
   /* 方便：获取对话链接 */
   async function fetchDialogueLinkForLive(){
     try{
-      const r=await fetch('http://127.0.0.1:18789/api/dialogue-token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:'auto'})});
+      const r=await fetch(OpenClawGateway.httpBase()+'/api/dialogue-token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:'auto'})});
       if(r.ok){const b=await r.json().catch(()=>({}));if(b&&b.ok&&b.dialogueUrl)return b.dialogueUrl;if(b&&b.ok&&b.token){const path=window.location.pathname||'/openclaw2.html';const base=path.endsWith('openclaw2.html')?path:path.replace(/\/?$/, '/openclaw2.html');return window.location.origin+base+'#token='+encodeURIComponent(b.token);}}
     }catch(_){}
     try{
@@ -1604,7 +1768,7 @@ const ClawController={
         const code=errObj.code||'';
         const isPairing=errMsg.toLowerCase().includes('pairing')||code==='PAIRING_REQUIRED';
         if(isPairing){
-          this.appendMsg('sys','设备需配对审批！请在 http://127.0.0.1:18789 后台批准，然后点击「↺ 重连」。');
+          this.appendMsg('sys','设备需配对审批！请在 '+OpenClawGateway.httpBase()+' 后台批准，然后点击「↺ 重连」。');
         }else{
           this.appendMsg('err','认证失败: '+errMsg);
           this.appendMsg('sys','请确认 Token 正确，或留空尝试本地模式（如服务器已配置 trusted-proxy）。');
@@ -1639,7 +1803,7 @@ const ClawController={
       const errMsg=p.message||'Auth error';
       const isPairing=ev==='pairing.required'||errMsg.toLowerCase().includes('pairing');
       if(isPairing){
-        this.appendMsg('sys','设备需配对审批！请在 http://127.0.0.1:18789 后台批准，然后点击「↺ 重连」。');
+        this.appendMsg('sys','设备需配对审批！请在 '+OpenClawGateway.httpBase()+' 后台批准，然后点击「↺ 重连」。');
       }else{
         this.appendMsg('err','认证失败: '+errMsg);
       }
@@ -1788,7 +1952,7 @@ const ClawController={
     const savedTok=this.getSavedToken();
     /* 始终直连 openclaw 服务（WebSocket 无同源限制）
        token 同时放在 URL query 和 connect 消息的 auth.token 中，确保双通道认证 */
-    const wsBase='ws://127.0.0.1:18789';
+    const wsBase=OpenClawGateway.wsBase();
     const qp=[];
     if(savedTok)qp.push('token='+encodeURIComponent(savedTok));
     const wsUrl=wsBase+(qp.length?'?'+qp.join('&'):'');
@@ -1825,7 +1989,7 @@ const ClawController={
       this.ws.onerror=(e)=>{
         console.error('[ClawCtrl] ws error', e);
         this.setStatus('offline');
-        this.appendMsg('err','WebSocket 连接错误，请确认 OpenClaw 服务运行于 127.0.0.1:18789');
+        this.appendMsg('err','WebSocket 连接错误，请确认 OpenClaw 服务运行于 '+OpenClawGateway.getDisplay());
       };
 
       this.ws.onclose=(e)=>{
@@ -1905,7 +2069,7 @@ const ClawController={
   /* ───── HTTP API 调用（备选，直接调用后台 REST 端点） ───── */
   async apiRequest(endpoint, options={}){
     const token=this.getSavedToken();
-    const url='http://127.0.0.1:18789'+endpoint;
+    const url=OpenClawGateway.httpBase()+endpoint;
     const cfg={
       method:options.method||'GET',
       headers:{'Content-Type':'application/json',...(token?{'Authorization':'Bearer '+token}:{})},
@@ -1997,6 +2161,7 @@ function tick(){const n=new Date();time.textContent=`${n.getFullYear()}-${String
 function pupil(p,c,x,y){const r=oc.getBoundingClientRect(),rx=(x-r.left)*(500/r.width),ry=(y-r.top)*(500/r.height),dx=rx-c.x,dy=ry-c.y,a=Math.atan2(dy,dx),dis=Math.min(Math.sqrt(dx*dx+dy*dy),eyeLimit);p.setAttribute('cx',(c.x+Math.cos(a)*dis).toFixed(2));p.setAttribute('cy',(c.y+Math.sin(a)*dis).toFixed(2));}
 const ptr=(x,y)=>{pupil(pl,eyes.l,x,y);pupil(pr,eyes.r,x,y)};
 function bind(){
+  try{OpenClawGateway.refreshSubtitle();}catch(_){}
   window.addEventListener('mousemove',e=>ptr(e.clientX,e.clientY));
   window.addEventListener('touchmove',e=>{if(e.touches&&e.touches.length)ptr(e.touches[0].clientX,e.touches[0].clientY)},{passive:true});
   const stageEl=document.querySelector('.stage');
@@ -2096,7 +2261,7 @@ function bind(){
     try{
       /* 方法 1：OpenClaw Gateway 直连（若网关暴露 /api/dialogue-token） */
       try{
-        const r=await fetch('http://127.0.0.1:18789/api/dialogue-token',{
+        const r=await fetch(OpenClawGateway.httpBase()+'/api/dialogue-token',{
           method:'POST',
           headers:{'Content-Type':'application/json'},
           body:JSON.stringify({source:'auto'})
@@ -2253,9 +2418,12 @@ function bind(){
   const btnClear=$("btn-clear");
   if(btnClear)btnClear.addEventListener('click',()=>ClawController.clearHistory());
 
-  /* ── 手动重连 ── */
+  /* ── 手动重连（先自动探测端口，适配网关随机端口） ── */
   const btnReconn=$("btn-reconnect");
-  if(btnReconn)btnReconn.addEventListener('click',()=>ClawController.reconnect());
+  if(btnReconn)btnReconn.addEventListener('click',async ()=>{
+    try{await OpenClawGateway.autoDetectPort();}catch(_){}
+    ClawController.reconnect();
+  });
 
   /* ── API 控制面板 ── */
   const btnToggleApi=$("btn-toggle-api");
@@ -2349,25 +2517,27 @@ function bind(){
   if(btnZh)btnZh.addEventListener('click',()=>{const L='zh';state.metrics=processStats(state.payload||{},L);state.themes=themes(state.metrics,L);mountNav();renderTheme(state.idx);refreshDetails();applyLang(L);});
   if(btnEn)btnEn.addEventListener('click',()=>{const L='en';state.metrics=processStats(state.payload||{},L);state.themes=themes(state.metrics,L);mountNav();renderTheme(state.idx);refreshDetails();applyLang(L);});
 
-  /* ── 初始化连接：无 token 时先自动获取再连接，实现分析结果页打开即用 ── */
-  (function startConnect(){
+  /* ── 初始化连接：先探测 Gateway 端口，再无 token 时自动获取后连接 ── */
+  (async function startConnect(){
+    try{await OpenClawGateway.autoDetectPort();}catch(_){}
     if(ClawController.getSavedToken()){
       ClawController.connect();
       return;
     }
-    autoFetchToken().then(function(tok){
+    try{
+      const tok=await autoFetchToken();
       ClawController.connect();
       if(tok){
         ClawController.appendMsg('sys','Token 已自动填充，正在连接…');
         var statusEl=$("token-fetch-status");if(statusEl)statusEl.textContent='';
       }
-    }).catch(function(){ClawController.connect();});
+    }catch(_){ClawController.connect();}
   })();
 }
 const setStatus=t=>status.textContent=t,hideBoot=()=>boot.classList.add('hide');
-async function bootstrap(){const L=state.lang;setStatus(i18n[L].statusLoading);const local=localPayload();setStatus(i18n[L].statusFetch);const remote=await workerPayload();state.payload=score(remote)>score(local)?remote:local;try{if(state.payload&&Object.keys(state.payload).length)sessionStorage.setItem('openclaw_analysis_data',JSON.stringify(state.payload));}catch{}setStatus(i18n[L].statusProcess);state.metrics=processStats(state.payload||{},L);state.themes=themes(state.metrics,L);}
+async function bootstrap(){const L=state.lang;setStatus(i18n[L].statusLoading);const local=localPayload();setStatus(i18n[L].statusFetch);const remote=await workerPayload();state.payload=score(remote)>score(local)?remote:local;try{if(state.payload&&Object.keys(state.payload).length)sessionStorage.setItem('openclaw_analysis_data',JSON.stringify(state.payload));}catch{}setStatus(i18n[L].statusProcess);state.metrics=processStats(state.payload||{},L);state.themes=themes(state.metrics,L);try{const sc=score(state.payload||{}),pk=state.payload||{},hasP=!!(pk.openclawPortrait&&Object.keys(pk.openclawPortrait).length),hasS=!!(pk.openclawSessionsSummary&&Object.keys(pk.openclawSessionsSummary).length);console.info('[openclaw2] 载荷诊断 quality=%s portrait=%s sessions=%s keys=%s',sc,hasP,hasS,Object.keys(pk).join(','));}catch{}}
 async function init(){applyLang(state.lang);bind();tick();setInterval(tick,1000);setInterval(()=>{if(Math.random()>.82){pl.setAttribute('r','14');pr.setAttribute('r','14');setTimeout(()=>{pl.setAttribute('r','11');pr.setAttribute('r','11')},110)}},2800);await bootstrap();mountNav();renderTheme(state.idx);refreshDetails();setStatus(i18n[state.lang].statusOnline);setTimeout(hideBoot,220);applyLang(state.lang);}
-function applyLang(L){state.lang=L;try{localStorage.setItem("openclaw2_lang",L);}catch{}const t=i18n[L];if(!t)return;$("top-title").textContent=t.topTitle;$("top-sub").textContent=t.topSub;const heroTitle=$("hero-title");if(heroTitle)heroTitle.textContent=t.heroTitle;$("link-report").textContent=t.linkReport;$("link-report").title=t.linkReport;$("link-stats").textContent=t.linkStats;$("link-stats").title=t.linkStats;$("boot").querySelector(".t").textContent=t.bootTitle;const dv=$("detail-view");if(dv){const sigTitle=$("detail-view-signal-title"),sessTitle=$("detail-view-session-title");if(sigTitle)sigTitle.textContent=t.signalPanels;if(sessTitle)sessTitle.textContent=t.sessionList;const leftBlks=dv.querySelectorAll(".detail-view-left .blk .pt");if(leftBlks[0])leftBlks[0].textContent=t.radar;if(leftBlks[1])leftBlks[1].textContent=t.wordCloud;}const dsTitle=$("data-source-title"),dsDesc=$("data-source-desc");if(dsTitle&&t.dataSourceTitle)dsTitle.textContent=t.dataSourceTitle;if(dsDesc&&t.dataSourceDesc)dsDesc.textContent=t.dataSourceDesc;const sg=$("chat-history-content")&&$("chat-history-content").querySelector(".msg-sys-group");if(sg&&typeof ClawController!=="undefined"&&ClawController._updateSysGroupHeader)ClawController._updateSysGroupHeader(sg);const bzh=$("btn-lang-zh"),ben=$("btn-lang-en");if(bzh)bzh.classList.toggle("active",L==="zh");if(ben)ben.classList.toggle("active",L==="en");document.documentElement.lang=L==="zh"?"zh-CN":"en";if(typeof window.updateMgmtLabels==="function")window.updateMgmtLabels();if(typeof LiveController!=="undefined")LiveController.updateLabels(L);}
+function applyLang(L){state.lang=L;try{localStorage.setItem("openclaw2_lang",L);}catch{}const t=i18n[L];if(!t)return;$("top-title").textContent=t.topTitle;$("top-sub").textContent=t.topSub;const heroTitle=$("hero-title");if(heroTitle)heroTitle.textContent=t.heroTitle;$("link-report").textContent=t.linkReport;$("link-report").title=t.linkReport;$("link-stats").textContent=t.linkStats;$("link-stats").title=t.linkStats;$("boot").querySelector(".t").textContent=t.bootTitle;const dv=$("detail-view");if(dv){const sigTitle=$("detail-view-signal-title"),sessTitle=$("detail-view-session-title");if(sigTitle)sigTitle.textContent=t.signalPanels;if(sessTitle)sessTitle.textContent=t.sessionList;const leftBlks=dv.querySelectorAll(".detail-view-left .blk .pt");if(leftBlks[0])leftBlks[0].textContent=t.radar;if(leftBlks[1])leftBlks[1].textContent=t.wordCloud;}const dsTitle=$("data-source-title"),dsDesc=$("data-source-desc");if(dsTitle&&t.dataSourceTitle)dsTitle.textContent=t.dataSourceTitle;if(dsDesc&&t.dataSourceDesc){let txt=t.dataSourceDesc;try{if(state.metrics&&typeof score==="function"&&t.dataSourcePayloadHint&&score(state.payload||{})<4)txt=txt+"\n\n"+t.dataSourcePayloadHint;}catch{}dsDesc.textContent=txt;}const sg=$("chat-history-content")&&$("chat-history-content").querySelector(".msg-sys-group");if(sg&&typeof ClawController!=="undefined"&&ClawController._updateSysGroupHeader)ClawController._updateSysGroupHeader(sg);const bzh=$("btn-lang-zh"),ben=$("btn-lang-en");if(bzh)bzh.classList.toggle("active",L==="zh");if(ben)ben.classList.toggle("active",L==="en");document.documentElement.lang=L==="zh"?"zh-CN":"en";if(typeof window.updateMgmtLabels==="function")window.updateMgmtLabels();if(typeof LiveController!=="undefined")LiveController.updateLabels(L);}
 init().catch(()=>{const L=state.lang;sub.textContent=L==="zh"?"数据离线":"DATA OFFLINE";setStatus(i18n[L].statusFailed);state.metrics=processStats({},L);state.themes=themes(state.metrics,L);mountNav();renderTheme(state.idx);refreshDetails();setTimeout(hideBoot,320);applyLang(L);});
 })();
 </script>
