@@ -2804,6 +2804,38 @@ app.post('/api/v2/analyze', async (c) => {
                   atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'))
                 );
                 authenticatedUserId = payload.sub || null;
+                    
+                      // 从 JWT payload 直接提取 github_login，用于保证 GitHub 身份识别时 upsert 冲突键始终可用
+                      const extractGithubLoginFromJwt = (p: any): string | null => {
+                        try {
+                          const userMetadata = (p && p.user_metadata && typeof p.user_metadata === 'object') ? p.user_metadata : null;
+                          const email = (p && p.email != null) ? String(p.email) : '';
+                          const emailLogin = email && email.includes('@') ? email.split('@')[0] : null;
+                          const candidates: Array<any> = [
+                            userMetadata?.login,
+                            userMetadata?.preferred_username,
+                            userMetadata?.user_name,
+                            userMetadata?.github_login,
+                            p?.preferred_username,
+                            p?.login,
+                            p?.github_login,
+                            emailLogin
+                          ];
+                          for (const c of candidates) {
+                            if (c == null) continue;
+                            const s = String(c).trim();
+                            if (!s) continue;
+                            if (s === 'OpenClaw ??') continue;
+                            return s.toLowerCase();
+                          }
+                          return null;
+                        } catch {
+                          return null;
+                        }
+                      };
+                      
+                      const tokenGithubLogin = extractGithubLoginFromJwt(payload);
+                      if (tokenGithubLogin) githubLoginForUpsert = tokenGithubLogin;
                 
                 if (authenticatedUserId) {
                   console.log('[Worker] ? ??? GitHub OAuth token?user_id:', authenticatedUserId.substring(0, 8) + '...');
@@ -2811,7 +2843,7 @@ app.post('/api/v2/analyze', async (c) => {
                   const existingUser = await identifyUserByUserId(authenticatedUserId, env);
                   if (existingUser) {
                     useUserIdForUpsert = true;
-                    githubLoginForUpsert = (existingUser as any)?.github_login || (existingUser as any)?.user_name || null;
+                      githubLoginForUpsert = (existingUser as any)?.github_login || (existingUser as any)?.user_name || githubLoginForUpsert || null;
                     console.log('[Worker] ? ??????????? user_id ?? Upsert');
                   } else {
                     console.log('[Worker] ?? ???????? user_analysis ?????????');
@@ -3896,7 +3928,61 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
       });
       if (!patchRes.ok) {
         const patchText = await patchRes.text().catch(() => '');
-        throw new Error(`user_analysis patch failed: ${patchRes.status} ${patchText}`);
+
+        // PATCH 失败时可能是：user_id 来自 token，但 user_analysis 行尚未创建。
+        // 这时必须回退为 UPSERT（优先 github_login），否则直接抛 500 会中断前端刷新。
+        try {
+          if (normalizedGitHubLogin) {
+            const upsertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=github_login`;
+            const upsertPayload: Record<string, unknown> = {
+              ...patchPayload,
+              github_login: normalizedGitHubLogin,
+              user_name: (basePayload as any).user_name || normalizedGitHubLogin,
+              user_identity: (basePayload as any).user_identity || 'github',
+              updated_at: updatedAtNow,
+            };
+
+            const upsertRes = await fetch(upsertUrl, {
+              method: 'POST',
+              headers: buildSupabaseHeaders(env, {
+                'Content-Type': 'application/json',
+                Prefer: 'return=minimal,resolution=merge-duplicates',
+              }),
+              body: JSON.stringify([upsertPayload]),
+            });
+
+            if (upsertRes.ok) return c.json({ success: true, user_id, persisted_to: 'user_analysis_upsert' });
+          }
+
+          // 最后兜底：尝试按主键 id 直接插入（避免 token user_id 但行不存在导致 404/500）
+          const insertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis`;
+          const insertPayload: Record<string, unknown> = {
+            id: user_id,
+            ...(fingerprint ? { fingerprint } : {}),
+            ...patchPayload,
+            user_identity: normalizedGitHubLogin ? 'github' : 'fingerprint',
+            github_login: normalizedGitHubLogin,
+            user_name: (basePayload as any).user_name || normalizedGitHubLogin || (existingUserRow as any)?.user_name || null,
+            updated_at: updatedAtNow,
+          };
+
+          const insertRes = await fetch(insertUrl, {
+            method: 'POST',
+            headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
+            body: JSON.stringify([insertPayload]),
+          });
+
+          if (insertRes.ok) return c.json({ success: true, user_id, persisted_to: 'user_analysis_insert_by_id' });
+        } catch (fallbackErr: any) {
+          // If fallback fails, throw original PATCH failure with context.
+          console.warn('[Worker] /api/v2/openclaw/analyze patch fallback failed:', {
+            patchStatus: patchRes.status,
+            patchError: patchText?.substring?.(0, 200),
+            fallbackError: fallbackErr?.message || String(fallbackErr),
+          });
+        }
+
+        throw new Error(`user_analysis patch failed (and fallback failed): ${patchRes.status} ${patchText}`);
       }
     }
 
@@ -5278,6 +5364,17 @@ app.post('/api/fingerprint/migrate', async (c) => {
     if (!cleanedUpdateData.user_name) {
       cleanedUpdateData.user_name = targetRecord?.user_name || sourceRecord?.user_name || 'github_user';
     }
+
+    // 确保 fallback upsert 使用 github_login 冲突键时，github_login 已被填充
+    if (!cleanedUpdateData.github_login) {
+      const fromReq = githubUsername != null ? String(githubUsername).trim() : '';
+      const fromTarget = (targetRecord as any)?.github_login || (targetRecord as any)?.user_name || '';
+      const fromSource = (sourceRecord as any)?.github_login || (sourceRecord as any)?.user_name || '';
+      const candidate = fromReq || fromTarget || fromSource;
+      if (candidate && String(candidate).trim()) {
+        cleanedUpdateData.github_login = String(candidate).trim().toLowerCase();
+      }
+    }
     
     console.log('[Worker] ?? ???????:', Object.keys(cleanedUpdateData));
     console.log('[Worker] ?? ??????:', {
@@ -5325,7 +5422,7 @@ app.post('/api/fingerprint/migrate', async (c) => {
       });
       
       // ????????? fingerprint ?????
-      const upsertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=fingerprint`;
+      const upsertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=github_login`;
       updateResponse = await fetch(upsertUrl, {
         method: 'POST',
         headers: {

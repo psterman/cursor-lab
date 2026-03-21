@@ -474,7 +474,7 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.22;ba
   </div>
   <!-- API 控制面板 + 管理命令（借鉴 Control Center 思路：总览/会话/任务/审批/员工/通道，自有实现） -->
   <div id="api-panel">
-    <div id="api-panel-title">API 控制面板 <span id="api-panel-subtitle">ws://127.0.0.1:18789</span></div>
+    <div id="api-panel-title">API 控制面板 <span id="api-panel-subtitle"></span></div>
     <div id="api-btns">
       <button type="button" class="api-btn" data-action="status">状态</button>
       <button type="button" class="api-btn" data-action="health">健康</button>
@@ -522,7 +522,7 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.22;ba
 (()=>{
 const $=id=>document.getElementById(id),orbit=$("orbit"),sub=$("sub"),nav=$("nav"),time=$("time"),ax=$("ax"),ay=$("ay"),cl=$("cl"),pl=$("pupil-l"),pr=$("pupil-r"),oc=$("oc"),reactor=$("reactor"),radar=$("radar"),wc=$("wc"),list=$("list"),boot=$("boot"),status=$("status");
 const state={themes:[],payload:{},metrics:null,idx:0,anim:false,lastWheel:0,dir:1,open:false,lang:(localStorage.getItem("openclaw2_lang")||"zh").replace(/^en$/i,"en").replace(/^zh$/i,"zh")||"zh"};
-/** OpenClaw Gateway 地址：默认 127.0.0.1:18789；端口变化时可通过 ?gwPort= / ?gateway= 指定，或自动探测常见端口并写入 localStorage */
+/** OpenClaw Gateway 地址：默认本机端口；端口变化时可通过 ?gwPort= / ?gateway= 指定，或自动探测常见端口并写入 localStorage */
 const OpenClawGateway=(function(){
   const LS_PORT='openclaw2_gateway_port';
   const LS_HOST='openclaw2_gateway_host';
@@ -650,6 +650,8 @@ const OpenClawGateway=(function(){
   return{getHost,getPort,setPort,getDisplay,httpBase,wsBase,autoDetectPort,probePort,refreshSubtitle,DEFAULT_PORT,DEFAULT_HOST};
 })();
 try{window.OpenClawGateway=OpenClawGateway;}catch(_){}
+// 初始展示由探测/读取 localStorage 后的动态网关地址决定
+OpenClawGateway.refreshSubtitle();
 const i18n={
   zh:{
     noData:"暂无数据",
@@ -1174,7 +1176,11 @@ const LiveController={
     const container=document.getElementById('live-sessions-list');
     const emptyEl=document.getElementById('live-sessions-empty');
     const L=this._lang();
-    if(emptyEl){const g=typeof OpenClawGateway!=='undefined'?OpenClawGateway.getDisplay():'127.0.0.1:18789';emptyEl.style.display='block';emptyEl.textContent=L==='zh'?('未连接 Gateway，请先连接 '+g):('Gateway not connected. Please connect to '+g);}
+    if(emptyEl){
+      const g=typeof OpenClawGateway!=='undefined'&&OpenClawGateway&&typeof OpenClawGateway.getDisplay==='function'?OpenClawGateway.getDisplay():'';
+      emptyEl.style.display='block';
+      emptyEl.textContent=L==='zh'?('未连接 Gateway，请先连接'+(g?' '+g:'')):('Gateway not connected. Please connect to'+(g?' '+g:''));
+    }
     const gwEl=document.getElementById('live-gw-status');
     if(gwEl)gwEl.textContent=L==='zh'?'未连接':'Offline';
     const healthEl=document.getElementById('live-gw-health');

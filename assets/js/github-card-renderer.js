@@ -133,6 +133,13 @@
         if (!defaultAvatar && typeof window.STATS_CONSTANTS !== 'undefined' && window.STATS_CONSTANTS.DEFAULT_AVATAR) defaultAvatar = window.STATS_CONSTANTS.DEFAULT_AVATAR;
         var exitDeleteBtns = isLoggedIn ? '<button type="button" id="left-drawer-exit-btn" class="left-drawer-exit-btn identity-row-btn px-2 py-1 text-[10px] rounded border border-[#00ff41]/40 text-[#00ff41]/90 hover:bg-[#00ff41]/10 transition-colors font-mono" title="' + esc(t(lang, 'logout')) + '">' + esc(t(lang, 'logout')) + '</button><button type="button" id="left-drawer-delete-account-btn" class="left-drawer-delete-account-btn identity-row-btn px-2 py-1 text-[10px] rounded border border-red-500/50 text-red-400 hover:bg-red-500/10 transition-colors font-mono" title="' + esc(t(lang, 'deleteAccount')) + '">' + esc(t(lang, 'deleteAccount')) + '</button>' : '';
         var linkHtml = isLoggedIn && githubUsername ? '<a href="https://github.com/' + esc(githubUsername) + '" target="_blank" rel="noopener noreferrer" class="mt-2 inline-block text-[9px] text-[#00ff41]/70 hover:text-[#00ff41] transition-colors font-mono">github.com/' + esc(githubUsername) + '</a>' : '';
+        var dataSourceTitle = lang === 'en' ? 'Data Source Management' : '数据源管理';
+        var slot1Title = lang === 'en' ? 'Slot 1: Cursor' : 'Slot 1（Cursor）：文件夹上传';
+        var slot2Title = lang === 'en' ? 'Slot 2: OpenClaw' : 'Slot 2（OpenClaw）：探测端口';
+        var uploadBtnText = lang === 'en' ? 'Choose Folder & Upload' : '选择文件夹并上传';
+        var detectBtnText = lang === 'en' ? 'Detect OpenClaw Port' : '探测 OpenClaw 端口';
+        var cursorSlotHint = lang === 'en' ? 'Upload a Cursor folder to trigger analysis.' : '上传 Cursor 文件夹，触发分析与上报。';
+        var openclawSlotHint = lang === 'en' ? 'Write port to localStorage for the monitor.' : '探测成功后写入 localStorage，供监控使用。';
         var statusIdle = currentStatus === 'idle';
         var statusBusy = currentStatus === 'busy';
         var statusSprint = currentStatus === 'sprint';
@@ -143,7 +150,7 @@
             '<span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">🕶️</span>',
             '<span class="text-[8px] leading-none text-[#00ff41] border border-[#00ff41]/40 px-1 py-0.5 tracking-widest uppercase bg-[#00ff41]/5">' + esc(t(lang, 'configBadge')) + '</span>',
             '</div>',
-            '<div class="drawer-item-label mb-2">' + esc(t(lang, 'identityConfig')) + '</div>',
+            '<div class="drawer-item-label mb-2">' + esc(dataSourceTitle) + '</div>',
             '<div class="mb-3 pb-3 border-b border-[#00ff41]/10">',
             '<div class="flex items-center gap-3">',
             '<div class="w-9 h-9 rounded-full overflow-hidden border border-[#00ff41]/30 flex-shrink-0"><img src="' + esc(avatarUrl) + '" alt="Avatar" class="w-full h-full object-cover" onerror="this.onerror=null;this.src=\'' + esc(defaultAvatar) + '\';" /></div>',
@@ -154,11 +161,20 @@
             '<div id="user-country-flag" class="flex items-center gap-2 mt-2 text-[10px]"></div>',
             linkHtml,
             '</div>',
-            '<div class="drawer-item-label mb-2">' + esc(t(lang, 'status')) + '</div>',
-            '<div class="flex gap-1.5">',
-            '<button type="button" data-status="idle" class="status-btn flex-1 px-2 py-1.5 bg-zinc-900/50 border ' + (statusIdle ? 'border-[#00ff41]' : 'border-zinc-800') + ' text-[10px] font-bold uppercase tracking-wider hover:border-[#00ff41] transition-colors" style="color:' + (statusIdle ? '#00ff41' : '#71717a') + ';" onclick="typeof setUserStatus === \'function\' && setUserStatus(\'idle\');">🟢 ' + esc(t(lang, 'online')) + '</button>',
-            '<button type="button" data-status="busy" class="status-btn flex-1 px-2 py-1.5 bg-zinc-900/50 border ' + (statusBusy ? 'border-[#ff8c00]' : 'border-zinc-800') + ' text-[10px] font-bold uppercase tracking-wider hover:border-[#ff8c00] transition-colors" style="color:' + (statusBusy ? '#ff8c00' : '#71717a') + ';" onclick="typeof setUserStatus === \'function\' && setUserStatus(\'busy\');">🟠 ' + esc(t(lang, 'busy')) + '</button>',
-            '<button type="button" data-status="sprint" class="status-btn flex-1 px-2 py-1.5 bg-zinc-900/50 border ' + (statusSprint ? 'border-[#71717a]' : 'border-zinc-800') + ' text-[10px] font-bold uppercase tracking-wider transition-colors" style="color:#71717a;" onclick="typeof setUserStatus === \'function\' && setUserStatus(\'sprint\');">⚫ ' + esc(t(lang, 'offline')) + '</button>',
+            '<div class="mt-2 pt-2 border-t border-[#00ff41]/10">',
+            '<div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">' + esc(slot1Title) + '</div>',
+            '<div class="flex items-center gap-2">',
+            '<button type="button" id="cursor-slot1-folder-btn" class="w-full px-3 py-2 bg-zinc-900/50 hover:bg-zinc-800 border border-[#00ff41]/30 rounded-md text-white text-[11px] font-bold uppercase tracking-wider transition-colors" style="color:#00ff41;border-color:rgba(0,255,65,0.35);font-family:inherit;">' + esc(uploadBtnText) + '</button>',
+            '</div>',
+            '<input type="file" id="cursor-slot1-folder-input" webkitdirectory directory multiple style="display:none;" />',
+            '<div class="text-[10px] text-zinc-500 mt-1" id="cursor-slot1-status">' + esc(cursorSlotHint) + '</div>',
+            '</div>',
+            '<div class="mt-3 pt-3 border-t border-[#00ff41]/10">',
+            '<div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">' + esc(slot2Title) + '</div>',
+            '<div class="flex items-center gap-2">',
+            '<button type="button" id="openclaw-slot2-detect-btn" class="flex-1 px-3 py-2 bg-zinc-900/50 hover:bg-zinc-800 border border-[#00ff41]/30 rounded-md text-white text-[11px] font-bold uppercase tracking-wider transition-colors" style="color:#00ff41;border-color:rgba(0,255,65,0.35);font-family:inherit;">' + esc(detectBtnText) + '</button>',
+            '</div>',
+            '<div class="text-[10px] text-zinc-500 mt-1" id="openclaw-slot2-port-text">' + esc(openclawSlotHint) + '</div>',
             '</div>',
             '<div class="mt-3 pt-3 border-t border-[#00ff41]/10" id="auth-login-section">' + loginSection + '</div>',
             '</div>'

@@ -37,7 +37,7 @@ Tab 3: http://localhost:3001/openclaw2.html#token=qclaw-bf792fb0e7010c03e6e8bd82
 
 可以同时使用官方 Dashboard 和 openclaw2.html：
 ```
-官方：http://127.0.0.1:18789/#token=qclaw-bf792fb0e7010c03e6e8bd82f7fd76d8
+官方：http://127.0.0.1:<网关端口>/#token=qclaw-bf792fb0e7010c03e6e8bd82f7fd76d8
 自定义：http://localhost:3001/openclaw2.html#token=qclaw-bf792fb0e7010c03e6e8bd82f7fd76d8
 ```
 

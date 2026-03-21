@@ -36,6 +36,32 @@
         { id: 'imessage', label: 'iMessage', domain: 'apple.com', keywords: ['imessage', 'i-message', 'messages'] }
     ];
 
+    // OpenClaw 网关动态地址（由 stats2.html 的 Slot2 探测写入）
+    var OPENCLAW_GATEWAY_HOST_KEY = 'openclaw2_gateway_host';
+    var OPENCLAW_GATEWAY_PORT_KEY = 'openclaw2_gateway_port';
+    var OPENCLAW_GATEWAY_DEFAULT_HOST = '127.0.0.1';
+    var OPENCLAW_GATEWAY_DEFAULT_PORT = 18789;
+
+    function getOpenClawGatewayAddress() {
+        var host = OPENCLAW_GATEWAY_DEFAULT_HOST;
+        var port = OPENCLAW_GATEWAY_DEFAULT_PORT;
+        try {
+            if (typeof localStorage !== 'undefined') {
+                var h = localStorage.getItem(OPENCLAW_GATEWAY_HOST_KEY);
+                if (h && String(h).trim()) host = String(h).trim();
+                var p = localStorage.getItem(OPENCLAW_GATEWAY_PORT_KEY);
+                if (p && String(p).trim()) {
+                    var parsed = parseInt(String(p).trim(), 10);
+                    if (Number.isFinite(parsed) && parsed > 0) port = parsed;
+                }
+            }
+        } catch (_) { /* ignore */ }
+
+        var httpBase = 'http://' + host + ':' + port;
+        var wsBase = 'ws://' + host + ':' + port;
+        return { host: host, port: port, httpBase: httpBase, wsBase: wsBase };
+    }
+
     function isGuestDrawerMode() {
         try {
             return typeof localStorage !== 'undefined' && localStorage.getItem('stats2_guest_mode') === '1';
@@ -276,9 +302,10 @@
                 return;
             }
 
+            var addr = getOpenClawGatewayAddress();
             var urls = [
-                'http://127.0.0.1:18789/api/channels/status',
-                'http://127.0.0.1:18789/api/channels'
+                addr.httpBase + '/api/channels/status',
+                addr.httpBase + '/api/channels'
             ];
 
             var headers = {};
@@ -352,7 +379,8 @@
                 var timeout = null;
                 var rpcId = 'rpc-openclaw-channel-status';
                 var connectSent = false;
-                var wsUrl = 'ws://127.0.0.1:18789?token=' + encodeURIComponent(token);
+                var addr2 = getOpenClawGatewayAddress();
+                var wsUrl = addr2.wsBase + '?token=' + encodeURIComponent(token);
 
                 var finish = function(icons) {
                     if (done) return;
@@ -1476,6 +1504,7 @@
      * 刷新监视器：聚合数据并渲染，有本地数据时尝试上报后端
      */
     function refreshOpenClawMonitor() {
+        try {
         var renderWithGatewayChannels = function(merged) {
             fetchGatewayConfiguredChannelIcons().then(function(gatewayIcons) {
                 if (Array.isArray(gatewayIcons) && gatewayIcons.length > 0) {
@@ -1520,6 +1549,14 @@
             }).catch(function() {
                 renderWithGatewayChannels(mergeOpenClawData(null, null));
             });
+        }
+        } catch (err) {
+            try {
+                console.warn('[OpenClawMonitor] refreshOpenClawMonitor failed:', err && err.message ? err.message : err);
+            } catch (_) {}
+            try {
+                renderOpenClawMonitorCard(mergeOpenClawData(getOpenClawLocalData(), null));
+            } catch (_) {}
         }
     }
 

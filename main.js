@@ -59,7 +59,7 @@ const VIBE_OPENCLAW_CACHE = 'vibe_openclaw_analysis_cache';
             if (typeof window !== 'undefined') window.__vibeGitHubUser = cache;
           }
           
-          // 【认领/绑定机制】在捕获到 access_token 的第一时间，把本地 fingerprint 绑定到 github_login
+          // 【认领/绑定机制】在捕获到 access_token 的第一时间，把本地 fingerprint 迁移/认领到 GitHub user_id
           const userId = data.sub || null;
           if (userId) {
             try {
@@ -70,26 +70,26 @@ const VIBE_OPENCLAW_CACHE = 'vibe_openclaw_analysis_cache';
                   fingerprint: String(userFingerprint).substring(0, 8) + '...',
                 });
                 
-                // 异步发送 migrate 请求（不阻塞页面加载）
-                fetch('/api/fingerprint/bind', {
+                // 异步发送迁移请求（不阻塞页面加载）
+                fetch('/api/fingerprint/migrate', {
                   method: 'POST',
                   headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`,
                   },
                   body: JSON.stringify({
-                    githubUsername: githubLogin,
+                    userId: userId,
                     fingerprint: userFingerprint,
-                    githubAccessToken: token,
+                    username: githubLogin,
                   }),
                 }).then(res => {
                   if (res.ok) {
-                    console.log('[Auth] ✅ Fingerprint 绑定请求已发送');
+                    console.log('[Auth] ✅ Fingerprint 迁移请求已发送');
                   } else {
-                    console.warn('[Auth] ⚠️ Fingerprint 绑定请求失败:', res.status);
+                    console.warn('[Auth] ⚠️ Fingerprint 迁移请求失败:', res.status);
                   }
                 }).catch(err => {
-                  console.warn('[Auth] ⚠️ Fingerprint 绑定请求出错:', err);
+                  console.warn('[Auth] ⚠️ Fingerprint 迁移请求出错:', err);
                 });
               } else {
                 console.log('[Auth] ℹ️ 未找到 user_fingerprint，跳过绑定');

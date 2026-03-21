@@ -405,6 +405,10 @@
             } catch (e) { return null; }
         }
         function isGuestGatePassed() {
+            try {
+                // 兜底：若 localStorage 不可用（隐私/禁用），仍允许游客入口点击生效
+                if (typeof window !== 'undefined' && window.__stats2GuestGateInMemory === true) return true;
+            } catch (e) {}
             try { return localStorage.getItem('stats2_guest_mode') === '1'; } catch (e) { return false; }
         }
         function pruneGuestDrawerBlocks() {
@@ -530,6 +534,8 @@
         }
         function setGuestGatePassed(enabled) {
             try {
+                // 兜底：即便 localStorage 失败，也要保证后续 runGateCheck 能立即识别游客态
+                if (typeof window !== 'undefined') window.__stats2GuestGateInMemory = !!enabled;
                 if (enabled) localStorage.setItem('stats2_guest_mode', '1');
                 else localStorage.removeItem('stats2_guest_mode');
             } catch (e) {}
@@ -1110,7 +1116,19 @@
                 return;
             }
             var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
-            if (!sb || typeof sb.auth !== 'object') return;
+            // 无 Supabase 客户端时仍须走「未登录」门控，否则遮罩永不进入可交互状态，国家列表/地图均不可用
+            if (!sb || typeof sb.auth !== 'object') {
+                var sessionOffline = null;
+                if (checkGatePassed(sessionOffline)) return;
+                if (!country) {
+                    window.__countryPickerForced = true;
+                    window.__countrySelectorSelectedCode = '';
+                    showOverlay();
+                    return;
+                }
+                showOverlay();
+                return;
+            }
             sb.auth.getSession().then(function(r) {
                 var session = (r && r.data && r.data.session) ? r.data.session : null;
                 // 已登录 GitHub：不弹出登录/选国家窗口；若已有国家则走确认逻辑，否则直接移除遮罩
@@ -1188,7 +1206,12 @@
                     }
                 });
             }, 200);
-            setTimeout(function() { clearInterval(poll); }, 15000);
+            setTimeout(function() {
+                clearInterval(poll);
+                try {
+                    if (typeof runGateCheck === 'function') runGateCheck();
+                } catch (ePoll) {}
+            }, 15000);
         }
         document.addEventListener('click', function(e) {
             var btn = e.target && (e.target.id === 'country-selector-close' || (e.target.closest && e.target.closest('#country-selector-close')));
@@ -1596,7 +1619,7 @@
                 var top1 = labels[sorted[0].k];
                 var top2 = labels[sorted[1].k];
                 answerContent = (currentLang === 'en')
-                    ? 'A developer with strong ' + top1 + ' and ' + top2.toLowerCase() + '.'
+                    ? 'A developer with strong ' + top1 + ' and ' + String(top2 || 'coding').toLowerCase() + '.'
                     : '一位极具' + top1 + '且' + (sorted[1].v >= 70 ? '极度' : '较为') + top2 + '的代码架构师。';
             } else {
                 answerContent = (currentLang === 'en') ? 'A developer with a unique vibe.' : '一位风格鲜明的开发者。';
@@ -6059,6 +6082,13 @@
                             if (lb && window.currentUser && typeof renderUserStatsCards === 'function') {
                                 renderUserStatsCards(lb, getBestUserRecordForStats(window.currentUser));
                             }
+
+                            // Slot1 完成后：点亮 L/P/D/E/F（若对应 DOM 存在）并触发数值滚动动画
+                            try {
+                                if (typeof window.__slot1LpdefHighlight === 'function') {
+                                    window.__slot1LpdefHighlight(msg.payload);
+                                }
+                            } catch (_) { /* ignore */ }
                         }
 
                         // OpenClaw 左侧监视器仅响应 OpenClaw 槽位，避免 Cursor 广播触发串台
@@ -6108,12 +6138,26 @@
                     
                     console.log('[Init] ✅ Supabase 客户端已成功挂载至 window.supabaseClient / window.supabase');
                     console.log('[Init] 💡 可在控制台使用 window.supabaseClient 访问客户端');
+                    try {
+                        if (typeof window.runGateCheck === 'function') {
+                            setTimeout(function() {
+                                try { window.runGateCheck(); } catch (eRc) {}
+                            }, 0);
+                        }
+                    } catch (_) {}
                 } catch (err) {
                     console.error('[Init] ❌ 初始化失败:', err);
                 }
             } else if (initAttempts >= maxAttempts) {
                 clearInterval(initInterval);
                 console.error('[Init] ❌ Supabase SDK 加载超时，请检查网络连接或 CDN 是否可访问');
+                try {
+                    if (typeof window.runGateCheck === 'function') {
+                        setTimeout(function() {
+                            try { window.runGateCheck(); } catch (eRc) {}
+                        }, 0);
+                    }
+                } catch (_) {}
             }
         }, 100);
         const i18n = {
@@ -7213,8 +7257,13 @@
         // 【重构】初始化右侧抽屉面板 - 支持三 Tab 结构
         function initRightDrawerPanels() {
             try {
-                // 默认显示排行榜视图
-                switchView('ranking');
+                var _prevAllow = window.__allowInitCall;
+                window.__allowInitCall = true;
+                try {
+                    switchView('ranking');
+                } finally {
+                    window.__allowInitCall = _prevAllow;
+                }
                 console.log('[Init] 右侧抽屉已初始化为排行榜视图');
             } catch (e) {
                 console.warn('[Init] 初始化右侧抽屉面板状态失败:', e);
@@ -7823,14 +7872,17 @@
                     </div>
                 </div>
             `;
-            document.body.appendChild(dialog);
+            if (document.body) document.body.appendChild(dialog);
+            else return;
 
             // 绑定事件
-            document.getElementById('homeland-confirm-ok').onclick = () => {
+            var homelandOk = document.getElementById('homeland-confirm-ok');
+            var homelandCancel = document.getElementById('homeland-confirm-cancel');
+            if (homelandOk) homelandOk.onclick = () => {
                 dialog.remove();
                 if (typeof onConfirm === 'function') onConfirm();
             };
-            document.getElementById('homeland-confirm-cancel').onclick = () => {
+            if (homelandCancel) homelandCancel.onclick = () => {
                 dialog.remove();
                 if (typeof onCancel === 'function') onCancel();
             };
@@ -7872,14 +7924,17 @@
                     </div>
                 </div>
             `;
-            document.body.appendChild(dialog);
+            if (document.body) document.body.appendChild(dialog);
+            else return;
 
             // 绑定事件
-            document.getElementById('unfix-confirm-ok').onclick = () => {
+            var unfixOk = document.getElementById('unfix-confirm-ok');
+            var unfixCancel = document.getElementById('unfix-confirm-cancel');
+            if (unfixOk) unfixOk.onclick = () => {
                 dialog.remove();
                 if (typeof onConfirm === 'function') onConfirm();
             };
-            document.getElementById('unfix-confirm-cancel').onclick = () => {
+            if (unfixCancel) unfixCancel.onclick = () => {
                 dialog.remove();
                 if (typeof onCancel === 'function') onCancel();
             };
@@ -8020,14 +8075,14 @@
                             name: 'Current Location',
                             type: 'effectScatter',
                             coordinateSystem: 'geo',
-                            data: [{ value: [lng, lat], name: 'YOU', avatarUrl: avatarUrl || null, username: username || null }],
+                            data: [{ value: [lng, lat], name: 'YOU', avatarUrl: avatarUrl || null, username: githubUsername || null }],
                             symbolSize: 20,
                             showEffectOn: 'render',
                             rippleEffect: { brushType: 'stroke', scale: 5, period: 4, color: fixedColor },
                             itemStyle: { color: fixedColor, shadowBlur: 20, shadowColor: fixedColor },
                             label: { show: true, formatter: 'YOU', position: 'top', color: fixedColor, fontSize: 10, fontFamily: 'JetBrains Mono' },
                             avatarUrl: avatarUrl || null,
-                            username: username || null,
+                            username: githubUsername || null,
                             zlevel: 10,
                             z: 10
                         };
@@ -9274,7 +9329,10 @@
             function pick(keys) {
                 for (var i = 0; i < keys.length; i++) {
                     var k = keys[i];
-                    var val = ct[k] ?? root[k] ?? raw[k] ?? root[k.toLowerCase()] ?? (typeof k === 'string' ? root[k.replace(/_/g, '')] : undefined);
+                    // 防御：keys 可能包含 undefined/非字符串，避免 root[k.toLowerCase()] 直接抛异常导致后续脚本中断
+                    var val = ct[k] ?? root[k] ?? raw[k]
+                        ?? (typeof k === 'string' ? root[k.toLowerCase()] : undefined)
+                        ?? (typeof k === 'string' ? root[k.replace(/_/g, '')] : undefined);
                     if (val !== undefined && val !== null && !isNaN(Number(val)) && Number(val) !== 0) {
                         return Number(val);
                     }
@@ -9687,6 +9745,7 @@
                 }
                 cards.forEach((card, index) => {
                     setTimeout(() => {
+                        if (!targetContainer || !targetContainer.appendChild) return;
                         if (targetContainer.dataset.drawerRenderGen !== String(renderGen)) return;
                         if (!card.classList.contains('drawer-item')) card.classList.add('drawer-item');
                         if (!card.classList.contains('stat-card')) card.classList.add('stat-card');
@@ -9701,8 +9760,9 @@
             };
             
             const appendCardStaggered = (container, card, index) => {
-                if (!container) return;
+                if (!container || !container.appendChild) return;
                 setTimeout(() => {
+                    if (!container || !container.appendChild) return;
                     card.classList.add('clinic-card');
                     container.appendChild(card);
                 }, index * 80);
@@ -10432,7 +10492,7 @@
                                     ${escapeHtml(currentLang === 'en' ? 'Fingerprint' : '指纹')}: ${currentFingerprint ? currentFingerprint.substring(0, 8) : 'N/A'}...
                                 </div>
                             `;
-                            leftBody.appendChild(waitingCard);
+                            if (leftBody && leftBody.appendChild) leftBody.appendChild(waitingCard);
                         };
 
                         const localGh = (localStorage.getItem('github_username') || '').trim();
@@ -11593,6 +11653,7 @@
             var icons = { longevity: '🦞', tokens: '⚡', skills: '🧠', dialog: '💬' };
             card.innerHTML = '<div class="flex items-center justify-between mb-3"><span class="text-[#00ff41] text-xs font-bold uppercase tracking-widest">' + (titles[type] || type) + '</span><span class="text-[10px] text-zinc-500">Top 10</span></div><div class="openclaw-rank-list space-y-1"></div>';
             var list = card.querySelector('.openclaw-rank-list');
+            if (!list) return;
             if (!items || items.length === 0) {
                 list.innerHTML = '<div class="text-zinc-500 text-[10px] py-4 text-center">暂无数据</div>';
             } else {
@@ -11632,6 +11693,7 @@
         }
 
         function renderOpenclawCardModelShare(root, modelShare) {
+            if (!root || !root.appendChild) return;
             var card = document.createElement('div');
             card.className = 'openclaw-dimension-card hacker-border clinic-card p-4 rounded-sm bg-[rgba(5,5,5,0.85)] border border-[rgba(0,255,65,0.3)] hover:border-[rgba(0,255,65,0.5)] transition-colors';
             var total = modelShare.total || 1;
@@ -11671,6 +11733,7 @@
         }
 
         function renderOpenclawCardDeviceShare(root, deviceShare) {
+            if (!root || !root.appendChild) return;
             var card = document.createElement('div');
             card.className = 'openclaw-dimension-card hacker-border clinic-card p-4 rounded-sm bg-[rgba(5,5,5,0.85)] border border-[rgba(0,255,65,0.3)] hover:border-[rgba(0,255,65,0.5)] transition-colors';
             var list = Array.isArray(deviceShare) ? deviceShare : [];
@@ -11691,6 +11754,7 @@
         }
 
         function renderOpenclawCardHourlyRhythm(root, hourlyRhythm) {
+            if (!root || !root.appendChild) return;
             var card = document.createElement('div');
             card.className = 'openclaw-dimension-card hacker-border clinic-card p-4 rounded-sm bg-[rgba(5,5,5,0.85)] border border-[rgba(0,255,65,0.3)] hover:border-[rgba(0,255,65,0.5)] transition-colors';
             card.innerHTML = '<div class="flex items-center justify-between mb-3"><span class="text-[#00ff41] text-xs font-bold uppercase tracking-widest">生物节律</span></div>' +
@@ -11981,6 +12045,7 @@
             var myRankEl = card.querySelector('.lb-my-rank');
 
             function fillList(rankingType) {
+                if (!listEl || !updatedEl || !myRankEl) return;
                 var list = rankingType === 'daily' ? topDataDaily : topDataAllTime;
                 var snapItem = rankingType === 'daily' ? dailySnap : allTimeSnap;
                 var updatedAt = snapItem.updated_at || '';
@@ -13488,7 +13553,8 @@
                     </div>
                 `;
 
-                document.body.appendChild(modal);
+                if (document.body) document.body.appendChild(modal);
+                else return;
 
                 // 显示弹窗
                 modal.classList.add('active');
@@ -13552,7 +13618,8 @@
                         <div class="ranking-detail-content" id="ranking-detail-content"></div>
                     </div>
                 `;
-                document.body.appendChild(modal);
+                if (document.body) document.body.appendChild(modal);
+                else return;
                 
                 // 点击背景关闭
                 modal.addEventListener('click', function(e) {
@@ -13565,6 +13632,7 @@
             // 填充内容（仅显示 GitHub 链接和代码称号）
             const content = document.getElementById('ranking-detail-content');
             let html = '';
+            if (!content) return;
             
             // 用户信息
             html += `
@@ -13642,7 +13710,8 @@
                         <div class="ranking-detail-content" id="ranking-detail-content"></div>
                     </div>
                 `;
-                document.body.appendChild(modal);
+                if (document.body) document.body.appendChild(modal);
+                else return;
                 
                 // 点击背景关闭
                 modal.addEventListener('click', function(e) {
@@ -13655,6 +13724,7 @@
             // 填充内容
             const content = document.getElementById('ranking-detail-content');
             let html = '';
+            if (!content) return;
             
             // 用户信息
             html += `
@@ -16221,6 +16291,43 @@
                 
                 // 初始化身份设置弹窗（国家列表、搜索、关闭）
                 initCountrySelector();
+                initCountrySelectorModal();
+
+                const countryBtn = document.getElementById('btn-country-selector');
+                if (countryBtn && countryBtn.dataset.bound !== 'true') {
+                    countryBtn.addEventListener('click', function(e) {
+                        if (e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                        }
+                        openCountrySelector();
+                    });
+                    countryBtn.dataset.bound = 'true';
+                }
+
+                const anchorBtn = document.getElementById('btn-anchor-location');
+                if (anchorBtn && anchorBtn.dataset.bound !== 'true') {
+                    anchorBtn.addEventListener('click', function(e) {
+                        if (e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                        }
+                        setAnchorMode(!isAnchorMode);
+                    });
+                    anchorBtn.dataset.bound = 'true';
+                }
+
+                const calibrateBtn = document.getElementById('btn-calibrate-location');
+                if (calibrateBtn && calibrateBtn.dataset.bound !== 'true') {
+                    calibrateBtn.addEventListener('click', function(e) {
+                        if (e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                        }
+                        setCalibrationMode(!isCalibrating);
+                    });
+                    calibrateBtn.dataset.bound = 'true';
+                }
                 
                 // 移除所有旧的拖拽和移动相关功能
                 // （不再需要校准、锚定等功能）
@@ -16304,7 +16411,54 @@
             return (currentLang === 'zh' && nameZh) ? `${nameZh} (${code})` : `${nameEn} (${code})`;
         }
         
-        function initCountrySelector() {
+        
+        function initCountrySelectorModal() {
+            try {
+                const modal = document.getElementById('country-selector-modal');
+                const closeBtn = document.getElementById('country-selector-close');
+                const searchInput = document.getElementById('country-search-input-modal');
+                const listContainer = document.getElementById('country-list-container-modal');
+                const githubSaveBtn = document.getElementById('country-selector-github-save-btn-modal');
+                if (!modal || !closeBtn || !searchInput || !listContainer) return;
+                
+                let searchTimeout = null;
+                searchInput.addEventListener('input', (e) => {
+                    if (searchTimeout) clearTimeout(searchTimeout);
+                    searchTimeout = setTimeout(() => {
+                        listContainer.hidden = false;
+                        listContainer.dataset.expanded = 'true';
+                        renderCountryList(e.target.value.trim());
+                    }, 200);
+                });
+                
+                if (listContainer.dataset.gateDelegated !== 'true') {
+                    listContainer.addEventListener('click', function(e) {
+                        let target = e && e.target ? e.target : null;
+                        if (target && target.nodeType === 3) target = target.parentElement;
+                        if (!target) return;
+                        const item = target.closest ? target.closest('.country-item[data-code]') : null;
+                        if (!item) return;
+                        const code = item.getAttribute('data-code');
+                        const name = item.getAttribute('data-name');
+                        selectCountryFromSelector(code, name);
+                    });
+                    listContainer.dataset.gateDelegated = 'true';
+                }
+                
+                if (githubSaveBtn) {
+                    // No-op for now unless forced. Usually githubSaveBtn in modal is disabled or handles similar logic
+                    githubSaveBtn.addEventListener('click', function() {
+                        if (typeof window.loginWithGitHub === 'function') {
+                            window.loginWithGitHub();
+                        }
+                    });
+                }
+            } catch (e) {
+                console.warn('[CountrySelector] initCountrySelectorModal failed', e);
+            }
+        }
+
+function initCountrySelector() {
             try {
                 const modal = document.getElementById('country-selector-modal');
                 const closeBtn = document.getElementById('country-selector-close');
@@ -16451,10 +16605,12 @@
                         const name = item.getAttribute('data-name');
                         const countries = (typeof window.__getAllGateCountries === 'function') ? window.__getAllGateCountries() : [];
                         if (window.__countryPickerForced) {
-                            window.__countrySelectorSelectedCode = (code || '').trim().toUpperCase();
-                            const chosen = countries.find(c => String(c.code || '').toUpperCase() === window.__countrySelectorSelectedCode);
-                            if (searchInput && chosen) {
-                                searchInput.value = getGateCountryDisplayName(chosen);
+                            const codeUpper = (code || '').trim().toUpperCase();
+                            window.__countrySelectorSelectedCode = codeUpper;
+                            const chosen = countries.find(c => String(c.code || '').toUpperCase() === codeUpper);
+                            // 只要点击了，就必须立即把输入框显示出来；即使 chosen 由于数据尚未就绪而找不到也给出回退显示
+                            if (searchInput) {
+                                searchInput.value = chosen ? getGateCountryDisplayName(chosen) : codeUpper;
                                 searchInput.dataset.userEdited = 'false';
                             }
                             if (typeof updateCountrySelectorGitHubButtonState === 'function') updateCountrySelectorGitHubButtonState();
@@ -16687,11 +16843,11 @@
          * 渲染国家列表
          * @param {string} searchQuery - 搜索关键词
          */
-        function renderCountryList(searchQuery) {
+        function renderCountryList(searchQuery, options) {
             try {
                 const listContainer = document.getElementById('country-list-container');
-                const searchInput = document.getElementById('country-search-input');
-                if (!listContainer) return;
+                const listContainerModal = document.getElementById('country-list-container-modal');
+                if (!listContainer && !listContainerModal) return;
 
                 const getAllGateCountries = function() {
                     return getAllStats2MapCountries();
@@ -16710,9 +16866,10 @@
                     });
 
                 const forcedSelectedCode = (window.__countrySelectorSelectedCode || '').trim().toUpperCase();
+                var gateLc = listContainer || listContainerModal;
                 const isExpanded = query
                     ? true
-                    : (listContainer.dataset.mode === 'all' || listContainer.dataset.expanded === 'true');
+                    : (gateLc && (gateLc.dataset.mode === 'all' || gateLc.dataset.expanded === 'true'));
                 let displayList = filtered;
                 if (!query && !isExpanded) {
                     const compactCodes = ['CN', 'US', 'JP', 'KR', 'SG', 'DE', 'FR', 'GB'];
@@ -16728,16 +16885,18 @@
 
                 let html = displayList.map(c => {
                     const displayName = getGateCountryDisplayName(c);
+                    var ccUpper = String(c && c.code != null ? c.code : '').trim().toUpperCase();
                     const isSelected = window.__countryPickerForced
-                        ? (forcedSelectedCode === c.code.toUpperCase())
-                        : ((window.currentUser?.manual_location || localStorage.getItem('manual_location') || '').toUpperCase() === c.code.toUpperCase());
+                        ? (forcedSelectedCode === ccUpper)
+                        : ((window.currentUser?.manual_location || localStorage.getItem('manual_location') || '').toUpperCase() === ccUpper);
                     return `
                         <div class="country-item ${isSelected ? 'selected' : ''}" data-code="${c.code}" data-name="${c.nameEn}">
                             ${displayName}
                         </div>
                     `;
                 }).join('');
-                listContainer.innerHTML = html;
+                if (listContainer) listContainer.innerHTML = html;
+                if (listContainerModal) listContainerModal.innerHTML = html;
 
                 // 交互事件由 initCountrySelector 中的事件委托统一处理
             } catch (e) {
@@ -17035,12 +17194,10 @@
                 const modal = document.getElementById('country-selector-modal');
                 if (modal) {
                     modal.style.display = 'block';
-                    const searchInput = document.getElementById('country-search-input');
-                    const listContainer = document.getElementById('country-list-container');
-                    if (searchInput) {
-                        searchInput.value = '';
-                    }
-                    if (listContainer) listContainer.hidden = true;
+                    const listContainerModal = document.getElementById('country-list-container-modal');
+                    const searchInputModal = document.getElementById('country-search-input-modal');
+                    if (searchInputModal) searchInputModal.value = '';
+                    if (listContainerModal) listContainerModal.hidden = false;
                     renderCountryList('');
                 }
             } catch (e) {
@@ -24922,7 +25079,7 @@
                                             const top1 = labels[sorted[0].k];
                                             const top2 = labels[sorted[1].k];
                                             realEvalText = (currentLang === 'en')
-                                                ? 'A developer with strong ' + top1 + ' and ' + top2.toLowerCase() + '.'
+                                                ? 'A developer with strong ' + top1 + ' and ' + String(top2 || 'coding').toLowerCase() + '.'
                                                 : '一位极具' + top1 + '且' + (sorted[1].v >= 70 ? '极度' : '较为') + top2 + '的代码架构师。';
                                         } else {
                                             realEvalText = (currentLang === 'en') ? 'A developer with a unique and complex coding style.' : '一位性格深邃且独特的赛博开发者。';
@@ -26243,6 +26400,11 @@
                 }
             };
             try {
+            try {
+                if (typeof window.detectOpenClawPort === 'function') {
+                    await window.detectOpenClawPort({ host: '127.0.0.1', ports: [18789, 18790, 18791, 18792], timeoutMs: 700 });
+                }
+            } catch (_) { /* OpenClaw 端口探测失败时静默，使用默认或缓存 */ }
             loadGitHubUsername();
             try { await loadLanguageConfig(); } catch { /* ignore */ }
             try { updateLanguageContext(); } catch { /* ignore */ }
@@ -26431,7 +26593,7 @@
                     console.error('[onload] 切换到全球视图也失败:', e2);
                 }
             }
-            window.__allowInitCall = false;
+            // 勿在此处将 __allowInitCall 置 false：isGlobalInitializing 仍为 true，会导致 switchView 在 initApp 余下阶段（OAuth 等）全部被拦截，Tab/按钮无响应。统一在 initApp 的 finally 里与 isGlobalInitializing 一并收尾。
             state.isInitialLayoutPending = false;
             isInitialLayoutPending = false; // 向后兼容
             
@@ -30583,3 +30745,372 @@ document.addEventListener('click', function(e) {
         btn.textContent = originalText;
     });
 });
+
+// ==========================================
+// Data Source Management - Slot2 OpenClaw
+// ==========================================
+(function () {
+    if (typeof document === 'undefined') return;
+
+    function $(id) {
+        try { return document.getElementById(id); } catch (_) { return null; }
+    }
+
+    function setText(id, text) {
+        var el = $(id);
+        if (!el) return;
+        try { el.textContent = String(text ?? ''); } catch (_) { }
+    }
+
+    async function probeOpenClawPortViaHttp(host, port, timeoutMs) {
+        var base = 'http://' + host + ':' + port;
+
+        var tryCors = async function (path, method, body) {
+            var ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            var tid = null;
+            try {
+                if (ac && timeoutMs > 0) tid = setTimeout(function () { try { ac.abort(); } catch (_) { } }, timeoutMs);
+                var resp = await fetch(base + path, {
+                    method: method || 'GET',
+                    mode: 'cors',
+                    credentials: 'include',
+                    signal: ac ? ac.signal : undefined,
+                    body: body
+                });
+                if (resp && resp.ok) return 2; // 服务存活
+                if (resp && (resp.status === 401 || resp.status === 403 || resp.status === 404 || resp.status === 405)) return 1; // 可能需要 token/权限，但端口可用
+            } catch (_) {
+                // ignore
+            } finally {
+                if (tid) clearTimeout(tid);
+            }
+            return 0;
+        };
+
+        var s = await tryCors('/api/channels/status', 'GET', null);
+        if (s > 0) return true;
+        s = await tryCors('/api/channels', 'GET', null);
+        if (s > 0) return true;
+
+        return false;
+    }
+
+    /**
+     * 探测 OpenClaw 网关端口并写入 localStorage
+     * - 成功：写入 `openclaw2_gateway_port` / `openclaw2_gateway_host`
+     * - 失败：返回 null
+     */
+    async function detectOpenClawPort(opts) {
+        opts = opts && typeof opts === 'object' ? opts : {};
+        var host = (opts.host || '127.0.0.1') + '';
+        var ports = Array.isArray(opts.ports) && opts.ports.length ? opts.ports : [18789, 18790, 18791, 18792];
+        var timeoutMs = Number(opts.timeoutMs || 700);
+
+        // 如果 localStorage 已有有效端口，优先使用
+        try {
+            var cachedPortRaw = localStorage.getItem('openclaw2_gateway_port');
+            var cachedPort = parseInt(String(cachedPortRaw || ''), 10);
+            if (Number.isFinite(cachedPort) && cachedPort > 0 && ports.indexOf(cachedPort) >= 0) {
+                if (await probeOpenClawPortViaHttp(host, cachedPort, timeoutMs)) {
+                    localStorage.setItem('openclaw2_gateway_host', host);
+                    localStorage.setItem('openclaw2_gateway_port', String(cachedPort));
+                    return cachedPort;
+                }
+            }
+        } catch (_) { }
+
+        for (var i = 0; i < ports.length; i++) {
+            var port = ports[i];
+            try {
+                if (await probeOpenClawPortViaHttp(host, port, timeoutMs)) {
+                    localStorage.setItem('openclaw2_gateway_host', host);
+                    localStorage.setItem('openclaw2_gateway_port', String(port));
+                    return port;
+                }
+            } catch (_) {
+                // ignore
+            }
+        }
+        return null;
+    }
+
+    window.detectOpenClawPort = detectOpenClawPort;
+
+    document.addEventListener('click', async function (e) {
+        try {
+            var target = e && e.target ? e.target : null;
+            var btn = null;
+            if (target) {
+                btn = target.id === 'openclaw-slot2-detect-btn' ? target : (target.closest ? target.closest('#openclaw-slot2-detect-btn') : null);
+            }
+            if (!btn) return;
+
+            var statusId = 'openclaw-slot2-port-text';
+            btn.disabled = true;
+            var oldText = btn.textContent;
+            setText(statusId, '正在探测...');
+            btn.textContent = '探测中...';
+
+            var port = await detectOpenClawPort({ host: '127.0.0.1', ports: [18789, 18790, 18791, 18792], timeoutMs: 700 });
+            if (port != null) {
+                setText(statusId, '已探测到 Gateway 端口：' + port);
+                if (typeof window.refreshOpenClawMonitor === 'function') {
+                    try { window.refreshOpenClawMonitor(); } catch (_) { }
+                }
+            } else {
+                setText(statusId, '探测失败：未发现可用 OpenClaw 网关（18789-18792）');
+            }
+            btn.textContent = oldText;
+            btn.disabled = false;
+        } catch (err) {
+            try { btn.textContent = btn.textContent || '探测网关端口'; } catch (_) { }
+            try { btn.disabled = false; } catch (_) { }
+            setText('openclaw-slot2-port-text', '探测失败：' + (err && err.message ? err.message : '未知错误'));
+        }
+    });
+})();
+
+// ==========================================
+// Data Source Management - Slot1 Cursor Upload
+// ==========================================
+(function () {
+    if (typeof document === 'undefined') return;
+
+    function $(id) {
+        try { return document.getElementById(id); } catch (_) { return null; }
+    }
+
+    function setText(id, text) {
+        var el = $(id);
+        if (!el) return;
+        try { el.textContent = String(text ?? ''); } catch (_) { }
+    }
+
+    function extractDimScores(payload) {
+        // 兼容 payload 结构：dimensions: {L,P,D,E,F} 或直接 payload: {L,P,...}
+        var dims = (payload && typeof payload === 'object' && payload.dimensions && typeof payload.dimensions === 'object')
+            ? payload.dimensions
+            : (payload && typeof payload === 'object' ? payload : {});
+
+        var out = {};
+        ['L', 'P', 'D', 'E', 'F'].forEach(function (k) {
+            var v = dims[k];
+            if (v == null && typeof dims === 'object') {
+                // 兜底：允许小写 key
+                var lk = String(k).toLowerCase();
+                v = dims[lk];
+            }
+            out[k] = v == null ? null : Number(v);
+            if (out[k] != null && !Number.isFinite(out[k])) out[k] = null;
+        });
+        return out;
+    }
+
+    function animateCountUp(el, toValue, durationMs) {
+        if (!el) return;
+        durationMs = Number(durationMs || 1100);
+        var to = Number(toValue);
+        if (!Number.isFinite(to)) return;
+
+        var raw = '';
+        try { raw = String(el.textContent || ''); } catch (_) { raw = ''; }
+        var from = Number(String(raw).replace(/[^\d.-]/g, ''));
+        if (!Number.isFinite(from)) from = 0;
+
+        // 分数/称号得分一般是整数（0-100），强制取整后回填
+        var start = performance.now();
+        var delta = to - from;
+        var easeOutCubic = function (t) { return 1 - Math.pow(1 - t, 3); };
+
+        function tick(now) {
+            var t = Math.min((now - start) / durationMs, 1);
+            var eased = easeOutCubic(t);
+            var cur = from + delta * eased;
+            try { el.textContent = String(Math.round(cur)); } catch (_) { }
+            if (t < 1) requestAnimationFrame(tick);
+        }
+
+        requestAnimationFrame(tick);
+    }
+
+    // 给 stats2.js 的 local_analysis_complete 复用：用于 Slot1 成功后“点亮 + 数值滚动”
+    window.__slot1LpdefHighlight = function (payload) {
+        try {
+            var scores = extractDimScores(payload);
+            ['L', 'P', 'D', 'E', 'F'].forEach(function (dim) {
+                var targetScore = scores[dim];
+                var cardEl = document.getElementById('card-' + dim);
+                if (!cardEl) {
+                    // 兜底：若页面中用的是 data / class 方式
+                    cardEl = document.querySelector('.lpdef-card[data-dim="' + dim + '"]') ||
+                        document.querySelector('[data-lpdef-dim="' + dim + '"]') ||
+                        document.querySelector('[data-dim-id="' + dim + '"]');
+                }
+
+                // 点亮动画：优先对 lpdef-card 加扫描类
+                if (cardEl) {
+                    if (!cardEl.classList.contains('lpdef-card')) cardEl.classList.add('lpdef-card');
+                    cardEl.classList.remove('scanning');
+                    cardEl.classList.remove('recalculating');
+                    cardEl.classList.add('scanning');
+                    setTimeout(function () {
+                        try { cardEl.classList.remove('scanning'); } catch (_) { }
+                        try {
+                            cardEl.classList.add('recalculating');
+                            setTimeout(function () {
+                                try { cardEl.classList.remove('recalculating'); } catch (_) { }
+                            }, 900);
+                        } catch (_) { }
+                    }, 1600);
+                }
+
+                // 数值滚动：优先更新 expert-score-<dim>
+                if (targetScore != null) {
+                    var scoreEl = document.getElementById('expert-score-' + dim);
+                    if (!scoreEl && cardEl) {
+                        scoreEl = cardEl.querySelector('[data-expert-score="' + dim + '"]') ||
+                            cardEl.querySelector('.expert-score') ||
+                            cardEl.querySelector('.lpdef-rank-score');
+                    }
+                    if (scoreEl) animateCountUp(scoreEl, targetScore, 1050);
+                }
+
+                // 指示按钮 active（如果存在）
+                var indicatorBtns = document.querySelectorAll('.lpdef-indicator-btn');
+                if (indicatorBtns && indicatorBtns.length) {
+                    for (var i = 0; i < indicatorBtns.length; i++) {
+                        var b = indicatorBtns[i];
+                        var txt = String(b && b.textContent ? b.textContent : '').trim().toUpperCase();
+                        if (txt === dim) {
+                            b.classList.add('active');
+                        } else {
+                            // 不强制移除其它 active，避免与用户手动交互冲突
+                        }
+                    }
+                }
+            });
+        } catch (_) { /* ignore */ }
+    };
+
+    var analysisLoadPromise = null;
+    async function ensureAnalysisModule() {
+        if (window.analysisModule && typeof window.analysisModule.processFiles === 'function') return window.analysisModule;
+        if (analysisLoadPromise) return analysisLoadPromise;
+
+        analysisLoadPromise = (async function () {
+            try {
+                window.analysisModuleLoading = true;
+                window.analysisModuleError = null;
+
+                var paths = [
+                    './main.js',
+                    './dist/main.js',
+                    '/main.js',
+                    '/dist/main.js'
+                ];
+                var lastErr = null;
+
+                for (var i = 0; i < paths.length; i++) {
+                    var p = paths[i];
+                    try {
+                        var mod = await import(p);
+                        var required = ['initializeParser', 'processFiles', 'getGlobalStats', 'getVibeResult'];
+                        var missing = required.filter(function (k) { return !(mod && typeof mod[k] === 'function'); });
+                        if (missing.length) throw new Error('缺少导出函数: ' + missing.join(', '));
+
+                        window.analysisModule = {
+                            initializeParser: mod.initializeParser,
+                            processFiles: mod.processFiles,
+                            renderFullDashboard: mod.renderFullDashboard || (() => { }),
+                            getGlobalStats: mod.getGlobalStats,
+                            getVibeResult: mod.getVibeResult,
+                            getVibeAnalyzer: mod.getVibeAnalyzer || (() => null),
+                            setGlobalStats: mod.setGlobalStats || (() => { }),
+                            setVibeResult: mod.setVibeResult || (() => { }),
+                            setAllChatData: mod.setAllChatData || (() => { }),
+                            reanalyzeWithLanguage: mod.reanalyzeWithLanguage || (async () => null)
+                        };
+
+                        console.log('[Slot1] ✅ analysisModule 已加载');
+                        window.analysisModuleLoading = false;
+                        return window.analysisModule;
+                    } catch (e) {
+                        lastErr = e;
+                    }
+                }
+
+                window.analysisModuleError = lastErr;
+                window.analysisModuleLoading = false;
+                throw lastErr || new Error('analysisModule 加载失败');
+            } catch (err) {
+                window.analysisModuleLoading = false;
+                window.analysisModuleError = err;
+                throw err;
+            }
+        })();
+
+        return analysisLoadPromise;
+    }
+
+    // Slot1 按钮：点击触发文件夹选择
+    document.addEventListener('click', function (e) {
+        try {
+            var target = e && e.target ? e.target : null;
+            if (!target || !target.closest) return;
+            var btn = target.closest('#cursor-slot1-folder-btn');
+            if (!btn) return;
+            var input = $('cursor-slot1-folder-input');
+            if (input && typeof input.click === 'function') {
+                input.value = '';
+                input.click();
+            }
+        } catch (_) { }
+    });
+
+    // Slot1 文件夹选择：直接调用 main.js 的 analysisModule.processFiles
+    document.addEventListener('change', async function (e) {
+        var input = e && e.target && e.target.id === 'cursor-slot1-folder-input' ? e.target : null;
+        if (!input) return;
+
+        var files = Array.from(input.files || []);
+        if (!files.length) return;
+
+        var btn = $('cursor-slot1-folder-btn');
+        if (btn) btn.disabled = true;
+        setText('cursor-slot1-status', '正在加载分析模块...');
+
+        try {
+            var mod = await ensureAnalysisModule();
+
+            setText('cursor-slot1-status', '初始化解析器...');
+            if (!window.__slot1ParserInitialized && typeof mod.initializeParser === 'function') {
+                await mod.initializeParser();
+                window.__slot1ParserInitialized = true;
+            }
+
+            setText('cursor-slot1-status', '上传/分析中，请稍候...');
+
+            await mod.processFiles(files, 'folder', {
+                analysisMode: 'full',
+                sourceEngine: 'cursor',
+                onStatus: function (text) {
+                    if (text != null) setText('cursor-slot1-status', text);
+                },
+                onLog: function () { },
+                onProgress: function () { },
+                onError: function (err) {
+                    console.error('[Slot1] processFiles onError:', err);
+                },
+                onComplete: function () {
+                    // UI 最终以 BroadcastChannel local_analysis_complete 为准；这里只做提示
+                    setText('cursor-slot1-status', '上传完成，正在刷新界面...');
+                }
+            });
+        } catch (err) {
+            console.error('[Slot1] 上传解析失败:', err);
+            setText('cursor-slot1-status', '上传失败：' + (err && err.message ? err.message : '未知错误'));
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    });
+})();

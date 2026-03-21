@@ -356,7 +356,7 @@ export async function bindFingerprintToUser(
       // 3) 新用户：使用基于 fingerprint 的 upsert（并发下也幂等）
       // - 若 fingerprint 已存在：更新该行（不会创建新 ID）
       // - 若 fingerprint 不存在：插入新行（id 由数据库默认值生成；若无默认值再回退为前端生成）
-      const upsertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=fingerprint`;
+      const upsertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=github_login`;
 
       const tryUpsert = async (row: any) => {
         return await fetch(upsertUrl, {
@@ -674,11 +674,11 @@ export async function migrateFingerprintToUserId(
 
       // 合并其他字段(优先使用有数据的记录)
       if (sourceMessages > 0) {
-        if (sourceRecord.l_score) updateData.l_score = sourceRecord.l_score;
-        if (sourceRecord.p_score) updateData.p_score = sourceRecord.p_score;
-        if (sourceRecord.d_score) updateData.d_score = sourceRecord.d_score;
-        if (sourceRecord.e_score) updateData.e_score = sourceRecord.e_score;
-        if (sourceRecord.f_score) updateData.f_score = sourceRecord.f_score;
+        if (sourceRecord.l_score !== null && sourceRecord.l_score !== undefined) updateData.l_score = sourceRecord.l_score;
+        if (sourceRecord.p_score !== null && sourceRecord.p_score !== undefined) updateData.p_score = sourceRecord.p_score;
+        if (sourceRecord.d_score !== null && sourceRecord.d_score !== undefined) updateData.d_score = sourceRecord.d_score;
+        if (sourceRecord.e_score !== null && sourceRecord.e_score !== undefined) updateData.e_score = sourceRecord.e_score;
+        if (sourceRecord.f_score !== null && sourceRecord.f_score !== undefined) updateData.f_score = sourceRecord.f_score;
         if (sourceRecord.stats) updateData.stats = sourceRecord.stats;
         if (sourceRecord.personality_type) updateData.personality_type = sourceRecord.personality_type;
         if (sourceRecord.roast_text) updateData.roast_text = sourceRecord.roast_text;

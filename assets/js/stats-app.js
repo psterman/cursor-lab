@@ -5139,7 +5139,10 @@ var _loc = window.location;
             function pick(keys) {
                 for (var i = 0; i < keys.length; i++) {
                     var k = keys[i];
-                    var val = ct[k] ?? root[k] ?? raw[k] ?? root[k.toLowerCase()] ?? (typeof k === 'string' ? root[k.replace(/_/g, '')] : undefined);
+                    // 防御：keys 可能包含 undefined/非字符串，避免 root[k.toLowerCase()] 直接抛异常导致后续脚本中断
+                    var val = ct[k] ?? root[k] ?? raw[k]
+                        ?? (typeof k === 'string' ? root[k.toLowerCase()] : undefined)
+                        ?? (typeof k === 'string' ? root[k.replace(/_/g, '')] : undefined);
                     if (val !== undefined && val !== null && !isNaN(Number(val)) && Number(val) !== 0) {
                         return Number(val);
                     }
