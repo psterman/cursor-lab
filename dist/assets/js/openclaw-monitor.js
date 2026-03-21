@@ -1567,9 +1567,26 @@
     window.refreshOpenClawMonitor = refreshOpenClawMonitor;
     window.syncOpenClawToUserAnalysis = syncOpenClawToUserAnalysis;
 
+    function invalidateGatewayAddressCaches() {
+        try {
+            openclawGatewayChannelCache = null;
+        } catch (_) {}
+        try {
+            if (typeof localStorage !== 'undefined') {
+                localStorage.removeItem(GATEWAY_CHANNEL_CACHE_KEY);
+                localStorage.removeItem(GATEWAY_UNAVAILABLE_CACHE_KEY);
+            }
+        } catch (_) {}
+    }
+
     if (typeof window.addEventListener === 'function') {
         window.addEventListener('storage', function(e) {
             if (e.key === VIBE_OPENCLAW_CACHE || e.key === 'openclaw_analysis_data') {
+                refreshOpenClawMonitor();
+                return;
+            }
+            if (e.key === OPENCLAW_GATEWAY_PORT_KEY || e.key === OPENCLAW_GATEWAY_HOST_KEY) {
+                invalidateGatewayAddressCaches();
                 refreshOpenClawMonitor();
             }
         });

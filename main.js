@@ -1076,7 +1076,9 @@ class VibeCodingApp {
             d.F = norm(d.F, base.F);
           }
         } catch (_) {}
-        const liveRank = await this.analyzer.uploadToSupabase(result, chatData, onProgress);
+        const uploadOpts = { sourceEngine };
+        if (options && options.mode === 'update') uploadOpts.mode = 'update';
+        const liveRank = await this.analyzer.uploadToSupabase(result, chatData, onProgress, uploadOpts);
         
         // 【关键修复】统一保存 claim_token，确保后续 GitHub 登录可认领匿名数据
         // stats2.html / 认领逻辑读取的 key 为 vibe_claim_token
@@ -1578,7 +1580,9 @@ class VibeCodingApp {
             d.F = norm(d.F, base.F);
           }
         } catch (_) {}
-        const liveRank = await this.analyzer.uploadToSupabase(result, chatData, onProgress);
+        const uploadOptsSync = { sourceEngine };
+        if (options && options.mode === 'update') uploadOptsSync.mode = 'update';
+        const liveRank = await this.analyzer.uploadToSupabase(result, chatData, onProgress, uploadOptsSync);
         
         // 【关键修复】统一保存 claim_token，确保后续 GitHub 登录可认领匿名数据
         try {
@@ -3949,7 +3953,7 @@ async function handleFileUpload(event, type, callbacks = {}) {
 
         // 使用 VibeCodingApp 的 analyzeFile 方法
         // 上传流程必须等待 rankData 再回调，否则预览/横向排名无数据（deferGlobalSync 默认会先返回再后台同步）
-        vibeResult = await vibeCodingApp.analyzeFile(allChatData, extraStats, onProgress, { deferGlobalSync: false, sourceEngine: sourceEngine });
+        vibeResult = await vibeCodingApp.analyzeFile(allChatData, extraStats, onProgress, { deferGlobalSync: false, sourceEngine: sourceEngine, mode: callbacks.syncMode === 'update' ? 'update' : undefined });
         console.log('[Main] Vibe Codinger 分析完成（使用 VibeCodingApp）:', vibeResult);
         
         // 重置处理状态
@@ -4020,7 +4024,7 @@ async function handleFileUpload(event, type, callbacks = {}) {
           };
           
           // 使用 VibeCodingApp 的 analyzeFileSync 方法（同步方法）
-          vibeResult = await vibeCodingApp.analyzeFileSync(allChatData, extraStats, onProgress, { deferGlobalSync: false, sourceEngine: sourceEngine });
+          vibeResult = await vibeCodingApp.analyzeFileSync(allChatData, extraStats, onProgress, { deferGlobalSync: false, sourceEngine: sourceEngine, mode: callbacks.syncMode === 'update' ? 'update' : undefined });
           console.log('[Main] Vibe Codinger 分析完成（使用 VibeCodingApp 同步方法）:', vibeResult);
           
           // 重置处理状态
@@ -4113,7 +4117,8 @@ async function handleFileUpload(event, type, callbacks = {}) {
         await vibeAnalyzer.uploadToSupabase(null, null, null, {
           sourceEngine: 'openclaw',
           openclawPortrait,
-          stats: globalStats
+          stats: globalStats,
+          ...(callbacks.syncMode === 'update' ? { mode: 'update' } : {})
         });
       } catch (e) {
         console.warn('[Main] OpenClaw 同步失败', e);

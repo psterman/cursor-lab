@@ -22851,7 +22851,8 @@ app.post("/api/v2/analyze", async (c) => {
           };
           const incomingTotalMessages = Number(v6StatsForStorage?.totalMessages ?? basicAnalysis?.totalMessages ?? 0) || 0;
           const dbStrongerThanIncoming = existingTotalMessages != null && incomingTotalMessages >= 0 && existingTotalMessages > incomingTotalMessages;
-          if (dbStrongerThanIncoming) {
+          // mode=update：增量同步，信任本次会话合并结果，不因“库中条数更大”而整行回滚
+          if (body.mode !== "update" && dbStrongerThanIncoming) {
             payload.total_messages = existingTotalMessages;
             if (existingTotalChars != null) payload.total_chars = existingTotalChars;
             if (existingWorkDays != null) payload.work_days = existingWorkDays;

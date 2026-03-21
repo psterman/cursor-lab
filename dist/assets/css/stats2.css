@@ -3771,6 +3771,15 @@ html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
             animation: lpdef-scan 1.5s ease-in-out;
         }
 
+        /* 智能同步中：L/P/D/E/F 呼吸灯 */
+        @keyframes lpdef-breathe {
+            0%, 100% { box-shadow: 0 0 6px rgba(0, 255, 65, 0.12); opacity: 1; }
+            50% { box-shadow: 0 0 22px rgba(0, 255, 65, 0.45); opacity: 0.92; }
+        }
+        .lpdef-card.sync-scanning {
+            animation: lpdef-breathe 2s ease-in-out infinite;
+        }
+
         .lpdef-card.recalculating {
             animation: lpdef-flash 0.8s ease-in-out;
         }

@@ -3861,6 +3861,11 @@ export class VibeCodingerAnalyzer {
         })(),
       };
 
+      // 增量同步：提示 Worker 走 UPSERT 合并路径（避免“库更强”时整行回滚）
+      if (opts.mode === 'update') {
+        uploadData.mode = 'update';
+      }
+
       // 【霸天/脱发/新手 唯一代表词】main.js onAnalyzeComplete 写入的 representativeWords 一并上报，供 personality_data 使用
       if (vibeResult?.representativeWords && typeof vibeResult.representativeWords === 'object') {
         uploadData.representativeWords = vibeResult.representativeWords;

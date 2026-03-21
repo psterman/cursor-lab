@@ -6074,6 +6074,12 @@
                         window.last_local_stats_by_engine = window.last_local_stats_by_engine || {};
                         window.last_local_stats_by_engine[sourceEngine] = { ts: msg.ts || Date.now(), payload: msg.payload };
 
+                        try {
+                            if (typeof window.__showSmartSyncSuccessToast === 'function') {
+                                window.__showSmartSyncSuccessToast(sourceEngine, msg.payload);
+                            }
+                        } catch (_) {}
+
                         // 左侧人格/统计卡片只使用 Cursor 本地槽位，避免 OpenClaw 覆盖后数据口径串台
                         if (sourceEngine === 'cursor') {
                             window.last_local_stats = { ts: msg.ts || Date.now(), payload: msg.payload };
@@ -26402,7 +26408,7 @@ function initCountrySelector() {
             try {
             try {
                 if (typeof window.detectOpenClawPort === 'function') {
-                    await window.detectOpenClawPort({ host: '127.0.0.1', ports: [18789, 18790, 18791, 18792], timeoutMs: 700 });
+                    await window.detectOpenClawPort({ host: '127.0.0.1', ports: [18789, 18790, 18791, 18792], timeoutMs: 600 });
                 }
             } catch (_) { /* OpenClaw 端口探测失败时静默，使用默认或缓存 */ }
             loadGitHubUsername();
@@ -30804,7 +30810,7 @@ document.addEventListener('click', function(e) {
         opts = opts && typeof opts === 'object' ? opts : {};
         var host = (opts.host || '127.0.0.1') + '';
         var ports = Array.isArray(opts.ports) && opts.ports.length ? opts.ports : [18789, 18790, 18791, 18792];
-        var timeoutMs = Number(opts.timeoutMs || 700);
+        var timeoutMs = Number(opts.timeoutMs || 600);
 
         // 如果 localStorage 已有有效端口，优先使用
         try {
@@ -30851,7 +30857,7 @@ document.addEventListener('click', function(e) {
             setText(statusId, '正在探测...');
             btn.textContent = '探测中...';
 
-            var port = await detectOpenClawPort({ host: '127.0.0.1', ports: [18789, 18790, 18791, 18792], timeoutMs: 700 });
+            var port = await detectOpenClawPort({ host: '127.0.0.1', ports: [18789, 18790, 18791, 18792], timeoutMs: 600 });
             if (port != null) {
                 setText(statusId, '已探测到 Gateway 端口：' + port);
                 if (typeof window.refreshOpenClawMonitor === 'function') {
@@ -31052,65 +31058,382 @@ document.addEventListener('click', function(e) {
         return analysisLoadPromise;
     }
 
-    // Slot1 按钮：点击触发文件夹选择
+    function detectEnvironment() {
+        var ua = (typeof navigator !== 'undefined' && navigator.userAgent) ? navigator.userAgent : '';
+        if (/Mac|iPhone|iPad|iPod/i.test(ua)) return 'macos';
+        if (/Win/i.test(ua)) return 'windows';
+        return 'other';
+    }
+    try { window.detectEnvironment = detectEnvironment; } catch (_) { }
+
+    function setLpdefCardsSyncScanning(on) {
+        ['L', 'P', 'D', 'E', 'F'].forEach(function (dim) {
+            var el = document.getElementById('card-' + dim);
+            if (!el) return;
+            if (!el.classList.contains('lpdef-card')) el.classList.add('lpdef-card');
+            if (on) el.classList.add('sync-scanning');
+            else el.classList.remove('sync-scanning');
+        });
+    }
+    try { window.setLpdefCardsSyncScanning = setLpdefCardsSyncScanning; } catch (_) { }
+
+    function readPrevCursorTotalMessages() {
+        try {
+            var raw = typeof localStorage !== 'undefined' && localStorage.getItem('last_analysis_data');
+            if (!raw) return null;
+            var o = JSON.parse(raw);
+            var st = o && o.stats && typeof o.stats === 'object' ? o.stats : {};
+            var n = Number(st.total_messages != null ? st.total_messages : st.totalMessages);
+            return Number.isFinite(n) ? n : null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    /** 与 github-card-renderer readSmartArchiveSyncState 一致，供 processFiles syncMode 判定 */
+    function readCursorTotalMessagesForSmartSync() {
+        var best = 0;
+        var keys = ['last_analysis_data', 'vibe_cursor_analysis_cache'];
+        for (var i = 0; i < keys.length; i++) {
+            try {
+                var raw = typeof localStorage !== 'undefined' && localStorage.getItem(keys[i]);
+                if (!raw) continue;
+                var o = JSON.parse(raw);
+                if (!o || typeof o !== 'object') continue;
+                var st = o.stats && typeof o.stats === 'object' ? o.stats : {};
+                var tm = st.total_messages != null ? st.total_messages : (st.totalMessages != null ? st.totalMessages : null);
+                if (tm == null) tm = o.total_messages != null ? o.total_messages : o.totalMessages;
+                var n = Number(tm);
+                if (Number.isFinite(n) && n > best) best = n;
+            } catch (e) { /* ignore */ }
+        }
+        return best;
+    }
+    function hasOpenClawLocalArchiveForSmartSync() {
+        try {
+            var raw = typeof localStorage !== 'undefined' && localStorage.getItem('vibe_openclaw_analysis_cache');
+            if (!raw || !String(raw).trim()) return false;
+            var o = JSON.parse(raw);
+            if (!o || typeof o !== 'object') return false;
+            if (o.openclawPortrait || o.stats || o.timestamp) return true;
+            return Object.keys(o).length > 0;
+        } catch (e) {
+            return false;
+        }
+    }
+    function inferArchiveTimestampForSmartSync() {
+        var best = 0;
+        function bump(val) {
+            if (val == null || val === '') return;
+            var d = Date.parse(String(val));
+            if (!Number.isNaN(d) && d > best) best = d;
+        }
+        var keys = ['last_analysis_data', 'vibe_cursor_analysis_cache', 'vibe_openclaw_analysis_cache'];
+        for (var i = 0; i < keys.length; i++) {
+            try {
+                var raw = typeof localStorage !== 'undefined' && localStorage.getItem(keys[i]);
+                if (!raw) continue;
+                var o = JSON.parse(raw);
+                if (!o || typeof o !== 'object') continue;
+                bump(o.syncedAt);
+                bump(o.synced_at);
+                bump(o.last_sync_at);
+                bump(o.analyzed_at);
+                bump(o.updated_at);
+                bump(o.timestamp);
+                if (o.stats && typeof o.stats === 'object') {
+                    bump(o.stats.syncedAt);
+                    bump(o.stats.analyzed_at);
+                }
+            } catch (e) { /* ignore */ }
+        }
+        return best;
+    }
+    function smartSyncCursorHasUpdateMode() {
+        try {
+            if (localStorage.getItem('last_cursor_sync')) return true;
+            if (readCursorTotalMessagesForSmartSync() > 0) return true;
+            if (inferArchiveTimestampForSmartSync() > 0) return true;
+            var raw = localStorage.getItem('last_analysis_data');
+            if (raw && String(raw).trim()) {
+                var o = JSON.parse(raw);
+                if (o && o.stats && typeof o.stats === 'object') return true;
+                if (o && o.chatData) return true;
+            }
+            raw = localStorage.getItem('vibe_cursor_analysis_cache');
+            if (raw && String(raw).trim()) {
+                var o2 = JSON.parse(raw);
+                if (o2 && typeof o2 === 'object' && Object.keys(o2).length) return true;
+            }
+        } catch (_) {}
+        return false;
+    }
+    function smartSyncOpenclawHasUpdateMode() {
+        try {
+            if (localStorage.getItem('last_openclaw_sync')) return true;
+            return hasOpenClawLocalArchiveForSmartSync();
+        } catch (_) {}
+        return false;
+    }
+
+    function copyPathToClipboard(text, isZh) {
+        var t = String(text || '');
+        var done = function (ok) {
+            try {
+                var hint = isZh ? (ok ? '已复制到剪贴板' : '复制失败，请手动选择复制') : (ok ? 'Copied' : 'Copy failed');
+                showSmartSyncToastLine(hint);
+            } catch (_) {}
+        };
+        if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+            return navigator.clipboard.writeText(t).then(function () { done(true); }).catch(function () {
+                try {
+                    var ta = document.createElement('textarea');
+                    ta.value = t;
+                    ta.style.position = 'fixed';
+                    ta.style.left = '-9999px';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(ta);
+                    done(true);
+                } catch (_) {
+                    done(false);
+                }
+            });
+        }
+        try {
+            var ta2 = document.createElement('textarea');
+            ta2.value = t;
+            ta2.style.position = 'fixed';
+            ta2.style.left = '-9999px';
+            document.body.appendChild(ta2);
+            ta2.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta2);
+            done(true);
+        } catch (_) {
+            done(false);
+        }
+    }
+
+    function showPathGuideModal() {
+        return new Promise(function (resolve) {
+            var env = detectEnvironment();
+            var isMac = env === 'macos';
+            var lang = (typeof document !== 'undefined' && document.documentElement && document.documentElement.lang) || '';
+            var isZh = !lang || String(lang).indexOf('zh') === 0;
+            var title = isZh ? '本地数据路径' : 'Local data paths';
+            var curPath = isMac
+                ? 'Cursor（macOS）：~/Library/Application Support/Cursor/User/workspaceStorage/ → state.vscdb'
+                : 'Cursor（Windows）：%APPDATA%\\Cursor\\User\\workspaceStorage\\ → state.vscdb';
+            var ocPath = isMac
+                ? 'OpenClaw（macOS）：~/.openclaw/agents/main/sessions/*.jsonl'
+                : 'OpenClaw（Windows）：%USERPROFILE%\\.openclaw\\agents\\main\\sessions\\*.jsonl';
+            var cursorCopyRaw = isMac
+                ? '~/Library/Application Support/Cursor/User/workspaceStorage/'
+                : '%APPDATA%\\Cursor\\User\\workspaceStorage\\';
+            var ocCopyRaw = isMac
+                ? '~/.openclaw/agents/main/sessions/'
+                : '%USERPROFILE%\\.openclaw\\agents\\main\\sessions\\';
+            var btnOk = isZh ? '已了解，选择文件夹' : 'Continue — pick folder';
+            var btnExit = isZh ? '退出' : 'Exit';
+            var btnCopy = isZh ? '复制路径' : 'Copy';
+            var existing = document.getElementById('smart-sync-path-modal');
+            if (existing) existing.remove();
+            var wrap = document.createElement('div');
+            wrap.id = 'smart-sync-path-modal';
+            wrap.style.cssText = 'position:fixed;inset:0;z-index:120000;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;padding:16px;';
+            var esc = function (s) {
+                return String(s || '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/"/g, '&quot;');
+            };
+            var row = function (labelHtml, copyVal) {
+                return (
+                    '<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px;">' +
+                    '<p style="flex:1;font-size:10px;line-height:1.55;margin:0;color:#a1a1aa;word-break:break-all;">' + labelHtml + '</p>' +
+                    '<button type="button" class="smart-sync-copy-btn" data-copy-path="' + esc(copyVal) + '" style="flex-shrink:0;padding:6px 10px;background:rgba(0,255,65,.1);border:1px solid rgba(0,255,65,.4);color:#00ff41;font-size:10px;cursor:pointer;border-radius:4px;white-space:nowrap;">' + esc(btnCopy) + '</button>' +
+                    '</div>'
+                );
+            };
+            wrap.innerHTML =
+                '<div style="max-width:440px;width:100%;background:rgba(10,10,12,.96);border:1px solid rgba(0,255,65,.45);border-radius:8px;padding:18px;font-family:JetBrains Mono,monospace;color:#e4e4e7;">' +
+                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">' +
+                '<div style="color:#00ff41;font-size:12px;font-weight:700;">' + esc(title) + '</div>' +
+                '<button type="button" id="smart-sync-path-modal-exit-x" style="background:transparent;border:none;color:#71717a;font-size:18px;line-height:1;cursor:pointer;padding:0 4px;" title="' + esc(btnExit) + '">×</button>' +
+                '</div>' +
+                row(curPath, cursorCopyRaw) +
+                row(ocPath, ocCopyRaw) +
+                '<p style="font-size:9px;line-height:1.45;margin:0 0 14px;color:#71717a;">' + (isZh ? '可同时选择包含上述两类的根目录，系统将依次同步 Cursor 与 OpenClaw。' : 'Pick a root folder that contains both trees; Cursor and OpenClaw will sync in sequence.') + '</p>' +
+                '<div style="display:flex;flex-direction:column;gap:8px;">' +
+                '<button type="button" id="smart-sync-path-modal-ok" style="width:100%;padding:10px 12px;background:rgba(0,255,65,.12);border:1px solid rgba(0,255,65,.5);color:#00ff41;font-size:11px;font-weight:700;cursor:pointer;border-radius:4px;">' + esc(btnOk) + '</button>' +
+                '<button type="button" id="smart-sync-path-modal-exit" style="width:100%;padding:8px 12px;background:transparent;border:1px solid rgba(113,113,122,.6);color:#a1a1aa;font-size:11px;cursor:pointer;border-radius:4px;">' + esc(btnExit) + '</button>' +
+                '</div></div>';
+            document.body.appendChild(wrap);
+            var inner = wrap.firstElementChild;
+            function finish(action) {
+                try { wrap.remove(); } catch (_) {}
+                resolve({ action: action || 'exit' });
+            }
+            wrap.addEventListener('click', function (ev) {
+                if (ev.target === wrap) finish('exit');
+            });
+            if (inner) {
+                inner.addEventListener('click', function (ev) {
+                    var t = ev.target;
+                    if (t && t.classList && t.classList.contains('smart-sync-copy-btn')) {
+                        var p = t.getAttribute('data-copy-path');
+                        if (p) copyPathToClipboard(p, isZh);
+                    }
+                });
+            }
+            var ok = wrap.querySelector('#smart-sync-path-modal-ok');
+            if (ok) ok.addEventListener('click', function () { finish('continue'); });
+            var ex = wrap.querySelector('#smart-sync-path-modal-exit');
+            if (ex) ex.addEventListener('click', function () { finish('exit'); });
+            var exx = wrap.querySelector('#smart-sync-path-modal-exit-x');
+            if (exx) exx.addEventListener('click', function () { finish('exit'); });
+        });
+    }
+
+    function showSmartSyncToastLine(message) {
+        try {
+            var nid = 'smart-sync-toast';
+            var old = document.getElementById(nid);
+            if (old) old.remove();
+            var t = document.createElement('div');
+            t.id = nid;
+            t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:120001;max-width:90vw;padding:12px 18px;background:rgba(0,255,65,.12);border:1px solid rgba(0,255,65,.55);color:#00ff41;font-size:11px;font-family:JetBrains Mono,monospace;border-radius:6px;box-shadow:0 8px 32px rgba(0,0,0,.5);';
+            t.textContent = message;
+            document.body.appendChild(t);
+            setTimeout(function () {
+                try { t.remove(); } catch (_) {}
+            }, 4500);
+        } catch (_) {}
+    }
+
+    window.__showSmartSyncSuccessToast = function (sourceEngine, payload) {
+        try {
+            var isZh = !(typeof document !== 'undefined' && document.documentElement && document.documentElement.lang) || String(document.documentElement.lang).indexOf('zh') === 0;
+            var stats = payload && (payload.statistics || payload.data && payload.data.stats);
+            var totalM = stats && (stats.totalMessages != null ? stats.totalMessages : stats.userMessages);
+            var prev = typeof window.__prev_sync_total_messages === 'number' ? window.__prev_sync_total_messages : null;
+            var line = isZh ? '同步成功' : 'Sync complete';
+            if (sourceEngine === 'cursor' && typeof totalM === 'number' && prev != null) {
+                var delta = Math.max(0, totalM - prev);
+                line += isZh ? ' · 消息 +' + delta + ' 条（累计 ' + totalM + '）' : ' · +' + delta + ' messages (total ' + totalM + ')';
+            } else if (typeof totalM === 'number') {
+                line += isZh ? ' · 消息 ' + totalM + ' 条' : ' · ' + totalM + ' messages';
+            }
+            showSmartSyncToastLine(line);
+        } catch (_) {}
+    };
+
+    async function runSmartFolderPipeline(files) {
+        var btn = $('cursor-slot1-folder-btn');
+        if (btn) btn.disabled = true;
+        setText('cursor-slot1-status', '正在加载分析模块...');
+        setLpdefCardsSyncScanning(true);
+        try {
+            window.__prev_sync_total_messages = readPrevCursorTotalMessages();
+            var mod = await ensureAnalysisModule();
+            setText('cursor-slot1-status', '初始化解析器...');
+            if (!window.__slot1ParserInitialized && typeof mod.initializeParser === 'function') {
+                await mod.initializeParser();
+                window.__slot1ParserInitialized = true;
+            }
+            var list = Array.from(files || []);
+            var hasVscdb = list.some(function (f) { return f && f.name === 'state.vscdb'; });
+            var hasJsonl = list.some(function (f) { return f && String(f.name).toLowerCase().endsWith('.jsonl'); });
+            var cursorSync = smartSyncCursorHasUpdateMode();
+            var ocSync = smartSyncOpenclawHasUpdateMode();
+            var ran = 0;
+            if (hasVscdb) {
+                ran++;
+                setText('cursor-slot1-status', '同步 Cursor…');
+                await mod.processFiles(list, 'folder', {
+                    analysisMode: 'full',
+                    sourceEngine: 'cursor',
+                    syncMode: cursorSync ? 'update' : undefined,
+                    onStatus: function (text) {
+                        if (text != null) setText('cursor-slot1-status', 'Cursor: ' + text);
+                    },
+                    onLog: function () { },
+                    onProgress: function () { },
+                    onError: function (err) {
+                        console.error('[SmartSync] cursor onError:', err);
+                    },
+                    onComplete: function () {
+                        setText('cursor-slot1-status', 'Cursor 上传完成，正在刷新…');
+                    }
+                });
+                try {
+                    localStorage.setItem('last_cursor_sync', new Date().toISOString());
+                } catch (_) {}
+            }
+            if (hasJsonl) {
+                ran++;
+                setText('cursor-slot1-status', hasVscdb ? '同步 OpenClaw…' : '同步 OpenClaw…');
+                await mod.processFiles(list, 'folder', {
+                    analysisMode: 'full',
+                    sourceEngine: 'openclaw',
+                    syncMode: ocSync ? 'update' : undefined,
+                    onStatus: function (text) {
+                        if (text != null) setText('cursor-slot1-status', 'OpenClaw: ' + text);
+                    },
+                    onLog: function () { },
+                    onProgress: function () { },
+                    onError: function (err) {
+                        console.error('[SmartSync] openclaw onError:', err);
+                    },
+                    onComplete: function () {
+                        setText('cursor-slot1-status', 'OpenClaw 上传完成…');
+                    }
+                });
+                try {
+                    localStorage.setItem('last_openclaw_sync', new Date().toISOString());
+                } catch (_) {}
+            }
+            if (!hasVscdb && !hasJsonl) {
+                throw new Error('未在文件夹中发现 state.vscdb 或 .jsonl，请确认路径与路径说明一致');
+            }
+            setText('cursor-slot1-status', ran > 1 ? '双源同步完成，正在刷新界面…' : '上传完成，正在刷新界面…');
+        } catch (err) {
+            console.error('[SmartSync] 失败:', err);
+            setText('cursor-slot1-status', '上传失败：' + (err && err.message ? err.message : '未知错误'));
+        } finally {
+            setLpdefCardsSyncScanning(false);
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    /**
+     * 路径引导后再打开文件夹选择
+     */
     document.addEventListener('click', function (e) {
         try {
             var target = e && e.target ? e.target : null;
             if (!target || !target.closest) return;
             var btn = target.closest('#cursor-slot1-folder-btn');
             if (!btn) return;
+            e.preventDefault();
+            e.stopPropagation();
             var input = $('cursor-slot1-folder-input');
-            if (input && typeof input.click === 'function') {
+            if (!input || typeof input.click !== 'function') return;
+            showPathGuideModal().then(function (result) {
+                if (!result || result.action !== 'continue') return;
                 input.value = '';
                 input.click();
-            }
+            });
         } catch (_) { }
-    });
+    }, true);
 
-    // Slot1 文件夹选择：直接调用 main.js 的 analysisModule.processFiles
     document.addEventListener('change', async function (e) {
         var input = e && e.target && e.target.id === 'cursor-slot1-folder-input' ? e.target : null;
         if (!input) return;
-
         var files = Array.from(input.files || []);
         if (!files.length) return;
-
-        var btn = $('cursor-slot1-folder-btn');
-        if (btn) btn.disabled = true;
-        setText('cursor-slot1-status', '正在加载分析模块...');
-
-        try {
-            var mod = await ensureAnalysisModule();
-
-            setText('cursor-slot1-status', '初始化解析器...');
-            if (!window.__slot1ParserInitialized && typeof mod.initializeParser === 'function') {
-                await mod.initializeParser();
-                window.__slot1ParserInitialized = true;
-            }
-
-            setText('cursor-slot1-status', '上传/分析中，请稍候...');
-
-            await mod.processFiles(files, 'folder', {
-                analysisMode: 'full',
-                sourceEngine: 'cursor',
-                onStatus: function (text) {
-                    if (text != null) setText('cursor-slot1-status', text);
-                },
-                onLog: function () { },
-                onProgress: function () { },
-                onError: function (err) {
-                    console.error('[Slot1] processFiles onError:', err);
-                },
-                onComplete: function () {
-                    // UI 最终以 BroadcastChannel local_analysis_complete 为准；这里只做提示
-                    setText('cursor-slot1-status', '上传完成，正在刷新界面...');
-                }
-            });
-        } catch (err) {
-            console.error('[Slot1] 上传解析失败:', err);
-            setText('cursor-slot1-status', '上传失败：' + (err && err.message ? err.message : '未知错误'));
-        } finally {
-            if (btn) btn.disabled = false;
-        }
+        await runSmartFolderPipeline(files);
     });
 })();

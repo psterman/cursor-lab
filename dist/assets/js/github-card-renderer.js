@@ -61,7 +61,21 @@
             loginSecurityNote: '安全、快速、一键登录',
             notSet: '未设置',
             pleaseLogin: '请使用 GitHub 登录',
-            githubCombat: 'GitHub 战力'
+            githubCombat: 'GitHub 战力',
+            updateCursorData: '更新 Cursor 数据',
+            connectedOpenclawPort: '已连接 {port}',
+            slotCursorLedOn: '本地已有 Cursor 对话数据',
+            slotCursorLedOff: '暂无本地对话计数',
+            smartSyncCenter: '智能同步中心',
+            newArchive: '新建档案',
+            updateArchive: '更新档案',
+            lastSyncPrefix: '最后同步',
+            pathGuideTitle: '本地数据路径',
+            pathGuideContinue: '已了解，选择文件夹',
+            pathGuideCursorMac: 'Cursor（macOS）：~/Library/Application Support/Cursor/User/workspaceStorage/ 下各子目录中的 state.vscdb',
+            pathGuideCursorWin: 'Cursor（Windows）：%APPDATA%\\Cursor\\User\\workspaceStorage\\ 下各子目录中的 state.vscdb',
+            pathGuideOcMac: 'OpenClaw（macOS）：~/.openclaw/agents/main/sessions/ 下的 .jsonl 会话日志',
+            pathGuideOcWin: 'OpenClaw（Windows）：%USERPROFILE%\\.openclaw\\agents\\main\\sessions\\ 下的 .jsonl'
         },
         en: {
             analyzing: 'ANALYZING...',
@@ -110,11 +124,89 @@
             loginSecurityNote: 'Secure, fast, one-click',
             notSet: 'Not set',
             pleaseLogin: 'Sign in with GitHub',
-            githubCombat: 'GitHub Combat'
+            githubCombat: 'GitHub Combat',
+            updateCursorData: 'Update Cursor data',
+            connectedOpenclawPort: 'Connected · port {port}',
+            slotCursorLedOn: 'Local Cursor message data present',
+            slotCursorLedOff: 'No local message count yet',
+            smartSyncCenter: 'Smart sync hub',
+            newArchive: 'New profile',
+            updateArchive: 'Update profile',
+            lastSyncPrefix: 'Last sync',
+            pathGuideTitle: 'Local data paths',
+            pathGuideContinue: 'Continue — pick folder',
+            pathGuideCursorMac: 'Cursor (macOS): state.vscdb under ~/Library/Application Support/Cursor/User/workspaceStorage/',
+            pathGuideCursorWin: 'Cursor (Windows): state.vscdb under %APPDATA%\\Cursor\\User\\workspaceStorage\\',
+            pathGuideOcMac: 'OpenClaw (macOS): ~/.openclaw/agents/main/sessions/*.jsonl',
+            pathGuideOcWin: 'OpenClaw (Windows): %USERPROFILE%\\.openclaw\\agents\\main\\sessions\\*.jsonl'
         }
     };
 
     var GITHUB_ICON_SVG = '<svg class="w-8 h-8 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clip-rule="evenodd"></path></svg>';
+
+    /** 从本地缓存读取 Cursor total_messages（用于 Config Slot1 状态灯与按钮文案） */
+    function readCursorTotalMessagesFromLocalStorage() {
+        var best = 0;
+        var keys = ['last_analysis_data', 'vibe_cursor_analysis_cache'];
+        for (var i = 0; i < keys.length; i++) {
+            try {
+                var raw = typeof localStorage !== 'undefined' && localStorage.getItem(keys[i]);
+                if (!raw) continue;
+                var o = JSON.parse(raw);
+                if (!o || typeof o !== 'object') continue;
+                var st = o.stats && typeof o.stats === 'object' ? o.stats : {};
+                var tm = st.total_messages != null ? st.total_messages : (st.totalMessages != null ? st.totalMessages : null);
+                if (tm == null) tm = o.total_messages != null ? o.total_messages : o.totalMessages;
+                var n = Number(tm);
+                if (Number.isFinite(n) && n > best) best = n;
+            } catch (e) { /* ignore */ }
+        }
+        return best;
+    }
+
+    /** 读取已探测的 OpenClaw 网关端口（openclaw2_gateway_port） */
+    function readStoredOpenClawGatewayPort() {
+        try {
+            var p = typeof localStorage !== 'undefined' && localStorage.getItem('openclaw2_gateway_port');
+            var n = parseInt(String(p || '').trim(), 10);
+            if (Number.isFinite(n) && n > 0) return String(n);
+        } catch (e) { /* ignore */ }
+        return '';
+    }
+
+    /** last_cursor_sync / last_openclaw_sync ISO 时间，用于智能同步按钮文案 */
+    function readSmartArchiveSyncState() {
+        var c = '';
+        var o = '';
+        try {
+            if (typeof localStorage !== 'undefined') {
+                c = String(localStorage.getItem('last_cursor_sync') || '').trim();
+                o = String(localStorage.getItem('last_openclaw_sync') || '').trim();
+            }
+        } catch (e) { /* ignore */ }
+        var times = [];
+        if (c) {
+            var dc = Date.parse(c);
+            if (!Number.isNaN(dc)) times.push(dc);
+        }
+        if (o) {
+            var dco = Date.parse(o);
+            if (!Number.isNaN(dco)) times.push(dco);
+        }
+        var lastTs = times.length ? Math.max.apply(null, times) : 0;
+        return { hasCursor: !!c, hasOpenclaw: !!o, hasAnySync: times.length > 0, lastTs: lastTs };
+    }
+
+    function formatSmartSyncTime(ts, lang) {
+        if (!ts) return '';
+        try {
+            var d = new Date(ts);
+            if (Number.isNaN(d.getTime())) return '';
+            return lang === 'en' ? d.toLocaleString('en-US') : d.toLocaleString('zh-CN');
+        } catch (e) {
+            return '';
+        }
+    }
 
     /**
      * 生成身份区块 HTML（私信、GitHub 登录、退出、链接、国家、状态、徽章、图标）
@@ -134,12 +226,22 @@
         var exitDeleteBtns = isLoggedIn ? '<button type="button" id="left-drawer-exit-btn" class="left-drawer-exit-btn identity-row-btn px-2 py-1 text-[10px] rounded border border-[#00ff41]/40 text-[#00ff41]/90 hover:bg-[#00ff41]/10 transition-colors font-mono" title="' + esc(t(lang, 'logout')) + '">' + esc(t(lang, 'logout')) + '</button><button type="button" id="left-drawer-delete-account-btn" class="left-drawer-delete-account-btn identity-row-btn px-2 py-1 text-[10px] rounded border border-red-500/50 text-red-400 hover:bg-red-500/10 transition-colors font-mono" title="' + esc(t(lang, 'deleteAccount')) + '">' + esc(t(lang, 'deleteAccount')) + '</button>' : '';
         var linkHtml = isLoggedIn && githubUsername ? '<a href="https://github.com/' + esc(githubUsername) + '" target="_blank" rel="noopener noreferrer" class="mt-2 inline-block text-[9px] text-[#00ff41]/70 hover:text-[#00ff41] transition-colors font-mono">github.com/' + esc(githubUsername) + '</a>' : '';
         var dataSourceTitle = lang === 'en' ? 'Data Source Management' : '数据源管理';
-        var slot1Title = lang === 'en' ? 'Slot 1: Cursor' : 'Slot 1（Cursor）：文件夹上传';
+        var slot1Title = t(lang, 'smartSyncCenter');
         var slot2Title = lang === 'en' ? 'Slot 2: OpenClaw' : 'Slot 2（OpenClaw）：探测端口';
-        var uploadBtnText = lang === 'en' ? 'Choose Folder & Upload' : '选择文件夹并上传';
+        var cursorTotalMsgs = readCursorTotalMessagesFromLocalStorage();
+        var slot1HasData = cursorTotalMsgs > 0;
+        var arch = readSmartArchiveSyncState();
+        var uploadBtnText = arch.hasAnySync ? t(lang, 'updateArchive') : t(lang, 'newArchive');
         var detectBtnText = lang === 'en' ? 'Detect OpenClaw Port' : '探测 OpenClaw 端口';
         var cursorSlotHint = lang === 'en' ? 'Upload a Cursor folder to trigger analysis.' : '上传 Cursor 文件夹，触发分析与上报。';
-        var openclawSlotHint = lang === 'en' ? 'Write port to localStorage for the monitor.' : '探测成功后写入 localStorage，供监控使用。';
+        var storedOcPort = readStoredOpenClawGatewayPort();
+        var openclawSlotHint = storedOcPort
+            ? t(lang, 'connectedOpenclawPort').replace(/\{port\}/g, storedOcPort)
+            : (lang === 'en' ? 'Write port to localStorage for the monitor.' : '探测成功后写入 localStorage，供监控使用。');
+        var slot1LedClass = slot1HasData
+            ? 'bg-[#00ff41] shadow-[0_0_6px_rgba(0,255,65,0.85)]'
+            : 'bg-zinc-600 opacity-50';
+        var slot1LedTitle = esc(slot1HasData ? t(lang, 'slotCursorLedOn') : t(lang, 'slotCursorLedOff'));
         var statusIdle = currentStatus === 'idle';
         var statusBusy = currentStatus === 'busy';
         var statusSprint = currentStatus === 'sprint';
@@ -162,11 +264,15 @@
             linkHtml,
             '</div>',
             '<div class="mt-2 pt-2 border-t border-[#00ff41]/10">',
-            '<div class="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">' + esc(slot1Title) + '</div>',
+            '<div class="flex items-center gap-2 mb-1">',
+            '<div class="text-[10px] text-zinc-500 uppercase tracking-widest flex-1 min-w-0">' + esc(slot1Title) + '</div>',
+            '<span id="cursor-slot1-status-led" class="w-2 h-2 rounded-full flex-shrink-0 ' + slot1LedClass + '" title="' + slot1LedTitle + '" aria-hidden="true"></span>',
+            '</div>',
             '<div class="flex items-center gap-2">',
             '<button type="button" id="cursor-slot1-folder-btn" class="w-full px-3 py-2 bg-zinc-900/50 hover:bg-zinc-800 border border-[#00ff41]/30 rounded-md text-white text-[11px] font-bold uppercase tracking-wider transition-colors" style="color:#00ff41;border-color:rgba(0,255,65,0.35);font-family:inherit;">' + esc(uploadBtnText) + '</button>',
             '</div>',
             '<input type="file" id="cursor-slot1-folder-input" webkitdirectory directory multiple style="display:none;" />',
+            '<div class="text-[9px] text-zinc-500 mt-1 font-mono" id="smart-sync-last-time">' + (arch.hasAnySync && arch.lastTs ? esc(t(lang, 'lastSyncPrefix') + ' ' + formatSmartSyncTime(arch.lastTs, lang)) : '') + '</div>',
             '<div class="text-[10px] text-zinc-500 mt-1" id="cursor-slot1-status">' + esc(cursorSlotHint) + '</div>',
             '</div>',
             '<div class="mt-3 pt-3 border-t border-[#00ff41]/10">',
