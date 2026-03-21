@@ -31505,7 +31505,7 @@ document.addEventListener('click', function(e) {
     try { window.openStats2DrawersForSync = openStats2DrawersForSync; } catch (_) {}
 
     /**
-     * 赛博导航员：集成页（国家+条款+路径）→ 复制并唤起文件夹 → 右上影子模式。
+     * 同步引导：国家+条款+路径 → 复制并唤起文件夹 → 右上影子模式。
      */
     var CyberNavigator = {
         _focusHandler: null,
@@ -31532,6 +31532,12 @@ document.addEventListener('click', function(e) {
             var self = this;
             self.clearHandlers();
             self._flowActive = false;
+            if (self._countryEscKey) {
+                try {
+                    document.removeEventListener('keydown', self._countryEscKey);
+                } catch (_) {}
+                self._countryEscKey = null;
+            }
             var el = document.getElementById('cyber-guide-overlay');
             if (!el) return;
             try {
@@ -31561,12 +31567,12 @@ document.addEventListener('click', function(e) {
                 needPath: isZh ? '请填写或粘贴路径。' : 'Please enter or paste a path.'
             };
             var T = {
-                title: isZh ? '赛博导航员' : 'Cyber Navigator',
+                title: isZh ? '同步' : 'Sync',
                 integrate: isZh ? '选择国家、阅读条款后，复制路径并打开系统文件夹完成注入。' : 'Choose country, review terms, copy path, then pick a folder to inject.',
                 shadowPaste: isZh ? '影子模式：按 Ctrl+V（Mac：Cmd+V）粘贴路径，再按 Enter。' : 'Shadow: Ctrl+V (Cmd+V on Mac), then Enter.',
                 shadowPick: isZh ? '进入目标目录后，点击「选择此文件夹」。' : 'Then click “Select Folder”.',
                 close: isZh ? '关闭' : 'Close',
-                closeAria: isZh ? '关闭引导' : 'Close guide',
+                closeAria: isZh ? '关闭同步' : 'Close sync',
                 countryLbl: isZh ? '国家/地区' : 'Country',
                 termsPrefix: isZh ? '我已阅读并同意' : 'I agree to ',
                 termsBook: isZh ? '《条款说明》' : 'Terms',
@@ -31616,6 +31622,18 @@ document.addEventListener('click', function(e) {
                 );
             }
 
+            function expandDrawersAfterGuideClose() {
+                try {
+                    if (typeof openStats2DrawersForSync === 'function') openStats2DrawersForSync();
+                } catch (_) {}
+                try {
+                    var nd = document.getElementById('live-nodes-drawer');
+                    if (nd && nd.classList.contains('collapsed') && typeof window.toggleDrawer === 'function') {
+                        window.toggleDrawer();
+                    }
+                } catch (_) {}
+            }
+
             function runCloseOverlayAnimation() {
                 try {
                     overlay.classList.add('cyber-guide-overlay--out');
@@ -31628,6 +31646,7 @@ document.addEventListener('click', function(e) {
                         var ly = overlay.querySelector('.cyber-guide-layout');
                         if (ly) ly.classList.remove('cyber-guide-layout--out');
                     } catch (_) {}
+                    expandDrawersAfterGuideClose();
                     self.hide();
                 }, 320);
             }
@@ -31661,18 +31680,40 @@ document.addEventListener('click', function(e) {
                 return html;
             }
 
-            function buildCountrySelectHtml() {
+            function buildCyberGuideCountryUi() {
                 var dd = document.getElementById('country-select-dropdown');
                 var opts = '';
+                var listBtns = '';
                 if (dd && dd.options && dd.options.length > 0) {
                     for (var i = 0; i < dd.options.length; i++) {
                         var o = dd.options[i];
-                        opts += '<option value="' + esc(o.value) + '">' + esc(o.textContent || '') + '</option>';
+                        var ov = esc(o.value);
+                        var ot = esc(o.textContent || '');
+                        opts += '<option value="' + ov + '">' + ot + '</option>';
+                        listBtns +=
+                            '<button type="button" class="cyber-guide-country-item" role="option" data-value="' +
+                            ov +
+                            '">' +
+                            ot +
+                            '</button>';
                     }
                 } else {
-                    opts = '<option value="">' + esc(isZh ? '-- 国家 --' : '-- Country --') + '</option>';
+                    var ph = esc(isZh ? '-- 国家 --' : '-- Country --');
+                    opts = '<option value="">' + ph + '</option>';
+                    listBtns = '<button type="button" class="cyber-guide-country-item" role="option" data-value="">' + ph + '</button>';
                 }
-                return '<select id="cyber-guide-country" class="cyber-guide-country-select" aria-label="' + esc(T.countryLbl) + '">' + opts + '</select>';
+                return (
+                    '<div class="cyber-guide-country-wrap">' +
+                    '<select id="cyber-guide-country" class="cyber-guide-country-select-native" tabindex="-1" hidden aria-hidden="true">' +
+                    opts +
+                    '</select>' +
+                    '<button type="button" class="cyber-guide-country-trigger" id="cyber-guide-country-trigger" aria-haspopup="listbox" aria-expanded="false" aria-label="' +
+                    esc(T.countryLbl) +
+                    '"><span class="cyber-guide-country-trigger-text" id="cyber-guide-country-trigger-text"></span></button>' +
+                    '<div class="cyber-guide-country-panel" id="cyber-guide-country-panel" hidden role="listbox">' +
+                    listBtns +
+                    '</div></div>'
+                );
             }
 
             var pathRows = hints.rows && hints.rows.length ? hints.rows : [{ label: '', copy: '' }];
@@ -31712,6 +31753,12 @@ document.addEventListener('click', function(e) {
             }
 
             function renderIntegratedPanel() {
+                if (self._countryEscKey) {
+                    try {
+                        document.removeEventListener('keydown', self._countryEscKey);
+                    } catch (_) {}
+                    self._countryEscKey = null;
+                }
                 overlay.classList.remove('cyber-guide-overlay--shadow');
                 if (pathIndex >= pathRows.length) pathIndex = 0;
                 var row = pathRows[pathIndex] || pathRows[0];
@@ -31736,7 +31783,6 @@ document.addEventListener('click', function(e) {
                     '<div class="cyber-guide-panel-header">' +
                     '<div class="cyber-guide-head-block">' +
                     '<div class="cyber-guide-title" id="cyber-guide-title">' + esc(T.title) + '</div>' +
-                    '<div class="cyber-guide-step-label">' + esc(isZh ? '集成' : 'Setup') + '</div>' +
                     '</div>' +
                     '<button type="button" class="cyber-guide-close-x" id="cyber-guide-close-x" aria-label="' + esc(T.closeAria) + '">×</button>' +
                     '</div>' +
@@ -31750,7 +31796,7 @@ document.addEventListener('click', function(e) {
                     esc(T.secCountry) +
                     '</span></div>' +
                     '<div class="cyber-guide-field cyber-guide-field--tight">' +
-                    buildCountrySelectHtml() +
+                    buildCyberGuideCountryUi() +
                     '</div></section>' +
                     '<section class="cyber-guide-section" aria-labelledby="cyber-guide-sec-terms">' +
                     '<div class="cyber-guide-section-head" id="cyber-guide-sec-terms">' +
@@ -31791,7 +31837,7 @@ document.addEventListener('click', function(e) {
                     esc(T.resetPath) +
                     '</button>' +
                     '</div></label>' +
-                    '<div class="cyber-guide-path-hint" role="note">' +
+                    '<div class="cyber-guide-path-hint" id="cyber-guide-path-hint" role="note">' +
                     esc(row && row.label ? row.label : '') +
                     '</div></section>' +
                     '</div>' +
@@ -31807,6 +31853,28 @@ document.addEventListener('click', function(e) {
                     '</div>';
 
                 var sel = overlay.querySelector('#cyber-guide-country');
+                var countryTrigger = document.getElementById('cyber-guide-country-trigger');
+                var countryPanel = document.getElementById('cyber-guide-country-panel');
+                var countryTriggerText = document.getElementById('cyber-guide-country-trigger-text');
+
+                function syncCountryTriggerLabel() {
+                    if (!sel) return;
+                    var opt = sel.options[sel.selectedIndex];
+                    var tx = opt ? String(opt.textContent || '') : '';
+                    if (countryTriggerText) countryTriggerText.textContent = tx;
+                    else if (countryTrigger) countryTrigger.textContent = tx;
+                }
+
+                function closeCountryPanel() {
+                    if (countryPanel) countryPanel.hidden = true;
+                    if (countryTrigger) countryTrigger.setAttribute('aria-expanded', 'false');
+                }
+
+                function openCountryPanel() {
+                    if (countryPanel) countryPanel.hidden = false;
+                    if (countryTrigger) countryTrigger.setAttribute('aria-expanded', 'true');
+                }
+
                 if (sel) {
                     try {
                         var sc = '';
@@ -31815,26 +31883,94 @@ document.addEventListener('click', function(e) {
                         } catch (_) {}
                         if (sc && /^[A-Z]{2}$/.test(sc)) sel.value = sc;
                     } catch (_) {}
+                    syncCountryTriggerLabel();
                     sel.addEventListener('change', function () {
+                        syncCountryTriggerLabel();
                         var v = (sel.value || '').trim().toUpperCase();
                         if (/^[A-Z]{2}$/.test(v)) syncStats2CountryFromGuide(v);
                     });
                 }
 
-                overlay.querySelectorAll('[data-path-tab]').forEach(function (btn) {
-                    btn.addEventListener('click', function () {
-                        pathIndex = parseInt(btn.getAttribute('data-path-tab'), 10) || 0;
-                        if (pathIndex < 0 || pathIndex >= pathRows.length) pathIndex = 0;
-                        renderIntegratedPanel();
+                if (countryTrigger && countryPanel) {
+                    countryTrigger.addEventListener('click', function (e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (countryPanel.hidden) openCountryPanel();
+                        else closeCountryPanel();
                     });
-                });
+                    countryPanel.querySelectorAll('.cyber-guide-country-item').forEach(function (btn) {
+                        btn.addEventListener('click', function (e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            var v = btn.getAttribute('data-value') || '';
+                            if (sel) {
+                                sel.value = v;
+                                try {
+                                    sel.dispatchEvent(new Event('change', { bubbles: true }));
+                                } catch (_) {
+                                    try {
+                                        var ev = document.createEvent('Event');
+                                        ev.initEvent('change', true, true);
+                                        sel.dispatchEvent(ev);
+                                    } catch (_) {}
+                                }
+                            }
+                            syncCountryTriggerLabel();
+                            closeCountryPanel();
+                        });
+                    });
+                    overlay.addEventListener(
+                        'click',
+                        function (e) {
+                            if (!countryPanel || countryPanel.hidden) return;
+                            var t = e.target;
+                            if (countryTrigger && countryTrigger.contains(t)) return;
+                            if (countryPanel.contains(t)) return;
+                            closeCountryPanel();
+                        },
+                        true
+                    );
+                    self._countryEscKey = function (ev) {
+                        if (ev.key !== 'Escape') return;
+                        if (!countryPanel || countryPanel.hidden) return;
+                        closeCountryPanel();
+                        try {
+                            ev.preventDefault();
+                        } catch (_) {}
+                    };
+                    document.addEventListener('keydown', self._countryEscKey);
+                }
 
                 var pathInput = document.getElementById('cyber-guide-path-display');
+                var pathHintEl = document.getElementById('cyber-guide-path-hint');
                 var pathReset = document.getElementById('cyber-guide-path-reset');
                 function persistCurrentPathFromInput() {
                     if (!pathInput) return;
                     setStoredCyberPath(pathIndex, pathInput.value);
                 }
+                function applyPathTabIndex(newIdx) {
+                    persistCurrentPathFromInput();
+                    pathIndex = newIdx;
+                    if (pathIndex < 0 || pathIndex >= pathRows.length) pathIndex = 0;
+                    var row = pathRows[pathIndex] || pathRows[0];
+                    var defaultPath = row && row.copy ? row.copy : '';
+                    var pathVal = getStoredCyberPath(pathIndex, defaultPath);
+                    if (pathInput) pathInput.value = pathVal;
+                    if (pathHintEl) pathHintEl.textContent = row && row.label ? row.label : '';
+                    overlay.querySelectorAll('[data-path-tab]').forEach(function (btn) {
+                        var i = parseInt(btn.getAttribute('data-path-tab'), 10) || 0;
+                        btn.classList.toggle('on', i === pathIndex);
+                    });
+                }
+
+                overlay.querySelectorAll('[data-path-tab]').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        var ni = parseInt(btn.getAttribute('data-path-tab'), 10) || 0;
+                        if (ni < 0 || ni >= pathRows.length) ni = 0;
+                        if (ni === pathIndex) return;
+                        applyPathTabIndex(ni);
+                    });
+                });
                 if (pathInput) {
                     pathInput.addEventListener('change', persistCurrentPathFromInput);
                     pathInput.addEventListener('blur', persistCurrentPathFromInput);

@@ -4836,7 +4836,7 @@ html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
 .cyber-guide-layout {
   display: flex;
   flex-direction: row;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: stretch;
   justify-content: center;
   gap: 14px;
@@ -4915,7 +4915,7 @@ html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
   min-width: 0;
 }
 .cyber-guide-terms-book {
-  color: #86efac;
+  color: #fafafa;
   font-weight: 700;
 }
 .cyber-guide-read-terms {
@@ -4944,8 +4944,12 @@ html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
 }
 .cyber-guide-terms-flyout {
   flex-direction: column;
-  width: min(380px, 92vw);
-  max-height: min(72vh, 560px);
+  flex: 0 1 min(380px, 40vw);
+  width: min(380px, 40vw);
+  min-width: 0;
+  min-height: 0;
+  max-height: none;
+  align-self: stretch;
   background: #0a0a0a;
   border: 1px solid rgba(0, 255, 65, 0.55);
   border-radius: 10px;
@@ -5000,12 +5004,30 @@ html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
   transform: scale(0.94);
 }
 .cyber-guide-terms-flyout-body {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding: 12px 14px 16px;
   font-size: 13px;
   line-height: 1.65;
   color: #e4e4e7;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 255, 65, 0.45) #050505;
+}
+.cyber-guide-terms-flyout-body::-webkit-scrollbar {
+  width: 8px;
+}
+.cyber-guide-terms-flyout-body::-webkit-scrollbar-track {
+  background: #050505;
+  border-radius: 4px;
+}
+.cyber-guide-terms-flyout-body::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 65, 0.35);
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.4);
+}
+.cyber-guide-terms-flyout-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 255, 65, 0.55);
 }
 .cyber-guide-terms-flyout-body p {
   margin: 0 0 10px;
@@ -5069,12 +5091,17 @@ html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
   padding: 14px 12px 12px;
 }
 .cyber-guide-panel--integrate {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 360px;
   max-width: 440px;
   min-width: 0;
-  overflow: hidden;
+  min-height: 0;
+  overflow: visible;
   animation: cyber-guide-pulse 2.4s ease-in-out infinite;
   font-size: 14px;
   padding: 22px 20px 18px;
+  align-self: stretch;
 }
 .cyber-guide-panel--integrate .cyber-guide-title {
   font-size: 17px;
@@ -5093,7 +5120,7 @@ html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
   background: rgba(0, 0, 0, 0.45);
   border: 1px solid rgba(0, 255, 65, 0.35);
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
   box-shadow: inset 0 1px 0 rgba(0, 255, 65, 0.06);
 }
 .cyber-guide-lead {
@@ -5160,37 +5187,114 @@ html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
   color: #a1a1aa;
   font-weight: 700;
 }
-.cyber-guide-country-select {
+.cyber-guide-country-wrap {
+  position: relative;
   width: 100%;
-  padding: 10px 12px;
+}
+select.cyber-guide-country-select-native {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.cyber-guide-country-trigger {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 10px 36px 10px 12px;
   font-size: 14px;
   font-family: inherit;
+  text-align: left;
   color: #fafafa;
   background: #050505;
   border: 1px solid rgba(0, 255, 65, 0.5);
   border-radius: 6px;
   outline: none;
-  accent-color: #00ff41;
   cursor: pointer;
   transition:
     border-color 0.15s ease,
     box-shadow 0.15s ease;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2300ff41' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
 }
-.cyber-guide-country-select:hover {
-  border-color: rgba(0, 255, 65, 0.65);
+.cyber-guide-country-trigger:hover {
+  border-color: rgba(0, 255, 65, 0.75);
 }
-.cyber-guide-country-select:focus {
-  border-color: rgba(0, 255, 65, 0.9);
+.cyber-guide-country-trigger:focus {
+  border-color: rgba(0, 255, 65, 0.95);
   box-shadow: 0 0 0 2px rgba(0, 255, 65, 0.28);
 }
-.cyber-guide-country-select option {
-  background: #0a0a0a;
-  color: #fafafa;
+.cyber-guide-country-trigger-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.cyber-guide-country-select option:checked,
-.cyber-guide-country-select option:hover {
-  background: rgba(0, 255, 65, 0.22);
+.cyber-guide-country-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 10002;
+  max-height: min(52vh, 360px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 6px;
+  background: #070707;
+  border: 1px solid rgba(0, 255, 65, 0.45);
+  border-radius: 8px;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.65),
+    0 0 0 1px rgba(0, 255, 65, 0.12);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 255, 65, 0.45) #050505;
+}
+.cyber-guide-country-panel::-webkit-scrollbar {
+  width: 8px;
+}
+.cyber-guide-country-panel::-webkit-scrollbar-track {
+  background: #050505;
+  border-radius: 4px;
+}
+.cyber-guide-country-panel::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 65, 0.35);
+  border-radius: 4px;
+}
+.cyber-guide-country-panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 255, 65, 0.55);
+}
+.cyber-guide-country-item {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  margin: 0;
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  color: #e4e4e7;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.cyber-guide-country-item:hover,
+.cyber-guide-country-item:focus {
+  outline: none;
+  background: rgba(0, 255, 65, 0.16);
   color: #00ff41;
+}
+.cyber-guide-country-item:focus-visible {
+  box-shadow: inset 0 0 0 1px rgba(0, 255, 65, 0.55);
 }
 .cyber-guide-terms-row {
   display: flex;
@@ -5308,12 +5412,25 @@ html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
   font-size: 11px;
   line-height: 1.45;
   color: #a1a1aa;
+  min-height: 5em;
   max-height: 7.5em;
   overflow-y: auto;
   overflow-x: hidden;
   word-break: break-word;
   overflow-wrap: anywhere;
   -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 255, 65, 0.35) #050505;
+}
+.cyber-guide-path-hint::-webkit-scrollbar {
+  width: 6px;
+}
+.cyber-guide-path-hint::-webkit-scrollbar-track {
+  background: #050505;
+}
+.cyber-guide-path-hint::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 65, 0.3);
+  border-radius: 3px;
 }
 .cyber-guide-path-list {
   margin-top: 10px;
@@ -5499,10 +5616,19 @@ html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
 @media (max-width: 900px) {
   .cyber-guide-layout {
     flex-direction: column;
-    align-items: center;
+    flex-wrap: wrap;
+    align-items: stretch;
   }
-  .cyber-guide-terms-flyout {
+  .cyber-guide-panel--integrate {
+    flex: 0 1 auto;
     width: 100%;
     max-width: 440px;
+    align-self: center;
+  }
+  .cyber-guide-terms-flyout {
+    flex: 0 1 auto;
+    width: 100%;
+    max-width: 440px;
+    align-self: center;
   }
 }
