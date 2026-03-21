@@ -31066,6 +31066,114 @@ document.addEventListener('click', function(e) {
     }
     try { window.detectEnvironment = detectEnvironment; } catch (_) { }
 
+    /**
+     * 智能路径引导：Mac / Win / Linux(other)
+     */
+    function getCursorPathHints() {
+        var env = detectEnvironment();
+        var lang = (typeof document !== 'undefined' && document.documentElement && document.documentElement.lang) || '';
+        var isZh = !lang || String(lang).indexOf('zh') === 0;
+        var rows = [];
+        if (env === 'macos') {
+            rows.push({
+                label: isZh ? 'Cursor workspace：~/Library/Application Support/Cursor/User/workspaceStorage/ → state.vscdb' : 'Cursor workspace: ~/Library/Application Support/Cursor/User/workspaceStorage/ → state.vscdb',
+                copy: '~/Library/Application Support/Cursor/User/workspaceStorage/'
+            });
+            rows.push({
+                label: isZh ? 'OpenClaw：~/.openclaw/agents/main/sessions/*.jsonl' : 'OpenClaw: ~/.openclaw/agents/main/sessions/*.jsonl',
+                copy: '~/.openclaw/agents/main/sessions/'
+            });
+        } else if (env === 'windows') {
+            rows.push({
+                label: isZh ? 'Cursor workspace：C:\\Users\\%USERNAME%\\AppData\\Roaming\\Cursor\\User\\workspaceStorage\\ → state.vscdb' : 'Cursor workspace: C:\\Users\\%USERNAME%\\AppData\\Roaming\\Cursor\\User\\workspaceStorage\\ → state.vscdb',
+                copy: 'C:\\Users\\%USERNAME%\\AppData\\Roaming\\Cursor\\User\\workspaceStorage\\'
+            });
+            rows.push({
+                label: isZh ? 'OpenClaw：C:\\Users\\%USERNAME%\\.openclaw\\agents\\main\\sessions\\' : 'OpenClaw: C:\\Users\\%USERNAME%\\.openclaw\\agents\\main\\sessions\\',
+                copy: 'C:\\Users\\%USERNAME%\\.openclaw\\agents\\main\\sessions\\'
+            });
+        } else {
+            rows.push({
+                label: isZh ? 'Cursor workspace：~/.config/Cursor/User/workspaceStorage/ → state.vscdb' : 'Cursor workspace: ~/.config/Cursor/User/workspaceStorage/ → state.vscdb',
+                copy: '~/.config/Cursor/User/workspaceStorage/'
+            });
+            rows.push({
+                label: isZh ? 'OpenClaw：~/.openclaw/agents/main/sessions/*.jsonl' : 'OpenClaw: ~/.openclaw/agents/main/sessions/*.jsonl',
+                copy: '~/.openclaw/agents/main/sessions/'
+            });
+        }
+        return { isZh: isZh, env: env, rows: rows };
+    }
+    try { window.getCursorPathHints = getCursorPathHints; } catch (_) { }
+
+    /**
+     * 递归启发式扫描：排除大目录；Cursor：globalStorage/storage.json 锚点 + state.vscdb；
+     * OpenClaw：.jsonl 且前 1KB 含 event_type
+     */
+    async function recursiveHeuristicScan(dirHandle, options) {
+        options = options || {};
+        var maxDepth = options.maxDepth != null ? options.maxDepth : 48;
+        var yieldEvery = options.yieldEvery != null ? options.yieldEvery : 64;
+        var cursorFiles = [];
+        var openclawFiles = [];
+        var hits = { cursorAnchored: false, openclawJsonl: 0 };
+        var entryCount = 0;
+        var SKIP = new Set([
+            'node_modules', '.git', 'dist', 'build', '.cache', 'caches', '__pycache__', '.npm', '.yarn',
+            'venv', '.venv', 'target', '.next', '.turbo', 'coverage', '.nuxt', '.output', 'out', 'vendor',
+            'bower_components', '.svn', '.hg', 'Pods', 'DerivedData'
+        ]);
+        function shouldSkipDir(name) {
+            var n = String(name || '').toLowerCase();
+            return SKIP.has(n);
+        }
+        async function walk(handle, pathParts, depth) {
+            if (depth > maxDepth) return;
+            var iter = handle.entries();
+            for await (var step of iter) {
+                entryCount++;
+                if (entryCount % yieldEvery === 0) {
+                    await new Promise(function (r) { setTimeout(r, 0); });
+                }
+                var name = step[0];
+                var entry = step[1];
+                if (!entry || !entry.kind) continue;
+                if (entry.kind === 'directory') {
+                    if (shouldSkipDir(name)) continue;
+                    await walk(entry, pathParts.concat(name), depth + 1);
+                } else if (entry.kind === 'file') {
+                    var lc = String(name).toLowerCase();
+                    if (name === 'state.vscdb') {
+                        try {
+                            cursorFiles.push(await entry.getFile());
+                        } catch (e) { /* ignore */ }
+                    }
+                    if (lc === 'storage.json') {
+                        var lowerParts = pathParts.map(function (p) { return String(p).toLowerCase(); });
+                        if (lowerParts.indexOf('globalstorage') >= 0) {
+                            hits.cursorAnchored = true;
+                        }
+                    }
+                    if (lc.endsWith('.jsonl')) {
+                        try {
+                            var file = await entry.getFile();
+                            var slice = file.slice(0, Math.min(1024, file.size || 1024));
+                            var buf = await slice.arrayBuffer();
+                            var text = new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(buf));
+                            if (text.indexOf('"event_type"') !== -1 || text.indexOf('event_type') !== -1) {
+                                openclawFiles.push(file);
+                                hits.openclawJsonl++;
+                            }
+                        } catch (e) { /* ignore */ }
+                    }
+                }
+            }
+        }
+        await walk(dirHandle, [], 0);
+        return { cursorFiles: cursorFiles, openclawFiles: openclawFiles, hits: hits };
+    }
+    try { window.recursiveHeuristicScan = recursiveHeuristicScan; } catch (_) { }
+
     function setLpdefCardsSyncScanning(on) {
         ['L', 'P', 'D', 'E', 'F'].forEach(function (dim) {
             var el = document.getElementById('card-' + dim);
@@ -31216,87 +31324,6 @@ document.addEventListener('click', function(e) {
         }
     }
 
-    function showPathGuideModal() {
-        return new Promise(function (resolve) {
-            var env = detectEnvironment();
-            var isMac = env === 'macos';
-            var lang = (typeof document !== 'undefined' && document.documentElement && document.documentElement.lang) || '';
-            var isZh = !lang || String(lang).indexOf('zh') === 0;
-            var title = isZh ? '本地数据路径' : 'Local data paths';
-            var curPath = isMac
-                ? 'Cursor（macOS）：~/Library/Application Support/Cursor/User/workspaceStorage/ → state.vscdb'
-                : 'Cursor（Windows）：%APPDATA%\\Cursor\\User\\workspaceStorage\\ → state.vscdb';
-            var ocPath = isMac
-                ? 'OpenClaw（macOS）：~/.openclaw/agents/main/sessions/*.jsonl'
-                : 'OpenClaw（Windows）：%USERPROFILE%\\.openclaw\\agents\\main\\sessions\\*.jsonl';
-            var cursorCopyRaw = isMac
-                ? '~/Library/Application Support/Cursor/User/workspaceStorage/'
-                : '%APPDATA%\\Cursor\\User\\workspaceStorage\\';
-            var ocCopyRaw = isMac
-                ? '~/.openclaw/agents/main/sessions/'
-                : '%USERPROFILE%\\.openclaw\\agents\\main\\sessions\\';
-            var btnOk = isZh ? '已了解，选择文件夹' : 'Continue — pick folder';
-            var btnExit = isZh ? '退出' : 'Exit';
-            var btnCopy = isZh ? '复制路径' : 'Copy';
-            var existing = document.getElementById('smart-sync-path-modal');
-            if (existing) existing.remove();
-            var wrap = document.createElement('div');
-            wrap.id = 'smart-sync-path-modal';
-            wrap.style.cssText = 'position:fixed;inset:0;z-index:120000;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;padding:16px;';
-            var esc = function (s) {
-                return String(s || '')
-                    .replace(/&/g, '&amp;')
-                    .replace(/</g, '&lt;')
-                    .replace(/"/g, '&quot;');
-            };
-            var row = function (labelHtml, copyVal) {
-                return (
-                    '<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px;">' +
-                    '<p style="flex:1;font-size:10px;line-height:1.55;margin:0;color:#a1a1aa;word-break:break-all;">' + labelHtml + '</p>' +
-                    '<button type="button" class="smart-sync-copy-btn" data-copy-path="' + esc(copyVal) + '" style="flex-shrink:0;padding:6px 10px;background:rgba(0,255,65,.1);border:1px solid rgba(0,255,65,.4);color:#00ff41;font-size:10px;cursor:pointer;border-radius:4px;white-space:nowrap;">' + esc(btnCopy) + '</button>' +
-                    '</div>'
-                );
-            };
-            wrap.innerHTML =
-                '<div style="max-width:440px;width:100%;background:rgba(10,10,12,.96);border:1px solid rgba(0,255,65,.45);border-radius:8px;padding:18px;font-family:JetBrains Mono,monospace;color:#e4e4e7;">' +
-                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">' +
-                '<div style="color:#00ff41;font-size:12px;font-weight:700;">' + esc(title) + '</div>' +
-                '<button type="button" id="smart-sync-path-modal-exit-x" style="background:transparent;border:none;color:#71717a;font-size:18px;line-height:1;cursor:pointer;padding:0 4px;" title="' + esc(btnExit) + '">×</button>' +
-                '</div>' +
-                row(curPath, cursorCopyRaw) +
-                row(ocPath, ocCopyRaw) +
-                '<p style="font-size:9px;line-height:1.45;margin:0 0 14px;color:#71717a;">' + (isZh ? '可同时选择包含上述两类的根目录，系统将依次同步 Cursor 与 OpenClaw。' : 'Pick a root folder that contains both trees; Cursor and OpenClaw will sync in sequence.') + '</p>' +
-                '<div style="display:flex;flex-direction:column;gap:8px;">' +
-                '<button type="button" id="smart-sync-path-modal-ok" style="width:100%;padding:10px 12px;background:rgba(0,255,65,.12);border:1px solid rgba(0,255,65,.5);color:#00ff41;font-size:11px;font-weight:700;cursor:pointer;border-radius:4px;">' + esc(btnOk) + '</button>' +
-                '<button type="button" id="smart-sync-path-modal-exit" style="width:100%;padding:8px 12px;background:transparent;border:1px solid rgba(113,113,122,.6);color:#a1a1aa;font-size:11px;cursor:pointer;border-radius:4px;">' + esc(btnExit) + '</button>' +
-                '</div></div>';
-            document.body.appendChild(wrap);
-            var inner = wrap.firstElementChild;
-            function finish(action) {
-                try { wrap.remove(); } catch (_) {}
-                resolve({ action: action || 'exit' });
-            }
-            wrap.addEventListener('click', function (ev) {
-                if (ev.target === wrap) finish('exit');
-            });
-            if (inner) {
-                inner.addEventListener('click', function (ev) {
-                    var t = ev.target;
-                    if (t && t.classList && t.classList.contains('smart-sync-copy-btn')) {
-                        var p = t.getAttribute('data-copy-path');
-                        if (p) copyPathToClipboard(p, isZh);
-                    }
-                });
-            }
-            var ok = wrap.querySelector('#smart-sync-path-modal-ok');
-            if (ok) ok.addEventListener('click', function () { finish('continue'); });
-            var ex = wrap.querySelector('#smart-sync-path-modal-exit');
-            if (ex) ex.addEventListener('click', function () { finish('exit'); });
-            var exx = wrap.querySelector('#smart-sync-path-modal-exit-x');
-            if (exx) exx.addEventListener('click', function () { finish('exit'); });
-        });
-    }
-
     function showSmartSyncToastLine(message) {
         try {
             var nid = 'smart-sync-toast';
@@ -31316,13 +31343,41 @@ document.addEventListener('click', function(e) {
     window.__showSmartSyncSuccessToast = function (sourceEngine, payload) {
         try {
             var isZh = !(typeof document !== 'undefined' && document.documentElement && document.documentElement.lang) || String(document.documentElement.lang).indexOf('zh') === 0;
+            if (typeof window.__smartSyncToastBatchRemaining === 'number' && window.__smartSyncToastBatchRemaining > 0) {
+                window.__smartSyncToastBatchRemaining--;
+                window.__smartSyncToastBatchCollected = window.__smartSyncToastBatchCollected || {};
+                window.__smartSyncToastBatchCollected[sourceEngine] = payload;
+                if (window.__smartSyncToastBatchRemaining > 0) return;
+                var parts = [];
+                var cur = window.__smartSyncToastBatchCollected.cursor;
+                var oc = window.__smartSyncToastBatchCollected.openclaw;
+                function lineFor(engine, p) {
+                    var stats = p && (p.statistics || p.data && p.data.stats);
+                    var totalM = stats && (stats.totalMessages != null ? stats.totalMessages : stats.userMessages);
+                    var prev = typeof window.__prev_sync_total_messages === 'number' ? window.__prev_sync_total_messages : null;
+                    if (engine === 'cursor' && typeof totalM === 'number' && prev != null) {
+                        var delta = Math.max(0, totalM - prev);
+                        return isZh ? 'Cursor +' + delta + '（累计 ' + totalM + '）' : 'Cursor +' + delta + ' (total ' + totalM + ')';
+                    }
+                    if (typeof totalM === 'number') {
+                        return isZh ? (engine === 'cursor' ? 'Cursor ' : 'OpenClaw ') + totalM + ' 条' : (engine === 'cursor' ? 'Cursor ' : 'OpenClaw ') + totalM + ' msgs';
+                    }
+                    return engine === 'cursor' ? 'Cursor' : 'OpenClaw';
+                }
+                if (cur) parts.push(lineFor('cursor', cur));
+                if (oc) parts.push(lineFor('openclaw', oc));
+                window.__smartSyncToastBatchCollected = {};
+                var line = isZh ? '注入成功 · ' + parts.join(' · ') : 'Inject OK · ' + parts.join(' · ');
+                showSmartSyncToastLine(line);
+                return;
+            }
             var stats = payload && (payload.statistics || payload.data && payload.data.stats);
             var totalM = stats && (stats.totalMessages != null ? stats.totalMessages : stats.userMessages);
             var prev = typeof window.__prev_sync_total_messages === 'number' ? window.__prev_sync_total_messages : null;
             var line = isZh ? '同步成功' : 'Sync complete';
             if (sourceEngine === 'cursor' && typeof totalM === 'number' && prev != null) {
-                var delta = Math.max(0, totalM - prev);
-                line += isZh ? ' · 消息 +' + delta + ' 条（累计 ' + totalM + '）' : ' · +' + delta + ' messages (total ' + totalM + ')';
+                var delta2 = Math.max(0, totalM - prev);
+                line += isZh ? ' · 消息 +' + delta2 + ' 条（累计 ' + totalM + '）' : ' · +' + delta2 + ' messages (total ' + totalM + ')';
             } else if (typeof totalM === 'number') {
                 line += isZh ? ' · 消息 ' + totalM + ' 条' : ' · ' + totalM + ' messages';
             }
@@ -31330,110 +31385,548 @@ document.addEventListener('click', function(e) {
         } catch (_) {}
     };
 
-    async function runSmartFolderPipeline(files) {
+    /** Mac / Win（与计划一致：UA 含 Mac 则 macOS 路径，否则 Windows） */
+    function detectOsForCyber() {
+        var ua = (typeof navigator !== 'undefined' && navigator.userAgent) ? navigator.userAgent : '';
+        if (/Mac|iPhone|iPad|iPod/i.test(ua)) return 'mac';
+        return 'win';
+    }
+
+    /** navigator.platform 优先；无法判定时回退 UA */
+    function detectPlatformForCyber() {
+        try {
+            var p = (typeof navigator !== 'undefined' && navigator.platform) ? String(navigator.platform) : '';
+            if (/Win/i.test(p)) return 'win';
+            if (/Mac/i.test(p)) return 'mac';
+        } catch (_) {}
+        return detectOsForCyber();
+    }
+
+    /**
+     * 对 webkitdirectory 返回的 File[]：仅在相对根目录深度 <= maxDepth 内做启发式识别。
+     * Cursor：state.vscdb 或任意 storage.json；state.vscdb 单独收集供上传。
+     * OpenClaw：.jsonl 且前 1KB 含 event_type。
+     */
+    async function heuristicScanByDepth(files, maxDepth) {
+        maxDepth = maxDepth != null ? maxDepth : 3;
+        var arr = Array.isArray(files) ? files : [];
+        var cursorStateVscdbFiles = [];
+        var openclawJsonlFiles = [];
+        var cursorHit = false;
+        var openclawHits = 0;
+
+        function dirDepth(rel) {
+            if (!rel) return 0;
+            var parts = String(rel).split(/[/\\]/).filter(Boolean);
+            if (parts.length <= 1) return 0;
+            return parts.length - 1;
+        }
+
+        var jsonlCandidates = [];
+        for (var i = 0; i < arr.length; i++) {
+            var f = arr[i];
+            if (!f || !f.name) continue;
+            var rel = f.webkitRelativePath || f.name || '';
+            if (dirDepth(rel) > maxDepth) continue;
+            var name = f.name;
+            var lc = name.toLowerCase();
+            if (name === 'state.vscdb') {
+                cursorStateVscdbFiles.push(f);
+                cursorHit = true;
+            }
+            if (lc === 'storage.json') {
+                cursorHit = true;
+            }
+            if (lc.endsWith('.jsonl')) {
+                jsonlCandidates.push(f);
+            }
+        }
+
+        for (var j = 0; j < jsonlCandidates.length; j++) {
+            var jf = jsonlCandidates[j];
+            var relJ = jf.webkitRelativePath || jf.name || '';
+            if (dirDepth(relJ) > maxDepth) continue;
+            try {
+                var slice = jf.slice(0, Math.min(1024, jf.size || 1024));
+                var buf = await slice.arrayBuffer();
+                var text = new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(buf));
+                if (text.indexOf('event_type') !== -1) {
+                    openclawJsonlFiles.push(jf);
+                    openclawHits++;
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        var mergedFiles = cursorStateVscdbFiles.concat(openclawJsonlFiles);
+        return {
+            cursorStateVscdbFiles: cursorStateVscdbFiles,
+            openclawJsonlFiles: openclawJsonlFiles,
+            mergedFiles: mergedFiles,
+            hits: { cursorHit: cursorHit, openclawHits: openclawHits }
+        };
+    }
+    try { window.heuristicScanByDepth = heuristicScanByDepth; } catch (_) { }
+
+    /**
+     * 赛博导航员：四阶段状态机；系统文件对话框期间保持影子模式可见。
+     */
+    var CyberNavigator = {
+        _focusHandler: null,
+        _changeHandler: null,
+        _activeInput: null,
+        _flowActive: false,
+        clearHandlers: function () {
+            var self = this;
+            if (self._focusHandler) {
+                try {
+                    window.removeEventListener('focus', self._focusHandler);
+                } catch (_) {}
+                self._focusHandler = null;
+            }
+            if (self._changeHandler && self._activeInput) {
+                try {
+                    self._activeInput.removeEventListener('change', self._changeHandler);
+                } catch (_) {}
+                self._changeHandler = null;
+            }
+            self._activeInput = null;
+        },
+        hide: function () {
+            var self = this;
+            self.clearHandlers();
+            self._flowActive = false;
+            var el = document.getElementById('cyber-guide-overlay');
+            if (!el) return;
+            try {
+                el.classList.remove('cyber-guide-overlay--shadow');
+            } catch (_) {}
+            el.hidden = true;
+            el.setAttribute('aria-hidden', 'true');
+            el.style.display = 'none';
+            el.innerHTML = '';
+        },
+        start: function () {
+            var self = this;
+            if (self._flowActive) return;
+            var overlay = document.getElementById('cyber-guide-overlay');
+            if (!overlay) return;
+            self.hide();
+            self._flowActive = true;
+            var hints = getCursorPathHints();
+            var isZh = hints.isZh;
+            var platformOs = detectPlatformForCyber();
+            var S = {
+                anchorNoVscdb: isZh ? '已识别锚点，但未找到 state.vscdb，请选择 workspaceStorage 或 Cursor/User 上级目录。' : 'Found anchor but no state.vscdb. Pick workspaceStorage or parent.',
+                scanFail: isZh ? '扫描失败' : 'Scan failed',
+                noSync: isZh ? '未在 3 层内发现可同步文件' : 'No syncable files within 3 levels'
+            };
+            var T = {
+                title: isZh ? '赛博导航员' : 'Cyber Navigator',
+                step1: isZh ? '步骤 1：路径准备（点击下方可复制路径到系统文件窗口地址栏）' : 'Step 1: Copy paths for the file dialog address bar.',
+                step2: isZh ? '步骤 2：在即将弹出的窗口顶部，点击地址栏（或按 Alt+D / Cmd+Shift+G）' : 'Step 2: Focus the address bar (Alt+D or Cmd+Shift+G).',
+                next: isZh ? '确认路径并前往下一步' : 'Confirm — next step',
+                openPicker: isZh ? '唤起文件夹窗口' : 'Open folder picker',
+                shadowPaste: isZh ? '影子模式：按 Ctrl+V（Mac：Cmd+V）粘贴路径，再按 Enter。' : 'Shadow: Ctrl+V (Cmd+V on Mac), then Enter.',
+                shadowPick: isZh ? '进入目标目录后，点击「选择此文件夹」。' : 'Then click “Select Folder”.',
+                close: isZh ? '关闭' : 'Close',
+                copyBtn: isZh ? '复制路径' : 'Copy',
+                progressScan: isZh ? '正在识别…' : 'Recognizing…'
+            };
+
+            function esc(s) {
+                return String(s || '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/"/g, '&quot;');
+            }
+
+            function progressSegs(step) {
+                var segs = '';
+                for (var si = 1; si <= 4; si++) {
+                    segs += '<div class="cyber-guide-progress-seg' + (si <= step ? ' on' : '') + '"></div>';
+                }
+                return segs;
+            }
+
+            function renderRecogLines(hasCur, hasOc, curSt, ocSt) {
+                function line(label, st) {
+                    if (st === 'done') return isZh ? '[✔] ' + label + ' 已识别' : '[✔] ' + label;
+                    if (st === 'pending') return isZh ? '[…] ' + label + ' …' : '[…] ' + label;
+                    if (st === 'error') return isZh ? '[✗] ' + label : '[✗] ' + label;
+                    return '';
+                }
+                var html = '';
+                if (hasCur && curSt) html += '<div class="cyber-guide-recog-line">' + esc(line('Cursor', curSt)) + '</div>';
+                if (hasOc && ocSt) html += '<div class="cyber-guide-recog-line">' + esc(line('OpenClaw', ocSt)) + '</div>';
+                return html;
+            }
+
+            function bindCopyClicks(root) {
+                if (!root) return;
+                root.addEventListener('click', function (ev) {
+                    var t = ev.target;
+                    if (t && t.getAttribute && t.getAttribute('data-copy-path')) {
+                        var p = t.getAttribute('data-copy-path');
+                        if (p) copyPathToClipboard(p, isZh);
+                    }
+                });
+            }
+
+            function renderPhase1() {
+                overlay.classList.remove('cyber-guide-overlay--shadow');
+                var rowsHtml = (hints.rows || []).map(function (r) {
+                    return (
+                        '<div class="cyber-guide-path-row">' +
+                        '<p class="cyber-guide-path-row-label">' + esc(r.label) + '</p>' +
+                        '<button type="button" class="cyber-guide-btn-copy smart-sync-copy-btn" data-copy-path="' + esc(r.copy) + '">' + esc(T.copyBtn) + '</button>' +
+                        '</div>'
+                    );
+                }).join('');
+                overlay.hidden = false;
+                overlay.setAttribute('aria-hidden', 'false');
+                overlay.style.display = 'flex';
+                overlay.innerHTML =
+                    '<div class="cyber-guide-panel" role="dialog" aria-modal="true" aria-labelledby="cyber-guide-title">' +
+                    '<div class="cyber-guide-head">' +
+                    '<div class="cyber-guide-title" id="cyber-guide-title">' + esc(T.title) + '</div>' +
+                    '<div class="cyber-guide-step-label">' + esc(isZh ? '步骤 1 / 4' : 'Step 1 / 4') + '</div>' +
+                    '</div>' +
+                    '<div class="cyber-guide-progress">' + progressSegs(1) + '</div>' +
+                    '<p class="cyber-guide-body">' + esc(T.step1) + '</p>' +
+                    '<div class="cyber-guide-path-list">' + rowsHtml + '</div>' +
+                    '<div class="cyber-guide-actions" id="cyber-guide-actions"></div>' +
+                    '</div>';
+                bindCopyClicks(overlay);
+                var actions = overlay.querySelector('#cyber-guide-actions');
+                if (!actions) return;
+                var bNext = document.createElement('button');
+                bNext.type = 'button';
+                bNext.className = 'cyber-guide-btn-primary';
+                bNext.textContent = T.next;
+                bNext.addEventListener('click', function () {
+                    renderPhase2();
+                });
+                actions.appendChild(bNext);
+                var bClose = document.createElement('button');
+                bClose.type = 'button';
+                bClose.className = 'cyber-guide-btn-secondary';
+                bClose.textContent = T.close;
+                bClose.addEventListener('click', function () {
+                    self.hide();
+                });
+                actions.appendChild(bClose);
+            }
+
+            function renderPhase2() {
+                overlay.classList.remove('cyber-guide-overlay--shadow');
+                overlay.innerHTML =
+                    '<div class="cyber-guide-panel" role="dialog" aria-modal="true" aria-labelledby="cyber-guide-title">' +
+                    '<div class="cyber-guide-head">' +
+                    '<div class="cyber-guide-title" id="cyber-guide-title">' + esc(T.title) + '</div>' +
+                    '<div class="cyber-guide-step-label">' + esc(isZh ? '步骤 2 / 4' : 'Step 2 / 4') + '</div>' +
+                    '</div>' +
+                    '<div class="cyber-guide-progress">' + progressSegs(2) + '</div>' +
+                    '<p class="cyber-guide-body">' + esc(T.step2) + '</p>' +
+                    '<p class="cyber-guide-body cyber-guide-body-dim">' + esc(isZh ? '点击下方按钮将打开系统文件夹窗口；导航员将缩小为右下角影子模式。' : 'The navigator shrinks to shadow mode while the dialog is open.') + '</p>' +
+                    '<div class="cyber-guide-actions" id="cyber-guide-actions"></div>' +
+                    '</div>';
+                var actions = overlay.querySelector('#cyber-guide-actions');
+                if (!actions) return;
+                var bOpen = document.createElement('button');
+                bOpen.type = 'button';
+                bOpen.className = 'cyber-guide-btn-primary';
+                bOpen.textContent = T.openPicker;
+                bOpen.addEventListener('click', function () {
+                    openPickerAndShadow();
+                });
+                actions.appendChild(bOpen);
+                var bBack = document.createElement('button');
+                bBack.type = 'button';
+                bBack.className = 'cyber-guide-btn-secondary';
+                bBack.textContent = isZh ? '上一步' : 'Back';
+                bBack.addEventListener('click', function () {
+                    renderPhase1();
+                });
+                actions.appendChild(bBack);
+            }
+
+            function renderShadowPhase34() {
+                overlay.classList.add('cyber-guide-overlay--shadow');
+                overlay.hidden = false;
+                overlay.setAttribute('aria-hidden', 'false');
+                overlay.style.display = 'flex';
+                overlay.innerHTML =
+                    '<div class="cyber-guide-panel cyber-guide-panel--shadow" role="dialog" aria-modal="true">' +
+                    '<div class="cyber-guide-head">' +
+                    '<div class="cyber-guide-title">' + esc(T.title) + '</div>' +
+                    '<div class="cyber-guide-step-label">' + esc(isZh ? '步骤 3–4 / 4（影子模式）' : 'Steps 3–4 / 4 (shadow)') + '</div>' +
+                    '</div>' +
+                    '<div class="cyber-guide-progress">' + progressSegs(4) + '</div>' +
+                    '<p class="cyber-guide-body cyber-guide-shadow-pulse">' + esc(T.shadowPaste) + '</p>' +
+                    '<p class="cyber-guide-body">' + esc(T.shadowPick) + '</p>' +
+                    '</div>';
+            }
+
+            function openPickerAndShadow() {
+                var inp = document.getElementById('cursor-slot1-folder-input');
+                if (!inp || typeof inp.click !== 'function') {
+                    showSmartSyncToastLine(isZh ? '未找到文件夹选择器' : 'Folder input missing');
+                    self.hide();
+                    return;
+                }
+                self.clearHandlers();
+                self._activeInput = inp;
+                renderShadowPhase34();
+
+                self._changeHandler = async function onCyberChange() {
+                    try {
+                        inp.removeEventListener('change', onCyberChange);
+                    } catch (_) {}
+                    self._changeHandler = null;
+                    if (self._focusHandler) {
+                        try {
+                            window.removeEventListener('focus', self._focusHandler);
+                        } catch (_) {}
+                        self._focusHandler = null;
+                    }
+                    self._activeInput = null;
+                    var files = Array.from(inp.files || []);
+                    if (!files.length) return;
+                    overlay.classList.remove('cyber-guide-overlay--shadow');
+                    overlay.innerHTML =
+                        '<div class="cyber-guide-panel" role="dialog" aria-modal="true">' +
+                        '<div class="cyber-guide-head">' +
+                        '<div class="cyber-guide-title">' + esc(T.title) + '</div>' +
+                        '<div class="cyber-guide-step-label">' + esc(isZh ? '识别与同步' : 'Scan & sync') + '</div>' +
+                        '</div>' +
+                        '<p class="cyber-guide-body">' + esc(T.progressScan) + '</p>' +
+                        '<div id="cyber-guide-recog" class="cyber-guide-recog"></div>' +
+                        '</div>';
+                    overlay.hidden = false;
+                    overlay.style.display = 'flex';
+
+                    var r;
+                    try {
+                        r = await heuristicScanByDepth(files, 3);
+                    } catch (err) {
+                        console.error('[CyberNavigator] heuristicScanByDepth', err);
+                        showSmartSyncToastLine(S.scanFail);
+                        self.hide();
+                        return;
+                    }
+                    var hasVscdb = r.cursorStateVscdbFiles && r.cursorStateVscdbFiles.length > 0;
+                    var hasJsonl = r.openclawJsonlFiles && r.openclawJsonlFiles.length > 0;
+                    var recogEl = document.getElementById('cyber-guide-recog');
+                    function setRecog(curSt, ocSt) {
+                        if (recogEl) {
+                            recogEl.innerHTML = renderRecogLines(hasVscdb, hasJsonl, curSt, ocSt);
+                        }
+                    }
+                    if (!r.mergedFiles || !r.mergedFiles.length) {
+                        if (r.hits && r.hits.cursorHit && !hasVscdb) {
+                            showSmartSyncToastLine(S.anchorNoVscdb);
+                        } else {
+                            showSmartSyncToastLine(S.noSync);
+                        }
+                        self.hide();
+                        return;
+                    }
+                    var curSt = hasVscdb ? 'pending' : '';
+                    var ocSt = hasJsonl ? 'pending' : '';
+                    function setRecog() {
+                        if (recogEl) {
+                            recogEl.innerHTML = renderRecogLines(hasVscdb, hasJsonl, curSt, ocSt);
+                        }
+                    }
+                    setRecog();
+                    setText('cursor-slot1-status', isZh ? '检测到档案，准备同步…' : 'Detected, syncing…');
+                    await runSmartFolderPipelineFromScanResult(r, {
+                        isZh: isZh,
+                        onGuideProgress: function (key, status) {
+                            if (key === 'cursor') curSt = status;
+                            if (key === 'openclaw') ocSt = status;
+                            setRecog();
+                        }
+                    });
+                    self.hide();
+                };
+                inp.addEventListener('change', self._changeHandler);
+
+                self._focusHandler = function () {
+                    setTimeout(function () {
+                        if (!self._activeInput) return;
+                        var fi = self._activeInput.files;
+                        if (!fi || fi.length === 0) {
+                            try {
+                                window.removeEventListener('focus', self._focusHandler);
+                            } catch (_) {}
+                            self._focusHandler = null;
+                            if (self._changeHandler && self._activeInput) {
+                                try {
+                                    self._activeInput.removeEventListener('change', self._changeHandler);
+                                } catch (_) {}
+                                self._changeHandler = null;
+                            }
+                            self._activeInput = null;
+                            try {
+                                overlay.classList.remove('cyber-guide-overlay--shadow');
+                            } catch (_) {}
+                            renderPhase1();
+                        }
+                    }, 380);
+                };
+                window.addEventListener('focus', self._focusHandler);
+                try {
+                    inp.value = '';
+                } catch (_) {}
+                inp.click();
+            }
+
+            renderPhase1();
+        }
+    };
+    try {
+        window.CyberNavigator = CyberNavigator;
+    } catch (_) {}
+
+    async function runSmartFolderPipelineFromScanResult(scanResult, opts) {
+        opts = opts || {};
+        var isZh = opts.isZh !== false;
+        var onGuideProgress = typeof opts.onGuideProgress === 'function' ? opts.onGuideProgress : null;
         var btn = $('cursor-slot1-folder-btn');
         if (btn) btn.disabled = true;
-        setText('cursor-slot1-status', '正在加载分析模块...');
+        setText('cursor-slot1-status', isZh ? '正在加载分析模块...' : 'Loading module...');
         setLpdefCardsSyncScanning(true);
+        window.__smartSyncToastBatchRemaining = 0;
+        window.__smartSyncToastBatchCollected = {};
+
+        var cursorFiles = scanResult.cursorStateVscdbFiles || [];
+        var openclawFiles = scanResult.openclawJsonlFiles || [];
+        var hasVscdb = cursorFiles.length > 0;
+        var hasJsonl = openclawFiles.length > 0;
+        var hasCursorHit = scanResult.hits && scanResult.hits.cursorHit;
+
+        if (!hasVscdb && !hasJsonl) {
+            if (hasCursorHit && !hasVscdb) {
+                showSmartSyncToastLine(isZh ? '已识别 storage.json 锚点，但未找到 state.vscdb，请扩大选择范围。' : 'Found storage.json anchor but no state.vscdb.');
+            } else {
+                showSmartSyncToastLine(isZh ? '未在 3 层内发现 state.vscdb 或 OpenClaw .jsonl' : 'No state.vscdb or OpenClaw .jsonl within 3 levels.');
+            }
+            setLpdefCardsSyncScanning(false);
+            if (btn) btn.disabled = false;
+            return;
+        }
+
         try {
             window.__prev_sync_total_messages = readPrevCursorTotalMessages();
             var mod = await ensureAnalysisModule();
-            setText('cursor-slot1-status', '初始化解析器...');
+            setText('cursor-slot1-status', isZh ? '初始化解析器...' : 'Initializing parser...');
             if (!window.__slot1ParserInitialized && typeof mod.initializeParser === 'function') {
                 await mod.initializeParser();
                 window.__slot1ParserInitialized = true;
             }
-            var list = Array.from(files || []);
-            var hasVscdb = list.some(function (f) { return f && f.name === 'state.vscdb'; });
-            var hasJsonl = list.some(function (f) { return f && String(f.name).toLowerCase().endsWith('.jsonl'); });
             var cursorSync = smartSyncCursorHasUpdateMode();
             var ocSync = smartSyncOpenclawHasUpdateMode();
-            var ran = 0;
+            var dual = hasVscdb && hasJsonl;
+            if (dual) {
+                window.__smartSyncToastBatchRemaining = 2;
+                window.__smartSyncToastBatchCollected = {};
+            }
+
+            var settled = [];
             if (hasVscdb) {
-                ran++;
-                setText('cursor-slot1-status', '同步 Cursor…');
-                await mod.processFiles(list, 'folder', {
-                    analysisMode: 'full',
-                    sourceEngine: 'cursor',
-                    syncMode: cursorSync ? 'update' : undefined,
-                    onStatus: function (text) {
-                        if (text != null) setText('cursor-slot1-status', 'Cursor: ' + text);
-                    },
-                    onLog: function () { },
-                    onProgress: function () { },
-                    onError: function (err) {
-                        console.error('[SmartSync] cursor onError:', err);
-                    },
-                    onComplete: function () {
-                        setText('cursor-slot1-status', 'Cursor 上传完成，正在刷新…');
-                    }
-                });
+                if (onGuideProgress) onGuideProgress('cursor', 'pending');
+                setText('cursor-slot1-status', isZh ? '同步 Cursor…' : 'Syncing Cursor…');
                 try {
-                    localStorage.setItem('last_cursor_sync', new Date().toISOString());
-                } catch (_) {}
+                    await mod.processFiles(cursorFiles, 'folder', {
+                        analysisMode: 'full',
+                        sourceEngine: 'cursor',
+                        syncMode: cursorSync ? 'update' : undefined,
+                        onStatus: function (text) {
+                            if (text != null) setText('cursor-slot1-status', 'Cursor: ' + text);
+                        },
+                        onLog: function () { },
+                        onProgress: function () { },
+                        onError: function (err) {
+                            console.error('[SmartSync] cursor onError:', err);
+                        },
+                        onComplete: function () {
+                            setText('cursor-slot1-status', isZh ? 'Cursor 上传完成，正在刷新…' : 'Cursor done…');
+                        }
+                    });
+                    settled.push({ status: 'fulfilled', value: 'cursor' });
+                    if (onGuideProgress) onGuideProgress('cursor', 'done');
+                    try {
+                        localStorage.setItem('last_cursor_sync', new Date().toISOString());
+                    } catch (_) {}
+                } catch (e) {
+                    settled.push({ status: 'rejected', reason: e });
+                    if (onGuideProgress) onGuideProgress('cursor', 'error');
+                }
             }
             if (hasJsonl) {
-                ran++;
-                setText('cursor-slot1-status', hasVscdb ? '同步 OpenClaw…' : '同步 OpenClaw…');
-                await mod.processFiles(list, 'folder', {
-                    analysisMode: 'full',
-                    sourceEngine: 'openclaw',
-                    syncMode: ocSync ? 'update' : undefined,
-                    onStatus: function (text) {
-                        if (text != null) setText('cursor-slot1-status', 'OpenClaw: ' + text);
-                    },
-                    onLog: function () { },
-                    onProgress: function () { },
-                    onError: function (err) {
-                        console.error('[SmartSync] openclaw onError:', err);
-                    },
-                    onComplete: function () {
-                        setText('cursor-slot1-status', 'OpenClaw 上传完成…');
-                    }
-                });
+                if (onGuideProgress) onGuideProgress('openclaw', 'pending');
+                setText('cursor-slot1-status', isZh ? '同步 OpenClaw…' : 'Syncing OpenClaw…');
                 try {
-                    localStorage.setItem('last_openclaw_sync', new Date().toISOString());
-                } catch (_) {}
+                    await mod.processFiles(openclawFiles, 'folder', {
+                        analysisMode: 'full',
+                        sourceEngine: 'openclaw',
+                        syncMode: ocSync ? 'update' : undefined,
+                        onStatus: function (text) {
+                            if (text != null) setText('cursor-slot1-status', 'OpenClaw: ' + text);
+                        },
+                        onLog: function () { },
+                        onProgress: function () { },
+                        onError: function (err) {
+                            console.error('[SmartSync] openclaw onError:', err);
+                        },
+                        onComplete: function () {
+                            setText('cursor-slot1-status', isZh ? 'OpenClaw 上传完成…' : 'OpenClaw done…');
+                        }
+                    });
+                    settled.push({ status: 'fulfilled', value: 'openclaw' });
+                    if (onGuideProgress) onGuideProgress('openclaw', 'done');
+                    try {
+                        localStorage.setItem('last_openclaw_sync', new Date().toISOString());
+                    } catch (_) {}
+                } catch (e2) {
+                    settled.push({ status: 'rejected', reason: e2 });
+                    if (onGuideProgress) onGuideProgress('openclaw', 'error');
+                }
             }
-            if (!hasVscdb && !hasJsonl) {
-                throw new Error('未在文件夹中发现 state.vscdb 或 .jsonl，请确认路径与路径说明一致');
+
+            var anyFail = settled.some(function (x) {
+                return x.status === 'rejected';
+            });
+            if (anyFail) {
+                showSmartSyncToastLine(isZh ? '部分同步失败，请查看控制台' : 'Partial sync failed — see console');
+                setText('cursor-slot1-status', isZh ? '部分完成，请检查失败项' : 'Partial completion');
+            } else {
+                setText('cursor-slot1-status', dual ? (isZh ? '双源同步完成，正在刷新界面…' : 'Dual sync complete…') : (isZh ? '上传完成，正在刷新界面…' : 'Upload complete…'));
             }
-            setText('cursor-slot1-status', ran > 1 ? '双源同步完成，正在刷新界面…' : '上传完成，正在刷新界面…');
         } catch (err) {
             console.error('[SmartSync] 失败:', err);
             setText('cursor-slot1-status', '上传失败：' + (err && err.message ? err.message : '未知错误'));
         } finally {
+            window.__smartSyncToastBatchRemaining = 0;
+            window.__smartSyncToastBatchCollected = {};
             setLpdefCardsSyncScanning(false);
             if (btn) btn.disabled = false;
         }
     }
+    try {
+        window.runSmartFolderPipelineFromScanResult = runSmartFolderPipelineFromScanResult;
+    } catch (_) {}
 
-    /**
-     * 路径引导后再打开文件夹选择
-     */
     document.addEventListener('click', function (e) {
         try {
             var target = e && e.target ? e.target : null;
             if (!target || !target.closest) return;
-            var btn = target.closest('#cursor-slot1-folder-btn');
-            if (!btn) return;
+            var btnEl = target.closest('#cursor-slot1-folder-btn');
+            if (!btnEl) return;
             e.preventDefault();
             e.stopPropagation();
-            var input = $('cursor-slot1-folder-input');
-            if (!input || typeof input.click !== 'function') return;
-            showPathGuideModal().then(function (result) {
-                if (!result || result.action !== 'continue') return;
-                input.value = '';
-                input.click();
-            });
+            CyberNavigator.start();
         } catch (_) { }
     }, true);
-
-    document.addEventListener('change', async function (e) {
-        var input = e && e.target && e.target.id === 'cursor-slot1-folder-input' ? e.target : null;
-        if (!input) return;
-        var files = Array.from(input.files || []);
-        if (!files.length) return;
-        await runSmartFolderPipeline(files);
-    });
 })();

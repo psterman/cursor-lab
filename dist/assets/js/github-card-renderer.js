@@ -70,12 +70,33 @@
             newArchive: '新建档案',
             updateArchive: '更新档案',
             lastSyncPrefix: '最后同步',
+            archiveLocalWithoutTime: '本地已有档案数据',
             pathGuideTitle: '本地数据路径',
             pathGuideContinue: '已了解，选择文件夹',
             pathGuideCursorMac: 'Cursor（macOS）：~/Library/Application Support/Cursor/User/workspaceStorage/ 下各子目录中的 state.vscdb',
             pathGuideCursorWin: 'Cursor（Windows）：%APPDATA%\\Cursor\\User\\workspaceStorage\\ 下各子目录中的 state.vscdb',
             pathGuideOcMac: 'OpenClaw（macOS）：~/.openclaw/agents/main/sessions/ 下的 .jsonl 会话日志',
-            pathGuideOcWin: 'OpenClaw（Windows）：%USERPROFILE%\\.openclaw\\agents\\main\\sessions\\ 下的 .jsonl'
+            pathGuideOcWin: 'OpenClaw（Windows）：%USERPROFILE%\\.openclaw\\agents\\main\\sessions\\ 下的 .jsonl',
+            pathGuideGlobalMac: 'Cursor 锚点（macOS）：~/Library/Application Support/Cursor/User/globalStorage/storage.json',
+            pathGuideGlobalWin: 'Cursor 锚点（Windows）：%APPDATA%\\Cursor\\User\\globalStorage\\storage.json',
+            pathGuideGlobalLinux: 'Cursor 锚点（Linux）：~/.config/Cursor/User/globalStorage/storage.json',
+            pathGuideWsLinux: 'Cursor（Linux）：~/.config/Cursor/User/workspaceStorage/ → state.vscdb',
+            pathGuideOcLinux: 'OpenClaw（Linux）：~/.openclaw/agents/main/sessions/*.jsonl',
+            smartInjectTitle: '智能数据注入',
+            smartInjectSubtitle: '全自动扫描或精准选择本地档案',
+            smartInjectAutoScan: '全自动扫描',
+            smartInjectGeekMode: '极客模式',
+            smartInjectBackFool: '返回傻瓜模式',
+            smartInjectSlotCursor: 'Slot · Cursor',
+            smartInjectSlotOpenclaw: 'Slot · OpenClaw',
+            smartInjectPickCursorDir: '选择 Cursor 目录',
+            smartInjectPickOpenclawDir: '选择 OpenClaw 会话目录',
+            smartInjectGeekSync: '开始同步',
+            smartInjectScanning: '正在扫描…',
+            smartInjectPickerUnavailable: '当前环境不支持文件夹选择，请使用极客模式或 HTTPS/localhost。',
+            smartInjectNoFiles: '未找到 state.vscdb 或 OpenClaw 会话 .jsonl，请扩大目录或检查路径。',
+            smartInjectAnchorNoVscdb: '已识别 globalStorage 锚点，但未找到 workspaceStorage 下的 state.vscdb，请选择上级的 Cursor/User 目录。',
+            cursorSlotHint: '打开向导：全自动扫描或精准选择文件夹。'
         },
         en: {
             analyzing: 'ANALYZING...',
@@ -133,12 +154,33 @@
             newArchive: 'New profile',
             updateArchive: 'Update profile',
             lastSyncPrefix: 'Last sync',
+            archiveLocalWithoutTime: 'Local archive present',
             pathGuideTitle: 'Local data paths',
             pathGuideContinue: 'Continue — pick folder',
             pathGuideCursorMac: 'Cursor (macOS): state.vscdb under ~/Library/Application Support/Cursor/User/workspaceStorage/',
             pathGuideCursorWin: 'Cursor (Windows): state.vscdb under %APPDATA%\\Cursor\\User\\workspaceStorage\\',
             pathGuideOcMac: 'OpenClaw (macOS): ~/.openclaw/agents/main/sessions/*.jsonl',
-            pathGuideOcWin: 'OpenClaw (Windows): %USERPROFILE%\\.openclaw\\agents\\main\\sessions\\*.jsonl'
+            pathGuideOcWin: 'OpenClaw (Windows): %USERPROFILE%\\.openclaw\\agents\\main\\sessions\\*.jsonl',
+            pathGuideGlobalMac: 'Cursor anchor (macOS): ~/Library/Application Support/Cursor/User/globalStorage/storage.json',
+            pathGuideGlobalWin: 'Cursor anchor (Windows): %APPDATA%\\Cursor\\User\\globalStorage\\storage.json',
+            pathGuideGlobalLinux: 'Cursor anchor (Linux): ~/.config/Cursor/User/globalStorage/storage.json',
+            pathGuideWsLinux: 'Cursor (Linux): ~/.config/Cursor/User/workspaceStorage/ → state.vscdb',
+            pathGuideOcLinux: 'OpenClaw (Linux): ~/.openclaw/agents/main/sessions/*.jsonl',
+            smartInjectTitle: 'Smart data inject',
+            smartInjectSubtitle: 'Auto-scan or pick files precisely',
+            smartInjectAutoScan: 'Full auto scan',
+            smartInjectGeekMode: 'Geek mode',
+            smartInjectBackFool: 'Back to simple mode',
+            smartInjectSlotCursor: 'Slot · Cursor',
+            smartInjectSlotOpenclaw: 'Slot · OpenClaw',
+            smartInjectPickCursorDir: 'Pick Cursor folder',
+            smartInjectPickOpenclawDir: 'Pick OpenClaw sessions folder',
+            smartInjectGeekSync: 'Sync now',
+            smartInjectScanning: 'Scanning…',
+            smartInjectPickerUnavailable: 'Folder picker unavailable. Use geek mode or HTTPS/localhost.',
+            smartInjectNoFiles: 'No state.vscdb or OpenClaw .jsonl found. Widen the folder or check paths.',
+            smartInjectAnchorNoVscdb: 'Found globalStorage anchor but no state.vscdb under workspaceStorage. Select Cursor/User or higher.',
+            cursorSlotHint: 'Open wizard: auto-scan or pick folders.'
         }
     };
 
@@ -174,7 +216,54 @@
         return '';
     }
 
-    /** last_cursor_sync / last_openclaw_sync ISO 时间，用于智能同步按钮文案 */
+    /** 从 last_analysis_data / 缓存对象上取可能的时间戳（毫秒） */
+    function inferArchiveTimestampFromStorage() {
+        var best = 0;
+        function bump(val) {
+            if (val == null || val === '') return;
+            var d = Date.parse(String(val));
+            if (!Number.isNaN(d) && d > best) best = d;
+        }
+        var keys = ['last_analysis_data', 'vibe_cursor_analysis_cache', 'vibe_openclaw_analysis_cache'];
+        for (var i = 0; i < keys.length; i++) {
+            try {
+                var raw = typeof localStorage !== 'undefined' && localStorage.getItem(keys[i]);
+                if (!raw) continue;
+                var o = JSON.parse(raw);
+                if (!o || typeof o !== 'object') continue;
+                bump(o.syncedAt);
+                bump(o.synced_at);
+                bump(o.last_sync_at);
+                bump(o.analyzed_at);
+                bump(o.updated_at);
+                bump(o.timestamp);
+                if (o.stats && typeof o.stats === 'object') {
+                    bump(o.stats.syncedAt);
+                    bump(o.stats.analyzed_at);
+                }
+            } catch (e) { /* ignore */ }
+        }
+        return best;
+    }
+
+    /** 是否已有 OpenClaw 本地缓存（与监视器一致） */
+    function hasOpenClawLocalArchive() {
+        try {
+            var raw = typeof localStorage !== 'undefined' && localStorage.getItem('vibe_openclaw_analysis_cache');
+            if (!raw || !String(raw).trim()) return false;
+            var o = JSON.parse(raw);
+            if (!o || typeof o !== 'object') return false;
+            if (o.openclawPortrait || o.stats || o.timestamp) return true;
+            return Object.keys(o).length > 0;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    /**
+     * last_cursor_sync / last_openclaw_sync，并兜底：last_analysis_data、OpenClaw 缓存
+     * 用户若仅在 index 等页面上传过、未经过 stats2 写入 last_*_sync，仍应显示「更新档案」
+     */
     function readSmartArchiveSyncState() {
         var c = '';
         var o = '';
@@ -193,8 +282,19 @@
             var dco = Date.parse(o);
             if (!Number.isNaN(dco)) times.push(dco);
         }
-        var lastTs = times.length ? Math.max.apply(null, times) : 0;
-        return { hasCursor: !!c, hasOpenclaw: !!o, hasAnySync: times.length > 0, lastTs: lastTs };
+        var fromKeys = times.length ? Math.max.apply(null, times) : 0;
+        var inferredTs = inferArchiveTimestampFromStorage();
+        var lastTs = Math.max(fromKeys, inferredTs);
+        var cursorMsgs = readCursorTotalMessagesFromLocalStorage();
+        var hasCursorLocal = cursorMsgs > 0;
+        var hasOcLocal = hasOpenClawLocalArchive();
+        var hasAnySync = times.length > 0 || hasCursorLocal || hasOcLocal || inferredTs > 0;
+        return {
+            hasCursor: !!c || hasCursorLocal,
+            hasOpenclaw: !!o || hasOcLocal,
+            hasAnySync: hasAnySync,
+            lastTs: lastTs
+        };
     }
 
     function formatSmartSyncTime(ts, lang) {
@@ -232,8 +332,16 @@
         var slot1HasData = cursorTotalMsgs > 0;
         var arch = readSmartArchiveSyncState();
         var uploadBtnText = arch.hasAnySync ? t(lang, 'updateArchive') : t(lang, 'newArchive');
+        var syncTimeLine = '';
+        if (arch.hasAnySync) {
+            if (arch.lastTs) {
+                syncTimeLine = t(lang, 'lastSyncPrefix') + ' ' + formatSmartSyncTime(arch.lastTs, lang);
+            } else {
+                syncTimeLine = t(lang, 'archiveLocalWithoutTime');
+            }
+        }
         var detectBtnText = lang === 'en' ? 'Detect OpenClaw Port' : '探测 OpenClaw 端口';
-        var cursorSlotHint = lang === 'en' ? 'Upload a Cursor folder to trigger analysis.' : '上传 Cursor 文件夹，触发分析与上报。';
+        var cursorSlotHint = t(lang, 'cursorSlotHint');
         var storedOcPort = readStoredOpenClawGatewayPort();
         var openclawSlotHint = storedOcPort
             ? t(lang, 'connectedOpenclawPort').replace(/\{port\}/g, storedOcPort)
@@ -272,7 +380,7 @@
             '<button type="button" id="cursor-slot1-folder-btn" class="w-full px-3 py-2 bg-zinc-900/50 hover:bg-zinc-800 border border-[#00ff41]/30 rounded-md text-white text-[11px] font-bold uppercase tracking-wider transition-colors" style="color:#00ff41;border-color:rgba(0,255,65,0.35);font-family:inherit;">' + esc(uploadBtnText) + '</button>',
             '</div>',
             '<input type="file" id="cursor-slot1-folder-input" webkitdirectory directory multiple style="display:none;" />',
-            '<div class="text-[9px] text-zinc-500 mt-1 font-mono" id="smart-sync-last-time">' + (arch.hasAnySync && arch.lastTs ? esc(t(lang, 'lastSyncPrefix') + ' ' + formatSmartSyncTime(arch.lastTs, lang)) : '') + '</div>',
+            '<div class="text-[9px] text-zinc-500 mt-1 font-mono" id="smart-sync-last-time">' + esc(syncTimeLine) + '</div>',
             '<div class="text-[10px] text-zinc-500 mt-1" id="cursor-slot1-status">' + esc(cursorSlotHint) + '</div>',
             '</div>',
             '<div class="mt-3 pt-3 border-t border-[#00ff41]/10">',

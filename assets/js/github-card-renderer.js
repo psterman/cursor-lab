@@ -76,7 +76,27 @@
             pathGuideCursorMac: 'Cursor（macOS）：~/Library/Application Support/Cursor/User/workspaceStorage/ 下各子目录中的 state.vscdb',
             pathGuideCursorWin: 'Cursor（Windows）：%APPDATA%\\Cursor\\User\\workspaceStorage\\ 下各子目录中的 state.vscdb',
             pathGuideOcMac: 'OpenClaw（macOS）：~/.openclaw/agents/main/sessions/ 下的 .jsonl 会话日志',
-            pathGuideOcWin: 'OpenClaw（Windows）：%USERPROFILE%\\.openclaw\\agents\\main\\sessions\\ 下的 .jsonl'
+            pathGuideOcWin: 'OpenClaw（Windows）：%USERPROFILE%\\.openclaw\\agents\\main\\sessions\\ 下的 .jsonl',
+            pathGuideGlobalMac: 'Cursor 锚点（macOS）：~/Library/Application Support/Cursor/User/globalStorage/storage.json',
+            pathGuideGlobalWin: 'Cursor 锚点（Windows）：%APPDATA%\\Cursor\\User\\globalStorage\\storage.json',
+            pathGuideGlobalLinux: 'Cursor 锚点（Linux）：~/.config/Cursor/User/globalStorage/storage.json',
+            pathGuideWsLinux: 'Cursor（Linux）：~/.config/Cursor/User/workspaceStorage/ → state.vscdb',
+            pathGuideOcLinux: 'OpenClaw（Linux）：~/.openclaw/agents/main/sessions/*.jsonl',
+            smartInjectTitle: '智能数据注入',
+            smartInjectSubtitle: '全自动扫描或精准选择本地档案',
+            smartInjectAutoScan: '全自动扫描',
+            smartInjectGeekMode: '极客模式',
+            smartInjectBackFool: '返回傻瓜模式',
+            smartInjectSlotCursor: 'Slot · Cursor',
+            smartInjectSlotOpenclaw: 'Slot · OpenClaw',
+            smartInjectPickCursorDir: '选择 Cursor 目录',
+            smartInjectPickOpenclawDir: '选择 OpenClaw 会话目录',
+            smartInjectGeekSync: '开始同步',
+            smartInjectScanning: '正在扫描…',
+            smartInjectPickerUnavailable: '当前环境不支持文件夹选择，请使用极客模式或 HTTPS/localhost。',
+            smartInjectNoFiles: '未找到 state.vscdb 或 OpenClaw 会话 .jsonl，请扩大目录或检查路径。',
+            smartInjectAnchorNoVscdb: '已识别 globalStorage 锚点，但未找到 workspaceStorage 下的 state.vscdb，请选择上级的 Cursor/User 目录。',
+            cursorSlotHint: '打开向导：全自动扫描或精准选择文件夹。'
         },
         en: {
             analyzing: 'ANALYZING...',
@@ -140,7 +160,27 @@
             pathGuideCursorMac: 'Cursor (macOS): state.vscdb under ~/Library/Application Support/Cursor/User/workspaceStorage/',
             pathGuideCursorWin: 'Cursor (Windows): state.vscdb under %APPDATA%\\Cursor\\User\\workspaceStorage\\',
             pathGuideOcMac: 'OpenClaw (macOS): ~/.openclaw/agents/main/sessions/*.jsonl',
-            pathGuideOcWin: 'OpenClaw (Windows): %USERPROFILE%\\.openclaw\\agents\\main\\sessions\\*.jsonl'
+            pathGuideOcWin: 'OpenClaw (Windows): %USERPROFILE%\\.openclaw\\agents\\main\\sessions\\*.jsonl',
+            pathGuideGlobalMac: 'Cursor anchor (macOS): ~/Library/Application Support/Cursor/User/globalStorage/storage.json',
+            pathGuideGlobalWin: 'Cursor anchor (Windows): %APPDATA%\\Cursor\\User\\globalStorage\\storage.json',
+            pathGuideGlobalLinux: 'Cursor anchor (Linux): ~/.config/Cursor/User/globalStorage/storage.json',
+            pathGuideWsLinux: 'Cursor (Linux): ~/.config/Cursor/User/workspaceStorage/ → state.vscdb',
+            pathGuideOcLinux: 'OpenClaw (Linux): ~/.openclaw/agents/main/sessions/*.jsonl',
+            smartInjectTitle: 'Smart data inject',
+            smartInjectSubtitle: 'Auto-scan or pick files precisely',
+            smartInjectAutoScan: 'Full auto scan',
+            smartInjectGeekMode: 'Geek mode',
+            smartInjectBackFool: 'Back to simple mode',
+            smartInjectSlotCursor: 'Slot · Cursor',
+            smartInjectSlotOpenclaw: 'Slot · OpenClaw',
+            smartInjectPickCursorDir: 'Pick Cursor folder',
+            smartInjectPickOpenclawDir: 'Pick OpenClaw sessions folder',
+            smartInjectGeekSync: 'Sync now',
+            smartInjectScanning: 'Scanning…',
+            smartInjectPickerUnavailable: 'Folder picker unavailable. Use geek mode or HTTPS/localhost.',
+            smartInjectNoFiles: 'No state.vscdb or OpenClaw .jsonl found. Widen the folder or check paths.',
+            smartInjectAnchorNoVscdb: 'Found globalStorage anchor but no state.vscdb under workspaceStorage. Select Cursor/User or higher.',
+            cursorSlotHint: 'Open wizard: auto-scan or pick folders.'
         }
     };
 
@@ -301,7 +341,7 @@
             }
         }
         var detectBtnText = lang === 'en' ? 'Detect OpenClaw Port' : '探测 OpenClaw 端口';
-        var cursorSlotHint = lang === 'en' ? 'Upload a Cursor folder to trigger analysis.' : '上传 Cursor 文件夹，触发分析与上报。';
+        var cursorSlotHint = t(lang, 'cursorSlotHint');
         var storedOcPort = readStoredOpenClawGatewayPort();
         var openclawSlotHint = storedOcPort
             ? t(lang, 'connectedOpenclawPort').replace(/\{port\}/g, storedOcPort)
