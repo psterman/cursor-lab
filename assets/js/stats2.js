@@ -394,7 +394,7 @@
 
     // --- Script Block ---
 
-    // 【强制性初始化拦截】id=force-onboarding-overlay；国家存 localStorage，登录态用 Supabase Session；先选国家再显示 GitHub 按钮；双重满足时静默销毁遮罩，无闪烁
+    // 【门控已移除】国家以 localStorage + 顶栏 / CyberNavigator 为准；保留 runGateCheck 以同步游客态与 currentCountryCode
     (function() {
         var OVERLAY_ID = 'force-onboarding-overlay';
         var GITHUB_SECTION_ID = 'force-onboarding-github-section';
@@ -554,11 +554,17 @@
                 var statsCard = leftBody.querySelector('.drawer-item.dashboard-card.backdrop-blur.clinic-card') || leftBody.querySelector('.drawer-item[data-card="cursor-inactive-placeholder"]');
                 var githubCard = leftBody.querySelector('.drawer-item.github-combat-card');
                 var wordcloudCard = document.getElementById('left-drawer-wordcloud-wrap');
-                var ordered = [identityCard, openclawCard, statsCard, githubCard, wordcloudCard];
-
-                ordered.forEach(function(node) {
-                    if (!node || node.parentNode !== leftBody) return;
-                    leftBody.appendChild(node);
+                var ordered = [identityCard, openclawCard, statsCard, githubCard, wordcloudCard].filter(function (n) {
+                    return n && n.parentNode === leftBody;
+                });
+                if (ordered.length === 0) {
+                    ensureLeftDrawerSourceBadges();
+                    return;
+                }
+                var ref = leftBody.firstChild;
+                ordered.forEach(function (node) {
+                    leftBody.insertBefore(node, ref);
+                    ref = node.nextSibling;
                 });
                 ensureLeftDrawerSourceBadges();
             } catch (e) {
@@ -1086,12 +1092,13 @@
         }
         function runGateCheck() {
             var overlay = document.getElementById(OVERLAY_ID);
-            if (!overlay || overlay.classList.contains('stats2-gate-removed')) return;
+            if (overlay && overlay.classList.contains('stats2-gate-removed')) return;
             var country = getStoredCountry();
+            try { window.__countryPickerForced = false; } catch (e) {}
             // 游客模式：允许不选国家直接进入（默认展示全球数据）
             if (isGuestGatePassed()) {
-                try { window.__countryPickerForced = false; window.__countrySelectorSelectedCode = ''; } catch (e) {}
-                hideGateOverlay();
+                try { window.__countrySelectorSelectedCode = ''; } catch (e) {}
+                if (overlay) hideGateOverlay(); else restoreBodyScroll();
                 // 游客进入：自动展开左右抽屉，并默认切到 GLOBAL（右抽屉显示全球数据页）
                 try {
                     if (!window.__stats2GuestAutoOpened) {
@@ -1102,7 +1109,6 @@
                         if (rightDrawer) rightDrawer.classList.add('active');
                         try { localStorage.setItem('left_drawer_open', 'true'); localStorage.setItem('right_drawer_open', 'true'); } catch (_) {}
                         try { if (typeof switchView === 'function') switchView('global'); } catch (_) {}
-                        // 游客状态也需要加载「高分图谱」人物榜单：确保 topByMetrics 拉取并触发 drawHighScores 渲染
                         setTimeout(function() {
                             try {
                                 var hasTopBy = !!(window.lastData && Array.isArray(window.lastData.topByMetrics) && window.lastData.topByMetrics.length > 0);
@@ -1116,42 +1122,33 @@
                 return;
             }
             var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
-            // 无 Supabase 客户端时仍须走「未登录」门控，否则遮罩永不进入可交互状态，国家列表/地图均不可用
             if (!sb || typeof sb.auth !== 'object') {
                 var sessionOffline = null;
                 if (checkGatePassed(sessionOffline)) return;
-                if (!country) {
-                    window.__countryPickerForced = true;
-                    window.__countrySelectorSelectedCode = '';
-                    showOverlay();
-                    return;
+                if (country) {
+                    try { window.currentCountryCode = country; } catch (e) {}
                 }
-                showOverlay();
+                if (overlay) hideGateOverlay(); else restoreBodyScroll();
                 return;
             }
             sb.auth.getSession().then(function(r) {
                 var session = (r && r.data && r.data.session) ? r.data.session : null;
-                // 已登录 GitHub：不弹出登录/选国家窗口；若已有国家则走确认逻辑，否则直接移除遮罩
                 if (session && session.user) {
                     setGuestGatePassed(false);
                     if (checkGatePassed(session)) return;
-                    hideGateOverlay();
-                    return;
-                }
-                if (!country) {
-                    window.__countryPickerForced = true;
-                    window.__countrySelectorSelectedCode = '';
-                    showOverlay();
+                    if (overlay) hideGateOverlay(); else restoreBodyScroll();
                     return;
                 }
                 if (checkGatePassed(session)) return;
-                showOverlay();
-            }).catch(function() {
-                if (!country) {
-                    window.__countryPickerForced = true;
-                    window.__countrySelectorSelectedCode = '';
-                    showOverlay();
+                if (country) {
+                    try { window.currentCountryCode = country; } catch (e) {}
                 }
+                if (overlay) hideGateOverlay(); else restoreBodyScroll();
+            }).catch(function() {
+                if (country) {
+                    try { window.currentCountryCode = country; } catch (e) {}
+                }
+                if (overlay) hideGateOverlay(); else restoreBodyScroll();
             }).finally(function() {
                 var ov = document.getElementById(OVERLAY_ID);
                 if (ov && ov.parentNode && window.getComputedStyle(ov).display === 'flex') {
@@ -1161,7 +1158,6 @@
         }
         function run() {
             var overlay = document.getElementById(OVERLAY_ID);
-            if (!overlay) return;
             var country = getStoredCountry();
             if (country) {
                 try {
@@ -1169,11 +1165,18 @@
                     localStorage.setItem('user_country_fixed', country);
                 } catch (e) {}
             }
-            window.__countryPickerForced = true;
-            window.__countrySelectorSelectedCode = '';
+            try { window.__countryPickerForced = false; } catch (e) {}
+            try {
+                if (country && /^[A-Z]{2}$/.test(country)) window.__countrySelectorSelectedCode = country;
+                else window.__countrySelectorSelectedCode = '';
+            } catch (e) {}
             var poll = setInterval(function() {
                 var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
-                if (!sb || typeof sb.auth !== 'object') return;
+                if (!sb || typeof sb.auth !== 'object') {
+                    clearInterval(poll);
+                    try { if (typeof runGateCheck === 'function') runGateCheck(); } catch (e0) {}
+                    return;
+                }
                 clearInterval(poll);
                 sb.auth.getSession().then(function(r) {
                     var session = (r && r.data && r.data.session) ? r.data.session : null;
@@ -1192,17 +1195,15 @@
                             if (session) runGateCheck();
                         });
                     }
-                    if (isGuestGatePassed()) {
-                        try { hideGateOverlay(); } catch (e0) {}
-                    } else {
-                        showOverlay();
+                    if (overlay) {
+                        if (isGuestGatePassed()) {
+                            try { hideGateOverlay(); } catch (e0) {}
+                        }
                     }
                 }).catch(function() {
                     runGateCheck();
-                    if (isGuestGatePassed()) {
+                    if (overlay && isGuestGatePassed()) {
                         try { hideGateOverlay(); } catch (e0) {}
-                    } else {
-                        showOverlay();
                     }
                 });
             }, 200);
@@ -12906,7 +12907,7 @@
                     { key: 'total_chars', label: '社畜榜', field: 'total_chars', desc: 'Token 霸权' }
                 ];
 
-                const rankings = {};
+                let rankings = {};
 
                 // 并行获取所有维度的排行榜（增强容错：单个维度失败不影响其他维度）
                 const promises = dimensions.map(async (dim) => {
@@ -16098,9 +16099,9 @@
                         dropdown.appendChild(option);
                     });
 
-                    // 从 localStorage 恢复选择
+                    // 从 localStorage 恢复选择（与 CyberNavigator / 门控键一致）
                     try {
-                        const savedCountry = localStorage.getItem('user_selected_country');
+                        const savedCountry = localStorage.getItem('user_selected_country') || localStorage.getItem('selected_country');
                         if (savedCountry) {
                             dropdown.value = savedCountry;
                             // 显示光标
@@ -16420,6 +16421,10 @@
         
         function initCountrySelectorModal() {
             try {
+                // 无首屏门控时 initCountrySelector 已复用 modal 的 search/list，避免重复绑定
+                if (!document.getElementById('country-search-input')) {
+                    return;
+                }
                 const modal = document.getElementById('country-selector-modal');
                 const closeBtn = document.getElementById('country-selector-close');
                 const searchInput = document.getElementById('country-search-input-modal');
@@ -16468,8 +16473,8 @@ function initCountrySelector() {
             try {
                 const modal = document.getElementById('country-selector-modal');
                 const closeBtn = document.getElementById('country-selector-close');
-                const searchInput = document.getElementById('country-search-input');
-                const listContainer = document.getElementById('country-list-container');
+                const searchInput = document.getElementById('country-search-input') || document.getElementById('country-search-input-modal');
+                const listContainer = document.getElementById('country-list-container') || document.getElementById('country-list-container-modal');
                 const expandBtn = document.getElementById('gate-expand-country-list-btn');
                 const githubSaveBtn = document.getElementById('country-selector-github-save-btn');
                 const guestBtn = document.getElementById('gate-guest-btn');
@@ -16654,10 +16659,10 @@ function initCountrySelector() {
                 } catch (e) {}
                 updateCountrySelectorGitHubButtonState();
                 document.addEventListener('mousedown', function(e) {
-                    if (!listContainer || !searchInput || !expandBtn) return;
+                    if (!listContainer || !searchInput) return;
                     const target = e && e.target ? e.target : null;
                     if (!target) return;
-                    if (target === searchInput || searchInput.contains(target) || listContainer.contains(target) || target === expandBtn || expandBtn.contains(target)) {
+                    if (target === searchInput || searchInput.contains(target) || listContainer.contains(target) || (expandBtn && (target === expandBtn || expandBtn.contains(target)))) {
                         return;
                     }
                     setGateListVisible(false);
@@ -31403,31 +31408,24 @@ document.addEventListener('click', function(e) {
     }
 
     /**
-     * 对 webkitdirectory 返回的 File[]：仅在相对根目录深度 <= maxDepth 内做启发式识别。
-     * Cursor：state.vscdb 或任意 storage.json；state.vscdb 单独收集供上传。
-     * OpenClaw：.jsonl 且前 1KB 含 event_type。
+     * 对 webkitdirectory 返回的 File[]：全树扫描（不限深度）。
+     * Cursor：state.vscdb；storage.json 作为锚点；state.vscdb 单独收集供上传。
+     * OpenClaw：.jsonl 且前 1KB 含 event_type（分批嗅探避免主线程阻塞）。
      */
     async function heuristicScanByDepth(files, maxDepth) {
         maxDepth = maxDepth != null ? maxDepth : 3;
+        return heuristicScanDirectoryFiles(files);
+    }
+    async function heuristicScanDirectoryFiles(files) {
         var arr = Array.isArray(files) ? files : [];
         var cursorStateVscdbFiles = [];
         var openclawJsonlFiles = [];
         var cursorHit = false;
         var openclawHits = 0;
-
-        function dirDepth(rel) {
-            if (!rel) return 0;
-            var parts = String(rel).split(/[/\\]/).filter(Boolean);
-            if (parts.length <= 1) return 0;
-            return parts.length - 1;
-        }
-
         var jsonlCandidates = [];
         for (var i = 0; i < arr.length; i++) {
             var f = arr[i];
             if (!f || !f.name) continue;
-            var rel = f.webkitRelativePath || f.name || '';
-            if (dirDepth(rel) > maxDepth) continue;
             var name = f.name;
             var lc = name.toLowerCase();
             if (name === 'state.vscdb') {
@@ -31441,22 +31439,23 @@ document.addEventListener('click', function(e) {
                 jsonlCandidates.push(f);
             }
         }
-
-        for (var j = 0; j < jsonlCandidates.length; j++) {
-            var jf = jsonlCandidates[j];
-            var relJ = jf.webkitRelativePath || jf.name || '';
-            if (dirDepth(relJ) > maxDepth) continue;
-            try {
-                var slice = jf.slice(0, Math.min(1024, jf.size || 1024));
-                var buf = await slice.arrayBuffer();
-                var text = new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(buf));
-                if (text.indexOf('event_type') !== -1) {
-                    openclawJsonlFiles.push(jf);
-                    openclawHits++;
-                }
-            } catch (e) { /* ignore */ }
+        var BATCH = 8;
+        for (var j = 0; j < jsonlCandidates.length; j += BATCH) {
+            var chunk = jsonlCandidates.slice(j, j + BATCH);
+            await Promise.all(chunk.map(function (jf) {
+                return (async function () {
+                    try {
+                        var sl = jf.slice(0, Math.min(1024, jf.size || 1024));
+                        var buf = await sl.arrayBuffer();
+                        var text = new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(buf));
+                        if (text.indexOf('event_type') !== -1) {
+                            openclawJsonlFiles.push(jf);
+                        }
+                    } catch (e) { /* ignore */ }
+                })();
+            }));
         }
-
+        openclawHits = openclawJsonlFiles.length;
         var mergedFiles = cursorStateVscdbFiles.concat(openclawJsonlFiles);
         return {
             cursorStateVscdbFiles: cursorStateVscdbFiles,
@@ -31466,9 +31465,47 @@ document.addEventListener('click', function(e) {
         };
     }
     try { window.heuristicScanByDepth = heuristicScanByDepth; } catch (_) { }
+    try { window.heuristicScanDirectoryFiles = heuristicScanDirectoryFiles; } catch (_) { }
+
+    function syncStats2CountryFromGuide(code) {
+        var c = String(code || '').trim().toUpperCase();
+        if (!/^[A-Z]{2}$/.test(c)) return;
+        try {
+            localStorage.setItem('selected_country', c);
+            localStorage.setItem('user_selected_country', c);
+            localStorage.setItem('user_country_fixed', c);
+            localStorage.setItem('user_manual_location', c);
+        } catch (e) { /* ignore */ }
+        try {
+            window.currentCountryCode = c;
+            window.__countrySelectorSelectedCode = c;
+        } catch (e2) { /* ignore */ }
+        var dd = document.getElementById('country-select-dropdown');
+        if (dd && dd.querySelector && dd.querySelector('option[value="' + c + '"]')) {
+            try { dd.value = c; } catch (e3) { /* ignore */ }
+        }
+    }
+    try { window.syncStats2CountryFromGuide = syncStats2CountryFromGuide; } catch (_) { }
+
+    function openStats2DrawersForSync() {
+        try {
+            var leftDrawer = document.getElementById('left-drawer');
+            var rightDrawer = document.getElementById('right-drawer');
+            if (leftDrawer) leftDrawer.classList.add('active');
+            if (rightDrawer) rightDrawer.classList.add('active');
+            try {
+                localStorage.setItem('left_drawer_open', 'true');
+                localStorage.setItem('right_drawer_open', 'true');
+            } catch (_) {}
+            if (typeof window.normalizeLeftDrawerCardOrder === 'function') {
+                try { window.normalizeLeftDrawerCardOrder(); } catch (_) {}
+            }
+        } catch (_) {}
+    }
+    try { window.openStats2DrawersForSync = openStats2DrawersForSync; } catch (_) {}
 
     /**
-     * 赛博导航员：四阶段状态机；系统文件对话框期间保持影子模式可见。
+     * 赛博导航员：集成页（国家+条款+路径）→ 复制并唤起文件夹 → 右上影子模式。
      */
     var CyberNavigator = {
         _focusHandler: null,
@@ -31499,6 +31536,7 @@ document.addEventListener('click', function(e) {
             if (!el) return;
             try {
                 el.classList.remove('cyber-guide-overlay--shadow');
+                el.classList.remove('cyber-guide-overlay--out');
             } catch (_) {}
             el.hidden = true;
             el.setAttribute('aria-hidden', 'true');
@@ -31514,24 +31552,85 @@ document.addEventListener('click', function(e) {
             self._flowActive = true;
             var hints = getCursorPathHints();
             var isZh = hints.isZh;
-            var platformOs = detectPlatformForCyber();
             var S = {
                 anchorNoVscdb: isZh ? '已识别锚点，但未找到 state.vscdb，请选择 workspaceStorage 或 Cursor/User 上级目录。' : 'Found anchor but no state.vscdb. Pick workspaceStorage or parent.',
                 scanFail: isZh ? '扫描失败' : 'Scan failed',
-                noSync: isZh ? '未在 3 层内发现可同步文件' : 'No syncable files within 3 levels'
+                noSync: isZh ? '未发现可同步的 state.vscdb 或 OpenClaw .jsonl' : 'No state.vscdb or OpenClaw .jsonl found under selection.',
+                needTerms: isZh ? '请先勾选并同意服务条款。' : 'Please accept the terms first.',
+                needCountry: isZh ? '请选择国家/地区。' : 'Please select a country.',
+                needPath: isZh ? '请填写或粘贴路径。' : 'Please enter or paste a path.'
             };
             var T = {
                 title: isZh ? '赛博导航员' : 'Cyber Navigator',
-                step1: isZh ? '步骤 1：路径准备（点击下方可复制路径到系统文件窗口地址栏）' : 'Step 1: Copy paths for the file dialog address bar.',
-                step2: isZh ? '步骤 2：在即将弹出的窗口顶部，点击地址栏（或按 Alt+D / Cmd+Shift+G）' : 'Step 2: Focus the address bar (Alt+D or Cmd+Shift+G).',
-                next: isZh ? '确认路径并前往下一步' : 'Confirm — next step',
-                openPicker: isZh ? '唤起文件夹窗口' : 'Open folder picker',
+                integrate: isZh ? '选择国家、阅读条款后，复制路径并打开系统文件夹完成注入。' : 'Choose country, review terms, copy path, then pick a folder to inject.',
                 shadowPaste: isZh ? '影子模式：按 Ctrl+V（Mac：Cmd+V）粘贴路径，再按 Enter。' : 'Shadow: Ctrl+V (Cmd+V on Mac), then Enter.',
                 shadowPick: isZh ? '进入目标目录后，点击「选择此文件夹」。' : 'Then click “Select Folder”.',
                 close: isZh ? '关闭' : 'Close',
-                copyBtn: isZh ? '复制路径' : 'Copy',
-                progressScan: isZh ? '正在识别…' : 'Recognizing…'
+                closeAria: isZh ? '关闭引导' : 'Close guide',
+                countryLbl: isZh ? '国家/地区' : 'Country',
+                termsPrefix: isZh ? '我已阅读并同意' : 'I agree to ',
+                termsBook: isZh ? '《条款说明》' : 'Terms',
+                readTerms: isZh ? '阅读全文' : 'Read full text',
+                termsFlyoutTitle: isZh ? '条款说明' : 'Terms',
+                pathLbl: isZh ? '路径（可编辑，已记忆本机）' : 'Path (editable, saved locally)',
+                resetPath: isZh ? '还原默认' : 'Reset default',
+                pathCursor: isZh ? 'Cursor' : 'Cursor',
+                pathOc: isZh ? 'OpenClaw' : 'OpenClaw',
+                primary: isZh ? '复制并选择文件夹' : 'Copy path & select folder',
+                progressScan: isZh ? '正在识别…' : 'Recognizing…',
+                secCountry: isZh ? '国家/地区' : 'Country',
+                secTerms: isZh ? '条款' : 'Terms',
+                secPath: isZh ? '路径' : 'Path'
             };
+
+            function buildCyberGuideTermsScrollHtml() {
+                if (isZh) {
+                    return (
+                        '<p><strong>1. 数据收集与用途</strong></p>' +
+                        '<p>为实现账号识别、国家统计展示、排行榜计算与反作弊能力，系统可能处理以下信息：设备指纹标识、浏览器与终端基础信息、您手动选择的国家/地区、以及您主动授权后用于分析的公开数据。相关信息仅用于本服务功能实现、体验优化与安全风控。</p>' +
+                        '<p><strong>2. 登录与授权说明</strong></p>' +
+                        '<p>当您选择「同意并使用 GitHub 登录」时，即表示您同意在授权范围内读取必要的公开账号信息，用于身份绑定、数据同步与统计展示。您可在后续取消授权或停止使用服务，但历史统计结果可能在合理周期内保留。</p>' +
+                        '<p><strong>3. 结果性质与使用限制</strong></p>' +
+                        '<p>本服务提供的画像、评分、排行榜、词云与相关可视化结果仅用于信息展示与娱乐参考，不构成任何职业、法律、医疗、投资或商业决策建议。请勿将本服务结果作为唯一决策依据。</p>' +
+                        '<p><strong>4. 免责与风险提示</strong></p>' +
+                        '<p>由于网络波动、第三方接口变更、数据源延迟、模型误差或不可抗力因素，服务可能出现中断、延迟、偏差或部分功能不可用。对于因依赖本服务结果造成的直接或间接损失，在法律允许范围内平台不承担责任。</p>' +
+                        '<p><strong>5. 合规与用户义务</strong></p>' +
+                        '<p>您承诺不利用本服务从事违法违规、攻击、刷量、爬虫滥用、数据投毒等行为。若发现异常访问或违规使用，平台有权采取限流、封禁、删除相关记录等处置措施。</p>' +
+                        '<p><strong>6. 条款更新</strong></p>' +
+                        '<p>平台可根据功能升级与合规要求对条款进行更新。更新后继续使用本服务即视为接受更新内容。</p>'
+                    );
+                }
+                return (
+                    '<p><strong>1. Data collection & use</strong></p>' +
+                    '<p>We may process device/browser signals, your selected country/region, and data you authorize for analysis, solely to run this service, improve UX, and protect against abuse.</p>' +
+                    '<p><strong>2. Sign-in</strong></p>' +
+                    '<p>If you use GitHub sign-in, you agree that limited public profile data may be read for identity binding and sync. You may revoke access; historical stats may be retained for a reasonable period.</p>' +
+                    '<p><strong>3. Nature of results</strong></p>' +
+                    '<p>Rankings, scores, and visuals are for information and entertainment only—not professional, legal, medical, or investment advice.</p>' +
+                    '<p><strong>4. Disclaimer</strong></p>' +
+                    '<p>Outages, latency, or model errors may occur. To the extent permitted by law, we are not liable for losses from reliance on this service.</p>' +
+                    '<p><strong>5. Your obligations</strong></p>' +
+                    '<p>You will not abuse, attack, scrape, or poison data. We may rate-limit or block misuse.</p>' +
+                    '<p><strong>6. Updates</strong></p>' +
+                    '<p>Terms may change with features or compliance needs; continued use constitutes acceptance.</p>'
+                );
+            }
+
+            function runCloseOverlayAnimation() {
+                try {
+                    overlay.classList.add('cyber-guide-overlay--out');
+                    var layout = overlay.querySelector('.cyber-guide-layout');
+                    if (layout) layout.classList.add('cyber-guide-layout--out');
+                } catch (_) {}
+                setTimeout(function () {
+                    try { overlay.classList.remove('cyber-guide-overlay--out'); } catch (_) {}
+                    try {
+                        var ly = overlay.querySelector('.cyber-guide-layout');
+                        if (ly) ly.classList.remove('cyber-guide-layout--out');
+                    } catch (_) {}
+                    self.hide();
+                }, 320);
+            }
 
             function esc(s) {
                 return String(s || '')
@@ -31540,9 +31639,10 @@ document.addEventListener('click', function(e) {
                     .replace(/"/g, '&quot;');
             }
 
-            function progressSegs(step) {
+            function progressSegs(step, max) {
+                max = max || 2;
                 var segs = '';
-                for (var si = 1; si <= 4; si++) {
+                for (var si = 1; si <= max; si++) {
                     segs += '<div class="cyber-guide-progress-seg' + (si <= step ? ' on' : '') + '"></div>';
                 }
                 return segs;
@@ -31561,93 +31661,285 @@ document.addEventListener('click', function(e) {
                 return html;
             }
 
-            function bindCopyClicks(root) {
-                if (!root) return;
-                root.addEventListener('click', function (ev) {
-                    var t = ev.target;
-                    if (t && t.getAttribute && t.getAttribute('data-copy-path')) {
-                        var p = t.getAttribute('data-copy-path');
-                        if (p) copyPathToClipboard(p, isZh);
+            function buildCountrySelectHtml() {
+                var dd = document.getElementById('country-select-dropdown');
+                var opts = '';
+                if (dd && dd.options && dd.options.length > 0) {
+                    for (var i = 0; i < dd.options.length; i++) {
+                        var o = dd.options[i];
+                        opts += '<option value="' + esc(o.value) + '">' + esc(o.textContent || '') + '</option>';
                     }
-                });
+                } else {
+                    opts = '<option value="">' + esc(isZh ? '-- 国家 --' : '-- Country --') + '</option>';
+                }
+                return '<select id="cyber-guide-country" class="cyber-guide-country-select" aria-label="' + esc(T.countryLbl) + '">' + opts + '</select>';
             }
 
-            function renderPhase1() {
+            var pathRows = hints.rows && hints.rows.length ? hints.rows : [{ label: '', copy: '' }];
+            var pathIndex = 0;
+            var LS_CYBER_PATH = 'stats2_cyber_guide_path_v1_';
+            var favBase = 'https://www.google.com/s2/favicons?domain=';
+            var icoCursor =
+                '<img class="cyber-guide-tab-ico cyber-guide-tab-favicon" src="' +
+                favBase +
+                'cursor.com&amp;sz=64" alt="" width="18" height="18" loading="lazy" decoding="async" referrerpolicy="no-referrer" />';
+            var icoOpenclaw =
+                '<img class="cyber-guide-tab-ico cyber-guide-tab-favicon" src="' +
+                favBase +
+                'openclaw.ai&amp;sz=64" alt="" width="18" height="18" loading="lazy" decoding="async" referrerpolicy="no-referrer" />';
+
+            function getCyberPathStorageKey(idx) {
+                return LS_CYBER_PATH + String(idx);
+            }
+            function getStoredCyberPath(idx, defaultCopy) {
+                try {
+                    var k = getCyberPathStorageKey(idx);
+                    if (localStorage.getItem(k) != null) return localStorage.getItem(k);
+                } catch (_) {}
+                return defaultCopy != null ? defaultCopy : '';
+            }
+            function setStoredCyberPath(idx, val) {
+                try {
+                    var row = pathRows[idx] || pathRows[0];
+                    var def = row && row.copy ? row.copy : '';
+                    var k = getCyberPathStorageKey(idx);
+                    if (String(val || '').trim() === String(def || '').trim()) {
+                        localStorage.removeItem(k);
+                    } else {
+                        localStorage.setItem(k, String(val || ''));
+                    }
+                } catch (_) {}
+            }
+
+            function renderIntegratedPanel() {
                 overlay.classList.remove('cyber-guide-overlay--shadow');
-                var rowsHtml = (hints.rows || []).map(function (r) {
-                    return (
-                        '<div class="cyber-guide-path-row">' +
-                        '<p class="cyber-guide-path-row-label">' + esc(r.label) + '</p>' +
-                        '<button type="button" class="cyber-guide-btn-copy smart-sync-copy-btn" data-copy-path="' + esc(r.copy) + '">' + esc(T.copyBtn) + '</button>' +
-                        '</div>'
-                    );
-                }).join('');
+                if (pathIndex >= pathRows.length) pathIndex = 0;
+                var row = pathRows[pathIndex] || pathRows[0];
+                var defaultPath = row && row.copy ? row.copy : '';
+                var pathVal = getStoredCyberPath(pathIndex, defaultPath);
+                var pathTabsHtml = '';
+                if (pathRows.length > 1) {
+                    pathTabsHtml =
+                        '<div class="cyber-guide-path-source">' +
+                        '<button type="button" class="cyber-guide-tab' + (pathIndex === 0 ? ' on' : '') + '" data-path-tab="0">' +
+                        '<span class="cyber-guide-tab-inner">' + icoCursor + '<span>' + esc(T.pathCursor) + '</span></span></button>' +
+                        '<button type="button" class="cyber-guide-tab' + (pathIndex === 1 ? ' on' : '') + '" data-path-tab="1">' +
+                        '<span class="cyber-guide-tab-inner">' + icoOpenclaw + '<span>' + esc(T.pathOc) + '</span></span></button>' +
+                        '</div>';
+                }
                 overlay.hidden = false;
                 overlay.setAttribute('aria-hidden', 'false');
                 overlay.style.display = 'flex';
                 overlay.innerHTML =
-                    '<div class="cyber-guide-panel" role="dialog" aria-modal="true" aria-labelledby="cyber-guide-title">' +
-                    '<div class="cyber-guide-head">' +
+                    '<div class="cyber-guide-layout">' +
+                    '<div class="cyber-guide-panel cyber-guide-panel--integrate" role="dialog" aria-modal="true" aria-labelledby="cyber-guide-title">' +
+                    '<div class="cyber-guide-panel-header">' +
+                    '<div class="cyber-guide-head-block">' +
                     '<div class="cyber-guide-title" id="cyber-guide-title">' + esc(T.title) + '</div>' +
-                    '<div class="cyber-guide-step-label">' + esc(isZh ? '步骤 1 / 4' : 'Step 1 / 4') + '</div>' +
+                    '<div class="cyber-guide-step-label">' + esc(isZh ? '集成' : 'Setup') + '</div>' +
                     '</div>' +
-                    '<div class="cyber-guide-progress">' + progressSegs(1) + '</div>' +
-                    '<p class="cyber-guide-body">' + esc(T.step1) + '</p>' +
-                    '<div class="cyber-guide-path-list">' + rowsHtml + '</div>' +
+                    '<button type="button" class="cyber-guide-close-x" id="cyber-guide-close-x" aria-label="' + esc(T.closeAria) + '">×</button>' +
+                    '</div>' +
+                    '<div class="cyber-guide-progress">' + progressSegs(1, 2) + '</div>' +
+                    '<p class="cyber-guide-body cyber-guide-body-dim cyber-guide-lead">' + esc(T.integrate) + '</p>' +
+                    '<div class="cyber-guide-integrate-card">' +
+                    '<section class="cyber-guide-section" aria-labelledby="cyber-guide-sec-country">' +
+                    '<div class="cyber-guide-section-head" id="cyber-guide-sec-country">' +
+                    '<span class="cyber-guide-section-num" aria-hidden="true">01</span>' +
+                    '<span class="cyber-guide-section-title">' +
+                    esc(T.secCountry) +
+                    '</span></div>' +
+                    '<div class="cyber-guide-field cyber-guide-field--tight">' +
+                    buildCountrySelectHtml() +
+                    '</div></section>' +
+                    '<section class="cyber-guide-section" aria-labelledby="cyber-guide-sec-terms">' +
+                    '<div class="cyber-guide-section-head" id="cyber-guide-sec-terms">' +
+                    '<span class="cyber-guide-section-num" aria-hidden="true">02</span>' +
+                    '<span class="cyber-guide-section-title">' +
+                    esc(T.secTerms) +
+                    '</span></div>' +
+                    '<div class="cyber-guide-terms-block">' +
+                    '<div class="cyber-guide-terms-row-wrap">' +
+                    '<label class="cyber-guide-terms-row">' +
+                    '<input type="checkbox" id="cyber-guide-terms" class="cyber-guide-terms-checkbox" />' +
+                    '<span class="cyber-guide-terms-line">' +
+                    esc(T.termsPrefix) +
+                    '<span class="cyber-guide-terms-book">' +
+                    esc(T.termsBook) +
+                    '</span></span>' +
+                    '</label>' +
+                    '<button type="button" class="cyber-guide-read-terms" id="cyber-guide-read-terms">' +
+                    esc(T.readTerms) +
+                    '</button>' +
+                    '</div></div></section>' +
+                    '<section class="cyber-guide-section" aria-labelledby="cyber-guide-sec-path">' +
+                    '<div class="cyber-guide-section-head" id="cyber-guide-sec-path">' +
+                    '<span class="cyber-guide-section-num" aria-hidden="true">03</span>' +
+                    '<span class="cyber-guide-section-title">' +
+                    esc(T.secPath) +
+                    '</span></div>' +
+                    pathTabsHtml +
+                    '<label class="cyber-guide-field cyber-guide-field--tight">' +
+                    '<span class="cyber-guide-field-label">' +
+                    esc(T.pathLbl) +
+                    '</span>' +
+                    '<div class="cyber-guide-path-input-row">' +
+                    '<input type="text" id="cyber-guide-path-display" class="cyber-guide-path-input" autocomplete="off" spellcheck="false" value="' +
+                    esc(pathVal) +
+                    '" />' +
+                    '<button type="button" class="cyber-guide-path-reset" id="cyber-guide-path-reset">' +
+                    esc(T.resetPath) +
+                    '</button>' +
+                    '</div></label>' +
+                    '<div class="cyber-guide-path-hint" role="note">' +
+                    esc(row && row.label ? row.label : '') +
+                    '</div></section>' +
+                    '</div>' +
                     '<div class="cyber-guide-actions" id="cyber-guide-actions"></div>' +
+                    '</div>' +
+                    '<aside id="cyber-guide-terms-flyout" class="cyber-guide-terms-flyout" aria-hidden="true" hidden>' +
+                    '<div class="cyber-guide-terms-flyout-top">' +
+                    '<span class="cyber-guide-terms-flyout-title">' + esc(T.termsFlyoutTitle) + '</span>' +
+                    '<button type="button" class="cyber-guide-terms-flyout-x" id="cyber-guide-terms-flyout-x" aria-label="' + esc(isZh ? '收起' : 'Collapse') + '">×</button>' +
+                    '</div>' +
+                    '<div class="cyber-guide-terms-scroll cyber-guide-terms-flyout-body">' + buildCyberGuideTermsScrollHtml() + '</div>' +
+                    '</aside>' +
                     '</div>';
-                bindCopyClicks(overlay);
-                var actions = overlay.querySelector('#cyber-guide-actions');
-                if (!actions) return;
-                var bNext = document.createElement('button');
-                bNext.type = 'button';
-                bNext.className = 'cyber-guide-btn-primary';
-                bNext.textContent = T.next;
-                bNext.addEventListener('click', function () {
-                    renderPhase2();
-                });
-                actions.appendChild(bNext);
-                var bClose = document.createElement('button');
-                bClose.type = 'button';
-                bClose.className = 'cyber-guide-btn-secondary';
-                bClose.textContent = T.close;
-                bClose.addEventListener('click', function () {
-                    self.hide();
-                });
-                actions.appendChild(bClose);
-            }
 
-            function renderPhase2() {
-                overlay.classList.remove('cyber-guide-overlay--shadow');
-                overlay.innerHTML =
-                    '<div class="cyber-guide-panel" role="dialog" aria-modal="true" aria-labelledby="cyber-guide-title">' +
-                    '<div class="cyber-guide-head">' +
-                    '<div class="cyber-guide-title" id="cyber-guide-title">' + esc(T.title) + '</div>' +
-                    '<div class="cyber-guide-step-label">' + esc(isZh ? '步骤 2 / 4' : 'Step 2 / 4') + '</div>' +
-                    '</div>' +
-                    '<div class="cyber-guide-progress">' + progressSegs(2) + '</div>' +
-                    '<p class="cyber-guide-body">' + esc(T.step2) + '</p>' +
-                    '<p class="cyber-guide-body cyber-guide-body-dim">' + esc(isZh ? '点击下方按钮将打开系统文件夹窗口；导航员将缩小为右下角影子模式。' : 'The navigator shrinks to shadow mode while the dialog is open.') + '</p>' +
-                    '<div class="cyber-guide-actions" id="cyber-guide-actions"></div>' +
-                    '</div>';
+                var sel = overlay.querySelector('#cyber-guide-country');
+                if (sel) {
+                    try {
+                        var sc = '';
+                        try {
+                            sc = (localStorage.getItem('selected_country') || localStorage.getItem('user_selected_country') || '').trim().toUpperCase();
+                        } catch (_) {}
+                        if (sc && /^[A-Z]{2}$/.test(sc)) sel.value = sc;
+                    } catch (_) {}
+                    sel.addEventListener('change', function () {
+                        var v = (sel.value || '').trim().toUpperCase();
+                        if (/^[A-Z]{2}$/.test(v)) syncStats2CountryFromGuide(v);
+                    });
+                }
+
+                overlay.querySelectorAll('[data-path-tab]').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        pathIndex = parseInt(btn.getAttribute('data-path-tab'), 10) || 0;
+                        if (pathIndex < 0 || pathIndex >= pathRows.length) pathIndex = 0;
+                        renderIntegratedPanel();
+                    });
+                });
+
+                var pathInput = document.getElementById('cyber-guide-path-display');
+                var pathReset = document.getElementById('cyber-guide-path-reset');
+                function persistCurrentPathFromInput() {
+                    if (!pathInput) return;
+                    setStoredCyberPath(pathIndex, pathInput.value);
+                }
+                if (pathInput) {
+                    pathInput.addEventListener('change', persistCurrentPathFromInput);
+                    pathInput.addEventListener('blur', persistCurrentPathFromInput);
+                }
+                if (pathReset) {
+                    pathReset.addEventListener('click', function () {
+                        var r = pathRows[pathIndex] || pathRows[0];
+                        var def = r && r.copy ? r.copy : '';
+                        if (pathInput) pathInput.value = def;
+                        setStoredCyberPath(pathIndex, def);
+                    });
+                }
+
                 var actions = overlay.querySelector('#cyber-guide-actions');
                 if (!actions) return;
-                var bOpen = document.createElement('button');
-                bOpen.type = 'button';
-                bOpen.className = 'cyber-guide-btn-primary';
-                bOpen.textContent = T.openPicker;
-                bOpen.addEventListener('click', function () {
+                var bPrimary = document.createElement('button');
+                bPrimary.type = 'button';
+                bPrimary.className = 'cyber-guide-btn-primary';
+                bPrimary.id = 'cyber-guide-primary-btn';
+                bPrimary.textContent = T.primary;
+                bPrimary.addEventListener('click', function () {
+                    var termsEl = document.getElementById('cyber-guide-terms');
+                    if (!termsEl || !termsEl.checked) {
+                        showSmartSyncToastLine(S.needTerms);
+                        return;
+                    }
+                    var selEl = document.getElementById('cyber-guide-country');
+                    var code = selEl ? String(selEl.value || '').trim().toUpperCase() : '';
+                    if (!/^[A-Z]{2}$/.test(code)) {
+                        showSmartSyncToastLine(S.needCountry);
+                        return;
+                    }
+                    syncStats2CountryFromGuide(code);
+                    try { localStorage.setItem('stats2_terms_accepted', '1'); } catch (_) {}
+                    var pathInputEl = document.getElementById('cyber-guide-path-display');
+                    persistCurrentPathFromInput();
+                    var p = pathInputEl ? String(pathInputEl.value || '').trim() : '';
+                    if (!p) {
+                        showSmartSyncToastLine(S.needPath);
+                        return;
+                    }
+                    copyPathToClipboard(p, isZh);
                     openPickerAndShadow();
                 });
-                actions.appendChild(bOpen);
-                var bBack = document.createElement('button');
-                bBack.type = 'button';
-                bBack.className = 'cyber-guide-btn-secondary';
-                bBack.textContent = isZh ? '上一步' : 'Back';
-                bBack.addEventListener('click', function () {
-                    renderPhase1();
+                actions.appendChild(bPrimary);
+                var bClose = document.createElement('button');
+                bClose.type = 'button';
+                bClose.className = 'cyber-guide-btn-secondary cyber-guide-btn-close-bottom';
+                bClose.textContent = T.close;
+                bClose.addEventListener('click', function () {
+                    runCloseOverlayAnimation();
                 });
-                actions.appendChild(bBack);
+                actions.appendChild(bClose);
+
+                var flyout = document.getElementById('cyber-guide-terms-flyout');
+                function setTermsFlyout(open) {
+                    if (!flyout) return;
+                    if (open) {
+                        flyout.hidden = false;
+                        flyout.setAttribute('aria-hidden', 'false');
+                        flyout.classList.add('cyber-guide-terms-flyout--open');
+                    } else {
+                        flyout.classList.remove('cyber-guide-terms-flyout--open');
+                        flyout.setAttribute('aria-hidden', 'true');
+                        flyout.hidden = true;
+                    }
+                }
+                var readBtn = document.getElementById('cyber-guide-read-terms');
+                if (readBtn) {
+                    readBtn.addEventListener('click', function (e) {
+                        e.preventDefault();
+                        if (flyout && flyout.classList.contains('cyber-guide-terms-flyout--open')) setTermsFlyout(false);
+                        else setTermsFlyout(true);
+                    });
+                }
+                var flyoutX = document.getElementById('cyber-guide-terms-flyout-x');
+                if (flyoutX) {
+                    flyoutX.addEventListener('click', function (e) {
+                        e.preventDefault();
+                        setTermsFlyout(false);
+                    });
+                }
+                var closeX = document.getElementById('cyber-guide-close-x');
+                if (closeX) {
+                    closeX.addEventListener('click', function (e) {
+                        e.preventDefault();
+                        runCloseOverlayAnimation();
+                    });
+                }
+
+                var termsCk = document.getElementById('cyber-guide-terms');
+                function syncPrimaryDisabled() {
+                    var ok = termsCk && termsCk.checked;
+                    var selEl = document.getElementById('cyber-guide-country');
+                    var code = selEl ? String(selEl.value || '').trim().toUpperCase() : '';
+                    var countryOk = /^[A-Z]{2}$/.test(code);
+                    bPrimary.disabled = !(ok && countryOk);
+                    bPrimary.style.opacity = ok && countryOk ? '1' : '0.55';
+                }
+                if (termsCk) termsCk.addEventListener('change', syncPrimaryDisabled);
+                if (sel) sel.addEventListener('change', syncPrimaryDisabled);
+                try {
+                    if (termsCk && localStorage.getItem('stats2_terms_accepted') === '1') termsCk.checked = true;
+                } catch (_) {}
+                syncPrimaryDisabled();
             }
 
             function renderShadowPhase34() {
@@ -31659,9 +31951,9 @@ document.addEventListener('click', function(e) {
                     '<div class="cyber-guide-panel cyber-guide-panel--shadow" role="dialog" aria-modal="true">' +
                     '<div class="cyber-guide-head">' +
                     '<div class="cyber-guide-title">' + esc(T.title) + '</div>' +
-                    '<div class="cyber-guide-step-label">' + esc(isZh ? '步骤 3–4 / 4（影子模式）' : 'Steps 3–4 / 4 (shadow)') + '</div>' +
+                    '<div class="cyber-guide-step-label">' + esc(isZh ? '影子模式' : 'Shadow') + '</div>' +
                     '</div>' +
-                    '<div class="cyber-guide-progress">' + progressSegs(4) + '</div>' +
+                    '<div class="cyber-guide-progress">' + progressSegs(2, 2) + '</div>' +
                     '<p class="cyber-guide-body cyber-guide-shadow-pulse">' + esc(T.shadowPaste) + '</p>' +
                     '<p class="cyber-guide-body">' + esc(T.shadowPick) + '</p>' +
                     '</div>';
@@ -31692,6 +31984,9 @@ document.addEventListener('click', function(e) {
                     self._activeInput = null;
                     var files = Array.from(inp.files || []);
                     if (!files.length) return;
+                    try {
+                        if (files.length && typeof openStats2DrawersForSync === 'function') openStats2DrawersForSync();
+                    } catch (_) {}
                     overlay.classList.remove('cyber-guide-overlay--shadow');
                     overlay.innerHTML =
                         '<div class="cyber-guide-panel" role="dialog" aria-modal="true">' +
@@ -31707,9 +32002,9 @@ document.addEventListener('click', function(e) {
 
                     var r;
                     try {
-                        r = await heuristicScanByDepth(files, 3);
+                        r = await heuristicScanDirectoryFiles(files);
                     } catch (err) {
-                        console.error('[CyberNavigator] heuristicScanByDepth', err);
+                        console.error('[CyberNavigator] heuristicScanDirectoryFiles', err);
                         showSmartSyncToastLine(S.scanFail);
                         self.hide();
                         return;
@@ -31717,11 +32012,6 @@ document.addEventListener('click', function(e) {
                     var hasVscdb = r.cursorStateVscdbFiles && r.cursorStateVscdbFiles.length > 0;
                     var hasJsonl = r.openclawJsonlFiles && r.openclawJsonlFiles.length > 0;
                     var recogEl = document.getElementById('cyber-guide-recog');
-                    function setRecog(curSt, ocSt) {
-                        if (recogEl) {
-                            recogEl.innerHTML = renderRecogLines(hasVscdb, hasJsonl, curSt, ocSt);
-                        }
-                    }
                     if (!r.mergedFiles || !r.mergedFiles.length) {
                         if (r.hits && r.hits.cursorHit && !hasVscdb) {
                             showSmartSyncToastLine(S.anchorNoVscdb);
@@ -31771,7 +32061,7 @@ document.addEventListener('click', function(e) {
                             try {
                                 overlay.classList.remove('cyber-guide-overlay--shadow');
                             } catch (_) {}
-                            renderPhase1();
+                            renderIntegratedPanel();
                         }
                     }, 380);
                 };
@@ -31782,7 +32072,7 @@ document.addEventListener('click', function(e) {
                 inp.click();
             }
 
-            renderPhase1();
+            renderIntegratedPanel();
         }
     };
     try {
@@ -31810,7 +32100,7 @@ document.addEventListener('click', function(e) {
             if (hasCursorHit && !hasVscdb) {
                 showSmartSyncToastLine(isZh ? '已识别 storage.json 锚点，但未找到 state.vscdb，请扩大选择范围。' : 'Found storage.json anchor but no state.vscdb.');
             } else {
-                showSmartSyncToastLine(isZh ? '未在 3 层内发现 state.vscdb 或 OpenClaw .jsonl' : 'No state.vscdb or OpenClaw .jsonl within 3 levels.');
+                showSmartSyncToastLine(isZh ? '未在所选目录树中发现 state.vscdb 或 OpenClaw .jsonl' : 'No state.vscdb or OpenClaw .jsonl under the selected tree.');
             }
             setLpdefCardsSyncScanning(false);
             if (btn) btn.disabled = false;
@@ -31834,64 +32124,119 @@ document.addEventListener('click', function(e) {
             }
 
             var settled = [];
-            if (hasVscdb) {
-                if (onGuideProgress) onGuideProgress('cursor', 'pending');
-                setText('cursor-slot1-status', isZh ? '同步 Cursor…' : 'Syncing Cursor…');
-                try {
-                    await mod.processFiles(cursorFiles, 'folder', {
+            if (dual) {
+                if (onGuideProgress) {
+                    onGuideProgress('cursor', 'pending');
+                    onGuideProgress('openclaw', 'pending');
+                }
+                setText('cursor-slot1-status', isZh ? '并发同步 Cursor 与 OpenClaw…' : 'Syncing Cursor & OpenClaw…');
+                var results = await Promise.allSettled([
+                    mod.processFiles(cursorFiles, 'folder', {
                         analysisMode: 'full',
                         sourceEngine: 'cursor',
                         syncMode: cursorSync ? 'update' : undefined,
                         onStatus: function (text) {
-                            if (text != null) setText('cursor-slot1-status', 'Cursor: ' + text);
+                            if (text != null && typeof console !== 'undefined' && console.debug) console.debug('[SmartSync] Cursor:', text);
                         },
                         onLog: function () { },
                         onProgress: function () { },
                         onError: function (err) {
                             console.error('[SmartSync] cursor onError:', err);
                         },
-                        onComplete: function () {
-                            setText('cursor-slot1-status', isZh ? 'Cursor 上传完成，正在刷新…' : 'Cursor done…');
-                        }
-                    });
-                    settled.push({ status: 'fulfilled', value: 'cursor' });
-                    if (onGuideProgress) onGuideProgress('cursor', 'done');
-                    try {
-                        localStorage.setItem('last_cursor_sync', new Date().toISOString());
-                    } catch (_) {}
-                } catch (e) {
-                    settled.push({ status: 'rejected', reason: e });
-                    if (onGuideProgress) onGuideProgress('cursor', 'error');
-                }
-            }
-            if (hasJsonl) {
-                if (onGuideProgress) onGuideProgress('openclaw', 'pending');
-                setText('cursor-slot1-status', isZh ? '同步 OpenClaw…' : 'Syncing OpenClaw…');
-                try {
-                    await mod.processFiles(openclawFiles, 'folder', {
+                        onComplete: function () { }
+                    }),
+                    mod.processFiles(openclawFiles, 'folder', {
                         analysisMode: 'full',
                         sourceEngine: 'openclaw',
                         syncMode: ocSync ? 'update' : undefined,
                         onStatus: function (text) {
-                            if (text != null) setText('cursor-slot1-status', 'OpenClaw: ' + text);
+                            if (text != null && typeof console !== 'undefined' && console.debug) console.debug('[SmartSync] OpenClaw:', text);
                         },
                         onLog: function () { },
                         onProgress: function () { },
                         onError: function (err) {
                             console.error('[SmartSync] openclaw onError:', err);
                         },
-                        onComplete: function () {
-                            setText('cursor-slot1-status', isZh ? 'OpenClaw 上传完成…' : 'OpenClaw done…');
-                        }
-                    });
+                        onComplete: function () { }
+                    })
+                ]);
+                if (results[0].status === 'fulfilled') {
+                    settled.push({ status: 'fulfilled', value: 'cursor' });
+                    if (onGuideProgress) onGuideProgress('cursor', 'done');
+                    try { localStorage.setItem('last_cursor_sync', new Date().toISOString()); } catch (_) {}
+                } else {
+                    settled.push({ status: 'rejected', reason: results[0].reason });
+                    if (onGuideProgress) onGuideProgress('cursor', 'error');
+                }
+                if (results[1].status === 'fulfilled') {
                     settled.push({ status: 'fulfilled', value: 'openclaw' });
                     if (onGuideProgress) onGuideProgress('openclaw', 'done');
-                    try {
-                        localStorage.setItem('last_openclaw_sync', new Date().toISOString());
-                    } catch (_) {}
-                } catch (e2) {
-                    settled.push({ status: 'rejected', reason: e2 });
+                    try { localStorage.setItem('last_openclaw_sync', new Date().toISOString()); } catch (_) {}
+                } else {
+                    settled.push({ status: 'rejected', reason: results[1].reason });
                     if (onGuideProgress) onGuideProgress('openclaw', 'error');
+                }
+                setText('cursor-slot1-status', isZh ? '双源处理完成，正在刷新…' : 'Dual sync finished…');
+            } else {
+                if (hasVscdb) {
+                    if (onGuideProgress) onGuideProgress('cursor', 'pending');
+                    setText('cursor-slot1-status', isZh ? '同步 Cursor…' : 'Syncing Cursor…');
+                    try {
+                        await mod.processFiles(cursorFiles, 'folder', {
+                            analysisMode: 'full',
+                            sourceEngine: 'cursor',
+                            syncMode: cursorSync ? 'update' : undefined,
+                            onStatus: function (text) {
+                                if (text != null) setText('cursor-slot1-status', 'Cursor: ' + text);
+                            },
+                            onLog: function () { },
+                            onProgress: function () { },
+                            onError: function (err) {
+                                console.error('[SmartSync] cursor onError:', err);
+                            },
+                            onComplete: function () {
+                                setText('cursor-slot1-status', isZh ? 'Cursor 上传完成，正在刷新…' : 'Cursor done…');
+                            }
+                        });
+                        settled.push({ status: 'fulfilled', value: 'cursor' });
+                        if (onGuideProgress) onGuideProgress('cursor', 'done');
+                        try {
+                            localStorage.setItem('last_cursor_sync', new Date().toISOString());
+                        } catch (_) {}
+                    } catch (e) {
+                        settled.push({ status: 'rejected', reason: e });
+                        if (onGuideProgress) onGuideProgress('cursor', 'error');
+                    }
+                }
+                if (hasJsonl) {
+                    if (onGuideProgress) onGuideProgress('openclaw', 'pending');
+                    setText('cursor-slot1-status', isZh ? '同步 OpenClaw…' : 'Syncing OpenClaw…');
+                    try {
+                        await mod.processFiles(openclawFiles, 'folder', {
+                            analysisMode: 'full',
+                            sourceEngine: 'openclaw',
+                            syncMode: ocSync ? 'update' : undefined,
+                            onStatus: function (text) {
+                                if (text != null) setText('cursor-slot1-status', 'OpenClaw: ' + text);
+                            },
+                            onLog: function () { },
+                            onProgress: function () { },
+                            onError: function (err) {
+                                console.error('[SmartSync] openclaw onError:', err);
+                            },
+                            onComplete: function () {
+                                setText('cursor-slot1-status', isZh ? 'OpenClaw 上传完成…' : 'OpenClaw done…');
+                            }
+                        });
+                        settled.push({ status: 'fulfilled', value: 'openclaw' });
+                        if (onGuideProgress) onGuideProgress('openclaw', 'done');
+                        try {
+                            localStorage.setItem('last_openclaw_sync', new Date().toISOString());
+                        } catch (_) {}
+                    } catch (e2) {
+                        settled.push({ status: 'rejected', reason: e2 });
+                        if (onGuideProgress) onGuideProgress('openclaw', 'error');
+                    }
                 }
             }
 
@@ -31912,6 +32257,9 @@ document.addEventListener('click', function(e) {
             window.__smartSyncToastBatchCollected = {};
             setLpdefCardsSyncScanning(false);
             if (btn) btn.disabled = false;
+            try {
+                if (typeof window.normalizeLeftDrawerCardOrder === 'function') window.normalizeLeftDrawerCardOrder();
+            } catch (_) {}
         }
     }
     try {

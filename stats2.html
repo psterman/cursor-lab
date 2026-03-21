@@ -53,42 +53,7 @@
     <link rel="stylesheet" href="assets/css/stats2.css">
 </head>
 <body class="p-4 md:p-8">
-    <!-- 强制性全屏遮罩：身份设置弹窗，选国家 + 隐私申明 + 同意/拒绝按钮均在弹窗内 -->
-    <div id="force-onboarding-overlay" class="stats2-gate-overlay" aria-hidden="false" style="display: flex;">
-        <div class="stats2-gate-overlay-inner">
-            <h3 class="stats2-gate-title">身份设置</h3>
-            <input type="text" id="country-search-input" placeholder="选择国家" class="stats2-gate-search" />
-            <div id="country-list-container" class="stats2-gate-list" hidden></div>
-            <button type="button" id="gate-expand-country-list-btn" class="stats2-gate-expand-btn">所有国家</button>
-            <div id="force-onboarding-github-section" class="stats2-gate-github-section">
-                <div class="stats2-gate-privacy-block">
-                    <p class="stats2-gate-privacy-intro">使用服务即表示您已阅读并同意以下《数据说明、服务条款与免责说明》：</p>
-                    <div class="stats2-gate-terms-scroll" role="region" aria-label="服务条款与免责说明">
-                        <p><strong>1. 数据收集与用途</strong></p>
-                        <p>为实现账号识别、国家统计展示、排行榜计算与反作弊能力，系统可能处理以下信息：设备指纹标识、浏览器与终端基础信息、您手动选择的国家/地区、以及您主动授权后用于分析的公开数据。相关信息仅用于本服务功能实现、体验优化与安全风控。</p>
-                        <p><strong>2. 登录与授权说明</strong></p>
-                        <p>当您选择“同意并使用 GitHub 登录”时，即表示您同意在授权范围内读取必要的公开账号信息，用于身份绑定、数据同步与统计展示。您可在后续取消授权或停止使用服务，但历史统计结果可能在合理周期内保留。</p>
-                        <p><strong>3. 结果性质与使用限制</strong></p>
-                        <p>本服务提供的画像、评分、排行榜、词云与相关可视化结果仅用于信息展示与娱乐参考，不构成任何职业、法律、医疗、投资或商业决策建议。请勿将本服务结果作为唯一决策依据。</p>
-                        <p><strong>4. 免责与风险提示</strong></p>
-                        <p>由于网络波动、第三方接口变更、数据源延迟、模型误差或不可抗力因素，服务可能出现中断、延迟、偏差或部分功能不可用。对于因依赖本服务结果造成的直接或间接损失，在法律允许范围内平台不承担责任。</p>
-                        <p><strong>5. 合规与用户义务</strong></p>
-                        <p>您承诺不利用本服务从事违法违规、攻击、刷量、爬虫滥用、数据投毒等行为。若发现异常访问或违规使用，平台有权采取限流、封禁、删除相关记录等处置措施。</p>
-                        <p><strong>6. 条款更新</strong></p>
-                        <p>平台可根据功能升级与合规要求对条款进行更新。更新后继续使用本服务即视为接受更新内容。</p>
-                    </div>
-                </div>
-                <div class="stats2-gate-buttons-row">
-                    <button type="button" id="gate-guest-btn" class="stats2-gate-guest-btn">游客</button>
-                </div>
-                <div class="stats2-gate-secondary-row">
-                    <button type="button" id="country-selector-github-save-btn" disabled class="stats2-gate-github-btn">同意并使用 GitHub 登录</button>
-                    <button type="button" id="gate-reject-btn" class="stats2-gate-reject-btn">拒绝并退出</button>
-                </div>
-                <p class="stats2-gate-guest-hint">游客模式可直接查看公开统计页，稍后仍可用 GitHub 登录认领和同步个人数据。</p>
-            </div>
-        </div>
-    </div>
+    <!-- 身份/条款/国家选择已迁移至 CyberNavigator（文件夹同步入口）与顶栏国家下拉 -->
     <!-- 顶部固定 Header -->
     <div class="top-header">
         <div class="top-header-left">
