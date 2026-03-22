@@ -8,6 +8,29 @@
 (function () {
     'use strict';
 
+    /** 登出/身份失效时统一清理，避免 setTimeout 与 DOM「自愈」重入 */
+    var _githubCardTimers = [];
+    function registerGithubCardTimer(id) {
+        if (id != null) _githubCardTimers.push(id);
+    }
+    window.clearGithubCardTimers = function () {
+        _githubCardTimers.forEach(function (id) {
+            try { clearTimeout(id); } catch (e) {}
+        });
+        _githubCardTimers = [];
+    };
+    window.clearGithubCardUI = function () {
+        try {
+            if (typeof window.clearGithubCardTimers === 'function') window.clearGithubCardTimers();
+        } catch (e) {}
+        try {
+            var combat = document.querySelectorAll('.github-combat-card');
+            for (var i = 0; i < combat.length; i++) combat[i].remove();
+            var identityCard = document.querySelector('.drawer-item[data-card="identity-config"]');
+            if (identityCard) identityCard.remove();
+        } catch (e2) {}
+    };
+
     var TERMINAL_GREEN = '#00ff41';
     var TERMINAL_GREEN_RGBA = 'rgba(0, 255, 65, 0.3)';
     var TERMINAL_GREEN_GLOW = 'rgba(0, 255, 65, 0.15)';
@@ -355,7 +378,7 @@
         var statusSprint = currentStatus === 'sprint';
         var loginSection = !isLoggedIn ? '<div class="drawer-item-label mb-2">' + esc(t(lang, 'githubLogin')) + '</div><button type="button" data-action="github-login" class="w-full px-4 py-3 bg-[#24292e] hover:bg-[#2f363d] border border-[#444d56] rounded-md text-white text-sm font-semibold flex items-center justify-center gap-2 transition-all duration-200"><svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clip-rule="evenodd"></path></svg><span>' + esc(t(lang, 'useGitHubLogin')) + '</span></button><div class="text-[8px] text-[#00ff41]/40 mt-2 text-center">' + esc(t(lang, 'loginSecurityNote')) + '</div>' : '';
         return [
-            '<div class="github-combat-identity border-b border-[#00ff41]/20 pb-3 mb-3">',
+            '<div id="user-identity-card" class="github-combat-identity border-b border-[#00ff41]/20 pb-3 mb-3">',
             '<div class="flex items-center justify-between mb-2">',
             '<span class="text-xl filter drop-shadow-[0_0_5px_rgba(0,255,65,0.5)]">🕶️</span>',
             '<span class="text-[8px] leading-none text-[#00ff41] border border-[#00ff41]/40 px-1 py-0.5 tracking-widest uppercase bg-[#00ff41]/5">' + esc(t(lang, 'configBadge')) + '</span>',
@@ -728,7 +751,7 @@
                     }
                 });
                 observer.observe(document.body, { childList: true, subtree: true });
-                setTimeout(function () { observer.disconnect(); }, 5000);
+                registerGithubCardTimer(setTimeout(function () { observer.disconnect(); }, 5000));
             }
             if (typeof console !== 'undefined' && console.warn) console.warn('[GitHubCard] No container, will retry when available');
             return null;
@@ -892,9 +915,9 @@
         var delayStep = 40;
         valueEls.forEach(function (el, idx) {
             var target = parseInt(el.getAttribute('data-target'), 10) || 0;
-            setTimeout(function () {
+            registerGithubCardTimer(setTimeout(function () {
                 animateNumber(el, target, duration);
-            }, idx * delayStep);
+            }, idx * delayStep));
         });
 
         var refreshBtn = card.querySelector('.github-combat-refresh-btn');
@@ -916,10 +939,10 @@
                                     afterSelector: options.afterSelector || ''
                                 });
                             }
-                            setTimeout(function () {
+                            registerGithubCardTimer(setTimeout(function () {
                                 if (typeof window.refreshUserStats === 'function') window.refreshUserStats().catch(function () {});
                                 if (typeof window.loadGitHubLeaderboard === 'function') window.loadGitHubLeaderboard(); else if (typeof loadGitHubLeaderboard === 'function') loadGitHubLeaderboard();
-                            }, 1500);
+                            }, 1500));
                         }
                     }).catch(function () {
                         setRefreshButtonState(refreshBtn, false, null, lang);

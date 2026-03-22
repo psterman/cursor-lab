@@ -50,7 +50,7 @@
     <script src="https://unpkg.com/lucide@latest" async></script>
 
     
-  <script type="module" crossorigin src="./assets/stats2-B9OSoZ-a.js"></script>
+  <script type="module" crossorigin src="./assets/stats2-DUmhNggD.js"></script>
   <link rel="modulepreload" crossorigin href="./assets/modulepreload-polyfill-YP0FEG5d.js">
   <link rel="stylesheet" crossorigin href="assets/css/stats2.css">
 </head>
@@ -250,22 +250,7 @@
                 </div>
             </div>
             <div class="drawer-body left-drawer-body" id="left-drawer-body">
-                <!-- OpenClaw 个人数据监视器卡片（顶部） -->
-                <div id="openclaw-monitor-card" class="drawer-item openclaw-monitor-card hacker-border" data-card="openclaw-monitor">
-                    <div class="openclaw-monitor-header">
-                        <span class="drawer-icon pulse">◉</span>
-                        <span class="openclaw-monitor-title">OpenClaw 个人数据监视器</span>
-                    </div>
-                    <div class="openclaw-monitor-body font-mono text-[11px]">
-                        <div class="openclaw-row"><span class="label">寿命 (Longevity)</span><span id="oc-longevity">--</span></div>
-                        <div class="openclaw-row"><span class="label">基因模型 (Genome)</span><span id="oc-genome">--</span></div>
-                        <div class="openclaw-row"><span class="label">生物能量 (Tokens)</span><span id="oc-tokens">--</span></div>
-                        <div class="openclaw-row openclaw-row-skills"><span class="label">技能树 (Skills)</span><div id="oc-skills" class="oc-tags"></div></div>
-                        <div class="openclaw-row"><span class="label">任务状态</span><span id="oc-github-sync">--</span></div>
-                    </div>
-                </div>
-                <!-- 上方可滚动：矩阵绿天梯榜 -->
-                <!-- 最下方：本国词云卡片（左抽屉风格、自适应高度） -->
+                <!-- 词云（顺序由 normalizeLeftDrawerCardOrder 与身份卡注入共同调整；OpenClaw 紧随 identity-config 下方） -->
                 <div class="left-drawer-wordcloud-card" id="left-drawer-wordcloud-wrap">
                     <div class="left-drawer-wordcloud-header">
                         <span class="left-drawer-wordcloud-title" data-t="panel.personal_wordcloud">本人词云</span>
@@ -288,6 +273,20 @@
                             <div id="personal-cloud-loading-hint" class="left-drawer-cloud-loading hidden">加载中...</div>
                         </div>
                         <div id="personal-cloud-empty" class="left-drawer-wordcloud-empty hidden" data-t="hotlist.building">初出茅庐，灵魂波段捕获中...</div>
+                    </div>
+                </div>
+                <!-- OpenClaw 个人数据监视器（运行时排在 identity-config 下方） -->
+                <div id="openclaw-monitor-card" class="drawer-item openclaw-monitor-card hacker-border" data-card="openclaw-monitor">
+                    <div class="openclaw-monitor-header">
+                        <span class="drawer-icon pulse">◉</span>
+                        <span class="openclaw-monitor-title">OpenClaw 个人数据监视器</span>
+                    </div>
+                    <div class="openclaw-monitor-body font-mono text-[11px]">
+                        <div class="openclaw-row"><span class="label">寿命 (Longevity)</span><span id="oc-longevity">--</span></div>
+                        <div class="openclaw-row"><span class="label">基因模型 (Genome)</span><span id="oc-genome">--</span></div>
+                        <div class="openclaw-row"><span class="label">生物能量 (Tokens)</span><span id="oc-tokens">--</span></div>
+                        <div class="openclaw-row openclaw-row-skills"><span class="label">技能树 (Skills)</span><div id="oc-skills" class="oc-tags"></div></div>
+                        <div class="openclaw-row"><span class="label">任务状态</span><span id="oc-github-sync">--</span></div>
                     </div>
                 </div>
             </div>

@@ -35,6 +35,76 @@
     // 严禁在代码中对 _loc 或 window.location 进行属性赋值，防止触发 eval5 的 "Cannot create property 'location' on string" 报错
     var _loc = window.location;
 
+    /** 显式登出锁（24h）：与 stats2_manual_logout 同步，禁止 OAuth 自动换码/静默登录 */
+    var STATS2_MANUAL_LOGOUT_KEY = 'stats2_manual_logout';
+    var STATS2_MANUAL_LOGOUT_TTL_MS = 24 * 60 * 60 * 1000;
+    function stats2ReadManualLogoutLockActive() {
+        try {
+            if (typeof localStorage === 'undefined') return false;
+            var raw = localStorage.getItem(STATS2_MANUAL_LOGOUT_KEY);
+            if (!raw || !String(raw).trim()) return false;
+            var o = JSON.parse(raw);
+            if (!o || o.manual_logout !== true) return false;
+            var exp = Number(o.expires);
+            if (!Number.isFinite(exp)) {
+                try { localStorage.removeItem(STATS2_MANUAL_LOGOUT_KEY); } catch (e2) {}
+                return false;
+            }
+            if (Date.now() > exp) {
+                try { localStorage.removeItem(STATS2_MANUAL_LOGOUT_KEY); } catch (e3) {}
+                try { window.__stats2ForceSignedOutUntil = 0; } catch (e4) {}
+                return false;
+            }
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+    function stats2SetManualLogoutLock() {
+        try {
+            var now = Date.now();
+            var payload = JSON.stringify({
+                manual_logout: true,
+                timestamp: now,
+                expires: now + STATS2_MANUAL_LOGOUT_TTL_MS
+            });
+            if (typeof localStorage !== 'undefined') {
+                localStorage.setItem(STATS2_MANUAL_LOGOUT_KEY, payload);
+                localStorage.setItem('stats2_force_signed_out_until', String(now + STATS2_MANUAL_LOGOUT_TTL_MS));
+            }
+            try { window.__stats2ForceSignedOutUntil = now + STATS2_MANUAL_LOGOUT_TTL_MS; } catch (e) {}
+        } catch (e) {}
+    }
+    try {
+        window.stats2ReadManualLogoutLockActive = stats2ReadManualLogoutLockActive;
+        window.stats2SetManualLogoutLock = stats2SetManualLogoutLock;
+    } catch (e) {}
+
+    /** 手动登出 / 强制登出锁期间：物理剥离 URL 中的 OAuth 参数与 Hash，避免 Supabase SDK 从 Hash 恢复 session */
+    (function stats2StripOAuthUrlIfManualLogout() {
+        try {
+            var shouldStrip = false;
+            if (typeof stats2ReadManualLogoutLockActive === 'function' && stats2ReadManualLogoutLockActive()) shouldStrip = true;
+            if (!shouldStrip && typeof localStorage !== 'undefined') {
+                var raw = localStorage.getItem('stats2_force_signed_out_until');
+                if (raw === '1' || raw === 'true') shouldStrip = true;
+                else if (raw) {
+                    var parsed = parseInt(raw, 10);
+                    if (Number.isFinite(parsed) && Date.now() < parsed) shouldStrip = true;
+                }
+            }
+            if (!shouldStrip) return;
+            var url = new URL(window.location.href);
+            ['code', 'state', 'error', 'error_description'].forEach(function (p) {
+                try { url.searchParams.delete(p); } catch (e) {}
+            });
+            url.hash = '';
+            if (window.history && typeof window.history.replaceState === 'function') {
+                window.history.replaceState({}, document.title || '', url.pathname + url.search + url.hash);
+            }
+        } catch (e) {}
+    })();
+
     /** SWR 核心常量与原子锁（Stale-While-Revalidate，GitHub 22 项战力秒开 + 静默更新） */
     var VIBE_STATS2_SWR_CACHE_KEY = 'vibe_stats2_swr_cache';
     var VIBE_SWR_MAX_AGE_MS = 30 * 60 * 1000;
@@ -60,6 +130,22 @@
      * 严禁将 provider_token 或 GitHub token 传给 supabase.auth.setSession。
      */
     (function () {
+      var forceOutEarly = false;
+      try {
+        if (typeof stats2ReadManualLogoutLockActive === 'function' && stats2ReadManualLogoutLockActive()) forceOutEarly = true;
+        if (!forceOutEarly && typeof localStorage !== 'undefined') {
+          var r = localStorage.getItem('stats2_force_signed_out_until');
+          if (r === '1' || r === 'true') forceOutEarly = true;
+          else if (r) {
+            var pt = parseInt(r, 10);
+            if (Number.isFinite(pt) && Date.now() < pt) forceOutEarly = true;
+          }
+        }
+      } catch (e) {}
+      if (forceOutEarly) {
+        if (typeof console !== 'undefined' && console.warn) console.warn('[Auth] 显式登出锁生效，跳过 Hash 内 provider_token 写入');
+        return;
+      }
       var hash = typeof window !== 'undefined' && _loc && _loc.hash;
       if (!hash || hash.length < 2) return;
       var params = {};
@@ -349,16 +435,33 @@
     /** 【核心修复】使用 /api/update-location 而非 /api/v2/analyze，避免生成低数值数据 */
     window.reportManualLocationIfCached = async function() {
         try {
+            try {
+                if (typeof window.isForceSignedOutActive === 'function' && window.isForceSignedOutActive()) return;
+            } catch (e) {}
             var ml = (typeof localStorage !== 'undefined' && localStorage.getItem('manual_location')) || '';
             ml = (ml && String(ml).trim()).toUpperCase();
             if (!ml || !/^[A-Z]{2}$/.test(ml)) return;
             var fp = (typeof localStorage !== 'undefined' && (localStorage.getItem('user_fingerprint') || window.fpId)) || '';
+            var userId = '';
+            if (!fp) {
+                try {
+                    var sb = (typeof supabaseClient !== 'undefined' && supabaseClient) ? supabaseClient : (window && window.supabaseClient ? window.supabaseClient : null);
+                    if (sb && sb.auth && typeof sb.auth.getSession === 'function') {
+                        var sess = await sb.auth.getSession();
+                        userId = (((sess || {}).data || {}).session || {}).user ? (((sess || {}).data || {}).session.user.id || '') : '';
+                    }
+                } catch (eSess) {}
+            }
+            if (!fp && !userId) return;
             var base = (window.getApiEndpoint && window.getApiEndpoint()) || (document.querySelector('meta[name="api-endpoint"]')?.content || '');
             if (base && base.endsWith('/')) base = base.slice(0, -1);
+            var payload = { new_cc: ml };
+            if (fp) payload.fingerprint = fp;
+            if (userId) payload.user_id = userId;
             await fetch((base || '') + '/api/update-location', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fingerprint: fp || null, new_cc: ml })
+                body: JSON.stringify(payload)
             });
         } catch (e) { /* ignore */ }
     };
@@ -572,6 +675,256 @@
             }
         }
         window.normalizeLeftDrawerCardOrder = normalizeLeftDrawerCardOrder;
+
+        /**
+         * 登出后强制从左侧抽屉移除 GitHub 战力卡与 Cursor 统计卡（与 prune 互补，避免权限判定时机或异步重绘导致卡片残留）。
+         */
+        function removeSignedOutPrivateDrawerCards() {
+            try {
+                var lb = document.getElementById('left-drawer-body');
+                if (!lb || !lb.querySelectorAll) return;
+                var selectors = [
+                    '.drawer-item.github-combat-card',
+                    '.drawer-item.dashboard-card',
+                    '.drawer-item[data-card="cursor-inactive-placeholder"]',
+                    '.github-power-card'
+                ];
+                selectors.forEach(function (s) {
+                    lb.querySelectorAll(s).forEach(function (node) {
+                        if (!node) return;
+                        var dc = (typeof node.getAttribute === 'function' ? node.getAttribute('data-card') : '') || '';
+                        if (dc === 'identity-config' || dc === 'guest-mode-info') return;
+                        if (typeof node.remove === 'function') node.remove();
+                        else if (node.parentNode) node.parentNode.removeChild(node);
+                    });
+                });
+            } catch (e) {}
+        }
+        try { window.removeSignedOutPrivateDrawerCards = removeSignedOutPrivateDrawerCards; } catch (e) {}
+
+        /**
+         * 退出登录后清空左侧与 LPDEF/统计相关的 UI 占位，避免残留上一用户数据（不依赖整页刷新）。
+         */
+        function resetLocalProfileUI() {
+            var dash = '--';
+            var isZh = typeof currentLang === 'undefined' || (currentLang !== 'en' && currentLang !== 'EN');
+            var waitInject = isZh ? '等待注入' : 'Awaiting injection';
+            try {
+                removeSignedOutPrivateDrawerCards();
+                var rtIds = [
+                    'rtDiagnosedTotal',
+                    'rtScanTotal',
+                    'rtJiafangCount',
+                    'rtKetaoCount',
+                    'rtWorkDays',
+                    'rtPowerScore',
+                    'rtBreakdownRate',
+                    'rtSemanticScore',
+                    'rtRatioPct',
+                    'rtGlobalRatio',
+                    'rtPkLeftPct',
+                    'rtPkRightPct',
+                    'rtMeltdownLevel',
+                    'rtMeltdownVictims',
+                    'rtSemanticMostUsed',
+                    'rtSemanticFreq'
+                ];
+                rtIds.forEach(function (id) {
+                    var el = document.getElementById(id);
+                    if (el) el.textContent = dash;
+                });
+                var rtNode = document.getElementById('rtNodeName');
+                if (rtNode) rtNode.textContent = dash;
+                var rtCoord = document.getElementById('rtCoord');
+                if (rtCoord) rtCoord.textContent = isZh ? '坐标：--' : 'Coords: --';
+                var rtFlag = document.getElementById('rtFlag');
+                if (rtFlag) rtFlag.textContent = '🏳️';
+                var rtCore = document.getElementById('rtCoreTrait');
+                if (rtCore) rtCore.textContent = isZh ? '该地区核心特质：--' : 'Core trait: --';
+                ['rtRealtimeList', 'rtCountryTotals', 'rtMyCountryRanks', 'rtTopTalentsList', 'rtTopTalentsHeroes', 'rtRatioList'].forEach(function (id) {
+                    var box = document.getElementById(id);
+                    if (box) box.innerHTML = '';
+                });
+                var merit = document.getElementById('rtMeritBoard');
+                if (merit) merit.textContent = '';
+
+                var lb = document.getElementById('left-drawer-body');
+                if (lb) {
+                    lb.querySelectorAll('.drawer-item.dashboard-card .drawer-item-value').forEach(function (el) {
+                        el.textContent = dash;
+                    });
+                    var techEl = lb.querySelector('.drawer-item.dashboard-card .dashboard-metric-value');
+                    if (techEl) techEl.textContent = dash;
+                    var persEl = lb.querySelector('[data-stat="personality-name"]');
+                    if (persEl) persEl.textContent = dash;
+                    lb.querySelectorAll('[data-dim-id]').forEach(function (card) {
+                        var v = card.querySelector('.drawer-item-value');
+                        if (v) v.textContent = dash;
+                    });
+                    lb.querySelectorAll('.lpdef-card .drawer-item-value, .lpdef-card .lpdef-score').forEach(function (el) {
+                        el.textContent = dash;
+                    });
+                }
+
+                var pcm = document.getElementById('personal-cloud-meta');
+                if (pcm) pcm.textContent = dash;
+                var vch = document.getElementById('vibe-country-hint');
+                if (vch) vch.textContent = isZh ? '国家：--' : 'Country: --';
+
+                var css1 = document.getElementById('cursor-slot1-status');
+                if (css1) css1.textContent = waitInject;
+                var sst = document.getElementById('smart-sync-last-time');
+                if (sst) sst.textContent = '';
+                var ocpt = document.getElementById('openclaw-slot2-port-text');
+                if (ocpt) ocpt.textContent = waitInject;
+                var led = document.getElementById('cursor-slot1-status-led');
+                if (led) {
+                    led.className = 'w-2 h-2 rounded-full flex-shrink-0 bg-zinc-600 opacity-50';
+                    led.setAttribute('title', 'OFFLINE');
+                }
+                var ucf = document.getElementById('user-country-flag');
+                if (ucf) ucf.innerHTML = '';
+
+                if (typeof window.renderOpenClawMonitorCard === 'function') {
+                    try {
+                        window.renderOpenClawMonitorCard({ openclaw_monitor_active: false });
+                    } catch (e0) {
+                        ['oc-longevity', 'oc-genome', 'oc-tokens', 'oc-github-sync'].forEach(function (id) {
+                            var el = document.getElementById(id);
+                            if (el) el.textContent = dash;
+                        });
+                        var sk = document.getElementById('oc-skills');
+                        if (sk) sk.innerHTML = '';
+                        var och = document.getElementById('oc-channels');
+                        if (och) och.innerHTML = '';
+                    }
+                } else {
+                    ['oc-longevity', 'oc-genome', 'oc-tokens', 'oc-github-sync'].forEach(function (id) {
+                        var el = document.getElementById(id);
+                        if (el) el.textContent = dash;
+                    });
+                    var sk2 = document.getElementById('oc-skills');
+                    if (sk2) sk2.innerHTML = '';
+                }
+            } catch (e) {
+                if (typeof console !== 'undefined' && console.warn) console.warn('[resetLocalProfileUI]', e);
+            }
+        }
+
+        /**
+         * 左侧抽屉视觉重置：Cursor 统计归零、OpenClaw 离线占位（委托 resetLocalProfileUI）。
+         */
+        function resetLeftDrawerUI() {
+            try {
+                if (typeof window.resetLocalProfileUI === 'function') {
+                    window.resetLocalProfileUI();
+                }
+            } catch (e) {
+                if (typeof console !== 'undefined' && console.warn) console.warn('[resetLeftDrawerUI]', e);
+            }
+        }
+        try { window.resetLeftDrawerUI = resetLeftDrawerUI; } catch (e) {}
+
+        /**
+         * 登出后顶栏/节点国家显示回到 IP 探测（或 lastData / my-ip），不沿用上一用户的 localStorage 国家。
+         */
+        function syncCountryDisplayFromIpAfterSignOut() {
+            var isZh = typeof currentLang === 'undefined' || (currentLang !== 'en' && currentLang !== 'EN');
+            function applyCode(code) {
+                var cc = String(code || '').trim().toUpperCase();
+                if (!/^[A-Z]{2}$/.test(cc) || cc === 'XX') return;
+                try {
+                    window.currentCountryCode = cc;
+                } catch (_) {}
+                try {
+                    window.__countrySelectorSelectedCode = cc;
+                } catch (_) {}
+                try {
+                    window.__selectedCountry = cc;
+                } catch (_) {}
+                var dd = document.getElementById('country-select-dropdown');
+                if (dd && dd.querySelector && dd.querySelector('option[value="' + cc + '"]')) {
+                    try {
+                        dd.value = cc;
+                    } catch (_) {}
+                }
+                var name = cc;
+                try {
+                    if (typeof countryNameMap !== 'undefined' && countryNameMap && countryNameMap[cc]) {
+                        name = isZh ? countryNameMap[cc].zh : countryNameMap[cc].en;
+                    }
+                } catch (_) {}
+                var rtNode = document.getElementById('rtNodeName');
+                if (rtNode) rtNode.textContent = name;
+                var leftTitle = document.getElementById('left-drawer-title');
+                var rightTitle = document.getElementById('right-drawer-title');
+                if (leftTitle) leftTitle.textContent = name;
+                if (rightTitle) rightTitle.textContent = name;
+                if (typeof updateUserCountryFlag === 'function') {
+                    try {
+                        updateUserCountryFlag(cc, name, true);
+                    } catch (_) {}
+                }
+                try {
+                    localStorage.setItem('selected_country', cc);
+                } catch (_) {}
+            }
+            var p = Promise.resolve()
+                .then(function () {
+                    try {
+                        if (window.lastData && (window.lastData.ip_country || window.lastData.ipCountry)) {
+                            var ip = String(window.lastData.ip_country || window.lastData.ipCountry || '')
+                                .trim()
+                                .toUpperCase();
+                            if (/^[A-Z]{2}$/.test(ip) && ip !== 'XX') return ip;
+                        }
+                    } catch (_) {}
+                    return null;
+                })
+                .then(function (fromLast) {
+                    if (fromLast) return fromLast;
+                    var apiBase =
+                        (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : '') ||
+                        (document.querySelector('meta[name="api-endpoint"]') && document.querySelector('meta[name="api-endpoint"]').content) ||
+                        '';
+                    apiBase = String(apiBase || '')
+                        .trim()
+                        .replace(/\/+$/, '');
+                    var myIpUrl = apiBase ? apiBase + '/api/v2/my-ip' : '/api/v2/my-ip';
+                    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+                    var tid = ctrl
+                        ? setTimeout(function () {
+                              try {
+                                  ctrl.abort();
+                              } catch (_) {}
+                          }, 2500)
+                        : null;
+                    return fetch(myIpUrl, { method: 'GET', signal: ctrl ? ctrl.signal : undefined })
+                        .then(function (r) {
+                            if (tid) clearTimeout(tid);
+                            return r.ok ? r.json() : null;
+                        })
+                        .then(function (data) {
+                            var c = data && data.country ? String(data.country).trim().toUpperCase() : '';
+                            return /^[A-Z]{2}$/.test(c) && c !== 'XX' ? c : 'US';
+                        })
+                        .catch(function () {
+                            if (tid) clearTimeout(tid);
+                            return 'US';
+                        });
+                });
+            return p
+                .then(function (code) {
+                    applyCode(code);
+                })
+                .catch(function () {});
+        }
+
+        try {
+            window.resetLocalProfileUI = resetLocalProfileUI;
+            window.syncCountryDisplayFromIpAfterSignOut = syncCountryDisplayFromIpAfterSignOut;
+        } catch (_) {}
+
         function ensureLeftDrawerSourceBadges() {
             try {
                 var leftBody = document.getElementById('left-drawer-body');
@@ -774,6 +1127,8 @@
                     window.__authUserId
                 );
                 if (hasAuthSession) return true;
+                // 已由 setAuthenticatedDrawerAccess(false) 标记为未登录会话时，不得再仅凭内存中的 fingerprint 等占位数据视为「已授权抽屉」（否则游客引导/GitHub 登录区不会恢复）
+                if (window.__stats2HasAuthenticatedSession === false) return false;
                 var hasResolvedUserData = !!(
                     (window.currentUser && (
                         window.currentUser.id ||
@@ -955,6 +1310,7 @@
             }
             setAuthenticatedDrawerAccess(false, null);
             pruneGuestDrawerBlocks();
+            removeSignedOutPrivateDrawerCards();
             applyLeftDrawerGuestModePermissions();
             if (shouldRenderGuestCard) {
                 renderGuestModeDrawerCard();
@@ -1133,6 +1489,11 @@
             }
             sb.auth.getSession().then(function(r) {
                 var session = (r && r.data && r.data.session) ? r.data.session : null;
+                try {
+                    if (typeof window.isForceSignedOutActive === 'function' && window.isForceSignedOutActive()) {
+                        session = null;
+                    }
+                } catch (e) {}
                 if (session && session.user) {
                     setGuestGatePassed(false);
                     if (checkGatePassed(session)) return;
@@ -1184,7 +1545,12 @@
                         runGateCheck();
                         if (!window.__stats2CountryGateAuthBound) {
                             window.__stats2CountryGateAuthBound = true;
-                            sb.auth.onAuthStateChange(function(event, s) { if (s) runGateCheck(); });
+                            sb.auth.onAuthStateChange(function(event, s) {
+                                try {
+                                    if (window.__stats2SuppressSignedOutDataFetch || window.__stats2GlobalLogoutInProgress) return;
+                                } catch (e) {}
+                                if (s) runGateCheck();
+                            });
                         }
                         return;
                     }
@@ -1192,6 +1558,9 @@
                     if (!window.__stats2CountryGateAuthBound) {
                         window.__stats2CountryGateAuthBound = true;
                         sb.auth.onAuthStateChange(function(event, session) {
+                            try {
+                                if (window.__stats2SuppressSignedOutDataFetch || window.__stats2GlobalLogoutInProgress) return;
+                            } catch (e) {}
                             if (session) runGateCheck();
                         });
                     }
@@ -1290,6 +1659,7 @@
         window.runGateCheck = runGateCheck;
         window.hideGateOverlay = hideGateOverlay;
         window.showGitHubSectionIfCountrySelected = showGitHubSectionIfCountrySelected;
+        window.getStoredCountry = getStoredCountry;
     })();
 
     /** GitHub 401 时清除本地 token 并将同步按钮恢复为「未连接」 */
@@ -12891,7 +13261,12 @@
                     }
                     return getEmptyRankings();
                 };
-                if (!supabaseClient || typeof supabaseClient.from !== 'function') {
+                var sbRank = (typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.from === 'function')
+                    ? supabaseClient
+                    : (typeof window !== 'undefined' && window.supabaseClient && typeof window.supabaseClient.from === 'function')
+                        ? window.supabaseClient
+                        : null;
+                if (!sbRank) {
                     console.warn('[GlobalRankings] ⚠️ Supabase 客户端未初始化, supabaseClient:', typeof supabaseClient);
                     return getLocalFallbackRankings();
                 }
@@ -12924,7 +13299,7 @@
                             selectFields += ', ' + dim.field;
                         }
 
-                        let query = supabaseClient
+                        let query = sbRank
                             .from('v_unified_analysis_v2')
                             .select(selectFields);
 
@@ -13974,6 +14349,20 @@
             }
             console.log('[Drawer] 抽屉已关闭, selectedCountry =', selectedCountry);
         }
+
+        /**
+         * 仅关闭左侧抽屉（退出流程末尾调用，不碰右侧与 selectedCountry）
+         */
+        function closeLeftDrawer() {
+            try {
+                const leftDrawer = document.getElementById('left-drawer');
+                if (leftDrawer) {
+                    leftDrawer.classList.remove('active');
+                    localStorage.setItem('left_drawer_open', 'false');
+                }
+            } catch (e) {}
+        }
+        try { window.closeLeftDrawer = closeLeftDrawer; } catch (e) {}
 
         // 添加 ESC 键关闭抽屉（当没有弹窗打开时）
         document.addEventListener('keydown', (e) => {
@@ -16636,7 +17025,7 @@ function initCountrySelector() {
                 }
                 
                 // 渲染国家列表（会绑定 item 点击，其中强制模式下仅更新选中状态）
-                const storedCode = (window.__countrySelectorSelectedCode || getStoredCountry() || '').trim().toUpperCase();
+                const storedCode = (window.__countrySelectorSelectedCode || (typeof window.getStoredCountry === 'function' ? window.getStoredCountry() : null) || '').trim().toUpperCase();
                 if (/^[A-Z]{2}$/.test(storedCode)) {
                     window.__countrySelectorSelectedCode = storedCode;
                 } else {
@@ -16707,6 +17096,59 @@ function initCountrySelector() {
                     button.textContent = pending ? pendingText : (idleText || button.dataset.originalText || '');
                 } catch (e) {}
             }
+            /** 清除 localStorage 中所有以 sb-（Supabase）与 user_ 开头的键 */
+            function clearAuthStorageKeys() {
+                if (typeof localStorage === 'undefined') return;
+                try {
+                    var keys = [];
+                    for (var i = 0; i < localStorage.length; i++) {
+                        var k = localStorage.key(i);
+                        if (!k) continue;
+                        if (k.indexOf('sb-') === 0 || k.indexOf('user_') === 0) keys.push(k);
+                    }
+                    keys.forEach(function(k) { try { localStorage.removeItem(k); } catch (e) {} });
+                } catch (e) {}
+            }
+            /** 再次兜底：删除所有 sb- 前缀键（含 SDK 可能写入的变体） */
+            function clearAllSbPrefixedKeys() {
+                if (typeof localStorage === 'undefined') return;
+                try {
+                    var toRemove = [];
+                    for (var i = 0; i < localStorage.length; i++) {
+                        var k = localStorage.key(i);
+                        if (k && k.indexOf('sb-') === 0) toRemove.push(k);
+                    }
+                    toRemove.forEach(function(k) { try { localStorage.removeItem(k); } catch (e) {} });
+                } catch (e) {}
+            }
+            /** 登出前将身份区与 Slot1 状态条置为占位，避免刷新前闪旧数据 */
+            function resetLogoutDomPlaceholders() {
+                try {
+                    var slot = document.getElementById('cursor-slot1-status');
+                    if (slot) slot.textContent = '—';
+                    var led = document.getElementById('cursor-slot1-status-led');
+                    if (led) {
+                        led.className = 'w-2 h-2 rounded-full flex-shrink-0 bg-zinc-600 opacity-50';
+                        try { led.removeAttribute('title'); } catch (e2) {}
+                    }
+                } catch (e) {}
+                try {
+                    var uic = document.getElementById('user-identity-card');
+                    if (uic) {
+                        var isEn2 = typeof currentLang !== 'undefined' && currentLang === 'en';
+                        uic.innerHTML = '<div class="text-[10px] text-zinc-500 font-mono py-2">' +
+                            (isEn2 ? 'Signing out…' : '正在退出…') + '</div>';
+                    }
+                } catch (e) {}
+                try {
+                    var ocSlot = document.getElementById('openclaw-slot2-port-text');
+                    if (ocSlot) ocSlot.textContent = '—';
+                } catch (e) {}
+                try {
+                    var syncLast = document.getElementById('smart-sync-last-time');
+                    if (syncLast) syncLast.textContent = '';
+                } catch (e) {}
+            }
             function clearLocalAccountData() {
                 if (typeof localStorage === 'undefined') return;
                 try {
@@ -16718,8 +17160,13 @@ function initCountrySelector() {
                         'stats2_guest_mode',
                         'github_token',
                         'vibe_github_access_token',
+                        'vibe_github_refresh_token',
+                        'vibe_github_user_cache',
                         'github_username',
                         'last_analysis_data',
+                        'cursor_stats_cache',
+                        'openclaw2_gateway_port',
+                        'openclaw2_gateway_host',
                         'vibe_fp',
                         'fingerprint',
                         'user_fingerprint',
@@ -16731,15 +17178,21 @@ function initCountrySelector() {
                         'right_drawer_open'
                     ];
                     keys.forEach(function(k) { try { localStorage.removeItem(k); } catch (e) {} });
+                    try { localStorage.removeItem('supabase.auth.token'); } catch (e) {}
+                    try { localStorage.removeItem('github_token'); } catch (e) {}
+                    try { localStorage.removeItem('vibe_github_access_token'); } catch (e) {}
                     var toRemove = [];
                     for (var i = 0; i < localStorage.length; i++) {
                         var key = localStorage.key(i);
                         if (!key) continue;
+                        var lowerKey = String(key).toLowerCase();
                         if (
                             key.indexOf('vibe_') === 0 ||
                             key.indexOf('vibe_report') === 0 ||
                             key.indexOf('vibe_cyber_report_') === 0 ||
-                            key.indexOf('vibe_country_') === 0
+                            key.indexOf('vibe_country_') === 0 ||
+                            lowerKey.indexOf('sb-') === 0 ||
+                            lowerKey === 'supabase.auth.token'
                         ) {
                             toRemove.push(key);
                         }
@@ -16748,6 +17201,16 @@ function initCountrySelector() {
                     try { localStorage.setItem('left_drawer_open', 'false'); } catch (e) {}
                     try { localStorage.setItem('right_drawer_open', 'false'); } catch (e) {}
                     if (window.__githubAccessToken !== undefined) window.__githubAccessToken = '';
+                    try {
+                        var u = new URL(window.location.href);
+                        u.hash = '';
+                        ['code', 'state', 'error', 'error_description'].forEach(function (p) {
+                            try { u.searchParams.delete(p); } catch (e) {}
+                        });
+                        if (window.history && typeof window.history.replaceState === 'function') {
+                            window.history.replaceState({}, document.title || '', u.pathname + (u.search || ''));
+                        }
+                    } catch (eUrl) {}
                 } catch (e) {}
             }
             function resetSignedOutUi() {
@@ -16756,7 +17219,8 @@ function initCountrySelector() {
                 try { window.currentUserMatchedByFingerprint = false; } catch (e) {}
                 try { window.__githubSyncInFlight = false; } catch (e) {}
                 try { setAuthenticatedDrawerAccess(false, null); } catch (e) {}
-                try { clearPrivateDrawerCards({ renderGuestCard: false }); } catch (e) {}
+                try { clearPrivateDrawerCards({ renderGuestCard: true }); } catch (e) {}
+                try { if (typeof window.renderGuestLoginCard === 'function') window.renderGuestLoginCard(); } catch (e) {}
                 try {
                     var leftDrawer = document.getElementById('left-drawer');
                     var rightDrawer = document.getElementById('right-drawer');
@@ -16771,14 +17235,31 @@ function initCountrySelector() {
                 try {
                     var currentUrl = new URL(window.location.href);
                     currentUrl.hash = '';
+                    ['code', 'state', 'error', 'error_description'].forEach(function (p) {
+                        try { currentUrl.searchParams.delete(p); } catch (e) {}
+                    });
                     return currentUrl.pathname + (currentUrl.search || '');
                 } catch (e) {
                     return 'stats2.html';
                 }
             }
-            function performStats2SignOut(options) {
+            /**
+             * 全局强制退出：清 Auth 存储、signOut、视觉重置、关左侧抽屉、整页刷新；阻断 SIGNED_OUT 触发的重复数据拉取。
+             */
+            function forceGlobalLogout(options) {
                 options = options || {};
                 if (window.__stats2SignOutPromise) return window.__stats2SignOutPromise;
+                try {
+                    window.__stats2SuppressSignedOutDataFetch = true;
+                    window.__stats2GlobalLogoutInProgress = true;
+                } catch (e) {}
+                try {
+                    if (typeof stats2SetManualLogoutLock === 'function') stats2SetManualLogoutLock();
+                    else {
+                        window.__stats2ForceSignedOutUntil = true;
+                        if (typeof localStorage !== 'undefined') localStorage.setItem('stats2_force_signed_out_until', '1');
+                    }
+                } catch (e) {}
                 var pendingButton = options.button || null;
                 setActionPendingState(
                     pendingButton,
@@ -16787,7 +17268,12 @@ function initCountrySelector() {
                     getStats2ActionText('logoutLabel')
                 );
                 window.__stats2SignOutPromise = Promise.resolve().then(function() {
+                    try {
+                        window.__stats2AuthApplyGeneration = (window.__stats2AuthApplyGeneration || 0) + 1;
+                    } catch (e) {}
                     clearLocalAccountData();
+                    clearAuthStorageKeys();
+                    clearAllSbPrefixedKeys();
                     var sb = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
                     if (sb && typeof sb.auth !== 'object') sb = null;
                     if (sb && typeof sb.auth.signOut === 'function') {
@@ -16798,23 +17284,75 @@ function initCountrySelector() {
                     return null;
                 }).finally(function() {
                     clearLocalAccountData();
+                    clearAuthStorageKeys();
+                    clearAllSbPrefixedKeys();
+                    try {
+                        if (typeof stats2SetManualLogoutLock === 'function') stats2SetManualLogoutLock();
+                    } catch (eLk) {}
+                    try {
+                        var _stripUrl = new URL(window.location.href);
+                        _stripUrl.hash = '';
+                        ['code', 'state', 'error', 'error_description'].forEach(function (p) { try { _stripUrl.searchParams.delete(p); } catch (e) {} });
+                        if (window.history && typeof window.history.replaceState === 'function') {
+                            window.history.replaceState({}, document.title || '', _stripUrl.pathname + _stripUrl.search);
+                        }
+                    } catch (eUrl) {}
+                    try {
+                        if (typeof window.clearGithubCardTimers === 'function') window.clearGithubCardTimers();
+                        if (typeof window.clearGithubCardUI === 'function') window.clearGithubCardUI();
+                    } catch (eGh) {}
+                    try { resetLogoutDomPlaceholders(); } catch (eDom) {}
                     resetSignedOutUi();
-                    if (typeof window.runGateCheck === 'function') {
-                        try { window.runGateCheck(); } catch (e) {}
-                    }
-                    var redirectUrl = resolvePostSignOutUrl();
-                    setActionPendingState(
-                        pendingButton,
-                        false,
-                        getStats2ActionText('logoutPending'),
-                        getStats2ActionText('logoutLabel')
-                    );
-                    window.__stats2SignOutPromise = null;
-                    try { window.location.replace(redirectUrl); } catch (e) { try { location.reload(); } catch (err) {} }
+                    try {
+                        if (typeof window.resetLeftDrawerUI === 'function') window.resetLeftDrawerUI();
+                        else if (typeof window.resetLocalProfileUI === 'function') window.resetLocalProfileUI();
+                    } catch (eRp) {}
+                    // 硬退出即将整页重载：不再请求 /api/v2/my-ip，也不触发 gate/自动重连
+                    var ipChain = Promise.resolve();
+                    ipChain.finally(function () {
+                        // 硬退出将整页重载：此处不调用 runGateCheck（避免登出后 gate 探测与自动重连）
+                        try {
+                            if (typeof window.removeSignedOutPrivateDrawerCards === 'function') {
+                                window.removeSignedOutPrivateDrawerCards();
+                            }
+                        } catch (eRm) {}
+                        try {
+                            if (typeof window.closeLeftDrawer === 'function') window.closeLeftDrawer();
+                        } catch (eCl) {}
+                        var cleanUrl = resolvePostSignOutUrl();
+                        setActionPendingState(
+                            pendingButton,
+                            false,
+                            getStats2ActionText('logoutPending'),
+                            getStats2ActionText('logoutLabel')
+                        );
+                        window.__stats2SignOutPromise = null;
+                        try { window.__stats2GlobalLogoutInProgress = false; } catch (e) {}
+                        try {
+                            var cur = window.location.pathname + window.location.search;
+                            if (window.location.hash || cur !== cleanUrl) {
+                                window.location.replace(cleanUrl);
+                            } else {
+                                window.location.reload();
+                            }
+                        } catch (e) {
+                            try { window.__stats2SuppressSignedOutDataFetch = false; } catch (_) {}
+                            try { window.location.reload(); } catch (err) {}
+                        }
+                    });
                 });
                 return window.__stats2SignOutPromise;
             }
-            if (typeof window !== 'undefined') window.performStats2SignOut = performStats2SignOut;
+            function performStats2SignOut(options) {
+                return forceGlobalLogout(options);
+            }
+            if (typeof window !== 'undefined') {
+                window.performStats2SignOut = performStats2SignOut;
+                window.forceGlobalLogout = forceGlobalLogout;
+                window.stats2ClearLocalAccountData = clearLocalAccountData;
+                window.stats2ClearAuthStorageKeys = clearAuthStorageKeys;
+                window.stats2ClearAllSbPrefixedKeys = clearAllSbPrefixedKeys;
+            }
             function onReady() {
                 var root = document.getElementById('left-drawer') || document.body;
                 root.addEventListener('click', function(e) {
@@ -16823,7 +17361,7 @@ function initCountrySelector() {
                         e.preventDefault();
                         e.stopPropagation();
                         if (!confirm(getStats2ActionText('logoutConfirm'))) return;
-                        performStats2SignOut({ button: target });
+                        forceGlobalLogout({ button: target });
                         return;
                     }
                     target = e.target && (e.target.matches && e.target.matches('[data-action="github-login"]') ? e.target : (e.target.closest && e.target.closest('[data-action="github-login"]')));
@@ -20419,6 +20957,11 @@ function initCountrySelector() {
                 console.log('[Auth] 🚀 开始 GitHub OAuth 登录流程...');
                 try { if (typeof setGuestGatePassed === 'function') setGuestGatePassed(false); } catch (e) {}
                 try { localStorage.removeItem('stats2_guest_mode'); } catch (e) {}
+                try {
+                    localStorage.removeItem('stats2_manual_logout');
+                    localStorage.removeItem('stats2_force_signed_out_until');
+                    window.__stats2ForceSignedOutUntil = 0;
+                } catch (e) {}
                 var redirectTo = '';
                 try {
                     var isStats2Path = /(?:^|\/)stats2(?:\.html)?$/i.test(_loc.pathname || '');
@@ -20557,6 +21100,10 @@ function initCountrySelector() {
                     console.log('[Auth] ✅ 已移除同步遮罩');
                 }
                 
+                // 登出后 __stats2HasAuthenticatedSession 已为 false：禁止用残留 currentUser 重绘统计卡（避免与登出竞态）
+                try {
+                    if (window.__stats2HasAuthenticatedSession === false) return;
+                } catch (e) {}
                 // 如果有当前用户数据，重新渲染统计卡片（优先使用 allData 中的完整记录）
                 if (window.currentUser) {
                     renderUserStatsCards(leftBody, getBestUserRecordForStats(window.currentUser));
@@ -20571,8 +21118,58 @@ function initCountrySelector() {
          * 当用户登录/退出时自动调用
          * @param {Object} session - Supabase 会话对象
          */
+        function isForceSignedOutActive() {
+            try {
+                if (typeof stats2ReadManualLogoutLockActive === 'function' && stats2ReadManualLogoutLockActive()) return true;
+                var now = Date.now();
+                var until = window.__stats2ForceSignedOutUntil;
+                if (until === true) return true;
+                if (typeof until === 'string' && (until === '1' || until === 'true')) return true;
+                if (!Number.isFinite(until)) until = 0;
+                if ((!until || !Number.isFinite(until)) && typeof localStorage !== 'undefined') {
+                    var raw = localStorage.getItem('stats2_force_signed_out_until');
+                    if (raw === '1' || raw === 'true') {
+                        try { window.__stats2ForceSignedOutUntil = true; } catch (e) {}
+                        return true;
+                    }
+                    if (raw) {
+                        var parsed = parseInt(raw, 10);
+                        if (Number.isFinite(parsed)) until = parsed;
+                    }
+                }
+                if (Number.isFinite(until) && until > 0 && now < until) return true;
+                if (Number.isFinite(until) && until > 0 && now >= until) {
+                    try { if (typeof localStorage !== 'undefined') localStorage.removeItem('stats2_force_signed_out_until'); } catch (e) {}
+                    try { window.__stats2ForceSignedOutUntil = 0; } catch (e) {}
+                }
+            } catch (e) {}
+            return false;
+        }
+        try { window.isForceSignedOutActive = isForceSignedOutActive; } catch (e) {}
+
         async function handleAuthStateChange(session) {
             console.log('[Auth] 🔔 认证状态变化:', session ? '已登录' : '未登录');
+            if (isForceSignedOutActive()) {
+                console.warn('[Auth] 手动退出锁生效：强制游客态，跳过身份绑定与迁移');
+                try {
+                    if (session && typeof supabaseClient !== 'undefined' && supabaseClient && typeof supabaseClient.auth.signOut === 'function') {
+                        await supabaseClient.auth.signOut();
+                    }
+                } catch (eSign) {
+                    try { console.warn('[Auth] signOut（强制锁）:', eSign); } catch (e2) {}
+                }
+                try {
+                    if (typeof window.setAuthenticatedDrawerAccess === 'function') window.setAuthenticatedDrawerAccess(false, null);
+                    else if (typeof setAuthenticatedDrawerAccess === 'function') setAuthenticatedDrawerAccess(false, null);
+                } catch (eAcc) {}
+                try { if (typeof renderGuestLoginCard === 'function') renderGuestLoginCard(); } catch (eGuest) {}
+                try { updateAuthUI(null); } catch (eUi) {}
+                return;
+            }
+            var _authApplyGen = window.__stats2AuthApplyGeneration || 0;
+            function _authApplyStale() {
+                return (window.__stats2AuthApplyGeneration || 0) !== _authApplyGen;
+            }
             
             // 超时兜底定时器
             let timeoutTimer = null;
@@ -20581,10 +21178,22 @@ function initCountrySelector() {
             let migrationCompleted = false;
             
             try {
-                if (session && session.user) {
+                    if (session && session.user) {
+                    if (_authApplyStale()) {
+                        console.warn('[Auth] 已取消过期的登录态处理（用户可能已登出，避免与登出竞态）');
+                        return;
+                    }
                     const user = session.user;
                     try { if (typeof setGuestGatePassed === 'function') setGuestGatePassed(false); } catch (e) {}
                     try { localStorage.removeItem('stats2_guest_mode'); } catch (e) {}
+                    try {
+                        if (typeof localStorage !== 'undefined') {
+                            localStorage.removeItem('stats2_force_signed_out_until');
+                            localStorage.removeItem('stats2_manual_logout');
+                        }
+                        window.__stats2ForceSignedOutUntil = 0;
+                    } catch (e) {}
+                    if (_authApplyStale()) return;
                     setAuthenticatedDrawerAccess(true, user);
                     console.log('[Auth] 👤 用户信息:', {
                         id: user.id,
@@ -20665,6 +21274,7 @@ function initCountrySelector() {
                             console.error('[Auth] ❌ 生成指纹失败:', genError);
                         }
                     }
+                    if (_authApplyStale()) return;
                     
                     const githubUserId = user.id; // 从 Supabase Auth 用户对象获取 user_id
                     let migrationSuccess = false;
@@ -20756,6 +21366,7 @@ function initCountrySelector() {
                                 }
                                 throw fetchError; // 重新抛出其他错误
                             }
+                            if (_authApplyStale()) return;
                             
                             // 清除超时兜底定时器
                             if (timeoutTimer) {
@@ -20965,6 +21576,7 @@ function initCountrySelector() {
                         
                         // 【变量修正】统一使用 currentFp 变量
                         const currentFp = window.fpId || localStorage.getItem('user_fingerprint') || await getCurrentFingerprint();
+                        if (_authApplyStale()) return;
                         
                         console.log('[Auth] 🔗 使用 GitHub User ID 执行 upsert 操作，id =', githubUserId.substring(0, 8) + '...');
                         
@@ -20974,6 +21586,7 @@ function initCountrySelector() {
                             .select('*')
                             .eq('id', githubUserId)
                             .maybeSingle();
+                        if (_authApplyStale()) return;
                         
                         let updatedUser = null;
                         
@@ -21498,6 +22111,24 @@ function initCountrySelector() {
             const leftBody = document.getElementById('left-drawer-body');
             const identityCard = leftBody ? (leftBody.querySelector('.drawer-item[data-card="identity-config"]') || leftBody.querySelector('.drawer-item:first-child')) : null;
             
+            if (!userInfo) {
+                try { window.currentUser = null; } catch (e) {}
+                try { window.currentUserData = null; } catch (e) {}
+                try { window.__stats2HasAuthenticatedSession = false; } catch (e) {}
+                try {
+                    if (typeof localStorage !== 'undefined') {
+                        localStorage.removeItem('github_username');
+                    }
+                } catch (eLs) {}
+                try {
+                    if (typeof window.openclawTimer !== 'undefined' && window.openclawTimer != null) {
+                        clearInterval(window.openclawTimer);
+                        clearTimeout(window.openclawTimer);
+                        window.openclawTimer = null;
+                    }
+                } catch (eT) {}
+            }
+            
             if (userInfo) {
                 // 已登录状态：显示用户信息
                 console.log('[Auth] ✅ 更新 UI 为已登录状态:', userInfo.username);
@@ -21544,8 +22175,16 @@ function initCountrySelector() {
                     const identityCard = leftBody.querySelector('.drawer-item[data-card="identity-config"]') || leftBody.querySelector('.drawer-item:first-child');
                     if (identityCard) {
                         const userInfoSection = identityCard.querySelector('.mb-3.pb-3.border-b');
-                        const loginSection = identityCard.querySelector('#auth-login-section') || 
-                                            identityCard.querySelector('.mt-3.pt-3.border-t');
+                        let loginSection = identityCard.querySelector('#auth-login-section') ||
+                            identityCard.querySelector('.mt-3.pt-3.border-t');
+                        if (!loginSection) {
+                            const host = identityCard.querySelector('.github-combat-identity');
+                            loginSection = document.createElement('div');
+                            loginSection.id = 'auth-login-section';
+                            loginSection.className = 'mt-3 pt-3 border-t border-[#00ff41]/10';
+                            if (host) host.appendChild(loginSection);
+                            else identityCard.appendChild(loginSection);
+                        }
                         
                         if (userInfoSection) {
                             // ✅ 简约：不重建 DOM，避免重复块；仅将用户名置空并恢复默认头像
@@ -25145,8 +25784,16 @@ function initCountrySelector() {
                     currentUserData.total_chars != null ||
                     currentUserData.github_stats
                 ));
-                var allowPrivateCards = hasRenderableUserData || !(typeof hasAuthenticatedDrawerAccess === 'function') || hasAuthenticatedDrawerAccess();
-                if (hasRenderableUserData && typeof setAuthenticatedDrawerAccess === 'function') {
+                var hasSupabaseSessionForDrawer = false;
+                try {
+                    hasSupabaseSessionForDrawer = window.__stats2HasAuthenticatedSession === true || !!(
+                        (window.supabaseAuthUser && window.supabaseAuthUser.id) ||
+                        window.authenticatedUserId ||
+                        window.__authUserId
+                    );
+                } catch (_) {}
+                var allowPrivateCards = !(typeof hasAuthenticatedDrawerAccess === 'function') || hasAuthenticatedDrawerAccess();
+                if (hasRenderableUserData && hasSupabaseSessionForDrawer && typeof setAuthenticatedDrawerAccess === 'function') {
                     try {
                         setAuthenticatedDrawerAccess(true, currentUserData && currentUserData.id ? currentUserData : (window.supabaseAuthUser || currentUserData || null));
                     } catch (_) {}
@@ -25222,7 +25869,7 @@ function initCountrySelector() {
                 // 创建用户统计卡片容器（赛博病理风格：border-white/10 bg-[#0a0a0a]/80 backdrop-blur）
                 if (!allowPrivateCards) {
                     console.log('[UserStats] ℹ️ 当前未登录，取消创建统计卡片 DOM');
-                    clearPrivateDrawerCards({ renderGuestCard: false });
+                    clearPrivateDrawerCards({ renderGuestCard: true });
                     return;
                 }
                 const statsCard = document.createElement('div');
@@ -25353,14 +26000,25 @@ function initCountrySelector() {
                         githubLoginFromStatsSt2 ||
                         ((typeof localStorage !== 'undefined' && localStorage.getItem('github_username')) || '')
                     );
+                    var hasSupabaseSessionForCardSt2 = false;
+                    try {
+                        hasSupabaseSessionForCardSt2 = window.__stats2HasAuthenticatedSession === true || !!(
+                            (window.supabaseAuthUser && window.supabaseAuthUser.id) ||
+                            window.authenticatedUserId ||
+                            window.__authUserId
+                        );
+                    } catch (_) {}
                     ghUserSt2 = String(ghUserSt2 || '').trim();
-                    if (ghUserSt2) {
+                    if (!hasSupabaseSessionForCardSt2) {
+                        ghUserSt2 = '';
+                    }
+                    if (ghUserSt2 && hasSupabaseSessionForCardSt2) {
                         try {
                             if (typeof localStorage !== 'undefined') localStorage.setItem('github_username', ghUserSt2);
                         } catch (_) {}
                     }
                     var userIdentitySt2 = (currentUserData && currentUserData.user_identity) || (githubLoginFromAuthSt2 || ghUserSt2 ? 'github' : null);
-                    var isFpOnlySt2 = !ghUserSt2 || (typeof isValidGitHubUsername === 'function' && !isValidGitHubUsername(ghUserSt2, userIdentitySt2));
+                    var isFpOnlySt2 = !hasSupabaseSessionForCardSt2 || !ghUserSt2 || (typeof isValidGitHubUsername === 'function' && !isValidGitHubUsername(ghUserSt2, userIdentitySt2));
                     var fpSt2 = (typeof localStorage !== 'undefined' && localStorage.getItem('user_fingerprint')) || '';
                     var fpPrefixSt2 = fpSt2 ? fpSt2.substring(0, 6).toUpperCase() : '';
                     var displayNameSourceSt2 = (
@@ -25389,7 +26047,7 @@ function initCountrySelector() {
                         displayLabel: dispLabelSt2,
                         badgeHtml: badgeSt2,
                         githubUsername: ghUserSt2,
-                        isLoggedIn: !!(ghUserSt2 && (typeof isValidGitHubUsername !== 'function' || isValidGitHubUsername(ghUserSt2, userIdentitySt2))),
+                        isLoggedIn: !!(hasSupabaseSessionForCardSt2 && ghUserSt2 && (typeof isValidGitHubUsername !== 'function' || isValidGitHubUsername(ghUserSt2, userIdentitySt2))),
                         currentStatus: curStatusSt2,
                         defaultAvatar: defaultAvatarSt2
                     };
@@ -26410,9 +27068,52 @@ function initCountrySelector() {
                     console.warn('[Init] clearPrivateDrawerCards fallback failed:', safeErr);
                 }
             };
+            if (typeof window.isForceSignedOutActive === 'function' && window.isForceSignedOutActive()) {
+                console.warn('[Init] 手动退出锁激活，优先执行离线清理后再拉取大盘');
+                try {
+                    if (typeof window.stats2ClearLocalAccountData === 'function') {
+                        window.stats2ClearLocalAccountData();
+                    } else {
+                        if (typeof window.stats2ClearAuthStorageKeys === 'function') window.stats2ClearAuthStorageKeys();
+                        if (typeof window.stats2ClearAllSbPrefixedKeys === 'function') window.stats2ClearAllSbPrefixedKeys();
+                    }
+                } catch (eClr) {
+                    try { console.warn('[Init] 手动退出锁清理失败:', eClr); } catch (_) {}
+                }
+                try {
+                    var scInit = typeof supabaseClient !== 'undefined' ? supabaseClient : window.supabaseClient;
+                    if (scInit && scInit.auth && typeof scInit.auth.signOut === 'function') {
+                        await scInit.auth.signOut();
+                    }
+                } catch (eSo) {}
+                try {
+                    var uInit = new URL(window.location.href);
+                    uInit.hash = '';
+                    ['code', 'state', 'error', 'error_description'].forEach(function (p) {
+                        try { uInit.searchParams.delete(p); } catch (e) {}
+                    });
+                    if (window.history && typeof window.history.replaceState === 'function') {
+                        window.history.replaceState({}, document.title || '', uInit.pathname + (uInit.search || ''));
+                    }
+                } catch (eU) {}
+                try {
+                    if (typeof window.setAuthenticatedDrawerAccess === 'function') {
+                        window.setAuthenticatedDrawerAccess(false, null);
+                    } else if (typeof setAuthenticatedDrawerAccess === 'function') {
+                        setAuthenticatedDrawerAccess(false, null);
+                    }
+                } catch (eA) {}
+                try { safeClearPrivateDrawerCards({ renderGuestCard: true }); } catch (eS) {}
+                try { if (typeof renderGuestLoginCard === 'function') renderGuestLoginCard(); } catch (eR) {}
+                try { if (typeof updateAuthUI === 'function') updateAuthUI(null); } catch (eUi) {}
+            }
             try {
             try {
-                if (typeof window.detectOpenClawPort === 'function') {
+                var shouldSkipOpenClawDetect = false;
+                try {
+                    shouldSkipOpenClawDetect = (typeof window.isForceSignedOutActive === 'function' && window.isForceSignedOutActive());
+                } catch (e) {}
+                if (!shouldSkipOpenClawDetect && typeof window.detectOpenClawPort === 'function') {
                     await window.detectOpenClawPort({ host: '127.0.0.1', ports: [18789, 18790, 18791, 18792], timeoutMs: 600 });
                 }
             } catch (_) { /* OpenClaw 端口探测失败时静默，使用默认或缓存 */ }
@@ -26467,7 +27168,7 @@ function initCountrySelector() {
                 var preloadLb = (typeof window.__fetchAllLeaderboardSnapshots === 'function') ? window.__fetchAllLeaderboardSnapshots() : Promise.resolve(null);
                 var myIpPromise = fetch(myIpUrlForInit).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
                 var staticHotlistPromise = fetch(staticHotlistUrl).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
-                var results = await Promise.all([
+                var settled = await Promise.allSettled([
                     fetchData().catch(function(fetchError) {
                         apiFailed = true;
                         console.error('[Window.onload] ❌ fetchData 失败:', fetchError);
@@ -26477,6 +27178,14 @@ function initCountrySelector() {
                     myIpPromise,
                     staticHotlistPromise
                 ]);
+                function settledVal(s) {
+                    return (s && s.status === 'fulfilled') ? s.value : null;
+                }
+                var results = settled.map(settledVal);
+                if (settled[0] && settled[0].status === 'rejected') {
+                    apiFailed = true;
+                    console.error('[Window.onload] ❌ fetchData 被拒绝:', settled[0].reason);
+                }
                 var myIpPayload = results[2];
                 if (myIpPayload && myIpPayload.country && /^[A-Z]{2}$/.test(String(myIpPayload.country).trim())) {
                     myIpCountry = String(myIpPayload.country).trim().toUpperCase();
@@ -26619,6 +27328,18 @@ function initCountrySelector() {
                     if (sessionError) {
                         console.warn('[Auth] ⚠️ 获取会话失败:', sessionError);
                     } else if (session) {
+                        if (typeof window.isForceSignedOutActive === 'function' && window.isForceSignedOutActive()) {
+                            console.warn('[Auth] 登出后 Storage 仍返回会话，正在 signOut 并按未登录展示（避免先亮游客再跳回 GitHub）');
+                            try { await supabaseClient.auth.signOut(); } catch (e) {}
+                            if (typeof window.setAuthenticatedDrawerAccess === 'function') {
+                                window.setAuthenticatedDrawerAccess(false, null);
+                            } else if (typeof setAuthenticatedDrawerAccess === 'function') {
+                                setAuthenticatedDrawerAccess(false, null);
+                            }
+                            safeClearPrivateDrawerCards({ renderGuestCard: true });
+                            try { renderGuestLoginCard(); } catch (e) {}
+                            updateAuthUI(null);
+                        } else {
                         console.log('[Auth] ✅ 检测到现有会话，自动处理认证状态');
                         if (typeof window.setAuthenticatedDrawerAccess === 'function') {
                             window.setAuthenticatedDrawerAccess(true, session.user || null);
@@ -26626,6 +27347,7 @@ function initCountrySelector() {
                             setAuthenticatedDrawerAccess(true, session.user || null);
                         }
                         await handleAuthStateChange(session);
+                        }
                     } else {
                         console.log('[Auth] ℹ️ 未检测到会话，显示登录按钮');
                         if (typeof window.setAuthenticatedDrawerAccess === 'function') {
@@ -26645,8 +27367,41 @@ function initCountrySelector() {
                 if (!window.__stats2AuthStateBound) {
                     window.__stats2AuthStateBound = true;
                     const stats2AuthStateBinding = supabaseClient.auth.onAuthStateChange((event, session) => {
+                        if (session && event !== 'SIGNED_OUT' && typeof window.isForceSignedOutActive === 'function' && window.isForceSignedOutActive()) {
+                            console.warn('[Auth] 强制登出窗口内拦截带会话事件并保持游客态:', event);
+                            Promise.resolve().then(async function() {
+                                try { await supabaseClient.auth.signOut(); } catch (e) {}
+                                try {
+                                    if (typeof window.setAuthenticatedDrawerAccess === 'function') {
+                                        window.setAuthenticatedDrawerAccess(false, null);
+                                    } else if (typeof setAuthenticatedDrawerAccess === 'function') {
+                                        setAuthenticatedDrawerAccess(false, null);
+                                    }
+                                } catch (e) {}
+                                try { safeClearPrivateDrawerCards({ renderGuestCard: true }); } catch (e) {}
+                                try { renderGuestLoginCard(); } catch (e) {}
+                                try { updateAuthUI(null); } catch (e) {}
+                            });
+                            return;
+                        }
                         console.log('[Auth] 🔔 认证状态变化事件:', event, session ? '有会话' : '无会话');
                         Promise.resolve().then(async function() {
+                            if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && window.__stats2SignOutPromise) {
+                                console.warn('[Auth] 登出流程尚未结束，忽略', event, '（避免登出后又被拉回已登录态）');
+                                return;
+                            }
+                            if (event === 'SIGNED_OUT') {
+                                if (window.__stats2SuppressSignedOutDataFetch) {
+                                    console.log('[Auth] 全局退出流程中，跳过 SIGNED_OUT 触发的重复拉取与 handleAuthStateChange(null)');
+                                    return;
+                                }
+                                try {
+                                    resetGuestViewerState({ renderDrawer: true });
+                                    renderGuestLoginCard();
+                                } catch (e) {}
+                                await handleAuthStateChange(null);
+                                return;
+                            }
                             if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
                                 await handleAuthStateChange(session);
                                 
@@ -26705,12 +27460,6 @@ function initCountrySelector() {
                                         }
                                     }
                                 }
-                            } else if (event === 'SIGNED_OUT') {
-                                try {
-                                    resetGuestViewerState({ renderDrawer: true });
-                                    renderGuestLoginCard();
-                                } catch (e) {}
-                                await handleAuthStateChange(null);
                             }
                         }).catch(function(authChangeError) {
                             console.error('[Auth] ❌ 认证状态回调执行失败:', authChangeError);
@@ -26730,12 +27479,24 @@ function initCountrySelector() {
                     if (supabaseClient) {
                         const { data: { session } } = await supabaseClient.auth.getSession();
                         if (session) {
+                            if (typeof window.isForceSignedOutActive === 'function' && window.isForceSignedOutActive()) {
+                                try { await supabaseClient.auth.signOut(); } catch (e) {}
+                                if (typeof window.setAuthenticatedDrawerAccess === 'function') {
+                                    window.setAuthenticatedDrawerAccess(false, null);
+                                } else if (typeof setAuthenticatedDrawerAccess === 'function') {
+                                    setAuthenticatedDrawerAccess(false, null);
+                                }
+                                safeClearPrivateDrawerCards({ renderGuestCard: true });
+                                try { renderGuestLoginCard(); } catch (e) {}
+                                updateAuthUI(null);
+                            } else {
                             if (typeof window.setAuthenticatedDrawerAccess === 'function') {
                                 window.setAuthenticatedDrawerAccess(true, session.user || null);
                             } else if (typeof setAuthenticatedDrawerAccess === 'function') {
                                 setAuthenticatedDrawerAccess(true, session.user || null);
                             }
                             await handleAuthStateChange(session);
+                            }
                         } else {
                             if (typeof window.setAuthenticatedDrawerAccess === 'function') {
                                 window.setAuthenticatedDrawerAccess(false, null);
