@@ -6496,6 +6496,25 @@
             }
         } catch (_) { /* ignore */ }
         
+        /**
+         * 合并对 auth.getSession() 的并发调用，避免 gotrue-js 同一 auth-token 锁在 5s 内被多次占用触发告警。
+         * 仅合并「同时进行」的请求；串行调用仍每次走底层，不缓存会话结果，避免登出后读到旧 session。
+         */
+        function patchSupabaseAuthGetSessionDedupe(sb) {
+            if (!sb || !sb.auth || typeof sb.auth.getSession !== 'function') return;
+            if (sb.auth.__stats2_getSession_patched) return;
+            sb.auth.__stats2_getSession_patched = true;
+            var orig = sb.auth.getSession.bind(sb.auth);
+            var inflight = null;
+            sb.auth.getSession = function () {
+                if (inflight) return inflight;
+                inflight = orig().finally(function () {
+                    inflight = null;
+                });
+                return inflight;
+            };
+        }
+
         // ============================================
         // 初始化 Supabase 客户端（全局作用域直接执行）
         // ============================================
@@ -6524,6 +6543,7 @@
                     window.supabase = supabaseClient;
                     // 挂载到全局 window，供控制台脚本使用
                     window.supabaseClient = supabaseClient;
+                    patchSupabaseAuthGetSessionDedupe(supabaseClient);
                     
                     console.log('[Init] ✅ Supabase 客户端已成功挂载至 window.supabaseClient / window.supabase');
                     console.log('[Init] 💡 可在控制台使用 window.supabaseClient 访问客户端');
@@ -9971,7 +9991,7 @@
             const countryViewPanel = document.getElementById('panel-country-view');
             const rankingViewPanel = document.getElementById('panel-ranking-view');
             // 全球视图内容容器
-            const rightBody = document.getElementById('panel-global-content');
+            const rightBody = document.getElementById('global-cards-container') || document.getElementById('panel-global-content');
 
             if (!leftDrawer || !rightDrawer) return;
             if (typeof currentDrawerCountry !== 'object' || currentDrawerCountry == null) return;
@@ -10118,7 +10138,20 @@
                 
                 // 新的全球视图容器
                 if (container.id === 'panel-global-view' || container.id === 'panel-global-content') {
-                    targetContainer = document.getElementById('panel-global-content') || container;
+                    const globalPanel = document.getElementById('panel-global-content') || container;
+                    let globalCardsContainer = document.getElementById('global-cards-container');
+                    if (!globalCardsContainer && globalPanel && typeof document !== 'undefined') {
+                        try {
+                            globalCardsContainer = document.createElement('div');
+                            globalCardsContainer.id = 'global-cards-container';
+                            globalCardsContainer.className = 'flex flex-col gap-4';
+                            if (globalPanel.firstChild) globalPanel.insertBefore(globalCardsContainer, globalPanel.firstChild);
+                            else globalPanel.appendChild(globalCardsContainer);
+                        } catch (_) {
+                            globalCardsContainer = null;
+                        }
+                    }
+                    targetContainer = globalCardsContainer || globalPanel;
                 }
                 // 新的国家视图容器
                 else if (container.id === 'panel-country-view' || container.id === 'countryTemplateMount') {
@@ -30831,6 +30864,11 @@ function initCountrySelector() {
                 // 重置标志
                 isRefreshingUserStats = false;
                 refreshUserStatsAbortController = null;
+                try {
+                    if (typeof window.refreshOpenClawMonitor === 'function') {
+                        setTimeout(function() { window.refreshOpenClawMonitor(); }, 80);
+                    }
+                } catch (e2) { /* ignore */ }
             }
         };
         
@@ -30995,7 +31033,7 @@ function initCountrySelector() {
 
         let totalChars = pickPkNumber(src, [
             'totalChars', 'total_chars', 'total_chars_sum', 'total_user_chars_sum',
-            'sumChars', 'sum_chars',
+            'totalCharsSum', 'sumChars', 'sum_chars', 'chars', 'chars_sum',
         ]);
 
         let avgChars = pickPkNumber(src, [
@@ -31015,7 +31053,7 @@ function initCountrySelector() {
             if (totalChars > 0) totalTokens = totalChars;
             else if (avgChars > 0 && userCount > 0) totalTokens = avgChars * userCount;
         }
-        // 兼容历史快照：缺失 chars 字段时，回退到 tokens（老口径 tokens≈chars）或 avgChars*userCount
+        // 兼容历史快照：缺失 chars 字段时，回退到 tokens（旧口径 tokens≈chars）或 avgChars*userCount
         if (!(totalChars > 0)) {
             if (totalTokens > 0) totalChars = totalTokens;
             else if (avgChars > 0 && userCount > 0) totalChars = avgChars * userCount;
@@ -31052,7 +31090,15 @@ function initCountrySelector() {
             ]);
         }
         const topModel = String(
-            src.topModel ?? src.top_model ?? src.primary_model ?? src.model ?? ''
+            src.topModel
+            ?? src.top_model
+            ?? src.primary_model
+            ?? src.model
+            ?? src.topModelId
+            ?? src.top_model_id
+            ?? (src.openclaw && typeof src.openclaw === 'object' ? (src.openclaw.top_model_id ?? src.openclaw.topModel) : '')
+            ?? (src.openclaw_stats && typeof src.openclaw_stats === 'object' ? (src.openclaw_stats.top_model_id ?? src.openclaw_stats.topModel) : '')
+            ?? ''
         ).trim();
 
         return {
@@ -31086,6 +31132,7 @@ function initCountrySelector() {
 
     function buildGlobalCountryPkScaffoldHtml() {
         return `
+            <div id="global-cards-container" class="flex flex-col gap-4"></div>
             <div class="flex items-center justify-between flex-shrink-0">
                 <span class="text-[10px] text-zinc-500 font-mono uppercase tracking-widest">Country PK // Global Rank</span>
                 <span id="global-pk-updated-at" class="text-[9px] text-zinc-600 font-mono"></span>
@@ -31114,6 +31161,13 @@ function initCountrySelector() {
                     // 兜底重建：避免 panel 被清空后 Global 榜单容器永久丢失
                     panel.innerHTML = buildGlobalCountryPkScaffoldHtml();
                 }
+            }
+            if (!panel.querySelector('#global-cards-container')) {
+                const cardsHost = document.createElement('div');
+                cardsHost.id = 'global-cards-container';
+                cardsHost.className = 'flex flex-col gap-4';
+                if (panel.firstChild) panel.insertBefore(cardsHost, panel.firstChild);
+                else panel.appendChild(cardsHost);
             }
             if (!window.__globalCountryPkMarkup && panel.querySelector('#global-country-pk-leaderboard')) {
                 window.__globalCountryPkMarkup = panel.innerHTML;
@@ -31164,11 +31218,11 @@ function initCountrySelector() {
                 if (!/^[A-Z]{2}$/.test(cc)) continue;
                 const normalized = normalizePkCountryRow({
                     userCount: row.total_users,
-                    totalChars: row.total_chars_sum,
+                    totalChars: row.total_chars_sum ?? row.total_user_chars_sum ?? row.total_chars,
                     totalCharsSum: row.total_user_chars_sum,
                     avgChars: row.avg_user_message_length_sum,
-                    totalTokens: row.total_tokens_sum ?? row.total_tokens,
-                    topModel: row.top_model ?? row.primary_model,
+                    totalTokens: row.total_tokens_sum ?? row.total_tokens ?? row.total_user_tokens_sum,
+                    topModel: row.top_model ?? row.primary_model ?? row.topModel ?? row.primaryModel ?? row.top_model_id ?? row.topModelId,
                     githubScore: row.github_score,
                     totalStars: row.total_stars_sum ?? row.github_stars_sum,
                     totalForks: row.total_forks_sum ?? row.github_forks_sum,
@@ -31430,31 +31484,33 @@ function initCountrySelector() {
                 case 'lobster':
                     return [
                         {
-                            id: 'totalTokens',
-                            title: '养虾总量榜',
-                            subtitle: '看国家总消耗，谁在高频高成本地和 AI 长时间磨合',
+                            id: 'lobsterUsers',
+                            title: '养虾榜',
+                            subtitle: '看养虾人数最多的国家',
+                            label: '养虾人数',
+                            metric: (item) => item.userCount,
+                            format: (item) => `${formatInt(item.userCount)} 人`,
+                            compare: (a, b) => (b.userCount - a.userCount) || (b.totalTokens - a.totalTokens) || a.cc.localeCompare(b.cc),
+                        },
+                        {
+                            id: 'lobsterFeed',
+                            title: '投喂榜',
+                            subtitle: '看国家养虾投入的 Tokens 总量',
                             label: '总 Tokens',
                             metric: (item) => item.totalTokens,
                             format: (item) => `${formatInt(item.totalTokens)} Tokens`,
+                            badge: (item) => `${formatInt(item.userCount)} 人`,
                             compare: (a, b) => (b.totalTokens - a.totalTokens) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
                         },
                         {
-                            id: 'tokensPerUser',
-                            title: '重度养虾榜',
-                            subtitle: '看单个用户的平均投入密度，谁更容易把模型“养熟”',
-                            label: '人均 Tokens',
-                            metric: (item) => item.tokensPerUser,
-                            format: (item) => `${formatInt(item.tokensPerUser)} Tokens`,
-                            compare: (a, b) => (b.tokensPerUser - a.tokensPerUser) || (b.totalTokens - a.totalTokens) || a.cc.localeCompare(b.cc),
-                        },
-                        {
-                            id: 'avgChars',
-                            title: '长指令投喂榜',
-                            subtitle: '看每人平均输出长度，谁更擅长用长上下文喂模型',
-                            label: '人均字符',
-                            metric: (item) => item.avgChars,
-                            format: (item) => `${formatInt(item.avgChars)} 字符`,
-                            compare: (a, b) => (b.avgChars - a.avgChars) || (b.tokensPerUser - a.tokensPerUser) || a.cc.localeCompare(b.cc),
+                            id: 'lobsterModel',
+                            title: '模型榜',
+                            subtitle: '看国家 OpenClaw 主力模型（按养虾人数排序）',
+                            label: '主力模型',
+                            metric: (item) => item.userCount,
+                            format: (item) => item.topModel ? item.topModel : '—',
+                            badge: (item) => `${formatInt(item.userCount)} 人`,
+                            compare: (a, b) => (b.userCount - a.userCount) || (b.totalTokens - a.totalTokens) || a.cc.localeCompare(b.cc),
                         },
                     ];
                 case 'model':
