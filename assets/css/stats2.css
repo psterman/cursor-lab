@@ -6016,21 +6016,10 @@ select.cyber-guide-country-select-native {
     0 0 12px rgba(0, 255, 65, 0.55),
     0 0 4px rgba(0, 255, 65, 0.9);
   transform: none;
-  will-change: left;
-  /* 用 left 驱动滑动，避免部分环境下 transform 百分比不生效导致滑块静止 */
-  animation: cyber-guide-recog-h-slide 1.2s ease-in-out infinite alternate;
-}
-@keyframes cyber-guide-recog-h-slide {
-  0% {
-    left: 0;
-  }
-  100% {
-    left: 74%;
-  }
+  will-change: left, background-position, opacity;
 }
 @media (prefers-reduced-motion: reduce) {
   .cyber-guide-recog-scrollbar-h-thumb {
-    animation: none;
     left: 37%;
     background: linear-gradient(90deg, #00aa33, #39ff66);
   }

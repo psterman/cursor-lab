@@ -32823,6 +32823,9 @@ document.addEventListener('click', function(e) {
                 } catch (_) {}
                 self._answerBookRotatorTimer = null;
             }
+            try {
+                stopCyberRecogThumbAnim();
+            } catch (_) {}
             self.clearHandlers();
             self._flowActive = false;
             if (self._countryEscKey) {
@@ -32956,6 +32959,67 @@ document.addEventListener('click', function(e) {
                     segs += '<div class="cyber-guide-progress-seg' + (si <= step ? ' on' : '') + '"></div>';
                 }
                 return segs;
+            }
+
+            function stopCyberRecogThumbAnim() {
+                try {
+                    if (self._recogThumbRaf) {
+                        cancelAnimationFrame(self._recogThumbRaf);
+                        self._recogThumbRaf = 0;
+                    }
+                    self._recogThumbStartedAt = 0;
+                } catch (_) {}
+            }
+
+            function startCyberRecogThumbAnim() {
+                try {
+                    var thumbs = overlay.querySelectorAll('.cyber-guide-recog-line--loading .cyber-guide-recog-scrollbar-h-thumb');
+                    if (!thumbs || thumbs.length === 0) {
+                        stopCyberRecogThumbAnim();
+                        return;
+                    }
+                    if (!self._recogThumbStartedAt) self._recogThumbStartedAt = Date.now();
+                    if (self._recogThumbRaf) return;
+                    var tick = function() {
+                        try {
+                            var liveThumbs = overlay.querySelectorAll('.cyber-guide-recog-line--loading .cyber-guide-recog-scrollbar-h-thumb');
+                            if (!liveThumbs || liveThumbs.length === 0) {
+                                stopCyberRecogThumbAnim();
+                                return;
+                            }
+                            var now = Date.now();
+                            var elapsed = now - (self._recogThumbStartedAt || now);
+                            var cycleMs = 1600;
+                            var startLeft = -28;
+                            var endLeft = 74;
+                            for (var ti = 0; ti < liveThumbs.length; ti++) {
+                                var node = liveThumbs[ti];
+                                if (!node) continue;
+                                if (node.style.animation !== 'none') node.style.animation = 'none';
+                                var phase = (elapsed / cycleMs + (ti * 0.24)) % 1;
+                                var ease = phase < 0.5
+                                    ? (4 * phase * phase * phase)
+                                    : (1 - Math.pow(-2 * phase + 2, 3) / 2);
+                                var left = startLeft + ((endLeft - startLeft) * ease);
+                                var fadeIn = Math.max(0, Math.min(1, phase / 0.16));
+                                fadeIn = fadeIn * fadeIn * (3 - 2 * fadeIn);
+                                var fadeOut = Math.max(0, Math.min(1, (1 - phase) / 0.18));
+                                fadeOut = fadeOut * fadeOut * (3 - 2 * fadeOut);
+                                var alpha = Math.max(0, Math.min(1, fadeIn * fadeOut));
+                                node.style.left = left.toFixed(2) + '%';
+                                node.style.backgroundPosition = ((phase * 120) | 0) + '% 0%';
+                                node.style.opacity = alpha.toFixed(3);
+                                node.style.transform = 'none';
+                            }
+                            self._recogThumbRaf = requestAnimationFrame(tick);
+                        } catch (err) {
+                            stopCyberRecogThumbAnim();
+                        }
+                    };
+                    self._recogThumbRaf = requestAnimationFrame(tick);
+                } catch (_) {
+                    stopCyberRecogThumbAnim();
+                }
             }
 
             function renderRecogLines(hasCur, hasOc, curSt, ocSt) {
@@ -33613,13 +33677,7 @@ document.addEventListener('click', function(e) {
 
             function kickCyberRecogThumbAnim() {
                 try {
-                    var thumbs = overlay.querySelectorAll('.cyber-guide-recog-scrollbar-h-thumb');
-                    for (var ti = 0; ti < thumbs.length; ti++) {
-                        var node = thumbs[ti];
-                        node.style.animation = 'none';
-                        void node.offsetWidth;
-                        node.style.removeProperty('animation');
-                    }
+                    startCyberRecogThumbAnim();
                 } catch (_) {}
             }
 
