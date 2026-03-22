@@ -10015,8 +10015,14 @@
                 ? (currentLang === 'zh' ? countryNameMap[countryCode].zh : countryNameMap[countryCode].en)
                 : countryName;
 
-            // 更新标题
-            if (rightTitle) rightTitle.textContent = countryDisplayName;
+            // 更新标题：处于全球 Tab 时固定为「全球」，避免异步国家 summary 回调把标题改回某国（左右抽屉同步）
+            if (typeof currentViewState === 'string' && currentViewState === 'GLOBAL') {
+                const gname = currentLang === 'en' ? 'Global' : '全球';
+                if (rightTitle) rightTitle.textContent = gname;
+                if (leftTitle) leftTitle.textContent = gname;
+            } else {
+                if (rightTitle) rightTitle.textContent = countryDisplayName;
+            }
 
             // ============================================
             // 【锁定骨架屏】仅当 localStorage 为空且网络请求进行中时显示骨架；只要本地有数严禁显示骨架
@@ -11738,6 +11744,21 @@
             }
             // 视图拦截：目标视图与目标国家均与当前一致时跳过数据拉取，避免死循环
             if (state.currentViewState === targetView) {
+                // Global 视图允许“同视图刷新”，避免首次/回流时 PK 榜不渲染
+                if (targetView === 'GLOBAL') {
+                    try {
+                        if (typeof window.ensureGlobalCountryPkScaffold === 'function') {
+                            window.ensureGlobalCountryPkScaffold();
+                        }
+                        if (typeof window.initCountryPkBoard === 'function') {
+                            window.initCountryPkBoard();
+                        }
+                        if (typeof window.refreshCountryPkBoard === 'function') {
+                            Promise.resolve(window.refreshCountryPkBoard(false)).catch(function () { /* ignore */ });
+                        }
+                    } catch (e) { /* ignore */ }
+                    return;
+                }
                 if (targetView !== 'COUNTRY') return;
                 var targetCode = (initialCountryCode && /^[A-Z]{2}$/i.test(String(initialCountryCode))) ? String(initialCountryCode).trim().toUpperCase() : (currentDrawerCountry && currentDrawerCountry.code);
                 if (targetCode && currentDrawerCountry && String(currentDrawerCountry.code || '').toUpperCase() === String(targetCode).toUpperCase()) return;
@@ -30930,6 +30951,155 @@ function initCountrySelector() {
         try { return x.toLocaleString(undefined, { maximumFractionDigits: 2 }); } catch { return String(Math.round(x * 100) / 100); }
     }
 
+    function apiJoin(base, path) {
+        const p = path.startsWith('/') ? path : `/${path}`;
+        const b = base != null && String(base).trim() !== '' ? String(base).replace(/\/$/, '') : '';
+        return b ? b + p : p;
+    }
+
+    function pickPkNumber(raw, keys) {
+        if (!raw || typeof raw !== 'object' || !Array.isArray(keys)) return 0;
+        for (let i = 0; i < keys.length; i++) {
+            const key = keys[i];
+            if (!key) continue;
+            const n = safeNum(raw[key]);
+            if (n > 0) return n;
+        }
+        return 0;
+    }
+
+    function pickPkNestedNumber(raw, nestedKeys, leafKeys) {
+        if (!raw || typeof raw !== 'object') return 0;
+        const holders = [];
+        if (Array.isArray(nestedKeys)) {
+            for (let i = 0; i < nestedKeys.length; i++) {
+                const nk = nestedKeys[i];
+                const obj = nk ? raw[nk] : null;
+                if (obj && typeof obj === 'object') holders.push(obj);
+            }
+        }
+        if (!holders.length) return 0;
+        for (let i = 0; i < holders.length; i++) {
+            const n = pickPkNumber(holders[i], leafKeys);
+            if (n > 0) return n;
+        }
+        return 0;
+    }
+
+    function normalizePkCountryRow(raw) {
+        const src = (raw && typeof raw === 'object') ? raw : {};
+
+        const userCount = Math.max(0, Math.floor(pickPkNumber(src, [
+            'userCount', 'user_count', 'total_users', 'users', 'count',
+        ])));
+
+        let totalChars = pickPkNumber(src, [
+            'totalChars', 'total_chars', 'total_chars_sum', 'total_user_chars_sum',
+            'sumChars', 'sum_chars',
+        ]);
+
+        let avgChars = pickPkNumber(src, [
+            'avgChars', 'avg_chars', 'avgUserChars', 'avg_user_chars',
+            'avg_user_message_length_sum', 'avg_user_message_length', 'avg_len',
+        ]);
+        if (!(avgChars > 0) && userCount > 0 && totalChars > 0) {
+            avgChars = totalChars / userCount;
+        }
+
+        let totalTokens = pickPkNumber(src, [
+            'totalTokens', 'total_tokens', 'total_tokens_sum',
+            'sumTokens', 'sum_tokens', 'tokens', 'token_count',
+        ]);
+        // 兼容历史快照：缺失 token 字段时，用 chars 口径兜底，避免养虾榜长期显示 0
+        if (!(totalTokens > 0)) {
+            if (totalChars > 0) totalTokens = totalChars;
+            else if (avgChars > 0 && userCount > 0) totalTokens = avgChars * userCount;
+        }
+        // 兼容历史快照：缺失 chars 字段时，回退到 tokens（老口径 tokens≈chars）或 avgChars*userCount
+        if (!(totalChars > 0)) {
+            if (totalTokens > 0) totalChars = totalTokens;
+            else if (avgChars > 0 && userCount > 0) totalChars = avgChars * userCount;
+        }
+
+        const githubScore = pickPkNumber(src, [
+            'githubScore', 'github_score', 'github_score_avg',
+        ]);
+        let totalStars = pickPkNumber(src, [
+            'totalStars', 'total_stars', 'total_stars_sum',
+            'githubStars', 'github_stars', 'stars', 'stars_sum',
+        ]);
+        if (!(totalStars > 0)) {
+            totalStars = pickPkNestedNumber(src, ['githubStats', 'github_stats'], [
+                'totalStars', 'total_stars', 'stars', 'starCount', 'star_count',
+            ]);
+        }
+        let totalForks = pickPkNumber(src, [
+            'totalForks', 'total_forks', 'total_forks_sum',
+            'githubForks', 'github_forks', 'forks', 'forks_sum',
+        ]);
+        if (!(totalForks > 0)) {
+            totalForks = pickPkNestedNumber(src, ['githubStats', 'github_stats'], [
+                'totalForks', 'total_forks', 'forks', 'forkCount', 'fork_count',
+            ]);
+        }
+        let totalFollowers = pickPkNumber(src, [
+            'totalFollowers', 'total_followers', 'total_followers_sum',
+            'githubFollowers', 'github_followers', 'followers', 'followers_sum',
+        ]);
+        if (!(totalFollowers > 0)) {
+            totalFollowers = pickPkNestedNumber(src, ['githubStats', 'github_stats'], [
+                'totalFollowers', 'total_followers', 'followers', 'followersCount', 'followers_count',
+            ]);
+        }
+        const topModel = String(
+            src.topModel ?? src.top_model ?? src.primary_model ?? src.model ?? ''
+        ).trim();
+
+        return {
+            avgChars: Math.round(safeNum(avgChars) * 100) / 100,
+            totalChars: Math.round(safeNum(totalChars) * 100) / 100,
+            totalTokens: Math.round(safeNum(totalTokens) * 100) / 100,
+            userCount,
+            topModel,
+            githubScore: Math.round(safeNum(githubScore) * 100) / 100,
+            totalStars: Math.round(safeNum(totalStars) * 100) / 100,
+            totalForks: Math.round(safeNum(totalForks) * 100) / 100,
+            totalFollowers: Math.round(safeNum(totalFollowers) * 100) / 100,
+        };
+    }
+
+    function normalizePkSnapshot(snapshot) {
+        const out = {};
+        try {
+            for (const [ccRaw, raw] of Object.entries(snapshot || {})) {
+                const cc = String(ccRaw || '').trim().toUpperCase();
+                if (!/^[A-Z]{2}$/.test(cc)) continue;
+                const row = normalizePkCountryRow(raw);
+                if (row.userCount <= 0) continue;
+                out[cc] = row;
+            }
+        } catch (_) {
+            return {};
+        }
+        return out;
+    }
+
+    function buildGlobalCountryPkScaffoldHtml() {
+        return `
+            <div class="flex items-center justify-between flex-shrink-0">
+                <span class="text-[10px] text-zinc-500 font-mono uppercase tracking-widest">Country PK // Global Rank</span>
+                <span id="global-pk-updated-at" class="text-[9px] text-zinc-600 font-mono"></span>
+            </div>
+            <div class="vibe-index-leaderboard min-h-[12rem]" id="global-country-pk-leaderboard">
+                <div class="stats2-cyber-skeleton" id="global-pk-skeleton" aria-hidden="true">
+                    <div class="stats2-skeleton-bars"></div>
+                    <div class="stats2-skeleton-line"></div>
+                    <div class="stats2-skeleton-line short"></div>
+                </div>
+            </div>
+        `;
+    }
+
     function ensureGlobalCountryPkScaffold() {
         const panel = document.getElementById('panel-global-content');
         if (!panel) return null;
@@ -30937,8 +31107,16 @@ function initCountrySelector() {
             if (!window.__globalCountryPkMarkup && panel.querySelector('#global-country-pk-leaderboard')) {
                 window.__globalCountryPkMarkup = panel.innerHTML;
             }
-            if (!panel.querySelector('#global-country-pk-leaderboard') && window.__globalCountryPkMarkup) {
-                panel.innerHTML = window.__globalCountryPkMarkup;
+            if (!panel.querySelector('#global-country-pk-leaderboard')) {
+                if (window.__globalCountryPkMarkup) {
+                    panel.innerHTML = window.__globalCountryPkMarkup;
+                } else {
+                    // 兜底重建：避免 panel 被清空后 Global 榜单容器永久丢失
+                    panel.innerHTML = buildGlobalCountryPkScaffoldHtml();
+                }
+            }
+            if (!window.__globalCountryPkMarkup && panel.querySelector('#global-country-pk-leaderboard')) {
+                window.__globalCountryPkMarkup = panel.innerHTML;
             }
         } catch (_) {
             // ignore
@@ -30958,15 +31136,55 @@ function initCountrySelector() {
             }
             if (skeleton) skeleton.style.display = '';
             const payload = await fetchCountryPkSnapshot();
-            if (payload) {
-                const currentRankType = String(window.__pkRankType || DEFAULT_RANK_TYPE).trim().toLowerCase() || DEFAULT_RANK_TYPE;
-                renderCountryRankings(payload, currentRankType);
-            }
+            const currentRankType = String(window.__pkRankType || DEFAULT_RANK_TYPE).trim().toLowerCase() || DEFAULT_RANK_TYPE;
+            renderCountryRankings(payload || { snapshot: {}, updated_at: null, updated_at_sec: null }, currentRankType);
             return payload;
         } catch (_) {
+            try {
+                const currentRankType = String(window.__pkRankType || DEFAULT_RANK_TYPE).trim().toLowerCase() || DEFAULT_RANK_TYPE;
+                renderCountryRankings({ snapshot: {}, updated_at: null, updated_at_sec: null }, currentRankType);
+            } catch (__) { /* ignore */ }
             return null;
         } finally {
             try { if (skeleton) skeleton.style.display = 'none'; } catch (_) {}
+        }
+    }
+
+    async function fetchCountryPkFromCountryStatsGlobal(base) {
+        try {
+            const url = apiJoin(base, `/api/v2/country-stats-global?_t=${Date.now()}`);
+            const res = await fetch(url, { headers: { 'Accept': 'application/json' }, mode: 'cors', credentials: 'omit' });
+            const j = res.ok ? await res.json() : null;
+            const arr = j && j.data && Array.isArray(j.data) ? j.data : [];
+            if (!arr.length) return null;
+            const snapshot = {};
+            for (let i = 0; i < arr.length; i++) {
+                const row = arr[i];
+                const cc = String(row && row.country_code != null ? row.country_code : '').trim().toUpperCase();
+                if (!/^[A-Z]{2}$/.test(cc)) continue;
+                const normalized = normalizePkCountryRow({
+                    userCount: row.total_users,
+                    totalChars: row.total_chars_sum,
+                    totalCharsSum: row.total_user_chars_sum,
+                    avgChars: row.avg_user_message_length_sum,
+                    totalTokens: row.total_tokens_sum ?? row.total_tokens,
+                    topModel: row.top_model ?? row.primary_model,
+                    githubScore: row.github_score,
+                    totalStars: row.total_stars_sum ?? row.github_stars_sum,
+                    totalForks: row.total_forks_sum ?? row.github_forks_sum,
+                    totalFollowers: row.total_followers_sum ?? row.github_followers_sum,
+                });
+                if (normalized.userCount <= 0) continue;
+                snapshot[cc] = normalized;
+            }
+            if (!Object.keys(snapshot).length) return null;
+            return {
+                snapshot,
+                updated_at: j.updated_at || null,
+                updated_at_sec: null,
+            };
+        } catch (_) {
+            return null;
         }
     }
 
@@ -30974,29 +31192,56 @@ function initCountrySelector() {
         try {
             const now = Date.now();
             if (window.__pkSnapshot && window.__pkSnapshotTs && (now - window.__pkSnapshotTs) < PK_CACHE_TTL_MS) {
-                return window.__pkSnapshot;
+                const cached = window.__pkSnapshot;
+                const snap = cached && cached.snapshot && typeof cached.snapshot === 'object' ? cached.snapshot : {};
+                if (Object.keys(snap).length > 0) return cached;
             }
             if (window.__pkSnapshotPromise) return await window.__pkSnapshotPromise;
 
             const base = getApiBase();
-            const url = `${base}/api/global-aggregate?view=global&_t=${now}`;
-            window.__pkSnapshotPromise = fetch(url, { headers: { 'Accept': 'application/json' }, mode: 'cors', credentials: 'omit' })
-                .then(res => res.ok ? res.json() : null)
-                .then(payload => {
-                    if (!payload || payload.success !== true) return null;
-                    const snapshot = payload.snapshot && typeof payload.snapshot === 'object' ? payload.snapshot : {};
-                    const out = { snapshot, updated_at: payload.updated_at || null, updated_at_sec: payload.updated_at_sec || null };
-                    window.__pkSnapshot = out;
+            window.__pkSnapshotPromise = (async () => {
+                let payload = null;
+                try {
+                    const url = apiJoin(base, `/api/global-aggregate?view=global&_t=${now}`);
+                    const res = await fetch(url, { headers: { 'Accept': 'application/json' }, mode: 'cors', credentials: 'omit' });
+                    if (res.ok) payload = await res.json();
+                } catch (_) {
+                    payload = null;
+                }
+                let snapshot = {};
+                let updated_at = null;
+                let updated_at_sec = null;
+                if (payload && payload.success === true) {
+                    snapshot = payload.snapshot && typeof payload.snapshot === 'object' ? payload.snapshot : {};
+                    snapshot = normalizePkSnapshot(snapshot);
+                    updated_at = payload.updated_at || null;
+                    updated_at_sec = payload.updated_at_sec || null;
+                }
+                if (!Object.keys(snapshot).length) {
+                    const fb = await fetchCountryPkFromCountryStatsGlobal(base);
+                    if (fb && fb.snapshot && Object.keys(fb.snapshot).length > 0) {
+                        snapshot = normalizePkSnapshot(fb.snapshot);
+                        updated_at = fb.updated_at != null ? fb.updated_at : updated_at;
+                        updated_at_sec = fb.updated_at_sec != null ? fb.updated_at_sec : updated_at_sec;
+                    }
+                }
+                const out = { snapshot, updated_at, updated_at_sec };
+                window.__pkSnapshot = out;
+                window.__pkSnapshotTs = Date.now();
+                return out;
+            })()
+                .catch(() => {
+                    const empty = { snapshot: {}, updated_at: null, updated_at_sec: null };
+                    window.__pkSnapshot = empty;
                     window.__pkSnapshotTs = Date.now();
-                    return out;
+                    return empty;
                 })
-                .catch(() => null)
                 .finally(() => { window.__pkSnapshotPromise = null; });
 
             return await window.__pkSnapshotPromise;
         } catch (e) {
             try { window.__pkSnapshotPromise = null; } catch (_) {}
-            return null;
+            return { snapshot: {}, updated_at: null, updated_at_sec: null };
         }
     }
 
@@ -31010,10 +31255,11 @@ function initCountrySelector() {
         try {
             for (const [, raw] of Object.entries(snapshot || {})) {
                 if (!raw || typeof raw !== 'object') continue;
-                const userCount = safeNum(raw.userCount);
-                const avgChars = safeNum(raw.avgChars);
-                const totalTokens = safeNum(raw.totalTokens);
-                const githubScore = safeNum(raw.githubScore);
+                const normalized = normalizePkCountryRow(raw);
+                const userCount = safeNum(normalized.userCount);
+                const avgChars = safeNum(normalized.avgChars);
+                const totalTokens = safeNum(normalized.totalTokens);
+                const githubScore = safeNum(normalized.githubScore);
                 const tokensPerUser = userCount > 0 ? (totalTokens / userCount) : 0;
 
                 if (userCount > 0) {
@@ -31124,7 +31370,13 @@ function initCountrySelector() {
         const tpl = document.getElementById('global-pk-card-tpl');
         const skeleton = document.getElementById('global-pk-skeleton');
         const updatedAtEl = document.getElementById('global-pk-updated-at');
-        if (!container || !tpl || !tpl.content) return;
+        if (!container) return;
+        if (!tpl || !tpl.content) {
+            try {
+                container.innerHTML = '<div class="text-zinc-500 text-xs py-6 text-center border border-[#00ff41]/20 rounded-lg">全球榜卡片模板未找到，请刷新页面</div>';
+            } catch (_) {}
+            return;
+        }
 
         const snapshot = (pkPayload && pkPayload.snapshot && typeof pkPayload.snapshot === 'object') ? pkPayload.snapshot : {};
         const globalBase = computeGlobalBaseline(snapshot);
@@ -31143,19 +31395,28 @@ function initCountrySelector() {
             for (const [ccRaw, raw] of Object.entries(snapshot || {})) {
                 const cc = String(ccRaw || '').trim().toUpperCase();
                 if (!/^[A-Z]{2}$/.test(cc)) continue;
-                const avgChars = safeNum(raw?.avgChars);
-                const totalTokens = safeNum(raw?.totalTokens);
-                const userCount = safeNum(raw?.userCount);
-                const topModel = (raw?.topModel != null ? String(raw.topModel) : '').trim();
-                const githubScore = safeNum(raw?.githubScore);
+                const normalized = normalizePkCountryRow(raw);
+                const avgChars = safeNum(normalized.avgChars);
+                const totalChars = safeNum(normalized.totalChars);
+                const totalTokens = safeNum(normalized.totalTokens);
+                const userCount = safeNum(normalized.userCount);
+                const topModel = (normalized.topModel != null ? String(normalized.topModel) : '').trim();
+                const githubScore = safeNum(normalized.githubScore);
+                const totalStars = safeNum(normalized.totalStars);
+                const totalForks = safeNum(normalized.totalForks);
+                const totalFollowers = safeNum(normalized.totalFollowers);
                 const tokensPerUser = userCount > 0 ? (totalTokens / userCount) : 0;
                 entries.push({
                     cc,
                     avgChars,
+                    totalChars,
                     totalTokens,
                     userCount,
                     topModel,
                     githubScore,
+                    totalStars,
+                    totalForks,
+                    totalFollowers,
                     tokensPerUser,
                 });
             }
@@ -31263,31 +31524,40 @@ function initCountrySelector() {
                 default:
                     return [
                         {
-                            id: 'avgChars',
-                            title: '生产力榜',
-                            subtitle: '看国家的人均输出能力，谁在单位用户维度上产出更高',
-                            label: '人均字符',
-                            metric: (item) => item.avgChars,
-                            format: (item) => `${formatInt(item.avgChars)} 字符`,
-                            compare: (a, b) => (b.avgChars - a.avgChars) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
+                            id: 'totalChars',
+                            title: '牛马榜',
+                            subtitle: '看国家的废话输出总数，谁在总产出上更能卷',
+                            label: '总字符',
+                            metric: (item) => item.totalChars,
+                            format: (item) => `${formatInt(item.totalChars)} 字符`,
+                            compare: (a, b) => (b.totalChars - a.totalChars) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
                         },
                         {
-                            id: 'tokensPerUser',
-                            title: '投入效率榜',
-                            subtitle: '看国家的人均 Tokens 投入强度，衡量高强度工作节奏',
-                            label: '人均 Tokens',
-                            metric: (item) => item.tokensPerUser,
-                            format: (item) => `${formatInt(item.tokensPerUser)} Tokens`,
-                            compare: (a, b) => (b.tokensPerUser - a.tokensPerUser) || (b.avgChars - a.avgChars) || a.cc.localeCompare(b.cc),
+                            id: 'totalStars',
+                            title: '效率榜',
+                            subtitle: '看国家 GitHub Star 总量',
+                            label: '总 Stars',
+                            metric: (item) => item.totalStars,
+                            format: (item) => `${formatInt(item.totalStars)} Stars`,
+                            compare: (a, b) => (b.totalStars - a.totalStars) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
                         },
                         {
-                            id: 'userCount',
-                            title: '活跃规模榜',
-                            subtitle: '看国家参与排名的活跃开发者规模',
-                            label: '活跃人数',
-                            metric: (item) => item.userCount,
-                            format: (item) => `${formatInt(item.userCount)} 人`,
-                            compare: (a, b) => (b.userCount - a.userCount) || (b.totalTokens - a.totalTokens) || a.cc.localeCompare(b.cc),
+                            id: 'totalForks',
+                            title: '活跃榜',
+                            subtitle: '看国家 GitHub Fork 总量',
+                            label: '总 Forks',
+                            metric: (item) => item.totalForks,
+                            format: (item) => `${formatInt(item.totalForks)} Forks`,
+                            compare: (a, b) => (b.totalForks - a.totalForks) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
+                        },
+                        {
+                            id: 'totalFollowers',
+                            title: '红人榜',
+                            subtitle: '看国家 GitHub Followers 总量',
+                            label: '总 Followers',
+                            metric: (item) => item.totalFollowers,
+                            format: (item) => `${formatInt(item.totalFollowers)} Followers`,
+                            compare: (a, b) => (b.totalFollowers - a.totalFollowers) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
                         },
                     ];
             }
@@ -31379,7 +31649,7 @@ function initCountrySelector() {
             const ranked = entries
                 .slice()
                 .sort(group.compare)
-                .filter((item) => (typeof group.metric === 'function' ? Number(group.metric(item)) : 0) > 0)
+                .filter((item) => safeNum(item.userCount) > 0)
                 .slice(0, topLimit);
 
             if (!ranked.length) {

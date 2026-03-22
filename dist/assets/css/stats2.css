@@ -3111,7 +3111,7 @@ html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
             object-fit: cover;
             border-radius: 50%; /* 确保图片本身也是圆形的 */
         }
-
+        
         /* 活跃节点头像悬停：旧版详情预览（与 user-modal 小卡片风格一致） */
         .live-node-detail-preview {
             position: fixed;
@@ -3190,7 +3190,7 @@ html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
             color: rgba(113, 113, 122, 0.95);
             letter-spacing: 0.04em;
         }
-
+        
         /* 拟态风格弹窗 - 从活跃节点框上边缘推出，不遮挡抽屉（fixed 定位由 JS 计算） */
         .user-popup {
             position: fixed;

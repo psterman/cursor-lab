@@ -50,7 +50,6 @@
     <script src="https://unpkg.com/lucide@latest" async></script>
 
     
-    <link rel="stylesheet" href="assets/css/stats2.css">
     <style>
         /* 未登录「接入节点」引导卡：顶条 + 局部扫描线（复用 stats2.css @keyframes scanline） */
         .stats2-guest-access-node {
@@ -141,6 +140,9 @@
             overflow: hidden;
         }
     </style>
+  <script type="module" crossorigin src="./assets/stats2-DtxwFr3o.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/modulepreload-polyfill-YP0FEG5d.js">
+  <link rel="stylesheet" crossorigin href="assets/css/stats2.css">
 </head>
 <body class="p-4 md:p-8">
     <!-- 身份/条款/国家选择已迁移至 CyberNavigator（文件夹同步入口）与顶栏国家下拉 -->
@@ -187,10 +189,10 @@
             <!-- 语言切换按钮 -->
             <div class="flex gap-2 items-center">
                 <button type="button" id="btn-zh" class="lang-flag-btn active" title="中文" aria-label="中文" data-lang="zh">
-                    <img src="images/zh.png" alt="中文" />
+                    <img src="./assets/zh-BUU2yN9i.png" alt="中文" />
                 </button>
                 <button type="button" id="btn-en" class="lang-flag-btn" title="English" aria-label="English" data-lang="en">
-                    <img src="images/us.png" alt="English" />
+                    <img src="./assets/us-DYKU2e25.png" alt="English" />
                 </button>
             </div>
         </div>
@@ -429,7 +431,7 @@
                 <div id="panel-global-view" class="right-drawer-panel flex flex-col h-full overflow-y-auto">
                     <!-- 国家 PK 榜切换 Tabs -->
                     <div class="rank-tab-bar flex gap-2 px-4 pt-3 pb-0 overflow-x-auto scrollbar-hide flex-shrink-0">
-                        <button type="button" data-rank-type="efficiency" class="rank-tab-btn active">⚡ 生产力榜</button>
+                        <button type="button" data-rank-type="efficiency" class="rank-tab-btn active">⚡ 牛马榜</button>
                         <button type="button" data-rank-type="lobster" class="rank-tab-btn">🦞 养虾榜</button>
                         <button type="button" data-rank-type="model" class="rank-tab-btn">🤖 信仰榜</button>
                         <button type="button" data-rank-type="github" class="rank-tab-btn">⚔ 硬核榜</button>
@@ -441,7 +443,7 @@
                             <span id="global-pk-updated-at" class="text-[9px] text-zinc-600 font-mono"></span>
                         </div>
                         <!-- 国家 PK 卡片列表（JS 渲染挂载点） -->
-                        <div class="vibe-index-leaderboard" id="global-country-pk-leaderboard">
+                        <div class="vibe-index-leaderboard min-h-[12rem]" id="global-country-pk-leaderboard">
                             <!-- 骨架屏：加载前占位，JS 渲染后由 JS 清空并填充真实卡片 -->
                             <div class="stats2-cyber-skeleton" id="global-pk-skeleton" aria-hidden="true">
                                 <div class="stats2-skeleton-bars"></div>
@@ -449,26 +451,6 @@
                                 <div class="stats2-skeleton-line short"></div>
                             </div>
                         </div>
-                        <!-- 国家 PK 卡片 HTML 模板（隐藏，供 JS cloneNode 使用） -->
-                        <template id="global-pk-card-tpl">
-                            <div class="global-pk-card">
-                                <div class="pk-rank-badge">
-                                    <span class="pk-rank">1</span>
-                                </div>
-                                <div class="pk-flag-wrap">
-                                    <span class="pk-flag" aria-hidden="true">🏳️</span>
-                                    <span class="pk-code">XX</span>
-                                </div>
-                                <div class="pk-info">
-                                    <span class="pk-name">Unknown</span>
-                                    <span class="pk-model-badge"></span>
-                                </div>
-                                <div class="pk-value-wrap">
-                                    <span class="pk-value">--</span>
-                                    <span class="pk-value-label"></span>
-                                </div>
-                            </div>
-                        </template>
                     </div>
                 </div>
                 
@@ -935,7 +917,27 @@
         </div>
     </div>
 
-    
+    <!-- 国家 PK 卡片模板：挂在 body 末端，避免抽屉 DOM 重建时丢失 -->
+    <template id="global-pk-card-tpl">
+        <div class="global-pk-card">
+            <div class="pk-rank-badge">
+                <span class="pk-rank">1</span>
+            </div>
+            <div class="pk-flag-wrap">
+                <span class="pk-flag" aria-hidden="true">🏳️</span>
+                <span class="pk-code">XX</span>
+            </div>
+            <div class="pk-info">
+                <span class="pk-name">Unknown</span>
+                <span class="pk-model-badge"></span>
+            </div>
+            <div class="pk-value-wrap">
+                <span class="pk-value">--</span>
+                <span class="pk-value-label"></span>
+            </div>
+        </div>
+    </template>
+
     <!-- 关注点分离：先依赖层，再数据层，再渲染层，最后入口与 Auth。本国词云依赖 WordCloud2.js -->
     <script src="assets/js/stats-libs.min.js" defer></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/wordcloud2.js/1.2.2/wordcloud2.min.js" defer></script>
@@ -947,6 +949,5 @@
     <input type="file" id="cursor-slot1-folder-input" webkitdirectory="" directory="" multiple="" tabindex="-1" aria-hidden="true" style="position:fixed;left:0;top:0;width:0;height:0;opacity:0;pointer-events:none;overflow:hidden;" />
     <!-- 赛博导航员：分步引导（由 stats2.js CyberNavigator 填充内容） -->
     <div id="cyber-guide-overlay" class="cyber-guide-overlay" hidden aria-hidden="true"></div>
-    <script type="module" src="assets/js/stats2.js"></script>
 </body>
 </html>

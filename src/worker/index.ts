@@ -68,7 +68,17 @@ export type Env = {
 
 type GlobalCountryStatsSnapshot = Record<
   string,
-  { avgChars: number; totalTokens: number; userCount: number; topModel: string; githubScore: number }
+  {
+    avgChars: number;
+    totalChars: number;
+    totalTokens: number;
+    userCount: number;
+    topModel: string;
+    githubScore: number;
+    totalStars: number;
+    totalForks: number;
+    totalFollowers: number;
+  }
 >;
 
 function normalizeIso2CountryCode(raw: unknown): string | null {
@@ -133,10 +143,29 @@ async function buildGlobalCountryStatsSnapshot(
     }
   }
 
-  type Row = { country_code: string | null; total_chars?: any; total_tokens?: any; primary_model?: any; github_score?: any };
+  type Row = {
+    country_code: string | null;
+    total_chars?: any;
+    total_tokens?: any;
+    primary_model?: any;
+    github_score?: any;
+    github_stats?: any;
+    github_stars?: any;
+    github_forks?: any;
+    github_followers?: any;
+  };
   const perCountry = new Map<
     string,
-    { sumChars: number; sumTokens: number; sumGithub: number; userCount: number; modelCounts: Map<string, number> }
+    {
+      sumChars: number;
+      sumTokens: number;
+      sumGithub: number;
+      sumStars: number;
+      sumForks: number;
+      sumFollowers: number;
+      userCount: number;
+      modelCounts: Map<string, number>;
+    }
   >();
 
   const pageSize = 1000;
@@ -146,7 +175,10 @@ async function buildGlobalCountryStatsSnapshot(
 
   for (let page = 0; page < maxPages; page++) {
     const url = new URL(`${env.SUPABASE_URL}/rest/v1/user_analysis`);
-    url.searchParams.set('select', 'country_code,total_chars,total_tokens,primary_model,github_score');
+    url.searchParams.set(
+      'select',
+      'country_code,total_chars,total_tokens,primary_model,github_score,github_stats,github_stars,github_forks,github_followers'
+    );
     url.searchParams.set('country_code', 'not.is.null');
     url.searchParams.set('limit', String(pageSize));
     url.searchParams.set('offset', String(offset));
@@ -175,18 +207,70 @@ async function buildGlobalCountryStatsSnapshot(
 
       let agg = perCountry.get(cc);
       if (!agg) {
-        agg = { sumChars: 0, sumTokens: 0, sumGithub: 0, userCount: 0, modelCounts: new Map<string, number>() };
+        agg = {
+          sumChars: 0,
+          sumTokens: 0,
+          sumGithub: 0,
+          sumStars: 0,
+          sumForks: 0,
+          sumFollowers: 0,
+          userCount: 0,
+          modelCounts: new Map<string, number>(),
+        };
         perCountry.set(cc, agg);
       }
 
       const chars = Math.max(0, safeNumber((r as any)?.total_chars, 0));
       const tokens = Math.max(0, safeNumber((r as any)?.total_tokens, 0));
       const github = Math.max(0, safeNumber((r as any)?.github_score, 0));
+      const githubStatsRaw = (r as any)?.github_stats;
+      const githubStats = (() => {
+        if (githubStatsRaw && typeof githubStatsRaw === 'object') return githubStatsRaw;
+        if (typeof githubStatsRaw === 'string') {
+          try {
+            const parsed = JSON.parse(githubStatsRaw);
+            return (parsed && typeof parsed === 'object') ? parsed : {};
+          } catch {
+            return {};
+          }
+        }
+        return {};
+      })();
+      const stars = Math.max(0, safeNumber(
+        (r as any)?.github_stars ??
+        githubStats?.totalStars ??
+        githubStats?.total_stars ??
+        githubStats?.stars ??
+        githubStats?.starCount ??
+        githubStats?.star_count,
+        0
+      ));
+      const forks = Math.max(0, safeNumber(
+        (r as any)?.github_forks ??
+        githubStats?.totalForks ??
+        githubStats?.total_forks ??
+        githubStats?.forks ??
+        githubStats?.forkCount ??
+        githubStats?.fork_count,
+        0
+      ));
+      const followers = Math.max(0, safeNumber(
+        (r as any)?.github_followers ??
+        githubStats?.totalFollowers ??
+        githubStats?.total_followers ??
+        githubStats?.followers ??
+        githubStats?.followersCount ??
+        githubStats?.followers_count,
+        0
+      ));
 
       agg.userCount += 1;
       agg.sumChars += chars;
       agg.sumTokens += tokens;
       agg.sumGithub += github;
+      agg.sumStars += stars;
+      agg.sumForks += forks;
+      agg.sumFollowers += followers;
 
       const pm = String((r as any)?.primary_model ?? '').trim();
       if (pm) agg.modelCounts.set(pm, (agg.modelCounts.get(pm) || 0) + 1);
@@ -202,10 +286,14 @@ async function buildGlobalCountryStatsSnapshot(
     if (userCount <= 0) continue;
     snapshot[cc] = {
       avgChars: round2(agg.sumChars / userCount),
+      totalChars: round2(agg.sumChars),
       totalTokens: round2(agg.sumTokens),
       userCount,
       topModel: chooseTopModel(agg.modelCounts),
       githubScore: round2(agg.sumGithub / userCount),
+      totalStars: round2(agg.sumStars),
+      totalForks: round2(agg.sumForks),
+      totalFollowers: round2(agg.sumFollowers),
     };
   }
 
@@ -325,6 +413,12 @@ interface GlobalCountryStatsPayload {
     total_messages_sum?: number;
     total_chars_sum?: number;
     total_user_chars_sum?: number;
+    total_stars_sum?: number;
+    total_forks_sum?: number;
+    total_followers_sum?: number;
+    github_stars_sum?: number;
+    github_forks_sum?: number;
+    github_followers_sum?: number;
     jiafang_count_sum?: number;
     ketao_count_sum?: number;
     work_days_sum?: number;
@@ -341,6 +435,40 @@ interface GlobalCountryStatsPayload {
     no_competition?: boolean; // ????????????????
   }>;
   updated_at?: string;
+}
+
+/**
+ * 当 GLOBAL_COUNTRY_STATS_SNAPSHOT（user_analysis 聚合）为空时，用 Cron 写入的 GLOBAL_COUNTRY_STATS.country_level 兜底，
+ * 供右抽屉「全球」四榜国家 PK 卡片使用。
+ */
+function snapshotFromCountryLevel(kv: GlobalCountryStatsPayload | null): GlobalCountryStatsSnapshot | null {
+  if (!kv || !Array.isArray(kv.country_level) || kv.country_level.length === 0) return null;
+  const out: GlobalCountryStatsSnapshot = {};
+  for (const row of kv.country_level) {
+    const cc = normalizeIso2CountryCode(row.country_code);
+    if (!cc) continue;
+    const userCount = Math.max(0, Math.floor(safeNumber(row.total_users, 0)));
+    if (userCount <= 0) continue;
+    const totalChars = safeNumber(row.total_chars_sum, 0);
+    const avgLen = safeNumber(row.avg_user_message_length_sum, 0);
+    const avgChars = avgLen > 0 ? round2(avgLen) : userCount > 0 ? round2(totalChars / userCount) : 0;
+    const totalTokens = round2(totalChars);
+    const totalStars = round2(safeNumber(row.total_stars_sum ?? row.github_stars_sum, 0));
+    const totalForks = round2(safeNumber(row.total_forks_sum ?? row.github_forks_sum, 0));
+    const totalFollowers = round2(safeNumber(row.total_followers_sum ?? row.github_followers_sum, 0));
+    out[cc] = {
+      avgChars,
+      totalChars: round2(totalChars),
+      totalTokens,
+      userCount,
+      topModel: '',
+      githubScore: 0,
+      totalStars,
+      totalForks,
+      totalFollowers,
+    };
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 /** ???? RPC??????????/?????????? 1/1 */
@@ -10192,13 +10320,62 @@ app.get('/api/global-aggregate', async (c) => {
       let updatedAtSecText = await env.STATS_STORE.get(KV_KEY_GLOBAL_COUNTRY_STATS_SNAPSHOT_UPDATED_AT, 'text').catch(() => null);
       let updatedAtSec = updatedAtSecText ? safeNonNegativeInt(updatedAtSecText) : null;
       const hasSnapshot = !!(snapshot && typeof snapshot === 'object' && Object.keys(snapshot).length > 0);
-      if (!hasSnapshot) {
+      const hasSocialFields = (() => {
+        if (!hasSnapshot || !snapshot) return false;
+        try {
+          for (const row of Object.values(snapshot)) {
+            if (!row || typeof row !== 'object') continue;
+            if (
+              Object.prototype.hasOwnProperty.call(row, 'totalStars') ||
+              Object.prototype.hasOwnProperty.call(row, 'totalForks') ||
+              Object.prototype.hasOwnProperty.call(row, 'totalFollowers')
+            ) {
+              return true;
+            }
+          }
+        } catch {
+          return false;
+        }
+        return false;
+      })();
+      // 兼容旧快照结构：缺少 stars/forks/followers 聚合字段时，自动重建
+      const hasNonZeroSocialTotals = (() => {
+        if (!hasSnapshot || !snapshot) return false;
+        try {
+          for (const row of Object.values(snapshot)) {
+            if (!row || typeof row !== 'object') continue;
+            if (
+              safeNumber((row as any).totalStars, 0) > 0 ||
+              safeNumber((row as any).totalForks, 0) > 0 ||
+              safeNumber((row as any).totalFollowers, 0) > 0
+            ) return true;
+          }
+        } catch {
+          return false;
+        }
+        return false;
+      })();
+      const nowSec = Math.floor(Date.now() / 1000);
+      const snapshotTooOldForZeroSocialRetry = !updatedAtSec || (nowSec - updatedAtSec > 5 * 60);
+      if (!hasSnapshot || !hasSocialFields || (!hasNonZeroSocialTotals && snapshotTooOldForZeroSocialRetry)) {
         const rebuilt = await buildGlobalCountryStatsSnapshot(env, { force: true });
         if (rebuilt.success && rebuilt.snapshot && Object.keys(rebuilt.snapshot).length > 0) {
           snapshot = rebuilt.snapshot;
           updatedAtSec = rebuilt.updatedAtSec ?? updatedAtSec;
         } else {
           snapshot = snapshot || {};
+        }
+      }
+      if (!snapshot || typeof snapshot !== 'object') snapshot = {};
+      if (Object.keys(snapshot).length === 0) {
+        const kv = await getGlobalCountryStatsFromKV(env);
+        const fb = snapshotFromCountryLevel(kv);
+        if (fb && Object.keys(fb).length > 0) {
+          snapshot = fb;
+          if (!updatedAtSec && kv?.updated_at) {
+            const ts = Date.parse(String(kv.updated_at));
+            if (Number.isFinite(ts)) updatedAtSec = Math.floor(ts / 1000);
+          }
         }
       }
       c.header('Cache-Control', 'public, max-age=600');

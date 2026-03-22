@@ -1,0 +1,32 @@
+{
+  "name": "cursor-clinical-analysis",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2024-04-03",
+  "vars": {
+    "SUPABASE_URL": "https://dtcplfhcgnxdzpigmotb.supabase.co"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "STATS_STORE",
+      "id": "991ddbdb18fa4b50998c722a7332f4c0",
+      "preview_id": "e6f9014fb49b45eb83c8288f1d1cc1d4"
+    },
+    {
+      "binding": "KV_VIBE_PROD",
+      "id": "f9cac5f94024451a9229253ae2367683"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "0 * * * *",
+      "0 2 * * *"
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "prompts_library",
+      "database_name": "prompts_library",
+      "database_id": "921a6870-94b9-43df-8d2d-5dad83f93fd2"
+    }
+  ]
+}

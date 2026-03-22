@@ -9,10 +9,10 @@
     "preview": "vite preview",
     "generate-content": "node scripts/generate-content.cjs",
     "prebuild": "npm run generate-content",
-    "worker:dev": "wrangler dev",
-    "worker:deploy": "wrangler deploy",
+    "worker:dev": "wrangler dev --config wrangler.worker.jsonc",
+    "worker:deploy": "wrangler deploy --config wrangler.worker.jsonc",
     "worker:deploy:ci": "powershell -ExecutionPolicy Bypass -File ./scripts/deploy-worker.ps1",
-    "worker:tail": "wrangler tail",
+    "worker:tail": "wrangler tail --config wrangler.worker.jsonc",
     "worker:test": "powershell -ExecutionPolicy Bypass -File ./test-worker.ps1"
   },
   "keywords": [
