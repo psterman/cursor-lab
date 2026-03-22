@@ -394,7 +394,7 @@
             '<div id="user-country-flag" class="flex items-center gap-2 mt-2 text-[10px]"></div>',
             linkHtml,
             '</div>',
-            '<div class="mt-2 pt-2 border-t border-[#00ff41]/10">',
+            '<div class="mt-2 pt-2 border-t border-[#00ff41]/10 cursor-slot1-cyber-shell">',
             '<div class="flex items-center gap-2 mb-1">',
             '<div class="text-[10px] text-zinc-500 uppercase tracking-widest flex-1 min-w-0">' + esc(slot1Title) + '</div>',
             '<span id="cursor-slot1-status-led" class="w-2 h-2 rounded-full flex-shrink-0 ' + slot1LedClass + '" title="' + slot1LedTitle + '" aria-hidden="true"></span>',

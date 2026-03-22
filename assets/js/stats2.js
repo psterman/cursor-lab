@@ -32710,9 +32710,12 @@ document.addEventListener('click', function(e) {
         for (var i = 0; i < arr.length; i++) {
             var f = arr[i];
             if (!f || !f.name) continue;
-            var name = f.name;
-            var lc = name.toLowerCase();
-            if (name === 'state.vscdb') {
+            var rawName = String(f.name || '');
+            var rel = (typeof f.webkitRelativePath === 'string') ? f.webkitRelativePath.replace(/\\/g, '/') : '';
+            var leaf = rel ? rel.split('/').filter(Boolean).pop() : '';
+            var base = (leaf || rawName).split(/[/\\]/).pop() || '';
+            var lc = base.toLowerCase();
+            if (lc === 'state.vscdb') {
                 cursorStateVscdbFiles.push(f);
                 cursorHit = true;
             }
@@ -32814,6 +32817,12 @@ document.addEventListener('click', function(e) {
         },
         hide: function () {
             var self = this;
+            if (self._answerBookRotatorTimer) {
+                try {
+                    clearInterval(self._answerBookRotatorTimer);
+                } catch (_) {}
+                self._answerBookRotatorTimer = null;
+            }
             self.clearHandlers();
             self._flowActive = false;
             if (self._countryEscKey) {
@@ -32851,10 +32860,9 @@ document.addEventListener('click', function(e) {
                 needPath: isZh ? '请填写或粘贴路径。' : 'Please enter or paste a path.'
             };
             var T = {
-                title: isZh ? '同步' : 'Sync',
+                title: isZh ? '同步中' : 'Syncing',
                 integrate: isZh ? '选择国家、阅读条款后，复制路径并打开系统文件夹完成注入。' : 'Choose country, review terms, copy path, then pick a folder to inject.',
-                shadowPaste: isZh ? '影子模式：按 Ctrl+V（Mac：Cmd+V）粘贴路径，再按 Enter。' : 'Shadow: Ctrl+V (Cmd+V on Mac), then Enter.',
-                shadowPick: isZh ? '进入目标目录后，点击「选择此文件夹」。' : 'Then click “Select Folder”.',
+                shadowTitle: isZh ? '同步' : 'Sync',
                 close: isZh ? '关闭' : 'Close',
                 closeAria: isZh ? '关闭同步' : 'Close sync',
                 countryLbl: isZh ? '国家/地区' : 'Country',
@@ -32867,7 +32875,6 @@ document.addEventListener('click', function(e) {
                 pathCursor: isZh ? 'Cursor' : 'Cursor',
                 pathOc: isZh ? 'OpenClaw' : 'OpenClaw',
                 primary: isZh ? '复制并选择文件夹' : 'Copy path & select folder',
-                progressScan: isZh ? '正在识别…' : 'Recognizing…',
                 secCountry: isZh ? '国家/地区' : 'Country',
                 secTerms: isZh ? '条款' : 'Terms',
                 secPath: isZh ? '路径' : 'Path'
@@ -32952,16 +32959,191 @@ document.addEventListener('click', function(e) {
             }
 
             function renderRecogLines(hasCur, hasOc, curSt, ocSt) {
-                function line(label, st) {
+                function lineDoneOrErr(label, st) {
                     if (st === 'done') return isZh ? '[✔] ' + label + ' 已识别' : '[✔] ' + label;
-                    if (st === 'pending') return isZh ? '[…] ' + label + ' …' : '[…] ' + label;
                     if (st === 'error') return isZh ? '[✗] ' + label : '[✗] ' + label;
                     return '';
                 }
+                function recogPendingBlock(label) {
+                    return (
+                        '<div class="cyber-guide-recog-line cyber-guide-recog-line--loading">' +
+                        '<div class="cyber-guide-recog-loading-head">' +
+                        '<span class="cyber-guide-recog-line-label">' +
+                        esc(label) +
+                        '</span>' +
+                        '</div>' +
+                        '<div class="cyber-guide-recog-scrollbar-h" aria-hidden="true">' +
+                        '<div class="cyber-guide-recog-scrollbar-h-track"></div>' +
+                        '<div class="cyber-guide-recog-scrollbar-h-thumb"></div>' +
+                        '</div>' +
+                        '</div>'
+                    );
+                }
                 var html = '';
-                if (hasCur && curSt) html += '<div class="cyber-guide-recog-line">' + esc(line('Cursor', curSt)) + '</div>';
-                if (hasOc && ocSt) html += '<div class="cyber-guide-recog-line">' + esc(line('OpenClaw', ocSt)) + '</div>';
+                if (hasCur && curSt) {
+                    if (curSt === 'pending') html += recogPendingBlock('Cursor');
+                    else html += '<div class="cyber-guide-recog-line">' + esc(lineDoneOrErr('Cursor', curSt)) + '</div>';
+                }
+                if (hasOc && ocSt) {
+                    if (ocSt === 'pending') html += recogPendingBlock('OpenClaw');
+                    else html += '<div class="cyber-guide-recog-line">' + esc(lineDoneOrErr('OpenClaw', ocSt)) + '</div>';
+                }
                 return html;
+            }
+
+            /** 与 index.html AnswerBookCard（stat-card）同源：localStorage → JSON → random_prompt */
+            function lpdefToVibeIndexStr(lpdef) {
+                if (!lpdef || typeof lpdef !== 'string') return null;
+                var digits = String(lpdef).replace(/\D/g, '');
+                return digits.length === 5 ? digits : null;
+            }
+            function getCyberRandomPromptEndpoint() {
+                try {
+                    if (typeof window !== 'undefined' && window.__API_ENDPOINT__) return String(window.__API_ENDPOINT__).trim();
+                    if (typeof window !== 'undefined' && window.API_ENDPOINT) return String(window.API_ENDPOINT).trim();
+                    var m = document.querySelector('meta[name="api-endpoint"]');
+                    if (m && m.content) return String(m.content).trim();
+                } catch (_) {}
+                return 'https://cursor-clinical-analysis.psterman.workers.dev/';
+            }
+            function readVibeResultFromLocalStorage() {
+                var keys = ['last_analysis_data', 'vibe_cursor_analysis_cache'];
+                for (var i = 0; i < keys.length; i++) {
+                    try {
+                        var raw = localStorage.getItem(keys[i]);
+                        if (!raw) continue;
+                        var d = JSON.parse(raw);
+                        var vr = d.vibeResult || d.vibe_result;
+                        if (!vr && d.analysisData) vr = d.analysisData.vibeResult;
+                        if (vr && typeof vr === 'object') return vr;
+                    } catch (_) {}
+                }
+                return null;
+            }
+            async function loadAnswerBookStatCardEntries(isZh) {
+                var out = [];
+                var seen = {};
+                function kOf(t, c) {
+                    return String(t || '') + '\u0000' + String(c || '');
+                }
+                function pushEntry(title, content) {
+                    var k = kOf(title, content);
+                    if (seen[k]) return;
+                    seen[k] = true;
+                    if (title || content) out.push({ title: title || '', content: content || '' });
+                }
+
+                try {
+                    var uab = localStorage.getItem('user_answer_book');
+                    if (uab) {
+                        var o = JSON.parse(uab);
+                        pushEntry(o.title || o.title_zh || '', o.content || o.content_zh || o.desc || o.description || '');
+                    }
+                } catch (_) {}
+
+                var vr = readVibeResultFromLocalStorage();
+                if (vr) {
+                    var ab = vr.answer_book || vr.answerBook;
+                    if (ab && (ab.title || ab.content)) {
+                        pushEntry(ab.title || '', ab.content || ab.desc || ab.description || '');
+                    }
+                }
+
+                var vibeIdx = null;
+                if (vr) {
+                    vibeIdx = vr.vibeIndex || vr.vibe_index || (vr.lpdef || vr.lpDef ? lpdefToVibeIndexStr(vr.lpdef || vr.lpDef) : null);
+                }
+
+                var jsonData = null;
+                try {
+                    var paths = ['./src/answerBookByVibeIndex.json', './answerBookByVibeIndex.json'];
+                    for (var pi = 0; pi < paths.length; pi++) {
+                        try {
+                            var resp = await fetch(paths[pi], { cache: 'force-cache' });
+                            if (resp.ok) {
+                                jsonData = await resp.json();
+                                break;
+                            }
+                        } catch (_) {}
+                    }
+                } catch (_) {}
+
+                if (jsonData && vibeIdx && jsonData[vibeIdx]) {
+                    var e0 = jsonData[vibeIdx];
+                    pushEntry(isZh ? e0.title_zh : e0.title_en, isZh ? e0.content_zh : e0.content_en);
+                }
+                if (jsonData) {
+                    for (var key in jsonData) {
+                        if (!Object.prototype.hasOwnProperty.call(jsonData, key)) continue;
+                        var e = jsonData[key];
+                        if (!e || typeof e !== 'object') continue;
+                        pushEntry(isZh ? e.title_zh : e.title_en, isZh ? e.content_zh : e.content_en);
+                    }
+                }
+
+                if (out.length === 0) {
+                    try {
+                        var api = getCyberRandomPromptEndpoint();
+                        var base = api.endsWith('/') ? api : api + '/';
+                        var langParam = isZh ? 'cn' : 'en';
+                        var r = await fetch(base + 'api/random_prompt?lang=' + langParam, {
+                            method: 'GET',
+                            mode: 'cors',
+                            cache: 'no-cache'
+                        });
+                        if (r.ok) {
+                            var rd = await r.json();
+                            var pd = rd.data || rd;
+                            if (pd && (pd.content || pd.author)) {
+                                pushEntry(pd.author || (isZh ? '今日箴言' : 'Today'), pd.content || '');
+                            }
+                        }
+                    } catch (_) {}
+                }
+
+                if (out.length === 0) {
+                    pushEntry(isZh ? '答案之书' : 'Answer Book', isZh ? '…' : '…');
+                }
+                return out;
+            }
+
+            function buildCyberAnswerBookHtml(isZh, entries) {
+                entries = entries || [];
+                var first = entries[0] || { title: '', content: '' };
+                return (
+                    '<div class="cyber-guide-answer-book" role="status">' +
+                    '<p class="cyber-guide-answer-book__text" id="cyber-guide-answer-book-text">' +
+                    esc(first.content) +
+                    '</p>' +
+                    '</div>'
+                );
+            }
+
+            function mountCyberAnswerBookRotator(isZh, entries) {
+                entries = entries || [];
+                if (self._answerBookRotatorTimer) {
+                    try {
+                        clearInterval(self._answerBookRotatorTimer);
+                    } catch (_) {}
+                    self._answerBookRotatorTimer = null;
+                }
+                if (entries.length <= 1) return;
+                if (!document.getElementById('cyber-guide-answer-book-text')) return;
+                var idx = 0;
+                var stepMs = 3000;
+                self._answerBookRotatorTimer = setInterval(function () {
+                    idx = (idx + 1) % entries.length;
+                    var cEl = document.getElementById('cyber-guide-answer-book-text');
+                    if (!cEl) {
+                        try {
+                            clearInterval(self._answerBookRotatorTimer);
+                        } catch (_) {}
+                        self._answerBookRotatorTimer = null;
+                        return;
+                    }
+                    var e = entries[idx];
+                    cEl.textContent = (e && e.content) || '';
+                }, stepMs);
             }
 
             function buildCyberGuideCountryUi() {
@@ -33108,11 +33290,13 @@ document.addEventListener('click', function(e) {
                     '<span class="cyber-guide-section-title">' +
                     esc(T.secPath) +
                     '</span></div>' +
+                    '<div class="cyber-guide-path-shell" aria-hidden="false">' +
                     pathTabsHtml +
                     '<label class="cyber-guide-field cyber-guide-field--tight">' +
                     '<span class="cyber-guide-field-label">' +
                     esc(T.pathLbl) +
                     '</span>' +
+                    '<div class="cyber-guide-path-input-cyber">' +
                     '<div class="cyber-guide-path-input-row">' +
                     '<input type="text" id="cyber-guide-path-display" class="cyber-guide-path-input" autocomplete="off" spellcheck="false" value="' +
                     esc(pathVal) +
@@ -33120,10 +33304,12 @@ document.addEventListener('click', function(e) {
                     '<button type="button" class="cyber-guide-path-reset" id="cyber-guide-path-reset">' +
                     esc(T.resetPath) +
                     '</button>' +
+                    '</div>' +
+                    '<div class="cyber-guide-path-scrollbar-deco" aria-hidden="true"></div>' +
                     '</div></label>' +
-                    '<div class="cyber-guide-path-hint" id="cyber-guide-path-hint" role="note">' +
+                    '<div class="cyber-guide-path-hint cyber-guide-path-hint--cyber" id="cyber-guide-path-hint" role="note">' +
                     esc(row && row.label ? row.label : '') +
-                    '</div></section>' +
+                    '</div></div></section>' +
                     '</div>' +
                     '<div class="cyber-guide-actions" id="cyber-guide-actions"></div>' +
                     '</div>' +
@@ -33382,21 +33568,67 @@ document.addEventListener('click', function(e) {
                 syncPrimaryDisabled();
             }
 
+            /** 影子模式悬浮窗：地址栏粘贴路径 + 本页上传；仅整包 workspaceStorage 时用「选择文件夹」 */
+            function buildShadowGuidePanelHtml() {
+                var addrFake = isZh ? '…\\User\\workspaceStorage' : '…\\User\\workspaceStorage';
+                return (
+                    '<div class="cyber-guide-panel cyber-guide-panel--shadow" role="dialog" aria-modal="true">' +
+                    '<div class="cyber-guide-head">' +
+                    '<div class="cyber-guide-title">' + esc(T.shadowTitle) + '</div>' +
+                    '<div class="cyber-guide-step-label">' + esc(isZh ? '影子模式' : 'Shadow') + '</div>' +
+                    '</div>' +
+                    '<div class="cyber-guide-progress">' + progressSegs(2, 2) + '</div>' +
+                    '<div class="cyber-guide-shadow-demo">' +
+                    '<div class="cyber-guide-shadow-demo-row">' +
+                    '<span class="cyber-guide-shadow-ico" aria-hidden="true">📋</span>' +
+                    '<div class="cyber-guide-shadow-addrbar">' +
+                    '<span class="cyber-guide-shadow-addrbar-tag">' + esc(isZh ? '地址栏' : 'Address') + '</span>' +
+                    '<span class="cyber-guide-shadow-addrbar-path">' + esc(addrFake) + '</span>' +
+                    '</div>' +
+                    '<span class="cyber-guide-shadow-kbd">Enter</span>' +
+                    '</div>' +
+                    '<p class="cyber-guide-shadow-caption">' +
+                    esc(isZh
+                        ? '在系统文件夹窗口顶部「地址栏」粘贴刚才复制的路径（Ctrl+V / Cmd+V），回车进入；逐级进入 workspaceStorage 或目标子目录。'
+                        : 'Paste the copied path into the folder dialog’s address bar (Ctrl+V / Cmd+V), press Enter, then open workspaceStorage or the target subfolder.') +
+                    '</p>' +
+                    '<div class="cyber-guide-shadow-demo-row cyber-guide-shadow-demo-row--upload">' +
+                    '<span class="cyber-guide-shadow-ico" aria-hidden="true">⬆</span>' +
+                    '<span class="cyber-guide-shadow-upload-chip">' + esc(isZh ? '上传' : 'Upload') + '</span>' +
+                    '</div>' +
+                    '<p class="cyber-guide-shadow-caption">' +
+                    esc(isZh
+                        ? '进入目标目录后：回到本页点击「上传」再次打开选择器；若对话框已在正确目录内，直接点确认即可。请勿在上级目录乱点「选择文件夹」。'
+                        : 'When you’re in the right folder: use Upload on this page to reopen the picker, or confirm if already there. Don’t pick a folder at the wrong level.') +
+                    '</p>' +
+                    '<p class="cyber-guide-shadow-exception">' +
+                    esc(isZh
+                        ? '例外：只有需要一次性选中整个 workspaceStorage 文件夹上传时，才在该文件夹页面使用「选择文件夹」。'
+                        : 'Exception: use “Select Folder” only when you need to upload the entire workspaceStorage folder in one step.') +
+                    '</p>' +
+                    '</div>' +
+                    '</div>'
+                );
+            }
+
+            function kickCyberRecogThumbAnim() {
+                try {
+                    var thumbs = overlay.querySelectorAll('.cyber-guide-recog-scrollbar-h-thumb');
+                    for (var ti = 0; ti < thumbs.length; ti++) {
+                        var node = thumbs[ti];
+                        node.style.animation = 'none';
+                        void node.offsetWidth;
+                        node.style.removeProperty('animation');
+                    }
+                } catch (_) {}
+            }
+
             function renderShadowPhase34() {
                 overlay.classList.add('cyber-guide-overlay--shadow');
                 overlay.hidden = false;
                 overlay.setAttribute('aria-hidden', 'false');
                 overlay.style.display = 'flex';
-                overlay.innerHTML =
-                    '<div class="cyber-guide-panel cyber-guide-panel--shadow" role="dialog" aria-modal="true">' +
-                    '<div class="cyber-guide-head">' +
-                    '<div class="cyber-guide-title">' + esc(T.title) + '</div>' +
-                    '<div class="cyber-guide-step-label">' + esc(isZh ? '影子模式' : 'Shadow') + '</div>' +
-                    '</div>' +
-                    '<div class="cyber-guide-progress">' + progressSegs(2, 2) + '</div>' +
-                    '<p class="cyber-guide-body cyber-guide-shadow-pulse">' + esc(T.shadowPaste) + '</p>' +
-                    '<p class="cyber-guide-body">' + esc(T.shadowPick) + '</p>' +
-                    '</div>';
+                overlay.innerHTML = buildShadowGuidePanelHtml();
             }
 
             function ensureCursorSlot1FolderInput() {
@@ -33447,17 +33679,24 @@ document.addEventListener('click', function(e) {
                         if (files.length && typeof openStats2DrawersForSync === 'function') openStats2DrawersForSync();
                     } catch (_) {}
                     overlay.classList.remove('cyber-guide-overlay--shadow');
+                    var bookEntries = [];
+                    try {
+                        bookEntries = await loadAnswerBookStatCardEntries(isZh);
+                    } catch (bookErr) {
+                        console.warn('[CyberNavigator] loadAnswerBookStatCardEntries', bookErr);
+                        bookEntries = [{ title: isZh ? '答案之书' : 'Answer Book', content: isZh ? '…' : '…' }];
+                    }
                     overlay.innerHTML =
                         '<div class="cyber-guide-panel" role="dialog" aria-modal="true">' +
                         '<div class="cyber-guide-head">' +
                         '<div class="cyber-guide-title">' + esc(T.title) + '</div>' +
-                        '<div class="cyber-guide-step-label">' + esc(isZh ? '识别与同步' : 'Scan & sync') + '</div>' +
                         '</div>' +
-                        '<p class="cyber-guide-body">' + esc(T.progressScan) + '</p>' +
+                        buildCyberAnswerBookHtml(isZh, bookEntries) +
                         '<div id="cyber-guide-recog" class="cyber-guide-recog"></div>' +
                         '</div>';
                     overlay.hidden = false;
                     overlay.style.display = 'flex';
+                    mountCyberAnswerBookRotator(isZh, bookEntries);
 
                     var r;
                     try {
@@ -33485,6 +33724,7 @@ document.addEventListener('click', function(e) {
                     function setRecog() {
                         if (recogEl) {
                             recogEl.innerHTML = renderRecogLines(hasVscdb, hasJsonl, curSt, ocSt);
+                            kickCyberRecogThumbAnim();
                         }
                     }
                     setRecog();
@@ -33501,11 +33741,24 @@ document.addEventListener('click', function(e) {
                 };
                 inp.addEventListener('change', self._changeHandler);
 
+                // 选择大文件夹时，部分浏览器先触发 window focus，延后填充 input.files / change。
+                // 若仅用短延时判定「取消」并移除 change 监听，会导致上传无反应、无识别动画。
                 self._focusHandler = function () {
-                    setTimeout(function () {
+                    var pollAttempts = 0;
+                    var maxPolls = 40;
+                    var pollMs = 80;
+                    var tick = function () {
                         if (!self._activeInput) return;
                         var fi = self._activeInput.files;
-                        if (!fi || fi.length === 0) {
+                        if (fi && fi.length > 0) {
+                            try {
+                                window.removeEventListener('focus', self._focusHandler);
+                            } catch (_) {}
+                            self._focusHandler = null;
+                            return;
+                        }
+                        pollAttempts++;
+                        if (pollAttempts >= maxPolls) {
                             try {
                                 window.removeEventListener('focus', self._focusHandler);
                             } catch (_) {}
@@ -33521,8 +33774,11 @@ document.addEventListener('click', function(e) {
                                 overlay.classList.remove('cyber-guide-overlay--shadow');
                             } catch (_) {}
                             renderIntegratedPanel();
+                            return;
                         }
-                    }, 380);
+                        setTimeout(tick, pollMs);
+                    };
+                    setTimeout(tick, pollMs);
                 };
                 window.addEventListener('focus', self._focusHandler);
                 try {
