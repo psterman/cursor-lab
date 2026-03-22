@@ -26,7 +26,7 @@
                 '<div class="openclaw-row"><span class="label">任务状态</span><span id="oc-github-sync">--</span></div>' +
             '</div>' +
             '<div class="openclaw-monitor-footer">' +
-                '<a href="openclaw2.html" class="openclaw-monitor-hub-link">OpenClaw 数据中枢</a>' +
+                '<a href="openclaw2.html" target="_blank" rel="noopener noreferrer" class="openclaw-monitor-hub-link">OpenClaw 数据报告</a>' +
             '</div>' +
         '</div>';
     var openclawDrawerObserver = null;

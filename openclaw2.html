@@ -282,16 +282,16 @@ body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.22;ba
 <header class="top-header" role="banner">
   <div class="top-header-left">
     <div class="top-header-title">
-      <h1><span class="text-white" id="top-title">OpenClaw 数据中枢</span></h1>
+      <h1><span class="text-white" id="top-title">OpenClaw 数据报告</span></h1>
       <p id="top-sub">Telemetry Uplink: Active // Source: OpenClaw_Nexus</p>
     </div>
   </div>
   <div class="top-header-right">
     <div class="top-header-card">
-      <a href="index.html" class="top-header-nav-link" id="link-report" title="体检报告">体检报告</a>
+      <a href="index.html" target="_blank" rel="noopener noreferrer" class="top-header-nav-link" id="link-report" title="体检报告">体检报告</a>
     </div>
     <div class="top-header-card">
-      <a href="stats2.html" class="top-header-nav-link" id="link-stats" title="PK地图">PK地图</a>
+      <a href="stats2.html" target="_blank" rel="noopener noreferrer" class="top-header-nav-link" id="link-stats" title="PK地图">PK地图</a>
     </div>
     <div class="lang-flag-wrap">
       <button type="button" id="btn-lang-zh" class="lang-flag-btn active" title="中文" aria-label="中文" data-lang="zh">
@@ -669,7 +669,7 @@ const i18n={
     statusProcess:"正在处理画像与卡片…",
     statusOnline:"已就绪",
     statusFailed:"加载失败，使用空数据。",
-    topTitle:"OpenClaw 数据中枢",
+    topTitle:"OpenClaw 数据报告",
     topSub:"遥测上行: 活跃 // 来源: OpenClaw_Nexus",
     linkReport:"体检报告",
     linkStats:"PK地图",
@@ -716,7 +716,7 @@ const i18n={
     statusProcess:"Processing stats and routing to card clusters...",
     statusOnline:"Online",
     statusFailed:"Failed to load payload. Using fallback.",
-    topTitle:"OpenClaw 3D Nexus",
+    topTitle:"OpenClaw Data Report",
     topSub:"Telemetry Uplink: Active // Source: OpenClaw_Nexus",
     linkReport:"Report",
     linkStats:"PK Map",

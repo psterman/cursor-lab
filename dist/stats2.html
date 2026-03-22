@@ -181,7 +181,7 @@
             
             <!-- 导航：体检报告（index） -->
             <div class="top-header-card">
-                <a href="index.html?from=stats2" class="top-header-nav-link" title="体检报告">体检报告</a>
+                <a href="index.html?from=stats2" target="_blank" rel="noopener noreferrer" class="top-header-nav-link" title="体检报告">体检报告</a>
             </div>
             
             <!-- 语言切换按钮 -->
@@ -339,7 +339,7 @@
             </div>
             <div class="drawer-body left-drawer-body" id="left-drawer-body">
                 <div id="guest-access-node-anchor" class="guest-access-node-anchor" aria-hidden="true"></div>
-                <!-- 词云（顺序由 normalizeLeftDrawerCardOrder 与身份卡注入共同调整；OpenClaw 紧随 identity-config 下方） -->
+                <!-- 词云（顺序由 normalizeLeftDrawerCardOrder 调整；OpenClaw 监测器在 stats 卡片下方） -->
                 <div class="left-drawer-wordcloud-card" id="left-drawer-wordcloud-wrap">
                     <div class="left-drawer-wordcloud-header">
                         <span class="left-drawer-wordcloud-title" data-t="panel.personal_wordcloud">本人词云</span>
@@ -364,7 +364,7 @@
                         <div id="personal-cloud-empty" class="left-drawer-wordcloud-empty hidden" data-t="hotlist.building">初出茅庐，灵魂波段捕获中...</div>
                     </div>
                 </div>
-                <!-- OpenClaw 个人数据监视器（运行时排在 identity-config 下方） -->
+                <!-- OpenClaw 个人数据监视器（运行时排在「我的数据统计」卡片下方） -->
                 <div id="openclaw-monitor-card" class="drawer-item openclaw-monitor-card hacker-border" data-card="openclaw-monitor">
                     <div class="openclaw-monitor-header">
                         <span class="drawer-icon pulse">◉</span>
@@ -378,7 +378,7 @@
                         <div class="openclaw-row"><span class="label">任务状态</span><span id="oc-github-sync">--</span></div>
                     </div>
                     <div class="openclaw-monitor-footer">
-                        <a href="openclaw2.html" class="openclaw-monitor-hub-link">OpenClaw 数据中枢</a>
+                        <a href="openclaw2.html" target="_blank" rel="noopener noreferrer" class="openclaw-monitor-hub-link">OpenClaw 数据报告</a>
                     </div>
                 </div>
             </div>

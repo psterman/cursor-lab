@@ -662,11 +662,13 @@
                 if (staleScroll && staleScroll.parentNode) staleScroll.parentNode.removeChild(staleScroll);
 
                 var identityCard = leftBody.querySelector('.drawer-item[data-card="identity-config"]');
-                var openclawCard = document.getElementById('openclaw-monitor-card');
+                var openclawMountEl = document.getElementById('openclaw-monitor-mount');
+                var openclawCardEl = document.getElementById('openclaw-monitor-card');
+                var openclawBlock = (openclawMountEl && openclawCardEl && openclawMountEl.contains(openclawCardEl)) ? openclawMountEl : openclawCardEl;
                 var statsCard = leftBody.querySelector('.drawer-item.dashboard-card.backdrop-blur.clinic-card') || leftBody.querySelector('.drawer-item[data-card="cursor-inactive-placeholder"]');
                 var githubCard = leftBody.querySelector('.drawer-item.github-combat-card');
                 var wordcloudCard = document.getElementById('left-drawer-wordcloud-wrap');
-                var ordered = [identityCard, openclawCard, statsCard, githubCard, wordcloudCard].filter(function (n) {
+                var ordered = [identityCard, statsCard, openclawBlock, githubCard, wordcloudCard].filter(function (n) {
                     return n && n.parentNode === leftBody;
                 });
                 if (ordered.length === 0) {
@@ -25972,7 +25974,7 @@ function initCountrySelector() {
                     </div>
                     ` : ''}
                     <div class="mt-3 pt-3 border-t border-[var(--border-ui)]">
-                        <a href="index.html?from=stats2" class="drawer-cursor-report-link">${currentLang === 'en' ? 'Cursor report · index' : 'Cursor 体检报告（聊天记录分析）'}</a>
+                        <a href="index.html?from=stats2" target="_blank" rel="noopener noreferrer" class="drawer-cursor-report-link">${currentLang === 'en' ? 'Cursor report · index' : 'Cursor 体检报告'}</a>
                     </div>
                 `;
                 
