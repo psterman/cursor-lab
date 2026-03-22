@@ -25,6 +25,9 @@
                 '<div class="openclaw-row openclaw-row-skills"><span class="label">已安装 Skills</span><div id="oc-skills" class="oc-tags"></div></div>' +
                 '<div class="openclaw-row"><span class="label">任务状态</span><span id="oc-github-sync">--</span></div>' +
             '</div>' +
+            '<div class="openclaw-monitor-footer">' +
+                '<a href="openclaw2.html" class="openclaw-monitor-hub-link">OpenClaw 数据中枢</a>' +
+            '</div>' +
         '</div>';
     var openclawDrawerObserver = null;
     var openclawDrawerObserverLock = false;

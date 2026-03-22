@@ -3068,6 +3068,8 @@
             const fileInputRef = useRef(null);
             // 用于保存动画所需的旧值和新值
             const animationDataRef = useRef(null);
+            /** 防止 ?from=stats2 自动进报告逻辑重复执行 */
+            const stats2BootRef = useRef(false);
             
             const [modulesReady, setModulesReady] = useState(!!(window.i18n && window.i18n.getText));
 
@@ -3226,30 +3228,91 @@
                 }
             }, [lang]);
 
-            // 检查历史记录
-            useEffect(() => {
-                const historyStr = localStorage.getItem('cursor_clinical_history');
-                if (historyStr) {
+            // 将 last_analysis_data / vibe_cursor_analysis_cache 等松散结构规范为 analysisData（与上传完成后的 data 形状对齐）
+            const normalizeLooseAnalysisPayloadToAnalysisData = (p) => {
+                if (!p || typeof p !== 'object') return null;
+                if (p.analysisData && typeof p.analysisData === 'object') return p.analysisData;
+                const inner = p.result && typeof p.result === 'object' ? p.result : p;
+                let stats = inner.stats || inner.statistics || null;
+                let vibeResult = inner.vibeResult;
+                if (!vibeResult && (inner.dimensions || inner.roastText || inner.roastTextZh || inner.roastTextEn || inner.personalityName || inner.vibeIndex || inner.lpdef)) {
+                    vibeResult = {
+                        roastText: inner.roastText || inner.roastTextZh || inner.roastTextEn,
+                        roast_text: inner.roast_text,
+                        dimensions: inner.dimensions,
+                        vibeIndex: inner.vibeIndex || inner.vibe_index,
+                        personalityName: inner.personalityName,
+                        personalityType: inner.personalityType,
+                        analysis: inner.analysis,
+                        lpdef: inner.lpdef,
+                        statistics: inner.statistics || stats,
+                        stats: inner.stats || stats
+                    };
+                }
+                if (!stats && vibeResult && (vibeResult.statistics || vibeResult.stats)) {
+                    stats = vibeResult.statistics || vibeResult.stats;
+                }
+                const chatData = inner.chatData || p.chatData;
+                if (!vibeResult && stats) {
+                    vibeResult = { statistics: stats, stats: stats };
+                }
+                if (!stats && !vibeResult) return null;
+                return {
+                    stats: stats || {},
+                    vibeResult: vibeResult || {},
+                    chatData: chatData
+                };
+            };
+
+            /** 优先 cursor_clinical_history，否则 last_analysis_data / vibe_cursor_analysis_cache（与 stats2 读取链一致） */
+            const resolveClinicalHistoryFromStorage = () => {
+                try {
+                    const rawHist = localStorage.getItem('cursor_clinical_history');
+                    if (rawHist) {
+                        const h = JSON.parse(rawHist);
+                        if (h && h.analysisData && typeof h.analysisData === 'object') {
+                            return { analysisData: h.analysisData, rankings: h.rankings || null };
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[History] cursor_clinical_history 解析失败:', e);
+                }
+                const looseKeys = ['last_analysis_data', 'vibe_cursor_analysis_cache'];
+                for (let i = 0; i < looseKeys.length; i++) {
                     try {
-                        const history = JSON.parse(historyStr);
-                        if (history && history.analysisData) {
-                            setHasHistory(true);
-                            console.log('[History] 发现历史记录');
+                        const raw = localStorage.getItem(looseKeys[i]);
+                        if (!raw) continue;
+                        const p = JSON.parse(raw);
+                        const ad = normalizeLooseAnalysisPayloadToAnalysisData(p);
+                        if (ad && (ad.vibeResult || ad.stats)) {
+                            return { analysisData: ad, rankings: null };
                         }
                     } catch (e) {
-                        console.error('[History] 解析历史记录失败:', e);
+                        console.warn('[History]', looseKeys[i], '解析失败:', e);
                     }
+                }
+                return null;
+            };
+
+            // 检查历史记录
+            useEffect(() => {
+                const resolved = resolveClinicalHistoryFromStorage();
+                if (resolved && resolved.analysisData) {
+                    setHasHistory(true);
+                    console.log('[History] 发现历史记录（含 last_analysis_data 等松散源）');
                 }
             }, []);
 
-            // 加载历史记录函数
-            const loadHistory = async () => {
+            // 加载历史记录函数（可选直接进入完整报告页，供 stats2 ?from=stats2 使用）
+            const loadHistory = async (options = {}) => {
+                const gotoFullReport = options.gotoFullReport === true;
                 try {
-                    const historyStr = localStorage.getItem('cursor_clinical_history');
-                    if (!historyStr) return;
-                    const history = JSON.parse(historyStr);
+                    const history = resolveClinicalHistoryFromStorage();
+                    if (!history || !history.analysisData) return;
                     
-                    console.log('[History] 正在加载历史记录，进入预览页面...');
+                    console.log(gotoFullReport
+                        ? '[History] 正在加载历史记录，进入完整报告...'
+                        : '[History] 正在加载历史记录，进入预览页面...');
                     
                     let finalAnalysisData = history.analysisData;
 
@@ -3308,8 +3371,12 @@
                         window.userRankings = history.rankings;
                     }
                     
-                    // 进入预览页面 (人格鉴定结果)
-                    setStep('preview');
+                    if (gotoFullReport) {
+                        await showFullReport(finalAnalysisData);
+                    } else {
+                        // 进入预览页面 (人格鉴定结果)
+                        setStep('preview');
+                    }
                 } catch (e) {
                     console.error('[History] 加载历史记录失败:', e);
                     setHasHistory(false);
@@ -4532,6 +4599,41 @@
                     } catch { /* ignore */ }
                 }, 0);
             };
+
+            // 从 stats2 带 ?from=stats2 进入时：有本地体检历史则跳过上传页，直接打开完整报告
+            useEffect(() => {
+                if (!modulesReady || stats2BootRef.current) return;
+                const params = new URLSearchParams(window.location.search);
+                let fromStats2 = params.get('from') === 'stats2';
+                if (!fromStats2) {
+                    try {
+                        const h = window.location.hash || '';
+                        if (h.indexOf('from=stats2') >= 0) fromStats2 = true;
+                    } catch { /* ignore */ }
+                }
+                if (!fromStats2) return;
+                const resolved = resolveClinicalHistoryFromStorage();
+                if (!resolved || !resolved.analysisData) return;
+                stats2BootRef.current = true;
+                params.delete('from');
+                const qs = params.toString();
+                let cleanHash = window.location.hash || '';
+                if (cleanHash && cleanHash.indexOf('from=stats2') >= 0) {
+                    try {
+                        const hp = new URLSearchParams(cleanHash.replace(/^#/, ''));
+                        hp.delete('from');
+                        const rest = hp.toString();
+                        cleanHash = rest ? '#' + rest : '';
+                    } catch { /* ignore */ }
+                }
+                const next = window.location.pathname + (qs ? '?' + qs : '') + cleanHash;
+                try {
+                    window.history.replaceState({}, '', next);
+                } catch { /* ignore */ }
+                loadHistory({ gotoFullReport: true }).catch((err) => {
+                    console.error('[from=stats2] 启动完整报告失败:', err);
+                });
+            }, [modulesReady]);
 
             // ===== 排名数据加载和更新函数 =====
             

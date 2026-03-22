@@ -482,10 +482,12 @@
             }
             var path = (typeof _loc !== 'undefined' && _loc && _loc.pathname) ? _loc.pathname : '';
             var indexUrl = (path && /\/stats2(\.html)?$/i.test(path)) ? path.replace(/\/stats2(\.html)?$/i, '/index.html') : 'index.html';
+            if (indexUrl.indexOf('?') < 0) indexUrl += '?from=stats2';
+            else indexUrl += '&from=stats2';
             var base = (typeof _loc !== 'undefined' && _loc && _loc.origin) ? _loc.origin : '';
             window.location.href = base ? (base + (indexUrl.indexOf('/') === 0 ? indexUrl : '/' + indexUrl.replace(/^\//, ''))) : indexUrl;
         } catch (e) {
-            try { window.location.href = 'index.html'; } catch (_) {}
+            try { window.location.href = 'index.html?from=stats2'; } catch (_) {}
         }
     };
 
@@ -535,9 +537,13 @@
                         if (!node) return;
                         var cardType = (typeof node.getAttribute === 'function' ? node.getAttribute('data-card') : '') || '';
                         if (cardType === 'identity-config') {
-                            node.style.display = 'block';
-                            node.style.visibility = 'visible';
-                            node.setAttribute('aria-hidden', 'false');
+                            if (typeof node.remove === 'function') node.remove();
+                            else if (node.parentNode) node.parentNode.removeChild(node);
+                            return;
+                        }
+                        if (cardType === 'openclaw-monitor') {
+                            node.style.display = 'none';
+                            node.setAttribute('aria-hidden', 'true');
                             return;
                         }
                         if (node.closest) {
@@ -558,12 +564,16 @@
                         if (!node || !node.querySelector) return;
                         var cardType = (typeof node.getAttribute === 'function' ? node.getAttribute('data-card') : '') || '';
                         if (cardType === 'identity-config') {
-                            node.style.display = 'block';
-                            node.style.visibility = 'visible';
-                            node.setAttribute('aria-hidden', 'false');
+                            if (typeof node.remove === 'function') node.remove();
+                            else if (node.parentNode) node.parentNode.removeChild(node);
                             return;
                         }
                         if (cardType === 'guest-mode-info') return;
+                        if (cardType === 'openclaw-monitor') {
+                            node.style.display = 'none';
+                            node.setAttribute('aria-hidden', 'true');
+                            return;
+                        }
                         if (
                             node.id === 'syncing-overlay-card' ||
                             node.classList.contains('clinic-card') ||
@@ -589,7 +599,8 @@
                         if (!node) return;
                         var parentDrawer = node.closest ? node.closest('.drawer-item') : null;
                         var parentType = parentDrawer && typeof parentDrawer.getAttribute === 'function' ? parentDrawer.getAttribute('data-card') : '';
-                        if (parentType === 'identity-config' || parentType === 'guest-mode-info') return;
+                        if (parentType === 'guest-mode-info') return;
+                        if (parentType === 'identity-config') return;
                         node.style.display = 'none';
                         node.setAttribute('aria-hidden', 'true');
                         if (typeof node.remove === 'function') node.remove();
@@ -616,14 +627,12 @@
                         window.__stats2GuestDrawerObserver = new MutationObserver(function(mutations) {
                             if (window.__stats2GuestDrawerInjecting) return;
                             if (!Array.isArray(mutations) || mutations.length === 0) return;
-                            var identityOnly = mutations.every(function(mutation) {
+                            var onlyGuestSubtree = mutations.every(function(mutation) {
                                 var target = mutation && mutation.target;
                                 if (!target || !target.closest) return false;
-                                var card = target.closest('.drawer-item');
-                                var cardType = card && typeof card.getAttribute === 'function' ? (card.getAttribute('data-card') || '') : '';
-                                return cardType === 'identity-config';
+                                return !!target.closest('.drawer-item[data-card="guest-mode-info"]');
                             });
-                            if (identityOnly) return;
+                            if (onlyGuestSubtree) return;
                             applyLeftDrawerGuestModePermissions();
                         });
                         window.__stats2GuestDrawerObserver.observe(leftBody, { childList: true, subtree: true });
@@ -665,6 +674,14 @@
                     return;
                 }
                 var ref = leftBody.firstChild;
+                while (ref) {
+                    var dc = ref.nodeType === 1 && typeof ref.getAttribute === 'function' ? (ref.getAttribute('data-card') || '') : '';
+                    if (ref.id === 'guest-access-node-anchor' || dc === 'guest-mode-info') {
+                        ref = ref.nextSibling;
+                        continue;
+                    }
+                    break;
+                }
                 ordered.forEach(function (node) {
                     leftBody.insertBefore(node, ref);
                     ref = node.nextSibling;
@@ -945,47 +962,15 @@
             } catch (_) {}
         }
         function renderGuestModeDrawerCard() {
-            var leftBody = document.getElementById('left-drawer-body');
-            if (!leftBody) return;
-            window.__stats2GuestDrawerInjecting = true;
             try {
-                leftBody.querySelectorAll('.drawer-item[data-card="guest-mode-info"]').forEach(function(node) { node.remove(); });
+                var leftBody = document.getElementById('left-drawer-body');
+                if (!leftBody) return;
+                if (typeof hasAuthenticatedDrawerAccess === 'function' && hasAuthenticatedDrawerAccess()) return;
+                leftBody.querySelectorAll('.drawer-item[data-card="identity-config"]').forEach(function(node) {
+                    if (typeof node.remove === 'function') node.remove();
+                    else if (node.parentNode) node.parentNode.removeChild(node);
+                });
             } catch (e) {}
-            try {
-                if (typeof window.renderGithubCard === 'function') {
-                    var fp = (typeof localStorage !== 'undefined' && localStorage.getItem('user_fingerprint')) || '';
-                    var fpPrefix = fp ? fp.substring(0, 6).toUpperCase() : '';
-                    var defaultAvatar = (window.STATS_CONSTANTS && window.STATS_CONSTANTS.DEFAULT_AVATAR) || '';
-                    var identity = {
-                        avatarUrl: fp ? ('https://api.dicebear.com/7.x/identicon/svg?seed=' + encodeURIComponent(fp)) : defaultAvatar,
-                        displayName: fp ? ('匿名专家 ' + fpPrefix) : ((typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Guest' : '游客'),
-                        displayLabel: fp ? ((typeof currentLang !== 'undefined' && currentLang === 'en') ? 'Device Fingerprint' : '设备指纹') : 'GitHub ID',
-                        badgeHtml: '',
-                        githubUsername: '',
-                        isLoggedIn: false,
-                        currentStatus: 'idle',
-                        defaultAvatar: defaultAvatar
-                    };
-                    if (typeof window.renderGithubIdentityCard === 'function') {
-                        window.renderGithubIdentityCard(identity, {
-                            container: leftBody,
-                            insertFirst: true,
-                            lang: (typeof currentLang !== 'undefined' ? currentLang : 'en')
-                        });
-                    } else {
-                        window.renderGithubCard(null, {
-                            container: leftBody,
-                            insertFirst: true,
-                            lang: (typeof currentLang !== 'undefined' ? currentLang : 'en'),
-                            identity: identity
-                        });
-                    }
-                }
-            } catch (e) {}
-            try { applyLeftDrawerGuestModePermissions(); } catch (e) {}
-            setTimeout(function() {
-                window.__stats2GuestDrawerInjecting = false;
-            }, 0);
         }
         function renderGuestLoginCard() {
             var leftBody = document.getElementById('left-drawer-body');
@@ -996,32 +981,56 @@
                 leftBody.querySelectorAll('.drawer-item[data-card="guest-mode-info"]').forEach(function(node) { node.remove(); });
             } catch (e) {}
             try {
+                var isEn = typeof currentLang !== 'undefined' && (currentLang === 'en' || currentLang === 'EN');
+                var title = isEn ? 'ACCESS NODE' : '接入节点';
+                var line1 = isEn
+                    ? 'Sign in to view your personal OpenClaw and Cursor leaderboard data and rankings.'
+                    : '登录后可查看与 OpenClaw、Cursor 相关的个人排行榜与数据。';
+                var tapLabel = isEn ? 'TAP TO CONNECT' : '点击接入';
+                var ghIcon = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"></path></svg>';
                 card = document.createElement('div');
-                card.className = 'drawer-item guest-login-guide-card';
+                card.className = 'drawer-item guest-login-guide-card stats2-guest-access-node';
                 card.setAttribute('data-card', 'guest-mode-info');
-                card.style.cssText = 'position:relative;padding:16px 14px;border-radius:4px;border:1px solid rgba(0,255,65,0.45);background:linear-gradient(165deg,rgba(5,5,5,0.95),rgba(8,18,12,0.92));box-shadow:0 0 16px rgba(0,255,65,0.18), inset 0 0 12px rgba(0,255,65,0.08);text-align:center;color:#c7ffd6;overflow:hidden;';
                 card.innerHTML = ''
-                    + '<div style="display:inline-flex;align-items:center;justify-content:center;width:46px;height:46px;border-radius:9999px;background:rgba(0,255,65,0.12);border:1px solid rgba(0,255,65,0.5);color:#00ff41;box-shadow:0 0 14px rgba(0,255,65,0.25);margin-bottom:10px;" aria-hidden="true">'
-                    + '  <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" style="display:block;"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"></path></svg>'
-                    + '</div>'
-                    + '<div style="font-size:16px;font-weight:700;line-height:1.4;margin-bottom:8px;color:#00ff41;text-shadow:0 0 8px rgba(0,255,65,0.35);font-family:var(--font-mono-stack),monospace;">查看完整数据分析</div>'
-                    + '<div style="font-size:12px;line-height:1.7;color:rgba(192,255,210,0.88);margin-bottom:14px;font-family:var(--font-mono-stack),monospace;">登录 GitHub 即可解锁深度 Vibe Coding 行踪分析、专属技术画像及全站排名。</div>'
-                    + '<button type="button" data-action="github-login" style="cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:10px 14px;border-radius:3px;border:1px solid rgba(0,255,65,0.7);background:linear-gradient(180deg,rgba(0,255,65,0.16),rgba(0,255,65,0.06));color:#00ff41;font-size:13px;font-weight:700;box-shadow:0 0 12px rgba(0,255,65,0.22), inset 0 0 10px rgba(0,255,65,0.08);font-family:var(--font-mono-stack),monospace;letter-spacing:0.4px;text-transform:uppercase;">'
-                    + '  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="filter:drop-shadow(0 0 4px rgba(0,255,65,0.45));"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"></path></svg>'
-                    + '  <span>GitHub 登录</span>'
-                    + '</button>';
-                var loginBtn = card.querySelector('[data-action="github-login"]');
-                if (loginBtn) {
-                    loginBtn.addEventListener('click', function(e) {
-                        if (e) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                        }
-                        if (typeof window.loginWithGitHub === 'function') window.loginWithGitHub();
-                        else if (typeof loginWithGitHub === 'function') loginWithGitHub();
-                    });
+                    + '<div class="guest-access-node-scanline" aria-hidden="true"></div>'
+                    + '<div style="position:relative;z-index:4;padding:14px 14px 16px;text-align:left;">'
+                    + '  <div class="flex items-center justify-between gap-2 mb-2" style="display:flex;align-items:center;justify-content:space-between;">'
+                    + '    <span style="font-size:10px;font-weight:700;letter-spacing:0.2em;color:rgba(0,255,65,0.85);font-family:var(--font-mono-stack),monospace;">UPLINK</span>'
+                    + '    <span class="w-2 h-2 rounded-full bg-[var(--accent-terminal,#00ff41)] pulse" style="flex-shrink:0;width:8px;height:8px;border-radius:999px;background:#00ff41;box-shadow:0 0 8px rgba(0,255,65,0.75);" title="STANDBY" aria-hidden="true"></span>'
+                    + '  </div>'
+                    + '  <div style="font-size:15px;font-weight:700;line-height:1.35;margin-bottom:6px;color:#00ff41;text-shadow:0 0 10px rgba(0,255,65,0.35);font-family:var(--font-mono-stack),monospace;">' + title + '</div>'
+                    + '  <div style="font-size:11px;line-height:1.65;color:rgba(200,255,215,0.88);font-family:var(--font-mono-stack),monospace;">' + line1 + '</div>'
+                    + '  <button type="button" class="guest-access-node-login-btn" data-guest-access-tap="1" aria-label="' + (isEn ? 'Connect with GitHub' : '使用 GitHub 接入') + '">'
+                    + ghIcon
+                    + '    <span>' + tapLabel + '</span>'
+                    + '  </button>'
+                    + '</div>';
+                var tap = card.querySelector('[data-guest-access-tap="1"]');
+                function runLogin(e) {
+                    if (e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }
+                    if (typeof window.handleLogin === 'function') window.handleLogin();
+                    else if (typeof window.loginWithGitHub === 'function') window.loginWithGitHub();
+                    else if (typeof loginWithGitHub === 'function') loginWithGitHub();
                 }
-                leftBody.insertBefore(card, leftBody.firstChild || null);
+                if (tap) {
+                    tap.addEventListener('click', runLogin);
+                }
+                var anchor = document.getElementById('guest-access-node-anchor');
+                if (!anchor && leftBody) {
+                    anchor = document.createElement('div');
+                    anchor.id = 'guest-access-node-anchor';
+                    anchor.className = 'guest-access-node-anchor';
+                    anchor.setAttribute('aria-hidden', 'true');
+                    leftBody.insertBefore(anchor, leftBody.firstChild || null);
+                }
+                if (anchor && anchor.parentNode === leftBody) {
+                    leftBody.insertBefore(card, anchor.nextSibling);
+                } else {
+                    leftBody.insertBefore(card, leftBody.firstChild || null);
+                }
                 card.style.setProperty('display', 'block', 'important');
                 card.style.setProperty('visibility', 'visible', 'important');
                 card.setAttribute('aria-hidden', 'false');
@@ -1045,7 +1054,12 @@
                 var card = leftBody.querySelector('.drawer-item[data-card="guest-mode-info"]');
                 if (!card) card = renderGuestLoginCard();
                 if (!card) return;
-                if (leftBody.firstElementChild !== card) {
+                var anchorEnf = document.getElementById('guest-access-node-anchor');
+                if (anchorEnf && anchorEnf.parentNode === leftBody) {
+                    if (card.previousSibling !== anchorEnf) {
+                        leftBody.insertBefore(card, anchorEnf.nextSibling);
+                    }
+                } else if (leftBody.firstChild !== card) {
                     leftBody.insertBefore(card, leftBody.firstChild || null);
                 }
                 card.style.setProperty('display', 'block', 'important');
@@ -1164,6 +1178,32 @@
                 return false;
             }
         }
+        function setLeftDrawerChromeVisibility(hasAuth) {
+            try {
+                var ld = document.getElementById('left-drawer');
+                var cs = document.getElementById('left-drawer-country-selector');
+                var oc = document.getElementById('openclaw-monitor-card');
+                if (ld) ld.setAttribute('data-left-auth', hasAuth ? 'full' : 'guest');
+                if (cs) {
+                    if (hasAuth) {
+                        cs.style.removeProperty('display');
+                        cs.setAttribute('aria-hidden', 'false');
+                    } else {
+                        cs.style.setProperty('display', 'none', 'important');
+                        cs.setAttribute('aria-hidden', 'true');
+                    }
+                }
+                if (oc) {
+                    if (hasAuth) {
+                        oc.style.removeProperty('display');
+                        oc.removeAttribute('aria-hidden');
+                    } else {
+                        oc.style.setProperty('display', 'none', 'important');
+                        oc.setAttribute('aria-hidden', 'true');
+                    }
+                }
+            } catch (e) {}
+        }
         function applyLeftDrawerGuestModePermissions() {
             try {
                 var leftBody = document && document.getElementById ? document.getElementById('left-drawer-body') : null;
@@ -1172,19 +1212,11 @@
                 var isGuestMode = (typeof isGuestGatePassed === 'function' && isGuestGatePassed()) || !hasAccess;
                 if (isGuestMode) {
                     try {
-                        var hasIdentityCard = !!leftBody.querySelector('.drawer-item[data-card="identity-config"]');
-                        if (!hasIdentityCard && !window.__stats2GuestCardRepairing) {
-                            window.__stats2GuestCardRepairing = true;
-                            setTimeout(function() {
-                                try {
-                                    var lb = document && document.getElementById ? document.getElementById('left-drawer-body') : null;
-                                    if (lb && !lb.querySelector('.drawer-item[data-card="identity-config"]')) {
-                                        renderGuestModeDrawerCard();
-                                    }
-                                } catch (e) {}
-                                window.__stats2GuestCardRepairing = false;
-                            }, 0);
-                        }
+                        renderGuestModeDrawerCard();
+                        leftBody.querySelectorAll('.drawer-item[data-card="identity-config"]').forEach(function(node) {
+                            if (typeof node.remove === 'function') node.remove();
+                            else if (node.parentNode) node.parentNode.removeChild(node);
+                        });
                     } catch (e) {}
                 }
                 var shouldHideUserData = isGuestMode;
@@ -1198,6 +1230,7 @@
                     } catch (e) {}
                 }
                 leftBody.setAttribute('data-guest-restricted', isGuestMode ? 'true' : 'false');
+                setLeftDrawerChromeVisibility(!!hasAuth);
                 leftBody.querySelectorAll('.drawer-item').forEach(function(node) {
                     if (!node) return;
                     var cardType = typeof node.getAttribute === 'function' ? (node.getAttribute('data-card') || '') : '';
@@ -1206,34 +1239,6 @@
                             node.style.display = 'block';
                             node.style.visibility = 'visible';
                             node.setAttribute('aria-hidden', 'false');
-                            return;
-                        }
-                        if (cardType === 'identity-config') {
-                            node.style.display = 'block';
-                            node.style.visibility = 'visible';
-                            node.setAttribute('aria-hidden', 'false');
-                            Array.from(node.children || []).forEach(function(child) {
-                                if (!child || !child.style) return;
-                                var keep = !!(
-                                    (child.classList && (
-                                        child.classList.contains('github-combat-identity') ||
-                                        child.classList.contains('status-grid') ||
-                                        child.classList.contains('status-item')
-                                    )) ||
-                                    child.id === 'auth-login-section' ||
-                                    (child.querySelector && (
-                                        child.querySelector('#auth-login-section') ||
-                                        child.querySelector('.github-login-btn') ||
-                                        child.querySelector('[data-auth-container]') ||
-                                        child.querySelector('[data-account-status]') ||
-                                        child.querySelector('.status-grid') ||
-                                        child.querySelector('.status-item')
-                                    ))
-                                );
-                                child.style.display = keep ? '' : 'none';
-                                child.style.visibility = keep ? 'visible' : 'hidden';
-                                child.setAttribute('aria-hidden', keep ? 'false' : 'true');
-                            });
                             return;
                         }
                         node.style.display = 'none';
@@ -1313,9 +1318,9 @@
             removeSignedOutPrivateDrawerCards();
             applyLeftDrawerGuestModePermissions();
             if (shouldRenderGuestCard) {
-                renderGuestModeDrawerCard();
-                renderGuestLoginCard();
-                enforceGuestLoginCardPriority('clearPrivateDrawerCards');
+                try { renderGuestModeDrawerCard(); } catch (e) {}
+                try { renderGuestLoginCard(); } catch (e) {}
+                try { enforceGuestLoginCardPriority('clearPrivateDrawerCards'); } catch (e) {}
             }
         }
         try { window.isGuestGatePassed = isGuestGatePassed; } catch (e) {}
@@ -10039,17 +10044,25 @@
                 if (leftBody) {
                     const isGuestDrawerMode = (typeof isGuestGatePassed === 'function' && isGuestGatePassed());
                     const wordcloudCard = document.getElementById('left-drawer-wordcloud-wrap');
+                    const openclawCard = document.getElementById('openclaw-monitor-card');
                     const openclawMount = document.getElementById('openclaw-monitor-mount');
-                    const identityCard = isGuestDrawerMode ? leftBody.querySelector('.drawer-item[data-card="identity-config"]') : null;
+                    const anchorEl = document.getElementById('guest-access-node-anchor');
+                    const identityCard = isGuestDrawerMode ? null : leftBody.querySelector('.drawer-item[data-card="identity-config"]');
                     const tempHolder = document.createDocumentFragment();
-                    if (identityCard && identityCard.parentNode) {
-                        tempHolder.appendChild(identityCard);
-                    }
-                    if (openclawMount && openclawMount.parentNode) {
-                        tempHolder.appendChild(openclawMount);
-                    }
-                    if (wordcloudCard && wordcloudCard.parentNode) {
-                        tempHolder.appendChild(wordcloudCard);
+                    if (isGuestDrawerMode) {
+                        if (anchorEl && anchorEl.parentNode) tempHolder.appendChild(anchorEl);
+                        if (wordcloudCard && wordcloudCard.parentNode) tempHolder.appendChild(wordcloudCard);
+                        if (openclawCard && openclawCard.parentNode) tempHolder.appendChild(openclawCard);
+                    } else {
+                        if (identityCard && identityCard.parentNode) {
+                            tempHolder.appendChild(identityCard);
+                        }
+                        if (openclawMount && openclawMount.parentNode) {
+                            tempHolder.appendChild(openclawMount);
+                        }
+                        if (wordcloudCard && wordcloudCard.parentNode) {
+                            tempHolder.appendChild(wordcloudCard);
+                        }
                     }
                     leftBody.innerHTML = isGuestDrawerMode ? '' : skeletonHTML;
                     leftBody.classList.toggle('drawer-loading', !isGuestDrawerMode);
@@ -10057,8 +10070,13 @@
                         leftBody.appendChild(tempHolder);
                     }
                     normalizeLeftDrawerCardOrder();
-                    if (isGuestDrawerMode && !leftBody.querySelector('.drawer-item[data-card="identity-config"]')) {
-                        try { renderGuestModeDrawerCard(); } catch (_) {}
+                    if (isGuestDrawerMode) {
+                        try {
+                            renderGuestModeDrawerCard();
+                            renderGuestLoginCard();
+                            enforceGuestLoginCardPriority('showDrawers-skeleton');
+                            if (typeof applyLeftDrawerGuestModePermissions === 'function') applyLeftDrawerGuestModePermissions();
+                        } catch (_) {}
                     }
                 }
                 if (rightBody) {
@@ -20990,6 +21008,10 @@ function initCountrySelector() {
             }
         }
         window.loginWithGitHub = loginWithGitHub;
+        window.handleLogin = function handleLogin() {
+            var fn = window.loginWithGitHub;
+            if (typeof fn === 'function') return fn.apply(window, arguments);
+        };
         
         /**
          * 退出登录（同步、不依赖任何异步 API）
@@ -25949,6 +25971,9 @@ function initCountrySelector() {
                         <div class="text-[13px] text-[#00ff41]/80 leading-relaxed">${answerBookContent && answerBookContent !== '暂无说明' ? esc(answerBookContent) : ''}</div>
                     </div>
                     ` : ''}
+                    <div class="mt-3 pt-3 border-t border-[var(--border-ui)]">
+                        <a href="index.html?from=stats2" class="drawer-cursor-report-link">${currentLang === 'en' ? 'Cursor report · index' : 'Cursor 体检报告（聊天记录分析）'}</a>
+                    </div>
                 `;
                 
                 // 先移除旧的统计卡片和 GitHub 战力卡片（不触碰身份配置卡：头像、GitHub、状态、私信）
@@ -32773,7 +32798,27 @@ document.addEventListener('click', function(e) {
                         showSmartSyncToastLine(S.needPath);
                         return;
                     }
-                    copyPathToClipboard(p, isZh);
+                    var taClip = null;
+                    try {
+                        taClip = document.createElement('textarea');
+                        taClip.value = p;
+                        taClip.setAttribute('readonly', '');
+                        taClip.style.position = 'fixed';
+                        taClip.style.left = '-9999px';
+                        document.body.appendChild(taClip);
+                        taClip.select();
+                        if (document.execCommand('copy')) {
+                            showSmartSyncToastLine(isZh ? '已复制到剪贴板' : 'Copied');
+                        } else {
+                            copyPathToClipboard(p, isZh);
+                        }
+                    } catch (_) {
+                        copyPathToClipboard(p, isZh);
+                    } finally {
+                        try {
+                            if (taClip && taClip.parentNode) taClip.parentNode.removeChild(taClip);
+                        } catch (_) {}
+                    }
                     openPickerAndShadow();
                 });
                 actions.appendChild(bPrimary);
@@ -32856,8 +32901,27 @@ document.addEventListener('click', function(e) {
                     '</div>';
             }
 
-            function openPickerAndShadow() {
+            function ensureCursorSlot1FolderInput() {
                 var inp = document.getElementById('cursor-slot1-folder-input');
+                if (inp && inp.nodeType === 1 && document.body.contains(inp)) return inp;
+                try {
+                    inp = document.createElement('input');
+                    inp.type = 'file';
+                    inp.id = 'cursor-slot1-folder-input';
+                    inp.setAttribute('webkitdirectory', '');
+                    inp.setAttribute('directory', '');
+                    inp.multiple = true;
+                    inp.setAttribute('tabindex', '-1');
+                    inp.setAttribute('aria-hidden', 'true');
+                    inp.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;opacity:0;pointer-events:none;overflow:hidden';
+                    document.body.appendChild(inp);
+                    return inp;
+                } catch (e) {
+                    return null;
+                }
+            }
+            function openPickerAndShadow() {
+                var inp = ensureCursorSlot1FolderInput();
                 if (!inp || typeof inp.click !== 'function') {
                     showSmartSyncToastLine(isZh ? '未找到文件夹选择器' : 'Folder input missing');
                     self.hide();

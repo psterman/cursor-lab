@@ -2362,6 +2362,36 @@ html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
             flex-direction: column;
             gap: 8px;
         }
+        .openclaw-monitor-footer {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(0, 255, 65, 0.2);
+        }
+        .openclaw-monitor-hub-link,
+        .drawer-cursor-report-link {
+            display: block;
+            width: 100%;
+            text-align: center;
+            padding: 8px 10px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            font-family: var(--font-mono-stack), monospace;
+            color: var(--accent-terminal, #00ff41);
+            border: 1px solid rgba(0, 255, 65, 0.4);
+            border-radius: 2px;
+            background: rgba(0, 255, 65, 0.08);
+            text-decoration: none;
+            transition: background 0.2s, box-shadow 0.2s, border-color 0.2s;
+            box-sizing: border-box;
+        }
+        .openclaw-monitor-hub-link:hover,
+        .drawer-cursor-report-link:hover {
+            background: rgba(0, 255, 65, 0.14);
+            box-shadow: 0 0 12px rgba(0, 255, 65, 0.22);
+            border-color: rgba(0, 255, 65, 0.65);
+        }
         .openclaw-row {
             display: flex;
             justify-content: space-between;

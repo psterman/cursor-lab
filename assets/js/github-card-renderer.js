@@ -402,7 +402,6 @@
             '<div class="flex items-center gap-2">',
             '<button type="button" id="cursor-slot1-folder-btn" class="w-full px-3 py-2 bg-zinc-900/50 hover:bg-zinc-800 border border-[#00ff41]/30 rounded-md text-white text-[11px] font-bold uppercase tracking-wider transition-colors" style="color:#00ff41;border-color:rgba(0,255,65,0.35);font-family:inherit;">' + esc(uploadBtnText) + '</button>',
             '</div>',
-            '<input type="file" id="cursor-slot1-folder-input" webkitdirectory directory multiple style="display:none;" />',
             '<div class="text-[9px] text-zinc-500 mt-1 font-mono" id="smart-sync-last-time">' + esc(syncTimeLine) + '</div>',
             '<div class="text-[10px] text-zinc-500 mt-1" id="cursor-slot1-status">' + esc(cursorSlotHint) + '</div>',
             '</div>',
