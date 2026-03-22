@@ -2063,7 +2063,12 @@
         body.querySelectorAll('.cyber-report-dm-btn').forEach(function(btn) {
             btn.addEventListener('click', function() {
                 var id = btn.getAttribute('data-to-id');
-                if (id && typeof openMessageInput === 'function') openMessageInput(id);
+                var dn = (data && (data.user_name || data.name)) ? String(data.user_name || data.name) : '';
+                if (id && typeof window.openMessageSender === 'function') {
+                    window.openMessageSender(id, dn || id);
+                } else if (id && typeof window.openMessageInput === 'function') {
+                    window.openMessageInput(id);
+                }
             });
         });
     }
@@ -20008,6 +20013,148 @@ function initCountrySelector() {
                 listContainer.innerHTML = '<div class="text-zinc-500 text-center py-4 text-xs">' + escapeHtml(msg) + '</div>';
             }
         }
+
+        var liveNodePreviewHideTimer = null;
+        var liveNodePreviewFetchSeq = 0;
+
+        function getOrCreateLiveNodeDetailPreview() {
+            var el = document.getElementById('live-node-detail-preview');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'live-node-detail-preview';
+                el.className = 'live-node-detail-preview';
+                el.setAttribute('role', 'tooltip');
+                el.addEventListener('mouseenter', cancelHideLiveNodeDetailPreview);
+                el.addEventListener('mouseleave', scheduleHideLiveNodeDetailPreview);
+                document.body.appendChild(el);
+            }
+            return el;
+        }
+
+        function hideLiveNodeDetailPreview() {
+            if (liveNodePreviewHideTimer) {
+                clearTimeout(liveNodePreviewHideTimer);
+                liveNodePreviewHideTimer = null;
+            }
+            var el = document.getElementById('live-node-detail-preview');
+            if (el) {
+                el.style.display = 'none';
+                el.innerHTML = '';
+            }
+        }
+
+        function scheduleHideLiveNodeDetailPreview() {
+            if (liveNodePreviewHideTimer) clearTimeout(liveNodePreviewHideTimer);
+            liveNodePreviewHideTimer = setTimeout(function() {
+                liveNodePreviewHideTimer = null;
+                hideLiveNodeDetailPreview();
+            }, 180);
+        }
+
+        function cancelHideLiveNodeDetailPreview() {
+            if (liveNodePreviewHideTimer) {
+                clearTimeout(liveNodePreviewHideTimer);
+                liveNodePreviewHideTimer = null;
+            }
+        }
+
+        function positionLiveNodeDetailPreview(anchorEl, previewEl) {
+            var rect = anchorEl.getBoundingClientRect();
+            var pw = previewEl.offsetWidth || 280;
+            var ph = previewEl.offsetHeight || 200;
+            var margin = 8;
+            var left = rect.right + margin;
+            var top = rect.top + rect.height / 2 - ph / 2;
+            if (left + pw > window.innerWidth - margin) {
+                left = rect.left - pw - margin;
+            }
+            if (left < margin) left = margin;
+            if (top < margin) top = margin;
+            if (top + ph > window.innerHeight - margin) {
+                top = Math.max(margin, window.innerHeight - margin - ph);
+            }
+            previewEl.style.left = left + 'px';
+            previewEl.style.top = top + 'px';
+        }
+
+        function showLiveNodeDetailPreview(avatarEl) {
+            var login = avatarEl.getAttribute('data-github-id') || '';
+            var name = avatarEl.getAttribute('data-user-name') || login || 'Guest';
+            var avatarUrl = avatarEl.getAttribute('data-avatar-url') || DEFAULT_AVATAR;
+            var statusLabel = avatarEl.getAttribute('data-status-label') || '';
+            var githubUrl = login ? ('https://github.com/' + encodeURIComponent(login)) : '#';
+
+            var preview = getOrCreateLiveNodeDetailPreview();
+            liveNodePreviewFetchSeq++;
+            var seq = liveNodePreviewFetchSeq;
+
+            preview.innerHTML = [
+                '<div class="ln-preview-card">',
+                '<div class="ln-preview-head">',
+                '<a class="ln-preview-avatar-wrap" href="' + escapeHtml(githubUrl) + '" target="_blank" rel="noopener noreferrer">',
+                '<img class="ln-preview-avatar" src="' + escapeHtml(avatarUrl) + '" alt="" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src=\'' + escapeHtml(DEFAULT_AVATAR) + '\';" />',
+                '</a>',
+                '<div class="ln-preview-meta">',
+                '<div class="ln-preview-name">' + escapeHtml(name) + '</div>',
+                '<div class="ln-preview-sub">@' + escapeHtml(login || '—') + '</div>',
+                (statusLabel ? '<div class="ln-preview-status">' + escapeHtml(statusLabel) + '</div>' : ''),
+                '</div></div>',
+                '<div class="ln-preview-grid">',
+                '<span>仓库数</span><span class="ln-preview-val" data-ln-preview-repos>—</span>',
+                '<span>更新日期</span><span class="ln-preview-val" data-ln-preview-updated>—</span>',
+                '<span>Star 总数</span><span class="ln-preview-val">—</span>',
+                '</div>',
+                '<div class="ln-preview-footer">悬停预览 · 点击头像查看赛博战力</div>',
+                '</div>'
+            ].join('');
+
+            preview.style.display = 'block';
+            positionLiveNodeDetailPreview(avatarEl, preview);
+            requestAnimationFrame(function() {
+                positionLiveNodeDetailPreview(avatarEl, preview);
+            });
+
+            if (login) {
+                fetch('https://api.github.com/users/' + encodeURIComponent(login), { headers: { Accept: 'application/vnd.github.v3+json' } })
+                    .then(function(r) { return r.ok ? r.json() : null; })
+                    .then(function(gh) {
+                        if (seq !== liveNodePreviewFetchSeq || !preview.parentNode) return;
+                        var repoEl = preview.querySelector('[data-ln-preview-repos]');
+                        var updatedEl = preview.querySelector('[data-ln-preview-updated]');
+                        if (gh) {
+                            if (repoEl && gh.public_repos != null) repoEl.textContent = String(gh.public_repos);
+                            if (updatedEl && gh.updated_at) {
+                                try { updatedEl.textContent = new Date(gh.updated_at).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }); } catch (_) { updatedEl.textContent = gh.updated_at; }
+                            }
+                        }
+                    })
+                    .catch(function() {});
+            }
+        }
+
+        function bindLiveNodeHoverPreview(listContainer) {
+            if (!listContainer || listContainer.dataset.liveHoverBound === '1') return;
+            listContainer.dataset.liveHoverBound = '1';
+            var lastAvatar = null;
+            listContainer.addEventListener('mouseover', function(e) {
+                var a = e.target && e.target.closest && e.target.closest('.user-avatar-compact.user-avatar-trigger');
+                if (!a || !listContainer.contains(a)) return;
+                if (lastAvatar === a) return;
+                lastAvatar = a;
+                cancelHideLiveNodeDetailPreview();
+                showLiveNodeDetailPreview(a);
+            });
+            listContainer.addEventListener('mouseout', function(e) {
+                var a = e.target && e.target.closest && e.target.closest('.user-avatar-compact.user-avatar-trigger');
+                if (!a || !listContainer.contains(a)) return;
+                var rel = e.relatedTarget;
+                if (rel && a.contains(rel)) return;
+                var pv = document.getElementById('live-node-detail-preview');
+                if (rel && pv && pv.contains(rel)) return;
+                if (lastAvatar === a) lastAvatar = null;
+                scheduleHideLiveNodeDetailPreview();
+            });
+        }
         
         /**
          * 渲染在线用户列表（紧凑排列：图标式）
@@ -20113,6 +20260,7 @@ function initCountrySelector() {
             }).join('');
             
             listContainer.innerHTML = html;
+            bindLiveNodeHoverPreview(listContainer);
         }
         
         // 全局变量：当前显示的弹窗
@@ -20132,7 +20280,9 @@ function initCountrySelector() {
                 }
             }
             
-            const avatarElement = event ? event.currentTarget : document.querySelector(`[data-user-index="${userIndex}"]`);
+            const avatarElement = (event && event.currentTarget) ||
+                (event && event.target && event.target.closest && event.target.closest('.user-avatar-trigger')) ||
+                (userIndex != null && userIndex !== '' ? document.querySelector(`[data-user-index="${userIndex}"]`) : null);
             if (!avatarElement) {
                 console.warn('[Popup] ⚠️ 找不到头像元素');
                 return;
@@ -20429,6 +20579,7 @@ function initCountrySelector() {
                 document.addEventListener('click', closePopupOnClickOutside, true);
             }, 200);
         }
+        try { window.toggleUserPopup = toggleUserPopup; } catch (e) {}
         
         /**
          * 获取用户仓库列表（优先缓存，否则请求后端代理 /api/github-proxy/:username 避免 403/CSP）
@@ -20504,8 +20655,16 @@ function initCountrySelector() {
                     var content = (ta && ta.value || '').trim();
                     if (!content) { alert('请输入内容'); return; }
                     sendBtn.disabled = true;
+                    var fpSend = fp;
+                    try {
+                        if (!fpSend) fpSend = (localStorage.getItem('user_fingerprint') || window.fpId || '').trim();
+                        if (!fpSend && window.currentUserData) fpSend = String(window.currentUserData.fingerprint || window.currentUserData.user_fingerprint || '').trim();
+                        if (!fpSend && window.currentUser) fpSend = String(window.currentUser.fingerprint || window.currentUser.user_fingerprint || '').trim();
+                        if (!fpSend) fpSend = (localStorage.getItem('vibe_fp') || '').trim();
+                        if (!fpSend && typeof getCurrentFingerprint === 'function') fpSend = (await getCurrentFingerprint()) || '';
+                    } catch (_) {}
                     var base = (typeof API_ENDPOINT_MANAGER !== 'undefined' && API_ENDPOINT_MANAGER.getCurrent && API_ENDPOINT_MANAGER.getCurrent()) || document.querySelector('meta[name="api-endpoint"]')?.content || '';
-                    var url = (base.replace(/\/$/, '') || '') + '/api/v2/message/send?fingerprint=' + encodeURIComponent(fp) + '&_t=' + Date.now();
+                    var url = (base.replace(/\/$/, '') || '') + '/api/v2/message/send?fingerprint=' + encodeURIComponent(fpSend || '') + '&_t=' + Date.now();
                     try {
                         var res = await fetch(url, {
                             method: 'POST',
@@ -20514,7 +20673,7 @@ function initCountrySelector() {
                                 toUserId: toId,
                                 toName: toName || toId,
                                 content: content,
-                                fingerprint: fp,
+                                fingerprint: fpSend || '',
                                 score: score,
                                 username: (window.currentUser && (window.currentUser.user_name || window.currentUser.name)) || (typeof localStorage !== 'undefined' ? localStorage.getItem('github_username') : '') || '',
                                 avatar: (window.currentUser && (window.currentUser.user_metadata && window.currentUser.user_metadata.avatar_url || window.currentUser.avatar_url)) || (typeof getGitHubAvatarUrl === 'function' ? getGitHubAvatarUrl((window.currentUser && (window.currentUser.user_name || window.currentUser.name)) || (typeof localStorage !== 'undefined' ? localStorage.getItem('github_username') : '') || '') : '') || ''
@@ -20537,6 +20696,7 @@ function initCountrySelector() {
                 });
             }
         }
+        try { window.openMessageSender = openMessageSender; } catch (e) {}
 
         /** 私信收件箱：所有 await 置于 async IIFE 内，避免顶层 await 报错 */
         (async function() {
@@ -20586,9 +20746,17 @@ function initCountrySelector() {
             var body = document.getElementById('inbox-body');
             if (!body) return;
             var fp = '';
-            try { fp = localStorage.getItem('user_fingerprint') || window.fpId || ''; } catch (_) {}
+            try {
+                fp = (localStorage.getItem('user_fingerprint') || window.fpId || '').trim();
+                if (!fp && window.currentUserData) fp = String(window.currentUserData.fingerprint || window.currentUserData.user_fingerprint || '').trim();
+                if (!fp && window.currentUser) fp = String(window.currentUser.fingerprint || window.currentUser.user_fingerprint || '').trim();
+                if (!fp) fp = (localStorage.getItem('vibe_fp') || '').trim();
+            } catch (_) {}
+            if (!fp && typeof getCurrentFingerprint === 'function') {
+                try { fp = (await getCurrentFingerprint()) || ''; } catch (_) {}
+            }
             if (!fp) {
-                body.innerHTML = '<div class="text-zinc-500 text-center py-8 text-xs">请先完成分析以获取收件箱</div>';
+                body.innerHTML = '<div class="text-zinc-500 text-center py-8 text-xs">无法获取收件箱身份标识，请刷新页面后重试</div>';
                 return;
             }
             body.innerHTML = '<div class="text-zinc-500 text-center py-8 text-xs">加载中...</div>';
@@ -20786,6 +20954,7 @@ function initCountrySelector() {
                 if (textarea) textarea.focus();
             }, 100);
         }
+        try { window.openMessageInput = openMessageInput; } catch (e) {}
         
         /**
          * 显示发送成功提示
@@ -20870,6 +21039,7 @@ function initCountrySelector() {
             const overlay = document.querySelector('.message-input-overlay');
             if (overlay) overlay.remove();
         }
+        try { window.sendMessage = sendMessage; } catch (e) {}
         
         // 全局变量：用于管理倒计时，防止多个弹窗重叠
         let currentBurnMsgInterval = null;

@@ -3112,6 +3112,85 @@ html.stats2-guest-mode #left-drawer-body .drawer-item.clinic-card,
             border-radius: 50%; /* 确保图片本身也是圆形的 */
         }
         
+        /* 活跃节点头像悬停：旧版详情预览（与 user-modal 小卡片风格一致） */
+        .live-node-detail-preview {
+            position: fixed;
+            z-index: 10002;
+            width: 280px;
+            max-width: calc(100vw - 16px);
+            pointer-events: auto;
+            animation: popup-appear 0.18s ease-out;
+        }
+        .live-node-detail-preview .ln-preview-card {
+            background: rgba(5, 5, 5, 0.94);
+            border: 1px solid rgba(0, 255, 65, 0.35);
+            border-radius: 8px;
+            padding: 12px 14px;
+            box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 255, 65, 0.08);
+            font-family: var(--font-mono-stack, 'JetBrains Mono', monospace);
+        }
+        .live-node-detail-preview .ln-preview-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+        .live-node-detail-preview .ln-preview-avatar-wrap {
+            flex-shrink: 0;
+            display: block;
+        }
+        .live-node-detail-preview .ln-preview-avatar {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 1px solid rgba(0, 255, 65, 0.35);
+        }
+        .live-node-detail-preview .ln-preview-meta {
+            min-width: 0;
+            flex: 1;
+        }
+        .live-node-detail-preview .ln-preview-name {
+            color: #00ff41;
+            font-weight: 600;
+            font-size: 13px;
+            line-height: 1.3;
+            word-break: break-all;
+        }
+        .live-node-detail-preview .ln-preview-sub {
+            color: rgba(255, 255, 255, 0.45);
+            font-size: 11px;
+            margin-top: 2px;
+        }
+        .live-node-detail-preview .ln-preview-status {
+            font-size: 10px;
+            color: rgba(0, 255, 65, 0.65);
+            margin-top: 4px;
+            letter-spacing: 0.06em;
+        }
+        .live-node-detail-preview .ln-preview-grid {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 6px 10px;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.55);
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            padding-top: 10px;
+        }
+        .live-node-detail-preview .ln-preview-val {
+            text-align: right;
+            color: rgba(255, 255, 255, 0.88);
+            font-variant-numeric: tabular-nums;
+        }
+        .live-node-detail-preview .ln-preview-footer {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+            font-size: 9px;
+            color: rgba(113, 113, 122, 0.95);
+            letter-spacing: 0.04em;
+        }
+        
         /* 拟态风格弹窗 - 从活跃节点框上边缘推出，不遮挡抽屉（fixed 定位由 JS 计算） */
         .user-popup {
             position: fixed;
