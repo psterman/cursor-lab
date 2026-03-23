@@ -78,6 +78,22 @@ type GlobalCountryStatsSnapshot = Record<
     totalStars: number;
     totalForks: number;
     totalFollowers: number;
+    /** 与 country_stats_current.main_language_mode 一致（mainLanguage 众数） */
+    mainLanguage?: string;
+    /** 同 main_language_mode，供前端直读 snake_case */
+    main_language_mode?: string;
+    /** 赛博磕头：同 cursor_total_messages_sum（SUM total_messages 列） */
+    kowtowTotal?: number;
+    cursor_total_messages_sum?: number;
+    /** 赛博仓鼠：同 github_total_repos_sum（SUM github_stats.totalRepos） */
+    cyberHamsterRepos?: number;
+    github_total_repos_sum?: number;
+    avgKowtowPerUser?: number;
+    avgReposPerUser?: number;
+    /** 众数语言用户占比 0..1 */
+    mainLanguageShare?: number;
+    /** 使用众数语言的用户数 */
+    mainLanguageModeUsers?: number;
   }
 >;
 
@@ -118,6 +134,97 @@ function chooseTopModel(modelCounts: Map<string, number>): string {
     }
   }
   return best || '';
+}
+
+type CountryStatsRollupRow = {
+  country_code?: string | null;
+  total_users?: number | null;
+  main_language_mode?: string | null;
+  main_language_mode_users?: number | null;
+  cursor_total_messages_sum?: number | null;
+  github_total_repos_sum?: number | null;
+  avg_cursor_messages_per_user?: number | null;
+  avg_github_repos_per_user?: number | null;
+  main_language_share?: number | null;
+};
+
+/**
+ * 拉取 v_country_stats_rollup（分页），合并进 GLOBAL_COUNTRY_STATS_SNAPSHOT 各国对象。
+ */
+async function mergeCountryStatsRollupIntoSnapshot(env: Env, snapshot: GlobalCountryStatsSnapshot): Promise<void> {
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) return;
+  const pageSize = 1000;
+  let offset = 0;
+  const rows: CountryStatsRollupRow[] = [];
+  for (let page = 0; page < 500; page++) {
+    const url = new URL(`${env.SUPABASE_URL}/rest/v1/v_country_stats_rollup`);
+    url.searchParams.set(
+      'select',
+      'country_code,total_users,main_language_mode,main_language_mode_users,cursor_total_messages_sum,github_total_repos_sum,avg_cursor_messages_per_user,avg_github_repos_per_user,main_language_share'
+    );
+    url.searchParams.set('limit', String(pageSize));
+    url.searchParams.set('offset', String(offset));
+    let batch: CountryStatsRollupRow[] = [];
+    try {
+      const raw = await fetchSupabaseJson<any>(env, url.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS);
+      batch = Array.isArray(raw) ? raw : [];
+    } catch {
+      batch = [];
+    }
+    if (!batch.length) break;
+    rows.push(...batch);
+    if (batch.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  for (const r of rows) {
+    const cc = normalizeIso2CountryCode(r?.country_code);
+    if (!cc) continue;
+    const userCount = Math.max(0, Math.floor(safeNumber(r.total_users, 0)));
+    const mainLanguage = String(r.main_language_mode ?? '').trim();
+    const kowtowTotal = round2(safeNumber(r.cursor_total_messages_sum, 0));
+    const cyberHamsterRepos = round2(safeNumber(r.github_total_repos_sum, 0));
+    const avgKowtowPerUser = round2(safeNumber(r.avg_cursor_messages_per_user, userCount > 0 ? kowtowTotal / userCount : 0));
+    const avgReposPerUser = round2(safeNumber(r.avg_github_repos_per_user, userCount > 0 ? cyberHamsterRepos / userCount : 0));
+    const mainLanguageShare = round2(safeNumber(r.main_language_share, 0));
+    const mainLanguageModeUsers = Math.max(0, Math.floor(safeNumber(r.main_language_mode_users, 0)));
+
+    const cur = snapshot[cc];
+    if (cur) {
+      cur.mainLanguage = mainLanguage;
+      cur.main_language_mode = mainLanguage;
+      cur.kowtowTotal = kowtowTotal;
+      cur.cursor_total_messages_sum = kowtowTotal;
+      cur.cyberHamsterRepos = cyberHamsterRepos;
+      cur.github_total_repos_sum = cyberHamsterRepos;
+      cur.avgKowtowPerUser = avgKowtowPerUser;
+      cur.avgReposPerUser = avgReposPerUser;
+      cur.mainLanguageShare = mainLanguageShare;
+      cur.mainLanguageModeUsers = mainLanguageModeUsers;
+    } else if (userCount > 0) {
+      snapshot[cc] = {
+        avgChars: 0,
+        totalChars: 0,
+        totalTokens: 0,
+        userCount,
+        topModel: '',
+        githubScore: 0,
+        totalStars: 0,
+        totalForks: 0,
+        totalFollowers: 0,
+        mainLanguage,
+        main_language_mode: mainLanguage,
+        kowtowTotal,
+        cursor_total_messages_sum: kowtowTotal,
+        cyberHamsterRepos,
+        github_total_repos_sum: cyberHamsterRepos,
+        avgKowtowPerUser,
+        avgReposPerUser,
+        mainLanguageShare,
+        mainLanguageModeUsers,
+      };
+    }
+  }
 }
 
 async function buildGlobalCountryStatsSnapshot(
@@ -297,6 +404,12 @@ async function buildGlobalCountryStatsSnapshot(
     };
   }
 
+  try {
+    await mergeCountryStatsRollupIntoSnapshot(env, snapshot);
+  } catch (rollupErr: any) {
+    console.warn('[Worker] v_country_stats_rollup merge failed:', rollupErr?.message || String(rollupErr));
+  }
+
   const nowSec = Math.floor(Date.now() / 1000);
   try {
     await secureKVPut(env, KV_KEY_GLOBAL_COUNTRY_STATS_SNAPSHOT, JSON.stringify(snapshot), 7200);
@@ -314,10 +427,14 @@ async function buildGlobalCountryStatsSnapshot(
   return { success: true, snapshot, updatedAtSec: nowSec };
 }
 
+/**
+ * 触发 Supabase 预聚合：main_language_mode（mainLanguage 众数）、
+ * cursor_total_messages_sum（SUM total_messages 赛博磕头）、github_total_repos_sum（SUM totalRepos 赛博仓鼠）。
+ * RPC 成功后重建 KV 快照并 merge v_country_stats_rollup。
+ */
 async function refreshCountryStatsCurrent(env: Env): Promise<{ success: boolean; error?: string }> {
   try {
     if (!env.SUPABASE_URL || !env.SUPABASE_KEY) return { success: false, error: 'Supabase ???' };
-    // RPC?public.refresh_country_stats_current()
     const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/refresh_country_stats_current`;
     await fetchSupabaseJson<any>(env, rpcUrl, {
       method: 'POST',
@@ -466,6 +583,16 @@ function snapshotFromCountryLevel(kv: GlobalCountryStatsPayload | null): GlobalC
       totalStars,
       totalForks,
       totalFollowers,
+      mainLanguage: '',
+      main_language_mode: '',
+      kowtowTotal: 0,
+      cursor_total_messages_sum: 0,
+      cyberHamsterRepos: 0,
+      github_total_repos_sum: 0,
+      avgKowtowPerUser: 0,
+      avgReposPerUser: 0,
+      mainLanguageShare: 0,
+      mainLanguageModeUsers: 0,
     };
   }
   return Object.keys(out).length ? out : null;

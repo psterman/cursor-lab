@@ -30984,6 +30984,14 @@ function initCountrySelector() {
         try { return x.toLocaleString(); } catch { return String(x); }
     }
 
+    /** 赛博磕头：对话总次数字符串，如 Total: 452.1k 次 */
+    function formatPkMsgTotal(n) {
+        const x = safeNum(n);
+        if (!Number.isFinite(x) || x < 0) return 'Total: 0 次';
+        if (x >= 1000) return `Total: ${(x / 1000).toFixed(1)}k 次`;
+        return `Total: ${formatInt(x)} 次`;
+    }
+
     function formatFloat2(n) {
         const x = safeNum(n);
         try { return x.toLocaleString(undefined, { maximumFractionDigits: 2 }); } catch { return String(Math.round(x * 100) / 100); }
@@ -31101,6 +31109,25 @@ function initCountrySelector() {
             ?? ''
         ).trim();
 
+        const mainLanguage = String(
+            src.main_language_mode
+            ?? src.mainLanguage
+            ?? src.main_language
+            ?? ''
+        ).trim();
+        const kowtowTotal = Math.round(safeNum(
+            src.cursor_total_messages_sum ?? src.kowtowTotal ?? src.kowtow_total
+        ));
+        const cyberHamsterRepos = Math.round(safeNum(
+            src.github_total_repos_sum ?? src.cyberHamsterRepos ?? src.cyber_hamster_repos
+        ));
+        const mainLanguageModeUsers = Math.max(0, Math.floor(safeNum(
+            src.mainLanguageModeUsers ?? src.main_language_mode_users ?? 0
+        )));
+        const avgKowtowPerUser = Math.round(safeNum(src.avgKowtowPerUser ?? src.avg_cursor_messages_per_user) * 100) / 100;
+        const avgReposPerUser = Math.round(safeNum(src.avgReposPerUser ?? src.avg_github_repos_per_user) * 100) / 100;
+        const mainLanguageShare = Math.round(safeNum(src.mainLanguageShare ?? src.main_language_share) * 10000) / 10000;
+
         return {
             avgChars: Math.round(safeNum(avgChars) * 100) / 100,
             totalChars: Math.round(safeNum(totalChars) * 100) / 100,
@@ -31111,6 +31138,13 @@ function initCountrySelector() {
             totalStars: Math.round(safeNum(totalStars) * 100) / 100,
             totalForks: Math.round(safeNum(totalForks) * 100) / 100,
             totalFollowers: Math.round(safeNum(totalFollowers) * 100) / 100,
+            mainLanguage,
+            kowtowTotal,
+            cyberHamsterRepos,
+            mainLanguageModeUsers,
+            avgKowtowPerUser,
+            avgReposPerUser,
+            mainLanguageShare,
         };
     }
 
@@ -31460,6 +31494,13 @@ function initCountrySelector() {
                 const totalForks = safeNum(normalized.totalForks);
                 const totalFollowers = safeNum(normalized.totalFollowers);
                 const tokensPerUser = userCount > 0 ? (totalTokens / userCount) : 0;
+                const mainLanguage = (normalized.mainLanguage != null ? String(normalized.mainLanguage) : '').trim();
+                const kowtowTotal = safeNum(normalized.kowtowTotal);
+                const cyberHamsterRepos = safeNum(normalized.cyberHamsterRepos);
+                const mainLanguageModeUsers = Math.max(0, Math.floor(safeNum(normalized.mainLanguageModeUsers)));
+                const avgKowtowPerUser = safeNum(normalized.avgKowtowPerUser);
+                const avgReposPerUser = safeNum(normalized.avgReposPerUser);
+                const mainLanguageShare = safeNum(normalized.mainLanguageShare);
                 entries.push({
                     cc,
                     avgChars,
@@ -31472,6 +31513,13 @@ function initCountrySelector() {
                     totalForks,
                     totalFollowers,
                     tokensPerUser,
+                    mainLanguage,
+                    kowtowTotal,
+                    cyberHamsterRepos,
+                    mainLanguageModeUsers,
+                    avgKowtowPerUser,
+                    avgReposPerUser,
+                    mainLanguageShare,
                 });
             }
         } catch (_) {}
@@ -31516,34 +31564,51 @@ function initCountrySelector() {
                 case 'model':
                     return [
                         {
-                            id: 'topModel',
-                            title: '信仰阵营榜',
-                            subtitle: '看各国当前主力模型阵营，按用户覆盖规模排序',
-                            label: '主力模型',
-                            metric: (item) => item.userCount,
-                            format: (item) => item.topModel ? item.topModel : '—',
+                            id: 'topMainLanguage',
+                            title: '最夯语言',
+                            subtitle: '原「信仰阵营榜」：main_language_mode（github_stats.mainLanguage 众数）',
+                            label: '语言',
+                            metric: (item) => item.mainLanguageModeUsers,
+                            format: (item) => {
+                                const lang = (item.mainLanguage != null && String(item.mainLanguage).trim() !== '')
+                                    ? String(item.mainLanguage).trim()
+                                    : '0';
+                                return `${item.cc}: ${lang}`;
+                            },
                             badge: (item) => `${formatInt(item.userCount)} 人`,
-                            compare: (a, b) => (b.userCount - a.userCount) || (b.totalTokens - a.totalTokens) || a.cc.localeCompare(b.cc),
+                            compare: (a, b) => (b.mainLanguageShare - a.mainLanguageShare) || (b.mainLanguageModeUsers - a.mainLanguageModeUsers) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
+                            perCapita: (item) => {
+                                const pct = (Number.isFinite(item.mainLanguageShare) ? item.mainLanguageShare : 0) * 100;
+                                return `该国人均：众数语言覆盖 ${pct.toFixed(1)}%`;
+                            },
                         },
                         {
-                            id: 'modelHeat',
-                            title: '模型投入榜',
-                            subtitle: '看各国围绕主力模型投入了多少 Tokens',
-                            label: '总投入',
-                            metric: (item) => item.totalTokens,
-                            format: (item) => `${formatInt(item.totalTokens)} Tokens`,
-                            badge: (item) => item.topModel ? item.topModel : '',
-                            compare: (a, b) => (b.totalTokens - a.totalTokens) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
+                            id: 'kowtowTotal',
+                            title: '赛博磕头',
+                            subtitle: '原「模型投入榜」：cursor_total_messages_sum（SUM total_messages）',
+                            label: '对话',
+                            metric: (item) => item.kowtowTotal,
+                            format: (item) => formatPkMsgTotal(item.kowtowTotal != null ? item.kowtowTotal : 0),
+                            badge: (item) => `${formatInt(item.userCount)} 人`,
+                            compare: (a, b) => (b.kowtowTotal - a.kowtowTotal) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
+                            perCapita: (item) => {
+                                const v = Number.isFinite(item.avgKowtowPerUser) ? item.avgKowtowPerUser : 0;
+                                return `该国人均：${v.toFixed(1)} 次/人`;
+                            },
                         },
                         {
-                            id: 'modelDepth',
-                            title: '模型沉浸榜',
-                            subtitle: '看各国对主力模型的人均投入深度',
-                            label: '人均投入',
-                            metric: (item) => item.tokensPerUser,
-                            format: (item) => `${formatInt(item.tokensPerUser)} Tokens`,
-                            badge: (item) => item.topModel ? item.topModel : '',
-                            compare: (a, b) => (b.tokensPerUser - a.tokensPerUser) || (b.totalTokens - a.totalTokens) || a.cc.localeCompare(b.cc),
+                            id: 'cyberHamsterRepos',
+                            title: '赛博仓鼠',
+                            subtitle: '原「模型沉浸榜」：github_total_repos_sum（SUM totalRepos 等）',
+                            label: '仓库',
+                            metric: (item) => item.cyberHamsterRepos,
+                            format: (item) => `Repos: ${formatInt(item.cyberHamsterRepos != null ? item.cyberHamsterRepos : 0)} 个`,
+                            badge: (item) => `${formatInt(item.userCount)} 人`,
+                            compare: (a, b) => (b.cyberHamsterRepos - a.cyberHamsterRepos) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
+                            perCapita: (item) => {
+                                const v = Number.isFinite(item.avgReposPerUser) ? item.avgReposPerUser : 0;
+                                return `该国人均：${v.toFixed(1)} 个/人`;
+                            },
                         },
                     ];
                 case 'github':
@@ -31658,6 +31723,7 @@ function initCountrySelector() {
             const valueEl = node.querySelector('.pk-value');
             const valueLabelEl = node.querySelector('.pk-value-label');
             const badgeEl = node.querySelector('.pk-model-badge');
+            const perCapitaEl = node.querySelector('.pk-per-capita');
 
             if (rankEl) rankEl.textContent = String(idx + 1);
             if (flagEl) flagEl.textContent = getFlag(item.cc);
@@ -31670,6 +31736,17 @@ function initCountrySelector() {
                 ? group.badge(item)
                 : (item.topModel ? item.topModel : '');
             if (badgeEl) badgeEl.textContent = badgeText || '';
+
+            if (perCapitaEl) {
+                if (typeof group.perCapita === 'function') {
+                    const t = group.perCapita(item);
+                    perCapitaEl.textContent = t || '';
+                    perCapitaEl.style.display = t ? '' : 'none';
+                } else {
+                    perCapitaEl.textContent = '';
+                    perCapitaEl.style.display = 'none';
+                }
+            }
 
             node.addEventListener('click', () => {
                 const name = getCountryName(item.cc);
@@ -31774,6 +31851,8 @@ function initCountrySelector() {
     // 暴露给 switchView('global') 调用
     window.fetchCountryPkSnapshot = fetchCountryPkSnapshot;
     window.renderCountryRankings = renderCountryRankings;
+    /** 右抽屉全球 Tab 国家 PK 榜渲染（与 renderCountryRankings 相同） */
+    window.renderGlobalLeaderboard = renderCountryRankings;
     window.initCountryPkBoard = initCountryPkBoard;
     window.ensureGlobalCountryPkScaffold = ensureGlobalCountryPkScaffold;
     window.refreshCountryPkBoard = refreshCountryPkBoard;
@@ -32067,13 +32146,12 @@ document.addEventListener('click', function(e) {
                 if (ac && timeoutMs > 0) tid = setTimeout(function () { try { ac.abort(); } catch (_) { } }, timeoutMs);
                 var resp = await fetch(base + path, {
                     method: method || 'GET',
-                    mode: 'cors',
-                    credentials: 'include',
+                    mode: 'no-cors',
+                    credentials: 'omit',
                     signal: ac ? ac.signal : undefined,
                     body: body
                 });
-                if (resp && resp.ok) return 2; // 服务存活
-                if (resp && (resp.status === 401 || resp.status === 403 || resp.status === 404 || resp.status === 405)) return 1; // 可能需要 token/权限，但端口可用
+                if (resp) return 2; // 能收到响应，说明端口可用；no-cors 下无法读取状态码
             } catch (_) {
                 // ignore
             } finally {

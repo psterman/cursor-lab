@@ -388,6 +388,19 @@
             }
 
             var addr = getOpenClawGatewayAddress();
+            var currentOrigin = '';
+            var gatewayOrigin = '';
+            try {
+                currentOrigin = window.location && window.location.origin ? String(window.location.origin) : '';
+            } catch (_) {}
+            try {
+                gatewayOrigin = addr && addr.httpBase ? new URL(addr.httpBase).origin : '';
+            } catch (_) {}
+            if (currentOrigin && gatewayOrigin && currentOrigin !== gatewayOrigin) {
+                resolve([]);
+                return;
+            }
+
             var urls = [
                 addr.httpBase + '/api/channels/status',
                 addr.httpBase + '/api/channels'
