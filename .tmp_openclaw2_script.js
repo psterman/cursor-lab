@@ -1,564 +1,4 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta name="api-endpoint" content="https://cursor-clinical-analysis.psterman.workers.dev/" />
-<title>OpenClaw 3D Nexus</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
-<style>
-:root{--bg:#06080c;--bg2:#090d14;--red:#e63946;--green:#00ff41;--txt:#ecf4ff;--dim:#8fa5be;--line:rgba(255,255,255,.17);--card:rgba(8,13,22,.58);--top-header-height:60px;--nav-width:200px;--console-width:380px;--main-left:200px;--main-right:380px;--console-bottom-height:0}
-*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{width:100%;height:100%;overflow:hidden;background:radial-gradient(circle at 50% 42%,rgba(230,57,70,.16),transparent 45%),radial-gradient(circle at 15% 80%,rgba(0,255,65,.08),transparent 45%),linear-gradient(180deg,var(--bg),var(--bg2));color:var(--txt);font-family:"JetBrains Mono","Inter",sans-serif}
-body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.22;background-image:linear-gradient(rgba(0,255,65,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(0,255,65,.05) 1px,transparent 1px);background-size:26px 26px;z-index:0}
-.hud{position:fixed;z-index:30;font-size:11px;letter-spacing:.06em;color:var(--dim);pointer-events:none}.hud strong{color:var(--green)}
-.tr{top:calc(var(--top-header-height) + 12px);right:calc(var(--console-width) + 20px);text-align:right}.br{bottom:86px;right:calc(var(--console-width) + 20px);text-align:right}
-.hero{position:fixed;top:calc(var(--top-header-height) + 12px);left:var(--main-left);right:var(--main-right);z-index:40;text-align:center;pointer-events:none}
-.hero h1{font-size:clamp(2.2rem,6vw,4.2rem);font-weight:800;text-transform:uppercase;text-shadow:0 0 24px rgba(230,57,70,.34)}
-.hero .sub{margin-top:8px;color:var(--dim);letter-spacing:.22em;text-transform:uppercase}
-.stage{position:fixed;top:var(--top-header-height);left:var(--main-left);right:var(--main-right);bottom:var(--console-bottom-height);z-index:10;display:grid;place-items:center}
-.orbit{position:absolute;inset:0;pointer-events:none;z-index:12}
-.anchor{position:relative;width:min(44vw,420px);aspect-ratio:1/1;display:grid;place-items:center;z-index:18;animation:float 6s ease-in-out infinite}
-.reactor{width:100%;height:100%;display:grid;place-items:center;transition:transform .24s ease}
-.ring{position:absolute;width:84%;height:84%;border-radius:50%;border:1px solid rgba(230,57,70,.5);box-shadow:inset 0 0 32px rgba(230,57,70,.14),0 0 24px rgba(230,57,70,.24);animation:ring 2.8s ease-in-out infinite}
-.svg{width:100%;height:100%;filter:drop-shadow(0 0 26px rgba(230,57,70,.3));animation:pulse 2.8s ease-in-out infinite}
-.card{position:absolute;top:50%;left:50%;width:min(28vw,260px);min-height:96px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:0 12px 36px rgba(0,0,0,.42);transition:transform .68s cubic-bezier(.22,.8,.2,1),opacity .42s ease;pointer-events:auto;overflow:hidden}
-.card:before,.card:after{content:"";position:absolute;width:16px;height:16px;border:1px solid rgba(230,57,70,.45);opacity:.65}.card:before{top:4px;left:4px;border-right:none;border-bottom:none}.card:after{right:4px;bottom:4px;border-left:none;border-top:none}
-.card h3{font-size:10px;color:var(--green);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}.card .v{font-size:clamp(0.85rem,1.8vw,1.2rem);font-weight:700;margin-bottom:4px;white-space:pre-wrap;word-break:break-word}.card .d{font-size:10px;color:var(--dim);line-height:1.35}
-.card{cursor:pointer}.card:hover{border-color:rgba(0,255,65,.5);box-shadow:0 0 20px rgba(0,255,65,.12)}
-.card-modal{position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);opacity:0;visibility:hidden;transition:.25s;pointer-events:none}.card-modal.open{opacity:1;visibility:visible;pointer-events:auto}
-.card-modal-box{max-width:520px;width:100%;max-height:85vh;overflow:auto;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
-.card-modal-title{font-size:14px;color:var(--green);margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid var(--line)}
-.card-modal-section{margin-bottom:14px}.card-modal-section h4{font-size:10px;color:var(--green);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px}.card-modal-section p{font-size:12px;color:var(--dim);line-height:1.6;margin:0}
-.card-modal-close{position:absolute;top:16px;right:16px;border:1px solid var(--line);background:rgba(12,20,30,.8);color:var(--txt);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center}.card-modal-close:hover{color:var(--green)}
-.nav{position:fixed;left:0;top:var(--top-header-height);bottom:0;z-index:50;width:200px;padding:16px 12px;display:flex;flex-direction:column;gap:10px;background:rgba(6,10,16,.85);border-right:1px solid rgba(255,255,255,.1);backdrop-filter:blur(8px)}
-.nav .btn{width:100%;margin:0;padding:14px 16px;font-size:13px;text-align:left;border-radius:8px;min-height:52px;display:flex;align-items:center;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.04);color:var(--txt);transition:.2s}.nav .btn:hover{border-color:rgba(0,255,65,.5);background:rgba(0,255,65,.08)}.nav .btn.on{border-color:var(--green);background:linear-gradient(135deg,rgba(230,57,70,.25),rgba(0,255,65,.2));color:var(--green);box-shadow:0 0 20px rgba(0,255,65,.15)}
-.view{position:fixed;left:var(--main-left);right:var(--main-right);bottom:76px;z-index:55;width:max-content;margin-left:auto;margin-right:auto;border:1px solid rgba(255,255,255,.26);border-radius:999px;padding:9px 14px;font-size:12px;color:#edf7ff;background:linear-gradient(135deg,rgba(230,57,70,.26),rgba(0,255,65,.14));cursor:pointer;font-family:"JetBrains Mono",monospace;letter-spacing:.08em;transition:.2s}.view:hover{border-color:rgba(0,255,65,.7);transform:translateY(-1px)}
-.boot{position:fixed;inset:0;z-index:70;display:grid;place-items:center;background:rgba(6,8,12,.94);transition:opacity .25s}.boot.hide{opacity:0;pointer-events:none}.boot .box{width:min(90vw,420px);border:1px solid var(--line);border-radius:12px;background:rgba(8,13,22,.7);padding:18px;text-align:center}.boot .t{color:var(--green);letter-spacing:.1em}.boot .s{margin-top:8px}.bar{margin-top:12px;height:6px;background:rgba(255,255,255,.08);border-radius:999px;overflow:hidden}.bar i{display:block;width:42%;height:100%;background:linear-gradient(90deg,var(--red),var(--green));animation:load 1.2s ease-in-out infinite}
-/* 查看详情 tab 内嵌页（原悬浮两栏内容） */
-.detail-view{position:fixed;top:var(--top-header-height);left:var(--main-left);right:var(--main-right);bottom:var(--console-bottom-height);z-index:20;background:var(--bg);display:none;flex-direction:column;padding:24px 18px;overflow:auto}.detail-view.active{display:flex}
-.detail-view-layout{display:flex;gap:20px;flex:1;min-height:0;max-width:1200px;margin:0 auto;width:100%}
-.detail-view-left,.detail-view-right{background:rgba(8,13,22,.66);border:1px solid rgba(255,255,255,.22);border-radius:12px;backdrop-filter:blur(12px);padding:14px;overflow:auto}
-.detail-view-left{min-width:280px;flex:0 0 min(48%,420px)}
-.detail-view-right{flex:1;min-width:260px}
-.detail-view .pt{margin-bottom:6px}
-.detail-view .blk{margin-bottom:14px}
-@media(max-width:900px){.detail-view-layout{flex-direction:column}.detail-view-left{flex:0 0 auto;max-height:50vh}}
-.pt{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--green);margin-bottom:10px}.blk{border:1px solid rgba(255,255,255,.16);border-radius:10px;background:rgba(255,255,255,.02);padding:10px;margin-bottom:10px}
-#radar{width:100%;max-width:380px;aspect-ratio:1/1;display:block;margin:0 auto}.wc{display:flex;flex-wrap:wrap;gap:8px;min-height:160px;align-items:center;justify-content:center}.wc span{padding:3px 6px;border:1px solid rgba(255,255,255,.2);border-radius:999px}
-.list{display:grid;gap:8px}.row{display:grid;grid-template-columns:120px 1fr;gap:8px;border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:8px;font-size:12px}.k{color:var(--green)}.v{word-break:break-word}
-.close{position:absolute;right:16px;top:16px;z-index:61;border:1px solid rgba(255,255,255,.32);border-radius:999px;background:rgba(12,20,30,.7);color:#fff;padding:7px 12px;cursor:pointer}
-@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}@keyframes pulse{0%,100%{filter:drop-shadow(0 0 24px rgba(230,57,70,.26))}50%{filter:drop-shadow(0 0 34px rgba(230,57,70,.48))}}@keyframes ring{0%,100%{transform:scale(1);opacity:.72}50%{transform:scale(1.022);opacity:1}}@keyframes load{0%{transform:translateX(-120%)}55%{transform:translateX(170%)}100%{transform:translateX(170%)}}
-@media(max-width:900px){.card{width:min(42vw,200px);min-height:88px}}
-@media(max-width:700px){.anchor{width:min(62vw,320px)}.card{width:min(58vw,200px);min-height:82px}.view{bottom:calc(var(--console-bottom-height) + 16px);font-size:11px}.nav{bottom:12px}.btn{font-size:11px;padding:8px 12px}}
-/* top-header 一比一复刻 stats2.html */
-.top-header{position:fixed;top:0;left:0;right:0;z-index:90;display:flex;justify-content:space-between;align-items:center;padding:10px 20px;background:rgba(10,10,10,.95);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,255,255,.06);box-shadow:none;pointer-events:auto}
-.top-header-left{display:flex;align-items:center;gap:20px}
-.top-header-title{display:flex;flex-direction:column}
-.top-header-title h1{margin:0;font-size:24px;font-weight:700;letter-spacing:-.02em;font-family:'Space Grotesk',system-ui,sans-serif;color:var(--txt);display:flex;align-items:center;gap:8px}
-.top-header-title p{margin:4px 0 0 0;font-size:9px;color:var(--dim);letter-spacing:.12em;font-weight:500;text-transform:uppercase;font-family:'JetBrains Mono',Consolas,monospace}
-.top-header-right{display:flex;align-items:stretch;gap:8px;flex-wrap:wrap}
-.top-header-card{display:flex;flex-direction:column;justify-content:center;min-height:44px;padding:6px 12px;background:rgba(255,255,255,.03);border:none;border-radius:4px}
-.top-header-card-label{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;line-height:1.2}
-.top-header-card-value{font-family:'Space Grotesk',system-ui,sans-serif;font-size:13px;font-weight:700;color:var(--txt);letter-spacing:-.5px;display:flex;align-items:center;gap:6px}
-.top-header-nav-link{display:inline-flex;align-items:center;min-height:20px;margin-top:0;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;color:var(--green);text-decoration:none;letter-spacing:.05em;cursor:pointer}
-.top-header-nav-link:hover{color:rgba(0,255,65,.9);opacity:1}
-.lang-flag-wrap{display:flex;gap:8px;align-items:center}
-.lang-flag-btn{padding:0;background:transparent;border:none;border-radius:50%;cursor:pointer;font-family:'JetBrains Mono',monospace;transition:opacity .3s ease,transform .3s cubic-bezier(.34,1.56,.64,1),box-shadow .3s ease;display:flex;align-items:center;justify-content:center;width:44px;height:44px;opacity:.6;transform:scale(1);box-shadow:none;overflow:hidden;position:relative;z-index:95}
-.lang-flag-btn img,.lang-flag-btn svg{width:100%;height:100%;object-fit:contain;border-radius:50%;padding:2px;outline:none;border:none}
-.lang-flag-btn.active{opacity:1;border:3px solid var(--green);box-shadow:0 0 16px rgba(0,255,65,.6),0 0 32px rgba(0,255,65,.3),inset 0 0 20px rgba(0,255,65,.1);transform:scale(1.1)}
-.lang-flag-btn:hover:not(.active){opacity:.9;transform:scale(1.15)}
-.lang-flag-btn:hover.active{border:3px solid var(--green);transform:scale(1.15);box-shadow:0 0 20px rgba(0,255,65,.8),0 0 40px rgba(0,255,65,.4),inset 0 0 25px rgba(0,255,65,.15)}
-@media(max-width:768px){.top-header{padding:8px 12px;flex-direction:column;align-items:flex-start;gap:8px}.top-header-left{width:100%}.top-header-right{width:100%;justify-content:space-between}.top-header-title h1{font-size:18px}.top-header-title p{font-size:8px}.top-header-card{padding:6px 10px}.top-header-card-label{font-size:8px}.top-header-card-value{font-size:10px}}
-/* Command Console (HUD) - 聊天对话框 */
-#command-console{position:fixed;top:var(--top-header-height);right:0;bottom:0;width:380px;z-index:45;display:flex;flex-direction:column;min-height:0;overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch;background:rgba(6,8,12,.82);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border:1px solid rgba(0,255,65,.4);border-right:none;border-radius:12px 0 0 12px;box-shadow:0 0 30px rgba(0,255,65,.1),inset 0 0 40px rgba(0,0,0,.2);pointer-events:auto;transition:width .3s ease}
-#command-console .console-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid rgba(0,255,65,.2);font-family:'JetBrains Mono',monospace;flex-shrink:0}
-#command-console .console-title{font-size:10px;color:var(--green);letter-spacing:.2em;display:flex;align-items:center;gap:6px}
-#command-console .console-title::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);flex-shrink:0}
-#status-indicator{padding:3px 8px;font-size:9px;font-weight:700;letter-spacing:.12em;border-radius:4px;border:1px solid transparent}
-#status-indicator.linked{color:var(--green);border-color:rgba(0,255,65,.3);background:rgba(0,255,65,.08)}
-#status-indicator.offline{color:var(--red);border-color:rgba(230,57,70,.3);background:rgba(230,57,70,.08);animation:blink 1.5s infinite}
-#status-indicator.connecting{color:#ffd700;border-color:rgba(255,215,0,.3);background:rgba(255,215,0,.08)}
-@keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
-/* Token 输入区 */
-#token-panel{padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.08);background:rgba(0,0,0,.2);flex-shrink:0;display:none;flex-direction:column;gap:6px;max-height:min(34vh,280px);overflow:auto;overscroll-behavior:contain}
-#token-panel.show{display:flex}
-#token-panel label{font-size:9px;color:var(--dim);letter-spacing:.1em;text-transform:uppercase}
-#token-input-row{display:flex;gap:6px}
-#token-input{flex:1;min-width:0;padding:7px 10px;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--txt);background:rgba(0,0,0,.4);border:1px solid rgba(0,255,65,.3);border-radius:5px;outline:none}
-#token-input::placeholder{color:rgba(143,165,190,.5)}
-#token-input:focus{border-color:var(--green);box-shadow:0 0 8px rgba(0,255,65,.15)}
-#btn-token-save{padding:7px 12px;font-size:9px;font-weight:700;color:var(--green);background:rgba(0,255,65,.1);border:1px solid rgba(0,255,65,.3);border-radius:5px;cursor:pointer;white-space:nowrap;letter-spacing:.05em;transition:.2s}
-#btn-token-save:hover{background:rgba(0,255,65,.2);border-color:var(--green)}
-#token-hint{font-size:9px;color:var(--dim);line-height:1.4}
-#token-hint a{color:var(--green);text-decoration:none}
-#token-hint a:hover{text-decoration:underline}
-/* 带 token 的对话链接区：便于分析页用户复制后自动登录 */
-#token-link-box{margin-top:8px;padding:8px 10px;background:rgba(0,255,65,.06);border:1px solid rgba(0,255,65,.25);border-radius:6px;display:none;flex-direction:column;gap:6px}
-#token-link-box.show{display:flex}
-#token-link-box .label{font-size:9px;color:var(--green);letter-spacing:.08em;text-transform:uppercase}
-#token-link-row{display:flex;gap:6px;align-items:center}
-#token-link-url{flex:1;min-width:0;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--dim);background:rgba(0,0,0,.3);padding:6px 8px;border-radius:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#btn-copy-link{padding:5px 10px;font-size:9px;font-weight:700;color:var(--green);background:rgba(0,255,65,.12);border:1px solid rgba(0,255,65,.35);border-radius:4px;cursor:pointer;white-space:nowrap}
-#btn-copy-link:hover{background:rgba(0,255,65,.2)}
-#btn-copy-link.copied{color:#fff;background:rgba(0,255,65,.5)}
-#btn-fetch-dialogue-link{padding:6px 12px;font-size:10px;font-weight:700;color:var(--green);background:rgba(0,255,65,.1);border:1px solid rgba(0,255,65,.35);border-radius:5px;cursor:pointer;letter-spacing:.05em}
-#btn-fetch-dialogue-link:hover{background:rgba(0,255,65,.2)}
-#btn-fetch-dialogue-link.loading{opacity:.7;cursor:wait}
-.token-fetch-status{font-size:9px;color:var(--dim)}
-.token-fetch-status.err{color:var(--red)}
-#btn-open-dialogue{padding:5px 10px;font-size:9px;font-weight:700;color:var(--green);background:rgba(0,255,65,.12);border:1px solid rgba(0,255,65,.35);border-radius:4px;cursor:pointer;white-space:nowrap}
-#btn-open-dialogue:hover{background:rgba(0,255,65,.2)}
-/* 消息历史区 */
-.chat-history-bar{display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid rgba(255,255,255,.08);flex-shrink:0;min-height:40px;font-family:'JetBrains Mono',monospace}
-.chat-history-bar label{font-size:10px;color:var(--dim);letter-spacing:.06em;white-space:nowrap}
-.chat-history-bar select{flex:1;min-width:0;font-size:11px;padding:4px 8px;background:rgba(0,0,0,.3);border:1px solid rgba(0,255,65,.25);border-radius:4px;color:var(--txt);cursor:pointer}
-.chat-history-bar select:hover,.chat-history-bar select:focus{border-color:rgba(0,255,65,.5);outline:none}
-#chat-history{flex:1 1 0%;min-height:min(36vh,220px);display:flex;flex-direction:column;overflow:hidden}
-.chat-agents-tabs{display:flex;flex-wrap:wrap;gap:4px;padding:6px 10px;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;min-height:38px;font-family:'JetBrains Mono',monospace;align-items:center}
-.chat-agents-tabs:empty::before{content:attr(data-empty-text);font-size:10px;color:rgba(143,165,190,.72);letter-spacing:.06em}
-.chat-agents-tabs .agent-tab{font-size:10px;padding:4px 10px;border-radius:4px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.04);color:var(--dim);cursor:pointer;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis}
-.chat-agents-tabs .agent-tab:hover{color:var(--txt);border-color:rgba(0,255,65,.3);background:rgba(0,255,65,.06)}
-.chat-agents-tabs .agent-tab.active{color:var(--green);border-color:rgba(0,255,65,.5);background:rgba(0,255,65,.1)}
-#chat-history-content{flex:1 1 0%;overflow-y:auto;padding:10px 12px;font-size:12px;color:var(--dim);line-height:1.55;scroll-behavior:smooth;display:flex;flex-direction:column;align-items:stretch;gap:2px;min-height:0}
-#chat-history-content:empty::before{content:attr(data-empty-text);display:block;margin:auto 0;font-size:11px;line-height:1.6;color:rgba(143,165,190,.72)}
-#chat-history-content::-webkit-scrollbar{width:3px}
-#chat-history-content::-webkit-scrollbar-track{background:transparent}
-#chat-history-content::-webkit-scrollbar-thumb{background:rgba(0,255,65,.2);border-radius:99px}
-#chat-history-content .msg{display:flex;flex-direction:column;gap:3px;margin-bottom:10px;animation:fadeUp .25s ease;max-width:88%;min-width:0}
-#chat-history-content .msg.user{align-self:flex-end}
-#chat-history-content .msg.ai{align-self:flex-start}
-#chat-history-content .msg-sys-group{align-self:stretch;max-width:none}
-@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-#chat-history-content .msg-role{font-size:9px;letter-spacing:.1em;text-transform:uppercase;opacity:.7;font-family:'JetBrains Mono',monospace}
-#chat-history-content .msg-body{word-break:break-word;white-space:pre-wrap;line-height:1.6}
-#chat-history-content .msg.user .msg-role{color:rgba(0,255,65,.8);text-align:right}
-#chat-history-content .msg.ai .msg-role{color:var(--dim);text-align:left}
-#chat-history-content .msg.sys .msg-body{font-size:10px;color:rgba(143,165,190,.6);font-family:'JetBrains Mono',monospace;font-style:italic}
-#chat-history-content .msg.err .msg-body{color:rgba(230,57,70,.9);font-size:10px;font-family:'JetBrains Mono',monospace}
-/* 系统/握手/心跳等折叠区：默认收起，点击展开 */
-.msg-sys-group{margin-bottom:10px;border:1px solid rgba(255,255,255,.1);border-radius:6px;overflow:hidden;background:rgba(0,0,0,.2)}
-.msg-sys-group-header{font-size:10px;color:var(--dim);padding:6px 10px;cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px;font-family:'JetBrains Mono',monospace;letter-spacing:.06em}
-.msg-sys-group-header:hover{background:rgba(255,255,255,.04);color:rgba(143,165,190,.9)}
-.msg-sys-group-header::before{content:"";width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid currentColor;transition:transform .2s}
-.msg-sys-group.expanded .msg-sys-group-header::before{transform:rotate(180deg)}
-.msg-sys-group-body{max-height:200px;overflow-y:auto;padding:4px 0}
-.msg-sys-group.collapsed .msg-sys-group-body{display:none}
-.msg-sys-line{font-size:10px;color:rgba(143,165,190,.7);padding:3px 10px;border-bottom:1px solid rgba(255,255,255,.04);font-family:'JetBrains Mono',monospace;line-height:1.4}
-.msg-sys-line.err{color:rgba(230,57,70,.85)}
-/* 用户与 AI 消息重点展示 */
-#chat-history-content .msg.user .msg-body{color:rgba(0,255,65,.95);background:rgba(0,255,65,.08);border-right:3px solid rgba(0,255,65,.5);border-left:none;padding:8px 12px;border-radius:8px 0 0 8px}
-#chat-history-content .msg.ai .msg-body{color:#e0e8f0;background:rgba(255,255,255,.06);border-left:3px solid rgba(255,255,255,.25);padding:8px 12px;border-radius:0 8px 8px 0}
-#chat-history-content .msg.ai .msg-body.streaming::after{content:"▍";animation:cursor-blink .7s infinite;color:var(--green)}
-@keyframes cursor-blink{0%,100%{opacity:1}50%{opacity:0}}
-/* AI 核心回复：摘要 + 展开/复制，便于精准对话 */
-#chat-history-content .msg.ai .msg-core{font-weight:600;color:rgba(255,255,255,.95);margin-bottom:6px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.08);line-height:1.5}
-#chat-history-content .msg.ai .msg-body.has-core .msg-full{display:none}
-#chat-history-content .msg.ai .msg-body.has-core.expanded .msg-core{border-bottom:none;margin-bottom:4px}
-#chat-history-content .msg.ai .msg-body.has-core.expanded .msg-full{display:block}
-#chat-history-content .msg.ai .msg-actions{margin-top:6px;display:flex;gap:6px;flex-wrap:wrap}
-#chat-history-content .msg.ai .msg-actions button{font-size:9px;padding:3px 8px;border-radius:4px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:var(--dim);cursor:pointer;font-family:'JetBrains Mono',monospace}
-#chat-history-content .msg.ai .msg-actions button:hover{color:var(--green);border-color:rgba(0,255,65,.4)}
-/* 输入区 */
-#command-console .console-input-area{display:flex;flex-direction:column;gap:0;border-top:1px solid rgba(0,255,65,.15);flex-shrink:0}
-#console-toolbar{display:flex;align-items:center;gap:6px;padding:6px 12px;background:rgba(0,0,0,.2)}
-#btn-toggle-token{font-size:9px;color:var(--dim);background:transparent;border:1px solid rgba(255,255,255,.12);border-radius:4px;padding:3px 8px;cursor:pointer;letter-spacing:.06em;transition:.2s;font-family:'JetBrains Mono',monospace}
-#btn-toggle-token:hover{color:var(--green);border-color:rgba(0,255,65,.3)}
-#btn-clear{font-size:9px;color:var(--dim);background:transparent;border:1px solid rgba(255,255,255,.12);border-radius:4px;padding:3px 8px;cursor:pointer;letter-spacing:.06em;transition:.2s;font-family:'JetBrains Mono',monospace}
-#btn-clear:hover{color:var(--red);border-color:rgba(230,57,70,.3)}
-.toolbar-spacer{flex:1}
-#btn-reconnect{font-size:9px;color:var(--dim);background:transparent;border:1px solid rgba(255,255,255,.12);border-radius:4px;padding:3px 8px;cursor:pointer;letter-spacing:.06em;transition:.2s;font-family:'JetBrains Mono',monospace}
-#btn-reconnect:hover{color:#ffd700;border-color:rgba(255,215,0,.3)}
-#command-console .console-input-row{display:flex;gap:8px;padding:10px 12px;background:rgba(0,0,0,.18)}
-#command-input{flex:1;min-width:0;padding:10px 12px;font-size:12px;font-family:'JetBrains Mono',monospace;color:var(--txt);background:transparent;border:1px solid rgba(0,255,65,.28);border-radius:6px;outline:none;resize:none;height:42px;max-height:120px;line-height:1.4;transition:border-color .2s,box-shadow .2s}
-#command-input::placeholder{color:var(--dim)}
-#command-input:focus{border-color:var(--green);box-shadow:0 0 10px rgba(0,255,65,.15)}
-#command-input:disabled{opacity:.4;cursor:not-allowed}
-#btn-send{padding:10px 14px;font-size:11px;font-weight:700;letter-spacing:.08em;color:#fff;background:linear-gradient(135deg,rgba(230,57,70,.9),rgba(185,29,29,.9));border:1px solid rgba(230,57,70,.5);border-radius:6px;cursor:pointer;box-shadow:0 0 12px rgba(230,57,70,.3);transition:transform .15s,box-shadow .2s,opacity .2s;align-self:flex-end;height:42px}
-#btn-send:hover{transform:scale(1.04);box-shadow:0 0 20px rgba(230,57,70,.5)}
-#btn-send:active{transform:scale(.97)}
-#btn-send:disabled{opacity:.35;cursor:not-allowed;transform:none}
-/* 网关扫描/切换：固定在 OPENCLAW CHAT 下方，始终可见 */
-/* 实时会话左侧：网关扫描/切换（简约） */
-.live-gateway-compact{flex-shrink:0;padding:8px 12px 10px;border-bottom:1px solid var(--line);background:rgba(0,0,0,.22);display:flex;flex-direction:column;gap:6px}
-.live-gw-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
-.live-gw-eyebrow{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--green);font-family:'JetBrains Mono',monospace;flex-shrink:0}
-.live-gw-endpoint{font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--dim);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.live-gw-row{display:flex;align-items:center;gap:6px;min-width:0}
-.live-gw-select-inst{flex:1;min-width:0;padding:6px 8px;font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--txt);background:rgba(0,0,0,.35);border:1px solid rgba(0,255,65,.28);border-radius:4px;outline:none}
-.live-gw-select-inst:focus{border-color:var(--green)}
-#btn-gateway-probe.live-gw-scan-btn{flex-shrink:0;padding:6px 10px;font-size:10px;min-width:auto}
-.live-gw-row-preset{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.live-gw-select-preset{flex:1;min-width:72px;max-width:120px;padding:5px 6px;font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--txt);background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.14);border-radius:4px}
-.live-gw-port-input{width:64px;padding:5px 6px;font-size:10px;font-family:'JetBrains Mono',monospace;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.14);border-radius:4px;color:var(--txt)}
-.live-gw-port-input.hidden{display:none!important}
-.live-gw-status{font-size:9px;line-height:1.35;word-break:break-word;display:none;padding-top:2px;font-family:'JetBrains Mono',monospace;color:var(--dim)}
-.live-gw-status.show{display:block}
-.live-gw-status.ok{color:rgba(0,255,65,.88)}
-.live-gw-status.err{color:rgba(230,57,70,.9)}
-@media(max-width:900px){#command-console{width:320px}}
-@media(max-width:700px){:root{--console-bottom-height:340px}#command-console{left:0;right:0;width:100%;border-radius:0;border-left:none;border-top:1px solid rgba(0,255,65,.4);top:auto;bottom:0;height:340px}#chat-history{min-height:min(28vh,140px)}}
-/* API 嵌入面板（内联于聊天控制台） */
-#api-panel{padding:8px 12px;border-bottom:1px solid rgba(255,215,0,.2);background:rgba(0,0,0,.25);flex-shrink:0;display:none;flex-direction:column;gap:6px;max-height:min(34vh,260px);overflow:auto;overscroll-behavior:contain}
-#api-panel.show{display:flex}
-#api-panel-title{font-size:9px;color:#ffd700;letter-spacing:.1em;text-transform:uppercase;display:flex;align-items:center;justify-content:space-between}
-#api-panel-subtitle{font-size:9px;color:var(--dim);letter-spacing:.04em;text-transform:none;opacity:.7}
-#api-btns{display:flex;flex-wrap:wrap;gap:4px}
-.api-btn{font-size:9px;font-family:'JetBrains Mono',monospace;color:var(--dim);background:rgba(255,215,0,.05);border:1px solid rgba(255,215,0,.25);border-radius:4px;padding:4px 9px;cursor:pointer;letter-spacing:.04em;transition:.2s}
-.api-btn:hover{color:#ffd700;border-color:rgba(255,215,0,.6);background:rgba(255,215,0,.1)}
-.api-btn:active{transform:scale(.96)}
-.api-btn.loading{opacity:.45;pointer-events:none}
-#api-result{font-size:9px;font-family:'JetBrains Mono',monospace;color:var(--dim);background:rgba(0,0,0,.32);border:1px solid rgba(255,255,255,.1);border-radius:4px;padding:6px 8px;max-height:90px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;display:none;line-height:1.5}
-#api-result.show{display:block}
-#api-result.ok{border-color:rgba(0,255,65,.3);color:rgba(0,255,65,.9)}
-#api-result.err{border-color:rgba(230,57,70,.3);color:rgba(230,57,70,.9)}
-.mgmt-section{margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08)}
-.mgmt-section-title{font-size:9px;color:var(--green);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px}
-.api-btns-mgmt{display:flex;flex-wrap:wrap;gap:4px}
 
-/* ── Live View ── */
-.live-view{position:fixed;top:var(--top-header-height);left:var(--main-left);right:var(--main-right);bottom:var(--console-bottom-height);z-index:20;background:var(--bg);display:none;flex-direction:column;padding:56px 0 0 0}
-.live-view.active{display:flex}
-.live-layout{display:grid;grid-template-columns:280px 1fr;height:100%;min-height:0;gap:0}
-.live-sessions-panel{background:rgba(0,0,0,.28);border-right:1px solid var(--line);display:flex;flex-direction:column;overflow:hidden}
-.live-panel-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--line);flex-shrink:0}
-.live-panel-title{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--green)}
-.live-panel-actions{display:flex;align-items:center;gap:8px}
-.live-status-dot{width:8px;height:8px;border-radius:50%;background:#555;transition:background .3s}
-.live-status-dot.connected{background:var(--green);box-shadow:0 0 6px rgba(0,255,65,.6)}
-.live-status-dot.error{background:var(--red)}
-.live-sessions-list{flex:1;overflow-y:auto;padding:6px 0}
-.live-empty{padding:24px 14px;font-size:11px;color:var(--dim);text-align:center}
-.live-session-item{display:flex;flex-direction:column;gap:3px;padding:9px 14px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.04);transition:background .18s}
-.live-session-item:hover{background:rgba(0,255,65,.06)}
-.live-session-item.selected{background:rgba(0,255,65,.10);border-left:2px solid var(--green)}
-.live-session-item .si-key{font-size:11px;color:var(--txt);font-family:'JetBrains Mono',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.live-session-item .si-meta{font-size:10px;color:var(--dim);display:flex;gap:8px;align-items:center}
-.live-session-item .si-status{font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(0,255,65,.12);color:var(--green)}
-.live-session-item .si-status.inactive{background:rgba(255,255,255,.06);color:var(--dim)}
-.live-main-panel{display:flex;flex-direction:column;overflow:hidden}
-.live-status-bar{display:flex;gap:0;border-bottom:1px solid var(--line);flex-shrink:0;flex-wrap:wrap}
-.live-stat-item{display:flex;flex-direction:column;gap:2px;padding:8px 16px;border-right:1px solid rgba(255,255,255,.06)}
-.live-stat-item.live-stat-gw-actions{justify-content:center}
-.live-stat-item.live-stat-gw-actions .live-action-btn{margin-top:2px}
-.live-stat-label{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
-.live-stat-value{font-size:13px;color:var(--txt);font-family:'JetBrains Mono',monospace}
-.live-stat-value.health-ok{color:var(--green)}
-.live-stat-value.health-err{color:var(--red)}
-.live-usage-detail{display:flex;align-items:center;gap:8px;padding:6px 16px;border-bottom:1px solid rgba(255,255,255,.06);flex-shrink:0;font-size:11px;color:var(--dim)}
-.live-usage-detail-label{text-transform:uppercase;letter-spacing:.06em}
-.live-usage-detail-value{font-family:'JetBrains Mono',monospace;color:var(--txt);margin-left:2px}
-.live-usage-detail-sep{opacity:.5;margin:0 4px}
-.live-session-detail{flex:1;overflow:hidden;display:flex;flex-direction:column}
-.live-detail-placeholder{flex:1;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:12px}
-.live-detail-content{flex:1;display:flex;flex-direction:column;overflow:hidden}
-.live-detail-header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--line);flex-shrink:0}
-.live-detail-meta{display:flex;align-items:center;gap:10px}
-.live-detail-key{font-size:12px;font-family:'JetBrains Mono',monospace;color:var(--green)}
-.live-detail-status{font-size:10px;padding:2px 7px;border-radius:4px;background:rgba(0,255,65,.12);color:var(--green)}
-.live-chat-history{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:8px}
-.live-msg{display:flex;flex-direction:column;gap:3px;max-width:86%}
-.live-msg.user-msg{align-self:flex-end}
-.live-msg.ai-msg{align-self:flex-start}
-.live-msg-role{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px}
-.live-msg.user-msg .live-msg-role{text-align:right}
-.live-msg-bubble{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:8px 11px;font-size:12px;color:var(--txt);line-height:1.6;white-space:pre-wrap;word-break:break-word}
-.live-msg.user-msg .live-msg-bubble{background:rgba(0,255,65,.09);border-color:rgba(0,255,65,.2)}
-.live-msg.ai-msg .live-msg-bubble{background:rgba(159,211,255,.06);border-color:rgba(159,211,255,.15)}
-.live-msg-model{font-size:9px;opacity:.8;margin-left:6px;color:var(--dim)}
-.live-chat-messages{display:flex;flex-direction:column;gap:8px}
-.live-detail-loading{font-size:11px;color:var(--dim);padding:8px 0}
-.live-action-btn{background:transparent;border:1px solid var(--line);color:var(--dim);padding:3px 8px;border-radius:4px;cursor:pointer;font-size:12px;transition:color .2s,border-color .2s}
-.live-action-btn:hover{color:var(--green);border-color:var(--green)}
-/* 实时后台：新手三版块 */
-.live-quick-blocks{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);flex-shrink:0;background:rgba(0,0,0,.15)}
-.live-block{border:1px solid rgba(255,255,255,.12);border-radius:8px;background:rgba(255,255,255,.03);overflow:hidden}
-.live-block-title{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--green);margin:0;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.08)}
-.live-block-content{padding:10px 12px;display:flex;flex-direction:column;gap:8px}
-.live-block-label{font-size:9px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
-.live-block-value{font-size:13px;font-family:'JetBrains Mono',monospace;color:var(--txt);font-weight:600}
-.live-usage-row,.live-conn-row,.live-gw-row,.live-models-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.live-usage-row .live-block-value,.live-block-gw{color:var(--green)}
-.live-models-list{font-size:11px;color:var(--dim);max-height:60px;overflow-y:auto;line-height:1.5}
-.live-conn-status{padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600}
-.live-conn-status.linked{color:var(--green);background:rgba(0,255,65,.12)}
-.live-conn-status.offline{color:var(--red);background:rgba(230,57,70,.12)}
-.live-conn-status.connecting{color:#ffd700;background:rgba(255,215,0,.12)}
-.live-link-actions{display:flex;gap:6px;flex-wrap:wrap}
-.live-dialogue-url{width:100%;padding:6px 8px;font-size:10px;font-family:'JetBrains Mono',monospace;background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.1);border-radius:4px;color:var(--dim);margin:0}
-.live-block-hint{font-size:10px;color:var(--dim);margin:0;line-height:1.4}
-.live-btn-primary{background:rgba(0,255,65,.15);border-color:rgba(0,255,65,.4);color:var(--green)}
-.live-btn-primary:hover{background:rgba(0,255,65,.25)}
-.live-btn-sm{font-size:10px;padding:2px 6px}
-.live-btn-icon{padding:2px 6px;min-width:28px}
-.live-btn-link{text-decoration:none;display:inline-block;text-align:center}
-.live-action-btn.loading{opacity:.5;pointer-events:none}
-@media(max-width:900px){.live-quick-blocks{grid-template-columns:1fr}}
-@media(max-width:640px){.live-layout{grid-template-columns:1fr}.live-sessions-panel{max-height:min(300px,48vh);border-right:none;border-bottom:1px solid var(--line)}.live-status-bar{overflow-x:auto;flex-wrap:nowrap}}
-</style>
-</head>
-<body>
-<!-- 顶部固定 Header（一比一复刻 stats2.html） -->
-<header class="top-header" role="banner">
-  <div class="top-header-left">
-    <div class="top-header-title">
-      <h1><span class="text-white" id="top-title">OpenClaw 数据报告</span></h1>
-      <p id="top-sub">Telemetry Uplink: Active // Source: OpenClaw_Nexus</p>
-    </div>
-  </div>
-  <div class="top-header-right">
-    <div class="top-header-card">
-      <a href="index.html" target="_blank" rel="noopener noreferrer" class="top-header-nav-link" id="link-report" title="体检报告">体检报告</a>
-    </div>
-    <div class="top-header-card">
-      <a href="stats2.html" target="_blank" rel="noopener noreferrer" class="top-header-nav-link" id="link-stats" title="PK地图">PK地图</a>
-    </div>
-    <div class="lang-flag-wrap">
-      <button type="button" id="btn-lang-zh" class="lang-flag-btn active" title="中文" aria-label="中文" data-lang="zh">
-        <img src="images/zh.png" alt="中文" onerror="this.style.display='none';var s=this.nextElementSibling;if(s)s.style.display='block'" />
-        <svg class="flag-svg" style="display:none;width:100%;height:100%" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><rect width="32" height="32" fill="#de2910"/><path fill="#ffde00" d="M8 6l1.2 1.8L11 7l-1.7 2 .4 1.8L8 9.5 5.3 11l.4-1.8L4 7l1.8-1.2L8 6zm0 8l1.2 1.8 1.8-1.2-1.7 2 .4 1.8L8 17.5 5.3 19l.4-1.8L4 15l1.8-1.2L8 15zm8-10l1.5 1 1.5-1v2l-1.5 1 1.5 1v2l-1.5-1-1.5 1v-2l1.5-1-1.5-1V4z"/></svg>
-      </button>
-      <button type="button" id="btn-lang-en" class="lang-flag-btn" title="English" aria-label="English" data-lang="en">
-        <img src="images/us.png" alt="English" onerror="this.style.display='none';var s=this.nextElementSibling;if(s)s.style.display='block'" />
-        <svg class="flag-svg" style="display:none;width:100%;height:100%" viewBox="0 0 32 22" xmlns="http://www.w3.org/2000/svg"><path fill="#bf0a30" d="M0 0h32v1.7H0V0zm0 3.4h32v1.7H0V3.4zm0 3.4h32v1.7H0v-1.7zm0 3.4h32v1.7H0v-1.7zm0 3.4h32v1.7H0v-1.7zm0 3.4h32v1.7H0v-1.7zm0 3.4h32V22H0v-1.7z"/><path fill="#fff" d="M0 1.7h32v1.7H0V1.7zm0 3.4h32v1.7H0V5.1zm0 3.4h32v1.7H0V6.8zm0 3.4h32v1.7H0v-1.7zm0 3.4h32v1.7H0v-1.7zm0 3.4h32v1.7H0v-1.7z"/><path fill="#002868" d="M0 0h12.8v11.9H0z"/><path fill="#fff" d="M6.4 3l.6 1 1-.3-.5 1 .5 1-1.1-.4-.6 1V5.2L5 5.6l1-.3-.6-1 1.1.4L6.4 3z"/></svg>
-      </button>
-    </div>
-  </div>
-</header>
-<div class="hud tr"><div>NODE: <strong>0x99_ALPHA</strong></div><div id="time">--</div></div>
-<div class="hud br"><div>CLUSTER: <strong id="cl">00</strong></div></div>
-<header class="hero"><h1 id="hero-title">OpenClaw</h1><p class="sub" id="sub">BOOTING</p></header>
-<main class="stage"><div class="orbit" id="orbit"></div>
-<section class="anchor"><div class="reactor" id="reactor"><div class="ring"></div>
-<svg id="oc" class="svg" viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg">
-<defs><linearGradient id="g" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:#FF4D4D;stop-opacity:1"/><stop offset="100%" style="stop-color:#B91D1D;stop-opacity:1"/></linearGradient></defs>
-<rect x="215" y="420" width="30" height="40" fill="#B91D1D" rx="4"/><rect x="255" y="420" width="30" height="40" fill="#B91D1D" rx="4"/>
-<path d="M190,120 C160,80 140,95 130,110" stroke="#FF4D4D" stroke-width="14" fill="none" stroke-linecap="round"/>
-<path d="M310,120 C340,80 360,95 370,110" stroke="#FF4D4D" stroke-width="14" fill="none" stroke-linecap="round"/>
-<path d="M100,260 C100,150 160,100 250,100 C340,100 400,150 400,260 C400,370 340,440 250,440 C160,440 100,370 100,260 Z" fill="url(#g)"/>
-<path d="M110,245 C70,245 45,275 45,305 C45,335 75,355 115,350 C125,320 120,280 110,245 Z" fill="#E63946"/>
-<path d="M390,245 C430,245 455,275 455,305 C455,335 425,355 385,350 C375,320 380,280 390,245 Z" fill="#E63946"/>
-<g><circle cx="195" cy="225" r="30" fill="#000"/><circle id="pupil-l" cx="195" cy="225" r="11" fill="#00ff41" filter="blur(0.7px)"/><circle cx="195" cy="225" r="4" fill="#fff" opacity="0.8"/></g>
-<g><circle cx="305" cy="225" r="30" fill="#000"/><circle id="pupil-r" cx="305" cy="225" r="11" fill="#00ff41" filter="blur(0.7px)"/><circle cx="305" cy="225" r="4" fill="#fff" opacity="0.8"/></g>
-</svg></div></section></main>
-<!-- Live Backend View -->
-<div id="live-view" class="live-view" aria-hidden="true">
-  <div class="live-layout">
-    <!-- 左：会话列表 -->
-    <aside class="live-sessions-panel">
-      <div class="live-panel-header">
-        <span class="live-panel-title" id="live-sessions-title">实时会话</span>
-        <div class="live-panel-actions">
-          <button type="button" class="live-action-btn" id="live-refresh-btn" title="刷新">&#8635;</button>
-          <span class="live-status-dot" id="live-status-dot"></span>
-        </div>
-      </div>
-      <div class="live-gateway-compact" id="live-gateway-compact" aria-label="Gateway">
-        <div class="live-gw-head">
-          <span class="live-gw-eyebrow" id="gateway-inline-title"></span>
-          <span class="live-gw-endpoint" id="live-gateway-endpoint"></span>
-        </div>
-        <div class="live-gw-row">
-          <select id="gateway-discovered" class="live-gw-select-inst"></select>
-          <button type="button" class="live-action-btn live-btn-sm live-gw-scan-btn" id="btn-gateway-probe"></button>
-        </div>
-        <div class="live-gw-row live-gw-row-preset">
-          <select id="gateway-preset" class="live-gw-select-preset" aria-label="Preset">
-            <option value="default">18789</option>
-            <option value="qclaw">18790</option>
-            <option value="custom">…</option>
-          </select>
-          <input type="number" id="gateway-custom-port" class="live-gw-port-input hidden" min="1" max="65535" placeholder="" inputmode="numeric" aria-label="Port" />
-          <button type="button" class="live-action-btn live-btn-sm" id="btn-gateway-apply"></button>
-        </div>
-        <div id="gateway-inline-status" class="live-gw-status" aria-live="polite"></div>
-      </div>
-      <div class="live-sessions-list" id="live-sessions-list">
-        <div class="live-empty" id="live-sessions-empty">等待 Gateway 连接...</div>
-      </div>
-    </aside>
-    <!-- 右：选中会话详情 + 快捷状态 -->
-    <div class="live-main-panel">
-      <!-- 顶部：快捷状态条 -->
-      <div class="live-status-bar" id="live-status-bar">
-        <div class="live-stat-item"><span class="live-stat-label" id="lbl-gw-status">Gateway</span><span class="live-stat-value" id="live-gw-status">--</span></div>
-        <div class="live-stat-item"><span class="live-stat-label" id="lbl-gw-health">健康</span><span class="live-stat-value" id="live-gw-health">--</span></div>
-        <div class="live-stat-item live-stat-gw-actions">
-          <button type="button" class="live-action-btn live-btn-sm" id="live-gw-restart-btn" title="重启网关">重启网关</button>
-        </div>
-        <div class="live-stat-item"><span class="live-stat-label" id="lbl-presence">在线实例</span><span class="live-stat-value" id="live-presence">--</span></div>
-        <div class="live-stat-item"><span class="live-stat-label" id="lbl-sess-cnt">会话数</span><span class="live-stat-value" id="live-sess-cnt">--</span></div>
-        <div class="live-stat-item"><span class="live-stat-label" id="lbl-task-cnt">任务</span><span class="live-stat-value" id="live-task-cnt">--</span></div>
-        <div class="live-stat-item"><span class="live-stat-label" id="lbl-usage">成本</span><span class="live-stat-value" id="live-usage">--</span></div>
-      </div>
-      <!-- 用量明细：Token 总量 / 输入 / 输出 -->
-      <div class="live-usage-detail" id="live-usage-detail">
-        <span class="live-usage-detail-label" id="lbl-token-total">Token 总量</span><span class="live-usage-detail-value" id="live-token-total">--</span>
-        <span class="live-usage-detail-sep">|</span>
-        <span class="live-usage-detail-label" id="lbl-token-in">输入</span><span class="live-usage-detail-value" id="live-token-in">--</span>
-        <span class="live-usage-detail-sep">|</span>
-        <span class="live-usage-detail-label" id="lbl-token-out">输出</span><span class="live-usage-detail-value" id="live-token-out">--</span>
-      </div>
-      <!-- 新手关键三版块：省钱 / 方便 / 实用 -->
-      <div class="live-quick-blocks" id="live-quick-blocks">
-        <section class="live-block live-block-save" aria-labelledby="live-block-save-title">
-          <h3 class="live-block-title" id="live-block-save-title">省钱</h3>
-          <div class="live-block-content">
-            <div class="live-usage-row">
-              <span class="live-block-label" id="lbl-block-usage">用量</span>
-              <span id="live-block-usage" class="live-block-value">--</span>
-              <button type="button" class="live-action-btn live-btn-icon" id="live-refresh-usage" title="刷新用量">&#8635;</button>
-            </div>
-            <div class="live-models-row">
-              <span class="live-block-label" id="lbl-block-models">模型</span>
-              <div id="live-models-list" class="live-models-list">--</div>
-              <button type="button" class="live-action-btn live-btn-sm" id="live-refresh-models">刷新模型</button>
-            </div>
-          </div>
-        </section>
-        <section class="live-block live-block-easy" aria-labelledby="live-block-easy-title">
-          <h3 class="live-block-title" id="live-block-easy-title">方便</h3>
-          <div class="live-block-content">
-            <div class="live-conn-row">
-              <span class="live-block-label" id="lbl-block-conn">连接</span>
-              <span id="live-conn-status" class="live-conn-status">--</span>
-            </div>
-            <div class="live-link-actions">
-              <button type="button" class="live-action-btn live-btn-primary" id="live-fetch-link">获取对话链接</button>
-              <button type="button" class="live-action-btn" id="live-copy-link" style="display:none">复制链接</button>
-            </div>
-            <input type="text" id="live-dialogue-url" class="live-dialogue-url" readonly placeholder="" aria-label="对话链接" />
-          </div>
-        </section>
-        <section class="live-block live-block-use" aria-labelledby="live-block-use-title">
-          <h3 class="live-block-title" id="live-block-use-title">实用</h3>
-          <div class="live-block-content">
-            <div class="live-gw-row">
-              <span class="live-block-label" id="lbl-block-gw">Gateway</span>
-              <span id="live-block-gw" class="live-block-value">--</span>
-            </div>
-            <p class="live-block-hint" id="live-block-use-hint">左侧为会话列表，选一条可看详情</p>
-            <a href="#" id="live-open-chat" class="live-action-btn live-btn-primary live-btn-link" target="_blank" rel="noopener">打开聊天</a>
-          </div>
-        </section>
-      </div>
-      <!-- 会话详情 / Chat 历史 -->
-      <div class="live-session-detail" id="live-session-detail">
-        <div class="live-detail-placeholder" id="live-detail-placeholder">
-          <p id="live-select-hint">← 选择一条会话查看详情</p>
-        </div>
-        <div class="live-detail-content" id="live-detail-content" style="display:none">
-          <div class="live-detail-header">
-            <div class="live-detail-meta">
-              <span class="live-detail-key" id="live-detail-key"></span>
-              <span class="live-detail-status" id="live-detail-status"></span>
-            </div>
-            <button type="button" class="live-action-btn" id="live-detail-close" title="关闭详情">✕</button>
-          </div>
-          <div class="live-chat-history" id="live-chat-history"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-<div id="detail-view" class="detail-view" aria-hidden="true">
-  <div class="detail-view-layout">
-    <aside class="detail-view-left">
-      <h3 class="pt" id="detail-view-signal-title">Signal Panels</h3>
-      <div class="blk"><p class="pt">Radar</p><canvas id="radar" width="380" height="380"></canvas></div>
-      <div class="blk"><p class="pt">Word Cloud</p><div class="wc" id="wc"></div></div>
-    </aside>
-    <section class="detail-view-right">
-      <h3 class="pt" id="detail-view-session-title">Session List</h3>
-      <div class="blk" id="data-source-block"><p class="pt" id="data-source-title">Data source</p><p class="d" id="data-source-desc">Metrics below are from openclawPortrait and sessions.json.</p></div>
-      <div class="blk list" id="list"></div>
-    </section>
-  </div>
-</div>
-<nav class="nav" id="nav"></nav>
-<div class="boot" id="boot"><div class="box"><p class="t">OpenClaw Bootstrap</p><p class="s" id="status">Loading session payload...</p><div class="bar"><i></i></div></div></div>
-<div class="card-modal" id="card-modal" aria-hidden="true" role="dialog" aria-labelledby="card-modal-title">
-  <div class="card-modal-box" style="position:relative">
-    <button type="button" class="card-modal-close" id="card-modal-close" aria-label="关闭">&times;</button>
-    <h2 class="card-modal-title" id="card-modal-title">指标说明</h2>
-    <div class="card-modal-section"><h4 id="card-help-source-label">数据来源</h4><p id="card-help-source"></p></div>
-    <div class="card-modal-section"><h4 id="card-help-analysis-label">数值分析</h4><p id="card-help-analysis"></p></div>
-    <div class="card-modal-section"><h4 id="card-help-calc-label">计算方法</h4><p id="card-help-calc"></p></div>
-    <div class="card-modal-section"><h4 id="card-help-trait-label">主人特点</h4><p id="card-help-trait"></p></div>
-  </div>
-</div>
-<div id="command-console">
-  <div class="console-header">
-    <span class="console-title">OPENCLAW CHAT</span>
-    <span id="status-indicator" class="offline" aria-live="polite">OFFLINE</span>
-  </div>
-  <div id="token-panel">
-    <label>GATEWAY TOKEN（从令牌化URL中获取）</label>
-    <div id="token-input-row">
-      <input type="password" id="token-input" placeholder="粘贴 token 或留空（本地模式）" autocomplete="off" />
-      <button type="button" id="btn-token-save">连接</button>
-    </div>
-    <div id="token-hint">后台通过<strong>读取本地文件</strong>（如 <code>.openclaw/gateway-token</code>、<code>OPENCLAW_TOKEN_FILE</code>）或<strong>执行 openclaw dashboard --no-open</strong> 解析输出中的 token，组合成带 token 的对话页 URL。点击「获取对话链接」后即可复制或直接打开，实现自动登录。<br>也可手动粘贴 token 到上方输入框后点击连接。<br><strong>Gateway 端口</strong>会在打开页面时自动探测（并记住上次成功端口）；若网关换了端口，可使用 <code>?gwPort=端口号</code>、<code>?gateway=127.0.0.1:端口</code>、或追加探测列表 <code>?gwProbePorts=19900,19901</code>，也可在控制台执行 <code>OpenClawGateway.setPort(端口);ClawController.reconnect()</code>。<strong>双开 OpenClaw</strong>（如 qclaw 在 18790）：打开 <code>openclaw2.html?profile=qclaw</code> 或 <code>?qclaw=1</code> / <code>?gwPort=18790</code>，或控制台 <code>OpenClawGateway.setGatewayProfile('qclaw');ClawController.reconnect()</code>。若曾误记端口，可清除 <code>localStorage</code> 键 <code>openclaw2_gateway_port</code> 后刷新。</div>
-    <div id="token-fetch-row" style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-      <button type="button" id="btn-fetch-dialogue-link">获取对话链接</button>
-      <span id="token-fetch-status" class="token-fetch-status"></span>
-    </div>
-    <div id="token-link-box" aria-label="带 Token 的对话链接">
-      <span class="label">自动登录对话链接（由本地文件或 openclaw dashboard --no-open 获取）</span>
-      <div id="token-link-row">
-        <input type="text" id="token-link-url" readonly aria-label="对话链接" />
-        <button type="button" id="btn-copy-link">复制链接</button>
-        <button type="button" id="btn-open-dialogue">打开对话</button>
-      </div>
-    </div>
-  </div>
-  <!-- API 控制面板 + 管理命令（借鉴 Control Center 思路：总览/会话/任务/审批/员工/通道，自有实现） -->
-  <div id="api-panel">
-    <div id="api-panel-title">API 控制面板 <span id="api-panel-subtitle"></span></div>
-    <div id="api-btns">
-      <button type="button" class="api-btn" data-action="status">状态</button>
-      <button type="button" class="api-btn" data-action="health">健康</button>
-      <button type="button" class="api-btn" data-action="sessions">会话</button>
-      <button type="button" class="api-btn" data-action="heartbeat">心跳</button>
-      <button type="button" class="api-btn" data-action="models">模型</button>
-      <button type="button" class="api-btn" data-action="config">配置</button>
-    </div>
-    <div id="mgmt-section" class="mgmt-section">
-      <div class="mgmt-section-title" id="mgmt-section-title">管理命令</div>
-      <div id="api-btns-mgmt" class="api-btns-mgmt">
-        <button type="button" class="api-btn" data-action="tasks">任务</button>
-        <button type="button" class="api-btn" data-action="projects">项目</button>
-        <button type="button" class="api-btn" data-action="approvals">审批</button>
-        <button type="button" class="api-btn" data-action="presence">在线节点</button>
-        <button type="button" class="api-btn" data-action="channels">通道</button>
-        <button type="button" class="api-btn" data-action="usage">用量</button>
-      </div>
-    </div>
-    <div id="api-result"></div>
-  </div>
-  <div class="chat-history-bar">
-    <label for="chat-load-session" id="chat-load-session-label">加载会话</label>
-    <select id="chat-load-session" aria-label="选择会话加载到对话区"><option value="">选择会话…</option></select>
-  </div>
-  <div id="chat-history">
-    <div class="chat-agents-tabs" id="chat-agents-tabs" role="tablist" aria-label="会话列表" data-empty-text="暂无会话标签"></div>
-    <div id="chat-history-content" role="log" aria-label="Chat history" data-empty-text="连接后或加载会话后，这里会显示聊天记录。"></div>
-  </div>
-  <div class="console-input-area">
-    <div id="console-toolbar">
-      <button type="button" id="btn-toggle-token">🔑 TOKEN</button>
-      <button type="button" id="btn-clear">✕ 清空</button>
-      <button type="button" id="btn-toggle-api">⚡ API</button>
-      <span class="toolbar-spacer"></span>
-      <button type="button" id="btn-reconnect">↺ 重连</button>
-    </div>
-    <div class="console-input-row">
-      <textarea id="command-input" placeholder="输入消息，Enter 发送，Shift+Enter 换行" autocomplete="off" aria-label="Chat input" rows="1"></textarea>
-      <button type="button" id="btn-send" aria-label="Send">发送</button>
-    </div>
-  </div>
-</div>
-<script>
 (()=>{
 const $=id=>document.getElementById(id),orbit=$("orbit"),sub=$("sub"),nav=$("nav"),time=$("time"),ax=$("ax"),ay=$("ay"),cl=$("cl"),pl=$("pupil-l"),pr=$("pupil-r"),oc=$("oc"),reactor=$("reactor"),radar=$("radar"),wc=$("wc"),list=$("list"),boot=$("boot"),status=$("status");
 const state={themes:[],payload:{},metrics:null,idx:0,anim:false,lastWheel:0,dir:1,open:false,lang:(localStorage.getItem("openclaw2_lang")||"zh").replace(/^en$/i,"en").replace(/^zh$/i,"zh")||"zh"};
@@ -566,9 +6,6 @@ const state={themes:[],payload:{},metrics:null,idx:0,anim:false,lastWheel:0,dir:
 const OpenClawGateway=(function(){
   const LS_PORT='openclaw2_gateway_port';
   const LS_HOST='openclaw2_gateway_host';
-  /** 双开 OpenClaw 时：qclaw 常用 18790，默认实例常用 18789 */
-  const LS_PROFILE='openclaw2_gateway_profile';
-  const QCLAW_PORT=18790;
   const DEFAULT_PORT=18789;
   const DEFAULT_HOST='127.0.0.1';
   const EXTRA_PORTS=[18790,18889,3000,8080,5173,5174];
@@ -593,16 +30,6 @@ const OpenClawGateway=(function(){
       const h=window.location.hash||'';
       const m=h.match(/(?:^#|[?&])gw(?:Port)?=(\d{2,5})/);
       if(m)return parseInt(m[1],10);
-      const prof=(q.get('profile')||q.get('gatewayProfile')||'').toLowerCase().replace(/^["']|["']$/g,'');
-      const qcl=q.get('qclaw');
-      const wantQclaw=prof==='qclaw'||qcl==='1'||qcl==='true'||String(qcl||'').toLowerCase()==='qclaw';
-      if(wantQclaw){
-        try{localStorage.setItem(LS_PROFILE,'qclaw');localStorage.setItem(LS_PORT,String(QCLAW_PORT));}catch(_){}
-        return QCLAW_PORT;
-      }
-      if(prof==='default'||prof==='openclaw'){
-        try{localStorage.removeItem(LS_PROFILE);}catch(_){}
-      }
     }catch(_){}
     return null;
   }
@@ -612,13 +39,6 @@ const OpenClawGateway=(function(){
       try{localStorage.setItem(LS_PORT,String(fromUrl));}catch(_){}
       return fromUrl;
     }
-    try{
-      if((localStorage.getItem(LS_PROFILE)||'').toLowerCase()==='qclaw'){
-        const n=QCLAW_PORT;
-        try{localStorage.setItem(LS_PORT,String(n));}catch(_){}
-        return n;
-      }
-    }catch(_){}
     try{
       const s=localStorage.getItem(LS_PORT);
       if(s!=null){
@@ -643,25 +63,6 @@ const OpenClawGateway=(function(){
     if(!Number.isFinite(n)||n<=0||n>=65536)return;
     cachedPort=n;
     try{localStorage.setItem(LS_PORT,String(n));}catch(_){}
-    try{
-      if(n===QCLAW_PORT)localStorage.setItem(LS_PROFILE,'qclaw');
-      else if((localStorage.getItem(LS_PROFILE)||'')==='qclaw'&&n!==QCLAW_PORT)localStorage.removeItem(LS_PROFILE);
-    }catch(_){}
-    refreshSubtitle();
-  }
-  /** 控制台：OpenClawGateway.setGatewayProfile('qclaw') 固定 qclaw:18790；'default' 清除配置档 */
-  function setGatewayProfile(name){
-    const p=String(name||'').toLowerCase();
-    if(p==='qclaw'){
-      cachedPort=QCLAW_PORT;
-      try{localStorage.setItem(LS_PORT,String(QCLAW_PORT));localStorage.setItem(LS_PROFILE,'qclaw');}catch(_){}
-    }else{
-      try{localStorage.removeItem(LS_PROFILE);}catch(_){}
-      if(p==='default'||p==='openclaw'){
-        cachedPort=DEFAULT_PORT;
-        try{localStorage.setItem(LS_PORT,String(DEFAULT_PORT));}catch(_){}
-      }
-    }
     refreshSubtitle();
   }
   function getDisplay(){return getHost()+':'+getPort();}
@@ -687,10 +88,6 @@ const OpenClawGateway=(function(){
   function refreshSubtitle(){
     const el=document.getElementById('api-panel-subtitle');
     if(el)el.textContent=wsBase();
-    try{
-      const ep=document.getElementById('live-gateway-endpoint');
-      if(ep)ep.textContent=getDisplay();
-    }catch(_){}
   }
   async function probePort(port){
     const base=useDevHttpProxy()
@@ -722,14 +119,12 @@ const OpenClawGateway=(function(){
     /* 已移除 no-cors GET /：任意 HTTP 服务都会「成功」，导致误选端口（例如空端口或静态站） */
     return false;
   }
-  function buildProbePortList(){
+  async function autoDetectPort(){
     const preferred=getPort();
     const list=[];
     const add=(p)=>{const n=typeof p==='number'?p:parseInt(p,10);if(Number.isFinite(n)&&n>0&&n<65536&&!list.includes(n))list.push(n);};
-    try{
-      if((localStorage.getItem(LS_PROFILE)||'').toLowerCase()==='qclaw')add(QCLAW_PORT);
-    }catch(_){}
     add(preferred);
+    /* 先扫常见备用端口（含 18790），再补默认 18789，避免「默认 18789 + 误判」挡住真实网关 */
     EXTRA_PORTS.forEach(add);
     add(DEFAULT_PORT);
     try{
@@ -737,10 +132,6 @@ const OpenClawGateway=(function(){
       const probeExtra=q.get('gwProbePorts')||q.get('openclaw_probe_ports')||'';
       probeExtra.split(/[,;\s]+/).forEach(function(s){const n=parseInt(String(s).trim(),10);add(n);});
     }catch(_){}
-    return list;
-  }
-  async function autoDetectPort(){
-    const list=buildProbePortList();
     for(const p of list){
       if(await probePort(p)){
         if(p!==getPort())setPort(p);
@@ -751,16 +142,7 @@ const OpenClawGateway=(function(){
     refreshSubtitle();
     return getPort();
   }
-  /** 返回列表中实际响应 OpenClaw 探测路径的端口（可多实例同时在线） */
-  async function scanOnlineGatewayPorts(){
-    const list=buildProbePortList();
-    const online=[];
-    for(const p of list){
-      if(await probePort(p))online.push(p);
-    }
-    return online;
-  }
-  return{getHost,getPort,setPort,setGatewayProfile,getDisplay,httpBase,wsBase,autoDetectPort,scanOnlineGatewayPorts,probePort,refreshSubtitle,useDevHttpProxy,DEFAULT_PORT,DEFAULT_HOST,QCLAW_PORT,LS_PROFILE};
+  return{getHost,getPort,setPort,getDisplay,httpBase,wsBase,autoDetectPort,probePort,refreshSubtitle,useDevHttpProxy,DEFAULT_PORT,DEFAULT_HOST};
 })();
 try{window.OpenClawGateway=OpenClawGateway;}catch(_){}
 // 初始展示由探测/读取 localStorage 后的动态网关地址决定
@@ -805,18 +187,6 @@ const i18n={
     radarLabels:["消耗","模型","工具","习惯","健康","综合"],
     rowLabels:["会话数","输入Token","输出Token","Token总量","缓存读/写","模型提供商","模型","最近渠道","来源","最近活跃","上下文上限","工具种类数","使用工具会话数","工具名","心跳时间","心跳内容","定时任务数量","systemSent","compactionCount","系统提示字数","注入工作区文件","技能"],
     themeNames:["核心信号","算力消耗","模型与工具","健康与状态","会话核心","实时后台","查看详情"],
-    gatewaySwitchLabel:"预设端口",
-    gatewayOptDefault:"18789",
-    gatewayOptQclaw:"18790",
-    gatewayOptCustom:"自定义",
-    gatewayApply:"应用并重连",
-    gatewayProbe:"扫描在线端口（探测列表内多实例）",
-    gatewayProbeShort:"扫描",
-    gatewayApplyShort:"应用",
-    gatewayPortPlaceholder:"端口",
-    gatewayDiscoveredLabel:"检测到的实例",
-    gatewayDiscoveredPlaceholder:"扫描后选择实例…",
-    gatewayInlineTitle:"网关",
     themes:[
       [{t:"OpenClaw 最爱用的关键词",d:"工具与技能激活信号"},{t:"等级评定",d:null},{t:"综合能力值",d:"综合得分"},{t:"能力向量",d:"消耗/模型/工具"},{t:"工作节奏",d:null},{t:"峰值时段",d:null},{t:"活跃时长",d:null},{t:"习惯分",d:"taskHabit.score"},{t:"健康分",d:"stabilityHealth.score"}],
       [{t:"OpenClaw Token 总量",d:"画像+会话汇总"},{t:"输入/输出",d:null},{t:"缓存命中率",d:null},{t:"花费(美元)",d:"consumption.totalCostUSD"},{t:"上下文窗口",d:"token.contextTokensMax"},{t:"缓存读取",d:"cacheReadSum"},{t:"缓存写入",d:"cacheWriteSum"},{t:"Token合计",d:"totalTokensSum"},{t:"数据来源",d:null}],
@@ -864,18 +234,6 @@ const i18n={
     radarLabels:["Consumption","Model","Tool","Habit","Health","Composite"],
     rowLabels:["Session Count","Token Input","Token Output","Token Total","Cache Read / Write","Model Provider","Model","Last Channel","Origin","Last Active","Context Tokens Max","Tools Schema Count","Tools Sessions","Tool Names","Heartbeat","Heartbeat Text","Scheduled tasks","systemSent","compactionCount","systemPromptChars","workspaceInjectedFiles","skills"],
     themeNames:["Core Signal","Resource","Model + Tool","Health + Status","sessions.json Core","Live Backend","View Details"],
-    gatewaySwitchLabel:"Preset",
-    gatewayOptDefault:"18789",
-    gatewayOptQclaw:"18790",
-    gatewayOptCustom:"Custom",
-    gatewayApply:"Apply & reconnect",
-    gatewayProbe:"Scan gateways on probe port list",
-    gatewayProbeShort:"Scan",
-    gatewayApplyShort:"Apply",
-    gatewayPortPlaceholder:"Port",
-    gatewayDiscoveredLabel:"Detected instances",
-    gatewayDiscoveredPlaceholder:"Scan, then pick…",
-    gatewayInlineTitle:"Gateway",
     themes:[
       [{t:"Top 3 Keywords",d:"Tool + skill activation signals"},{t:"Rank Grade",d:null},{t:"Core Ability",d:"composite score"},{t:"Capability Vector",d:"consumption / model / tool"},{t:"Work Rhythm",d:null},{t:"Peak Hours",d:null},{t:"Active Hours",d:null},{t:"Habit Score",d:"taskHabit.score"},{t:"Health Score",d:"stabilityHealth.score"}],
       [{t:"Total Token",d:"portrait + sessions summary"},{t:"Input / Output",d:null},{t:"Cache Hit Rate",d:null},{t:"Cost USD",d:"consumption.totalCostUSD"},{t:"Context Window",d:"token.contextTokensMax"},{t:"Cache Read",d:"cacheReadSum"},{t:"Cache Write",d:"cacheWriteSum"},{t:"Token Sum",d:"totalTokensSum"},{t:"Data source",d:null}],
@@ -1487,61 +845,38 @@ function cardNode(data,i,t,themeIdx){const c=document.createElement('article');c
 function openCardModal(themeIdx,cardIdx){const L=state.lang;const help=i18n[L].cardHelp;const labels=i18n[L].cardModalLabels;if(!help||!help[themeIdx]||!help[themeIdx][cardIdx])return;const h=help[themeIdx][cardIdx];const th=state.themes[themeIdx];const cardTitle=th&&th.c&&th.c[cardIdx]?th.c[cardIdx].t:"";const modal=$("card-modal");if(!modal)return;modal.querySelector("#card-modal-title").textContent=cardTitle;$("card-help-source").textContent=h.source||"--";$("card-help-analysis").textContent=h.analysis||"--";$("card-help-calc").textContent=h.calculation||"--";$("card-help-trait").textContent=h.ownerTrait||"--";$("card-help-source-label").textContent=labels.source;$("card-help-analysis-label").textContent=labels.analysis;$("card-help-calc-label").textContent=labels.calculation;$("card-help-trait-label").textContent=labels.ownerTrait;modal.classList.add("open");modal.setAttribute("aria-hidden","false");}
 function closeCardModal(){const modal=$("card-modal");if(modal){modal.classList.remove("open");modal.setAttribute("aria-hidden","true");}}
 function escapeHtml(s){if(s==null)return'';const t=String(s);const d=document.createElement('div');d.textContent=t;return d.innerHTML;}
-/** 去掉网关常见的 { ok, data } / { success, data } 外层，便于统一解析 */
-function unwrapGatewaySessionEnvelope(raw){
-  let v=raw;
-  for(let i=0;i<8;i++){
-    if(!v||typeof v!=='object'||Array.isArray(v))break;
-    if((v.ok===true||v.success===true)&&v.data!==undefined&&v.data!==null){v=v.data;continue;}
-    break;
-  }
-  return v;
-}
 function extractSessionsListFromGatewayValue(raw){
   const seen=new Set();
-  let v=unwrapGatewaySessionEnvelope(raw);
-  for(let depth=0;depth<10;depth++){
+  let v=raw;
+  for(let depth=0;depth<8;depth++){
     if(Array.isArray(v))return v;
     if(!v||typeof v!=='object'||seen.has(v))break;
     seen.add(v);
     if(Array.isArray(v.sessions))return v.sessions;
-    if(v.sessions&&typeof v.sessions==='object'&&!Array.isArray(v.sessions)){
-      const vals=Object.values(v.sessions);
-      if(vals.length)return vals;
-    }
-    if(Array.isArray(v.sessionList))return v.sessionList;
-    if(Array.isArray(v.conversations))return v.conversations;
-    if(Array.isArray(v.conversationList))return v.conversationList;
     if(Array.isArray(v.items))return v.items;
     if(Array.isArray(v.rows))return v.rows;
     if(Array.isArray(v.list))return v.list;
-    if(Array.isArray(v.records))return v.records;
-    if(Array.isArray(v.values))return v.values;
     if(Array.isArray(v.data))return v.data;
     if(Array.isArray(v.result))return v.result;
     if(v.result&&typeof v.result==='object'&&!Array.isArray(v.result)){v=v.result;continue;}
     if(v.payload&&typeof v.payload==='object'&&!Array.isArray(v.payload)){v=v.payload;continue;}
     if(v.data&&typeof v.data==='object'&&!Array.isArray(v.data)){v=v.data;continue;}
-    if(v.body&&typeof v.body==='object'&&!Array.isArray(v.body)){v=v.body;continue;}
     break;
   }
   return [];
 }
 function hasSessionCollectionShape(raw){
-  const u=unwrapGatewaySessionEnvelope(raw);
-  if(Array.isArray(u))return true;
-  if(!u||typeof u!=='object')return false;
-  if(u.sessions!==undefined&&u.sessions!==null)return typeof u.sessions==='object';
+  if(Array.isArray(raw))return true;
+  if(!raw||typeof raw!=='object')return false;
   return !!(
-    Array.isArray(u.items)||
-    Array.isArray(u.rows)||
-    Array.isArray(u.list)||
-    Array.isArray(u.data)||
-    Array.isArray(u.result)||
-    Array.isArray(u.conversations)||
-    Array.isArray(u.sessionList)||
-    (u.result&&typeof u.result==='object')||
-    (u.payload&&typeof u.payload==='object')
+    Array.isArray(raw.sessions)||
+    Array.isArray(raw.items)||
+    Array.isArray(raw.rows)||
+    Array.isArray(raw.list)||
+    Array.isArray(raw.data)||
+    Array.isArray(raw.result)||
+    (raw.result&&typeof raw.result==='object')||
+    (raw.payload&&typeof raw.payload==='object')
   );
 }
 async function fetchGatewaySessionsData(){
@@ -1549,23 +884,16 @@ async function fetchGatewaySessionsData(){
   const preferred=Array.isArray(ClawController.supportedMethods)
     ? ClawController.supportedMethods.filter(m=>typeof m==='string'&&/(^|\.)(sessions?|conversations?)(\.|$)/i.test(m))
     : [];
-  const rpcCandidates=[...new Set([...preferred,
-    'sessions.list','session.list','chat.sessions.list','chat.sessions','chat.session.list',
-    'gateway.sessions.list','gateway.sessions','openclaw.sessions.list','openclaw.sessions',
-    'conversations.list','conversation.list','conversation.listSessions','listSessions'
-  ])];
-  const paramVariants=[{}, {limit:500}];
+  const rpcCandidates=[...new Set([...preferred,'sessions.list','session.list','chat.sessions.list','chat.sessions','conversations.list','conversation.list'])];
   let lastErr=null;
   for(const method of rpcCandidates){
-    for(const params of paramVariants){
-      try{
-        const res=await ClawController.rpcCall(method,params);
-        if(hasSessionCollectionShape(res))return{source:'rpc',method,data:res};
-        if(res!=null&&extractSessionsListFromGatewayValue(res).length)return{source:'rpc',method,data:res};
-      }catch(e){lastErr=e;}
-    }
+    try{
+      const res=await ClawController.rpcCall(method,{});
+      if(hasSessionCollectionShape(res))return{source:'rpc',method,data:res};
+      if(res!=null&&extractSessionsListFromGatewayValue(res).length)return{source:'rpc',method,data:res};
+    }catch(e){lastErr=e;}
   }
-  const httpCandidates=['/api/sessions','/api/chat/sessions','/api/v1/sessions','/api/gateway/sessions','/sessions','/v1/sessions','/api/conversations'];
+  const httpCandidates=['/api/sessions','/sessions','/v1/sessions'];
   for(const path of httpCandidates){
     try{
       const res=await ClawController.apiRequest(path);
@@ -1573,8 +901,8 @@ async function fetchGatewaySessionsData(){
       if(res!=null&&extractSessionsListFromGatewayValue(res).length)return{source:'http',path,data:res};
     }catch(e){lastErr=e;}
   }
-  if(lastErr)return{source:'error',data:null,error:lastErr};
-  return{source:'none',data:null,error:null};
+  if(lastErr)throw lastErr;
+  return null;
 }
 /* ===== LiveController: 实时后台标签数据轮询与渲染 ===== */
 const LiveController={
@@ -1638,20 +966,10 @@ const LiveController={
       this._updateStatusBar(statusRes,healthRes,sessRes,tasksRes,usageRes,presRes);
       this._updateUsageDetail(usageRes);
       let sessionJustAutoSelected=false;
-      const sessPack=sessRes.status==='fulfilled'?sessRes.value:null;
-      if(sessPack&&sessPack.data)sessionJustAutoSelected=!!this._renderSessionList(sessPack.data);
-      else{
-        const L=this._lang();
-        const fallbackMain={sessions:[{sessionKey:'main',key:'main',id:'main',status:'active',updatedAt:new Date().toISOString()}]};
-        sessionJustAutoSelected=!!this._renderSessionList(fallbackMain);
-        let msg=L==='zh'?'已连接，但网关未返回可列举的会话列表。已显示默认会话 main（与右侧聊天发送默认一致），可点击尝试加载历史。':'Connected, but no session list from the gateway. Showing default session main (same as chat send).';
-        if(sessRes.status==='rejected'&&sessRes.reason)msg+=' '+((sessRes.reason&&sessRes.reason.message)||String(sessRes.reason));
-        else if(sessPack&&sessPack.error)msg+=' '+((sessPack.error&&sessPack.error.message)||String(sessPack.error));
-        else if(sessPack&&sessPack.source==='none')msg+=L==='zh'?' 常见原因：网关未实现 sessions 列举 RPC/REST，或返回 JSON 形态与解析器不兼容。':' Common causes: no sessions list API, or an unsupported JSON shape.';
-        this._setSessionsHint(msg);
-      }
+      if(sessRes.status==='fulfilled'&&sessRes.value&&sessRes.value.data)sessionJustAutoSelected=!!this._renderSessionList(sessRes.value.data);
+      else this._setSessionsHint(this._lang()==='zh'?'已连接，但会话列表接口暂不可用':'Connected, but the sessions endpoint is unavailable');
       /* 同一会话已选时由此处拉取最新 chat.history（_selectSession 已会加载，避免重复） */
-      if(this.selectedKey&&!sessionJustAutoSelected&&ClawController&&ClawController.authenticated&&sessPack&&sessPack.data){
+      if(this.selectedKey&&!sessionJustAutoSelected&&ClawController&&ClawController.authenticated&&sessRes.status==='fulfilled'&&sessRes.value&&sessRes.value.data){
         void this._loadSessionDetail(this.selectedKey);
       }
       this._updateQuickBlocks(statusRes,usageRes,modelsRes);
@@ -1899,15 +1217,14 @@ const LiveController={
     const L=this._lang();
     historyEl.innerHTML='<div class="live-detail-loading" id="live-detail-loading">'+(L==='zh'?'加载对话…':'Loading chat…')+'</div>';
     let messages=[];
-    let historyErr=null;
     if(ClawController&&ClawController.authenticated){
       try{
         const res=await ClawController.rpcCall('chat.history',{sessionKey:key,limit:100});
         messages=ClawController.getMessagesFromHistoryResponse?ClawController.getMessagesFromHistoryResponse(res):(Array.isArray(res&&res.messages)?res.messages:[]);
-      }catch(e){historyErr=e;}
+      }catch(_){}
     }
     if(seq!==this._detailLoadSeq)return;
-    if(ClawController&&typeof ClawController.syncHistoryFromMessages==='function')ClawController.syncHistoryFromMessages(messages,key,historyErr);
+    if(ClawController&&typeof ClawController.syncHistoryFromMessages==='function')ClawController.syncHistoryFromMessages(messages,key);
     const loadingEl=document.getElementById('live-detail-loading');
     if(loadingEl)loadingEl.remove();
     if(!session){
@@ -1959,13 +1276,7 @@ const LiveController={
     }else{
       const p=document.createElement('p');
       p.style.cssText='font-size:11px;color:var(--dim);margin:0;';
-      let t=L==='zh'?'无对话记录或接口不可用。':'No messages or API unavailable.';
-      if(historyErr){
-        const em=(historyErr&&historyErr.message)?String(historyErr.message):String(historyErr);
-        t+=' '+em;
-        if(/missing scope|operator\.write|operator\.read/i.test(em))t+=L==='zh'?' （connect 已请求 operator.read/write，请先「↺ 重连」；仍失败则换 Token）':' (Reconnect; renew token if needed.)';
-      }
-      p.textContent=t;
+      p.textContent=L==='zh'?'无对话记录或接口不可用。':'No messages or API unavailable.';
       historyEl.appendChild(p);
     }
   },
@@ -2413,21 +1724,11 @@ const ClawController={
     return '';
   },
   /** 将实时后台某会话的对话历史映射到右侧 chat-history（先清空再按条追加 user/ai） */
-  syncHistoryFromMessages(messages,sessionKey,historyError){
+  syncHistoryFromMessages(messages,sessionKey){
     const el=$("chat-history-content");if(!el)return;
     this.clearHistory();
     const L=state.lang||'zh';
-    if(historyError){
-      const em=(historyError&&historyError.message)?String(historyError.message):String(historyError||'');
-      if(em)this.appendMsg('err',em);
-      if(/missing scope|operator\.write|operator\.read/i.test(em)){
-        this.appendMsg('sys',L==='zh'
-          ?'请点「↺ 重连」以用新的 scopes 重新握手；若仍提示缺 scope，请换发带 operator.read / operator.write 的 Gateway Token。'
-          :'Click Reconnect to re-handshake; if scope errors persist, use a token granting operator.read and operator.write.');
-      }
-    }else if(sessionKey){
-      this.appendMsg('sys',(L==='zh'?'已加载会话「'+sessionKey+'」的对话历史':'Loaded chat history for session "'+sessionKey+'"'));
-    }
+    if(sessionKey)this.appendMsg('sys',(L==='zh'?'已加载会话「'+sessionKey+'」的对话历史':'Loaded chat history for session "'+sessionKey+'"'));
     if(!Array.isArray(messages)||!messages.length)return;
     messages.forEach(m=>{
       let role=(m.role||m.type||m.actor||'').toLowerCase().trim();
@@ -2558,8 +1859,7 @@ const ClawController={
         instanceId:this._instanceId
       },
       role:'operator',
-      /* chat.history 等：网关常要求 operator.read + operator.write */
-      scopes:['operator.admin','operator.approvals','operator.pairing','operator.read','operator.write'],
+      scopes:['operator.admin','operator.approvals','operator.pairing'],
       caps:[],
       userAgent:(typeof navigator!=='undefined'&&navigator.userAgent)||'',
       locale:(typeof navigator!=='undefined'&&navigator.language)||'zh-CN'
@@ -3211,7 +2511,7 @@ function bind(){
           ClawController.rpcCall('chat.history',{sessionKey:k,limit:100}).then(res=>{
             const messages=ClawController.getMessagesFromHistoryResponse?ClawController.getMessagesFromHistoryResponse(res):(Array.isArray(res&&res.messages)?res.messages:[]);
             ClawController.syncHistoryFromMessages(messages,k);
-          }).catch(e=>{ClawController.syncHistoryFromMessages([],k,e);});
+          }).catch(()=>{});
         }
         try{localStorage.setItem('openclaw2_lastSessionKey',k);}catch(e){}
       });
@@ -3236,7 +2536,7 @@ function bind(){
       ClawController.syncHistoryFromMessages(messages,key);
       try{localStorage.setItem('openclaw2_lastSessionKey',key);}catch(e){}
       const tabsEl=$("chat-agents-tabs");if(tabsEl)tabsEl.querySelectorAll('.agent-tab').forEach(t=>t.classList.toggle('active',t.dataset.key===key));
-    }catch(e){ClawController.syncHistoryFromMessages([],key,e);}
+    }catch(e){}
   });
 
   window.refreshChatLoadSession=async function(){
@@ -3249,7 +2549,6 @@ function bind(){
     try{
       const res=await fetchGatewaySessionsData();
       let sessions=extractSessionsListFromGatewayValue(res&&res.data);
-      if(!sessions.length&&res&&(res.source==='none'||res.source==='error'))sessions=[{sessionKey:'main',key:'main',id:'main',status:'active'}];
       sessions=sessions.slice().sort((a,b)=>(new Date(b.updatedAt||b.createdAt||0)).getTime()-(new Date(a.updatedAt||a.createdAt||0)).getTime());
       sel.innerHTML='<option value="">'+(L==='zh'?'选择会话…':'Select session…')+'</option>';
       sessions.forEach(s=>{
@@ -3268,7 +2567,7 @@ function bind(){
           const messages=ClawController.getMessagesFromHistoryResponse?ClawController.getMessagesFromHistoryResponse(hist):(Array.isArray(hist&&hist.messages)?hist.messages:[]);
           ClawController.syncHistoryFromMessages(messages,lastKey);
           if(typeof window.renderChatAgentTabs==='function')window.renderChatAgentTabs(sessions,lastKey);
-        }catch(e){ClawController.syncHistoryFromMessages([],lastKey,e);}
+        }catch(e){}
       }else if(typeof window.renderChatAgentTabs==='function')window.renderChatAgentTabs(sessions,null);
     }catch(e){}
   };
@@ -3293,17 +2592,6 @@ function bind(){
     if(!apiResult)return;
     apiResult.textContent=text;
     apiResult.className='show '+(isOk?'ok':'err');
-  }
-  function showGatewayNotify(text,isOk){
-    const st=$("gateway-inline-status");
-    if(!st)return;
-    if(text==null||text===''){
-      st.textContent='';
-      st.className='live-gw-status';
-      return;
-    }
-    st.textContent=text;
-    st.className='live-gw-status show '+(isOk===false?'err':'ok');
   }
 
   /* API 按钮映射到 RPC 方法（借鉴 Control Center 思路：总览/会话/任务/审批/员工/通道，自有实现） */
@@ -3354,10 +2642,6 @@ function bind(){
       const open=apiPanel.classList.toggle('show');
       btnToggleApi.classList.toggle('active',open);
       if(apiResult&&!open){apiResult.textContent='';apiResult.className='';}
-      if(open){
-        if(typeof window.updateGatewaySwitchUi==='function')window.updateGatewaySwitchUi(state.lang);
-        if(typeof window.refreshDiscoveredGatewaysAsync==='function')void window.refreshDiscoveredGatewaysAsync();
-      }
     });
   }
 
@@ -3386,174 +2670,6 @@ function bind(){
   window.updateMgmtLabels=updateMgmtLabels;
   if(document.getElementById('mgmt-section'))updateMgmtLabels();
 
-  /* ── API 面板：网关端口切换 + 扫描多实例 + 检测结果下拉切换 ── */
-  window.__lastDiscoveredPorts=window.__lastDiscoveredPorts||[];
-  function fillDiscoveredGatewaysSelect(online){
-    const disc=$("gateway-discovered");
-    if(!disc)return;
-    const L=state.lang||'zh';
-    const t=i18n[L]||i18n.zh;
-    const ph=t.gatewayDiscoveredPlaceholder||'';
-    const cur=OpenClawGateway.getPort();
-    const host=OpenClawGateway.getHost();
-    let ports;
-    if(Array.isArray(online)){
-      ports=online.slice();
-      window.__lastDiscoveredPorts=ports;
-    }else{
-      ports=(window.__lastDiscoveredPorts||[]).slice();
-    }
-    const set=new Set(ports);
-    if(Number.isFinite(cur)&&cur>0&&cur<65536&&!set.has(cur))set.add(cur);
-    const sorted=Array.from(set).sort((a,b)=>a-b);
-    const q=OpenClawGateway.QCLAW_PORT,d=OpenClawGateway.DEFAULT_PORT;
-    disc.innerHTML='';
-    const o0=document.createElement('option');
-    o0.value='';
-    o0.textContent=ph;
-    disc.appendChild(o0);
-    sorted.forEach(p=>{
-      const o=document.createElement('option');
-      o.value=String(p);
-      let lab=host+':'+p;
-      if(p===q)lab+=' (qclaw)';
-      else if(p===d)lab+=L==='zh'?' (默认)':' (default)';
-      if(p===cur&&ports.indexOf(p)<0)lab+=L==='zh'?' (当前)':' (current)';
-      o.textContent=lab;
-      if(p===cur)o.selected=true;
-      disc.appendChild(o);
-    });
-  }
-  async function refreshDiscoveredGatewaysAsync(){
-    try{
-      const online=await OpenClawGateway.scanOnlineGatewayPorts();
-      fillDiscoveredGatewaysSelect(online);
-    }catch(_){}
-  }
-  window.refreshDiscoveredGatewaysAsync=refreshDiscoveredGatewaysAsync;
-
-  function syncGatewayPresetFromPort(){
-    const sel=$("gateway-preset");
-    const inp=$("gateway-custom-port");
-    if(!sel)return;
-    const p=OpenClawGateway.getPort();
-    const d=OpenClawGateway.DEFAULT_PORT,q=OpenClawGateway.QCLAW_PORT;
-    if(p===q)sel.value='qclaw';
-    else if(p===d)sel.value='default';
-    else{
-      sel.value='custom';
-      if(inp){inp.classList.remove('hidden');inp.value=String(p);}
-    }
-    if(sel.value!=='custom'&&inp)inp.classList.add('hidden');
-  }
-  function updateGatewaySwitchUi(L){
-    L=L||state.lang||'zh';
-    const t=i18n[L]||i18n.zh;
-    const git=$("gateway-inline-title");
-    if(git&&t.gatewayInlineTitle)git.textContent=t.gatewayInlineTitle;
-    const sel=$("gateway-preset");
-    if(sel&&sel.options&&sel.options.length>=3){
-      if(t.gatewayOptDefault)sel.options[0].text=t.gatewayOptDefault;
-      if(t.gatewayOptQclaw)sel.options[1].text=t.gatewayOptQclaw;
-      if(t.gatewayOptCustom)sel.options[2].text=t.gatewayOptCustom;
-    }
-    if(sel&&t.gatewaySwitchLabel)sel.setAttribute('aria-label',t.gatewaySwitchLabel);
-    const disc=$("gateway-discovered");
-    if(disc&&t.gatewayDiscoveredLabel)disc.setAttribute('aria-label',t.gatewayDiscoveredLabel);
-    const cport=$("gateway-custom-port");
-    if(cport&&t.gatewayPortPlaceholder)cport.placeholder=t.gatewayPortPlaceholder;
-    const ba=$("btn-gateway-apply"),bp=$("btn-gateway-probe");
-    if(ba)ba.textContent=t.gatewayApplyShort||t.gatewayApply;
-    if(bp){
-      bp.textContent=t.gatewayProbeShort||t.gatewayProbe;
-      if(t.gatewayProbe)bp.title=t.gatewayProbe;
-    }
-    syncGatewayPresetFromPort();
-    fillDiscoveredGatewaysSelect();
-    try{const ep=$("live-gateway-endpoint");if(ep)ep.textContent=OpenClawGateway.getDisplay();}catch(_){}
-  }
-  window.updateGatewaySwitchUi=updateGatewaySwitchUi;
-  const gwPreset=$("gateway-preset"),gwCustom=$("gateway-custom-port"),gwApply=$("btn-gateway-apply"),gwProbe=$("btn-gateway-probe");
-  if(gwPreset){
-    gwPreset.addEventListener('change',()=>{
-      if(gwCustom){
-        if(gwPreset.value==='custom')gwCustom.classList.remove('hidden');
-        else gwCustom.classList.add('hidden');
-      }
-    });
-  }
-  if(gwApply){
-    gwApply.addEventListener('click',()=>{
-      const sel=$("gateway-preset");
-      const inp=$("gateway-custom-port");
-      if(!sel)return;
-      const L=state.lang||'zh';
-      if(sel.value==='default')OpenClawGateway.setGatewayProfile('default');
-      else if(sel.value==='qclaw')OpenClawGateway.setGatewayProfile('qclaw');
-      else{
-        const n=parseInt(inp&&inp.value||'',10);
-        if(!Number.isFinite(n)||n<1||n>65535){
-          const err=L==='zh'?'请输入有效端口 (1–65535)':'Invalid port (1–65535)';
-          showGatewayNotify(err,false);
-          showApiResult(err,false);
-          return;
-        }
-        OpenClawGateway.setPort(n);
-      }
-      OpenClawGateway.refreshSubtitle();
-      ClawController.reconnect();
-      const okMsg=(L==='zh'?'已切换为 ':'Switched to ')+OpenClawGateway.getDisplay();
-      showGatewayNotify(okMsg,true);
-      showApiResult(okMsg,true);
-    });
-  }
-  if(gwProbe){
-    gwProbe.addEventListener('click',async ()=>{
-      const L=state.lang||'zh';
-      const scanning=L==='zh'?'正在扫描…':'Scanning…';
-      showGatewayNotify(scanning,true);
-      showApiResult(scanning,true);
-      try{
-        const online=await OpenClawGateway.scanOnlineGatewayPorts();
-        fillDiscoveredGatewaysSelect(online);
-        if(online.length){
-          const msg=(L==='zh'?'已检测到在线端口: ':'Detected ports: ')+online.join(', ')+(L==='zh'?'\n在「检测到的实例」中选一项即可切换并重连。':'\nPick a detected instance below to switch.');
-          showGatewayNotify(msg,true);
-          showApiResult(msg,true);
-          syncGatewayPresetFromPort();
-        }else{
-          const fail=L==='zh'?'未发现探测列表中的在线网关。可追加 ?gwProbePorts=端口1,端口2 后刷新':'No gateway on probe list. Add ?gwProbePorts=… and refresh';
-          showGatewayNotify(fail,false);
-          showApiResult(fail,false);
-        }
-      }catch(e){
-        const err=String(e&&e.message||e);
-        showGatewayNotify(err,false);
-        showApiResult(err,false);
-      }
-    });
-  }
-  const gwDisc=$("gateway-discovered");
-  if(gwDisc){
-    gwDisc.addEventListener('change',()=>{
-      const v=(gwDisc.value||'').trim();
-      if(!v)return;
-      const n=parseInt(v,10);
-      if(!Number.isFinite(n)||n<1||n>65535)return;
-      OpenClawGateway.setPort(n);
-      OpenClawGateway.refreshSubtitle();
-      syncGatewayPresetFromPort();
-      ClawController.reconnect();
-      const L=state.lang||'zh';
-      const okMsg=(L==='zh'?'已切换到 ':'Switched to ')+OpenClawGateway.getDisplay();
-      showGatewayNotify(okMsg,true);
-      showApiResult(okMsg,true);
-      fillDiscoveredGatewaysSelect();
-    });
-  }
-  updateGatewaySwitchUi(state.lang);
-  setTimeout(()=>{if(typeof refreshDiscoveredGatewaysAsync==='function')void refreshDiscoveredGatewaysAsync();},1200);
-
   /* ── 语言切换 ── */
   const btnZh=$("btn-lang-zh"),btnEn=$("btn-lang-en");
   if(btnZh)btnZh.addEventListener('click',()=>{const L='zh';state.metrics=processStats(state.payload||{},L);state.themes=themes(state.metrics,L);mountNav();renderTheme(state.idx);refreshDetails();applyLang(L);});
@@ -3579,9 +2695,6 @@ function bind(){
 const setStatus=t=>status.textContent=t,hideBoot=()=>boot.classList.add('hide');
 async function bootstrap(){const L=state.lang;setStatus(i18n[L].statusLoading);const local=localPayload();setStatus(i18n[L].statusFetch);const remote=await workerPayload();state.payload=score(remote)>score(local)?remote:local;try{if(state.payload&&Object.keys(state.payload).length)sessionStorage.setItem('openclaw_analysis_data',JSON.stringify(state.payload));}catch{}setStatus(i18n[L].statusProcess);state.metrics=processStats(state.payload||{},L);state.themes=themes(state.metrics,L);try{const sc=score(state.payload||{}),pk=state.payload||{},hasP=!!(pk.openclawPortrait&&Object.keys(pk.openclawPortrait).length),hasS=!!(pk.openclawSessionsSummary&&Object.keys(pk.openclawSessionsSummary).length);console.info('[openclaw2] 载荷诊断 quality=%s portrait=%s sessions=%s keys=%s',sc,hasP,hasS,Object.keys(pk).join(','));}catch{}}
 async function init(){applyLang(state.lang);bind();tick();setInterval(tick,1000);setInterval(()=>{if(Math.random()>.82){pl.setAttribute('r','14');pr.setAttribute('r','14');setTimeout(()=>{pl.setAttribute('r','11');pr.setAttribute('r','11')},110)}},2800);await bootstrap();mountNav();renderTheme(state.idx);refreshDetails();setStatus(i18n[state.lang].statusOnline);setTimeout(hideBoot,220);applyLang(state.lang);}
-function applyLang(L){state.lang=L;try{localStorage.setItem("openclaw2_lang",L);}catch{}const t=i18n[L];if(!t)return;$("top-title").textContent=t.topTitle;$("top-sub").textContent=t.topSub;const heroTitle=$("hero-title");if(heroTitle)heroTitle.textContent=t.heroTitle;$("link-report").textContent=t.linkReport;$("link-report").title=t.linkReport;$("link-stats").textContent=t.linkStats;$("link-stats").title=t.linkStats;$("boot").querySelector(".t").textContent=t.bootTitle;const dv=$("detail-view");if(dv){const sigTitle=$("detail-view-signal-title"),sessTitle=$("detail-view-session-title");if(sigTitle)sigTitle.textContent=t.signalPanels;if(sessTitle)sessTitle.textContent=t.sessionList;const leftBlks=dv.querySelectorAll(".detail-view-left .blk .pt");if(leftBlks[0])leftBlks[0].textContent=t.radar;if(leftBlks[1])leftBlks[1].textContent=t.wordCloud;}const dsTitle=$("data-source-title"),dsDesc=$("data-source-desc");if(dsTitle&&t.dataSourceTitle)dsTitle.textContent=t.dataSourceTitle;if(dsDesc&&t.dataSourceDesc){let txt=t.dataSourceDesc;try{if(state.metrics&&typeof score==="function"&&t.dataSourcePayloadHint&&score(state.payload||{})<4)txt=txt+"\n\n"+t.dataSourcePayloadHint;}catch{}dsDesc.textContent=txt;}const tabsEl=$("chat-agents-tabs"),histEl=$("chat-history-content");if(tabsEl)tabsEl.setAttribute("data-empty-text",L==="zh"?"暂无会话标签":"No session tabs yet");if(histEl)histEl.setAttribute("data-empty-text",L==="zh"?"连接后或加载会话后，这里会显示聊天记录。":"Chat history will appear here after connection or session load.");const sg=histEl&&histEl.querySelector(".msg-sys-group");if(sg&&typeof ClawController!=="undefined"&&ClawController._updateSysGroupHeader)ClawController._updateSysGroupHeader(sg);const bzh=$("btn-lang-zh"),ben=$("btn-lang-en");if(bzh)bzh.classList.toggle("active",L==="zh");if(ben)ben.classList.toggle("active",L==="en");document.documentElement.lang=L==="zh"?"zh-CN":"en";if(typeof window.updateMgmtLabels==="function")window.updateMgmtLabels();if(typeof window.updateGatewaySwitchUi==="function")window.updateGatewaySwitchUi(L);if(typeof LiveController!=="undefined")LiveController.updateLabels(L);}
+function applyLang(L){state.lang=L;try{localStorage.setItem("openclaw2_lang",L);}catch{}const t=i18n[L];if(!t)return;$("top-title").textContent=t.topTitle;$("top-sub").textContent=t.topSub;const heroTitle=$("hero-title");if(heroTitle)heroTitle.textContent=t.heroTitle;$("link-report").textContent=t.linkReport;$("link-report").title=t.linkReport;$("link-stats").textContent=t.linkStats;$("link-stats").title=t.linkStats;$("boot").querySelector(".t").textContent=t.bootTitle;const dv=$("detail-view");if(dv){const sigTitle=$("detail-view-signal-title"),sessTitle=$("detail-view-session-title");if(sigTitle)sigTitle.textContent=t.signalPanels;if(sessTitle)sessTitle.textContent=t.sessionList;const leftBlks=dv.querySelectorAll(".detail-view-left .blk .pt");if(leftBlks[0])leftBlks[0].textContent=t.radar;if(leftBlks[1])leftBlks[1].textContent=t.wordCloud;}const dsTitle=$("data-source-title"),dsDesc=$("data-source-desc");if(dsTitle&&t.dataSourceTitle)dsTitle.textContent=t.dataSourceTitle;if(dsDesc&&t.dataSourceDesc){let txt=t.dataSourceDesc;try{if(state.metrics&&typeof score==="function"&&t.dataSourcePayloadHint&&score(state.payload||{})<4)txt=txt+"\n\n"+t.dataSourcePayloadHint;}catch{}dsDesc.textContent=txt;}const tabsEl=$("chat-agents-tabs"),histEl=$("chat-history-content");if(tabsEl)tabsEl.setAttribute("data-empty-text",L==="zh"?"暂无会话标签":"No session tabs yet");if(histEl)histEl.setAttribute("data-empty-text",L==="zh"?"连接后或加载会话后，这里会显示聊天记录。":"Chat history will appear here after connection or session load.");const sg=histEl&&histEl.querySelector(".msg-sys-group");if(sg&&typeof ClawController!=="undefined"&&ClawController._updateSysGroupHeader)ClawController._updateSysGroupHeader(sg);const bzh=$("btn-lang-zh"),ben=$("btn-lang-en");if(bzh)bzh.classList.toggle("active",L==="zh");if(ben)ben.classList.toggle("active",L==="en");document.documentElement.lang=L==="zh"?"zh-CN":"en";if(typeof window.updateMgmtLabels==="function")window.updateMgmtLabels();if(typeof LiveController!=="undefined")LiveController.updateLabels(L);}
 init().catch(()=>{const L=state.lang;sub.textContent=L==="zh"?"数据离线":"DATA OFFLINE";setStatus(i18n[L].statusFailed);state.metrics=processStats({},L);state.themes=themes(state.metrics,L);mountNav();renderTheme(state.idx);refreshDetails();setTimeout(hideBoot,320);applyLang(L);});
 })();
-</script>
-</body>
-</html>

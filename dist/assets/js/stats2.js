@@ -4365,22 +4365,29 @@
                         countryDimensionAverages = await getCachedOrFetch(dimCacheKey, VIBE_COUNTRY_RPC_CACHE_TTL_MS, async function() {
                             var raw = null;
                             try {
-                                var proxyRes = await fetch('/api/supabase/rpc/get_country_dimension_averages', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ target_country_code: countryCode })
-                                });
-                                if (proxyRes.ok) {
-                                    var json = await proxyRes.json();
-                                    if (json && json.data != null) {
-                                        raw = json.data;
-                                        window.__countryDimFailCount = 0;
-                                    }
-                                } else {
-                                    window.__countryDimFailCount = (window.__countryDimFailCount || 0) + 1;
-                                    if (window.__countryDimFailCount >= 3) {
-                                        window.__countryDimensionAveragesDisabled = true;
-                                        hideRadarCardIfDisabled();
+                                var proxyBase = '';
+                                try {
+                                    proxyBase = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : (document.querySelector('meta[name="api-endpoint"]')?.content || '')) || '';
+                                    proxyBase = String(proxyBase || '').trim().replace(/\/+$/, '');
+                                } catch (_) {}
+                                if (proxyBase) {
+                                    var proxyRes = await fetch(proxyBase + '/api/supabase/rpc/get_country_dimension_averages', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ target_country_code: countryCode })
+                                    });
+                                    if (proxyRes.ok) {
+                                        var json = await proxyRes.json();
+                                        if (json && json.data != null) {
+                                            raw = json.data;
+                                            window.__countryDimFailCount = 0;
+                                        }
+                                    } else {
+                                        window.__countryDimFailCount = (window.__countryDimFailCount || 0) + 1;
+                                        if (window.__countryDimFailCount >= 3) {
+                                            window.__countryDimensionAveragesDisabled = true;
+                                            hideRadarCardIfDisabled();
+                                        }
                                     }
                                 }
                             } catch (e) {
@@ -4404,7 +4411,12 @@
                         });
                     } else if (!effectiveIsGlobal && countryCode) {
                         try {
-                            const proxyRes = await fetch('/api/supabase/rpc/get_country_dimension_averages', {
+                            var proxyBase2 = '';
+                            try {
+                                proxyBase2 = (typeof window.getApiEndpoint === 'function' ? window.getApiEndpoint() : (document.querySelector('meta[name="api-endpoint"]')?.content || '')) || '';
+                                proxyBase2 = String(proxyBase2 || '').trim().replace(/\/+$/, '');
+                            } catch (_) {}
+                            const proxyRes = await fetch((proxyBase2 ? proxyBase2 : '') + '/api/supabase/rpc/get_country_dimension_averages', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ target_country_code: countryCode })
@@ -30968,6 +30980,16 @@ function initCountrySelector() {
         return base || '';
     }
 
+    /** 云端 Worker 基址：与 openclaw-monitor 一致，供本地网关失败时拉全球聚合 */
+    function getFallbackCloudApiBase() {
+        try {
+            const meta = document.querySelector('meta[name="api-endpoint"]');
+            const c = meta && meta.getAttribute('content') ? String(meta.getAttribute('content')).trim().replace(/\/+$/, '') : '';
+            if (c) return c;
+        } catch (_) {}
+        return 'https://cursor-clinical-analysis.psterman.workers.dev';
+    }
+
     function safeNum(v) {
         const n = Number(v ?? 0);
         return Number.isFinite(n) ? n : 0;
@@ -31128,6 +31150,32 @@ function initCountrySelector() {
         const avgReposPerUser = Math.round(safeNum(src.avgReposPerUser ?? src.avg_github_repos_per_user) * 100) / 100;
         const mainLanguageShare = Math.round(safeNum(src.mainLanguageShare ?? src.main_language_share) * 10000) / 10000;
 
+        const jiafangSum = Math.round(safeNum(
+            src.jiafang_count_sum ?? src.jiafangCountSum ?? 0
+        ));
+        const cursorMsgForRej = Math.round(safeNum(
+            src.cursor_total_messages_sum ?? src.kowtowTotal ?? src.kowtow_total ?? 0
+        ));
+        const aiMsgSum = Math.round(safeNum(
+            src.cursor_ai_messages_sum ?? src.cursor_metrics?.ai_messages ?? 0
+        ));
+        let jiafangRejectionRate = safeNum(src.jiafang_rejection_rate ?? src.jiafangRejectionRate, NaN);
+        if (!Number.isFinite(jiafangRejectionRate) && jiafangSum > 0) {
+            const ai = aiMsgSum > 0 ? aiMsgSum : (cursorMsgForRej > 0 ? cursorMsgForRej / 2 : 0);
+            jiafangRejectionRate = ai / jiafangSum;
+        }
+        if (!Number.isFinite(jiafangRejectionRate)) jiafangRejectionRate = 0;
+
+        const toolCallsTotalSum = Math.round(safeNum(
+            src.tool_calls_total_sum ?? src.openclaw_tool_calls_sum ?? src.tool_calls_sum ?? 0
+        ));
+        const tasksExecutedSum = Math.round(safeNum(src.tasks_executed_sum ?? src.tasksExecutedSum ?? 0));
+        const scheduledTasksSum = Math.round(safeNum(src.scheduled_tasks_sum ?? src.scheduledTasksSum ?? 0));
+        const polyglotAvg = Math.round(safeNum(
+            src.polyglot_avg_languages_per_repo ?? src.avg_languages_per_repo_national ?? 0
+        ) * 1000) / 1000;
+        const topTierSum = Math.round(safeNum(totalStars) + safeNum(totalForks) + safeNum(totalFollowers));
+
         return {
             avgChars: Math.round(safeNum(avgChars) * 100) / 100,
             totalChars: Math.round(safeNum(totalChars) * 100) / 100,
@@ -31145,6 +31193,14 @@ function initCountrySelector() {
             avgKowtowPerUser,
             avgReposPerUser,
             mainLanguageShare,
+            jiafang_count_sum: jiafangSum,
+            cursor_ai_messages_sum: aiMsgSum,
+            jiafang_rejection_rate: Math.round(jiafangRejectionRate * 100000) / 100000,
+            tool_calls_total_sum: toolCallsTotalSum,
+            tasks_executed_sum: tasksExecutedSum,
+            scheduled_tasks_sum: scheduledTasksSum,
+            polyglot_avg_languages_per_repo: polyglotAvg,
+            top_tier_sum: topTierSum,
         };
     }
 
@@ -31261,6 +31317,13 @@ function initCountrySelector() {
                     totalStars: row.total_stars_sum ?? row.github_stars_sum,
                     totalForks: row.total_forks_sum ?? row.github_forks_sum,
                     totalFollowers: row.total_followers_sum ?? row.github_followers_sum,
+                    jiafang_count_sum: row.jiafang_count_sum,
+                    cursor_total_messages_sum: row.cursor_total_messages_sum,
+                    cursor_ai_messages_sum: row.cursor_ai_messages_sum,
+                    jiafang_rejection_rate: row.jiafang_rejection_rate,
+                    tool_calls_total_sum: row.openclaw_tool_calls_sum ?? row.tool_calls_total_sum,
+                    tasks_executed_sum: row.tasks_executed_sum,
+                    polyglot_avg_languages_per_repo: row.polyglot_avg_languages_per_repo,
                 });
                 if (normalized.userCount <= 0) continue;
                 snapshot[cc] = normalized;
@@ -31287,14 +31350,27 @@ function initCountrySelector() {
             if (window.__pkSnapshotPromise) return await window.__pkSnapshotPromise;
 
             const base = getApiBase();
+            const cloudBase = getFallbackCloudApiBase();
             window.__pkSnapshotPromise = (async () => {
                 let payload = null;
-                try {
-                    const url = apiJoin(base, `/api/global-aggregate?view=global&_t=${now}`);
-                    const res = await fetch(url, { headers: { 'Accept': 'application/json' }, mode: 'cors', credentials: 'omit' });
-                    if (res.ok) payload = await res.json();
-                } catch (_) {
-                    payload = null;
+                const tryBases = [];
+                if (base) tryBases.push(base);
+                if (cloudBase && tryBases.indexOf(cloudBase) < 0) tryBases.push(cloudBase);
+                if (!tryBases.length) tryBases.push('');
+                for (let bi = 0; bi < tryBases.length; bi++) {
+                    try {
+                        const url = apiJoin(tryBases[bi], `/api/global-aggregate?view=global&_t=${now}`);
+                        const res = await fetch(url, { headers: { 'Accept': 'application/json' }, mode: 'cors', credentials: 'omit' });
+                        if (res.ok) {
+                            payload = await res.json();
+                            if (payload && payload.success === true && payload.snapshot && typeof payload.snapshot === 'object' && Object.keys(payload.snapshot).length > 0) {
+                                break;
+                            }
+                            payload = null;
+                        }
+                    } catch (_) {
+                        payload = null;
+                    }
                 }
                 let snapshot = {};
                 let updated_at = null;
@@ -31306,7 +31382,10 @@ function initCountrySelector() {
                     updated_at_sec = payload.updated_at_sec || null;
                 }
                 if (!Object.keys(snapshot).length) {
-                    const fb = await fetchCountryPkFromCountryStatsGlobal(base);
+                    let fb = await fetchCountryPkFromCountryStatsGlobal(base);
+                    if ((!fb || !fb.snapshot || Object.keys(fb.snapshot).length === 0) && cloudBase && cloudBase !== base) {
+                        fb = await fetchCountryPkFromCountryStatsGlobal(cloudBase);
+                    }
                     if (fb && fb.snapshot && Object.keys(fb.snapshot).length > 0) {
                         snapshot = normalizePkSnapshot(fb.snapshot);
                         updated_at = fb.updated_at != null ? fb.updated_at : updated_at;
@@ -31520,6 +31599,12 @@ function initCountrySelector() {
                     avgKowtowPerUser,
                     avgReposPerUser,
                     mainLanguageShare,
+                    jiafang_rejection_rate: safeNum(normalized.jiafang_rejection_rate, 0),
+                    jiafang_count_sum: safeNum(normalized.jiafang_count_sum, 0),
+                    tool_calls_total_sum: safeNum(normalized.tool_calls_total_sum, 0),
+                    tasks_executed_sum: safeNum(normalized.tasks_executed_sum, 0),
+                    polyglot_avg_languages_per_repo: safeNum(normalized.polyglot_avg_languages_per_repo, 0),
+                    top_tier_sum: safeNum(normalized.top_tier_sum, 0),
                 });
             }
         } catch (_) {}
@@ -31614,31 +31699,64 @@ function initCountrySelector() {
                 case 'github':
                     return [
                         {
-                            id: 'githubScore',
-                            title: '硬核战力榜',
-                            subtitle: '看国家层面的平均开源战力，谁的开发者更硬核',
-                            label: '平均战力',
-                            metric: (item) => item.githubScore,
-                            format: (item) => formatFloat2(item.githubScore),
-                            compare: (a, b) => (b.githubScore - a.githubScore) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
+                            id: 'jiafangRejection',
+                            title: '杠精榜（甲方上身）',
+                            subtitle: '国家级 SUM(AI 回复条数) ÷ SUM(甲方化/否定信号次数)。表示平均每隔多少条 AI 回复会出现一次否定倾向；数值越小越「杠」。未上报 ai_messages 时用对话条数÷2 近似',
+                            label: 'AI 回复/次否定',
+                            metric: (item) => item.jiafang_rejection_rate,
+                            format: (item) => {
+                                const j = Number(item.jiafang_count_sum ?? 0) || 0;
+                                if (j <= 0) return '暂无';
+                                const r = Number.isFinite(item.jiafang_rejection_rate) ? item.jiafang_rejection_rate : 0;
+                                if (!Number.isFinite(r) || r <= 0) return '暂无';
+                                return `约 ${r.toFixed(1)} 条 / 次`;
+                            },
+                            compare: (a, b) => {
+                                const iv = (x) => {
+                                    const j = Number(x.jiafang_count_sum ?? 0) || 0;
+                                    if (j <= 0) return Number.POSITIVE_INFINITY;
+                                    const r = Number.isFinite(x.jiafang_rejection_rate) ? x.jiafang_rejection_rate : 0;
+                                    if (!Number.isFinite(r) || r <= 0) return Number.POSITIVE_INFINITY;
+                                    return r;
+                                };
+                                return (iv(a) - iv(b)) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc);
+                            },
                         },
                         {
-                            id: 'githubImpact',
-                            title: '开源影响力榜',
-                            subtitle: '看国家总战力体量，兼顾战力与参与规模',
-                            label: '总战力',
-                            metric: (item) => item.githubScore * item.userCount,
-                            format: (item) => formatFloat2(item.githubScore * item.userCount),
-                            compare: (a, b) => ((b.githubScore * b.userCount) - (a.githubScore * a.userCount)) || (b.githubScore - a.githubScore) || a.cc.localeCompare(b.cc),
+                            id: 'toolMaster',
+                            title: '工具榜 (Tool Master)',
+                            subtitle: 'OpenClaw stats.tool_calls_total 国家级 SUM',
+                            label: '工具调用',
+                            metric: (item) => item.tool_calls_total_sum,
+                            format: (item) => `${formatInt(item.tool_calls_total_sum)} 次`,
+                            compare: (a, b) => (b.tool_calls_total_sum - a.tool_calls_total_sum) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
                         },
                         {
-                            id: 'githubDensity',
-                            title: '硬核密度榜',
-                            subtitle: '看高战力开发者在人均高投入国家中的集中度',
-                            label: '战力 x 投入',
-                            metric: (item) => item.githubScore * Math.max(item.tokensPerUser, 1),
-                            format: (item) => formatFloat2(item.githubScore * Math.max(item.tokensPerUser, 1)),
-                            compare: (a, b) => ((b.githubScore * Math.max(b.tokensPerUser, 1)) - (a.githubScore * Math.max(a.tokensPerUser, 1))) || (b.githubScore - a.githubScore) || a.cc.localeCompare(b.cc),
+                            id: 'taskRunner',
+                            title: '任务榜 (Task Runner)',
+                            subtitle: 'OpenClaw 后台定时任务数 scheduled_tasks_count 国家级 SUM',
+                            label: '定时任务',
+                            metric: (item) => item.scheduled_tasks_sum,
+                            format: (item) => (item.scheduled_tasks_sum > 0 ? `${formatInt(item.scheduled_tasks_sum)} 条` : '暂无数据'),
+                            compare: (a, b) => (b.scheduled_tasks_sum - a.scheduled_tasks_sum) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
+                        },
+                        {
+                            id: 'polyglot',
+                            title: '全栈榜 (Polyglot)',
+                            subtitle: '该国用户 github_stats 每仓库 languages 种类数之全国平均（AVG）',
+                            label: '语言种类/仓',
+                            metric: (item) => item.polyglot_avg_languages_per_repo,
+                            format: (item) => (item.polyglot_avg_languages_per_repo > 0 ? formatFloat2(item.polyglot_avg_languages_per_repo) : '暂无数据'),
+                            compare: (a, b) => (b.polyglot_avg_languages_per_repo - a.polyglot_avg_languages_per_repo) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
+                        },
+                        {
+                            id: 'topTier',
+                            title: '大佬榜 (Top Tier)',
+                            subtitle: '国家级 SUM(Stars + Forks + Followers)',
+                            label: '影响力',
+                            metric: (item) => item.top_tier_sum,
+                            format: (item) => formatInt(item.top_tier_sum),
+                            compare: (a, b) => (b.top_tier_sum - a.top_tier_sum) || (b.userCount - a.userCount) || a.cc.localeCompare(b.cc),
                         },
                     ];
                 case 'efficiency':
@@ -31878,12 +31996,34 @@ function initCountrySelector() {
         }
 
         try {
-            var response = await fetch(`/api/v2/my-soul-words?f=${encodeURIComponent(fingerprint)}`);
+            var apiEndpoint = '';
+            try {
+                if (typeof window.getApiEndpoint === 'function') {
+                    apiEndpoint = String(window.getApiEndpoint() || '').trim().replace(/\/+$/, '');
+                }
+                if (!apiEndpoint && document.querySelector) {
+                    var meta = document.querySelector('meta[name="api-endpoint"]');
+                    apiEndpoint = meta && meta.getAttribute('content') ? String(meta.getAttribute('content')).trim().replace(/\/+$/, '') : '';
+                }
+                if (!apiEndpoint) apiEndpoint = window.location && window.location.origin ? String(window.location.origin).replace(/\/+$/, '') : '';
+            } catch (_) {}
+
+            var soulWordsUrl = (apiEndpoint ? apiEndpoint : '') + `/api/v2/my-soul-words?f=${encodeURIComponent(fingerprint)}`;
+            var response = await fetch(soulWordsUrl, {
+                headers: { 'Accept': 'application/json' }
+            });
             if (!response.ok) {
                 console.warn('[SoulWords] 查询失败:', response.status);
                 return [];
             }
-            var result = await response.json();
+            var contentType = (response.headers && response.headers.get && response.headers.get('content-type')) ? String(response.headers.get('content-type')) : '';
+            var text = await response.text();
+            if (!text || !String(text).trim()) return [];
+            if (contentType && contentType.toLowerCase().indexOf('json') === -1 && String(text).trim().charAt(0) === '<') {
+                console.warn('[SoulWords] 返回的不是 JSON，已忽略');
+                return [];
+            }
+            var result = JSON.parse(text);
             if (result.status === 'success' && Array.isArray(result.data)) {
                 console.log('[SoulWords] 获取到', result.data.length, '个灵魂词');
                 return result.data;
@@ -32136,6 +32276,7 @@ document.addEventListener('click', function(e) {
         try { el.textContent = String(text ?? ''); } catch (_) { }
     }
 
+    /** 本地网关探测：失败静默（no-cors 下无状态码），避免控制台刷屏 */
     async function probeOpenClawPortViaHttp(host, port, timeoutMs) {
         var base = 'http://' + host + ':' + port;
 
@@ -32160,7 +32301,9 @@ document.addEventListener('click', function(e) {
             return 0;
         };
 
-        var s = await tryCors('/api/channels/status', 'GET', null);
+        var s = await tryCors('/', 'GET', null);
+        if (s > 0) return true;
+        s = await tryCors('/api/channels/status', 'GET', null);
         if (s > 0) return true;
         s = await tryCors('/api/channels', 'GET', null);
         if (s > 0) return true;

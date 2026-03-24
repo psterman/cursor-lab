@@ -3497,7 +3497,8 @@ async function handleFileUpload(event, type, callbacks = {}) {
             updatedAt: null,
             lastActiveAt: null,
             skills: [],
-            tools: { entriesCount: 0, sessionsWithTools: 0, toolNames: [] },
+            tools: { entriesCount: 0, sessionsWithTools: 0, toolNames: [], toolCallsTotal: 0, maxEntriesPerSession: 0, toolKinds: 0 },
+            tasks: { count: 0, total: 0, taskCount: 0, tasksCount: 0, tasksExecuted: 0, uniqueTaskIds: 0, taskIds: [] },
             heartbeat: { lastHeartbeatText: null, lastHeartbeatSentAt: null },
             status: {
               abortedLastRunCount: 0,
@@ -3522,6 +3523,7 @@ async function handleFileUpload(event, type, callbacks = {}) {
             _routeHintSet: new Set(),
             _skillsSet: new Set(),
             _toolSet: new Set(),
+            _taskIdSet: new Set(),
             _updatedAtMs: null,
           };
           for (const entry of sessionsIndex) {
@@ -3646,6 +3648,8 @@ async function handleFileUpload(event, type, callbacks = {}) {
             if (entriesArr.length > 0) {
               summary.tools.sessionsWithTools += 1;
               summary.tools.entriesCount = Math.max(summary.tools.entriesCount, entriesArr.length);
+              summary.tools.maxEntriesPerSession = Math.max(summary.tools.maxEntriesPerSession, entriesArr.length);
+              summary.tools.toolCallsTotal += entriesArr.length;
               entriesArr.forEach((toolEntry) => {
                 if (typeof toolEntry === 'string') {
                   if (toolEntry.trim()) summary._toolSet.add(toolEntry.trim());
@@ -3654,6 +3658,28 @@ async function handleFileUpload(event, type, callbacks = {}) {
                 const toolName = pickString(toolEntry, ['name', 'toolName', 'tool_name', 'id', 'key', 'title', 'function.name']);
                 if (toolName) summary._toolSet.add(toolName);
               });
+            }
+
+            const taskId = pickString(entry, [
+              'taskId', 'task_id', 'task.id',
+              'task.taskId', 'task.task_id',
+              'runner.taskId', 'runner.task_id',
+              'jobId', 'job_id',
+              'workflowId', 'workflow_id',
+            ]);
+            if (taskId) summary._taskIdSet.add(taskId);
+            const taskCountExplicit = pickNumber(entry, [
+              'tasksExecuted', 'tasks_executed',
+              'taskCount', 'task_count',
+              'tasksCount', 'tasks_count',
+              'task.total', 'task.count',
+              'runner.taskCount', 'runner.task_count',
+              'runner.tasksExecuted', 'runner.tasks_executed',
+              'stats.tasksExecuted', 'stats.tasks_executed',
+              'meta.taskCount', 'meta.tasksExecuted',
+            ]) ?? deepFindNumberByKeyRegex(entry, /tasks?.*(executed|count|total)|executed.*tasks?|task.?count|task.?total/i);
+            if (taskCountExplicit != null) {
+              summary.tasks.count += Math.max(0, Math.trunc(taskCountExplicit));
             }
 
             const lastHeartbeatText = pickString(entry, ['lastHeartbeatText', 'last_heartbeat_text', 'heartbeat.lastText', 'heartbeat.last_text']);
@@ -3748,6 +3774,17 @@ async function handleFileUpload(event, type, callbacks = {}) {
           summary.channel.routeHints = [...summary._routeHintSet];
           summary.skills = [...summary._skillsSet];
           summary.tools.toolNames = [...summary._toolSet];
+          summary.tools.toolKinds = summary._toolSet.size;
+          summary.tools.totalCalls = summary.tools.toolCallsTotal;
+          summary.tasks.uniqueTaskIds = summary._taskIdSet.size;
+          if (summary.tasks.count <= 0 && summary.tasks.uniqueTaskIds > 0) {
+            summary.tasks.count = summary.tasks.uniqueTaskIds;
+          }
+          summary.tasks.total = summary.tasks.count;
+          summary.tasks.taskCount = summary.tasks.count;
+          summary.tasks.tasksCount = summary.tasks.count;
+          summary.tasks.tasksExecuted = summary.tasks.count;
+          summary.tasks.taskIds = [...summary._taskIdSet].slice(0, 200);
           delete summary._providerSet;
           delete summary._modelSet;
           delete summary._channelSet;
@@ -3757,6 +3794,7 @@ async function handleFileUpload(event, type, callbacks = {}) {
           delete summary._routeHintSet;
           delete summary._skillsSet;
           delete summary._toolSet;
+          delete summary._taskIdSet;
           delete summary._updatedAtMs;
           openclawSessionsSummary = summary;
           openclawSessionTokenMap = map;
@@ -4117,6 +4155,8 @@ async function handleFileUpload(event, type, callbacks = {}) {
         await vibeAnalyzer.uploadToSupabase(null, null, null, {
           sourceEngine: 'openclaw',
           openclawPortrait,
+          openclawSessionsSummary: openclawSessionsSummary || null,
+          openclawTasksSummary: (openclawSessionsSummary && openclawSessionsSummary.tasks) ? openclawSessionsSummary.tasks : null,
           stats: globalStats,
           ...(callbacks.syncMode === 'update' ? { mode: 'update' } : {})
         });
@@ -4130,6 +4170,7 @@ async function handleFileUpload(event, type, callbacks = {}) {
         const payload = {
           openclawPortrait,
           openclawSessionsSummary: openclawSessionsSummary || null,
+          openclawTasksSummary: (openclawSessionsSummary && openclawSessionsSummary.tasks) ? openclawSessionsSummary.tasks : null,
           stats: globalStats ? {
             modelUsage: globalStats.modelUsage,
             usage: globalStats.usage,
@@ -4152,6 +4193,7 @@ async function handleFileUpload(event, type, callbacks = {}) {
       };
       if (openclawPortrait) payload.openclawPortrait = openclawPortrait;
       if (openclawSessionsSummary) payload.openclawSessionsSummary = openclawSessionsSummary;
+      if (openclawSessionsSummary && openclawSessionsSummary.tasks) payload.openclawTasksSummary = openclawSessionsSummary.tasks;
       onComplete(payload);
     } else {
       // 如果没有回调，使用原来的逻辑：500ms 淡出后再显示结果，减少闪烁

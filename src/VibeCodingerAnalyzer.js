@@ -3294,23 +3294,87 @@ export class VibeCodingerAnalyzer {
           } catch (_) {}
           const portrait = opts.openclawPortrait;
           const stats = opts.stats || opts.openclawStats || {};
+          const sessionsSummary = opts.openclawSessionsSummary && typeof opts.openclawSessionsSummary === 'object'
+            ? opts.openclawSessionsSummary
+            : {};
+          const tasksSummary = opts.openclawTasksSummary && typeof opts.openclawTasksSummary === 'object'
+            ? opts.openclawTasksSummary
+            : ((sessionsSummary.tasks && typeof sessionsSummary.tasks === 'object') ? sessionsSummary.tasks : {});
           const dims = portrait.dimensions || {};
           const consumption = dims.consumptionCost || {};
           const modelDim = dims.modelPreference || {};
           const health = dims.stabilityHealth || {};
           const toolHeat = dims.toolSkillHeat || {};
           const taskHabit = dims.taskHabit || {};
+          const summaryTools = sessionsSummary.tools && typeof sessionsSummary.tools === 'object' ? sessionsSummary.tools : {};
           const hourlyActivity = stats.hourlyActivity || (stats.hourlyHeatmap && Array.isArray(stats.hourlyHeatmap) ? stats.hourlyHeatmap.map((h) => h.count || 0) : Array(24).fill(0));
           const hourlyHeatmap = Array.isArray(hourlyActivity) && hourlyActivity.length >= 24
             ? hourlyActivity.map((count, hour) => ({ hour, count }))
             : Array.from({ length: 24 }, (_, i) => ({ hour: i, count: 0 }));
+          const recordsTotal = Math.max(0, Number(
+            stats.totalMessages ??
+            stats.recordsTotal ??
+            stats.records_total ??
+            sessionsSummary.sessionCount ??
+            0
+          ) || 0);
+          const toolKinds = Math.max(0, Number(
+            toolHeat.toolKinds ??
+            summaryTools.toolKinds ??
+            (Array.isArray(summaryTools.toolNames) ? summaryTools.toolNames.length : 0) ??
+            0
+          ) || 0);
+          // 工具调用总次数与「种类数」不得混用；不得用 toolKinds>0 覆盖真实 toolCallsTotal
+          const toolCallsTotal = Math.max(0, Number(
+            stats.toolCallsTotal ??
+            stats.tool_calls_total ??
+            toolHeat.toolCallsTotal ??
+            toolHeat.tool_calls_total ??
+            summaryTools.toolCallsTotal ??
+            summaryTools.tool_calls_total ??
+            summaryTools.totalCalls ??
+            summaryTools.calls ??
+            summaryTools.entriesCount ??
+            summaryTools.sessionsWithTools ??
+            0
+          ) || 0);
+          const tasksExecuted = Math.max(0, Number(
+            stats.tasksExecuted ??
+            stats.tasks_executed ??
+            tasksSummary.count ??
+            tasksSummary.total ??
+            tasksSummary.taskCount ??
+            tasksSummary.tasksCount ??
+            tasksSummary.tasksExecuted ??
+            0
+          ) || 0);
+          const totalChars = Math.max(0, Number(
+            consumption.totalChars ??
+            stats.totalChars ??
+            stats.total_chars ??
+            0
+          ) || 0);
+          const workDays = Math.max(0, Number(
+            portrait.lifeDays ??
+            portrait.life_days ??
+            stats.workDays ??
+            stats.work_days ??
+            sessionsSummary.workDays ??
+            sessionsSummary.work_days ??
+            0
+          ) || 0);
           const openclawPayload = {
             fingerprint,
             github_login: github_login || null,
             model_usage: stats.modelUsage || {},
             tool_usage: stats.toolUsage || {},
             skills_stats: stats.skillsByName || stats.skillsUsage || {},
+            openclawSessionsSummary: sessionsSummary,
+            sessionsSummary: sessionsSummary,
+            openclawTasksSummary: tasksSummary,
+            tasksSummary: tasksSummary,
             hourly_heatmap: hourlyHeatmap,
+            records_total: recordsTotal,
             total_tokens: consumption.totalTokens ?? stats.usage?.totalTokens ?? 0,
             prompt_tokens: consumption.promptTokens ?? stats.usage?.promptTokens ?? 0,
             completion_tokens: consumption.completionTokens ?? stats.usage?.completionTokens ?? 0,
@@ -3323,7 +3387,11 @@ export class VibeCodingerAnalyzer {
             success_count: health.successCount ?? stats.successCount ?? 0,
             failure_count: health.failureCount ?? stats.failureCount ?? 0,
             abnormal_interrupt_count: health.abnormalInterruptions ?? stats.abnormalInterruptions ?? 0,
-            tool_calls_total: stats.toolCallsTotal ?? 0,
+            tool_calls_total: toolCallsTotal,
+            tool_kinds: toolKinds,
+            tasks_executed: tasksExecuted,
+            total_chars: totalChars,
+            work_days: workDays,
             raw_summary: { dimensions: dims, composite: portrait.composite || {} },
             analyzed_at: new Date().toISOString(),
           };

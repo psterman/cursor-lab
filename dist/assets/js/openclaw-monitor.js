@@ -60,6 +60,32 @@
         });
         return ocAuthSessionCache.inflight;
     }
+    function resolveClientFingerprint() {
+        try {
+            var keys = [
+                'user_fingerprint',
+                'fingerprint',
+                'cursor_clinical_fingerprint',
+                'vibe_fp'
+            ];
+            for (var i = 0; i < keys.length; i++) {
+                var v = '';
+                try { v = (localStorage.getItem(keys[i]) || '').trim(); } catch (_) {}
+                if (v) {
+                    try { localStorage.setItem('user_fingerprint', v); } catch (_) {}
+                    return v;
+                }
+            }
+        } catch (_) {}
+        try {
+            var fp = String(window.fpId || '').trim();
+            if (fp) {
+                try { localStorage.setItem('user_fingerprint', fp); } catch (_) {}
+                return fp;
+            }
+        } catch (_) {}
+        return '';
+    }
     var CHANNEL_ICON_META = [
         { id: 'telegram', label: 'Telegram', domain: 'telegram.org', keywords: ['telegram', 'tg'] },
         { id: 'feishu', label: 'Feishu', domain: 'feishu.cn', keywords: ['feishu', 'lark', '飞书'] },
@@ -380,6 +406,251 @@
         return [];
     }
 
+    function parseGatewayTasksCount(payload) {
+        if (payload == null) return 0;
+        if (Array.isArray(payload)) return payload.length;
+        if (typeof payload === 'number' && Number.isFinite(payload)) return Math.max(0, Math.floor(payload));
+        if (typeof payload !== 'object') return 0;
+
+        var candidates = [
+            payload.count,
+            payload.total,
+            payload.totalCount,
+            payload.taskCount,
+            payload.tasksCount
+        ];
+        for (var i = 0; i < candidates.length; i++) {
+            var n = Number(candidates[i]);
+            if (Number.isFinite(n) && n >= 0) return Math.floor(n);
+        }
+
+        if (Array.isArray(payload.tasks)) return payload.tasks.length;
+        if (Array.isArray(payload.items)) return payload.items.length;
+        if (Array.isArray(payload.data)) return payload.data.length;
+        if (payload.tasks && typeof payload.tasks === 'object') {
+            if (Array.isArray(payload.tasks.list)) return payload.tasks.list.length;
+            if (Array.isArray(payload.tasks.items)) return payload.tasks.items.length;
+        }
+        return 0;
+    }
+
+    function extractGatewayTasksList(payload) {
+        if (payload == null) return [];
+        if (Array.isArray(payload)) return payload;
+        if (typeof payload !== 'object') return [];
+        if (Array.isArray(payload.tasks)) return payload.tasks;
+        if (Array.isArray(payload.items)) return payload.items;
+        if (Array.isArray(payload.data)) return payload.data;
+        if (payload.tasks && typeof payload.tasks === 'object') {
+            if (Array.isArray(payload.tasks.list)) return payload.tasks.list;
+            if (Array.isArray(payload.tasks.items)) return payload.tasks.items;
+        }
+        return [];
+    }
+
+    function isOpenClawTaskScheduled(task) {
+        if (!task || typeof task !== 'object') return false;
+        if (task.schedule || task.cron || task.interval || task.intervalMs) return true;
+        if (task.trigger === 'schedule' || task.type === 'scheduled') return true;
+        if (task.kind === 'cron' || task.kind === 'interval') return true;
+        if (task.recurring === true) return true;
+        var cfg = task.config || task.spec;
+        if (cfg && typeof cfg === 'object' && (cfg.schedule || cfg.cron || cfg.interval || cfg.intervalMs)) return true;
+        return false;
+    }
+
+    /** 任务总数 + 定时任务条数（来自 Gateway tasks.list 等结构） */
+    function parseGatewayTaskRollup(payload) {
+        var list = extractGatewayTasksList(payload);
+        var total = list.length;
+        if (total === 0) total = parseGatewayTasksCount(payload);
+        var scheduled = 0;
+        for (var i = 0; i < list.length; i++) {
+            if (isOpenClawTaskScheduled(list[i])) scheduled++;
+        }
+        return {
+            total: Math.max(0, Math.floor(Number(total) || 0)),
+            scheduled: Math.max(0, Math.floor(Number(scheduled) || 0))
+        };
+    }
+
+    function fetchGatewayTasksCountViaHttp(token) {
+        return new Promise(function(resolve) {
+            if (typeof fetch !== 'function') {
+                resolve({ total: 0, scheduled: 0 });
+                return;
+            }
+
+            var addr = getOpenClawGatewayAddress();
+            var currentOrigin = '';
+            var gatewayOrigin = '';
+            try {
+                currentOrigin = window.location && window.location.origin ? String(window.location.origin) : '';
+            } catch (_) {}
+            try {
+                gatewayOrigin = addr && addr.httpBase ? new URL(addr.httpBase).origin : '';
+            } catch (_) {}
+            // Cross-origin requests to local gateway endpoints often fail preflight.
+            // Skip HTTP probing in that case and fallback to websocket directly.
+            if (currentOrigin && gatewayOrigin && currentOrigin !== gatewayOrigin) {
+                fetchGatewayTasksCountViaWebSocket(token).then(resolve).catch(function() { resolve({ total: 0, scheduled: 0 }); });
+                return;
+            }
+
+            var tokenQuery = token ? ('?token=' + encodeURIComponent(String(token))) : '';
+            var urls = [
+                addr.httpBase + '/tasks' + tokenQuery,
+                addr.httpBase + '/api/tasks' + tokenQuery
+            ];
+            var headers = {};
+            // Only attach Authorization on same-origin to avoid OPTIONS preflight CORS failures.
+            if (token && currentOrigin && gatewayOrigin && currentOrigin === gatewayOrigin) {
+                headers.Authorization = 'Bearer ' + token;
+            }
+
+            var tryIndex = 0;
+            var tryNext = function() {
+                if (tryIndex >= urls.length) {
+                    fetchGatewayTasksCountViaWebSocket(token).then(resolve).catch(function() { resolve({ total: 0, scheduled: 0 }); });
+                    return;
+                }
+                var url = urls[tryIndex++];
+                fetch(url, {
+                    method: 'GET',
+                    headers: headers,
+                    credentials: 'include',
+                    mode: 'cors'
+                }).then(function(resp) {
+                    if (!resp || !resp.ok) {
+                        tryNext();
+                        return;
+                    }
+                    return resp.json().then(function(json) {
+                        var rollup = parseGatewayTaskRollup(json);
+                        if (rollup.total > 0 || rollup.scheduled > 0 || Array.isArray(json) || (json && typeof json === 'object')) {
+                            resolve(rollup);
+                        } else {
+                            tryNext();
+                        }
+                    }).catch(function() {
+                        tryNext();
+                    });
+                }).catch(function() {
+                    tryNext();
+                });
+            };
+
+            tryNext();
+        });
+    }
+
+    function fetchGatewayTasksCountViaWebSocket(token) {
+        return new Promise(function(resolve) {
+            if (typeof WebSocket === 'undefined' || !token) {
+                resolve({ total: 0, scheduled: 0 });
+                return;
+            }
+
+            var addr = getOpenClawGatewayAddress();
+            var ws = null;
+            var done = false;
+            var timeout = null;
+            var connectSeq = 1;
+            var rpcId = 'rpc-openclaw-tasks-count';
+            var connectSent = false;
+            var wsUrl = addr.wsBase + '?token=' + encodeURIComponent(token);
+
+            var finish = function(rollup) {
+                if (done) return;
+                done = true;
+                try { if (timeout) clearTimeout(timeout); } catch (_) {}
+                try { if (ws && ws.readyState === 1) ws.close(); } catch (_) {}
+                if (rollup && typeof rollup === 'object' && ('total' in rollup || 'scheduled' in rollup)) {
+                    resolve({
+                        total: Math.max(0, Math.floor(Number(rollup.total) || 0)),
+                        scheduled: Math.max(0, Math.floor(Number(rollup.scheduled) || 0))
+                    });
+                } else {
+                    var n = Number.isFinite(Number(rollup)) && Number(rollup) > 0 ? Math.floor(Number(rollup)) : 0;
+                    resolve({ total: n, scheduled: 0 });
+                }
+            };
+
+            var send = function(payload) {
+                try {
+                    if (ws && ws.readyState === 1) ws.send(JSON.stringify(payload));
+                } catch (_) {}
+            };
+
+            var sendConnect = function() {
+                connectSent = true;
+                send({
+                    type: 'req',
+                    id: 'connect-' + String(connectSeq++),
+                    method: 'connect',
+                    params: {
+                        minProtocol: 3,
+                        maxProtocol: 3,
+                        client: {
+                            id: 'webchat',
+                            version: 'dev',
+                            platform: 'stats2',
+                            mode: 'webchat',
+                            instanceId: 'stats2-openclaw-monitor'
+                        },
+                        role: 'operator',
+                        scopes: ['operator.admin', 'operator.approvals', 'operator.pairing', 'operator.read', 'operator.write'],
+                        caps: [],
+                        userAgent: 'stats2-openclaw-monitor',
+                        locale: 'zh-CN',
+                        auth: { token: token }
+                    }
+                });
+            };
+
+            try {
+                ws = new WebSocket(wsUrl);
+            } catch (_) {
+                resolve({ total: 0, scheduled: 0 });
+                return;
+            }
+
+            timeout = setTimeout(function() { finish({ total: 0, scheduled: 0 }); }, 3500);
+
+            ws.onopen = function() { sendConnect(); };
+            ws.onerror = function() { finish({ total: 0, scheduled: 0 }); };
+            ws.onclose = function() { if (!done) finish({ total: 0, scheduled: 0 }); };
+            ws.onmessage = function(evt) {
+                var msg = null;
+                try { msg = JSON.parse(String(evt.data || '')); } catch (_) { return; }
+                var event = msg.event || msg.type || msg.method || '';
+                if (event === 'connect.challenge') {
+                    sendConnect();
+                    return;
+                }
+                if (typeof msg.id === 'string' && msg.id.indexOf('connect-') === 0) {
+                    if (msg.ok === true || msg.result != null || (msg.payload && msg.payload.type === 'hello-ok')) {
+                        send({ type: 'req', id: rpcId, method: 'tasks.list', params: {} });
+                    } else {
+                        finish({ total: 0, scheduled: 0 });
+                    }
+                    return;
+                }
+                if (msg.id === rpcId) {
+                    if (msg.ok === true) {
+                        finish(parseGatewayTaskRollup(msg.payload || msg.result || msg.data || msg));
+                    } else {
+                        finish({ total: 0, scheduled: 0 });
+                    }
+                    return;
+                }
+                if (!connectSent && (event === 'hello-ok' || (msg.ok === true && msg.payload))) {
+                    send({ type: 'req', id: rpcId, method: 'tasks.list', params: {} });
+                }
+            };
+        });
+    }
+
     function fetchGatewayConfiguredChannelIconsViaHttp(token) {
         return new Promise(function(resolve) {
             if (typeof fetch !== 'function') {
@@ -514,7 +785,7 @@
                                 instanceId: 'stats2-openclaw-monitor'
                             },
                             role: 'operator',
-                            scopes: ['operator.admin', 'operator.approvals', 'operator.pairing'],
+                            scopes: ['operator.admin', 'operator.approvals', 'operator.pairing', 'operator.read', 'operator.write'],
                             caps: [],
                             userAgent: 'stats2-openclaw-monitor',
                             locale: 'zh-CN',
@@ -1514,6 +1785,15 @@
         } catch (_) {}
         var portrait = local.openclawPortrait || {};
         var stats = local.stats || {};
+        var localStats = (stats && typeof stats === 'object') ? stats : {};
+        var localSummary = (local && (local.openclawSessionsSummary || local.sessionsSummary) && typeof (local.openclawSessionsSummary || local.sessionsSummary) === 'object')
+            ? (local.openclawSessionsSummary || local.sessionsSummary)
+            : {};
+        var localSummaryTools = (localSummary && localSummary.tools && typeof localSummary.tools === 'object') ? localSummary.tools : {};
+        var localSummaryTasks = (localSummary && localSummary.tasks && typeof localSummary.tasks === 'object') ? localSummary.tasks : {};
+        var localTasksSummary = (local && local.openclawTasksSummary && typeof local.openclawTasksSummary === 'object')
+            ? local.openclawTasksSummary
+            : localSummaryTasks;
         var dims = portrait.dimensions || {};
         var consumption = dims.consumptionCost || {};
         var modelDim = dims.modelPreference || {};
@@ -1522,8 +1802,7 @@
         var hourlyHeatmap = Array.isArray(hourlyActivity) && hourlyActivity.length >= 24
             ? hourlyActivity.map(function(count, hour) { return { hour: hour, count: count }; })
             : Array.from({ length: 24 }, function(_, i) { return { hour: i, count: 0 }; });
-        var fingerprint = '';
-        try { fingerprint = (localStorage.getItem('user_fingerprint') || window.fpId || '').trim(); } catch (_) {}
+        var fingerprint = resolveClientFingerprint();
         var github_login = '';
         try {
             var ghTok = (window.__VIBE_GITHUB_ACCESS_TOKEN__ || (localStorage && localStorage.getItem('vibe_github_access_token'))) || '';
@@ -1627,6 +1906,87 @@
         var cachedTokensVal = (consumption && consumption.cachedTokens) != null ? consumption.cachedTokens : ((stats.usage && stats.usage.cachedTokens) != null ? stats.usage.cachedTokens : ((cachedUsage && cachedUsage.cachedTokens) != null ? cachedUsage.cachedTokens : 0));
         var totalCostVal = (consumption && consumption.totalCostUSD) != null ? consumption.totalCostUSD : ((stats.usage && stats.usage.totalCostUSD) != null ? stats.usage.totalCostUSD : ((cachedUsage && cachedUsage.totalCostUSD) != null ? cachedUsage.totalCostUSD : 0));
         var cacheHitRateVal = (consumption && consumption.cacheHitRate) != null ? consumption.cacheHitRate : (stats.cacheHitRate != null ? stats.cacheHitRate : ((cachedStats && cachedStats.cacheHitRate != null) ? cachedStats.cacheHitRate : 0));
+        var toolHeat = dims.toolSkillHeat || {};
+        var statsTools = (stats && stats.tools && typeof stats.tools === 'object') ? stats.tools : {};
+        var pickFirstNumber = function(candidates, fallback) {
+            if (!Array.isArray(candidates)) return Number(fallback) || 0;
+            for (var i = 0; i < candidates.length; i++) {
+                var n = Number(candidates[i]);
+                if (Number.isFinite(n)) return n;
+            }
+            return Number(fallback) || 0;
+        };
+        var toolKindsVal = pickFirstNumber([
+            toolHeat.toolKinds,
+            toolHeat.tool_kinds,
+            localSummaryTools.toolKinds,
+            localSummaryTools.tool_kinds,
+            Array.isArray(localSummaryTools.toolNames) ? localSummaryTools.toolNames.length : 0,
+            localSummary.toolKinds,
+            localSummary.tool_kinds,
+            Array.isArray(localSummary.toolNames) ? localSummary.toolNames.length : 0
+        ], 0);
+        // 禁止用 toolKinds（种类数）作为 tool_calls_total：toolKinds 为 0 时会错误短路，忽略真实的 toolCallsTotal
+        var toolCallsTotalVal = pickFirstNumber([
+            toolHeat.toolCallsTotal,
+            toolHeat.tool_calls_total,
+            stats.toolCallsTotal,
+            stats.tool_calls_total,
+            statsTools.toolCallsTotal,
+            statsTools.tool_calls_total,
+            statsTools.totalCalls,
+            statsTools.total_calls,
+            statsTools.calls,
+            localSummaryTools.toolCallsTotal,
+            localSummaryTools.tool_calls_total,
+            localSummaryTools.totalCalls,
+            localSummaryTools.total_calls,
+            localSummaryTools.calls,
+            localSummaryTools.entriesCount,
+            localSummaryTools.entries_count,
+            localSummaryTools.sessionsWithTools,
+            localSummaryTools.sessions_with_tools,
+            localSummary.toolCallsTotal,
+            localSummary.tool_calls_total
+        ], 0);
+        var tasksExecutedVal = pickFirstNumber([
+            localTasksSummary.count,
+            localTasksSummary.total,
+            localTasksSummary.taskCount,
+            localTasksSummary.tasksCount,
+            localTasksSummary.tasks_executed,
+            localTasksSummary.tasksExecuted,
+            localSummaryTasks.count,
+            localSummaryTasks.total,
+            localSummaryTasks.taskCount,
+            localSummaryTasks.tasksCount,
+            localSummaryTasks.tasks_executed,
+            localSummaryTasks.tasksExecuted,
+            localSummary.taskCount,
+            localSummary.tasksCount,
+            localSummary.tasks_executed,
+            localSummary.tasksExecuted,
+            stats.tasksExecuted,
+            stats.tasks_executed,
+            localStats.tasksExecuted,
+            localStats.tasks_executed
+        ], 0);
+        var totalCharsVal = Math.max(0, pickFirstNumber([
+            stats.totalChars,
+            stats.total_chars,
+            stats.totalCharacters,
+            consumption.totalChars,
+            consumption.total_chars,
+            cachedStats.totalChars,
+            cachedStats.total_chars
+        ], 0));
+        var workDaysVal = Math.max(0, pickFirstNumber([
+            stats.workDays,
+            stats.work_days,
+            localSummary.workDays,
+            localSummary.work_days,
+            lifeDays
+        ], 0));
 
         var lastActiveAt = new Date().toISOString();
 
@@ -1638,6 +1998,9 @@
             skills_stats: stats.skillsByName || stats.skillsUsage || cachedStats.skillsByName || cachedStats.skillsUsage || {},
             skills_tags: skillsArray,
             hourly_heatmap: hourlyHeatmap,
+            openclawSessionsSummary: localSummary || {},
+            sessionsSummary: localSummary || {},
+            openclawTasksSummary: Object.assign({}, localTasksSummary || {}),
             records_total: stats.totalMessages || stats.recordsTotal || cachedStats.totalMessages || cachedStats.recordsTotal || 0,
             total_tokens: totalTokensVal,
             prompt_tokens: promptTokensVal,
@@ -1645,6 +2008,8 @@
             cached_tokens: cachedTokensVal,
             total_cost_usd: totalCostVal,
             cache_hit_rate: cacheHitRateVal,
+            total_chars: totalCharsVal,
+            work_days: workDaysVal,
             top_model_id: primaryModel,
             primary_model: primaryModel,
             success_rate: (health && health.successRate) != null ? health.successRate : (stats.successRate != null ? stats.successRate : 0),
@@ -1652,8 +2017,17 @@
             success_count: (health && health.successCount) != null ? health.successCount : (stats.successCount != null ? stats.successCount : 0),
             failure_count: (health && health.failureCount) != null ? health.failureCount : (stats.failureCount != null ? stats.failureCount : 0),
             abnormal_interrupt_count: (health && health.abnormalInterruptions) != null ? health.abnormalInterruptions : (stats.abnormalInterruptions != null ? stats.abnormalInterruptions : 0),
-            tool_calls_total: stats.toolCallsTotal != null ? stats.toolCallsTotal : 0,
-            raw_summary: { dimensions: dims, composite: portrait.composite || {} },
+            tool_calls_total: toolCallsTotalVal,
+            tasks_executed: tasksExecutedVal,
+            raw_summary: {
+                dimensions: dims,
+                composite: portrait.composite || {},
+                tool_calls_total: Math.max(0, Number(toolCallsTotalVal) || 0),
+                tasks_executed: Math.max(0, Number(tasksExecutedVal) || 0),
+                scheduled_tasks_count: 0,
+                total_chars: Math.max(0, Number(totalCharsVal) || 0),
+                work_days: Math.max(0, Number(workDaysVal) || 0)
+            },
             analyzed_at: lastActiveAt,
             last_active_at: lastActiveAt,
             portrait: {
@@ -1671,7 +2045,32 @@
                 }
             }
         };
-        var apiEndpoint = '';
+        var gatewayToken = '';
+        try {
+            gatewayToken = getGatewayToken();
+        } catch (_) {}
+        var tasksCountPromise = gatewayToken ? fetchGatewayTasksCountViaHttp(gatewayToken).catch(function() { return { total: 0, scheduled: 0 }; }) : Promise.resolve({ total: 0, scheduled: 0 });
+        return tasksCountPromise.then(function(taskRollup) {
+            var tr = taskRollup && typeof taskRollup === 'object' ? taskRollup : {};
+            var fromGatewayTotal = Math.max(0, Math.floor(Number(tr.total) || 0));
+            var fromGatewayScheduled = Math.max(0, Math.floor(Number(tr.scheduled) || 0));
+            var resolvedTasksCount = fromGatewayTotal > 0
+                ? fromGatewayTotal
+                : Math.max(0, Number(tasksExecutedVal) || 0);
+            body.tasks_executed = resolvedTasksCount;
+            body.scheduled_tasks_count = fromGatewayScheduled;
+            body.openclawTasksSummary = {
+                count: resolvedTasksCount,
+                scheduledCount: fromGatewayScheduled,
+                scheduled_tasks_count: fromGatewayScheduled,
+                source: 'tasks.list'
+            };
+            try {
+                if (body.raw_summary && typeof body.raw_summary === 'object') {
+                    body.raw_summary.scheduled_tasks_count = fromGatewayScheduled;
+                }
+            } catch (_) {}
+            var apiEndpoint = '';
         try {
             if (typeof window.getApiEndpoint === 'function') {
                 apiEndpoint = (window.getApiEndpoint() || '').trim().replace(/\/+$/, '');
@@ -1689,31 +2088,36 @@
             if (github_login && String(github_login).trim()) return true;
             return false;
         }
-        function postOpenclawAnalyze(bearerToken) {
+        function postOpenclawAnalyze(bearerToken, payloadBody) {
             var headers = { 'Content-Type': 'application/json' };
             if (bearerToken && String(bearerToken).trim()) headers['Authorization'] = 'Bearer ' + String(bearerToken).trim();
-            return fetch(url, { method: 'POST', headers: headers, body: JSON.stringify(body) })
+            return fetch(url, { method: 'POST', headers: headers, body: JSON.stringify(payloadBody || body) })
                 .then(function(res) {
                     if (res.ok) {
                         try { localStorage.setItem(key, String(Date.now())); } catch (_) {}
+                    } else {
+                        try { console.warn('[OpenClawMonitor] /api/v2/openclaw/analyze failed:', res.status, res.statusText); } catch (_) {}
                     }
                     return res;
                 })
-                .catch(function() {});
+                .catch(function(err) {
+                    try { console.warn('[OpenClawMonitor] /api/v2/openclaw/analyze request error:', err && err.message ? err.message : err); } catch (_) {}
+                });
         }
         var sbSync = window.supabaseClient || (typeof supabaseClient !== 'undefined' ? supabaseClient : null);
         if (sbSync && sbSync.auth && typeof sbSync.auth.getSession === 'function') {
             return getCachedSupabaseSession(sbSync).then(function(sessRes) {
                 var supaTok = sessRes && sessRes.data && sessRes.data.session && sessRes.data.session.access_token;
                 if (!openclawAnalyzeCanPost(supaTok)) return Promise.resolve();
-                return postOpenclawAnalyze(supaTok || '');
+                return postOpenclawAnalyze(supaTok || '', body);
             }).catch(function() {
                 if (!openclawAnalyzeCanPost('')) return Promise.resolve();
-                return postOpenclawAnalyze('');
+                return postOpenclawAnalyze('', body);
             });
         }
         if (!openclawAnalyzeCanPost('')) return Promise.resolve();
-        return postOpenclawAnalyze('');
+        return postOpenclawAnalyze('', body);
+        });
     }
 
     /**
@@ -1742,10 +2146,7 @@
                 identityHint = String(umHint.user_name || umHint.preferred_username || umHint.login || umHint.full_name || '').trim();
             }
         } catch (_) {}
-        var fingerprint = '';
-        try {
-            fingerprint = (localStorage.getItem('user_fingerprint') || window.fpId || '').trim();
-        } catch (_) {}
+        var fingerprint = resolveClientFingerprint();
         if (local) {
             try { syncOpenClawToUserAnalysis(local).catch(function() {}); } catch (_) {}
             getOpenClawSupabaseData(userId, fingerprint, identityHint).then(function(remote) {

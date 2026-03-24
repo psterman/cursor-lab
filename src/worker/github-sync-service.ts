@@ -42,6 +42,8 @@ export interface ProcessedGitHubStats {
   syncedAt: string;
   /** 最近一次推送的仓库时间（ISO 字符串），来自 orderBy: PUSHED_AT 的第一条 */
   latest_repo_updated_at: string | null;
+  /** 各仓库 GraphQL languages.edges 条数之平均（国家级 Polyglot 再对用户 AVG） */
+  avg_languages_per_repo?: number;
 }
 
 /** GraphQL 查询：仅 read:user + user:email，不请求 name/avatarUrl/organizations（否则需 read:org） */
@@ -361,6 +363,13 @@ function processGitHubData(viewer: any): ProcessedGitHubStats {
   const globalRanking = calculateGlobalRanking(totalRepoStars);
   const latestRepoUpdatedAt = viewer?.latestPushedRepos?.nodes?.[0]?.pushedAt ?? null;
 
+  let totalLanguageEdgeSlots = 0;
+  for (let ri = 0; ri < repos.length; ri++) {
+    const rn = repos[ri];
+    totalLanguageEdgeSlots += (rn?.languages?.edges ?? []).length;
+  }
+  const avgLanguagesPerRepo = repos.length > 0 ? totalLanguageEdgeSlots / repos.length : 0;
+
   return {
     login,
     avatarUrl,
@@ -389,6 +398,7 @@ function processGitHubData(viewer: any): ProcessedGitHubStats {
     globalRanking,
     syncedAt,
     latest_repo_updated_at: latestRepoUpdatedAt,
+    avg_languages_per_repo: Math.round(avgLanguagesPerRepo * 1000) / 1000,
   };
 }
 

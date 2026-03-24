@@ -132,6 +132,86 @@ function runGatewayRestart() {
   });
 }
 
+/**
+ * 浏览器从 localhost:3000 直连 http://127.0.0.1:端口 会因 CORS 失败。
+ * 将请求改为同源：/ __openclaw /{port}/api/... → 开发服转发到 http://127.0.0.1:{port}/api/...
+ * openclaw2.html 中 OpenClawGateway.httpBase() 在本地开发时返回 origin + '/__openclaw/' + 探测端口
+ */
+function openclawGatewayHttpProxyPlugin() {
+  const host = () => process.env.OPENCLAW_GATEWAY_HOST || '127.0.0.1';
+
+  function readBody(req) {
+    return new Promise((resolve, reject) => {
+      const chunks = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => resolve(Buffer.concat(chunks)));
+      req.on('error', reject);
+    });
+  }
+
+  return {
+    name: 'openclaw-gateway-http-proxy',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        const raw = req.url || '';
+        if (!raw.startsWith('/__openclaw/')) return next();
+        let pathname = raw.split('?')[0];
+        try {
+          pathname = decodeURI(pathname);
+        } catch (_) {
+          /* ignore */
+        }
+        const m = pathname.match(/^\/__openclaw\/(\d+)(\/.*)?$/);
+        if (!m) return next();
+        const port = m[1];
+        const gwPath = m[2] && m[2].length ? m[2] : '/';
+        const qs = raw.includes('?') ? `?${raw.split('?').slice(1).join('?')}` : '';
+        const target = `http://${host()}:${port}${gwPath}${qs}`;
+        try {
+          const method = (req.method || 'GET').toUpperCase();
+          const hop = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailers', 'transfer-encoding', 'upgrade']);
+          /** @type {Record<string, string>} */
+          const out = {};
+          for (const [k, v] of Object.entries(req.headers)) {
+            if (!k || hop.has(k.toLowerCase())) continue;
+            if (k.toLowerCase() === 'host') continue;
+            if (typeof v === 'string') out[k] = v;
+            else if (Array.isArray(v) && v.length) out[k] = v.join(', ');
+          }
+          let body;
+          if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+            const buf = await readBody(req);
+            if (buf && buf.length) body = buf;
+          }
+          const r = await fetch(target, {
+            method,
+            headers: out,
+            body,
+            signal: AbortSignal.timeout(15000),
+          });
+          const skip = new Set(['content-encoding', 'transfer-encoding']);
+          res.statusCode = r.status;
+          r.headers.forEach((val, key) => {
+            if (skip.has(key.toLowerCase())) return;
+            try {
+              res.setHeader(key, val);
+            } catch (_) {
+              /* ignore invalid header names */
+            }
+          });
+          const ab = await r.arrayBuffer();
+          res.end(Buffer.from(ab));
+        } catch (e) {
+          res.statusCode = 502;
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-store');
+          res.end(JSON.stringify({ ok: false, error: String(e && e.message) }));
+        }
+      });
+    },
+  };
+}
+
 /** openclaw2.html workerPayload 依赖同源 /api/openclaw/latest 等；Gateway 路径因版本可能为 /latest 或 /api/openclaw/latest，故在开发服做多路径回源 */
 function openclawGatewayBridgePlugin() {
   const host = () => process.env.OPENCLAW_GATEWAY_HOST || '127.0.0.1';
@@ -367,7 +447,7 @@ export default defineConfig({
   },
 
   // 插件配置（bridge 需在 dialogue-token 之前，优先命中 OpenClaw 数据回源）
-  plugins: [openclawGatewayBridgePlugin(), dialogueTokenPlugin(), copyI18nPlugin()],
+  plugins: [openclawGatewayHttpProxyPlugin(), openclawGatewayBridgePlugin(), dialogueTokenPlugin(), copyI18nPlugin()],
 
   // 构建配置
   build: {

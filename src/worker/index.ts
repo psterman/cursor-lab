@@ -94,6 +94,22 @@ type GlobalCountryStatsSnapshot = Record<
     mainLanguageShare?: number;
     /** 使用众数语言的用户数 */
     mainLanguageModeUsers?: number;
+    /** 国家级 SUM(jiafang_count)，与 country_stats_current 一致 */
+    jiafang_count_sum?: number;
+    /** 国家级 SUM(stats.cursor.ai_messages)，缺省时 refresh 用对话条数/2 近似 */
+    cursor_ai_messages_sum?: number;
+    /** 杠精间隔：约多少条 AI 回复 / 次甲方化(否定)信号 = cursor_ai_messages_sum / jiafang_count_sum；越小越「杠」 */
+    jiafang_rejection_rate?: number;
+    /** OpenClaw tool_calls_total 国家级 SUM */
+    tool_calls_total_sum?: number;
+    openclaw_tool_calls_sum?: number;
+    /** OpenClaw 自动化任务执行次数国家级 SUM（lobster_metrics.tasks_executed，JSON 路径可后续调整） */
+    tasks_executed_sum?: number;
+    openclaw_tasks_executed_sum?: number;
+    /** OpenClaw 定时任务数国家级 SUM（lobster_metrics.scheduled_tasks） */
+    scheduled_tasks_sum?: number;
+    /** 该国用户 github_stats.avg_languages_per_repo 的算术平均 */
+    polyglot_avg_languages_per_repo?: number;
   }
 >;
 
@@ -106,6 +122,16 @@ function safeNumber(raw: unknown, fallback = 0): number {
   const n = typeof raw === 'number' ? raw : Number(raw);
   if (!Number.isFinite(n)) return fallback;
   return n;
+}
+
+/** 第一个非 null/undefined 的有限数字（包含 0）；用于避免 `??` 把 0 当成有效占位而误跳过下一项 */
+function firstFiniteNumber(...vals: unknown[]): number | undefined {
+  for (const v of vals) {
+    if (v === undefined || v === null) continue;
+    const n = typeof v === 'number' ? v : Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
 }
 
 function safeNonNegativeInt(raw: unknown): number {
@@ -146,6 +172,14 @@ type CountryStatsRollupRow = {
   avg_cursor_messages_per_user?: number | null;
   avg_github_repos_per_user?: number | null;
   main_language_share?: number | null;
+  jiafang_count_sum?: number | null;
+  cursor_ai_messages_sum?: number | null;
+  jiafang_rejection_rate?: number | null;
+  openclaw_tool_calls_sum?: number | null;
+  tool_calls_total_sum?: number | null;
+  tasks_executed_sum?: number | null;
+  openclaw_tasks_executed_sum?: number | null;
+  scheduled_tasks_sum?: number | null;
 };
 
 /**
@@ -160,7 +194,7 @@ async function mergeCountryStatsRollupIntoSnapshot(env: Env, snapshot: GlobalCou
     const url = new URL(`${env.SUPABASE_URL}/rest/v1/v_country_stats_rollup`);
     url.searchParams.set(
       'select',
-      'country_code,total_users,main_language_mode,main_language_mode_users,cursor_total_messages_sum,github_total_repos_sum,avg_cursor_messages_per_user,avg_github_repos_per_user,main_language_share'
+      'country_code,total_users,main_language_mode,main_language_mode_users,cursor_total_messages_sum,github_total_repos_sum,avg_cursor_messages_per_user,avg_github_repos_per_user,main_language_share,jiafang_count_sum,cursor_ai_messages_sum,jiafang_rejection_rate,openclaw_tool_calls_sum,tasks_executed_sum,scheduled_tasks_sum'
     );
     url.searchParams.set('limit', String(pageSize));
     url.searchParams.set('offset', String(offset));
@@ -189,6 +223,13 @@ async function mergeCountryStatsRollupIntoSnapshot(env: Env, snapshot: GlobalCou
     const mainLanguageShare = round2(safeNumber(r.main_language_share, 0));
     const mainLanguageModeUsers = Math.max(0, Math.floor(safeNumber(r.main_language_mode_users, 0)));
 
+    const jiafangSumR = round2(safeNumber(r.jiafang_count_sum, 0));
+    const aiMsgSumR = round2(safeNumber(r.cursor_ai_messages_sum, 0));
+    const rejR = round2(safeNumber(r.jiafang_rejection_rate, 0));
+    const toolSumR = round2(safeNumber(r.openclaw_tool_calls_sum, 0));
+    const tasksSumR = round2(safeNumber(r.tasks_executed_sum, 0));
+    const schedSumR = round2(safeNumber(r.scheduled_tasks_sum, 0));
+
     const cur = snapshot[cc];
     if (cur) {
       cur.mainLanguage = mainLanguage;
@@ -201,6 +242,14 @@ async function mergeCountryStatsRollupIntoSnapshot(env: Env, snapshot: GlobalCou
       cur.avgReposPerUser = avgReposPerUser;
       cur.mainLanguageShare = mainLanguageShare;
       cur.mainLanguageModeUsers = mainLanguageModeUsers;
+      cur.jiafang_count_sum = jiafangSumR;
+      cur.cursor_ai_messages_sum = aiMsgSumR;
+      cur.jiafang_rejection_rate = rejR;
+      cur.tool_calls_total_sum = toolSumR;
+      cur.openclaw_tool_calls_sum = toolSumR;
+      cur.tasks_executed_sum = tasksSumR;
+      cur.openclaw_tasks_executed_sum = tasksSumR;
+      cur.scheduled_tasks_sum = schedSumR;
     } else if (userCount > 0) {
       snapshot[cc] = {
         avgChars: 0,
@@ -222,8 +271,216 @@ async function mergeCountryStatsRollupIntoSnapshot(env: Env, snapshot: GlobalCou
         avgReposPerUser,
         mainLanguageShare,
         mainLanguageModeUsers,
+        jiafang_count_sum: jiafangSumR,
+        cursor_ai_messages_sum: aiMsgSumR,
+        jiafang_rejection_rate: rejR,
+        tool_calls_total_sum: toolSumR,
+        openclaw_tool_calls_sum: toolSumR,
+        tasks_executed_sum: tasksSumR,
+        openclaw_tasks_executed_sum: tasksSumR,
+        scheduled_tasks_sum: schedSumR,
+        polyglot_avg_languages_per_repo: 0,
       };
     }
+  }
+}
+
+type CountryStatsCurrentRow = {
+  country_code?: string | null;
+  jiafang_count_sum?: number | null;
+  cursor_total_messages_sum?: number | null;
+  cursor_metrics?: Record<string, unknown> | null;
+  lobster_metrics?: Record<string, unknown> | null;
+  total_users?: number | null;
+};
+
+type OpenClawCountryStatsRow = {
+  country_code?: string | null;
+  user_count?: number | null;
+  total_tool_calls?: number | null;
+  total_tasks_executed?: number | null;
+};
+
+/**
+ * 从 country_stats_current 合并杠精间隔（SUM(ai_messages)÷SUM(jiafang)）、OpenClaw 工具与任务聚合（国家级 SUM）。
+ */
+async function mergeCountryStatsCurrentIntoSnapshot(env: Env, snapshot: GlobalCountryStatsSnapshot): Promise<void> {
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) return;
+  const pageSize = 1000;
+  let offset = 0;
+  const rows: CountryStatsCurrentRow[] = [];
+  for (let page = 0; page < 500; page++) {
+    const url = new URL(`${env.SUPABASE_URL}/rest/v1/country_stats_current`);
+    url.searchParams.set('select', 'country_code,jiafang_count_sum,cursor_total_messages_sum,cursor_metrics,lobster_metrics,total_users');
+    url.searchParams.set('limit', String(pageSize));
+    url.searchParams.set('offset', String(offset));
+    let batch: CountryStatsCurrentRow[] = [];
+    try {
+      const raw = await fetchSupabaseJson<any>(env, url.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS);
+      batch = Array.isArray(raw) ? raw : [];
+    } catch {
+      batch = [];
+    }
+    if (!batch.length) break;
+    rows.push(...batch);
+    if (batch.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  for (const r of rows) {
+    const cc = normalizeIso2CountryCode(r?.country_code);
+    if (!cc) continue;
+    const jiafangSum = round2(safeNumber(r.jiafang_count_sum, 0));
+    const cursorMsgSum = round2(safeNumber(r.cursor_total_messages_sum, 0));
+    const cm = r.cursor_metrics && typeof r.cursor_metrics === 'object' ? r.cursor_metrics : {};
+    const aiMsgSum = round2(safeNumber((cm as Record<string, unknown>).ai_messages, 0));
+    const rej = jiafangSum > 0 ? aiMsgSum / jiafangSum : 0;
+    const lm = r.lobster_metrics && typeof r.lobster_metrics === 'object' ? r.lobster_metrics : {};
+    const toolCalls = round2(
+      safeNumber(
+        (lm as Record<string, unknown>).tool_calls ?? (lm as Record<string, unknown>).tool_calls_total,
+        0
+      )
+    );
+    const tasksExec = round2(
+      safeNumber(
+        (lm as Record<string, unknown>).tasks_executed ??
+          (lm as Record<string, unknown>).tasks_executed_total ??
+          (lm as Record<string, unknown>).tasks_total,
+        0
+      )
+    );
+    const schedTasks = round2(safeNumber((lm as Record<string, unknown>).scheduled_tasks, 0));
+
+    const cur = snapshot[cc];
+    if (cur) {
+      cur.jiafang_count_sum = jiafangSum;
+      cur.cursor_total_messages_sum = cursorMsgSum;
+      cur.cursor_ai_messages_sum = aiMsgSum;
+      cur.jiafang_rejection_rate = round2(rej);
+      cur.tool_calls_total_sum = toolCalls;
+      cur.openclaw_tool_calls_sum = toolCalls;
+      cur.tasks_executed_sum = tasksExec;
+      cur.openclaw_tasks_executed_sum = tasksExec;
+      cur.scheduled_tasks_sum = schedTasks;
+    } else {
+      const uc = Math.max(0, Math.floor(safeNumber(r.total_users, 0)));
+      if (uc <= 0) continue;
+      snapshot[cc] = {
+        avgChars: 0,
+        totalChars: 0,
+        totalTokens: 0,
+        userCount: uc,
+        topModel: '',
+        githubScore: 0,
+        totalStars: 0,
+        totalForks: 0,
+        totalFollowers: 0,
+        mainLanguage: '',
+        main_language_mode: '',
+        kowtowTotal: cursorMsgSum,
+        cursor_total_messages_sum: cursorMsgSum,
+        cyberHamsterRepos: 0,
+        github_total_repos_sum: 0,
+        avgKowtowPerUser: uc > 0 ? round2(cursorMsgSum / uc) : 0,
+        avgReposPerUser: 0,
+        mainLanguageShare: 0,
+        mainLanguageModeUsers: 0,
+        polyglot_avg_languages_per_repo: 0,
+        jiafang_count_sum: jiafangSum,
+        cursor_ai_messages_sum: aiMsgSum,
+        jiafang_rejection_rate: round2(rej),
+        tool_calls_total_sum: toolCalls,
+        openclaw_tool_calls_sum: toolCalls,
+        tasks_executed_sum: tasksExec,
+        openclaw_tasks_executed_sum: tasksExec,
+        scheduled_tasks_sum: schedTasks,
+      };
+    }
+  }
+}
+
+/**
+ * Additional OpenClaw fallback from v_openclaw_country_stats.
+ * This protects Tool/Task boards when country_stats_current is stale.
+ */
+async function mergeOpenClawCountryStatsIntoSnapshot(env: Env, snapshot: GlobalCountryStatsSnapshot): Promise<void> {
+  if (!env.SUPABASE_URL || !env.SUPABASE_KEY) return;
+  const pageSize = 1000;
+  let offset = 0;
+  const rows: OpenClawCountryStatsRow[] = [];
+  let selectExpr = 'country_code,user_count,total_tool_calls,total_tasks_executed';
+
+  for (let page = 0; page < 500; page++) {
+    const url = new URL(`${env.SUPABASE_URL}/rest/v1/v_openclaw_country_stats`);
+    url.searchParams.set('select', selectExpr);
+    url.searchParams.set('limit', String(pageSize));
+    url.searchParams.set('offset', String(offset));
+    let batch: OpenClawCountryStatsRow[] = [];
+    try {
+      const raw = await fetchSupabaseJson<any>(env, url.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS);
+      batch = Array.isArray(raw) ? raw : [];
+    } catch (err) {
+      if (selectExpr.indexOf('total_tasks_executed') >= 0) {
+        // Backward compatible with old view definition that does not expose total_tasks_executed.
+        selectExpr = 'country_code,user_count,total_tool_calls';
+        offset = 0;
+        rows.length = 0;
+        continue;
+      }
+      batch = [];
+    }
+    if (!batch.length) break;
+    rows.push(...batch);
+    if (batch.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  for (const r of rows) {
+    const cc = normalizeIso2CountryCode(r?.country_code);
+    if (!cc) continue;
+    const userCount = Math.max(0, Math.floor(safeNumber(r.user_count, 0)));
+    const toolCalls = round2(safeNumber(r.total_tool_calls, 0));
+    const tasksExec = round2(safeNumber(r.total_tasks_executed, 0));
+
+    const cur = snapshot[cc];
+    if (cur) {
+      cur.tool_calls_total_sum = Math.max(round2(safeNumber(cur.tool_calls_total_sum, 0)), toolCalls);
+      cur.openclaw_tool_calls_sum = cur.tool_calls_total_sum;
+      cur.tasks_executed_sum = Math.max(round2(safeNumber(cur.tasks_executed_sum, 0)), tasksExec);
+      cur.openclaw_tasks_executed_sum = cur.tasks_executed_sum;
+      continue;
+    }
+    if (userCount <= 0) continue;
+    snapshot[cc] = {
+      avgChars: 0,
+      totalChars: 0,
+      totalTokens: 0,
+      userCount,
+      topModel: '',
+      githubScore: 0,
+      totalStars: 0,
+      totalForks: 0,
+      totalFollowers: 0,
+      mainLanguage: '',
+      main_language_mode: '',
+      kowtowTotal: 0,
+      cursor_total_messages_sum: 0,
+      cyberHamsterRepos: 0,
+      github_total_repos_sum: 0,
+      avgKowtowPerUser: 0,
+      avgReposPerUser: 0,
+      mainLanguageShare: 0,
+      mainLanguageModeUsers: 0,
+      polyglot_avg_languages_per_repo: 0,
+      jiafang_count_sum: 0,
+      cursor_ai_messages_sum: 0,
+      jiafang_rejection_rate: 0,
+      tool_calls_total_sum: toolCalls,
+      openclaw_tool_calls_sum: toolCalls,
+      tasks_executed_sum: tasksExec,
+      openclaw_tasks_executed_sum: tasksExec,
+    };
   }
 }
 
@@ -272,6 +529,8 @@ async function buildGlobalCountryStatsSnapshot(
       sumFollowers: number;
       userCount: number;
       modelCounts: Map<string, number>;
+      polyglotSum: number;
+      polyglotUsers: number;
     }
   >();
 
@@ -323,6 +582,8 @@ async function buildGlobalCountryStatsSnapshot(
           sumFollowers: 0,
           userCount: 0,
           modelCounts: new Map<string, number>(),
+          polyglotSum: 0,
+          polyglotUsers: 0,
         };
         perCountry.set(cc, agg);
       }
@@ -381,6 +642,24 @@ async function buildGlobalCountryStatsSnapshot(
 
       const pm = String((r as any)?.primary_model ?? '').trim();
       if (pm) agg.modelCounts.set(pm, (agg.modelCounts.get(pm) || 0) + 1);
+
+      let polyRaw = safeNumber(
+        (githubStats as Record<string, unknown>).avg_languages_per_repo ??
+          (githubStats as Record<string, unknown>).avgLanguagesPerRepo,
+        NaN
+      );
+      if (!Number.isFinite(polyRaw) || polyRaw < 0) {
+        const dist = (githubStats as Record<string, unknown>).languageDistribution;
+        if (Array.isArray(dist) && dist.length > 0) {
+          polyRaw = Math.min(10, dist.length);
+        } else {
+          polyRaw = NaN;
+        }
+      }
+      if (Number.isFinite(polyRaw) && polyRaw >= 0) {
+        agg.polyglotSum += polyRaw;
+        agg.polyglotUsers += 1;
+      }
     }
 
     if (rows.length < pageSize) break;
@@ -391,6 +670,7 @@ async function buildGlobalCountryStatsSnapshot(
   for (const [cc, agg] of perCountry.entries()) {
     const userCount = Math.max(0, agg.userCount);
     if (userCount <= 0) continue;
+    const polyN = agg.polyglotUsers;
     snapshot[cc] = {
       avgChars: round2(agg.sumChars / userCount),
       totalChars: round2(agg.sumChars),
@@ -401,6 +681,7 @@ async function buildGlobalCountryStatsSnapshot(
       totalStars: round2(agg.sumStars),
       totalForks: round2(agg.sumForks),
       totalFollowers: round2(agg.sumFollowers),
+      polyglot_avg_languages_per_repo: polyN > 0 ? round2(agg.polyglotSum / polyN) : 0,
     };
   }
 
@@ -408,6 +689,18 @@ async function buildGlobalCountryStatsSnapshot(
     await mergeCountryStatsRollupIntoSnapshot(env, snapshot);
   } catch (rollupErr: any) {
     console.warn('[Worker] v_country_stats_rollup merge failed:', rollupErr?.message || String(rollupErr));
+  }
+
+  try {
+    await mergeCountryStatsCurrentIntoSnapshot(env, snapshot);
+  } catch (curErr: any) {
+    console.warn('[Worker] country_stats_current merge failed:', curErr?.message || String(curErr));
+  }
+
+  try {
+    await mergeOpenClawCountryStatsIntoSnapshot(env, snapshot);
+  } catch (ocErr: any) {
+    console.warn('[Worker] v_openclaw_country_stats merge failed:', ocErr?.message || String(ocErr));
   }
 
   const nowSec = Math.floor(Date.now() / 1000);
@@ -508,15 +801,42 @@ function buildCountryDataByCode(kv: GlobalCountryStatsPayload | null): Record<st
   return Object.keys(out).length ? out : undefined;
 }
 
+function normalizeHardcoreCountryLevelRow(row: Record<string, any>): Record<string, any> {
+  if (!row || typeof row !== 'object') return row;
+  const toolCalls = round2(safeNumber(row.openclaw_tool_calls_sum ?? row.tool_calls_total_sum, 0));
+  const tasksExec = round2(safeNumber(row.openclaw_tasks_executed_sum ?? row.tasks_executed_sum, 0));
+  const schedSum = round2(safeNumber(row.scheduled_tasks_sum, 0));
+  return {
+    ...row,
+    openclaw_tool_calls_sum: toolCalls,
+    tool_calls_total_sum: toolCalls,
+    openclaw_tasks_executed_sum: tasksExec,
+    tasks_executed_sum: tasksExec,
+    scheduled_tasks_sum: schedSum,
+  };
+}
+
+function normalizeGlobalCountryStatsPayload(raw: any): GlobalCountryStatsPayload | null {
+  if (!raw || typeof raw !== 'object') return null;
+  if (!Array.isArray(raw.country_level)) return null;
+  const normalized: any = {
+    ...raw,
+    country_level: raw.country_level.map((row: any) => normalizeHardcoreCountryLevelRow(row)),
+  };
+  for (const [k, v] of Object.entries(normalized)) {
+    if (/^[A-Z]{2}$/.test(k) && v && typeof v === 'object') {
+      normalized[k] = normalizeHardcoreCountryLevelRow(v as Record<string, any>);
+    }
+  }
+  return normalized as GlobalCountryStatsPayload;
+}
+
 /** ? KV ?????????????????? null???????? GROUP BY */
 async function getGlobalCountryStatsFromKV(env: Env): Promise<GlobalCountryStatsPayload | null> {
   if (!env.STATS_STORE) return null;
   try {
     const raw = await env.STATS_STORE.get(KV_KEY_GLOBAL_COUNTRY_STATS, 'json');
-    if (!raw || typeof raw !== 'object') return null;
-    const r = raw as any;
-    if (!Array.isArray(r.country_level)) return null;
-    return r as GlobalCountryStatsPayload;
+    return normalizeGlobalCountryStatsPayload(raw);
   } catch {
     return null;
   }
@@ -541,6 +861,11 @@ interface GlobalCountryStatsPayload {
     work_days_sum?: number;
     avg_user_message_length_sum?: number;
     total_users?: number;
+    openclaw_tool_calls_sum?: number;
+    tool_calls_total_sum?: number;
+    openclaw_tasks_executed_sum?: number;
+    tasks_executed_sum?: number;
+    scheduled_tasks_sum?: number;
     rank_total_messages?: number;
     rank_total_chars?: number;
     rank_total_user_chars?: number;
@@ -573,6 +898,14 @@ function snapshotFromCountryLevel(kv: GlobalCountryStatsPayload | null): GlobalC
     const totalStars = round2(safeNumber(row.total_stars_sum ?? row.github_stars_sum, 0));
     const totalForks = round2(safeNumber(row.total_forks_sum ?? row.github_forks_sum, 0));
     const totalFollowers = round2(safeNumber(row.total_followers_sum ?? row.github_followers_sum, 0));
+    const jfSum = round2(safeNumber(row.jiafang_count_sum, 0));
+    const msgSum = round2(safeNumber(row.total_messages_sum, 0));
+    const aiMsgSum = round2(safeNumber((row as any).cursor_ai_messages_sum, 0));
+    const toolCalls = round2(safeNumber(row.openclaw_tool_calls_sum ?? row.tool_calls_total_sum, 0));
+    const tasksExec = round2(safeNumber(row.openclaw_tasks_executed_sum ?? row.tasks_executed_sum, 0));
+    const schedSum = round2(safeNumber((row as any).scheduled_tasks_sum, 0));
+    const aiEst = aiMsgSum > 0 ? aiMsgSum : msgSum > 0 ? msgSum / 2 : 0;
+    const rej = jfSum > 0 ? aiEst / jfSum : 0;
     out[cc] = {
       avgChars,
       totalChars: round2(totalChars),
@@ -586,13 +919,21 @@ function snapshotFromCountryLevel(kv: GlobalCountryStatsPayload | null): GlobalC
       mainLanguage: '',
       main_language_mode: '',
       kowtowTotal: 0,
-      cursor_total_messages_sum: 0,
+      cursor_total_messages_sum: msgSum,
       cyberHamsterRepos: 0,
       github_total_repos_sum: 0,
       avgKowtowPerUser: 0,
       avgReposPerUser: 0,
       mainLanguageShare: 0,
       mainLanguageModeUsers: 0,
+      jiafang_count_sum: jfSum,
+      cursor_ai_messages_sum: round2(aiEst),
+      jiafang_rejection_rate: round2(rej),
+      tool_calls_total_sum: toolCalls,
+      openclaw_tool_calls_sum: toolCalls,
+      tasks_executed_sum: tasksExec,
+      openclaw_tasks_executed_sum: tasksExec,
+      scheduled_tasks_sum: schedSum,
     };
   }
   return Object.keys(out).length ? out : null;
@@ -4040,7 +4381,25 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
       return c.json({ success: false, error: 'Could not resolve or create user_analysis row' }, 400);
     }
 
-    const toNum = (v: any, def = 0) => (typeof v === 'number' && Number.isFinite(v) ? v : def);
+    const toNum = (v: any, def = 0) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : def;
+    };
+    const sumUsageMap = (obj: any): number => {
+      if (!obj || typeof obj !== 'object') return 0;
+      let sum = 0;
+      for (const v of Object.values(obj)) {
+        if (typeof v === 'number' && Number.isFinite(v)) {
+          sum += v;
+          continue;
+        }
+        if (v && typeof v === 'object') {
+          const nested = Number((v as any).count ?? (v as any).calls ?? (v as any).value ?? 0);
+          if (Number.isFinite(nested)) sum += nested;
+        }
+      }
+      return Math.max(0, sum);
+    };
     const openclawRow = {
       user_id,
       source_type: 'openclaw_jsonl',
@@ -4062,7 +4421,63 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
       success_count: Math.max(0, toNum(body.success_count, 0)),
       failure_count: Math.max(0, toNum(body.failure_count, 0)),
       abnormal_interrupt_count: Math.max(0, toNum(body.abnormal_interrupt_count, 0)),
-      tool_calls_total: Math.max(0, toNum(body.tool_calls_total, 0)),
+      tool_calls_total: Math.max(
+        0,
+        firstFiniteNumber(
+          body.tool_calls_total,
+          body.toolCallsTotal,
+          body?.raw_summary?.tool_calls_total,
+          body?.stats2_bindings?.tool_calls_total,
+          body?.stats?.openclaw_stats?.tool_calls_total,
+          body?.openclawPortrait?.dimensions?.toolSkillHeat?.toolCallsTotal,
+          body?.openclawPortrait?.dimensions?.toolSkillHeat?.tool_calls_total,
+          body?.portrait?.dimensions?.toolSkillHeat?.toolCallsTotal,
+          body?.portrait?.dimensions?.toolSkillHeat?.tool_calls_total,
+          body?.openclawSessionsSummary?.tools?.toolCallsTotal,
+          body?.openclawSessionsSummary?.tools?.tool_calls_total,
+          body?.sessionsSummary?.tools?.toolCallsTotal,
+          body?.sessionsSummary?.tools?.tool_calls_total
+        ) ??
+          (() => {
+            const u1 = sumUsageMap(body.tool_usage);
+            if (u1 > 0) return u1;
+            return sumUsageMap(body?.stats?.toolUsage);
+          })()
+      ),
+      tasks_executed: Math.max(
+        0,
+        toNum(
+          body.tasks_executed ??
+          body.tasksExecuted ??
+          body?.raw_summary?.tasks_executed ??
+          body?.stats2_bindings?.tasks_executed ??
+          body?.stats?.openclaw_stats?.tasks_executed ??
+          body?.openclawTasksSummary?.count ??
+          body?.openclawTasksSummary?.total ??
+          body?.openclawTasksSummary?.taskCount ??
+          body?.openclawTasksSummary?.tasksCount ??
+          body?.openclawSessionsSummary?.sessionCount ??
+          body?.sessionsSummary?.sessionCount ??
+          body?.portrait?.totalDialogRounds ??
+          0,
+          0
+        )
+      ),
+      scheduled_tasks_count: Math.max(
+        0,
+        toNum(
+          body.scheduled_tasks_count ??
+          body.scheduledTasksCount ??
+          body?.raw_summary?.scheduled_tasks_count ??
+          body?.stats2_bindings?.scheduled_tasks_count ??
+          body?.stats?.openclaw_stats?.scheduled_tasks_count ??
+          body?.stats?.openclaw?.stats?.scheduled_tasks_count ??
+          body?.openclawTasksSummary?.scheduledCount ??
+          body?.openclawTasksSummary?.scheduled_tasks_count ??
+          0,
+          0
+        )
+      ),
       github_login: github_login || null,
       country_code: (body.country_code ?? '').trim() || null,
       raw_summary: body.raw_summary && typeof body.raw_summary === 'object' ? body.raw_summary : {},
@@ -4094,6 +4509,12 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
       ...(existingOpenclawStats || {}),
       stats: openclawRow,
       portrait: body.portrait && typeof body.portrait === 'object' ? body.portrait : {},
+      sessionsSummary: body.openclawSessionsSummary && typeof body.openclawSessionsSummary === 'object'
+        ? body.openclawSessionsSummary
+        : (body.sessionsSummary && typeof body.sessionsSummary === 'object' ? body.sessionsSummary : {}),
+      tasksSummary: body.openclawTasksSummary && typeof body.openclawTasksSummary === 'object'
+        ? body.openclawTasksSummary
+        : (body.tasksSummary && typeof body.tasksSummary === 'object' ? body.tasksSummary : {}),
       environment: body.portrait?.environment && typeof body.portrait.environment === 'object' ? body.portrait.environment : {},
       modelUsage: body.model_usage && typeof body.model_usage === 'object' ? body.model_usage : {},
       analyzed_at: openclawRow.analyzed_at,
@@ -4117,6 +4538,70 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
     const existingWorkDays = Math.max(0, toNum(existingUserRow?.work_days, 0));
     const incomingTotalChars = Math.max(0, Math.round(incomingTotalTokens * 4));
     const existingTotalChars = Math.max(0, toNum(existingUserRow?.total_chars, 0));
+    const incomingOpenClawTotalChars = Math.max(
+      0,
+      toNum(
+        body.total_chars ??
+        body.totalChars ??
+        body?.portrait?.totalChars ??
+        body?.portrait?.dimensions?.consumptionCost?.totalChars ??
+        incomingTotalChars,
+        0
+      )
+    );
+    const incomingOpenClawWorkDays = Math.max(
+      0,
+      toNum(
+        body.work_days ??
+        body.workDays ??
+        body?.portrait?.lifeDays ??
+        body?.openclawPortrait?.lifeDays ??
+        body?.sessionsSummary?.workDays ??
+        body?.openclawSessionsSummary?.workDays ??
+        incomingWorkDays,
+        0
+      )
+    );
+    const incomingOpenClawTasksExecuted = Math.max(
+      0,
+      toNum(
+        body.tasks_executed ??
+        body.tasksExecuted ??
+        body?.openclawTasksSummary?.count ??
+        body?.openclawTasksSummary?.total ??
+        body?.openclawTasksSummary?.taskCount ??
+        body?.openclawTasksSummary?.tasksCount ??
+        0,
+        0
+      )
+    );
+    const incomingOpenClawScheduledTasks = Math.max(
+      0,
+      toNum(
+        body.scheduled_tasks_count ??
+        body.scheduledTasksCount ??
+        body?.raw_summary?.scheduled_tasks_count ??
+        body?.stats2_bindings?.scheduled_tasks_count ??
+        body?.stats?.openclaw_stats?.scheduled_tasks_count ??
+        body?.openclawTasksSummary?.scheduledCount ??
+        body?.openclawTasksSummary?.scheduled_tasks_count ??
+        openclawRow.scheduled_tasks_count,
+        0
+      )
+    );
+    const openclawFlatStats = {
+      ...((existingStats?.openclaw_stats && typeof existingStats.openclaw_stats === 'object') ? existingStats.openclaw_stats : {}),
+      records_total: openclawRow.records_total,
+      total_chars: incomingOpenClawTotalChars,
+      work_days: incomingOpenClawWorkDays,
+      tool_calls_total: openclawRow.tool_calls_total,
+      tasks_executed: incomingOpenClawTasksExecuted,
+      scheduled_tasks_count: incomingOpenClawScheduledTasks,
+      total_tokens: openclawRow.total_tokens,
+      top_model_id: openclawRow.top_model_id,
+      model_usage: openclawRow.model_usage,
+      analyzed_at: openclawRow.analyzed_at,
+    };
     const basePayload: Record<string, unknown> = {
       total_tokens: Math.max(existingTotalTokens, incomingTotalTokens),
       total_messages: Math.max(existingTotalMessages, incomingTotalMessages),
@@ -4137,6 +4622,105 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
         basePayload.user_identity = 'github';
       }
     }
+    const openclawSnapshotSourceHash = [
+      fingerprint || user_id,
+      openclawRow.analyzed_at,
+      openclawRow.records_total,
+      openclawRow.total_tokens,
+      openclawRow.tool_calls_total,
+      incomingOpenClawTasksExecuted,
+      incomingOpenClawScheduledTasks,
+      incomingOpenClawTotalChars,
+      incomingOpenClawWorkDays,
+    ].map((item) => String(item ?? '')).join('|');
+    const openclawSnapshotRawSummary = {
+      ...(body.raw_summary && typeof body.raw_summary === 'object' ? body.raw_summary : {}),
+      records_total: openclawRow.records_total,
+      total_chars: incomingOpenClawTotalChars,
+      work_days: incomingOpenClawWorkDays,
+      tool_calls_total: openclawRow.tool_calls_total,
+      tasks_executed: incomingOpenClawTasksExecuted,
+      scheduled_tasks_count: incomingOpenClawScheduledTasks,
+      total_tokens: openclawRow.total_tokens,
+    };
+    const openclawSnapshotStats2Bindings = {
+      records_total: openclawRow.records_total,
+      total_chars: incomingOpenClawTotalChars,
+      work_days: incomingOpenClawWorkDays,
+      tool_calls_total: openclawRow.tool_calls_total,
+      tasks_executed: incomingOpenClawTasksExecuted,
+      scheduled_tasks_count: incomingOpenClawScheduledTasks,
+      openclaw: openclawState,
+      openclaw_stats: openclawFlatStats,
+    };
+    const persistOpenclawSnapshot = async (persistedFrom: string): Promise<void> => {
+      if (!env.SUPABASE_URL || !user_id) return;
+      try {
+        const snapshotUrl = `${env.SUPABASE_URL}/rest/v1/rpc/upsert_openclaw_stats_snapshot`;
+        const snapshotBody = {
+          p_user_id: user_id,
+          p_source_file_hash: openclawSnapshotSourceHash,
+          p_source_file_name: null,
+          p_source_type: 'openclaw_jsonl',
+          p_stats_version: 'v1',
+          p_records_total: openclawRow.records_total,
+          p_model_usage: openclawRow.model_usage,
+          p_top_model_id: openclawRow.top_model_id,
+          p_prompt_tokens: openclawRow.prompt_tokens,
+          p_completion_tokens: openclawRow.completion_tokens,
+          p_total_tokens: openclawRow.total_tokens,
+          p_cached_tokens: openclawRow.cached_tokens,
+          p_total_cost_usd: openclawRow.total_cost_usd,
+          p_skills_stats: openclawRow.skills_stats,
+          p_skills_snapshot: mergedSkillsTags,
+          p_skills_tree: body.skills_tree && typeof body.skills_tree === 'object' ? body.skills_tree : {},
+          p_tool_usage: openclawRow.tool_usage,
+          p_tool_calls_total: openclawRow.tool_calls_total,
+          p_total_chars: incomingOpenClawTotalChars,
+          p_work_days: incomingOpenClawWorkDays,
+          p_tasks_executed: incomingOpenClawTasksExecuted,
+          p_success_count: openclawRow.success_count,
+          p_failure_count: openclawRow.failure_count,
+          p_success_rate: openclawRow.success_rate,
+          p_abnormal_interrupt_count: openclawRow.abnormal_interrupt_count,
+          p_abnormal_interrupt_rate: openclawRow.abnormal_interrupt_rate,
+          p_cache_requests: Math.max(0, toNum(body.cache_requests ?? body.cacheRequests ?? 0, 0)),
+          p_cache_hits: Math.max(0, toNum(body.cache_hits ?? body.cacheHits ?? 0, 0)),
+          p_cache_hit_rate: openclawRow.cache_hit_rate,
+          p_cache_hit_token_rate: Math.max(0, Math.min(1, toNum(body.cache_hit_token_rate ?? body.cacheHitTokenRate ?? 0, 0))),
+          p_cwd_usage: body.cwd_usage && typeof body.cwd_usage === 'object' ? body.cwd_usage : {},
+          p_primary_cwd: body.primary_cwd && String(body.primary_cwd).trim() ? String(body.primary_cwd).trim() : null,
+          p_hourly_heatmap: openclawRow.hourly_heatmap,
+          p_daily_activity: body.daily_activity && typeof body.daily_activity === 'object' ? body.daily_activity : {},
+          p_first_event_at: body.first_event_at || body?.portrait?.startedAt || null,
+          p_last_event_at: incomingLastActiveAt,
+          p_country_code: incomingCountryCode,
+          p_github_login: normalizedGitHubLogin,
+          p_github_card: body.github_card && typeof body.github_card === 'object' ? body.github_card : {},
+          p_stats2_bindings: openclawSnapshotStats2Bindings,
+          p_raw_summary: openclawSnapshotRawSummary,
+          p_analyzed_at: openclawRow.analyzed_at,
+        };
+        const resp = await fetch(snapshotUrl, {
+          method: 'POST',
+          headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
+          body: JSON.stringify(snapshotBody),
+        });
+        if (!resp.ok) {
+          const text = await resp.text().catch(() => '');
+          console.warn('[Worker] /api/v2/openclaw/analyze snapshot persist failed:', {
+            persistedFrom,
+            status: resp.status,
+            error: text?.substring?.(0, 200),
+          });
+        }
+      } catch (e: any) {
+        console.warn('[Worker] /api/v2/openclaw/analyze snapshot persist error:', {
+          persistedFrom,
+          error: e?.message || String(e),
+        });
+      }
+    };
     if (fingerprint) {
       const rpcUrl = `${env.SUPABASE_URL}/rest/v1/rpc/upsert_user_analysis_openclaw`;
       const rpcBody = {
@@ -4154,6 +4738,7 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
         p_last_active_at: incomingLastActiveAt,
         p_stats: {
           openclaw: openclawState,
+          openclaw_stats: openclawFlatStats,
         },
         p_updated_at: updatedAtNow,
       };
@@ -4164,7 +4749,88 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
       });
       if (!rpcRes.ok) {
         const rpcText = await rpcRes.text().catch(() => '');
-        throw new Error(`user_analysis openclaw rpc upsert failed: ${rpcRes.status} ${rpcText}`);
+        console.warn('[Worker] /api/v2/openclaw/analyze RPC failed, using REST fallback:', {
+          status: rpcRes.status,
+          error: rpcText?.substring?.(0, 200),
+        });
+
+        const patchPayload: Record<string, unknown> = {
+          ...basePayload,
+          stats: {
+            ...existingStats,
+            openclaw: openclawState,
+            openclaw_stats: openclawFlatStats,
+          },
+        };
+
+        const uaPatchUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(user_id)}`;
+        const patchRes = await fetch(uaPatchUrl, {
+          method: 'PATCH',
+          headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
+          body: JSON.stringify(patchPayload),
+        });
+        if (!patchRes.ok) {
+          const patchText = await patchRes.text().catch(() => '');
+          try {
+            if (normalizedGitHubLogin) {
+              const upsertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?on_conflict=github_login`;
+              const upsertPayload: Record<string, unknown> = {
+                ...patchPayload,
+                github_login: normalizedGitHubLogin,
+                user_name: (basePayload as any).user_name || normalizedGitHubLogin,
+                user_identity: (basePayload as any).user_identity || 'github',
+                updated_at: updatedAtNow,
+              };
+
+              const upsertRes = await fetch(upsertUrl, {
+                method: 'POST',
+                headers: buildSupabaseHeaders(env, {
+                  'Content-Type': 'application/json',
+                  Prefer: 'return=minimal,resolution=merge-duplicates',
+                }),
+                body: JSON.stringify([upsertPayload]),
+              });
+
+              if (upsertRes.ok) {
+                await persistOpenclawSnapshot('user_analysis_upsert');
+                return c.json({ success: true, user_id, persisted_to: 'user_analysis_upsert' });
+              }
+            }
+
+            const insertUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis`;
+            const insertPayload: Record<string, unknown> = {
+              id: user_id,
+              ...(fingerprint ? { fingerprint } : {}),
+              ...patchPayload,
+              user_identity: normalizedGitHubLogin ? 'github' : 'fingerprint',
+              github_login: normalizedGitHubLogin,
+              user_name: (basePayload as any).user_name || normalizedGitHubLogin || (existingUserRow as any)?.user_name || null,
+              updated_at: updatedAtNow,
+            };
+
+            const insertRes = await fetch(insertUrl, {
+              method: 'POST',
+              headers: buildSupabaseHeaders(env, { 'Content-Type': 'application/json', Prefer: 'return=minimal' }),
+              body: JSON.stringify([insertPayload]),
+            });
+
+            if (insertRes.ok) {
+              await persistOpenclawSnapshot('user_analysis_insert_by_id');
+              return c.json({ success: true, user_id, persisted_to: 'user_analysis_insert_by_id' });
+            }
+          } catch (fallbackErr: any) {
+            console.warn('[Worker] /api/v2/openclaw/analyze patch fallback failed:', {
+              patchStatus: patchRes.status,
+              patchError: patchText?.substring?.(0, 200),
+              fallbackError: fallbackErr?.message || String(fallbackErr),
+            });
+          }
+
+          throw new Error(`user_analysis patch failed (and fallback failed): ${patchRes.status} ${patchText}`);
+        }
+      } else {
+        await persistOpenclawSnapshot('user_analysis_rpc');
+        return c.json({ success: true, user_id, persisted_to: 'user_analysis_rpc' });
       }
     } else {
       const patchPayload: Record<string, unknown> = {
@@ -4173,6 +4839,7 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
         stats: {
           ...existingStats,
           openclaw: openclawState,
+          openclaw_stats: openclawFlatStats,
         },
       };
       const uaPatchUrl = `${env.SUPABASE_URL}/rest/v1/user_analysis?id=eq.${encodeURIComponent(user_id)}`;
@@ -4206,7 +4873,10 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
               body: JSON.stringify([upsertPayload]),
             });
 
-            if (upsertRes.ok) return c.json({ success: true, user_id, persisted_to: 'user_analysis_upsert' });
+            if (upsertRes.ok) {
+              await persistOpenclawSnapshot('user_analysis_upsert');
+              return c.json({ success: true, user_id, persisted_to: 'user_analysis_upsert' });
+            }
           }
 
           // 最后兜底：尝试按主键 id 直接插入（避免 token user_id 但行不存在导致 404/500）
@@ -4227,7 +4897,10 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
             body: JSON.stringify([insertPayload]),
           });
 
-          if (insertRes.ok) return c.json({ success: true, user_id, persisted_to: 'user_analysis_insert_by_id' });
+          if (insertRes.ok) {
+            await persistOpenclawSnapshot('user_analysis_insert_by_id');
+            return c.json({ success: true, user_id, persisted_to: 'user_analysis_insert_by_id' });
+          }
         } catch (fallbackErr: any) {
           // If fallback fails, throw original PATCH failure with context.
           console.warn('[Worker] /api/v2/openclaw/analyze patch fallback failed:', {
@@ -4241,6 +4914,7 @@ app.post('/api/v2/openclaw/analyze', async (c) => {
       }
     }
 
+    await persistOpenclawSnapshot('user_analysis');
     return c.json({ success: true, user_id, persisted_to: 'user_analysis' });
   } catch (err: any) {
     console.error('[Worker] /api/v2/openclaw/analyze ??:', err);
@@ -12043,6 +12717,42 @@ async function writeGlobalCountryStatsToKV(env: Env): Promise<{ success: boolean
       }, SUPABASE_FETCH_TIMEOUT_MS);
       rpcList = Array.isArray(fallbackRows) ? fallbackRows : (fallbackRows ? [fallbackRows] : []);
     }
+    const rollupHardcoreByCc = new Map<
+      string,
+      { cursor_total_messages_sum: number; jiafang_rejection_rate: number; openclaw_tool_calls_sum: number; tasks_executed_sum: number; scheduled_tasks_sum: number }
+    >();
+    try {
+      const pageSize = 1000;
+      let ro = 0;
+      for (let page = 0; page < 500; page++) {
+        const rUrl = new URL(`${env.SUPABASE_URL}/rest/v1/v_country_stats_rollup`);
+        rUrl.searchParams.set(
+          'select',
+          'country_code,cursor_total_messages_sum,jiafang_rejection_rate,openclaw_tool_calls_sum,tasks_executed_sum,scheduled_tasks_sum'
+        );
+        rUrl.searchParams.set('limit', String(pageSize));
+        rUrl.searchParams.set('offset', String(ro));
+        const batch = await fetchSupabaseJson<any>(env, rUrl.toString(), { headers: buildSupabaseHeaders(env) }, SUPABASE_FETCH_TIMEOUT_MS);
+        const rows = Array.isArray(batch) ? batch : [];
+        if (!rows.length) break;
+        for (const r of rows) {
+          const cc = normalizeIso2CountryCode(r?.country_code);
+          if (!cc) continue;
+          rollupHardcoreByCc.set(cc, {
+            cursor_total_messages_sum: round2(safeNumber(r.cursor_total_messages_sum, 0)),
+            jiafang_rejection_rate: round2(safeNumber(r.jiafang_rejection_rate, 0)),
+            openclaw_tool_calls_sum: round2(safeNumber(r.openclaw_tool_calls_sum, 0)),
+            tasks_executed_sum: round2(safeNumber(r.tasks_executed_sum, 0)),
+            scheduled_tasks_sum: round2(safeNumber(r.scheduled_tasks_sum, 0)),
+          });
+        }
+        if (rows.length < pageSize) break;
+        ro += pageSize;
+      }
+    } catch (rollupMergeErr: any) {
+      console.warn('[Worker] v_country_stats_rollup merge into GLOBAL_COUNTRY_STATS.country_level failed:', rollupMergeErr?.message || String(rollupMergeErr));
+    }
+
     const totalCountries = Math.max(1, rpcList.length);
     const n = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
     const byCountry: Record<string, any> = {};
@@ -12082,6 +12792,16 @@ async function writeGlobalCountryStatsToKV(env: Env): Promise<{ success: boolean
         total_countries: totalCountries,
         no_competition: total_users <= 1,
       };
+      const hc = rollupHardcoreByCc.get(normalizeIso2CountryCode(cc) || '');
+      if (hc) {
+        (level as any).cursor_total_messages_sum = hc.cursor_total_messages_sum;
+        (level as any).jiafang_rejection_rate = hc.jiafang_rejection_rate;
+        (level as any).openclaw_tool_calls_sum = hc.openclaw_tool_calls_sum;
+        (level as any).tool_calls_total_sum = hc.openclaw_tool_calls_sum;
+        (level as any).tasks_executed_sum = hc.tasks_executed_sum;
+        (level as any).openclaw_tasks_executed_sum = hc.tasks_executed_sum;
+        (level as any).scheduled_tasks_sum = hc.scheduled_tasks_sum;
+      }
       byCountry[cc] = { ranks, total_countries: totalCountries, user_count: total_users, ...level };
       country_level.push(level);
     }
